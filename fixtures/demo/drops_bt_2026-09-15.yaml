@@ -1,0 +1,11 @@
+# MOCK drop set for the 2026-09-15 Black Temple night. Items are defined in
+# profiles/tbc/items/black_temple.yaml. Order = boss order.
+drops:
+  - {item: 32248, boss: "High Warlord Naj'entus"}
+  - {item: 32262, boss: Supremus}
+  - {item: 32323, boss: Teron Gorefiend}
+  - {item: 32349, boss: Reliquary of Souls}
+  - {item: 31103, boss: Mother Shahraz}
+  - {item: 32505, boss: The Illidari Council}
+  - {item: 32483, boss: Illidan Stormrage}
+  - {item: 32521, boss: Illidan Stormrage}

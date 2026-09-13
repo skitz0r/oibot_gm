@@ -1,0 +1,223 @@
+# Black Temple loot tables for the prototype.
+#
+# UNVERIFIED DATA. Item ids/names are from memory plus the guild's BisCouncil
+# export; a few may be wrong or attributed to the wrong boss. Cross-check
+# against the Blizzard API before anything depends on them.
+#
+# `tiers` are MOCK BisCouncil-style spec tierings (S+/S/A/B). Keys, most
+# specific wins: "Class:Spec" > "Class:*" > "role:<tank|healer|melee|ranged>".
+# `usable` is derived from tiers when omitted.
+items:
+  # ---- High Warlord Naj'entus ----
+  - {id: 32248, name: Halberd of Desolation, slot: two_hand, type: polearm, boss: "High Warlord Naj'entus",
+     tiers: {"Warrior:Arms": S, "Paladin:Retribution": S, "Druid:Feral": A, "Hunter:*": A}}
+  - {id: 32234, name: Fists of Mukoa, slot: one_hand, type: fist, boss: "High Warlord Naj'entus",
+     tiers: {"Shaman:Enhancement": S, "Rogue:*": S, "Warrior:Fury": A, "Hunter:*": A}}
+  - {id: 32232, name: Eternium Shell Bracers, slot: wrist, type: plate, boss: "High Warlord Naj'entus",
+     tiers: {"Warrior:Protection": S, "Paladin:Protection": S}}
+  - {id: 32239, name: Slippers of the Seacaller, slot: feet, type: cloth, boss: "High Warlord Naj'entus",
+     tiers: {"Mage:*": S, "Warlock:*": S, "Priest:Shadow": S}}
+  - {id: 32240, name: Guise of the Tidal Lurker, slot: head, type: leather, boss: "High Warlord Naj'entus",
+     tiers: {"Druid:Restoration": S}}
+  - {id: 32241, name: Helm of Soothing Currents, slot: head, type: mail, boss: "High Warlord Naj'entus",
+     tiers: {"Shaman:Restoration": S}}
+  - {id: 32247, name: Ring of Calming Waves, slot: finger, type: ring, boss: "High Warlord Naj'entus",
+     tiers: {"role:healer": S, "Warlock:*": A, "Mage:*": A}}
+
+  # ---- Supremus ----
+  - {id: 32262, name: Syphon of the Nathrezim, slot: one_hand, type: mace, boss: Supremus,
+     tiers: {"Shaman:Enhancement": S+, "Rogue:Combat": S, "Warrior:Fury": S, "Warrior:Arms": A, "Paladin:Protection": B, "Warrior:Protection": B}}
+  - {id: 32250, name: Pauldrons of Abyssal Fury, slot: shoulders, type: plate, boss: Supremus,
+     tiers: {"Paladin:Retribution": S, "Warrior:Arms": S, "Warrior:Fury": S, "Paladin:Protection": A}}
+  - {id: 32251, name: Wraps of Precise Flight, slot: wrist, type: mail, boss: Supremus,
+     tiers: {"Hunter:*": S, "Shaman:Enhancement": A}}
+  - {id: 32252, name: Nether Shadow Tunic, slot: chest, type: leather, boss: Supremus,
+     tiers: {"Rogue:*": S, "Druid:Feral": A}}
+  - {id: 32253, name: Legionkiller, slot: ranged_weapon_primary, type: crossbow, boss: Supremus,
+     tiers: {"Hunter:*": S+, "Warrior:*": A, "Rogue:*": A}}
+  - {id: 32254, name: The Brutalizer, slot: one_hand, type: axe, boss: Supremus,
+     tiers: {"Warrior:Protection": S, "Paladin:Protection": A}}
+  - {id: 32255, name: Felstone Bulwark, slot: shield, type: shield, boss: Supremus,
+     tiers: {"Paladin:Holy": S, "Shaman:Restoration": S}}
+  - {id: 32256, name: Waistwrap of Infinity, slot: waist, type: cloth, boss: Supremus,
+     tiers: {"Mage:*": S, "Warlock:*": S, "Priest:Shadow": S}}
+  - {id: 32260, name: Choker of Endless Nightmares, slot: neck, type: neck, boss: Supremus,
+     tiers: {"role:melee": S, "Hunter:*": S}}
+  - {id: 32261, name: Band of the Abyssal Lord, slot: finger, type: ring, boss: Supremus,
+     tiers: {"role:tank": S}}
+
+  # ---- Shade of Akama ----
+  - {id: 32263, name: Praetorian's Legguards, slot: legs, type: plate, boss: Shade of Akama,
+     tiers: {"Warrior:Protection": S+, "Paladin:Protection": S+}}
+  - {id: 32264, name: Shoulders of the Hidden Predator, slot: shoulders, type: mail, boss: Shade of Akama,
+     tiers: {"Hunter:*": S, "Shaman:Enhancement": A}}
+  - {id: 32265, name: Shadow-walker's Cord, slot: waist, type: leather, boss: Shade of Akama,
+     tiers: {"Rogue:*": S, "Druid:Feral": S}}
+  - {id: 32266, name: Ring of Deceitful Intent, slot: finger, type: ring, boss: Shade of Akama,
+     tiers: {"role:melee": S, "Hunter:*": S}}
+  - {id: 32267, name: Boots of Oceanic Fury, slot: feet, type: mail, boss: Shade of Akama,
+     tiers: {"Shaman:Elemental": S}}
+  - {id: 32268, name: Myrmidon's Treads, slot: feet, type: plate, boss: Shade of Akama,
+     tiers: {"role:tank": S}}
+  - {id: 32270, name: Focused Mana Bindings, slot: wrist, type: cloth, boss: Shade of Akama,
+     tiers: {"Mage:*": S, "Warlock:*": S, "Priest:Shadow": S}}
+  - {id: 32273, name: Amice of Brilliant Light, slot: shoulders, type: plate, boss: Shade of Akama,
+     tiers: {"Paladin:Holy": S}}
+  - {id: 32278, name: Grips of Silent Justice, slot: hands, type: plate, boss: Shade of Akama,
+     tiers: {"Warrior:Fury": S, "Warrior:Arms": S, "Paladin:Retribution": S}}
+  - {id: 32361, name: Blind-Seers Icon, slot: off_hand, type: offhand, boss: Shade of Akama,
+     tiers: {"Warlock:*": A, "Mage:*": A, "Priest:Shadow": A}}
+
+  # ---- Teron Gorefiend ----
+  - {id: 32323, name: Shadowmoon Destroyer's Drape, slot: back, type: cloak, boss: Teron Gorefiend,
+     tiers: {"Warrior:Fury": S, "Warrior:Arms": S, "Rogue:*": S, "Shaman:Enhancement": S, "Paladin:Retribution": S, "Druid:Feral": S, "Hunter:*": A}}
+  - {id: 32324, name: Insidious Bands, slot: wrist, type: leather, boss: Teron Gorefiend,
+     tiers: {"Rogue:*": S, "Druid:Feral": S, "Shaman:Enhancement": A, "Hunter:*": A}}   # corrected: leather/agi (was mis-tiered as caster cloth)
+  - {id: 32326, name: Twisted Blades of Zarak, slot: one_hand, type: dagger, boss: Teron Gorefiend,
+     tiers: {"Rogue:*": S, "Shaman:Enhancement": A}}
+  - {id: 32327, name: Robe of the Shadow Council, slot: chest, type: cloth, boss: Teron Gorefiend,
+     tiers: {"Warlock:*": S, "Mage:*": S, "Priest:Shadow": S}}
+  - {id: 32329, name: Cowl of Benevolence, slot: head, type: cloth, boss: Teron Gorefiend,
+     tiers: {"Priest:Holy": S, "Priest:Discipline": S}}
+  - {id: 32330, name: Totem of Ancestral Guidance, slot: ranged_weapon_stat, type: relic, boss: Teron Gorefiend,
+     tiers: {"Shaman:Elemental": S}}
+  - {id: 32333, name: Girdle of Lordaeron's Fallen, slot: waist, type: plate, boss: Teron Gorefiend,
+     tiers: {"role:tank": S}}
+  - {id: 32334, name: Vest of Mounting Assault, slot: chest, type: mail, boss: Teron Gorefiend,
+     tiers: {"Hunter:*": S, "Shaman:Enhancement": A}}
+  - {id: 32512, name: Girdle of Divine Blessing, slot: waist, type: plate, boss: Teron Gorefiend,
+     tiers: {"Paladin:Holy": S}}
+
+  # ---- Gurtogg Bloodboil ----
+  - {id: 32337, name: Shadowmoon Insignia, slot: trinket, type: trinket, boss: Gurtogg Bloodboil,
+     tiers: {"role:tank": S+}}
+  - {id: 32338, name: Blood-cursed Shoulderpads, slot: shoulders, type: cloth, boss: Gurtogg Bloodboil,
+     tiers: {"Warlock:*": S, "Mage:*": S, "Priest:Shadow": S}}
+  - {id: 32339, name: Belt of Primal Majesty, slot: waist, type: leather, boss: Gurtogg Bloodboil,
+     tiers: {"Druid:Feral": S, "Rogue:*": A}}
+  - {id: 32341, name: Leggings of Divine Retribution, slot: legs, type: plate, boss: Gurtogg Bloodboil,
+     tiers: {"Paladin:Holy": S}}
+  - {id: 32342, name: Girdle of Mighty Resolve, slot: waist, type: plate, boss: Gurtogg Bloodboil,
+     tiers: {"role:tank": S}}
+  - {id: 32343, name: Wand of Prismatic Focus, slot: wand, type: wand, boss: Gurtogg Bloodboil,
+     tiers: {"Warlock:*": S, "Mage:*": S, "Priest:Shadow": S}}
+  - {id: 32344, name: Staff of Immaculate Recovery, slot: two_hand, type: staff, boss: Gurtogg Bloodboil,
+     tiers: {"Priest:Holy": S+, "Druid:Restoration": S+, "Shaman:Restoration": A}}
+  - {id: 32346, name: Boneweave Girdle, slot: waist, type: mail, boss: Gurtogg Bloodboil,
+     tiers: {"Hunter:*": S, "Shaman:Enhancement": S}}
+
+  # ---- Reliquary of Souls ----
+  - {id: 32345, name: Dreadboots of the Legion, slot: feet, type: plate, boss: Reliquary of Souls,
+     tiers: {"Warrior:Fury": S, "Warrior:Arms": S, "Paladin:Retribution": S}}
+  - {id: 32347, name: Grips of Damnation, slot: hands, type: mail, boss: Reliquary of Souls,
+     tiers: {"Shaman:Enhancement": S, "Hunter:*": S}}
+  - {id: 32349, name: Translucent Spellthread Necklace, slot: neck, type: neck, boss: Reliquary of Souls,
+     tiers: {"Warlock:*": S, "Mage:*": S, "Priest:Shadow": S, "Shaman:Elemental": S, "Druid:Balance": S}}
+  - {id: 32350, name: Touch of Inspiration, slot: off_hand, type: offhand, boss: Reliquary of Souls,
+     tiers: {"role:healer": S}}
+  - {id: 32353, name: Gloves of Unfailing Faith, slot: hands, type: cloth, boss: Reliquary of Souls,
+     tiers: {"Priest:Holy": S, "Priest:Discipline": S}}
+  - {id: 32354, name: Crown of Empowered Fate, slot: head, type: plate, boss: Reliquary of Souls,
+     tiers: {"Paladin:Holy": S}}
+  - {id: 32362, name: Pendant of Titans, slot: neck, type: neck, boss: Reliquary of Souls,
+     tiers: {"role:melee": S, "Hunter:*": S}}
+
+  # ---- Mother Shahraz ----
+  - {id: 31101, name: Pauldrons of the Forgotten Conqueror (T6 token), slot: shoulders, type: token, boss: Mother Shahraz, token_group: Conqueror,
+     tiers: {"Paladin:*": S, "Priest:*": S, "Warlock:*": S}}
+  - {id: 31102, name: Pauldrons of the Forgotten Vanquisher (T6 token), slot: shoulders, type: token, boss: Mother Shahraz, token_group: Vanquisher,
+     tiers: {"Rogue:*": S, "Mage:*": S, "Druid:*": S}}
+  - {id: 31103, name: Pauldrons of the Forgotten Protector (T6 token), slot: shoulders, type: token, boss: Mother Shahraz, token_group: Protector,
+     tiers: {"Warrior:*": S, "Hunter:*": S, "Shaman:*": S}}
+  - {id: 32365, name: Heartshatter Breastplate, slot: chest, type: plate, boss: Mother Shahraz,
+     tiers: {"Warrior:Fury": S, "Warrior:Arms": S, "Paladin:Retribution": S}}
+  - {id: 32366, name: Shadowmaster's Boots, slot: feet, type: leather, boss: Mother Shahraz,
+     tiers: {"Rogue:*": S, "Druid:Feral": S}}
+  - {id: 32367, name: Leggings of Devastation, slot: legs, type: cloth, boss: Mother Shahraz,
+     tiers: {"Warlock:*": S, "Mage:*": S, "Priest:Shadow": S}}
+  - {id: 32369, name: Blade of Savagery, slot: one_hand, type: sword, boss: Mother Shahraz,
+     tiers: {"Rogue:Combat": S, "Warrior:Fury": S, "Shaman:Enhancement": A}}
+  - {id: 32370, name: Nadina's Pendant of Purity, slot: neck, type: neck, boss: Mother Shahraz,
+     tiers: {"role:healer": S}}
+
+  # ---- The Illidari Council ----
+  - {id: 31098, name: Leggings of the Forgotten Conqueror (T6 token), slot: legs, type: token, boss: The Illidari Council, token_group: Conqueror,
+     tiers: {"Paladin:*": S, "Priest:*": S, "Warlock:*": S}}
+  - {id: 31099, name: Leggings of the Forgotten Vanquisher (T6 token), slot: legs, type: token, boss: The Illidari Council, token_group: Vanquisher,
+     tiers: {"Rogue:*": S, "Mage:*": S, "Druid:*": S}}
+  - {id: 31100, name: Leggings of the Forgotten Protector (T6 token), slot: legs, type: token, boss: The Illidari Council, token_group: Protector,
+     tiers: {"Warrior:*": S, "Hunter:*": S, "Shaman:*": S}}
+  - {id: 32331, name: Cloak of the Illidari Council, slot: back, type: cloak, boss: The Illidari Council,
+     tiers: {"Warlock:*": S, "Mage:*": S, "Priest:Shadow": S, "Shaman:Elemental": S, "Druid:Balance": S}}
+  - {id: 32505, name: Madness of the Betrayer, slot: trinket, type: trinket, boss: The Illidari Council,
+     tiers: {"Rogue:*": S+, "Warrior:Fury": S+, "Warrior:Arms": S, "Hunter:*": S+, "Shaman:Enhancement": S, "Paladin:Retribution": S, "Druid:Feral": S, "Warrior:Protection": A}}
+  - {id: 32376, name: Forest Prowler's Helm, slot: head, type: mail, boss: The Illidari Council,
+     tiers: {"Hunter:*": S, "Shaman:Enhancement": A}}
+  - {id: 32519, name: Belt of Divine Guidance, slot: waist, type: cloth, boss: The Illidari Council,
+     tiers: {"Priest:Holy": S, "Priest:Discipline": S}}
+
+  # ---- Illidan Stormrage ----
+  - {id: 31089, name: Chestguard of the Forgotten Conqueror (T6 token), slot: chest, type: token, boss: Illidan Stormrage, token_group: Conqueror,
+     tiers: {"Paladin:*": S, "Priest:*": S, "Warlock:*": S}}
+  - {id: 31090, name: Chestguard of the Forgotten Vanquisher (T6 token), slot: chest, type: token, boss: Illidan Stormrage, token_group: Vanquisher,
+     tiers: {"Rogue:*": S, "Mage:*": S, "Druid:*": S}}
+  - {id: 31091, name: Chestguard of the Forgotten Protector (T6 token), slot: chest, type: token, boss: Illidan Stormrage, token_group: Protector,
+     tiers: {"Warrior:*": S, "Hunter:*": S, "Shaman:*": S}}
+  - {id: 32837, name: Warglaive of Azzinoth (main hand), slot: one_hand, type: sword, boss: Illidan Stormrage,
+     tiers: {"Rogue:*": S+, "Warrior:Fury": S+}}
+  - {id: 32374, name: "Zhar'doom, Greatstaff of the Devourer", slot: two_hand, type: staff, boss: Illidan Stormrage,
+     tiers: {"Warlock:*": S+, "Mage:*": S+, "Priest:Shadow": S+, "Druid:Balance": S}}
+  - {id: 32375, name: Bulwark of Azzinoth, slot: shield, type: shield, boss: Illidan Stormrage,
+     tiers: {"Warrior:Protection": S+, "Paladin:Protection": S+}}
+  - {id: 32483, name: The Skull of Gul'dan, slot: trinket, type: trinket, boss: Illidan Stormrage,
+     tiers: {"Warlock:*": S+, "Mage:*": S+, "Priest:Shadow": S, "Shaman:Elemental": S, "Druid:Balance": S}}
+  - {id: 32500, name: Crystal Spire of Karabor, slot: one_hand, type: mace, boss: Illidan Stormrage,
+     tiers: {"Paladin:Holy": S+, "Shaman:Restoration": S+, "Priest:Holy": S, "Druid:Restoration": S}}
+  - {id: 32521, name: Faceplate of the Impenetrable, slot: head, type: plate, boss: Illidan Stormrage,
+     tiers: {"Warrior:Protection": S+, "Paladin:Protection": S}}
+  - {id: 32524, name: Shroud of the Highborne, slot: back, type: cloak, boss: Illidan Stormrage,
+     tiers: {"role:healer": S}}
+  - {id: 32525, name: Cowl of the Illidari High Lord, slot: head, type: cloth, boss: Illidan Stormrage,
+     tiers: {"Warlock:*": S+, "Mage:*": S+, "Priest:Shadow": S+}}
+  - {id: 32336, name: Black Bow of the Betrayer, slot: ranged_weapon_primary, type: bow, boss: Illidan Stormrage,
+     tiers: {"Hunter:*": S+, "Warrior:*": A, "Rogue:*": A}}
+  - {id: 32235, name: Cursed Vision of Sargeras, slot: head, type: leather, boss: Illidan Stormrage,
+     tiers: {"Rogue:*": S+, "Druid:Feral": S+, "Shaman:Enhancement": S, "Hunter:*": S, "Warrior:Fury": A}}
+  - {id: 32496, name: Memento of Tyrande, slot: trinket, type: trinket, boss: Illidan Stormrage,
+     tiers: {"role:healer": S}}
+  - {id: 32497, name: Stormrage Signet Ring, slot: finger, type: ring, boss: Illidan Stormrage,
+     tiers: {"role:melee": S, "Hunter:*": S}}
+
+# Names for ids that appear in the guild's received-loot export but are not
+# BT drops modelled above (Hyjal etc.). Partial.
+known_items:
+  30916: "Leggings of Channeled Elements"
+  31092: "Gloves of the Forgotten Conqueror"
+  31093: "Gloves of the Forgotten Vanquisher"
+  31094: "Gloves of the Forgotten Protector"
+  31095: "Helm of the Forgotten Protector"
+  31096: "Helm of the Forgotten Vanquisher"
+  31097: "Helm of the Forgotten Conqueror"
+  30910: "Tempest of Chaos"
+  30905: "Cataclysm's Edge"
+  30883: "Pillar of Ferocity"
+  30900: "Bow-stitched Leggings"
+  30870: "Cuffs of Devastation"
+  30872: "Chestguard of Relentless Storms"
+  30882: "Bastion of Light"
+  30893: "Sun-touched Chain Leggings"
+  30896: "Glory of the Defender"
+  30902: "Bloodmaw Magus-Blade"
+  30903: "Boots of the Divine Light"
+  30913: "Blade of Infamy"
+  30918: "Gloves of Unfailing Faith? (Kaz'rogal)"
+  30919: "Tempest of Chaos? (Kaz'rogal)"
+  32363: "Naaru-Blessed Life Rod"
+  32528: "Blessed Band of Karabor"
+  32590: "Nethervoid Cloak"
+  32591: "Choker of Serrated Blades"
+  32946: "Claw of Molten Fury"
+  34009: "Hammer of Judgement"
+  34011: "Illidari Runeshield"
+  34012: "Shifting Naaru Sliver? (trash)"
+  32323: "Shadowmoon Destroyer's Drape"

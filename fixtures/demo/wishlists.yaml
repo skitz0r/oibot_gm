@@ -1,0 +1,23 @@
+# MOCK wishlists. The guild's real wishlists live in TMB/BisCouncil and are not
+# in any export we have. These exist only so the demo shows how wishlist rank
+# interacts with the score. Ranks are 1 = most wanted. offspec: true where the
+# character wants it for an offspec.
+wishlists:
+  Zanzor:      [{item: 32505, rank: 1}, {item: 32262, rank: 2}, {item: 32323, rank: 4}]
+  Talaelzan:      [{item: 32505, rank: 1}, {item: 32262, rank: 2}]
+  Torsha:      [{item: 32262, rank: 1}, {item: 32323, rank: 2}, {item: 31103, rank: 3}, {item: 32505, rank: 4}]
+  Eltam:    [{item: 32262, rank: 1}, {item: 31103, rank: 2}]
+  Sororn:    [{item: 31103, rank: 2}]
+  Ithmaeltal:       [{item: 32248, rank: 1}, {item: 32505, rank: 2}, {item: 31103, rank: 3}, {item: 32323, rank: 5}]
+  Sorbrin:   [{item: 32248, rank: 1}, {item: 32323, rank: 3}]
+  Dravexwyn:  [{item: 31103, rank: 1}, {item: 32248, rank: 4}]
+  Raulfgor:     [{item: 32248, rank: 3}]
+  Morbrin:      [{item: 32505, rank: 1}, {item: 32248, rank: 2}, {item: 32323, rank: 3}]
+  Kazor:       [{item: 32349, rank: 3}]
+  Zanwen:      [{item: 32483, rank: 1}, {item: 32349, rank: 2}]
+  Wynael:      [{item: 32483, rank: 1}, {item: 32349, rank: 2}]
+  Oridan:     [{item: 32483, rank: 1}, {item: 32349, rank: 2}]
+  Votam:     [{item: 32349, rank: 1}, {item: 32483, rank: 2}]
+  Kamael:       [{item: 32483, rank: 2}, {item: 32349, rank: 4}]
+  Ashdan:     [{item: 32483, rank: 1}, {item: 32349, rank: 3}]
+  Nymtam:        [{item: 32262, rank: 5, offspec: true}]

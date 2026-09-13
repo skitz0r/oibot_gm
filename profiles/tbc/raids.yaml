@@ -1,0 +1,34 @@
+# GameProfile: TBC raids we model. Encounter ids are the fresh.warcraftlogs.com
+# (Anniversary) partition ids, verified from the guild's own logs.
+raids:
+  - id: black_temple
+    name: Black Temple
+    size: 25
+    wcl_zone: 1060
+    tank_needs:
+      count: 3
+      note: >
+        Shade of Akama, Teron Gorefiend and the Illidari Council all want a
+        third tank; Illidan phase 2 needs a Warlock to tank the flames and
+        a shadow-resist set for Mother Shahraz is on everyone, not just tanks.
+    bosses:
+      - {enc: 50601, name: "High Warlord Naj'entus"}
+      - {enc: 50602, name: "Supremus"}
+      - {enc: 50603, name: "Shade of Akama"}
+      - {enc: 50604, name: "Teron Gorefiend"}
+      - {enc: 50606, name: "Reliquary of Souls"}
+      - {enc: 50605, name: "Gurtogg Bloodboil"}
+      - {enc: 50607, name: "Mother Shahraz"}
+      - {enc: 50608, name: "The Illidari Council"}
+      - {enc: 50609, name: "Illidan Stormrage"}
+  - id: hyjal_summit
+    name: Hyjal Summit
+    size: 25
+    wcl_zone: 1060
+    tank_needs: {count: 3, note: "Trash waves want 3 tanks; Archimonde 1."}
+    bosses:
+      - {enc: 50618, name: "Rage Winterchill"}
+      - {enc: 50619, name: "Anetheron"}
+      - {enc: 50620, name: "Kaz'rogal"}
+      - {enc: 50621, name: "Azgalor"}
+      - {enc: 50622, name: "Archimonde"}

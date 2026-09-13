@@ -1,0 +1,88 @@
+# Character registry + Discord/Raid-Helper name mapping for "Demo Guild".
+#
+# Sources: WCL report kdwgJZyDWjHaP8t1 (2026-09-09 roster with specs), the
+# BisCouncil Loot Summary export (2026-09-08), and the Raid-Helper signup
+# screenshot. In the real bot members register their own characters; here the
+# mapping is inferred, so every row carries a confidence.
+#
+# rank: core | raider | trial | alt | unknown  (mock — the guild's real ranks
+#       aren't in any export we have)
+guild:
+  id: demo
+  name: "Demo Guild"
+  realm: Demorealm
+  region: US
+  game_profile: tbc
+  wcl_guild_id: 0
+
+characters:
+  # --- mains seen in the 09-09 log ---
+  - {name: Vothaszan,      class: Shaman,  spec: Restoration,  rank: core}
+  - {name: Torsha,      class: Shaman,  spec: Enhancement,  rank: core}
+  - {name: Oridan,     class: Mage,    spec: Arcane,       rank: core}
+  - {name: Torthasash, class: Paladin, spec: Holy,         rank: core}
+  - {name: Velwenvo,         class: Priest,  spec: Holy,         rank: core}
+  - {name: Wynael,      class: Warlock, spec: Affliction,   rank: core}
+  - {name: Kakossor,    class: Druid,   spec: Feral,        rank: raider, offspec: Guardian}
+  - {name: Kazor,       class: Warlock, spec: Destruction,  rank: core}
+  - {name: Zanwen,      class: Warlock, spec: Destruction,  rank: core}
+  - {name: Zanzor,      class: Rogue,   spec: Combat,       rank: core}
+  - {name: Velexori,   class: Shaman,  spec: Restoration,  rank: core}
+  - {name: Origarther,    class: Warlock, spec: Destruction,  rank: raider}
+  - {name: Kamael,       class: Shaman,  spec: Elemental,    rank: core}
+  - {name: Ithmaeltal,       class: Warrior, spec: Arms,         rank: core}
+  - {name: Gorael, class: Druid,   spec: Feral,        rank: core, offspec: Guardian}
+  - {name: Sorbrin,   class: Paladin, spec: Retribution,  rank: core}
+  - {name: Raulfgor,     class: Hunter,  spec: Survival,     rank: core}
+  - {name: Fenzorkel,        class: Priest,  spec: Holy,         rank: core}
+  - {name: Nymtam,        class: Paladin, spec: Protection,   rank: core}
+  - {name: Vertam,      class: Mage,    spec: Arcane,       rank: core}
+  - {name: Eltam,    class: Shaman,  spec: Enhancement,  rank: raider}
+  - {name: Ashdan,     class: Druid,   spec: Balance,      rank: core}
+  - {name: Votam,     class: Priest,  spec: Shadow,       rank: core}
+  - {name: Talaelzan,      class: Warrior, spec: Fury,         rank: core}
+  - {name: Dravexwyn,  class: Hunter,  spec: BeastMastery, rank: core}
+  # --- others from BisCouncil / attendance ---
+  - {name: Sororn,    class: Shaman,  spec: Enhancement,  rank: raider}
+  - {name: Oribrinlua,   class: Paladin, spec: Protection,   rank: raider}
+  - {name: Morbrin,      class: Hunter,  spec: BeastMastery, rank: raider}
+  - {name: Sordil,      class: Druid,   spec: Feral,        rank: raider}
+  - {name: Mirquil,  class: Shaman,  spec: Restoration,  rank: trial}
+  - {name: Torael,     class: Shaman,  spec: Enhancement,  rank: trial}
+  - {name: Morthasbal,     class: Druid,   spec: Balance,      rank: trial}
+  - {name: Fenulfmor,      class: Warrior, spec: Fury,         rank: alt, main: Nymtam}
+  - {name: Ithzor,        class: Druid,   spec: Feral,        rank: alt, main: Velwenvo}
+  - {name: Mordil,     class: Paladin, spec: Holy,         rank: alt, main: Kamael}
+
+# Raid-Helper display name -> character. confidence: high | medium | low.
+# `unmapped: true` means we treat the signup as a fresh character with no
+# history (attendance 0, no loot) — that is how the real bot would treat an
+# unregistered signup, and the roster justification calls it out.
+signup_map:
+  Ithmaeltal:            {character: Ithmaeltal,       confidence: high}
+  Ashael:            {character: Zanzor,      confidence: high}
+  Dravexwyn:       {character: Dravexwyn,  confidence: high}
+  Sorryn:             {character: Raulfgor,     confidence: high}
+  wynmundvel:              {character: Morbrin,      confidence: high}
+  Fenzorkel:             {character: Fenzorkel,        confidence: high}
+  velwenvo:              {character: Velwenvo,         confidence: high}
+  Wyndanvo:             {character: Votam,     confidence: high}
+  oridan:          {character: Oridan,     confidence: high}
+  Zanwen:           {character: Zanwen,      confidence: high}
+  Kazor:            {character: Kazor,       confidence: high}
+  Kamael:            {character: Kamael,       confidence: high}
+  Theriannym:       {character: Velexori,   confidence: high}
+  Luaniswyn:            {character: Torsha,      confidence: high}
+  verorn:            {character: Talaelzan,      confidence: high}
+  ASHDAN:          {character: Ashdan,     confidence: high}
+  Ashornsor:              {character: Fenulfmor,      confidence: medium, note: "Signed as Fury warrior; main Nymtam is the guild's prot paladin (4/6 attendance, tanked all of 09-09)."}
+  Torulf:       {character: Sorbrin,   confidence: medium}
+  Therwenvel: {character: Torthasash, confidence: medium, note: "Only unmapped 4/6 holy paladin."}
+  LUAORN:              {character: Wynael,      confidence: low,    note: "Guess: the only 4/6 warlock not otherwise signed."}
+  Orivex:          {character: Vothaszan,      confidence: low,    note: "Guess: the only 4/6 resto shaman not otherwise signed."}
+  "Sorgar": {character: null, unmapped: true, note: "Sororn is an Enhancement shaman (3/6, 5 items incl. 2× Syphon). Signed on an unknown druid."}
+  Kelbrindra:        {character: null, unmapped: true, note: "No Guk* in any log or export."}
+  origarther:         {character: null, unmapped: true, note: "Origarther main is a Destruction warlock; signed as a tank on an unknown character."}
+  Therdanfen:      {character: null, unmapped: true, note: "Hunter; likely an alt account of Torulf."}
+  Oriulfkel:              {character: null, unmapped: true, note: "Morthasbal in BisCouncil is a Balance druid; signed as Enhancement shaman."}
+  Therwen:             {character: null, unmapped: true}

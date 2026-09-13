@@ -1,0 +1,199 @@
+"""Roster selection + party layout as one CP-SAT model.
+
+Selection: which N of the signups raid (role bounds, prefer signed over bench,
+prefer attendance). Layout: assign the selected to groups of 5 to maximise
+party-buff synergy from the GameProfile's buff matrix. Deterministic; the LLM
+only explains the result."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ortools.sat.python import cp_model
+
+from ..models import GroupReport, Player, RosterResult
+from ..profiles import Buff, GameProfile
+
+SCALE = 10  # buff values are floats; CP-SAT wants ints
+
+
+@dataclass
+class SolveOptions:
+    force_in: tuple[str, ...] = ()
+    force_out: tuple[str, ...] = ()
+    pins: dict[str, int] | None = None  # signup_name -> group index (0-based)
+    keep_together: tuple[tuple[str, str], ...] = ()
+    keep_apart: tuple[tuple[str, str], ...] = ()
+    time_limit_s: float = 20.0
+    workers: int = 8
+
+
+def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: SolveOptions = SolveOptions()) -> RosterResult:
+    rules = profile.comp_rules
+    raid = profile.raids[raid_id]
+    n_groups = rules["groups"]
+    gsize = rules["group_size"]
+    raid_size = min(rules["raid_size"], len(players))
+    specs = {p.signup_name: profile.spec(p.cls, p.spec) for p in players}
+    sel = rules["selection"]
+
+    m = cp_model.CpModel()
+    x = {p.signup_name: m.NewBoolVar(f"x_{p.signup_name}") for p in players}
+    y = {(p.signup_name, g): m.NewBoolVar(f"y_{p.signup_name}_{g}") for p in players for g in range(n_groups)}
+
+    m.Add(sum(x.values()) == raid_size)
+    for p in players:
+        m.Add(sum(y[p.signup_name, g] for g in range(n_groups)) == x[p.signup_name])
+    for g in range(n_groups):
+        m.Add(sum(y[p.signup_name, g] for p in players) <= gsize)
+        m.Add(sum(y[p.signup_name, g] for p in players if p.role == "healer") <= rules["grouping"]["healer_max_per_group"])
+        m.Add(sum(y[p.signup_name, g] for p in players if p.role == "tank") <= rules["grouping"]["tank_max_per_group"])
+    for role, bounds in rules["roles"].items():
+        have = [x[p.signup_name] for p in players if p.role == role]
+        if have:
+            m.Add(sum(have) >= min(bounds["min"], len(have)))
+            m.Add(sum(have) <= bounds["max"])
+    for name in opts.force_in:
+        m.Add(x[name] == 1)
+    for name in opts.force_out:
+        m.Add(x[name] == 0)
+    for a, b in list(rules["grouping"].get("keep_together", [])) + list(opts.keep_together):
+        if a in x and b in x:
+            for g in range(n_groups):
+                m.Add(y[a, g] == y[b, g]).OnlyEnforceIf([x[a], x[b]])
+    for a, b in list(rules["grouping"].get("keep_apart", [])) + list(opts.keep_apart):
+        if a in x and b in x:
+            for g in range(n_groups):
+                m.Add(y[a, g] + y[b, g] <= 1)
+    for name, g in (opts.pins or {}).items():
+        if name in x:
+            m.Add(x[name] == 1)
+            m.Add(y[name, g] == 1)
+
+    # --- objective: selection terms ---
+    terms = []
+    for p in players:
+        v = sel["signed_bonus"] if p.status == "signed" else -sel["bench_penalty"]
+        v += int(round(sel["attendance_weight"] * p.attendance))
+        if p.unmapped:
+            v -= sel["unknown_character_penalty"]
+        terms.append(v * SCALE * x[p.signup_name])
+
+    # --- objective: party buff synergy ---
+    synergy_terms = []
+    for b in profile.party_buffs():
+        providers = [p for p in players if b.provided_by(specs[p.signup_name])]
+        if not providers:
+            continue
+        for g in range(n_groups):
+            if b.stacking == "unique":
+                prov = m.NewBoolVar(f"prov_{b.id}_{g}")
+                m.Add(prov <= sum(y[p.signup_name, g] for p in providers))
+                for q in players:
+                    val = int(round(b.benefit(specs[q.signup_name]) * SCALE))
+                    if val <= 0:
+                        continue
+                    z = m.NewBoolVar(f"z_{b.id}_{g}_{q.signup_name}")
+                    m.Add(z <= prov)
+                    m.Add(z <= y[q.signup_name, g])
+                    synergy_terms.append(val * z)
+            else:  # stack: every provider adds for every other member
+                for p in providers:
+                    for q in players:
+                        if q is p:
+                            continue
+                        val = int(round(b.benefit(specs[q.signup_name]) * SCALE))
+                        if val <= 0:
+                            continue
+                        w = m.NewBoolVar(f"w_{b.id}_{g}_{p.signup_name}_{q.signup_name}")
+                        m.Add(w <= y[p.signup_name, g])
+                        m.Add(w <= y[q.signup_name, g])
+                        synergy_terms.append(val * w)
+
+    # symmetry breaking: the first signed player anchors group 0 (unless pins fix the numbering)
+    if not opts.pins:
+        first = next((p for p in players if p.status == "signed" and p.signup_name not in opts.force_out), None)
+        if first:
+            m.Add(y[first.signup_name, 0] == x[first.signup_name])
+
+    m.Maximize(sum(terms) + sum(synergy_terms))
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = opts.time_limit_s
+    solver.parameters.num_workers = opts.workers
+    status = solver.Solve(m)
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        raise RuntimeError(f"no roster found: {solver.StatusName(status)}")
+
+    selected = [p for p in players if solver.Value(x[p.signup_name])]
+    benched = [p for p in players if not solver.Value(x[p.signup_name])]
+    groups: list[list[str]] = [[] for _ in range(n_groups)]
+    for p in selected:
+        for g in range(n_groups):
+            if solver.Value(y[p.signup_name, g]):
+                groups[g].append(p.signup_name)
+    reports, syn_total = group_reports(profile, players, groups)
+    counts: dict[str, int] = {}
+    for p in selected:
+        counts[p.role] = counts.get(p.role, 0) + 1
+    return RosterResult(
+        selected=selected,
+        benched=benched,
+        groups=groups,
+        group_reports=reports,
+        objective=int(solver.ObjectiveValue()) // SCALE,
+        synergy_value=syn_total,
+        role_counts=counts,
+        advisories=[],
+        solver_status=solver.StatusName(status),
+    )
+
+
+def rebuild(profile: GameProfile, players: list[Player], groups: list[list[str]], base: RosterResult) -> RosterResult:
+    """Recompute a RosterResult after groups were edited by hand (swap/move)."""
+    by = {p.signup_name: p for p in players}
+    selected = [by[n] for g in groups for n in g]
+    sel_names = {p.signup_name for p in selected}
+    reports, syn = group_reports(profile, players, groups)
+    counts: dict[str, int] = {}
+    for p in selected:
+        counts[p.role] = counts.get(p.role, 0) + 1
+    return RosterResult(
+        selected=selected,
+        benched=[p for p in players if p.signup_name not in sel_names],
+        groups=groups,
+        group_reports=reports,
+        objective=base.objective - base.synergy_value + syn,
+        synergy_value=syn,
+        role_counts=counts,
+        advisories=base.advisories,
+        bench_whatif=base.bench_whatif,
+        solver_status="edited",
+    )
+
+
+def group_reports(profile: GameProfile, players: list[Player], groups: list[list[str]]) -> tuple[list[GroupReport], int]:
+    by_name = {p.signup_name: p for p in players}
+    total = 0
+    reports = []
+    for gi, names in enumerate(groups):
+        members = [by_name[n] for n in names]
+        lines = []
+        gval = 0.0
+        for b in profile.party_buffs():
+            provs = [p for p in members if b.provided_by(profile.spec(p.cls, p.spec))]
+            if not provs:
+                continue
+            if b.stacking == "unique":
+                bens = [(q, b.benefit(profile.spec(q.cls, q.spec))) for q in members]
+                v = sum(val for _, val in bens)
+                who = ",".join((p.character or p.signup_name) for p in provs[:1])
+            else:
+                v = 0.0
+                for p in provs:
+                    v += sum(b.benefit(profile.spec(q.cls, q.spec)) for q in members if q is not p)
+                who = "+".join((p.character or p.signup_name) for p in provs)
+            if v > 0:
+                gval += v
+                lines.append(f"{b.name} [{who}] +{v:.0f}")
+        total += int(gval)
+        reports.append(GroupReport(index=gi + 1, members=[p.label for p in members], buffs=lines, value=int(gval)))
+    return reports, total

@@ -1,0 +1,43 @@
+# Raid-Helper signup, transcribed from a screenshot of the guild's Discord on
+# 2026-09-13. Positions are Raid-Helper signup order. `class`/`spec` are what
+# the player picked in Raid-Helper (spec inferred from the icon where the
+# screenshot allowed it; `spec_confidence: low` where guessed).
+#
+# When we have the event id this file is replaced by the API fetch
+# (raid-helper.xyz/api/v4/events/<id>, no auth needed for reads).
+event:
+  title: "TUESDAY RAID SIGNUP"
+  guild: demo
+  instance: black_temple
+  starts_at: "2026-09-15T19:30:00-05:00"   # "7:30pm Server" (assumed CT)
+  leader: Ashael
+  counts: {signed: 24, bench: 3, tanks: 2, healers: 5, ranged: 10, melee: 7}
+
+signups:
+  - {pos: 7,  name: Kelbrindra,        class: Warrior, spec: Protection,   role: tank,   status: signed, spec_confidence: low}
+  - {pos: 11, name: origarther,         class: Paladin, spec: Protection,   role: tank,   status: signed, spec_confidence: low}
+  - {pos: 2,  name: Ithmaeltal,            class: Warrior, spec: Arms,         role: melee,  status: signed}
+  - {pos: 14, name: Ashornsor,              class: Warrior, spec: Fury,         role: melee,  status: signed}
+  - {pos: 9,  name: "Sorgar", class: Druid, spec: Feral,        role: melee,  status: signed, spec_confidence: low}
+  - {pos: 4,  name: Therwenvel, class: Paladin, spec: Holy,         role: healer, status: signed}
+  - {pos: 5,  name: Torulf,       class: Paladin, spec: Retribution,  role: melee,  status: signed}
+  - {pos: 1,  name: Ashael,            class: Rogue,   spec: Combat,       role: melee,  status: signed}
+  - {pos: 13, name: Therdanfen,      class: Hunter,  spec: BeastMastery, role: ranged, status: signed, spec_confidence: low}
+  - {pos: 15, name: Dravexwyn,       class: Hunter,  spec: BeastMastery, role: ranged, status: signed}
+  - {pos: 24, name: wynmundvel,              class: Hunter,  spec: BeastMastery, role: ranged, status: signed}
+  - {pos: 25, name: Sorryn,             class: Hunter,  spec: Survival,     role: ranged, status: signed}
+  - {pos: 12, name: Fenzorkel,             class: Priest,  spec: Holy,         role: healer, status: signed}
+  - {pos: 23, name: velwenvo,              class: Priest,  spec: Holy,         role: healer, status: signed}
+  - {pos: 27, name: Wyndanvo,             class: Priest,  spec: Shadow,       role: ranged, status: signed}
+  - {pos: 19, name: oridan,          class: Mage,    spec: Arcane,       role: ranged, status: signed}
+  - {pos: 17, name: LUAORN,              class: Warlock, spec: Destruction,  role: ranged, status: signed, spec_confidence: low}
+  - {pos: 20, name: Zanwen,           class: Warlock, spec: Destruction,  role: ranged, status: signed}
+  - {pos: 26, name: Kazor,            class: Warlock, spec: Destruction,  role: ranged, status: signed}
+  - {pos: 10, name: Kamael,            class: Shaman,  spec: Elemental,    role: ranged, status: signed}
+  - {pos: 8,  name: Orivex,          class: Shaman,  spec: Restoration,  role: healer, status: signed}
+  - {pos: 22, name: Theriannym,       class: Shaman,  spec: Restoration,  role: healer, status: signed}
+  - {pos: 16, name: Oriulfkel,              class: Shaman,  spec: Enhancement,  role: melee,  status: signed}
+  - {pos: 21, name: Luaniswyn,            class: Shaman,  spec: Enhancement,  role: melee,  status: signed}
+  - {pos: 3,  name: verorn,            class: Warrior, spec: Fury,         role: melee,  status: bench}
+  - {pos: 6,  name: Therwen,             class: Paladin, spec: Holy,         role: healer, status: bench, spec_confidence: low}
+  - {pos: 18, name: ASHDAN,          class: Druid,   spec: Balance,      role: ranged, status: bench}

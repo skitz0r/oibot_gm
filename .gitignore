@@ -1,0 +1,29 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# runtime data / generated output
+data/
+out/
+*.db
+*.db-wal
+*.db-shm
+
+# real guild data stays local; fixtures/demo is the anonymized copy
+fixtures/25bg/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# os / editors
+.DS_Store
+.idea/
+.vscode/

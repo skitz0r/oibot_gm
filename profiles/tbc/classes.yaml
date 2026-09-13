@@ -1,0 +1,104 @@
+# GameProfile: The Burning Crusade (Anniversary). Classes, specs and the
+# attributes the buff matrix keys on.
+#
+# role:   tank | healer | melee | ranged
+# dmg:    physical | spell | none        (what kind of damage buffs help)
+# mana:   whether the spec cares about mana regen buffs
+# token:  T6 armor token group
+profile: tbc
+raid_sizes: [10, 25]
+
+token_groups:
+  Conqueror: [Paladin, Priest, Warlock]
+  Protector: [Warrior, Hunter, Shaman]
+  Vanquisher: [Rogue, Mage, Druid]
+
+armor:
+  Warrior: plate
+  Paladin: plate
+  Hunter: mail
+  Shaman: mail
+  Rogue: leather
+  Druid: leather
+  Priest: cloth
+  Mage: cloth
+  Warlock: cloth
+
+classes:
+  Warrior:
+    Arms:        {role: melee,  dmg: physical, mana: false}
+    Fury:        {role: melee,  dmg: physical, mana: false}
+    Protection:  {role: tank,   dmg: physical, mana: false}
+  Paladin:
+    Holy:        {role: healer, dmg: none,     mana: true}
+    Protection:  {role: tank,   dmg: spell,    mana: true}
+    Retribution: {role: melee,  dmg: physical, mana: true}
+  Hunter:
+    BeastMastery: {role: ranged, dmg: physical, mana: true}
+    Marksmanship: {role: ranged, dmg: physical, mana: true}
+    Survival:     {role: ranged, dmg: physical, mana: true}
+  Rogue:
+    Combat:       {role: melee, dmg: physical, mana: false}
+    Assassination: {role: melee, dmg: physical, mana: false}
+    Subtlety:     {role: melee, dmg: physical, mana: false}
+  Priest:
+    Holy:        {role: healer, dmg: none,  mana: true}
+    Discipline:  {role: healer, dmg: none,  mana: true}
+    Shadow:      {role: ranged, dmg: spell, mana: true}
+  Shaman:
+    Elemental:   {role: ranged, dmg: spell,    mana: true}
+    Enhancement: {role: melee,  dmg: physical, mana: true}
+    Restoration: {role: healer, dmg: none,     mana: true}
+  Mage:
+    Arcane:      {role: ranged, dmg: spell, mana: true}
+    Fire:        {role: ranged, dmg: spell, mana: true}
+    Frost:       {role: ranged, dmg: spell, mana: true}
+  Warlock:
+    Affliction:  {role: ranged, dmg: spell, mana: true}
+    Destruction: {role: ranged, dmg: spell, mana: true}
+    Demonology:  {role: ranged, dmg: spell, mana: true}
+  Druid:
+    Balance:     {role: ranged, dmg: spell,    mana: true}
+    Feral:       {role: melee,  dmg: physical, mana: false}
+    Guardian:    {role: tank,   dmg: physical, mana: false}
+    Restoration: {role: healer, dmg: none,     mana: true}
+
+# Aliases seen in external data (Raid-Helper spec labels, WCL, BisCouncil)
+spec_aliases:
+  "Beast Mastery": BeastMastery
+  "Marksman": Marksmanship
+  "Bear": Guardian
+  "Cat": Feral
+  "Warden": Guardian
+  "Resto": Restoration
+  "Prot": Protection
+  "Ret": Retribution
+  "Enh": Enhancement
+  "Ele": Elemental
+  "Disc": Discipline
+
+# BisCouncil export ids (derived from the guild's Loot Summary export)
+biscouncil:
+  class_id: {2: Druid, 3: Hunter, 4: Mage, 5: Paladin, 6: Priest, 7: Rogue, 8: Shaman, 9: Warlock, 10: Warrior}
+  role_id: {1: ranged, 2: melee, 3: healer, 4: tank}
+  spec_id:
+    6: [Druid, Balance]
+    7: [Druid, Feral]
+    8: [Druid, Guardian]
+    9: [Druid, Restoration]
+    10: [Hunter, BeastMastery]
+    11: [Hunter, Marksmanship]
+    12: [Hunter, Survival]
+    13: [Mage, Arcane]
+    16: [Paladin, Holy]
+    17: [Paladin, Protection]
+    18: [Paladin, Retribution]
+    20: [Priest, Holy]
+    21: [Priest, Shadow]
+    23: [Rogue, Combat]
+    25: [Shaman, Elemental]
+    26: [Shaman, Enhancement]
+    27: [Shaman, Restoration]
+    28: [Warlock, Affliction]
+    30: [Warlock, Destruction]
+    32: [Warrior, Fury]

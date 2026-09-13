@@ -1,0 +1,292 @@
+[
+ {
+  "name": "Vothaszan",
+  "class": "Shaman",
+  "specs": [
+   {
+    "spec": "Restoration",
+    "role": "healer",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Torsha",
+  "class": "Shaman",
+  "specs": [
+   {
+    "spec": "Enhancement",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Oridan",
+  "class": "Mage",
+  "specs": [
+   {
+    "spec": "Arcane",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Torthasash",
+  "class": "Paladin",
+  "specs": [
+   {
+    "spec": "Holy",
+    "role": "healer",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Velwenvo",
+  "class": "Priest",
+  "specs": [
+   {
+    "spec": "Holy",
+    "role": "healer",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Wynael",
+  "class": "Warlock",
+  "specs": [
+   {
+    "spec": "Affliction",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Kakossor",
+  "class": "Druid",
+  "specs": [
+   {
+    "spec": "Feral",
+    "role": "dps",
+    "fights": 10
+   },
+   {
+    "spec": "Guardian",
+    "role": "tank",
+    "fights": 7
+   }
+  ]
+ },
+ {
+  "name": "Kazor",
+  "class": "Warlock",
+  "specs": [
+   {
+    "spec": "Destruction",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Zanwen",
+  "class": "Warlock",
+  "specs": [
+   {
+    "spec": "Destruction",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Zanzor",
+  "class": "Rogue",
+  "specs": [
+   {
+    "spec": "Combat",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Velexori",
+  "class": "Shaman",
+  "specs": [
+   {
+    "spec": "Restoration",
+    "role": "healer",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Origarther",
+  "class": "Warlock",
+  "specs": [
+   {
+    "spec": "Destruction",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Kamael",
+  "class": "Shaman",
+  "specs": [
+   {
+    "spec": "Elemental",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Ithmaeltal",
+  "class": "Warrior",
+  "specs": [
+   {
+    "spec": "Arms",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Gorael",
+  "class": "Druid",
+  "specs": [
+   {
+    "spec": "Feral",
+    "role": "dps",
+    "fights": 9
+   },
+   {
+    "spec": "Guardian",
+    "role": "tank",
+    "fights": 7
+   },
+   {
+    "spec": "Warden",
+    "role": "tank",
+    "fights": 1
+   }
+  ]
+ },
+ {
+  "name": "Sorbrin",
+  "class": "Paladin",
+  "specs": [
+   {
+    "spec": "Retribution",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Raulfgor",
+  "class": "Hunter",
+  "specs": [
+   {
+    "spec": "Survival",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Fenzorkel",
+  "class": "Priest",
+  "specs": [
+   {
+    "spec": "Holy",
+    "role": "healer",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Nymtam",
+  "class": "Paladin",
+  "specs": [
+   {
+    "spec": "Protection",
+    "role": "tank",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Vertam",
+  "class": "Mage",
+  "specs": [
+   {
+    "spec": "Arcane",
+    "role": "dps",
+    "fights": 14
+   }
+  ]
+ },
+ {
+  "name": "Eltam",
+  "class": "Shaman",
+  "specs": [
+   {
+    "spec": "Enhancement",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Ashdan",
+  "class": "Druid",
+  "specs": [
+   {
+    "spec": "Balance",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Votam",
+  "class": "Priest",
+  "specs": [
+   {
+    "spec": "Shadow",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Talaelzan",
+  "class": "Warrior",
+  "specs": [
+   {
+    "spec": "Fury",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ },
+ {
+  "name": "Dravexwyn",
+  "class": "Hunter",
+  "specs": [
+   {
+    "spec": "BeastMastery",
+    "role": "dps",
+    "fights": 17
+   }
+  ]
+ }
+]

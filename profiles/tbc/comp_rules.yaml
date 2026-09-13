@@ -1,0 +1,26 @@
+# GameProfile: TBC composition rules for the roster/group solver.
+raid_size: 25
+group_size: 5
+groups: 5
+
+# Hard role bounds for the selected raid. Instance-specific needs live in
+# raids.yaml and are surfaced as advisories, not hard constraints.
+roles:
+  tank:   {min: 2, max: 4}
+  healer: {min: 5, max: 8}
+
+selection:
+  # Objective terms (points). Buff synergy from buffs.yaml is added on top.
+  signed_bonus: 30          # someone who signed up (vs bench/tentative)
+  bench_penalty: 15         # cost of promoting a bench signup
+  attendance_weight: 10     # × attendance ratio (0..1)
+  unknown_character_penalty: 3   # signup we couldn't map to a known character
+  loot_hunger_weight: 0     # placeholder: prefer players owed loot (not for MVP)
+
+grouping:
+  healer_max_per_group: 3
+  tank_max_per_group: 2
+  # Soft: keep at most one *shaman* per group so Bloodlust covers everyone.
+  # (Falls out of bloodlust being unique+party in buffs.yaml, so no rule here.)
+  keep_together: []          # [[Name, Name], ...] soft pairs, from standing instructions
+  keep_apart: []
