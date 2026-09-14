@@ -324,7 +324,9 @@ Built and running against the shadow guild (see README / CLAUDE.md):
 - Cost controls: prompt-cached policy prefix, parallel judging with a two-pass provisional/actual reconciliation, change-only re-judging after an override, compact feedback digest, per-workload routing, a usage ledger in `/mock status`/`/mock end`, and an `OIBOT_BUDGET_USD` hard stop.
 - Data: real BisCouncil ledger and WCL attendance; mock tiers, wishlists, policy and ranks; `fixtures/demo` is the anonymized public copy.
 
-Known gaps: item rows in `profiles/tbc/items` are unverified (Blizzard API pass pending); tanks land in DPS groups (comp_rules tuning); state is JSON files, not the database; no weekly cycle yet (§5.10).
+**Added 2026-09-13, later the same day (real, non-mock surface on the git-backed store):** registry (`/register`, `/char`, officer `/roster`), applicant intake (`/apply` + review cards), availability and absences, `/me`, ops feed + `/gm status`, `/gm config` (owner, ops/applications/signup channels, officer roles, teams with schedule/cutoffs/instance, timezone), and the **weekly cycle**: sheets prefilled from availability/absences with persistent In/Tentative/Out/Sub buttons and a character picker, the scheduler (open at T−N days, health check + DM nudges at the soft cutoff, lock → propose at the hard cutoff, close after the raid), `/raid open|sheet|health|lock|accept|set|cancel|list`, `/callout` with late-callout marking. Role bounds and group count scale to the team size. `forever` game profile exists as a placeholder clone of `tbc`.
+
+Known gaps: item rows in `profiles/tbc/items` are unverified (Blizzard API pass pending); tanks land in DPS groups (comp_rules tuning); the mock flow still reads the shadow fixtures rather than the registry; no policy/plain-text config surface yet (§5.15); no companion (§5.13); Forever profile data is placeholder.
 
 ## 6. Architecture
 

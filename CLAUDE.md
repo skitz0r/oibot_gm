@@ -22,7 +22,12 @@ src/oibot_gm/
   loot/                scoring.py (candidates + base score), recommend.py (Claude structured output + fallback)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
-  discord_bot.py       /mock flow: signup → lock/propose → chat changes → start → tick drops → distribute → feedback → confirm
+  discord_bot.py       OibotGM client + /mock flow (shadow data): signup → lock/propose → chat changes → start → drops → distribute → feedback → confirm
+  registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member)
+  discord_registry.py  real commands: /register, /char, /apply, /absent, /availability, /me, /roster (officer), /gm config|status
+  raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
+  discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
+  ops.py               ops feed (channel line per action; errors DM the owner)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`
@@ -41,6 +46,7 @@ Restart the bot after code changes: `pkill -f "oibot discord"; PYTHONUNBUFFERED=
 - Python 3.12, `uv`, Pydantic models in `models.py` double as LLM output schemas.
 - Deterministic first: add a rule to `scoring.py`/`comp_rules.yaml`, not to a prompt.
 - Anything slow (solver, LLM) runs in `asyncio.to_thread`; Discord interactions must respond within 3 s.
-- Verify offline before touching Discord: build a `MockEvent` in a script (see git history for examples) with `ctx.provider = None`.
+- Verify offline before touching Discord: copy the data repo to a scratch dir, `GitStore(scratch, push=False)`, drive `Registry`/`raidcycle`/`MockEvent` directly (see git history for examples); build a `CommandTree` on a bare `discord.Client` to validate command decorators.
+- Real guild state is keyed by Discord guild id → `<data>/<guild>/guild.yaml`; `/mock` uses the shadow fixtures. Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template.
 - Item data in `profiles/tbc/items/*.yaml` is unverified; `equippable()` is the safety net. Verify ids against the Blizzard API before relying on them.
 - Model routing lives in `llm/provider.py:ROUTES`; override per workload with `OIBOT_MODEL_<WORKLOAD>`.
