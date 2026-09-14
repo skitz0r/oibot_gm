@@ -1,0 +1,148 @@
+# FOREVER PLACEHOLDER: cloned from profiles/tbc on 2026-09-13. Revise when WoW: Forever data (buffs, raid sizes, loot) is known.
+# GameProfile: TBC party-scoped buff matrix.
+#
+# This is the file the group solver optimises against AND the file the
+# WCL party-inference uses (scope/kind decide what counts as a party signal).
+#
+# scope:    party | raid | class | self   (only `party` matters for grouping)
+# kind:     aura | proc                   (procs are ignored by inference)
+# stacking: unique | stack                (unique: one provider per group is
+#                                          enough; stack: each provider adds)
+# value:    points per beneficiary, keyed by spec attribute. The highest
+#           matching key applies; `spec:<Name>` overrides win. Keys:
+#           all | physical | spell | mana | melee | ranged | healer | tank
+# providers: specs that bring it. `Shaman:*` means any spec of the class.
+#
+# The numbers are a starting point for the T6 meta, not gospel. They are
+# meant to be tuned against real WCL group layouts (shadow mode).
+buffs:
+  - id: windfury_totem
+    name: Windfury Totem
+    providers: [Shaman:Enhancement]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {melee: 10, tank: 3, "spec:Enhancement": 2, "spec:Feral": 4}
+    note: Enh shaman drops it; other shamans could but are wanted elsewhere.
+
+  - id: unleashed_rage
+    name: Unleashed Rage (10% AP)
+    providers: [Shaman:Enhancement]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {physical: 5, tank: 2}
+
+  - id: bloodlust
+    name: Bloodlust / Heroism
+    providers: [Shaman:*]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {physical: 6, spell: 6, healer: 3, tank: 2}
+    note: Party-wide in TBC, so one shaman per group is the classic layout.
+
+  - id: totem_of_wrath
+    name: Totem of Wrath
+    providers: [Shaman:Elemental]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {spell: 6}
+
+  - id: wrath_of_air
+    name: Wrath of Air Totem
+    providers: [Shaman:Elemental, Shaman:Restoration]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {spell: 3, healer: 2}
+
+  - id: mana_tide
+    name: Mana Tide / Mana Spring
+    providers: [Shaman:Restoration]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {healer: 5, mana: 3}
+
+  - id: ferocious_inspiration
+    name: Ferocious Inspiration (3% dmg, stacks)
+    providers: [Hunter:BeastMastery]
+    scope: party
+    kind: aura
+    stacking: stack
+    value: {physical: 4, spell: 4}
+
+  - id: trueshot_aura
+    name: Trueshot Aura
+    providers: [Hunter:Marksmanship]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {physical: 4}
+
+  - id: leader_of_the_pack
+    name: Leader of the Pack (5% crit)
+    providers: [Druid:Feral, Druid:Guardian]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {physical: 5, tank: 2}
+
+  - id: moonkin_aura
+    name: Moonkin Aura (5% spell crit)
+    providers: [Druid:Balance]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {spell: 5}
+
+  - id: battle_shout
+    name: Battle Shout
+    providers: [Warrior:*]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {physical: 4, tank: 2}
+
+  - id: blood_pact
+    name: Blood Pact (imp)
+    providers: [Warlock:*]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {all: 1}
+
+  - id: vampiric_touch
+    name: Vampiric Touch (mana return)
+    providers: [Priest:Shadow]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {mana: 4, healer: 3, "spec:Shadow": 0}
+    note: The "mana group" anchor.
+
+  - id: sanctity_aura
+    name: Sanctity Aura
+    providers: [Paladin:Retribution]
+    scope: party
+    kind: aura
+    stacking: unique
+    value: {"spec:Retribution": 0, "spec:Protection": 2, all: 1}
+
+  # --- signals that show up in logs but must NOT drive grouping ---
+  - id: windfury_attack
+    name: Windfury Attack
+    providers: []
+    scope: party
+    kind: proc
+    stacking: unique
+    value: {}
+  - id: greater_blessings
+    name: Greater Blessings (any)
+    providers: [Paladin:*]
+    scope: class
+    kind: aura
+    stacking: unique
+    value: {}

@@ -27,7 +27,9 @@ from discord import app_commands
 from pydantic import BaseModel, Field
 
 from . import nl, render
+from .discord_registry import Guilds, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
+from .ops import Ops
 from .llm.provider import Provider, get_provider
 from .loot import recommend as rec_mod, scoring
 from .models import DropResult, LootAward, Player, RosterResult
@@ -647,6 +649,28 @@ class OibotGM(discord.Client):
         self.test_guild = test_guild
         self.events: dict[int, MockEvent] = load_events()
         self._register()
+        # real (non-mock) surface: registry, officer tools, ops feed
+        self.ops = Ops(self)
+        self.guilds = Guilds(_store(), ROOT)
+        register_commands(self.tree, self.guilds, self.ops, ico)
+        self.tree.on_error = self._on_command_error
+
+    async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        reg = self.guilds.for_interaction(interaction)
+        cmd = interaction.command.qualified_name if interaction.command else "?"
+        msg = f"`/{cmd}` by {interaction.user.display_name}: {type(error).__name__}: {str(error)[:200]}"
+        if reg:
+            await self.ops.emit(reg.config, "error", msg, exc=error)
+        else:
+            print("[ops:error]", msg)
+        try:
+            text = "Something went wrong; the owner has been notified."
+            if interaction.response.is_done():
+                await interaction.followup.send(text, ephemeral=True)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ---- helpers
     def event_for(self, channel_id: int) -> MockEvent | None:
@@ -939,17 +963,21 @@ class OibotGM(discord.Client):
         self.tree.add_command(mock)
 
     async def setup_hook(self):
+        # global sync (so /register etc. work in DMs; propagates within ~1h) plus an
+        # instant guild-scoped copy for the test server
+        await self.tree.sync()
         if self.test_guild:
             g = discord.Object(id=self.test_guild)
             self.tree.copy_global_to(guild=g)
             await self.tree.sync(guild=g)
-        else:
-            await self.tree.sync()
 
     async def on_ready(self):
         await self.ensure_emojis()
         st = _store()
-        print(f"oibot_GM online as {self.user} · guild: {self.ctx.guild['name']} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
+        regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.guilds.by_discord.values())
+        print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
+        for reg in self.guilds.by_discord.values():
+            await self.ops.emit(reg.config, "info", f"bot online · data @ {st.head()} · {len(reg.members)} members / {len(reg.all_characters())} characters · {len(reg.pending())} unconfirmed")
 
 
 def run(guild_dir: Path, signup_file: str) -> None:

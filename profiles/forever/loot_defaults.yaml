@@ -1,0 +1,68 @@
+# FOREVER PLACEHOLDER: cloned from profiles/tbc on 2026-09-13. Revise when WoW: Forever data (buffs, raid sizes, loot) is known.
+# GameProfile: default loot scoring for TBC.
+#
+# base = upgrade_value(item, spec) * attendance_factor * rank_factor / loot_divisor
+#
+# upgrade_value mirrors BisCouncil's model (tier_weight × slot_weight) so the
+# guild's own export is directly comparable.
+tier_weight: {"S+": 1.0, "S": 0.75, "A": 0.20, "B": 0.05}
+
+slot_weight:
+  two_hand: 3.0
+  ranged_weapon_primary: 3.0    # bow/gun for hunters
+  one_hand: 1.5
+  shield: 1.0
+  chest: 1.0
+  legs: 1.0
+  head: 1.0
+  shoulders: 1.0
+  hands: 1.0
+  trinket: 0.9
+  feet: 0.75
+  waist: 0.75
+  wrist: 0.55
+  neck: 0.55
+  finger: 0.55
+  back: 0.55
+  off_hand: 0.3
+  wand: 0.3
+  ranged_weapon_stat: 0.3       # melee-stat ranged slot / hunter melee weapon
+
+attendance:
+  window_days: 30
+  weight: 1.0          # factor = 0.5 + 0.5 * ratio  (never zero, never >1)
+
+rank_factor:
+  core: 1.0
+  raider: 1.0
+  trial: 0.7
+  alt: 0.5
+  unknown: 0.6
+
+# Loot divisor: how much recent loot suppresses priority. Uses BisCouncil-style
+# "loadout power" (sum of tier×slot weights) received in `window_days`.
+loot_divisor:
+  window_days: 14
+  # divisor = 1 + k * power_received_in_window ** p
+  k: 0.9
+  p: 1.3
+  # Per RCLC "Merit": allow one cheap item without penalty.
+  free_allowance_power: 0.25
+
+wishlist:
+  rank_bonus: {1: 0.30, 2: 0.20, 3: 0.12, 4: 0.06, 5: 0.03}   # additive multiplier bonus
+  offspec_multiplier: 0.35
+
+# Same slot twice in one week (including earlier in tonight's batch) is heavily
+# discounted; the candidate still appears so the council can override if nobody
+# else needs the item.
+slot_repeat:
+  window_days: 7
+  multiplier: 0.25
+
+# Order in which a batch of drops is judged. Sequential loot councils are
+# path-dependent (each award raises the winner's loot divisor), so big items
+# settle first and small items do the spreading. Items whose winner would differ
+# under kill order are flagged order-sensitive for the council.
+distribution:
+  order: impact      # impact (weight × best eligible tier, ties by kill order) | kill

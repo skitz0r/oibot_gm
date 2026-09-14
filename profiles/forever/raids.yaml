@@ -1,0 +1,6 @@
+# WoW: Forever raids (announced 2026-09-12; open 2026-12-09). Bosses and loot
+# tables are not published yet — placeholders. Encounter ids TBD.
+raids:
+  - {id: barrow_deeps, name: Barrow Deeps, size: 10, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
+  - {id: hyjal_summit_forever, name: Hyjal Summit, size: 20, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
+  - {id: onyxias_lair, name: "Onyxia's Lair", size: 40, wcl_zone: null, tank_needs: {count: 3, note: "TBD"}, bosses: []}
