@@ -33,10 +33,17 @@ from .loot import recommend as rec_mod, scoring
 from .models import DropResult, LootAward, Player, RosterResult
 from .profiles import GameProfile, Item
 from .roster import coverage as cov_mod, explain, solver
+from .store import GitStore, resolve_data_root
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "out"
-EVENTS = OUT / "events"
+STORE: GitStore | None = None  # set in run(); None = fixtures-only mode (no git)
+GUILD_KEY = "25bg"
+
+
+def _store() -> GitStore:
+    assert STORE is not None, "store not initialised"
+    return STORE
 
 CLASS_COLOURS = {"Warrior": 0xC79C6E, "Paladin": 0xF58CBA, "Hunter": 0xABD473, "Rogue": 0xFFF569, "Priest": 0xFFFFFF, "Shaman": 0x0070DE, "Mage": 0x69CCF0, "Warlock": 0x9482C9, "Druid": 0xFF7D0A}
 TEAL = 0x2B7A78
@@ -58,7 +65,12 @@ class GuildContext:
         self.profile = GameProfile.load(ROOT / "profiles" / self.guild["game_profile"])
         att = wcl.attendance(guild_dir / "wcl_attendance_1060.json")
         self.seed_event, self.seed_players = signup_mod.load_signup(guild_dir / signup_file, self.profile, self.registry, smap, att)
-        _, self.ledger = biscouncil.parse(next(guild_dir.glob("biscouncil_loot_*.csv")))
+        _, imported = biscouncil.parse(next(guild_dir.glob("biscouncil_loot_*.csv")))
+        # native ledger (awards confirmed through the bot) on top of the imported export, deduped
+        native = [LootAward(**{k: v for k, v in r.items() if k in LootAward.model_fields}) for r in (STORE.read_jsonl(Path(guild_dir.name) / "ledger.jsonl") if STORE else [])]
+        seen = {(a.raider, a.item_id, str(a.received)) for a in imported}
+        self.ledger = imported + [a for a in native if (a.raider, a.item_id, str(a.received)) not in seen]
+        self.precedents: list[dict] = STORE.read_jsonl(Path(guild_dir.name) / "precedents.jsonl") if STORE else []
         self.wishlists = yaml.safe_load((guild_dir / "wishlists.yaml").read_text())["wishlists"]
         self.policy = (guild_dir / "policy.md").read_text()
         persona = guild_dir / "persona.md"
@@ -68,8 +80,12 @@ class GuildContext:
         self.provider: Provider | None = get_provider()
 
     def policy_for_llm(self) -> str:
-        """Policy + voice + data provenance: what the model may cite and how to describe it."""
-        return self.policy + ("\n\n## Voice\n" + self.persona if self.persona else "") + ("\n\n## Data provenance\n" + self.provenance if self.provenance else "")
+        """Policy + voice + data provenance + recent precedents from earlier raids."""
+        text = self.policy + ("\n\n## Voice\n" + self.persona if self.persona else "") + ("\n\n## Data provenance\n" + self.provenance if self.provenance else "")
+        recent = [p for p in self.precedents if p.get("status", "active") == "active"][-20:]
+        if recent:
+            text += "\n\n## Precedents from earlier raids (council overrides, with reasons; cite when relevant)\n" + "\n".join(f"- {p.get('date','?')} {p['item']}: bot picked {p['bot']}, council awarded {p['human']} — “{p['reason']}”" for p in recent)
+        return text
 
 
 # ---------------------------------------------------------------- event state
@@ -122,15 +138,28 @@ class MockEvent(BaseModel):
         order = [b["name"] for b in profile.raids[self.instance]["bosses"]]
         return [i for boss in order for i in self.drops.get(boss, []) if i not in self.distributed]
 
-    def save(self) -> None:
-        EVENTS.mkdir(parents=True, exist_ok=True)
-        (EVENTS / f"{self.channel_id}.json").write_text(self.model_dump_json(indent=1))
+    def rel_path(self) -> Path:
+        return Path(GUILD_KEY) / "events" / f"{self.channel_id}.json"
+
+    def save(self, message: str | None = None) -> None:
+        st = _store()
+        st.write_text(self.rel_path(), self.model_dump_json(indent=1))
+        st.commit(message or f"{self.id}: {self.state}")
+
+    def archive(self) -> None:
+        st = _store()
+        st.write_text(Path(GUILD_KEY) / "events" / "archive" / f"{self.id}-{self.date}-{self.channel_id}.json", self.model_dump_json(indent=1))
+        live = st.root / self.rel_path()
+        if live.exists():
+            live.unlink()
+        st.commit(f"{self.id}: archived")
 
 
 def load_events() -> dict[int, MockEvent]:
     out = {}
-    if EVENTS.exists():
-        for f in EVENTS.glob("*.json"):
+    d = _store().root / GUILD_KEY / "events"
+    if d.exists():
+        for f in d.glob("*.json"):
             try:
                 ev = MockEvent.model_validate_json(f.read_text())
                 out[ev.channel_id] = ev
@@ -508,16 +537,20 @@ def run_distribution(ctx: GuildContext, ev: MockEvent, keep_overrides: bool = Tr
 def confirm_awards(ctx: GuildContext, ev: MockEvent) -> list[str]:
     raid_date = date.fromisoformat(ev.date)
     lines = []
+    st = _store()
     for p in ev.proposals:
         c = next((c for c in p.result.candidates if c.character == p.award_to), None)
-        ev.awards.append(LootAward(raider=p.award_to, item_id=p.item_id, tier=c.tier if c else "?", total_weight=c.upgrade_value if c else 0.5, offspec=bool(c and c.offspec), received=raid_date, instance=ev.raid_name, boss=p.boss))
+        award = LootAward(raider=p.award_to, item_id=p.item_id, tier=c.tier if c else "?", total_weight=c.upgrade_value if c else 0.5, offspec=bool(c and c.offspec), received=raid_date, instance=ev.raid_name, boss=p.boss)
+        ev.awards.append(award)
+        ctx.ledger.append(award)
+        st.append_jsonl(Path(GUILD_KEY) / "ledger.jsonl", {**award.model_dump(), "event": ev.id, "source": p.source, "bot_pick": p.result.recommendation.primary, "import_id": f"{ev.id}-{p.item_id}-{p.award_to}"})
         lines.append(f"{p.item_name} → {p.award_to}" + (" (override)" if p.source == "override" else ""))
         ev.distributed.append(p.item_id)
         if p.boss not in ev.bosses_done:
             ev.bosses_done.append(p.boss)
     ev.proposals = []
     ev.pending_drops = []
-    ev.save()
+    ev.save(f"{ev.id}: confirmed {len(lines)} awards")
     return lines
 
 
@@ -754,10 +787,13 @@ class OibotGM(discord.Client):
                     if not p or ch.award_to not in {c.character for c in p.result.candidates}:
                         applied.append(f"couldn't apply {ch.award_to} ← item {ch.item_id}")
                         continue
-                    ev.overrides.append({"item": p.item_name, "item_id": p.item_id, "bot": p.result.recommendation.primary, "human": ch.award_to, "reason": ch.reason, "by": message.author.display_name})
+                    precedent = {"date": ev.date, "event": ev.id, "item": p.item_name, "item_id": p.item_id, "bot": p.result.recommendation.primary, "human": ch.award_to, "reason": ch.reason, "by": message.author.display_name, "status": "active"}
+                    ev.overrides.append(precedent)
+                    self.ctx.precedents.append(precedent)
+                    _store().append_jsonl(Path(GUILD_KEY) / "precedents.jsonl", precedent)
                     p.award_to, p.source, p.reason = ch.award_to, "override", ch.reason
                     applied.append(f"{p.item_name} → {ch.award_to}")
-                ev.save()
+                ev.save(f"{ev.id}: override {', '.join(applied)}"[:120])
                 before = len(self.ctx.provider.log) if self.ctx.provider else 0
                 await asyncio.to_thread(run_distribution, self.ctx, ev, True)  # re-score; re-judge only tables that changed
                 rejudged = (len(self.ctx.provider.log) - before) if self.ctx.provider else 0
@@ -886,18 +922,19 @@ class OibotGM(discord.Client):
             agree = len(ev.awards) - len(ev.overrides)
             if self.ctx.provider:
                 e.add_field(name="LLM usage (this bot process)", value=self.ctx.provider.summary()[:1000], inline=False)
-            e.set_footer(text=f"council agreed with the bot on {max(agree,0)}/{len(ev.awards)} awards · saved to out/events/{ev.channel_id}.json")
+            e.set_footer(text=f"council agreed with the bot on {max(agree,0)}/{len(ev.awards)} awards · data repo {_store().head()}")
             ev.state = "ended"
-            ev.save()
+            ev.archive()
+            self.events.pop(ev.channel_id, None)
             await interaction.response.send_message(embed=e)
 
-        @mock.command(name="reset", description="Forget this channel's mock event")
+        @mock.command(name="reset", description="Forget this channel's mock event (archived, not deleted)")
         async def reset(interaction: discord.Interaction):
             ev = self.event_for(interaction.channel_id)
             if ev:
                 self.events.pop(ev.channel_id, None)
-                (EVENTS / f"{ev.channel_id}.json").unlink(missing_ok=True)
-            await interaction.response.send_message("Reset. /mock signup to start over.", ephemeral=True)
+                ev.archive()
+            await interaction.response.send_message("Reset (event archived). /mock signup to start over.", ephemeral=True)
 
         self.tree.add_command(mock)
 
@@ -911,13 +948,18 @@ class OibotGM(discord.Client):
 
     async def on_ready(self):
         await self.ensure_emojis()
-        print(f"oibot_GM online as {self.user} · guild fixtures: {self.ctx.guild['name']} · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)}")
+        st = _store()
+        print(f"oibot_GM online as {self.user} · guild: {self.ctx.guild['name']} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
 
 
 def run(guild_dir: Path, signup_file: str) -> None:
+    global STORE, GUILD_KEY
     token = os.environ.get("DISCORD_TOKEN")
     if not token:
         raise SystemExit("DISCORD_TOKEN missing from .env")
     test_guild = int(os.environ["DISCORD_TEST_GUILD_ID"]) if os.environ.get("DISCORD_TEST_GUILD_ID") else None
+    guild_dir = guild_dir.resolve()
+    STORE = GitStore(guild_dir.parent)
+    GUILD_KEY = guild_dir.name
     ctx = GuildContext(guild_dir, signup_file)
     OibotGM(ctx, test_guild).run(token, log_handler=None)

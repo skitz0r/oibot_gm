@@ -16,6 +16,10 @@ uv run oibot roster                 # roster only (Claude narrative if key prese
 uv run oibot loot                   # loot only, uses out/roster.json if present
 ```
 
+Native guild state (characters, events, awards, precedents, policy) is a
+git-backed store: a private repo checked out as a sibling `../oibot_gm-data`
+(or `OIBOT_DATA_DIR`). Without one, the CLI falls back to `fixtures/demo`.
+
 Put `ANTHROPIC_API_KEY=...` (and `WCL_CLIENT_ID/SECRET`) in `.env` to enable the
 Claude paths. Model routing per workload is in `src/oibot_gm/llm/provider.py`
 (`OIBOT_MODEL_LOOT_RECOMMEND=claude-sonnet-5` etc. overrides).

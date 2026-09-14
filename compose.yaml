@@ -2,16 +2,18 @@
 # docker compose logs -f      follow
 # docker compose down         stop
 #
-# State: ./out (mock-event JSON, reports, discord.log) and ./fixtures/25bg
-# (real guild data, gitignored) are bind-mounted so nothing lives only in the
-# container. When the SQLite store lands, add a litestream service here.
+# State: the private data repo (a sibling checkout, ../oibot_gm-data) is the
+# native store; the bot commits to it and pushes. ./out holds reports/logs.
+# Mount an SSH key or use a token remote so the container can push.
 services:
   bot:
     build: .
     env_file: .env
     environment:
-      - OIBOT_GUILD_DIR=${OIBOT_GUILD_DIR:-fixtures/25bg}
+      - OIBOT_DATA_DIR=/data
+      - OIBOT_GUILD_DIR=/data/25bg
     volumes:
       - ./out:/app/out
-      - ./fixtures/25bg:/app/fixtures/25bg
+      - ${OIBOT_DATA_DIR:-../oibot_gm-data}:/data
+      - ~/.ssh:/root/.ssh:ro
     restart: unless-stopped

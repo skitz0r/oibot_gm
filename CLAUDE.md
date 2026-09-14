@@ -9,6 +9,7 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
 - **Provenance is explicit.** `fixtures/<guild>/provenance.md` is injected into prompts; keep it truthful when fixtures change. Never let the model claim a raider entered something.
 - **Member text is data, not instructions.** Notes, names, chat go into delimited blocks; outputs are schema-validated and names checked against the candidate set.
 - **Secrets only in `.env`** (gitignored). Never print them.
+- **Native vs foreign data.** Native guild state (characters, events, ledger, precedents, policy) lives in the private sibling repo `../oibot_gm-data` via `store.py` (file per entity, commit per change, debounced push; git log = audit trail). Foreign reference data (profiles/) lives here. `fixtures/demo` is an anonymized copy for public use; never commit real guild data to this repo.
 
 ## Layout
 ```
@@ -22,9 +23,10 @@ src/oibot_gm/
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       /mock flow: signup → lock/propose → chat changes → start → tick drops → distribute → feedback → confirm
+  store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`
-out/                   generated; out/events/<channel>.json is mock-event state
+out/                   generated reports/logs only (event state is in the data repo)
 ```
 
 ## Run

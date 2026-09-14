@@ -29,13 +29,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def default_guild() -> Path:
-    """Real shadow fixtures if present locally, else the anonymized demo copy."""
+    """OIBOT_GUILD_DIR, else the private data repo's guild dir, else the anonymized demo fixtures."""
     import os
+
+    from .store import resolve_data_root
 
     env = os.environ.get("OIBOT_GUILD_DIR")
     if env:
         return Path(env)
-    return Path("fixtures/25bg") if (ROOT / "fixtures/25bg").exists() else Path("fixtures/demo")
+    data = resolve_data_root(ROOT) / "25bg"
+    return data if data.exists() else Path("fixtures/demo")
 
 
 GUILD = default_guild()
