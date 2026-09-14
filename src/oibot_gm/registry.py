@@ -211,6 +211,8 @@ class Registry:
             nxt = next((x for x in m.active()), None)
             if nxt:
                 nxt.is_main = True
+                if nxt.rank == "alt" and c.rank in ("trial", "raider", "core"):
+                    nxt.rank = c.rank  # the player's standing follows them to the new main
         self.save(m, f"{m.display_name} retired {c.name}")
         return c
 
