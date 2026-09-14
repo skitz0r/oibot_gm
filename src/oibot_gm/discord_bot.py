@@ -27,6 +27,7 @@ from discord import app_commands
 from pydantic import BaseModel, Field
 
 from . import nl, render
+from .discord_raid import RaidContext, RaidMixin, SignupButton, register_raid_commands
 from .discord_registry import Guilds, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
@@ -639,7 +640,9 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(discord.Client):
+class OibotGM(RaidMixin, discord.Client):
+    ico = staticmethod(ico)
+
     def __init__(self, ctx: GuildContext, test_guild: int | None):
         intents = discord.Intents.default()
         intents.message_content = True  # channel chat → roster changes / loot feedback
@@ -653,6 +656,9 @@ class OibotGM(discord.Client):
         self.ops = Ops(self)
         self.registries = Guilds(_store(), ROOT)
         register_commands(self.tree, self.registries, self.ops, ico)
+        self.raids = RaidContext(self.registries)
+        register_raid_commands(self.tree, self.registries, self.ops, self)
+        self.add_dynamic_items(SignupButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -970,6 +976,7 @@ class OibotGM(discord.Client):
             g = discord.Object(id=self.test_guild)
             self.tree.copy_global_to(guild=g)
             await self.tree.sync(guild=g)
+        self.loop.create_task(self.scheduler())
 
     async def on_ready(self):
         await self.ensure_emojis()

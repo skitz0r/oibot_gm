@@ -554,9 +554,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ Officer roles: {', '.join(reg.config.officer_roles) or '(none; Manage Server only)'}", ephemeral=True)
         await ops.emit(reg.config, "warn", f"officer roles now {reg.config.officer_roles} (by {interaction.user.display_name})")
 
-    @config.command(name="team", description="Owner: add or remove a raid team (key, size, schedule)")
-    @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="e.g. 'Tue 19:30 server'")
-    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", remove: bool = False):
+    @config.command(name="team", description="Owner: add/update a raid team (schedule like 'Tue 19:30'; cutoffs in hours)")
+    @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="'Tue 19:30' in the guild's timezone", instance="raid id from the game profile", soft_cutoff="hours before raid: health check + nudges", hard_cutoff="hours before raid: lock + propose", open_days="days before the raid to open the sheet")
+    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, remove: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -564,13 +564,67 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
         key = key.strip().lower()
+        if schedule:
+            from .raidcycle import parse_schedule
+
+            try:
+                parse_schedule(schedule)
+            except ValueError as e:
+                await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+                return
+        if instance and instance not in reg.profile.raids:
+            await interaction.response.send_message(f"❌ Unknown instance. Options: {', '.join(reg.profile.raids)}", ephemeral=True)
+            return
         teams = [t for t in reg.config.raid_teams if t["key"] != key]
         if not remove:
-            teams.append({"key": key, "name": key, "size": size, "schedule": schedule})
+            teams.append({"key": key, "name": key, "size": size, "schedule": schedule, "instance": instance, "cutoff_soft_hours": soft_cutoff, "cutoff_hard_hours": hard_cutoff, "open_days_before": open_days, "reminders": "dm"})
         reg.config.raid_teams = teams
         reg.save_config(f"teams: {[t['key'] for t in teams]}")
-        await interaction.response.send_message("✅ Teams: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'})" for t in teams) or "none (default 'main')"), ephemeral=True)
+        await interaction.response.send_message("✅ Teams: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'}, lock {t.get('cutoff_hard_hours', 24)}h)" for t in teams) or "none (default 'main')"), ephemeral=True)
         await ops.emit(reg.config, "info", f"teams now {[t['key'] for t in teams]} (by {interaction.user.display_name})")
+
+    @config.command(name="signup-channel", description="Owner: where raid sheets are posted")
+    async def cfg_signup(interaction: discord.Interaction, channel: discord.TextChannel):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        reg.config.signup_channel_id = channel.id
+        reg.save_config(f"signup channel → #{channel.name}")
+        await interaction.response.send_message(f"✅ Sheets → {channel.mention}", ephemeral=True)
+
+    @config.command(name="timezone", description="Owner: IANA timezone for schedules, e.g. America/Chicago")
+    async def cfg_tz(interaction: discord.Interaction, timezone: str):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(timezone)
+        except Exception:  # noqa: BLE001
+            await interaction.response.send_message("❌ Unknown timezone (use IANA names like America/Chicago).", ephemeral=True)
+            return
+        reg.config.timezone = timezone
+        reg.save_config(f"timezone → {timezone}")
+        await interaction.response.send_message(f"✅ Timezone {timezone}", ephemeral=True)
+
+    @config.command(name="show", description="Effective configuration")
+    async def cfg_show(interaction: discord.Interaction):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_officer(interaction, reg):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        import yaml as _y
+
+        await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
 
     @gm.command(name="status", description="Bot health: data repo, registry, spend, recent ops")
     async def gm_status(interaction: discord.Interaction):

@@ -100,11 +100,17 @@ class GuildConfig(BaseModel):
     owner_discord_id: Optional[int] = None
     ops_channel_id: Optional[int] = None
     applications_channel_id: Optional[int] = None  # defaults to the ops channel
+    signup_channel_id: Optional[int] = None  # where raid sheets are posted
+    timezone: str = "America/Chicago"  # server time for schedules
     officer_roles: list[str] = Field(default_factory=list)
-    raid_teams: list[dict] = Field(default_factory=list)  # {key, name, size, schedule}
+    # {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders: dm|channel|none}
+    raid_teams: list[dict] = Field(default_factory=list)
 
     def team_keys(self) -> list[str]:
         return [t["key"] for t in self.raid_teams] or ["main"]
+
+    def team(self, key: str) -> Optional[dict]:
+        return next((t for t in self.raid_teams if t["key"] == key), None)
 
 
 class RegistryError(ValueError):
