@@ -29,6 +29,7 @@ class ConfigOp(BaseModel):
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits)")
     member: Optional[str] = Field(default=None, description="member display name or mention <@id>")
     character: Optional[str] = None
+    rank: Optional[Literal["trial", "raider", "core", "alt", "social"]] = Field(default=None, description="for op=rank")
     start: Optional[str] = None
     end: Optional[str] = None
     reason: Optional[str] = None
@@ -97,7 +98,7 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"officer roles {cfg.officer_roles} {'+' if op.op == 'role_add' else '−'} {op.value}"
     if op.op == "rank":
         hit = reg.find(op.character or "")
-        return f"{op.character}: rank {hit[1].rank if hit else '?'} → {op.value}"
+        return f"{op.character}: rank {hit[1].rank if hit else '?'} → {op.rank or op.value}"
     if op.op == "confirm":
         return f"confirm {op.character}"
     if op.op == "set_main":
@@ -164,8 +165,9 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         reg.save_config(f"officer roles {cfg.officer_roles} (by {by})")
         return f"officer roles = {cfg.officer_roles}"
     if op.op == "rank":
-        reg.set_rank(op.character or "", op.value or "", by)
-        return f"{op.character} → {op.value}"
+        rank = op.rank or op.value or ""
+        reg.set_rank(op.character or "", rank, by)
+        return f"{op.character} → {rank}"
     if op.op == "confirm":
         reg.confirm(op.character or "", by)
         return f"confirmed {op.character}"
