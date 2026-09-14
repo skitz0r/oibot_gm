@@ -651,12 +651,12 @@ class OibotGM(discord.Client):
         self._register()
         # real (non-mock) surface: registry, officer tools, ops feed
         self.ops = Ops(self)
-        self.guilds = Guilds(_store(), ROOT)
-        register_commands(self.tree, self.guilds, self.ops, ico)
+        self.registries = Guilds(_store(), ROOT)
+        register_commands(self.tree, self.registries, self.ops, ico)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        reg = self.guilds.for_interaction(interaction)
+        reg = self.registries.for_interaction(interaction)
         cmd = interaction.command.qualified_name if interaction.command else "?"
         msg = f"`/{cmd}` by {interaction.user.display_name}: {type(error).__name__}: {str(error)[:200]}"
         if reg:
@@ -974,9 +974,9 @@ class OibotGM(discord.Client):
     async def on_ready(self):
         await self.ensure_emojis()
         st = _store()
-        regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.guilds.by_discord.values())
+        regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.registries.by_discord.values())
         print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
-        for reg in self.guilds.by_discord.values():
+        for reg in self.registries.by_discord.values():
             await self.ops.emit(reg.config, "info", f"bot online · data @ {st.head()} · {len(reg.members)} members / {len(reg.all_characters())} characters · {len(reg.pending())} unconfirmed")
 
 
