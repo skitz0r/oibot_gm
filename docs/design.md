@@ -305,6 +305,16 @@ Goal: nobody types drops or awards into Discord. The game already writes files o
 
 Every registry, config and loot action is mirrored as one line to the guild's ops channel (`/gm config ops-channel`); command errors go there and DM the owner with the traceback; `/gm status` shows uptime, data-repo head and push state, registry counts and unconfirmed characters, config, LLM spend against the cap, and the last ops events. The data repo's git log is the exact audit trail. Aligned, not built: budget-threshold alerts, companion-silent alerts, daily digest DM.
 
+### 5.15 Configuration surfaces (decided)
+
+Three kinds of configuration, three surfaces, all landing as versioned files in the data repo (git log = history of the rules):
+
+1. **Structured settings** (cutoffs, channels, teams, roles, budget): typed slash commands (`/gm config …`, `/gm config show`) **and plain text** (below).
+2. **Policy documents** (loot policy, standing comp instructions, persona): prose. `/policy show|edit <doc>` (modal; longer docs link to the file on GitHub), `/policy reload` after a PR. On every save the bot **compiles** the doc with Claude into rules/constraints and posts its reading for confirmation; only the confirmed compiled form goes live, committed next to the prose. NL shortcuts `/comp rule "…"` and `/loot rule "…"` append a line and run the same compile-and-confirm.
+3. **Tables** (item tiers per spec, prio notes, scoring weights): `/prio show <raid>` (embed/image), `/prio set <item> <text>`, **CSV round-trip** (`/prio export` → Sheets → `/prio import` with a diff and confirmation), `/prio draft <raid>` (Claude first pass, marked draft until reviewed), `/loot weights show|set|preview` where preview re-scores the last raid under the proposed weights. Guild overrides (`<guild>/config/*.yaml`) sit on top of the game profile defaults. A private web page (Discord OAuth, Cloudflare Tunnel) can replace the CSV loop for the tier grid later.
+
+**Plain-text configuration.** `/gm <text>` (or @mention in the ops channel): Claude receives the config schema (every settable path with type, allowed values and required permission) plus current values, and returns typed operations. The bot renders a diff with Confirm/Cancel; apply runs through the same functions as the slash commands (identical validation and permission checks), as one commit in the officer's name. Ambiguity or unknown fields produce a question, never a guess. Members cannot trigger it. Slash commands remain for discoverability and for anything needing pickers; the long tail of settings is text.
+
 ### 5.11 Prototype status (2026-09-13)
 
 Built and running against the shadow guild (see README / CLAUDE.md):
