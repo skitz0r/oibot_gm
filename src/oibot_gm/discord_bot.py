@@ -27,8 +27,9 @@ from discord import app_commands
 from pydantic import BaseModel, Field
 
 from . import nl, render
+from .discord_policy import PolicyContext, handle_change, register_policy_commands
 from .discord_raid import RaidContext, RaidMixin, SignupButton, register_raid_commands
-from .discord_registry import Guilds, register_commands
+from .discord_registry import Guilds, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
 from .llm.provider import Provider, get_provider
@@ -658,6 +659,8 @@ class OibotGM(RaidMixin, discord.Client):
         register_commands(self.tree, self.registries, self.ops, ico)
         self.raids = RaidContext(self.registries)
         register_raid_commands(self.tree, self.registries, self.ops, self)
+        self.policies = PolicyContext(self.registries)
+        register_policy_commands(self.tree, self.registries, self.ops, self, self.policies)
         self.add_dynamic_items(SignupButton)
         self.tree.on_error = self._on_command_error
 
@@ -770,6 +773,17 @@ class OibotGM(RaidMixin, discord.Client):
     # ---- chat handlers
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
+            return
+        # @mention in the ops channel = plain-text configuration
+        reg = self.registries.by_discord.get(message.guild.id)
+        if reg and self.user in message.mentions and reg.config.ops_channel_id == message.channel.id:
+            text = message.content.replace(self.user.mention, "").strip()
+            if text:
+                member = message.author
+                owner = reg.config.owner_discord_id == member.id
+                officer = owner or (isinstance(member, discord.Member) and (member.guild_permissions.manage_guild or any(r.name in reg.config.officer_roles for r in member.roles)))
+                async with message.channel.typing():
+                    await handle_change(message, reg, self.policies.store(reg), self.ctx.provider, self.ops, text, owner, officer)
             return
         ev = self.event_for(message.channel.id)
         if not ev or not self.ctx.provider:

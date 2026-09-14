@@ -259,7 +259,21 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[Player], 
     raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
     team = reg.config.team(ev.team) or {}
     size = int(team.get("size") or reg.profile.raids.get(raid_id, {}).get("size") or reg.profile.comp_rules["raid_size"])
-    result = solver.solve(reg.profile, players, raid_id, solver.SolveOptions(time_limit_s=12, raid_size=size))
+    # standing instructions (confirmed compiled comp policy) → solver constraints
+    from .policy import PolicyStore
+
+    kt, ka, never_bench, always_bench = PolicyStore(rs.store, rs.key).comp_constraints()
+    names = {p.character: p.signup_name for p in players} | {p.signup_name: p.signup_name for p in players}
+    resolve = lambda n: names.get(n) or next((v for k, v in names.items() if k.lower() == n.lower()), None)  # noqa: E731
+    opts = solver.SolveOptions(
+        time_limit_s=12,
+        raid_size=size,
+        keep_together=tuple((resolve(a), resolve(b)) for a, b in kt if resolve(a) and resolve(b)),
+        keep_apart=tuple((resolve(a), resolve(b)) for a, b in ka if resolve(a) and resolve(b)),
+        force_in=tuple(x for x in (resolve(n) for n in never_bench) if x),
+        force_out=tuple(x for x in (resolve(n) for n in always_bench) if x),
+    )
+    result = solver.solve(reg.profile, players, raid_id, opts)
     result = explain.annotate(reg.profile, players, raid_id, result, whatif=len(players) <= 30)
     ev.roster = result
     ev.state = "proposed"
