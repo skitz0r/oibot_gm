@@ -1,6 +1,6 @@
 # Guild Master Bot: Design Proposal (DRAFT)
 
-_Status: research and discussion. No code yet. Last updated 2026-09-13. Background and sources: [research.md](research.md)._
+_Status: prototype running in shadow mode (§5.11). Last updated 2026-09-13. Background and sources: [research.md](research.md). Agent guide: [../CLAUDE.md](../CLAUDE.md)._
 
 ---
 
@@ -211,6 +211,53 @@ Two different problems:
 - Surfaces: `#loot-council` (officer, full detail), an optional public `#loot-log` where each award posts as "Item → Character (MS)" plus an optional one-line public reason the approver can add, and `/me` commands for a raider's own data.
 - Every raider-facing query is filtered server-side by the caller's role; the model never sees data the caller can't.
 
+### 5.10 Weekly cycle, roster health, absences (no-LLM tier)
+
+Everything in this section is scheduling, state and arithmetic. It runs with zero API calls; Claude is only involved when someone asks for an explanation or during loot.
+
+**The weekly cycle** (per raid team, from its schedule, e.g. `Tue 19:30 server`):
+
+| When | Bot action |
+|---|---|
+| T−6d (after the previous raid) | Open next week's signup, pre-filled from **standing availability** (default-in / default-out / sub-only per member) so the sheet starts mostly full and people act on exceptions. |
+| T−48h, soft cutoff | Post the **roster health check**. Ping non-responders once (DM or a single channel mention; per-team setting, quiet hours respected). Nudge "tentative" to resolve. |
+| T−24h, hard cutoff | Lock the sheet, propose the roster. Late signups go to the bench pool. Gaps trigger recruiting. |
+| T−2h | Reminder to the locked roster with their group. Callouts from here are **late callouts**. |
+| T | Raid. Attendance from the locked roster, corrected by the RL. |
+
+**Roster health** is computed at the soft cutoff and on every signup change; each dimension is green/amber/red with the specific ask attached:
+- **Role floor**: tanks/healers vs the instance's `tank_needs` and healer minimum ("BT wants 3 tanks, sheet has 2; Rhoz's main is a Prot Paladin").
+- **Buff floor**: required buffs with zero providers on the sheet (`required` flag per raid in `buffs.yaml`).
+- **Headcount and bench depth**: signed vs raid size, spare per role.
+- **Reliability**: signed players at risk by history (late callouts in the last N weeks, low attendance), so "25 signed" with three habitual no-shows shows amber.
+
+**Recruiting subs**, an ordered escalation, every step logged, steps 3–4 draft-only unless the team opts in:
+1. Alts/offspecs already on the sheet (registry knows tank-capable mains and offspecs): proposed first, costs nothing.
+2. **Bench pool**: members marked sub-only or "call me if short", pinged by role.
+3. Guild-wide ask in the raid channel with the exact gap (templated text from the health check, not a Claude call).
+4. **Pickup**: if allowed, a draft for the pug/LFG channel and a lightweight **guest** signup (name, class, spec; no Discord link). Guests show in the health check and are excluded from loot fairness rollups per policy.
+
+**Availability, callouts, absences**, all slash commands or buttons, all deterministic:
+- `/absent <date|range> [reason]`: future absence; removes them from those sheets when they open; reason is officer-only.
+- `/callout` (or the Absent button) after lock: a late callout with a timestamp relative to the cutoff, so policy can distinguish "called out Monday" from "no-showed at pull". Both map to TMB attendance remarks (gave notice / no-call-no-show).
+- `/availability`: standing default per team, plus a "late by ~30 min" flag for the night.
+- **Tentative** is a first-class state with a resolve nudge at the soft cutoff.
+- Officers can act on someone's behalf (`/absent @member …`), audit-logged.
+- A callout after lock does not re-solve the roster: it runs the "fill one slot" path (everyone else pinned, solver picks the best replacement from the bench/sub pool), posts the swap for RL approval, and pings the replacement. Sub-second, no LLM.
+
+**API spend isolation**: LLM tools are gated by the same permissions as commands, so member actions can never trigger an API call; a per-guild monthly budget with a hard stop lives in the provider layer, plus a per-user rate limit on the two LLM-backed features; budget status shows in `/gm status`.
+
+### 5.11 Prototype status (2026-09-13)
+
+Built and running against the shadow guild (see README / CLAUDE.md):
+- Offline CLI: roster + groups (CP-SAT), coverage matrix (terminal, PNG, HTML), loot scoring and recommendations, `--no-llm` fallback.
+- Discord mock flow in the test server: `/mock signup` (seeded sheet) → `/mock lock` (proposal as an image card with class colours and the coverage matrix) → plain-text change requests compiled to ops by Claude and applied by code (swap/move/bench/promote/keep-together/apart, with the solver filling slots) → `/mock accept` → `/mock start` posts every boss's loot table with a multi-select → **Distribute** runs the council on everything ticked-but-unawarded → compact "item → character" and "character → items" output, full cards via a dropdown → plain-text feedback (override with reason → precedent, questions answered) → Confirm → `/mock end`.
+- Loot rules added from live testing: **impact ordering** within a batch (big items first, order-sensitive items flagged), **slot-repeat** discount (same slot within 7 days ×0.25), **equippability guard** independent of tier data (armour class, token group), **provenance block** in every prompt so the model never invents where data came from.
+- Cost controls: prompt-cached policy prefix, parallel judging with a two-pass provisional/actual reconciliation, change-only re-judging after an override, compact feedback digest, per-workload routing, a usage ledger in `/mock status`/`/mock end`, and an `OIBOT_BUDGET_USD` hard stop.
+- Data: real BisCouncil ledger and WCL attendance; mock tiers, wishlists, policy and ranks; `fixtures/demo` is the anonymized public copy.
+
+Known gaps: item rows in `profiles/tbc/items` are unverified (Blizzard API pass pending); tanks land in DPS groups (comp_rules tuning); state is JSON files, not the database; no weekly cycle yet (§5.10).
+
 ## 6. Architecture
 
 ```mermaid
@@ -275,6 +322,8 @@ The routing table lives in config (§ provider abstraction), so any row can move
 - A small monthly **spend cap** is enforced in the bot, using token usage from each response.
 
 ### 6.2 Data model sketch
+
+**Migration from the prototype.** Today's state is JSON (`out/events/<channel>.json`, last-run `roster.json`/`loot.json`) plus fixture files. Order that keeps the mock flow working: (1) add SQLite + Alembic and write recommendations, awards and precedents to it while events stay in JSON; (2) move the registry, events, signups and attendance; (3) retire the JSON. Importers become idempotent on `import_id`. Litestream joins `compose.yaml` as a sidecar the day the DB exists.
 ```
 guild(id, name, settings_json)
 member(id, guild_id, discord_user_id, rank, joined_at)
@@ -302,8 +351,8 @@ buff_rule(spec, provides, scope, benefits_json)
 audit_log(id, actor, action, entity, before_json, after_json, at)
 ```
 
-### 6.3 Hosting: Docker Compose on the Mac mini (decided)
-- **Compose stack** from day one, so lifecycle is `docker compose up -d / down / logs -f` and the same file runs on any other host (e.g. the droplet `oibot_mcp` deploys to).
+### 6.3 Hosting: Docker Compose on the Mac mini (decided; `Dockerfile` + `compose.yaml` are in the repo)
+- **Compose stack** from day one, so lifecycle is `docker compose up -d / down / logs -f` and the same file runs on any other host (e.g. the droplet `oibot_mcp` deploys to). The image is `python:3.12-slim` + `uv` + DejaVu fonts; `./out` and `./fixtures/25bg` are bind-mounted.
   ```yaml
   services:
     bot:        { build: ., env_file: .env, volumes: ["./data:/data"], restart: unless-stopped }
@@ -461,7 +510,12 @@ These are the numbers to confirm with real usage logs.
 
 12. **Shadow-mode guild:** "25 big guys", TBC Classic 25-man LC in T6. WCL, Raid-Helper and TMB access available; bot sits in their server read-only (§6.4).
 
+15. **Batch distribution order:** impact first (weight × best eligible tier), order-sensitive items flagged; `kill` order available per profile (§5.11).
+16. **Repository:** public at github.com/skitz0r/oibot_gm; real guild fixtures stay local and gitignored, `fixtures/demo` is the anonymized copy.
+
 **Still open**
 
-13. **Monthly LLM cap**, once shadow mode gives real numbers.
+13. **Monthly LLM cap**, once shadow mode gives real numbers (prototype default: `OIBOT_BUDGET_USD=5` per bot process; a real night of 24 drops on Opus 5 measured ≈ $1).
+17. **Loot tiers and wishlists**: replace mock tiers with the guild's BisCouncil per-item tiers or TMB wishlists; verify item rows against the Blizzard API.
+18. **Weekly cycle** (§5.10) build order relative to the database migration (§6.2).
 14. ~~T6 zone IDs~~ Resolved: zone 1060, encounters 50601+ on `fresh.` (research §6c).
