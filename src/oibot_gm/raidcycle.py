@@ -211,8 +211,9 @@ def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
     out.append((lvl, f"Headcount {n}/{size} in, {len(tent)} tentative, {len(subs)} sub"))
     # roles
     counts = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer", "melee", "ranged")}
-    need_t = (profile.raids.get(ev.instance or "", {}).get("tank_needs", {}) or {}).get("count") or rules["roles"]["tank"]["min"]
-    need_h = rules["roles"]["healer"]["min"]
+    bounds = solver.scaled_role_bounds(rules, size)
+    need_t = (profile.raids.get(ev.instance or "", {}).get("tank_needs", {}) or {}).get("count") or bounds["tank"]["min"]
+    need_h = bounds["healer"]["min"]
     for role, need in (("tank", need_t), ("healer", need_h)):
         have = counts[role]
         if have >= need:
@@ -256,7 +257,9 @@ def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
 def propose(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[Player], RosterResult]:
     players = players_for(reg, ev)
     raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
-    result = solver.solve(reg.profile, players, raid_id, solver.SolveOptions(time_limit_s=12))
+    team = reg.config.team(ev.team) or {}
+    size = int(team.get("size") or reg.profile.raids.get(raid_id, {}).get("size") or reg.profile.comp_rules["raid_size"])
+    result = solver.solve(reg.profile, players, raid_id, solver.SolveOptions(time_limit_s=12, raid_size=size))
     result = explain.annotate(reg.profile, players, raid_id, result, whatif=len(players) <= 30)
     ev.roster = result
     ev.state = "proposed"

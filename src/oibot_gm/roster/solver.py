@@ -23,16 +23,27 @@ class SolveOptions:
     pins: dict[str, int] | None = None  # signup_name -> group index (0-based)
     keep_together: tuple[tuple[str, str], ...] = ()
     keep_apart: tuple[tuple[str, str], ...] = ()
+    raid_size: int | None = None  # override the profile's raid_size (e.g. a 10-man team); role bounds scale with it
     time_limit_s: float = 20.0
     workers: int = 8
+
+
+def scaled_role_bounds(rules: dict, raid_size: int) -> dict[str, dict[str, int]]:
+    """Role min/max from comp_rules, scaled to a different raid size (ceil for mins)."""
+    import math
+
+    f = raid_size / rules["raid_size"]
+    return {role: {"min": math.ceil(b["min"] * f) if b["min"] else 0, "max": max(1, round(b["max"] * f))} for role, b in rules["roles"].items()}
 
 
 def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: SolveOptions = SolveOptions()) -> RosterResult:
     rules = profile.comp_rules
     raid = profile.raids[raid_id]
-    n_groups = rules["groups"]
     gsize = rules["group_size"]
-    raid_size = min(rules["raid_size"], len(players))
+    target = opts.raid_size or rules["raid_size"]
+    n_groups = max(1, -(-target // gsize))  # ceil
+    raid_size = min(target, len(players))
+    role_bounds = scaled_role_bounds(rules, target) if opts.raid_size else rules["roles"]
     specs = {p.signup_name: profile.spec(p.cls, p.spec) for p in players}
     sel = rules["selection"]
 
@@ -47,7 +58,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         m.Add(sum(y[p.signup_name, g] for p in players) <= gsize)
         m.Add(sum(y[p.signup_name, g] for p in players if p.role == "healer") <= rules["grouping"]["healer_max_per_group"])
         m.Add(sum(y[p.signup_name, g] for p in players if p.role == "tank") <= rules["grouping"]["tank_max_per_group"])
-    for role, bounds in rules["roles"].items():
+    for role, bounds in role_bounds.items():
         have = [x[p.signup_name] for p in players if p.role == role]
         if have:
             m.Add(sum(have) >= min(bounds["min"], len(have)))
