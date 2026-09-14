@@ -39,13 +39,32 @@ class RegisteredCharacter(BaseModel):
     note: Optional[str] = None  # officer-only
 
 
+class Absence(BaseModel):
+    start: str  # YYYY-MM-DD inclusive
+    end: str  # YYYY-MM-DD inclusive
+    reason: Optional[str] = None  # officer-only
+    by: str  # who recorded it (member or officer)
+    created_at: str = Field(default_factory=now)
+
+
+AVAILABILITY = ("in", "out", "sub")
+
+
 class Member(BaseModel):
     discord_id: int
     display_name: str
     characters: list[RegisteredCharacter] = Field(default_factory=list)
     availability: dict[str, str] = Field(default_factory=dict)  # team -> in | out | sub
+    absences: list[Absence] = Field(default_factory=list)
+    dm_opt_out: bool = False
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
+
+    def upcoming_absences(self, today: str) -> list[Absence]:
+        return sorted([a for a in self.absences if a.end >= today], key=lambda a: a.start)
+
+    def absent_on(self, day: str) -> Optional[Absence]:
+        return next((a for a in self.absences if a.start <= day <= a.end), None)
 
     @property
     def main(self) -> Optional[RegisteredCharacter]:
@@ -63,7 +82,10 @@ class GuildConfig(BaseModel):
     owner_discord_id: Optional[int] = None
     ops_channel_id: Optional[int] = None
     officer_roles: list[str] = Field(default_factory=list)
-    raid_teams: list[dict] = Field(default_factory=list)
+    raid_teams: list[dict] = Field(default_factory=list)  # {key, name, size, schedule}
+
+    def team_keys(self) -> list[str]:
+        return [t["key"] for t in self.raid_teams] or ["main"]
 
 
 class RegistryError(ValueError):
@@ -240,3 +262,58 @@ class Registry:
     def officer_set_main(self, discord_id: int, name: str, by: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m, c, old = self.set_main(discord_id, name)
         return m, c, old
+
+    # ---- availability & absences
+    def set_availability(self, discord_id: int, team: str, value: str) -> Member:
+        if value not in AVAILABILITY:
+            raise RegistryError(f"Availability must be one of {', '.join(AVAILABILITY)}.")
+        if team not in self.config.team_keys():
+            raise RegistryError(f"Unknown team {team}. Teams: {', '.join(self.config.team_keys())}.")
+        m = self.member(discord_id)
+        m.availability[team] = value
+        self.save(m, f"{m.display_name} availability {team}={value}")
+        return m
+
+    def add_absence(self, discord_id: int, start: str, end: str | None, reason: str | None, by: str, display_name: str | None = None) -> tuple[Member, Absence]:
+        from datetime import date as _d
+
+        try:
+            s = _d.fromisoformat(start)
+            e = _d.fromisoformat(end) if end else s
+        except ValueError:
+            raise RegistryError("Dates are YYYY-MM-DD.")
+        if e < s:
+            raise RegistryError("End is before start.")
+        if (e - s).days > 120:
+            raise RegistryError("Absences longer than 120 days: set availability to out instead.")
+        m = self.member(discord_id, display_name, create=display_name is not None)
+        a = Absence(start=s.isoformat(), end=e.isoformat(), reason=(reason or "").strip() or None, by=by)
+        m.absences = [x for x in m.absences if not (x.start == a.start and x.end == a.end)] + [a]
+        self.save(m, f"{m.display_name} absent {a.start}" + (f"→{a.end}" if a.end != a.start else "") + (f" (by {by})" if by != m.display_name else ""))
+        return m, a
+
+    def clear_absence(self, discord_id: int, start: str) -> Member:
+        m = self.member(discord_id)
+        before = len(m.absences)
+        m.absences = [a for a in m.absences if a.start != start]
+        if len(m.absences) == before:
+            raise RegistryError(f"No absence starting {start}.")
+        self.save(m, f"{m.display_name} cleared absence {start}")
+        return m
+
+    def absences_between(self, start: str, end: str) -> list[tuple[Member, Absence]]:
+        out = []
+        for m in self.members.values():
+            for a in m.absences:
+                if a.start <= end and a.end >= start:
+                    out.append((m, a))
+        return sorted(out, key=lambda ma: ma[1].start)
+
+    def availability_summary(self) -> dict[str, dict[str, int]]:
+        out: dict[str, dict[str, int]] = {t: {"in": 0, "out": 0, "sub": 0, "unset": 0} for t in self.config.team_keys()}
+        for m in self.members.values():
+            if not m.active():
+                continue
+            for t in out:
+                out[t][m.availability.get(t, "unset")] += 1
+        return out

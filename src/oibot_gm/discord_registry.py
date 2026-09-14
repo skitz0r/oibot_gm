@@ -190,6 +190,87 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     tree.add_command(char)
 
+    # ---------------- /availability, /absent, /me
+    async def team_autocomplete(interaction: discord.Interaction, current: str):
+        reg = guilds.for_interaction(interaction)
+        return [app_commands.Choice(name=t, value=t) for t in (reg.config.team_keys() if reg else []) if current.lower() in t.lower()][:25]
+
+    @tree.command(name="availability", description="Your standing default for a raid team: in, out, or sub-only")
+    @app_commands.autocomplete(team=team_autocomplete)
+    @app_commands.choices(value=[app_commands.Choice(name=v, value=v) for v in ("in", "out", "sub")])
+    async def availability(interaction: discord.Interaction, value: app_commands.Choice[str], team: str | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        team = team or reg.config.team_keys()[0]
+        try:
+            m = reg.set_availability(interaction.user.id, team, value.value)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {team}: **{value.value}** (sheets for this team will start with you {value.value}).", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} availability {team}={value.value}")
+
+    absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)")
+
+    @absent.command(name="add", description="Register an absence: one day or a range")
+    @app_commands.describe(start="YYYY-MM-DD", end="YYYY-MM-DD (optional)", reason="Optional; only officers see it")
+    async def absent_add(interaction: discord.Interaction, start: str, end: str | None = None, reason: str | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        try:
+            m, a = reg.add_absence(interaction.user.id, start, end, reason, interaction.user.display_name, display_name=interaction.user.display_name)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        span = a.start + (f" → {a.end}" if a.end != a.start else "")
+        await interaction.response.send_message(f"✅ Absent {span}. You'll be left off sheets for those dates.", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} absent {span}" + (f" — {a.reason}" if a.reason else ""))
+
+    @absent.command(name="list", description="Your upcoming absences")
+    async def absent_list(interaction: discord.Interaction):
+        reg = await need(interaction)
+        if not reg:
+            return
+        m = reg.members.get(interaction.user.id)
+        today = discord.utils.utcnow().date().isoformat()
+        ups = m.upcoming_absences(today) if m else []
+        await interaction.response.send_message("\n".join(f"• {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") for a in ups) or "No upcoming absences.", ephemeral=True)
+
+    @absent.command(name="clear", description="Remove an absence by its start date")
+    async def absent_clear(interaction: discord.Interaction, start: str):
+        reg = await need(interaction)
+        if not reg:
+            return
+        try:
+            m = reg.clear_absence(interaction.user.id, start)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ Cleared absence starting {start}.", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} cleared absence {start}")
+
+    tree.add_command(absent)
+
+    @tree.command(name="me", description="Your characters, availability and upcoming absences")
+    async def me(interaction: discord.Interaction):
+        reg = await need(interaction)
+        if not reg:
+            return
+        m = reg.members.get(interaction.user.id)
+        if not m:
+            await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
+            return
+        today = discord.utils.utcnow().date().isoformat()
+        e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=0x2B7A78)
+        e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
+        e.add_field(name="Availability", value=", ".join(f"{t}: {m.availability.get(t, 'unset')}" for t in reg.config.team_keys()), inline=True)
+        ups = m.upcoming_absences(today)
+        e.add_field(name="Upcoming absences", value="\n".join(f"{a.start}" + (f" → {a.end}" if a.end != a.start else "") for a in ups) or "none", inline=True)
+        e.set_footer(text="Attendance and loot history appear here once the raid ledger is live.")
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
     # ---------------- /roster (officers)
     roster = app_commands.Group(name="roster", description="Officer: the guild's registered characters")
 
@@ -266,6 +347,40 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ {m.display_name}'s main is now {c.name}", ephemeral=True)
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {m.display_name}'s main → {c.name}")
 
+    @roster.command(name="absences", description="Upcoming absences across the guild (with reasons)")
+    @app_commands.describe(days="How far ahead to look (default 30)")
+    async def roster_absences(interaction: discord.Interaction, days: int = 30):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        from datetime import timedelta
+
+        today = discord.utils.utcnow().date()
+        rows = reg.absences_between(today.isoformat(), (today + timedelta(days=days)).isoformat())
+        lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
+        await interaction.response.send_message("\n".join(lines)[:1900] or f"No absences in the next {days} days.", ephemeral=True)
+
+    @roster.command(name="availability", description="Standing availability counts per team")
+    async def roster_availability(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        s = reg.availability_summary()
+        await interaction.response.send_message("\n".join(f"**{t}**: in {v['in']} · sub {v['sub']} · out {v['out']} · unset {v['unset']}" for t, v in s.items()), ephemeral=True)
+
+    @roster.command(name="absent", description="Record an absence on a member's behalf")
+    async def roster_absent(interaction: discord.Interaction, member: discord.User, start: str, end: str | None = None, reason: str | None = None):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        try:
+            m, a = reg.add_absence(member.id, start, end, reason, interaction.user.display_name, display_name=member.display_name)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else ""), ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} recorded {m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else ""))
+
     tree.add_command(roster)
 
     # ---------------- /gm (owner / officers)
@@ -313,6 +428,24 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"officer roles: {reg.config.officer_roles}")
         await interaction.response.send_message(f"✅ Officer roles: {', '.join(reg.config.officer_roles) or '(none; Manage Server only)'}", ephemeral=True)
         await ops.emit(reg.config, "warn", f"officer roles now {reg.config.officer_roles} (by {interaction.user.display_name})")
+
+    @config.command(name="team", description="Owner: add or remove a raid team (key, size, schedule)")
+    @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="e.g. 'Tue 19:30 server'")
+    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", remove: bool = False):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        key = key.strip().lower()
+        teams = [t for t in reg.config.raid_teams if t["key"] != key]
+        if not remove:
+            teams.append({"key": key, "name": key, "size": size, "schedule": schedule})
+        reg.config.raid_teams = teams
+        reg.save_config(f"teams: {[t['key'] for t in teams]}")
+        await interaction.response.send_message("✅ Teams: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'})" for t in teams) or "none (default 'main')"), ephemeral=True)
+        await ops.emit(reg.config, "info", f"teams now {[t['key'] for t in teams]} (by {interaction.user.display_name})")
 
     @gm.command(name="status", description="Bot health: data repo, registry, spend, recent ops")
     async def gm_status(interaction: discord.Interaction):

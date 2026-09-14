@@ -57,6 +57,10 @@ Treat access control as a proper layer, not per-command checks. Three concepts:
 
 Rank (Trial / Raider / Core) is a **property of a character or member**, not a permission. The loot policy uses it.
 
+A **companion** principal (§5.13) is a machine identity, not a Discord user: it holds only `loot.event.write` and `raid.presence`, authenticated by a per-device token on the tailnet listener or a webhook id.
+
+Prototype state: owner = `owner_discord_id` in `guild.yaml`; officer = Manage Server or a role listed in `officer_roles`; everyone else is a member. The fine-grained permission strings arrive with the database-backed registry.
+
 **Data classification.** Every entity and sensitive field carries a classification that maps to the permission needed to read it: `public` (guild loot log, prio notes), `self` (own history, own wishlist), `council` (scores, reasoning, alternates, precedents), `officer` (officer notes, audit log), `owner` (secrets, budget). Visibility "profiles" from earlier are just this table; there's no separate config.
 
 **Enforcement, in order:**
@@ -246,6 +250,60 @@ Everything in this section is scheduling, state and arithmetic. It runs with zer
 - A callout after lock does not re-solve the roster: it runs the "fill one slot" path (everyone else pinned, solver picks the best replacement from the bench/sub pool), posts the swap for RL approval, and pings the replacement. Sub-second, no LLM.
 
 **API spend isolation**: LLM tools are gated by the same permissions as commands, so member actions can never trigger an API call; a per-guild monthly budget with a hard stop lives in the provider layer, plus a per-user rate limit on the two LLM-backed features; budget status shows in `/gm status`.
+
+### 5.12 UX flow inventory
+
+Status: **built** (running), **aligned** (designed, not built), **new** (added here). Private flows work in DM or in-channel with ephemeral replies; guild-visible actions (signups, callouts after lock) are public in the raid channel. Reminders and nudges go by DM with a per-member opt-out.
+
+**Members**
+| Flow | Status | Notes |
+|---|---|---|
+| Onboarding: `/register` (character, class/spec, main) → officer `/roster confirm` → rank | built | Unconfirmed characters show ⏳; unregistered signups are treated as trials. |
+| Alt registration `/char add`; change main `/char main` (rank follows the player); `/char spec`; `/char retire` (history kept) | built | |
+| Rename / realm transfer | new | Registry key becomes an id; name is an attribute with history. |
+| Standing availability `/availability <team> in\|out\|sub` | built | Pre-fills weekly sheets (§5.10). |
+| Future absence `/absent <from> [to] [reason]`, list, clear; late callout `/callout` after lock | built (absent) / aligned (callout) | Reasons are officer-only. |
+| Signup with character picker, Tentative state | aligned | Mock version built. |
+| Wishlist `/wishlist` or TMB import | aligned | |
+| `/me`: own characters, availability, absences, attendance, loot | built (partial) | Attendance/loot views land with the real ledger. |
+| Appeal `/loot ask`: private thread with the council | new | Keeps "why not me?" out of public channels. |
+| Leave / deletion request | new | Retire everything, drop from sheets; deletion is best-effort (git history). |
+
+**Officers / raid leaders**
+| Flow | Status |
+|---|---|
+| `/gm config` roles, ops channel, teams, schedule, cutoffs | built (owner, ops, roles, teams) / aligned (cutoffs) |
+| Policy docs with interpretation shown for confirmation | aligned |
+| Weekly cycle: open → health check → lock → propose → negotiate → accept | built (mock) / aligned (scheduled) |
+| Recruit subs escalation; post-lock swap | aligned |
+| Attendance correction; confirm registrations; ranks; act on behalf | built (registry parts) / aligned |
+| Imports (TMB, BisCouncil, WCL, item overrides) | built (BisCouncil, WCL) / aligned |
+| `/roster list\|absences\|availability`, audit via data-repo history | built |
+
+**Loot council**: tick drops → distribute → compact review → details on demand → override with reason → confirm → ledger (built); Gargul/TMB export, precedent retire/distill, pre-raid planning (aligned).
+
+**Owner**: secrets, routing, budget cap (built); `/gm status`, ops feed, error DMs (built); monthly cap, daily digest (aligned).
+
+**Public / recruitment (new)**: recruitment post generated from the health check ("need 1 resto shaman, 1 prot warrior"), officer presses send; `/apply` intake (character, class/spec, logs, availability) → applicant record → officer review thread → accept creates the member as trial; trial → raider prompt after N raids with attendance and loot in front of the officers.
+
+### 5.13 Companion and the loot feed
+
+Goal: nobody types drops or awards into Discord. The game already writes files on the player's machine; a small companion reads them. This is the same permitted pattern Warcraft Logs, the WoWAudit companion and DKP bots use: no memory reading, no input automation, no addon networking.
+
+**Sources**, best first:
+1. **Chat log** (`/chatlog` → `Logs/WoWChatLog.txt`), real time: `X receives loot: [item link]` gives award, recipient, item id and time the moment the master looter assigns; Gargul/RCLC drop announcements and boss-mod kill lines land in the same file. One raider running it (the ML) covers the raid.
+2. **SavedVariables** (Gargul, RCLootCouncil, BisCouncil) at `/reload` or logout: complete award history with responses/notes; the end-of-night reconciliation source.
+3. Combat log (kills and `COMBATANT_INFO` gear; no loot), Warcraft Logs gear diffs and the Blizzard profile API: slow verification only.
+
+**Transport**: primary is a **tailnet WebSocket** from the companion to the Mac mini (Tailscale on the raiding PC; listener bound to the tailnet address, token-authenticated, ACL-restricted; MagicDNS name in the config). Bidirectional, so the bot can push the confirmed Gargul/TMB string back to the companion's clipboard. Fallback for machines outside the tailnet: a **Discord webhook** into a private `#loot-feed` channel that the bot reads and routes to the active raid; or Tailscale Funnel with a per-companion token. Same event schema on every transport; DMs are not a machine transport (webhooks can't DM, user-token automation is against Discord ToS).
+
+**Bot behaviour per event**: drop announcement → auto-tick the boss's loot table (optionally run the council immediately so proposals precede assignment); `receives loot` matching the proposal → auto-confirm to the ledger; differing → record as the award, mark override, ask the council for the reason in the thread (precedent stored only once answered); no proposal → manual award; boss kill → boss done; heartbeat → presence, stale-feed warning mid-raid; end of night SavedVariables → reconciliation, disagreements flagged never overwritten.
+
+**Security**: a `companion` principal in the security framework (§4), a machine identity limited to `loot.event.write` and `raid.presence`; events carry chat-log timestamp + item + recipient as an idempotency key; the companion buffers and replays on reconnect. Forever risk is low: `/chatlog` is a client feature, not an addon.
+
+### 5.14 Ops feed and owner monitoring (built)
+
+Every registry, config and loot action is mirrored as one line to the guild's ops channel (`/gm config ops-channel`); command errors go there and DM the owner with the traceback; `/gm status` shows uptime, data-repo head and push state, registry counts and unconfirmed characters, config, LLM spend against the cap, and the last ops events. The data repo's git log is the exact audit trail. Aligned, not built: budget-threshold alerts, companion-silent alerts, daily digest DM.
 
 ### 5.11 Prototype status (2026-09-13)
 
