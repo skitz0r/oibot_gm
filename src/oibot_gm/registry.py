@@ -74,6 +74,24 @@ class Member(BaseModel):
         return [c for c in self.characters if c.status == "active"]
 
 
+class Applicant(BaseModel):
+    discord_id: int
+    display_name: str
+    name: str
+    cls: str
+    spec: str
+    offspec: Optional[str] = None
+    logs_url: Optional[str] = None
+    availability: Optional[str] = None
+    about: Optional[str] = None
+    status: str = "open"  # open | accepted | declined | withdrawn
+    created_at: str = Field(default_factory=now)
+    decided_by: Optional[str] = None
+    decided_at: Optional[str] = None
+    decision_note: Optional[str] = None
+    message_id: Optional[int] = None  # review card in the applications channel
+
+
 class GuildConfig(BaseModel):
     key: str
     name: str
@@ -81,6 +99,7 @@ class GuildConfig(BaseModel):
     discord_guild_id: int
     owner_discord_id: Optional[int] = None
     ops_channel_id: Optional[int] = None
+    applications_channel_id: Optional[int] = None  # defaults to the ops channel
     officer_roles: list[str] = Field(default_factory=list)
     raid_teams: list[dict] = Field(default_factory=list)  # {key, name, size, schedule}
 
@@ -118,6 +137,52 @@ class Registry:
             for f in d.glob("*.json"):
                 m = Member.model_validate_json(f.read_text())
                 self.members[m.discord_id] = m
+        self.applicants: dict[int, Applicant] = {}
+        ad = self.store.root / self.key / "applicants"
+        if ad.exists():
+            for f in ad.glob("*.json"):
+                a = Applicant.model_validate_json(f.read_text())
+                self.applicants[a.discord_id] = a
+
+    def save_applicant(self, a: Applicant, message: str) -> None:
+        self.store.write_text(Path(self.key) / "applicants" / f"{a.discord_id}.json", a.model_dump_json(indent=1))
+        self.applicants[a.discord_id] = a
+        self.store.commit(f"{self.key}: {message}")
+
+    # ---- applicants
+    def apply(self, discord_id: int, display_name: str, name: str, cls: str, spec: str, offspec: str | None, logs_url: str | None, availability: str | None, about: str | None) -> Applicant:
+        if discord_id in self.members and self.members[discord_id].active():
+            raise RegistryError("You're already a member; use /register or /char add for more characters.")
+        name = self.normalise_name(name)
+        if cls not in self.profile.classes:
+            raise RegistryError(f"Unknown class {cls}.")
+        spec = self.validate_spec(cls, spec)
+        offspec = self.validate_spec(cls, offspec) if offspec else None
+        if self.find(name):
+            raise RegistryError(f"{name} is already registered to a member.")
+        existing = self.applicants.get(discord_id)
+        if existing and existing.status == "open":
+            raise RegistryError(f"You already have an open application for {existing.name}. An officer will get to it.")
+        a = Applicant(discord_id=discord_id, display_name=display_name, name=name, cls=cls, spec=spec, offspec=offspec, logs_url=(logs_url or "").strip() or None, availability=(availability or "").strip() or None, about=(about or "").strip() or None)
+        self.save_applicant(a, f"application from {display_name}: {name} ({cls} {spec})")
+        return a
+
+    def open_applicants(self) -> list[Applicant]:
+        return sorted([a for a in self.applicants.values() if a.status == "open"], key=lambda a: a.created_at)
+
+    def decide(self, discord_id: int, accept: bool, by: str, note: str | None = None) -> tuple[Applicant, Optional[RegisteredCharacter]]:
+        a = self.applicants.get(discord_id)
+        if not a or a.status != "open":
+            raise RegistryError("No open application for that member.")
+        a.status = "accepted" if accept else "declined"
+        a.decided_by, a.decided_at, a.decision_note = by, now(), (note or "").strip() or None
+        char = None
+        if accept:
+            m, char = self.add_character(a.discord_id, a.display_name, a.name, a.cls, a.spec, a.offspec, True)
+            char.confirmed_by, char.confirmed_at = by, now()
+            self.save(m, f"{by} accepted {a.display_name} as {a.name}")
+        self.save_applicant(a, f"{by} {a.status} application from {a.display_name} ({a.name})")
+        return a, char
 
     def save(self, m: Member, message: str) -> None:
         m.updated_at = now()

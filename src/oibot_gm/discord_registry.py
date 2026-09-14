@@ -253,6 +253,100 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     tree.add_command(absent)
 
+    # ---------------- /apply (recruitment intake)
+    def application_embed(reg: Registry, a) -> discord.Embed:
+        e = discord.Embed(title=f"Application · {a.name}", colour=0x2B7A78, description=f"{ico('class', a.cls)} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''} · from **{a.display_name}** (<@{a.discord_id}>)")
+        if a.logs_url:
+            e.add_field(name="Logs", value=a.logs_url[:200], inline=False)
+        if a.availability:
+            e.add_field(name="Availability", value=a.availability[:300], inline=False)
+        if a.about:
+            e.add_field(name="About", value=a.about[:600], inline=False)
+        e.set_footer(text=f"status: {a.status}" + (f" · {a.decided_by}: {a.decision_note or ''}" if a.decided_by else " · officers: Accept / Decline below, or /roster applicant"))
+        return e
+
+    async def decide_application(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None):
+        try:
+            a, char = reg.decide(discord_id, accept, interaction.user.display_name, note)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True) if not interaction.response.is_done() else await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            return
+        verdict = f"✅ Accepted {a.display_name} as {a.name} (trial, confirmed)" if accept else f"⛔ Declined {a.display_name} ({a.name})"
+        if interaction.response.is_done():
+            await interaction.followup.send(verdict, ephemeral=True)
+        else:
+            await interaction.response.send_message(verdict, ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name}: {verdict}" + (f" — {note}" if note else ""))
+        try:
+            user = await interaction.client.fetch_user(a.discord_id)
+            if accept:
+                await user.send(f"✅ Your application for **{a.name}** to {reg.config.name} was accepted by {interaction.user.display_name}. You're registered as a trial; /me shows your status." + (f"\n\n{note}" if note else ""))
+            else:
+                await user.send(f"Your application for **{a.name}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "") + "\n\nYou can apply again later.")
+        except Exception:  # noqa: BLE001
+            pass
+        ch_id = reg.config.applications_channel_id or reg.config.ops_channel_id
+        if a.message_id and ch_id:
+            ch = interaction.client.get_channel(ch_id)
+            try:
+                msg = await ch.fetch_message(a.message_id)
+                await msg.edit(embed=application_embed(reg, a), view=None)
+            except Exception:  # noqa: BLE001
+                pass
+
+    class DeclineModal(discord.ui.Modal, title="Decline application"):
+        note = discord.ui.TextInput(label="Note to the applicant (optional)", style=discord.TextStyle.paragraph, required=False, max_length=400)
+
+        def __init__(self, reg: Registry, discord_id: int):
+            super().__init__()
+            self.reg, self.discord_id = reg, discord_id
+
+        async def on_submit(self, interaction: discord.Interaction):
+            await decide_application(interaction, self.reg, self.discord_id, False, str(self.note.value))
+
+    class ApplicationView(discord.ui.View):
+        def __init__(self, reg: Registry, discord_id: int):
+            super().__init__(timeout=None)
+            self.reg, self.discord_id = reg, discord_id
+
+        @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+        async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
+            if not is_officer(interaction, self.reg):
+                await interaction.response.send_message("Officers only.", ephemeral=True)
+                return
+            await decide_application(interaction, self.reg, self.discord_id, True, None)
+
+        @discord.ui.button(label="Decline…", style=discord.ButtonStyle.secondary)
+        async def decline(self, interaction: discord.Interaction, _: discord.ui.Button):
+            if not is_officer(interaction, self.reg):
+                await interaction.response.send_message("Officers only.", ephemeral=True)
+                return
+            await interaction.response.send_modal(DeclineModal(self.reg, self.discord_id))
+
+    @tree.command(name="apply", description="Apply to join the guild")
+    @app_commands.describe(name="Character name", class_="Class", spec="Main spec", offspec="Offspec (optional)", logs="Warcraft Logs / armory link (optional)", availability="When you can raid (optional)", about="Anything else (optional)")
+    @app_commands.rename(class_="class")
+    @app_commands.choices(class_=CLASS_CHOICES)
+    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
+    async def apply(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None, logs: str | None = None, availability: str | None = None, about: str | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        try:
+            a = reg.apply(interaction.user.id, interaction.user.display_name, name, class_.value, spec, offspec, logs, availability, about)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ Application received for **{a.name}** ({a.cls} {a.spec}). An officer will review it; you'll get a DM either way.", ephemeral=True)
+        ch_id = reg.config.applications_channel_id or reg.config.ops_channel_id
+        ch = interaction.client.get_channel(ch_id) if ch_id else None
+        if ch:
+            msg = await ch.send(embed=application_embed(reg, a), view=ApplicationView(reg, a.discord_id))
+            a.message_id = msg.id
+            reg.save_applicant(a, f"application card posted for {a.name}")
+        else:
+            await ops.emit(reg.config, "warn", f"application from {a.display_name} ({a.name}, {a.cls} {a.spec}) — no applications/ops channel configured; use /roster applicants")
+
     @tree.command(name="me", description="Your characters, availability and upcoming absences")
     async def me(interaction: discord.Interaction):
         reg = await need(interaction)
@@ -381,6 +475,25 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ {m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else ""), ephemeral=True)
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} recorded {m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else ""))
 
+    @roster.command(name="applicants", description="Open applications")
+    async def roster_applicants(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        opens = reg.open_applicants()
+        if not opens:
+            await interaction.response.send_message("No open applications.", ephemeral=True)
+            return
+        await interaction.response.send_message(embeds=[application_embed(reg, a) for a in opens[:10]], ephemeral=True)
+
+    @roster.command(name="applicant", description="Accept or decline an application by member")
+    @app_commands.choices(decision=[app_commands.Choice(name="accept", value="accept"), app_commands.Choice(name="decline", value="decline")])
+    async def roster_applicant(interaction: discord.Interaction, member: discord.User, decision: app_commands.Choice[str], note: str | None = None):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        await decide_application(interaction, reg, member.id, decision.value == "accept", note)
+
     tree.add_command(roster)
 
     # ---------------- /gm (owner / officers)
@@ -413,6 +526,18 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ops channel → #{channel.name}")
         await interaction.response.send_message(f"✅ Ops feed → {channel.mention}", ephemeral=True)
         await ops.emit(reg.config, "info", f"ops feed connected by {interaction.user.display_name}")
+
+    @config.command(name="applications-channel", description="Owner: where application review cards are posted (defaults to the ops channel)")
+    async def cfg_apps(interaction: discord.Interaction, channel: discord.TextChannel):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        reg.config.applications_channel_id = channel.id
+        reg.save_config(f"applications channel → #{channel.name}")
+        await interaction.response.send_message(f"✅ Applications → {channel.mention}", ephemeral=True)
 
     @config.command(name="officer-role", description="Owner: add or remove a Discord role that counts as officer")
     async def cfg_role(interaction: discord.Interaction, role: discord.Role, remove: bool = False):
