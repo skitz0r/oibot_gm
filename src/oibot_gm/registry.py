@@ -160,6 +160,9 @@ class Registry:
         offspec = self.validate_spec(cls, offspec) if offspec else None
         if self.find(name):
             raise RegistryError(f"{name} is already registered to a member.")
+        clash = next((x for x in self.applicants.values() if x.status == "open" and x.name.lower() == name.lower() and x.discord_id != discord_id), None)
+        if clash:
+            raise RegistryError(f"There is already an open application for {name}. If that character is yours, ask an officer.")
         existing = self.applicants.get(discord_id)
         if existing and existing.status == "open":
             raise RegistryError(f"You already have an open application for {existing.name}. An officer will get to it.")
