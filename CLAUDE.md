@@ -27,6 +27,9 @@ src/oibot_gm/
   discord_registry.py  real commands: /register, /char, /apply, /absent, /availability, /me, /roster (officer), /gm config|status
   raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
   discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
+  policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
+  configops.py         plain-text config: whitelisted ConfigOp schema, describe() diff, apply() via the same code paths as commands
+  discord_policy.py    /policy show|edit|reload, /loot-rule, /comp-rule, /gm change, @mention in the ops channel
   ops.py               ops feed (channel line per action; errors DM the owner)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html
