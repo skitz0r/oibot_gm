@@ -32,6 +32,7 @@ class RegisteredCharacter(BaseModel):
     is_main: bool = False
     rank: str = "trial"
     status: str = "active"  # planned | active | retired
+    rosters: list[str] = Field(default_factory=list)  # officer-curated roster membership, per character
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[str] = None
     created_at: str = Field(default_factory=now)
@@ -110,17 +111,40 @@ class GuildConfig(BaseModel):
     owner_discord_id: Optional[int] = None
     ops_channel_id: Optional[int] = None
     applications_channel_id: Optional[int] = None  # defaults to the ops channel
-    signup_channel_id: Optional[int] = None  # where raid sheets are posted
+    signup_channel_id: Optional[int] = None  # where raid sheets are posted (public)
+    roster_channel_id: Optional[int] = None  # officer channel: overview, proposals, officer health cards
     timezone: str = "America/Chicago"  # server time for schedules
     officer_roles: list[str] = Field(default_factory=list)
-    # {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders: dm|channel|none}
-    raid_teams: list[dict] = Field(default_factory=list)
+    # rosters: {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders, open_dm}
+    rosters: list[dict] = Field(default_factory=list)
+
+    def __init__(self, **data):
+        if "raid_teams" in data and not data.get("rosters"):
+            data["rosters"] = data.pop("raid_teams")  # pre-roster config files
+        data.pop("raid_teams", None)
+        super().__init__(**data)
+
+    # canonical names
+    def roster_keys(self) -> list[str]:
+        return [t["key"] for t in self.rosters] or ["main"]
+
+    def roster(self, key: str) -> Optional[dict]:
+        return next((t for t in self.rosters if t["key"] == key), None)
+
+    # compatibility aliases (older call sites)
+    @property
+    def raid_teams(self) -> list[dict]:
+        return self.rosters
+
+    @raid_teams.setter
+    def raid_teams(self, v: list[dict]) -> None:
+        self.rosters = v
 
     def team_keys(self) -> list[str]:
-        return [t["key"] for t in self.raid_teams] or ["main"]
+        return self.roster_keys()
 
     def team(self, key: str) -> Optional[dict]:
-        return next((t for t in self.raid_teams if t["key"] == key), None)
+        return self.roster(key)
 
 
 class RegistryError(ValueError):
@@ -152,6 +176,12 @@ class Registry:
         if d.exists():
             for f in d.glob("*.json"):
                 m = Member.model_validate_json(f.read_text())
+                if m.teams and m.main:  # pre-roster files kept membership on the member
+                    for k in m.teams:
+                        if k not in m.main.rosters:
+                            m.main.rosters.append(k)
+                    m.teams = []
+                    self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
                 self.members[m.discord_id] = m
         self.applicants: dict[int, Applicant] = {}
         ad = self.store.root / self.key / "applicants"
@@ -411,30 +441,61 @@ class Registry:
         m, c, old = self.set_main(discord_id, name)
         return m, c, old
 
-    # ---- team membership (the curated default roster per team)
-    def team_add(self, discord_id: int, team: str, by: str, display_name: str | None = None) -> Member:
-        if team not in self.config.team_keys():
-            raise RegistryError(f"Unknown team {team}. Teams: {', '.join(self.config.team_keys())}.")
+    # ---- roster membership (curated, per character)
+    def roster_add(self, discord_id: int, roster: str, by: str, character: str | None = None, display_name: str | None = None) -> tuple[Member, RegisteredCharacter]:
+        if roster not in self.config.roster_keys():
+            raise RegistryError(f"Unknown roster {roster}. Rosters: {', '.join(self.config.roster_keys())}.")
         m = self.member(discord_id, display_name, create=display_name is not None)
-        if team not in m.teams:
-            m.teams.append(team)
-            self.save(m, f"{by} added {m.display_name} to team {team}")
+        c = next((c for c in m.active() if (c.name or c.label).lower() == character.lower()), None) if character else m.main
+        if not c:
+            raise RegistryError(f"{m.display_name} has no {'character named ' + character if character else 'main'} yet.")
+        for other in m.active():  # one character per member per roster
+            if other is not c and roster in other.rosters:
+                other.rosters.remove(roster)
+        if roster not in c.rosters:
+            c.rosters.append(roster)
+            self.save(m, f"{by} added {m.display_name} ({c.label}) to roster {roster}")
+        return m, c
+
+    def roster_remove(self, discord_id: int, roster: str, by: str) -> Member:
+        m = self.member(discord_id)
+        changed = False
+        for c in m.characters:
+            if roster in c.rosters:
+                c.rosters.remove(roster)
+                changed = True
+        if changed:
+            self.save(m, f"{by} removed {m.display_name} from roster {roster}")
         return m
+
+    def roster_members(self, roster: str) -> list[tuple[Member, RegisteredCharacter]]:
+        out = []
+        for m in self.members.values():
+            for c in m.active():
+                if roster in c.rosters:
+                    out.append((m, c))
+        return out
+
+    def roster_pool(self, roster: str) -> list[tuple[Member, RegisteredCharacter]]:
+        """Who a sheet expects, with the character they raid on: the roster if curated, else every main."""
+        members = self.roster_members(roster)
+        return members if members else [(m, m.main) for m in self.members.values() if m.main]
+
+    def on_roster(self, m: Member, roster: str) -> bool:
+        return any(roster in c.rosters for c in m.active())
+
+    # older call sites
+    def team_add(self, discord_id: int, team: str, by: str, display_name: str | None = None) -> Member:
+        return self.roster_add(discord_id, team, by, None, display_name)[0]
 
     def team_remove(self, discord_id: int, team: str, by: str) -> Member:
-        m = self.member(discord_id)
-        if team in m.teams:
-            m.teams.remove(team)
-            self.save(m, f"{by} removed {m.display_name} from team {team}")
-        return m
+        return self.roster_remove(discord_id, team, by)
 
     def team_members(self, team: str) -> list[Member]:
-        return [m for m in self.members.values() if team in m.teams]
+        return [m for m, _ in self.roster_members(team)]
 
     def team_pool(self, team: str) -> list[Member]:
-        """Who a sheet expects: the team's members if any are set, else everyone with a main."""
-        members = self.team_members(team)
-        return members if members else [m for m in self.members.values() if m.main]
+        return [m for m, _ in self.roster_pool(team)]
 
     # ---- availability & absences
     def set_availability(self, discord_id: int, team: str, value: str) -> Member:
@@ -483,7 +544,7 @@ class Registry:
         return sorted(out, key=lambda ma: ma[1].start)
 
     def availability_summary(self) -> dict[str, dict[str, int]]:
-        out: dict[str, dict[str, int]] = {t: {"in": 0, "out": 0, "sub": 0, "unset": 0} for t in self.config.team_keys()}
+        out: dict[str, dict[str, int]] = {t: {"in": 0, "out": 0, "sub": 0, "unset": 0} for t in self.config.roster_keys()}
         for m in self.members.values():
             if not m.active():
                 continue

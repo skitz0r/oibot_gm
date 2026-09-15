@@ -191,8 +191,9 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
             rp = m.role_prefs
             lines = [char_line(bot.ico, c) for c in m.active()]
             lines.append(("Roles: " + rp.get("primary", "?") + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "Roles: unset")
-            if m.teams:
-                lines.append("Rosters: " + ", ".join(m.teams))
+            rosters = sorted({k for c in m.active() for k in c.rosters})
+            if rosters:
+                lines.append("Rosters: " + ", ".join(rosters))
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
         slot = "main" if self.action == "register" else "alt"
@@ -480,18 +481,20 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
 
     # ---------------- /availability, /me absent, /me
-    async def team_autocomplete(interaction: discord.Interaction, current: str):
+    async def roster_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
-        return [app_commands.Choice(name=t, value=t) for t in (reg.config.team_keys() if reg else []) if current.lower() in t.lower()][:25]
+        return [app_commands.Choice(name=t, value=t) for t in (reg.config.roster_keys() if reg else []) if current.lower() in t.lower()][:25]
 
-    @me.command(name="availability", description="Your standing default for a raid team: in, out, or sub-only")
-    @app_commands.autocomplete(team=team_autocomplete)
+    team_autocomplete = roster_autocomplete
+
+    @me.command(name="availability", description="Your standing default for a roster's raids: in, out, or sub-only")
+    @app_commands.autocomplete(roster=roster_autocomplete)
     @app_commands.choices(value=[app_commands.Choice(name=v, value=v) for v in ("in", "out", "sub")])
-    async def availability(interaction: discord.Interaction, value: app_commands.Choice[str], team: str | None = None):
+    async def availability(interaction: discord.Interaction, value: app_commands.Choice[str], roster: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
-        team = team or reg.config.team_keys()[0]
+        team = roster or reg.config.roster_keys()[0]
         try:
             m = reg.set_availability(interaction.user.id, team, value.value)
         except RegistryError as e:
@@ -647,8 +650,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         today = discord.utils.utcnow().date().isoformat()
         e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=0x2B7A78)
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
-        if m.teams:
-            e.add_field(name="Teams", value=", ".join(m.teams), inline=True)
+        rosters = sorted({k for c in m.active() for k in c.rosters})
+        if rosters:
+            e.add_field(name="Rosters", value=", ".join(f"{k} ({next(c.label for c in m.active() if k in c.rosters)})" for k in rosters), inline=True)
         rp = m.role_prefs
         e.add_field(name="Roles", value=(f"{rp.get('primary')}" + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "unset — /me plan roles", inline=True)
         e.add_field(name="Availability", value=", ".join(f"{t}: {m.availability.get(t, 'unset')}" for t in reg.config.team_keys()), inline=True)
@@ -748,7 +752,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         from .roster.solver import scaled_role_bounds
 
-        team = reg.config.raid_teams[0] if reg.config.raid_teams else {}
+        team = reg.config.rosters[0] if reg.config.rosters else {}
         n = size or int(team.get("size") or 20)
         bounds = scaled_role_bounds(reg.profile.comp_rules, n)
         e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=0x2B7A78)
@@ -778,55 +782,53 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
         await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
 
-    team = app_commands.Group(name="team", description="Officer: the curated roster for each raid team", parent=roster)
-
-    @team.command(name="add", description="Add a member to a team (they default to In on that team's sheets)")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def team_add(interaction: discord.Interaction, member: discord.User, team: str | None = None):
+    @roster.command(name="add", description="Add a member's character to a roster (defaults to their main)")
+    @app_commands.autocomplete(roster=roster_autocomplete, character=member_char_autocomplete)
+    async def roster_add(interaction: discord.Interaction, member: discord.User, character: str | None = None, roster: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        key = team or reg.config.team_keys()[0]
+        key = roster or reg.config.roster_keys()[0]
         try:
-            m = reg.team_add(member.id, key, interaction.user.display_name, display_name=member.display_name)
+            m, c = reg.roster_add(member.id, key, interaction.user.display_name, character, display_name=member.display_name)
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.response.send_message(f"✅ {m.display_name} → team **{key}** ({len(reg.team_members(key))} members)", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} added {m.display_name} to team {key}")
+        await interaction.response.send_message(f"✅ {char_line(ico, c)} ({m.display_name}) → roster **{key}** ({len(reg.roster_members(key))} characters)", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} added {m.display_name} ({c.label}) to roster {key}")
 
-    @team.command(name="remove", description="Remove a member from a team (they can still sign as sub)")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def team_remove(interaction: discord.Interaction, member: discord.User, team: str | None = None):
+    @roster.command(name="remove", description="Remove a member from a roster (they can still sign as sub)")
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def roster_remove(interaction: discord.Interaction, member: discord.User, roster: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        key = team or reg.config.team_keys()[0]
+        key = roster or reg.config.roster_keys()[0]
         try:
-            m = reg.team_remove(member.id, key, interaction.user.display_name)
+            m = reg.roster_remove(member.id, key, interaction.user.display_name)
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ {m.display_name} removed from **{key}**", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} removed {m.display_name} from team {key}")
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} removed {m.display_name} from roster {key}")
 
-    @team.command(name="list", description="Team membership by role")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def team_list(interaction: discord.Interaction, team: str | None = None):
+    @roster.command(name="members", description="A roster's characters by role")
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def roster_members_cmd(interaction: discord.Interaction, roster: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
-        key = team or reg.config.team_keys()[0]
-        members = reg.team_members(key)
+        key = roster or reg.config.roster_keys()[0]
+        members = reg.roster_members(key)
         if not members:
-            await interaction.response.send_message(f"Team **{key}** has no explicit members yet, so every registered main counts. `/roster team add @member` to curate it.", ephemeral=True)
+            await interaction.response.send_message(f"Roster **{key}** has no curated members yet, so every registered main counts. `/roster add @member` to curate it.", ephemeral=True)
             return
         by_role: dict[str, list[str]] = {}
-        for m in members:
-            c = m.main
-            role = (m.role_prefs.get("primary") or (reg.profile.spec(c.cls, c.spec).role if c else "?"))
-            by_role.setdefault(role, []).append(f"{ico('class', c.cls) if c else ''} {m.display_name}" + (f" · {c.spec}" if c else " · no main"))
-        e = discord.Embed(title=f"Team {key} · {len(members)} members", colour=0x2B7A78)
+        for m, c in members:
+            role = m.role_prefs.get("primary") or reg.profile.spec(c.cls, c.spec).role
+            by_role.setdefault(role, []).append(f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · {m.display_name}")
+        cfg = reg.config.roster(key) or {}
+        e = discord.Embed(title=f"Roster {key} · {len(members)}/{cfg.get('size', '?')} · {cfg.get('schedule') or 'no schedule'}", colour=0x2B7A78)
         for r in ROLES:
             if by_role.get(r):
                 e.add_field(name=f"{ico('role', r)} {r} ({len(by_role[r])})", value="\n".join(by_role[r])[:1000], inline=True)
@@ -845,7 +847,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
         await interaction.response.send_message("\n".join(lines)[:1900] or f"No absences in the next {days} days.", ephemeral=True)
 
-    @roster.command(name="availability", description="Standing availability counts per team")
+    @roster.command(name="availability", description="Standing availability counts per roster")
     async def roster_availability(interaction: discord.Interaction):
         reg = await officer(interaction)
         if not reg:
@@ -945,7 +947,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ Officer roles: {', '.join(reg.config.officer_roles) or '(none; Manage Server only)'}", ephemeral=True)
         await ops.emit(reg.config, "warn", f"officer roles now {reg.config.officer_roles} (by {interaction.user.display_name})")
 
-    @config.command(name="team", description="Owner: add/update a raid team (schedule like 'Tue 19:30'; cutoffs in hours)")
+    @config.command(name="roster", description="Owner: add/update a roster (size, schedule like 'Tue 19:30', instance, cutoffs)")
     @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="'Tue 19:30' in the guild's timezone", instance="raid from the game profile", soft_cutoff="hours before raid: health check + nudges", hard_cutoff="hours before raid: lock + propose", open_days="days before the raid to open the sheet")
     @app_commands.autocomplete(instance=instance_autocomplete)
     async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, open_dm: bool = False, remove: bool = False):
@@ -971,9 +973,21 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not remove:
             teams.append({"key": key, "name": key, "size": size, "schedule": schedule, "instance": instance, "cutoff_soft_hours": soft_cutoff, "cutoff_hard_hours": hard_cutoff, "open_days_before": open_days, "reminders": "dm", "open_dm": open_dm})
         reg.config.raid_teams = teams
-        reg.save_config(f"teams: {[t['key'] for t in teams]}")
-        await interaction.response.send_message("✅ Teams: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'}, lock {t.get('cutoff_hard_hours', 24)}h)" for t in teams) or "none (default 'main')"), ephemeral=True)
-        await ops.emit(reg.config, "info", f"teams now {[t['key'] for t in teams]} (by {interaction.user.display_name})")
+        reg.save_config(f"rosters: {[t['key'] for t in teams]}")
+        await interaction.response.send_message("✅ Rosters: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'}, lock {t.get('cutoff_hard_hours', 24)}h)" for t in teams) or "none (default 'main')"), ephemeral=True)
+        await ops.emit(reg.config, "info", f"rosters now {[t['key'] for t in teams]} (by {interaction.user.display_name})")
+
+    @config.command(name="roster-channel", description="Owner: private channel for roster overviews, proposals and officer health cards")
+    async def cfg_roster_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        reg.config.roster_channel_id = channel.id
+        reg.save_config(f"roster channel → #{channel.name}")
+        await interaction.response.send_message(f"✅ Roster management → {channel.mention}", ephemeral=True)
 
     @config.command(name="signup-channel", description="Owner: where raid sheets are posted")
     async def cfg_signup(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -1065,8 +1079,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     tree.add_command(gm)
-    # exported for other command modules that take a member + character
+    # exported for other command modules
     register_commands.member_char_autocomplete = member_char_autocomplete  # type: ignore[attr-defined]
+    register_commands.roster_autocomplete = roster_autocomplete  # type: ignore[attr-defined]
 
 
 LEVEL = ops_mod.LEVEL_ICON

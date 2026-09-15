@@ -12,20 +12,20 @@ from .registry import RANKS, Registry, RegistryError
 
 SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never guess)
 Guild (owner only): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
-  officer_role add/remove (role name).
-Teams (owner only): team <key> size (10|20|25|40), schedule ('Tue 19:30'), instance (raid id), cutoff_soft_hours,
-  cutoff_hard_hours, open_days_before, reminders (dm|channel|none), open_dm (true|false: DM everyone when the
-  sheet opens asking them to confirm/tentative/bench); add/remove team.
+  roster_channel (officer channel for overviews/proposals), officer_role add/remove (role name).
+Rosters (owner only; the ops are still named team_*): team <key> size (10|20|25|40), schedule ('Tue 19:30'),
+  instance (raid id), cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders (dm|channel|none),
+  open_dm (true|false: DM everyone when the sheet opens); add/remove roster (team_add/team_remove).
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason];
-  team_member: add/remove <member> to/from team <key> (the curated default roster).
+  team_member: add/remove <member> [character] to/from roster <key> (curated roster; defaults to their main).
 Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
 """
 
 
 class ConfigOp(BaseModel):
     op: Literal["set", "team_set", "team_add", "team_remove", "team_member", "role_add", "role_remove", "rank", "confirm", "set_main", "availability", "absence", "policy_append"]
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel")
+    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel")
     team: Optional[str] = Field(default=None, description="team key for team_* ops and availability")
     field: Optional[str] = Field(default=None, description="for op=team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits)")
@@ -86,7 +86,7 @@ def describe(reg: Registry, op: ConfigOp) -> str:
     """Human-readable 'current → new' for the diff, without applying."""
     cfg = reg.config
     if op.op == "set":
-        cur = {"timezone": cfg.timezone, "signup_channel": cfg.signup_channel_id and f"<#{cfg.signup_channel_id}>", "ops_channel": cfg.ops_channel_id and f"<#{cfg.ops_channel_id}>", "applications_channel": cfg.applications_channel_id and f"<#{cfg.applications_channel_id}>"}.get(op.path or "", "?")
+        cur = {"timezone": cfg.timezone, "signup_channel": cfg.signup_channel_id and f"<#{cfg.signup_channel_id}>", "ops_channel": cfg.ops_channel_id and f"<#{cfg.ops_channel_id}>", "applications_channel": cfg.applications_channel_id and f"<#{cfg.applications_channel_id}>", "roster_channel": cfg.roster_channel_id and f"<#{cfg.roster_channel_id}>"}.get(op.path or "", "?")
         return f"{op.path}: {cur or '—'} → {op.value}"
     if op.op == "team_set":
         t = cfg.team(op.team or "") or {}
@@ -128,7 +128,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
 
             ZoneInfo(op.value or "")
             cfg.timezone = op.value or cfg.timezone
-        elif op.path in ("signup_channel", "ops_channel", "applications_channel"):
+        elif op.path in ("signup_channel", "ops_channel", "applications_channel", "roster_channel"):
             cid = _channel_id(op.value)
             if not cid:
                 raise RegistryError(f"{op.path}: need a channel mention")
@@ -142,8 +142,8 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if t is None:
             if op.op == "team_set":
                 raise RegistryError(f"no team {op.team}")
-            t = {"key": op.team, "name": op.team, "size": 20, "schedule": "", "instance": None, "cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm"}
-            cfg.raid_teams.append(t)
+            t = {"key": op.team, "name": op.team, "size": 20, "schedule": "", "instance": None, "cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm", "open_dm": False}
+            cfg.rosters.append(t)
         if op.op == "team_set":
             field = op.field or op.path or ""
             if field not in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "reminders", "name", "open_dm"):
@@ -161,7 +161,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         reg.save_config(f"team {op.team} {f} → {op.value} (by {by})")
         return f"team {op.team} {f} = {op.value}"
     if op.op == "team_remove":
-        cfg.raid_teams = [t for t in cfg.raid_teams if t["key"] != op.team]
+        cfg.rosters = [t for t in cfg.rosters if t["key"] != op.team]
         reg.save_config(f"team {op.team} removed (by {by})")
         return f"team {op.team} removed"
     if op.op in ("role_add", "role_remove"):
@@ -201,10 +201,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             raise RegistryError(f"unknown member {op.member}")
         key = op.team or cfg.team_keys()[0]
         if (op.value or "add") == "remove":
-            reg.team_remove(m.discord_id, key, by)
+            reg.roster_remove(m.discord_id, key, by)
             return f"{m.display_name} removed from {key}"
-        reg.team_add(m.discord_id, key, by)
-        return f"{m.display_name} added to {key}"
+        _, c = reg.roster_add(m.discord_id, key, by, op.character)
+        return f"{m.display_name} ({c.label}) added to {key}"
     if op.op == "policy_append":
         if policy_store is None or not op.doc or not op.text:
             raise RegistryError("policy append needs a doc and text")

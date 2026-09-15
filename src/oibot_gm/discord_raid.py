@@ -1,5 +1,5 @@
 """Discord surface for the weekly cycle: signup sheets with persistent buttons,
-/raid commands, /callout, and the scheduler loop."""
+/raid commands (raids belong to a roster), /raid out, and the scheduler loop."""
 from __future__ import annotations
 
 import asyncio
@@ -269,11 +269,14 @@ class RaidMixin:
                 ch = self.get_channel(ev.channel_id) if ev.channel_id else channel
                 if not ch:
                     continue
+                officer_ch = (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or ch
                 if ev.state == "open" and not ev.health_posted and now >= ev.start - timedelta(hours=rc.team_setting(team, "cutoff_soft_hours")):
-                    await self.post_health(reg, rs, ev, ch, nudge=True)
+                    await self.post_health(reg, rs, ev, officer_ch, nudge=True)
                     await self.ops.emit(cfg, "info", f"{ev.key}: health check posted, nudged {len(ev.nudged)}")
                 if ev.state == "open" and now >= ev.start - timedelta(hours=rc.team_setting(team, "cutoff_hard_hours")):
-                    await self.lock_and_propose(reg, rs, ev, ch)
+                    await self.lock_and_propose(reg, rs, ev, officer_ch)
+                    if officer_ch is not ch:
+                        await ch.send(f"🔒 {ev.key}: signups locked; officers are reviewing the roster.")
                     await self.ops.emit(cfg, "info", f"{ev.key}: locked and proposed")
                 if ev.state in ("locked", "proposed", "accepted") and now >= ev.start + timedelta(hours=6):
                     ev.state = "done"
@@ -298,27 +301,27 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             return None
         return reg
 
-    async def team_autocomplete(interaction: discord.Interaction, current: str):
+    async def roster_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
-        return [app_commands.Choice(name=t, value=t) for t in (reg.config.team_keys() if reg else []) if current.lower() in t.lower()][:25]
+        return [app_commands.Choice(name=t, value=t) for t in (reg.config.roster_keys() if reg else []) if current.lower() in t.lower()][:25]
 
-    def current_event(reg: Registry, team: str | None):
+    def current_event(reg: Registry, roster: str | None):
         rs = bot.raids.store(reg)
-        key = team or reg.config.team_keys()[0]
-        return rs, rs.for_team(key), reg.config.team(key) or {"key": key, "size": 20}
+        key = roster or reg.config.roster_keys()[0]
+        return rs, rs.for_team(key), reg.config.roster(key) or {"key": key, "size": 20}
 
     raid = app_commands.Group(name="raid", description="Raid sheets and rosters")
 
     @raid.command(name="open", description="Officer: open the next sheet for a team now (date optional, YYYY-MM-DD)")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def raid_open(interaction: discord.Interaction, team: str | None = None, date: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def raid_open(interaction: discord.Interaction, roster: str | None = None, date: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        key = team or reg.config.team_keys()[0]
-        t = reg.config.team(key)
+        key = roster or reg.config.roster_keys()[0]
+        t = reg.config.roster(key)
         if not t or not t.get("schedule"):
-            await interaction.response.send_message(f"Team {key} has no schedule. `/gm config team key:{key} schedule:'Tue 19:30'` first.", ephemeral=True)
+            await interaction.response.send_message(f"Roster {key} has no schedule. `/gm config roster key:{key} schedule:'Tue 19:30'` first.", ephemeral=True)
             return
         try:
             start = rc.next_raid_time(t["schedule"], reg.config.timezone)
@@ -337,12 +340,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} opened {ev.key} ({len(ev.signups)} prefilled)")
 
     @raid.command(name="sheet", description="Re-post the current sheet")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def raid_sheet(interaction: discord.Interaction, team: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def raid_sheet(interaction: discord.Interaction, roster: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         if not ev:
             await interaction.response.send_message("No open sheet.", ephemeral=True)
             return
@@ -352,12 +355,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         rs.save(ev, "sheet re-posted")
 
     @raid.command(name="health", description="Roster health for the current sheet")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def raid_health(interaction: discord.Interaction, team: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def raid_health(interaction: discord.Interaction, roster: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         if not ev:
             await interaction.response.send_message("No open sheet.", ephemeral=True)
             return
@@ -365,26 +368,27 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         await interaction.response.send_message(embed=embed, file=file, ephemeral=not is_officer(interaction, reg))
 
     @raid.command(name="lock", description="Officer: lock signups now and propose a roster")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def raid_lock(interaction: discord.Interaction, team: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def raid_lock(interaction: discord.Interaction, roster: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         if not ev:
             await interaction.response.send_message("No open sheet.", ephemeral=True)
             return
         await interaction.response.send_message(f"Locking {ev.key} and proposing…", ephemeral=True)
-        await bot.lock_and_propose(reg, rs, ev, interaction.channel)
+        target = (bot.get_channel(reg.config.roster_channel_id) if reg.config.roster_channel_id else None) or interaction.channel
+        await bot.lock_and_propose(reg, rs, ev, target)
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} locked {ev.key}")
 
     @raid.command(name="accept", description="Officer: accept the proposed roster")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def raid_accept(interaction: discord.Interaction, team: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def raid_accept(interaction: discord.Interaction, roster: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         if not ev or not ev.roster:
             await interaction.response.send_message("Nothing proposed yet.", ephemeral=True)
             return
@@ -394,12 +398,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} accepted roster {ev.key}")
 
     @raid.command(name="loot", description="Officer: open the loot council thread for the accepted roster")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def raid_loot(interaction: discord.Interaction, team: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def raid_loot(interaction: discord.Interaction, roster: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         if not ev or not ev.roster or ev.state not in ("proposed", "accepted", "locked"):
             await interaction.response.send_message("Need a proposed/accepted roster first (/raid lock, /raid accept).", ephemeral=True)
             return
@@ -445,12 +449,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
 
     @raid.command(name="set", description="Officer: set someone's status on the sheet")
     @app_commands.choices(status=[app_commands.Choice(name=s, value=s) for s in rc.STATUSES])
-    @app_commands.autocomplete(team=team_autocomplete, character=_rc.member_char_autocomplete)
-    async def raid_set(interaction: discord.Interaction, member: discord.User, status: app_commands.Choice[str], character: str | None = None, team: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete, character=_rc.member_char_autocomplete)
+    async def raid_set(interaction: discord.Interaction, member: discord.User, status: app_commands.Choice[str], character: str | None = None, roster: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         m = reg.members.get(member.id)
         if not ev or not m:
             await interaction.response.send_message("No open sheet, or that member isn't registered.", ephemeral=True)
@@ -465,12 +469,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {m.display_name} {status.value} on {ev.key}")
 
     @raid.command(name="cancel", description="Officer: cancel the current raid")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def raid_cancel(interaction: discord.Interaction, team: str | None = None, reason: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def raid_cancel(interaction: discord.Interaction, roster: str | None = None, reason: str | None = None):
         reg = await officer(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         if not ev:
             await interaction.response.send_message("No open sheet.", ephemeral=True)
             return
@@ -491,12 +495,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         await interaction.response.send_message("\n".join(f"• {e.key} · {e.state} · <t:{int(e.start.timestamp())}:F> · {len(e.by_status('in'))} in" for e in live) or "No live raids.", ephemeral=True)
 
     @raid.command(name="out", description="Can't make the raid you're signed for (records the time relative to the cutoff)")
-    @app_commands.autocomplete(team=team_autocomplete)
-    async def callout_cmd(interaction: discord.Interaction, note: str | None = None, team: str | None = None):
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    async def callout_cmd(interaction: discord.Interaction, note: str | None = None, roster: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
-        rs, ev, t = current_event(reg, team)
+        rs, ev, t = current_event(reg, roster)
         m = reg.members.get(interaction.user.id)
         if not ev or not m:
             await interaction.response.send_message("No live raid, or you're not registered.", ephemeral=True)

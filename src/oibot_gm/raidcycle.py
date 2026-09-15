@@ -142,9 +142,8 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
 def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
     """Standing availability + absences seed the sheet so people act on exceptions."""
     day = ev.start.date().isoformat()
-    explicit = bool(reg.team_members(team["key"]))
-    for m in reg.team_pool(team["key"]):
-        main = m.main
+    explicit = bool(reg.roster_members(team["key"]))
+    for m, main in reg.roster_pool(team["key"]):
         if not main:
             continue
         absence = m.absent_on(day)
@@ -173,8 +172,8 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     if not c:
         raise ValueError("no such active character")
     team = reg.config.team(ev.team) or {"key": ev.team}
-    if status == "in" and reg.team_members(team["key"]) and team["key"] not in m.teams and source == "member":
-        status, note = "sub", "not on the team roster; subs are picked when needed"
+    if status == "in" and reg.roster_members(team["key"]) and not reg.on_roster(m, team["key"]) and source == "member":
+        status, note = "sub", "not on this roster; subs are picked when needed"
     s = _signup(reg, m, c, status, source, note)
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"{m.display_name} {status} as {c.label} ({source})")
