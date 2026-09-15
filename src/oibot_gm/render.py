@@ -300,6 +300,134 @@ def bank_png(title: str, subtitle: str, rows: list[dict], footer: str = "") -> b
     return buf.getvalue()
 
 
+def groups_png(profile: GameProfile, players: list[Player], result: RosterResult, cov, raid_buffs: list[dict], title: str, subtitle: str, assumptions: list[str]) -> bytes:
+    """Compact optimised-groups card: group panels (members + present/missing aura badges + totem picks),
+    a raid-buff strip, and the scoping assumptions."""
+    by = {p.signup_name: p for p in players}
+    buffs = {b.id: b for b in profile.party_buffs()}
+    n = len(result.groups)
+    W, M, GAP = 1100, 28, 12
+    cols = min(4, max(1, n))
+    rows = -(-n // cols)
+    pw = (W - 2 * M - GAP * (cols - 1)) // cols
+    f_title, f_h, f_body, f_small, f_tiny = font(28, True), font(16, True), font(15), font(13), font(12)
+    gsize = profile.comp_rules["group_size"]
+    ph = 36 + gsize * 22 + 8 + 34 + 18 + 10
+    rb_rows = -(-len(raid_buffs) // 3) if raid_buffs else 0
+    H = M + 64 + rows * (ph + GAP) + (30 + rb_rows * 40 + 10 if raid_buffs else 0) + 18 * len(assumptions) + 24
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+    d.text((M, M), title, font=f_title, fill=INK)
+    d.text((M, M + 34), subtitle, font=f_small, fill=MUTED)
+    top = M + 64
+    for gi, names in enumerate(result.groups):
+        x0 = M + (gi % cols) * (pw + GAP)
+        y0 = top + (gi // cols) * (ph + GAP)
+        g = cov.groups[gi]
+        d.rounded_rectangle([x0, y0, x0 + pw, y0 + ph], radius=8, fill=PANEL, outline=LINE)
+        d.text((x0 + 12, y0 + 8), f"Group {gi + 1}", font=f_h, fill=INK)
+        val = result.group_reports[gi].value if gi < len(result.group_reports) else 0
+        d.text((x0 + pw - 12 - d.textlength(f"+{val}", font=f_h), y0 + 8), f"+{val}", font=f_h, fill=OK)
+        y = y0 + 34
+        for name in names:
+            p = by[name]
+            _role_glyph(d, x0 + 12, y + 5, p.role, 11)
+            label = (p.character or p.signup_name)[:14]
+            d.text((x0 + 30, y), label, font=f_body, fill=CLASS.get(p.cls, INK))
+            d.text((x0 + 30 + d.textlength(label, font=f_body) + 6, y + 2), p.spec[:12], font=f_tiny, fill=MUTED)
+            y += 22
+        y = y0 + 34 + gsize * 22 + 8
+        # badges: present (coloured) then wanted-but-missing (grey, red outline); slot losers are skipped
+        bx = x0 + 12
+        bs = 24  # badge size; buffs worth < 2 to the group are noise and stay off the row
+        present_ids = [bid for bid in g.present if g.wanted.get(bid, 0) >= 2]
+        slot_taken = {buffs[bid].slot for bid in g.present if buffs[bid].slot}
+        missing_ids = [bid for bid, w in sorted(g.wanted.items(), key=lambda kv: -kv[1]) if w >= 2 and bid not in g.present and not (buffs[bid].slot and buffs[bid].slot in slot_taken)]
+        for bid in present_ids + missing_ids:
+            b = buffs[bid]
+            if bx + bs > x0 + pw - 12:
+                d.text((bx, y + 4), "…", font=f_small, fill=MUTED)
+                break
+            missing = bid not in g.present
+            _badge(d, bx, y, b.abbr, b.colour if not missing else NA, bs)
+            if missing:
+                d.rounded_rectangle([bx, y, bx + bs, y + bs], radius=6, outline="#E5484D", width=2)
+            bx += bs + 3
+        # totem picks (elements whose chosen totem matters to this group)
+        if g.picks:
+            picks = " · ".join(f"{slot.split('_')[1].title()} {buffs[bid].abbr}" for slot, bid in sorted(g.picks.items()) if not slot.endswith("_cd") and g.wanted.get(bid, 0) >= 2)
+            d.text((x0 + 12, y + 34), ("totems: " + (picks or "nothing wanted here"))[:60], font=f_tiny, fill=MUTED)
+        elif any(by[nm].cls == "Shaman" for nm in names):
+            d.text((x0 + 12, y + 34), "totems: nothing wanted here", font=f_tiny, fill=MUTED)
+    y = top + rows * (ph + GAP)
+    if raid_buffs:
+        d.text((M, y), "Raid-wide buffs", font=f_h, fill=INK)
+        d.text((M + 150, y + 3), "cast on the whole raid · count = providers in the pool", font=f_small, fill=MUTED)
+        y += 30
+        cw = (W - 2 * M) // 3
+        LEVEL = {"green": OK, "amber": WARN, "red": "#E5484D"}
+        for i, rb in enumerate(raid_buffs):
+            cx, cy = M + (i % 3) * cw, y + (i // 3) * 40
+            _badge(d, cx, cy, rb["abbr"][:4], rb["colour"] if rb["providers"] else NA, 26)
+            if not rb["providers"]:
+                d.rounded_rectangle([cx, cy, cx + 26, cy + 26], radius=6, outline="#E5484D", width=2)
+            d.text((cx + 34, cy + 1), f"{rb['name'][:22]} ×{len(rb['providers'])}", font=f_body, fill=LEVEL[rb["ok"]])
+            d.text((cx + 34, cy + 19), rb["detail"][:48], font=f_tiny, fill=MUTED)
+        y += rb_rows * 40 + 10
+    for a in assumptions:
+        d.text((M, y), ("assumes " + a)[:150], font=f_tiny, fill=MUTED)
+        y += 18
+    buf = BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
+def comp_png(lines: list, title: str, subtitle: str, notes: list[str]) -> bytes:
+    """Desired-comp table: target vs have per role/class/spec with the reason; officer targets marked."""
+    W, M, RH = 1100, 28, 30
+    f_title, f_h, f_body, f_small, f_tiny = font(28, True), font(15, True), font(16), font(13), font(12)
+    LEVEL = {"green": OK, "amber": WARN, "red": "#E5484D"}
+    H = M + 64 + 30 + max(1, len(lines)) * RH + 16 + 18 * len(notes) + 20
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+    d.text((M, M), title, font=f_title, fill=INK)
+    d.text((M, M + 34), subtitle, font=f_small, fill=MUTED)
+    y = M + 64
+    d.rounded_rectangle([M - 8, y, W - M + 8, y + 26 + max(1, len(lines)) * RH + 6], radius=8, fill=PANEL, outline=LINE)
+    for name, x in (("Slot", M), ("Want", M + 190), ("Have", M + 260), ("", M + 330), ("Why", M + 460)):
+        d.text((x + 4, y + 5), name.upper(), font=f_small, fill=MUTED)
+    y += 26
+    d.line([(M, y), (W - M, y)], fill=LINE)
+    for i, l in enumerate(lines):
+        yy = y + i * RH
+        if i % 2:
+            d.rectangle([M - 4, yy + 1, W - M + 4, yy + RH - 1], fill="#1F2630")
+        key = l.key
+        if key in ROLE_COLOUR:
+            _role_glyph(d, M + 4, yy + 9, key, 12)
+            d.text((M + 22, yy + 6), key.title(), font=f_body, fill=ROLE_COLOUR[key])
+        else:
+            cls = key.split(":")[0]
+            d.rounded_rectangle([M + 4, yy + 7, M + 12, yy + 24], radius=2, fill=CLASS.get(cls, INK))
+            d.text((M + 20, yy + 6), key.replace(":", " · ")[:20], font=f_body, fill=CLASS.get(cls, INK))
+        want = f"{l.want}" + (f"–{l.max}" if l.max is not None and l.max != l.want else "")
+        d.text((M + 194, yy + 6), want, font=f_body, fill=INK)
+        d.text((M + 264, yy + 6), str(l.have), font=f_body, fill=LEVEL[l.level])
+        bw = 110
+        d.rounded_rectangle([M + 334, yy + 12, M + 334 + bw, yy + 18], radius=3, fill=BARBG)
+        frac = min(1.0, l.have / l.want) if l.want else 1.0
+        d.rounded_rectangle([M + 334, yy + 12, M + 334 + int(bw * frac), yy + 18], radius=3, fill=LEVEL[l.level])
+        why = ("officer: " if l.source == "officer" else "") + l.why
+        d.text((M + 464, yy + 8), why[:96], font=f_tiny, fill=WARN if l.source == "officer" else MUTED)
+    y += max(1, len(lines)) * RH + 16
+    for a in notes:
+        d.text((M, y), ("assumes " + a)[:150], font=f_tiny, fill=MUTED)
+        y += 18
+    buf = BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
 def class_badge_png(cls: str, size: int = 96) -> bytes:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)

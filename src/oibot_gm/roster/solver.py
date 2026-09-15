@@ -172,6 +172,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         return out
 
     synergy_terms = []
+    slot_provs: dict[tuple[str, int], list] = {}  # (slot, g) -> prov vars of the buffs sharing that slot
     for b in profile.party_buffs():
         any_provider = any(b.provided_by(specs[p.signup_name]) or (p.signup_name in off_specs and b.provided_by(off_specs[p.signup_name])) for p in players)
         if not any_provider:
@@ -181,6 +182,8 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
             if b.stacking == "unique":
                 prov = m.NewBoolVar(f"prov_{b.id}_{g}")
                 m.Add(prov <= sum(prov_vars))
+                if b.slot:
+                    slot_provs.setdefault((b.slot, g), []).append((prov, prov_vars))
                 for q in players:
                     for v, s in presence_terms(q, g, b):
                         val = int(round(b.benefit(s) * SCALE))
@@ -206,6 +209,11 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
                                 m.Add(w <= pv)
                                 m.Add(w <= qv)
                                 synergy_terms.append(val * w)
+
+    # slot exclusivity: a group with k shamans gets at most k totems of the same element
+    for (_slot, g), entries in slot_provs.items():
+        provider_vars = {id(v): v for _, pv in entries for v in pv}
+        m.Add(sum(prov for prov, _ in entries) <= sum(provider_vars.values()))
 
     # symmetry breaking: the first signed player anchors group 0 (unless pins fix the numbering)
     if not opts.pins:
@@ -285,8 +293,11 @@ def group_reports(profile: GameProfile, players: list[Player], groups: list[list
         members = [by_name[n] for n in names]
         lines = []
         gval = 0.0
+        from . import coverage as _cov
+
+        present, _picks, _wanted = _cov.group_buffs(profile, [(p.signup_name, profile.spec(p.cls, p.spec)) for p in members])
         for b in profile.party_buffs():
-            provs = [p for p in members if b.provided_by(profile.spec(p.cls, p.spec))]
+            provs = [p for p in members if p.signup_name in present.get(b.id, [])]
             if not provs:
                 continue
             if b.stacking == "unique":

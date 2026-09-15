@@ -20,11 +20,17 @@ Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <ch
   availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason];
   team_member: add/remove <member> [character] to/from roster <key> (curated roster; defaults to their main).
 Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
+Comp ideals (officer): comp_target: for roster <key>, a slot = role (tank|healer|melee|ranged), a class ("Paladin")
+  or "Class:Spec" ("Shaman:Enhancement"); min and/or max count and an optional note (the justification shown on the
+  desired-comp card). comp_target_clear removes an officer target so the derived value applies again.
 """
 
 
 class ConfigOp(BaseModel):
-    op: Literal["set", "team_set", "team_add", "team_remove", "team_member", "role_add", "role_remove", "rank", "confirm", "set_main", "availability", "absence", "policy_append"]
+    op: Literal["set", "team_set", "team_add", "team_remove", "team_member", "role_add", "role_remove", "rank", "confirm", "set_main", "availability", "absence", "policy_append", "comp_target", "comp_target_clear"]
+    slot: Optional[str] = Field(default=None, description="comp_target*: role name, Class, or Class:Spec")
+    min: Optional[int] = Field(default=None, description="comp_target: wanted count")
+    max: Optional[int] = Field(default=None, description="comp_target: cap")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel")
     team: Optional[str] = Field(default=None, description="team key for team_* ops and availability")
     field: Optional[str] = Field(default=None, description="for op=team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders")
@@ -114,6 +120,14 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"append to {op.doc} policy: “{op.text}”"
     if op.op == "team_member":
         return f"team {op.team or reg.config.team_keys()[0]}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
+    if op.op in ("comp_target", "comp_target_clear"):
+        key = op.team or reg.config.team_keys()[0]
+        cur = ((cfg.team(key) or {}).get("comp_targets") or {}).get(op.slot or "")
+        cur_s = (f"{cur.get('min', '?')}" + (f"–{cur['max']}" if cur.get("max") is not None else "")) if cur else "derived"
+        if op.op == "comp_target_clear":
+            return f"roster {key} comp {op.slot}: {cur_s} → derived"
+        new_s = f"{op.min if op.min is not None else (cur or {}).get('min', '?')}" + (f"–{op.max}" if op.max is not None else "")
+        return f"roster {key} comp {op.slot}: {cur_s} → {new_s}" + (f" ({op.reason or op.text})" if (op.reason or op.text) else "")
     return str(op)
 
 
@@ -205,6 +219,28 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             return f"{m.display_name} removed from {key}"
         _, c = reg.roster_add(m.discord_id, key, by, op.character)
         return f"{m.display_name} ({c.label}) added to {key}"
+    if op.op in ("comp_target", "comp_target_clear"):
+        key = op.team or cfg.team_keys()[0]
+        t = cfg.team(key)
+        if t is None:
+            raise RegistryError(f"no roster {key}")
+        slot = (op.slot or "").strip()
+        if slot not in ("tank", "healer", "melee", "ranged"):
+            cls, _, spec = slot.partition(":")
+            if cls not in reg.profile.classes or (spec and spec not in reg.profile.classes[cls]):
+                raise RegistryError(f"unknown comp slot '{slot}' (role, Class or Class:Spec)")
+        targets = t.setdefault("comp_targets", {})
+        if op.op == "comp_target_clear":
+            targets.pop(slot, None)
+            reg.save_config(f"roster {key} comp target {slot} cleared (by {by})")
+            return f"{key}: {slot} back to derived"
+        cur = targets.get(slot, {})
+        entry = {"min": op.min if op.min is not None else cur.get("min", 0), "max": op.max if op.max is not None else cur.get("max"), "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
+        if entry["max"] is not None and entry["max"] < entry["min"]:
+            raise RegistryError(f"{slot}: max {entry['max']} below min {entry['min']}")
+        targets[slot] = {k: v for k, v in entry.items() if v is not None}
+        reg.save_config(f"roster {key} comp target {slot} → {targets[slot]} (by {by})")
+        return f"{key}: {slot} = {entry['min']}" + (f"–{entry['max']}" if entry["max"] is not None else "")
     if op.op == "policy_append":
         if policy_store is None or not op.doc or not op.text:
             raise RegistryError("policy append needs a doc and text")

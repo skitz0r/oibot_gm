@@ -14,6 +14,7 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
 ## Layout
 ```
 profiles/tbc/          GameProfile YAML (buffs.yaml drives both the solver and WCL party inference)
+profiles/forever/      Classic-era buff matrix: `slot` = mutually exclusive totems per element, `scope: raid` = cast buffs, `status` = evidence level
 fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg, gitignored): REAL (BisCouncil ledger, WCL attendance/roster) + MOCK (tiers, wishlists, policy, ranks)
 src/oibot_gm/
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
@@ -34,8 +35,10 @@ src/oibot_gm/
   raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
   discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
-  discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only), character bank table and per-roster
-                       pool-readiness cards + change log in the analytics channel; driven by Registry.listeners (diff_member), debounced
+  discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with the character
+                       bank, and per roster: pool readiness, optimised groups (solver on the pool, totem picks, raid buffs), desired comp
+                       (derived + officer targets, @mention to change) + change log; driven by Registry.listeners (diff_member), debounced
+  comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   configops.py         plain-text config: whitelisted ConfigOp schema, describe() diff, apply() via the same code paths as commands
   discord_policy.py    /policy show|edit|reload, /loot-rule, /comp-rule, /gm change, @mention in the ops channel
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks

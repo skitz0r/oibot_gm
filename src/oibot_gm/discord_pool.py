@@ -13,13 +13,71 @@ from io import BytesIO
 
 import discord
 
-from . import render
+from . import comp as comp_mod, render
 from .discord_registry import registration_card, registration_view
 from .registry import Registry, bank_rows, pool_health_data
 
 LEVEL_DOT = {"green": "🟢", "amber": "🟡", "red": "🔴"}
 DEBOUNCE_S = 3.0
 BANK_KEY = "_bank"  # analytics_message_ids slot for the character bank card
+
+
+def _stamp() -> str:
+    return datetime.now().strftime("%a %b %d %H:%M")
+
+
+def groups_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.File]:
+    """Optimised groups for the pool at this roster's size, with per-group aura coverage and raid buffs."""
+    key = roster.get("key", "main")
+    players, result, cov = comp_mod.optimize(reg, roster)
+    rb = comp_mod.raid_buff_status(reg.profile, players)
+    fname = f"groups-{key}.png"
+    if result is None or cov is None:
+        e = discord.Embed(colour=0x98A3B5, description=f"**Groups · {key}** — no mains in the pool yet" if not players else f"**Groups · {key}** — the solver couldn't build groups from {len(players)} main(s) yet")
+        png = render.health_png(f"Optimised groups · {key}", "waiting for registrations", (len(players), int(roster.get("size") or 20), 0, 0), [], [], [], headcount_text=f"{len(players)} mains")
+        return e, discord.File(BytesIO(png), filename=fname)
+    png = render.groups_png(reg.profile, players, result, cov, rb,
+                            f"Optimised groups · {roster.get('name', key)} ({roster.get('size', 20)}-man)",
+                            f"{len(result.selected)} of {len(players)} mains placed · synergy {result.synergy_value} · updated {_stamp()}",
+                            reg.profile.buff_assumptions())
+    file = discord.File(BytesIO(png), filename=fname)
+    missing_raid = [r for r in rb if not r["providers"]]
+    worst = "red" if missing_raid or any(g.missing_summary and "nobody on roster" in " ".join(g.missing_summary) for g in cov.groups) else ("amber" if any(g.missing_summary for g in cov.groups) else "green")
+    colour = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]
+    e = discord.Embed(colour=colour, description=f"{LEVEL_DOT[worst]} **{len(result.groups)}** groups from **{len(result.selected)}** mains · " + " · ".join(f"{ico('role', r)} {n}" for r, n in result.role_counts.items()))
+    e.set_image(url=f"attachment://{fname}")
+    if cov.unmet_raidwide:
+        e.add_field(name="No provider in the pool", value=", ".join(cov.unmet_raidwide)[:900], inline=False)
+    if missing_raid:
+        e.add_field(name="Raid buffs nobody brings", value=" ".join(f"{ico('buff', r['id'])}" for r in missing_raid) + "\n" + ", ".join(r["name"] for r in missing_raid)[:800], inline=False)
+    adv = [a for a in result.advisories if a.startswith(("🔴", "🟡"))][:3]
+    if adv:
+        e.add_field(name="Advisories", value="\n".join(adv)[:900], inline=False)
+    e.set_footer(text="Solver output on the whole pool; the real sheet decides who plays. Badges: coloured = aura present in group, red outline = wanted but missing")
+    return e, file
+
+
+def comp_card(reg: Registry, roster: dict) -> tuple[discord.Embed, discord.File]:
+    """Desired comp for this roster's size vs the pool, with justifications; officer targets from roster config."""
+    key = roster.get("key", "main")
+    players = comp_mod.pool_players(reg)
+    size = int(roster.get("size") or 20)
+    ic = comp_mod.ideal_comp(reg.profile, size, players, roster.get("comp_targets") or {}, roster.get("instance"))
+    n_off = sum(1 for l in ic.lines if l.source == "officer")
+    png = render.comp_png(ic.lines, f"Desired comp · {roster.get('name', key)} ({size}-man, {ic.groups} groups)",
+                          f"derived from the buff matrix and comp rules · {n_off} officer target(s) · updated {_stamp()}", ic.notes)
+    fname = f"comp-{key}.png"
+    file = discord.File(BytesIO(png), filename=fname)
+    short = [l for l in ic.lines if l.level == "red"]
+    over = [l for l in ic.lines if l.max is not None and l.have > l.max]
+    worst = "red" if short else ("amber" if over or any(l.level == "amber" for l in ic.lines) else "green")
+    colour = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]
+    e = discord.Embed(colour=colour, description=f"{LEVEL_DOT[worst]} **Desired comp · {key}** — " + (("short: " + ", ".join(f"{l.key} {l.have}/{l.want}" for l in short[:6])) if short else "every slot filled"))
+    e.set_image(url=f"attachment://{fname}")
+    if over:
+        e.add_field(name="Over cap", value=", ".join(f"{l.key} {l.have}/{l.max}" for l in over)[:900], inline=False)
+    e.set_footer(text=f"Change the ideals in plain text: @mention me here, e.g. “{key}: we want 3 tanks”, “cap hunters at 3 because of Trueshot”, “clear the paladin target”")
+    return e, file
 
 
 def bank_card(reg: Registry) -> tuple[discord.Embed, discord.File]:
@@ -79,7 +137,7 @@ class PoolMixin:
             return
         if kind == "member":
             self.loop.create_task(self.post_pool_log(reg, lines))
-        elif not any(l.startswith(("roster", "rosters", "analytics")) for l in lines):
+        elif not any(l.startswith(("roster", "rosters", "team", "analytics")) for l in lines):
             return  # config commits that can't move the numbers (channels, timezone, owner)
         t = self._pool_timers.pop(reg.key, None)
         if t:
@@ -105,10 +163,17 @@ class PoolMixin:
         out = []
         changed = False
         rosters = reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]
-        for key in [BANK_KEY] + [r["key"] for r in rosters]:
+        keys = [BANK_KEY]
+        for r in rosters:
+            keys += [r["key"], f"comp:{r['key']}", f"groups:{r['key']}"]
+        for key in keys:
             try:
                 if key == BANK_KEY:
                     embed, file = await asyncio.to_thread(bank_card, reg)
+                elif key.startswith("comp:"):
+                    embed, file = await asyncio.to_thread(comp_card, reg, next(r for r in rosters if r["key"] == key[5:]))
+                elif key.startswith("groups:"):
+                    embed, file = await asyncio.to_thread(groups_card, reg, next(r for r in rosters if r["key"] == key[7:]), self.ico)
                 else:
                     embed, file = await asyncio.to_thread(pool_card, reg, next(r for r in rosters if r["key"] == key), self.ico)
             except Exception as e:  # noqa: BLE001
@@ -135,7 +200,7 @@ class PoolMixin:
                 changed = True
             out.append(msg)
         # drop cards for rosters that no longer exist
-        for key in [k for k in reg.config.analytics_message_ids if k != BANK_KEY and k not in {r["key"] for r in rosters}]:
+        for key in [k for k in reg.config.analytics_message_ids if k not in keys]:
             try:
                 await (await ch.fetch_message(reg.config.analytics_message_ids[key])).delete()
             except Exception:  # noqa: BLE001

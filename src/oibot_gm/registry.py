@@ -282,7 +282,16 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
             hint = f"short {n - have} → recruit"
         roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
     buffs = []
+    seen_slots: set[str] = set()
     for b in profile.party_buffs():
+        if b.slot:  # one badge per totem element: the highest-value totem stands for the slot
+            best = max((x for x in profile.party_buffs() if x.slot == b.slot), key=lambda x: x.max_benefit)
+            if b.slot in seen_slots or best.id != b.id or best.max_benefit < 2:
+                continue
+            seen_slots.add(b.slot)
+            providers = [m.display_name for m, c in mains if any(x.provided_by(profile.spec(c.cls, c.spec)) for x in profile.party_buffs() if x.slot == b.slot)]
+            buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
+            continue
         providers = [m.display_name for m, c in mains if b.provided_by(profile.spec(c.cls, c.spec))]
         buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
     not_on_roster = [m.display_name for m, c in mains if key not in c.rosters]

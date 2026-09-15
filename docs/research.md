@@ -28,6 +28,25 @@ _Compiled 2026-09-13. This is reference material; the design proposal is in [des
 
 Sources: [Blizzard announcement](https://news.blizzard.com/en-us/article/24302093/carve-a-new-path-with-world-of-warcraft-forever) · [What's Next recap](https://news.blizzard.com/en-us/article/24303862/world-of-warcraft-forever-whats-next-panel-recap) · [Deep Dive recap](https://news.blizzard.com/en-us/article/24303313/world-of-warcraft-forever-deep-dive-panel-recap) · [Icy Veins roadmap](https://www.icy-veins.com/wow/news/warcraft-forever-roadmap-unveils-raid-unlocks-and-major-updates/) · [Forum: Forever addons](https://us.forums.blizzard.com/en/wow/t/forever-addons/2347307)
 
+### 1a. Forever buffs and group mechanics (checked 2026-09-15)
+
+What the profile's `buffs.yaml` can lean on, by confidence:
+
+| Claim | Status | Source |
+|---|---|---|
+| Blessing of Kings, Divine Spirit and Improved Mark of the Wild are **baseline** (no talent tax) | confirmed | [Blizzard deep-dive recap](https://news.blizzard.com/en-us/article/24303313/world-of-warcraft-forever-deep-dive-panel-recap) |
+| Trueshot Aura: "+30 Ranged Attack Power to party members within 45 yards", MM row 4 — **party-scoped, ranged-only** | confirmed (beta capture, may change) | [classicwowforever.com hunter](https://classicwowforever.com/class-changes/hunter/) |
+| Blessings last 1 h; one blessing per paladin still applies | reported | [zockify paladin](https://www.zockify.com/forever/paladin/), [classicwow.gg paladin](https://classicwow.gg/forever/guides/paladin) |
+| Totems: "static radius", new **Totemic Projection** moves all totems | reported | [Icy Veins shaman](https://www.icy-veins.com/wow-forever/shaman-class-overview), [zockify shaman](https://www.zockify.com/forever/shaman/) |
+| Totem scope (party vs raid), Windfury/Grace of Air/Strength of Earth/Mana Spring/Mana Tide values | **not published** → profile assumes Vanilla (party-wide) | — |
+| Bloodlust/Heroism, Totem of Wrath, Wrath of Air, Unleashed Rage, Ferocious Inspiration (TBC-era) | **no evidence they exist** → dropped from the Forever profile | — |
+| Vampiric Embrace: 30 s debuff with a cooldown (party heal, not a mana battery) | reported (beta capture) | [classicwowforever.com priest](https://classicwowforever.com/class-changes/priest/) |
+| Shadow Weaving becomes a personal buff, not a raid debuff | reported | same |
+| New spells: Lava Burst, Riptide, Wild Growth, Penance, Prayer of Mending, Berserk, Lone Wolf, Maelstrom Weapon | reported (beta capture) | classicwowforever.com class pages |
+| Battle Shout, Blood Pact, Leader of the Pack, Moonkin Aura, Sanctity Aura scope | not addressed → assumed Vanilla party-wide | — |
+
+The cards print each entry's `status` (confirmed / reported / assumed) so officers can see which numbers are a guess. Revisit once Blizzard publishes class data or the beta datamine settles (beta runs Sep 17 → ~Oct 22).
+
 ---
 
 ## 2. letmelcthatforyou (prior art)

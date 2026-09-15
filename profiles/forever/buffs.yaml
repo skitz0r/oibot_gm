@@ -1,112 +1,164 @@
-# FOREVER PLACEHOLDER: cloned from profiles/tbc on 2026-09-13. Revise when WoW: Forever data (buffs, raid sizes, loot) is known.
-# GameProfile: TBC party-scoped buff matrix.
+# GameProfile: WoW: Forever buff matrix (Classic-era rules). Rewritten 2026-09-15 from the TBC clone.
 #
-# This is the file the group solver optimises against AND the file the
-# WCL party-inference uses (scope/kind decide what counts as a party signal).
+# Forever is "Classic continued", so the working assumption is Vanilla scoping:
+#   party  = totems, auras, shouts, Blood Pact (5-man group; totems have a static radius)
+#   raid   = cast buffs: Fortitude, Divine Spirit, Mark of the Wild, Arcane Intellect,
+#            Shadow Protection, Paladin Blessings (one blessing per paladin, 1 h)
+# Every entry carries `status`: confirmed (Blizzard/beta capture), reported (fan-site claim),
+# assumed (Vanilla behaviour, nothing published for Forever). The analytics cards print these,
+# so keep them honest. Sources: docs/research.md §1a.
 #
-# scope:    party | raid | class | self   (only `party` matters for grouping)
-# kind:     aura | proc                   (procs are ignored by inference)
-# stacking: unique | stack                (unique: one provider per group is
-#                                          enough; stack: each provider adds)
-# value:    points per beneficiary, keyed by spec attribute. The highest
-#           matching key applies; `spec:<Name>` overrides win. Keys:
-#           all | physical | spell | mana | melee | ranged | healer | tank
-# providers: specs that bring it. `Shaman:*` means any spec of the class.
-#
-# The numbers are a starting point for the T6 meta, not gospel. They are
-# meant to be tuned against real WCL group layouts (shadow mode).
+# scope:    party | raid | class | self   (only `party` drives grouping)
+# kind:     aura | proc
+# stacking: unique | stack
+# slot:     one provider can only bring one buff per slot at a time (shaman totems by element).
+#           Coverage and the solver pick the best totem per element for each group.
+# value:    points per beneficiary by spec attribute (all | physical | spell | mana | melee | ranged |
+#           healer | tank | spec:<Name>).
+# choices:  raid-scope only; a list of things each provider fills one of, in priority order (blessings).
 buffs:
+  # ---------------------------------------------------------------- shaman totems (party, static radius)
   - id: windfury_totem
     icon: {abbr: WF, colour: "#5C9BFF"}
     name: Windfury Totem
-    providers: [Shaman:Enhancement]
-    scope: party
-    kind: aura
-    stacking: unique
-    value: {melee: 10, tank: 3, "spec:Enhancement": 2, "spec:Feral": 4}
-    note: Enh shaman drops it; other shamans could but are wanted elsewhere.
-
-  - id: unleashed_rage
-    icon: {abbr: UR, colour: "#C0392B"}
-    name: Unleashed Rage (10% AP)
-    providers: [Shaman:Enhancement]
-    scope: party
-    kind: aura
-    stacking: unique
-    value: {physical: 5, tank: 2}
-
-  - id: bloodlust
-    icon: {abbr: BL, colour: "#E5484D"}
-    name: Bloodlust / Heroism
     providers: [Shaman:*]
     scope: party
     kind: aura
     stacking: unique
-    value: {physical: 6, spell: 6, healer: 3, tank: 2}
-    note: Party-wide in TBC, so one shaman per group is the classic layout.
+    slot: shaman_air
+    status: assumed
+    value: {melee: 10, tank: 3, "spec:Enhancement": 2, "spec:Feral": 4}
+    note: Air totem. Vanilla party-wide; Forever scope not published.
 
-  - id: totem_of_wrath
-    icon: {abbr: ToW, colour: "#F0A030"}
-    name: Totem of Wrath
-    providers: [Shaman:Elemental]
+  - id: grace_of_air
+    icon: {abbr: GoA, colour: "#9FD8F5"}
+    name: Grace of Air Totem
+    providers: [Shaman:*]
     scope: party
     kind: aura
     stacking: unique
-    value: {spell: 6}
+    slot: shaman_air
+    status: assumed
+    value: {ranged: 5, "spec:Feral": 3, "spec:Combat": 2, "spec:Assassination": 2, "spec:Subtlety": 2}
+    note: Air totem (agility). Wins the air slot in hunter/rogue groups without warriors.
 
-  - id: wrath_of_air
-    icon: {abbr: WoA, colour: "#7FD3F5"}
-    name: Wrath of Air Totem
-    providers: [Shaman:Elemental, Shaman:Restoration]
+  - id: tranquil_air
+    icon: {abbr: TqA, colour: "#B7E4F2"}
+    name: Tranquil Air Totem
+    providers: [Shaman:*]
     scope: party
     kind: aura
     stacking: unique
-    value: {spell: 3, healer: 2}
+    slot: shaman_air
+    status: assumed
+    value: {"spec:Shadow": 3, "spec:Fire": 2, "spec:Frost": 2, "spec:Arcane": 2, "spec:Destruction": 2, "spec:Affliction": 2, "spec:Demonology": 2, "spec:Balance": 2}
+    note: Air totem (threat). Only wins the slot in a pure caster group.
+
+  - id: strength_of_earth
+    icon: {abbr: SoE, colour: "#B0855B"}
+    name: Strength of Earth Totem
+    providers: [Shaman:*]
+    scope: party
+    kind: aura
+    stacking: unique
+    slot: shaman_earth
+    status: assumed
+    value: {melee: 5, tank: 3}
+    note: Earth totem.
+
+  - id: stoneskin
+    icon: {abbr: SS, colour: "#8D8D8D"}
+    name: Stoneskin Totem
+    providers: [Shaman:*]
+    scope: party
+    kind: aura
+    stacking: unique
+    slot: shaman_earth
+    status: assumed
+    value: {tank: 2}
+    note: Earth totem; loses to Strength of Earth unless the group is all casters/healers.
+
+  - id: mana_spring
+    icon: {abbr: MSp, colour: "#4FB3E8"}
+    name: Mana Spring Totem
+    providers: [Shaman:*]
+    scope: party
+    kind: aura
+    stacking: unique
+    slot: shaman_water
+    status: assumed
+    value: {mana: 3, healer: 4}
+    note: Water totem.
 
   - id: mana_tide
-    icon: {abbr: MT, colour: "#4FB3E8"}
-    name: Mana Tide / Mana Spring
+    icon: {abbr: MT, colour: "#2F8FD6"}
+    name: Mana Tide Totem
     providers: [Shaman:Restoration]
     scope: party
     kind: aura
     stacking: unique
-    value: {healer: 5, mana: 3}
+    slot: shaman_water_cd
+    status: assumed
+    value: {healer: 5, mana: 2}
+    note: Restoration talent (Vanilla). Cooldown totem, so it does not compete with Mana Spring for the slot.
 
-  - id: ferocious_inspiration
-    icon: {abbr: FI, colour: "#ABD473"}
-    name: Ferocious Inspiration (3% dmg, stacks)
-    providers: [Hunter:BeastMastery]
+  - id: healing_stream
+    icon: {abbr: HSt, colour: "#7FD3C8"}
+    name: Healing Stream Totem
+    providers: [Shaman:*]
     scope: party
     kind: aura
-    stacking: stack
-    value: {physical: 4, spell: 4}
+    stacking: unique
+    slot: shaman_water
+    status: assumed
+    value: {tank: 2, melee: 1}
+    note: Water totem; usually loses the slot to Mana Spring.
 
+  - id: fire_resistance
+    icon: {abbr: FR, colour: "#E06A3A"}
+    name: Fire Resistance Totem
+    providers: [Shaman:*]
+    scope: party
+    kind: aura
+    stacking: unique
+    slot: shaman_fire
+    status: assumed
+    value: {tank: 1}
+    note: Fire slot placeholder; encounter-specific (Onyxia). Not a grouping driver.
+
+  # ---------------------------------------------------------------- other party auras
   - id: trueshot_aura
     icon: {abbr: TA, colour: "#8FBF5A"}
-    name: Trueshot Aura
+    name: Trueshot Aura (+30 ranged AP)
     providers: [Hunter:Marksmanship]
     scope: party
     kind: aura
     stacking: unique
-    value: {physical: 4}
+    status: confirmed
+    value: {ranged: 3, "spec:Elemental": 0, "spec:Balance": 0, "spec:Shadow": 0, "spec:Fire": 0, "spec:Frost": 0, "spec:Arcane": 0, "spec:Affliction": 0, "spec:Destruction": 0, "spec:Demonology": 0}
+    note: "Beta capture: 'Increases the Ranged Attack Power of party members within 45 yards by 30' (MM row 4). Ranged-only now."
 
   - id: leader_of_the_pack
     icon: {abbr: LotP, colour: "#FF7D0A"}
-    name: Leader of the Pack (5% crit)
+    name: Leader of the Pack (3% crit)
     providers: [Druid:Feral, Druid:Guardian]
     scope: party
     kind: aura
     stacking: unique
-    value: {physical: 5, tank: 2}
+    status: assumed
+    value: {physical: 4, tank: 2}
+    note: Vanilla Feral talent; party-wide. Not in the Forever druid captures either way.
 
   - id: moonkin_aura
     icon: {abbr: MA, colour: "#D7A6FF"}
-    name: Moonkin Aura (5% spell crit)
+    name: Moonkin Aura (3% spell crit)
     providers: [Druid:Balance]
     scope: party
     kind: aura
     stacking: unique
-    value: {spell: 5}
+    status: assumed
+    value: {spell: 4}
+    note: Vanilla Balance talent; party-wide.
 
   - id: battle_shout
     icon: {abbr: BS, colour: "#C79C6E"}
@@ -115,7 +167,9 @@ buffs:
     scope: party
     kind: aura
     stacking: unique
+    status: assumed
     value: {physical: 4, tank: 2}
+    note: Vanilla party-wide, 2 min. Fury warriors keep it up.
 
   - id: blood_pact
     icon: {abbr: BP, colour: "#9482C9"}
@@ -124,39 +178,109 @@ buffs:
     scope: party
     kind: aura
     stacking: unique
-    value: {all: 1}
-
-  - id: vampiric_touch
-    icon: {abbr: VT, colour: "#B39DDB"}
-    name: Vampiric Touch (mana return)
-    providers: [Priest:Shadow]
-    scope: party
-    kind: aura
-    stacking: unique
-    value: {mana: 4, healer: 3, "spec:Shadow": 0}
-    note: The "mana group" anchor.
+    status: assumed
+    value: {all: 1, tank: 2}
+    note: Vanilla party-wide, needs an imp out. Demonic Sacrifice locks won't have one.
 
   - id: sanctity_aura
     icon: {abbr: SA, colour: "#F58CBA"}
-    name: Sanctity Aura
+    name: Sanctity Aura (10% holy)
     providers: [Paladin:Retribution]
     scope: party
     kind: aura
     stacking: unique
-    value: {"spec:Retribution": 0, "spec:Protection": 2, all: 1}
+    status: assumed
+    value: {"spec:Retribution": 0, "spec:Protection": 2, "spec:Holy": 1, all: 0}
+    note: Vanilla Ret talent; party-wide. One paladin aura at a time (Devotion/Retribution/Concentration/Sanctity).
 
-  # --- signals that show up in logs but must NOT drive grouping ---
+  - id: vampiric_embrace
+    icon: {abbr: VE, colour: "#B39DDB"}
+    name: Vampiric Embrace (party heal)
+    providers: [Priest:Shadow]
+    scope: party
+    kind: aura
+    stacking: unique
+    status: reported
+    value: {melee: 1, ranged: 1, tank: 1}
+    note: Beta capture says the debuff is 30 s with a cooldown; small party heal. Not a mana battery like TBC's Vampiric Touch.
+
+  # ---------------------------------------------------------------- raid-wide cast buffs (coverage = enough providers)
+  - id: fortitude
+    icon: {abbr: Fort, colour: "#E6E6E6"}
+    name: "Power Word: Fortitude"
+    providers: [Priest:*]
+    scope: raid
+    kind: aura
+    stacking: unique
+    status: assumed
+    value: {all: 3}
+    note: Prayer of Fortitude covers the raid; 1 priest is enough, 2 is comfortable.
+
+  - id: divine_spirit
+    icon: {abbr: Spirit, colour: "#C9D6FF"}
+    name: Divine Spirit
+    providers: [Priest:*]
+    scope: raid
+    kind: aura
+    stacking: unique
+    status: confirmed
+    value: {mana: 2, healer: 3}
+    note: "Blizzard deep dive: Divine Spirit is baseline (was a Discipline talent), so any priest brings it."
+
+  - id: shadow_protection
+    icon: {abbr: SP, colour: "#7E6AA8"}
+    name: Shadow Protection
+    providers: [Priest:*]
+    scope: raid
+    kind: aura
+    stacking: unique
+    status: assumed
+    value: {all: 1}
+
+  - id: mark_of_the_wild
+    icon: {abbr: MotW, colour: "#FF7D0A"}
+    name: Mark of the Wild (improved)
+    providers: [Druid:*]
+    scope: raid
+    kind: aura
+    stacking: unique
+    status: confirmed
+    value: {all: 3}
+    note: "Blizzard deep dive: Improved Mark of the Wild is baseline; Gift of the Wild covers the raid."
+
+  - id: arcane_intellect
+    icon: {abbr: AI, colour: "#69CCF0"}
+    name: Arcane Intellect
+    providers: [Mage:*]
+    scope: raid
+    kind: aura
+    stacking: unique
+    status: assumed
+    value: {mana: 3, healer: 2}
+    note: Arcane Brilliance covers the raid.
+
+  - id: blessings
+    icon: {abbr: Bless, colour: "#F58CBA"}
+    name: Paladin Blessings
+    providers: [Paladin:*]
+    scope: raid
+    kind: aura
+    stacking: stack
+    status: reported
+    choices: [Kings, Might, Wisdom, Salvation, Light, Sanctuary]
+    wanted: 4
+    value: {all: 3}
+    note: >-
+      Each paladin keeps one Greater Blessing on the raid; blessings reported to last 1 h in Forever and
+      Kings is baseline (no talent tax). Priority order above is the classic default — Kings first, then Might
+      for the physical groups, Wisdom for casters/healers, Salvation for threat. 4 paladins = full coverage.
+
+  # ---------------------------------------------------------------- log signals that must not drive grouping
   - id: windfury_attack
     name: Windfury Attack
     providers: []
     scope: party
     kind: proc
     stacking: unique
-    value: {}
-  - id: greater_blessings
-    name: Greater Blessings (any)
-    providers: [Paladin:*]
-    scope: class
-    kind: aura
-    stacking: unique
+    status: assumed
     value: {}

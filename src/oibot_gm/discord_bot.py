@@ -841,9 +841,9 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
-        # @mention in the ops channel = plain-text configuration
+        # @mention in the ops or analytics channel = plain-text configuration (comp ideals live in analytics)
         reg = self.registries.by_discord.get(message.guild.id)
-        if reg and self.user in message.mentions and reg.config.ops_channel_id == message.channel.id:
+        if reg and self.user in message.mentions and message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id):
             text = message.content.replace(self.user.mention, "").strip()
             if text:
                 member = message.author

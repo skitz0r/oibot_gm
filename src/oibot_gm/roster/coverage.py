@@ -1,11 +1,15 @@
 """Buff coverage matrix: for every player in every group, which party buffs
-they would benefit from and whether a provider is in their group."""
+they would benefit from and whether a provider is in their group.
+
+Slot-aware: buffs that share a `slot` (shaman totems by element) are mutually
+exclusive per provider, so a group with one shaman gets the one air totem that
+helps its members most, not every air totem at once."""
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..models import Player, RosterResult
-from ..profiles import GameProfile
+from ..profiles import Buff, GameProfile, SpecInfo
 
 
 class Cell(BaseModel):
@@ -34,12 +38,45 @@ class GroupCoverage(BaseModel):
     index: int
     players: list[PlayerCoverage]
     missing_summary: list[str]  # "Windfury Totem (wanted by 3, +26)"
+    picks: dict[str, str] = Field(default_factory=dict)  # slot -> buff id chosen for this group (totems)
+    present: dict[str, list[str]] = Field(default_factory=dict)  # buff id -> providers in group
+    wanted: dict[str, float] = Field(default_factory=dict)  # buff id -> total benefit to the group if present
 
 
 class Coverage(BaseModel):
     buffs: list[str]  # column order (buff names)
     groups: list[GroupCoverage]
     unmet_raidwide: list[str]  # buffs nobody on the roster can provide
+
+
+def group_buffs(profile: GameProfile, members: list[tuple[str, SpecInfo]]) -> tuple[dict[str, list[str]], dict[str, str], dict[str, float]]:
+    """(present: buff id -> providers, picks: slot -> buff id, wanted: buff id -> group benefit) for one group.
+    Per slot, each provider brings the one buff worth most to the group; unslotted buffs are simply present
+    when someone provides them."""
+    buffs = profile.party_buffs()
+    wanted = {b.id: sum(b.benefit(s) for _, s in members) for b in buffs}
+    present: dict[str, list[str]] = {}
+    picks: dict[str, str] = {}
+    slots: dict[str, list[Buff]] = {}
+    for b in buffs:
+        if b.slot:
+            slots.setdefault(b.slot, []).append(b)
+        else:
+            provs = [n for n, s in members if b.provided_by(s)]
+            if provs:
+                present[b.id] = provs
+    for slot, sbuffs in slots.items():
+        # providers of anything in the slot; each fills one buff, best value first
+        provs = [n for n, s in members if any(b.provided_by(s) for b in sbuffs)]
+        if not provs:
+            continue
+        ranked = sorted(sbuffs, key=lambda b: -wanted[b.id])
+        for b in ranked[: len(provs)]:
+            who = [n for n, s in members if b.provided_by(s)]
+            if who and wanted[b.id] > 0:
+                present[b.id] = who
+                picks.setdefault(slot, b.id)
+    return present, picks, wanted
 
 
 def compute(profile: GameProfile, players: list[Player], result: RosterResult) -> Coverage:
@@ -50,30 +87,28 @@ def compute(profile: GameProfile, players: list[Player], result: RosterResult) -
     for gi, names in enumerate(result.groups, 1):
         members = [by_name[n] for n in names]
         specs = {p.signup_name: profile.spec(p.cls, p.spec) for p in members}
+        present, picks, wanted = group_buffs(profile, [(p.character or p.signup_name, specs[p.signup_name]) for p in members])
         pcs: list[PlayerCoverage] = []
         missing_tally: dict[str, tuple[int, float]] = {}
         for p in members:
             cells = []
             cov = miss = 0.0
             for b in buffs:
-                provs = [(q.character or q.signup_name) for q in members if q is not p and b.provided_by(specs[q.signup_name])]
-                if b.stacking == "unique":
-                    # a provider also covers itself for unique buffs (totems, auras)
-                    if b.provided_by(specs[p.signup_name]):
-                        provs = [p.character or p.signup_name] + provs
+                provs = present.get(b.id, [])
                 val = b.benefit(specs[p.signup_name])
-                present = bool(provs)
+                if b.slot and b.id not in picks.values() and val > 0 and any(b2.id in present for b2 in buffs if b2.slot == b.slot):
+                    val = 0.0  # the slot is taken by a better totem for this group; not "missing"
                 if val > 0:
-                    if present:
+                    if provs:
                         cov += val
                     else:
                         miss += val
                         n, v = missing_tally.get(b.name, (0, 0.0))
                         missing_tally[b.name] = (n + 1, v + val)
-                cells.append(Cell(buff=b.name, value=val, present=present, providers=provs))
+                cells.append(Cell(buff=b.name, value=val, present=bool(provs), providers=provs))
             pcs.append(PlayerCoverage(name=p.character or p.signup_name, cls=p.cls, spec=p.spec, role=p.role, cells=cells, covered=cov, missing=miss))
         summary = [f"{name} (wanted by {n}, +{v:.0f}){' — nobody on roster' if not anyone[next(b.id for b in buffs if b.name == name)] else ''}" for name, (n, v) in sorted(missing_tally.items(), key=lambda kv: -kv[1][1])]
-        groups.append(GroupCoverage(index=gi, players=pcs, missing_summary=summary))
+        groups.append(GroupCoverage(index=gi, players=pcs, missing_summary=summary, picks=picks, present=present, wanted=wanted))
     return Coverage(buffs=[b.name for b in buffs], groups=groups, unmet_raidwide=[b.name for b in buffs if not anyone[b.id]])
 
 

@@ -22,6 +22,14 @@ class Buff:
     value: dict[str, float]
     note: str = ""
     icon: dict[str, str] = field(default_factory=dict)  # {abbr, colour} for badges/emojis
+    slot: str | None = None  # buffs sharing a slot are mutually exclusive per provider (totem elements)
+    status: str = "assumed"  # confirmed | reported | assumed — how sure we are this is how the game version behaves
+    choices: list[str] = field(default_factory=list)  # raid scope: each provider fills one of these, in priority order (blessings)
+    wanted: int | None = None  # raid scope: providers for full coverage (default: 1, or len(choices))
+
+    @property
+    def max_benefit(self) -> float:
+        return max([float(v) for v in self.value.values()] or [0.0])
 
     @property
     def short(self) -> str:
@@ -161,6 +169,24 @@ class GameProfile:
 
     def party_buffs(self) -> list[Buff]:
         return [b for b in self.buffs if b.scope == "party" and b.kind == "aura" and b.providers]
+
+    def raid_buffs(self) -> list[Buff]:
+        return [b for b in self.buffs if b.scope == "raid" and b.kind == "aura" and b.providers]
+
+    def buff_assumptions(self) -> list[str]:
+        """One line per scoping assumption the cards should disclose."""
+        out = []
+        slots = {b.slot for b in self.party_buffs() if b.slot}
+        if slots:
+            st = {b.status for b in self.party_buffs() if b.slot}
+            out.append(f"totems: one per element per shaman, party-wide, static radius ({'/'.join(sorted(st))})")
+        others = [b for b in self.party_buffs() if not b.slot]
+        if others:
+            out.append("auras/shouts: party-wide (" + ", ".join(f"{b.abbr} {b.status}" for b in others) + ")")
+        rb = self.raid_buffs()
+        if rb:
+            out.append("cast buffs: raid-wide (" + ", ".join(f"{b.abbr} {b.status}" for b in rb) + ")")
+        return out
 
     def item_name(self, item_id: int) -> str:
         return self.known_items.get(item_id, f"item {item_id}")
