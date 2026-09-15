@@ -5,6 +5,7 @@ and also work in DMs; officer commands need Manage Server or a configured
 officer role; /gm config needs the owner."""
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -780,7 +781,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
         asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
         e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
-        await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
+        from .discord_pool import pool_card
+
+        card, file = await asyncio.to_thread(pool_card, reg, {**team, "size": n} if team else {"key": "main", "name": "main", "size": n}, ico)
+        e.set_image(url=card.image.url)
+        await interaction.response.send_message(embed=e, file=file, ephemeral=not is_officer(interaction, reg))
 
     @roster.command(name="add", description="Add a member's character to a roster (defaults to their main)")
     @app_commands.autocomplete(roster=roster_autocomplete, character=member_char_autocomplete)
@@ -988,6 +993,43 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.config.roster_channel_id = channel.id
         reg.save_config(f"roster channel → #{channel.name}")
         await interaction.response.send_message(f"✅ Roster management → {channel.mention}", ephemeral=True)
+
+    @config.command(name="registration-channel", description="Owner: public read-only channel where the bot keeps the registration card (buttons open to everyone)")
+    async def cfg_registration_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            note = await interaction.client.post_registration_card(reg, channel, interaction.user.display_name)
+        except discord.Forbidden:
+            await interaction.followup.send(f"❌ I can't post in {channel.mention} (need View Channel, Send Messages, Embed Links there).", ephemeral=True)
+            return
+        await interaction.followup.send(f"✅ Registration card posted and pinned in {channel.mention}" + (f"\n{note}" if note else ""), ephemeral=True)
+        await ops.emit(reg.config, "info", f"registration channel → #{channel.name} (by {interaction.user.display_name})")
+
+    @config.command(name="analytics-channel", description="Owner: officer channel with live pool-readiness cards per roster and a change log")
+    async def cfg_analytics_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        if reg.config.analytics_channel_id != channel.id:
+            reg.config.analytics_channel_id, reg.config.analytics_message_ids = channel.id, {}
+            reg.save_config(f"analytics channel → #{channel.name}", notify=False)
+        try:
+            msgs = await interaction.client.refresh_pool(reg)
+        except discord.Forbidden:
+            await interaction.followup.send(f"❌ I can't post in {channel.mention} (need Send Messages, Embed Links, Attach Files, Manage Messages to pin).", ephemeral=True)
+            return
+        await interaction.followup.send(f"✅ {len(msgs)} readiness card(s) pinned in {channel.mention}; they update themselves and every registry change is logged there.", ephemeral=True)
+        await ops.emit(reg.config, "info", f"analytics channel → #{channel.name} (by {interaction.user.display_name})")
 
     @config.command(name="signup-channel", description="Owner: where raid sheets are posted")
     async def cfg_signup(interaction: discord.Interaction, channel: discord.TextChannel):

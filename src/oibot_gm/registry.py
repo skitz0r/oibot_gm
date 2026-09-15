@@ -113,6 +113,10 @@ class GuildConfig(BaseModel):
     applications_channel_id: Optional[int] = None  # defaults to the ops channel
     signup_channel_id: Optional[int] = None  # where raid sheets are posted (public)
     roster_channel_id: Optional[int] = None  # officer channel: overview, proposals, officer health cards
+    registration_channel_id: Optional[int] = None  # public, read-only: the bot keeps the registration card here
+    registration_message_id: Optional[int] = None
+    analytics_channel_id: Optional[int] = None  # officer: live pool-readiness cards (edited on every change) + change log
+    analytics_message_ids: dict[str, int] = Field(default_factory=dict)  # roster key -> card message id
     timezone: str = "America/Chicago"  # server time for schedules
     officer_roles: list[str] = Field(default_factory=list)
     # rosters: {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders, open_dm}
@@ -151,12 +155,136 @@ class RegistryError(ValueError):
     pass
 
 
+def _clabel(c: dict) -> str:
+    return c.get("name") or f"{c['cls']} ({c['spec']})"
+
+
+def _roles_text(rp: dict) -> str:
+    if not rp or not rp.get("primary"):
+        return "—"
+    return rp["primary"] + (f" (+{', '.join(rp['flex'])})" if rp.get("flex") else "")
+
+
+def diff_member(old: dict | None, new: dict) -> list[str]:
+    """Human lines describing what changed between two saved states of a member (for the change log)."""
+    who = new["display_name"]
+    if old is None:
+        lines = [f"➕ **{who}** joined the pool"]
+        for c in new["characters"]:
+            lines.append(f"➕ {who}: {'main' if c['is_main'] else 'alt'} {_clabel(c)} · {c['cls']} {c['spec']}" + (f"/{c['offspec']}" if c.get("offspec") else "") + f" · {c['status']}")
+        if new.get("role_prefs", {}).get("primary"):
+            lines.append(f"{who}: roles {_roles_text(new['role_prefs'])}")
+        return lines
+    lines: list[str] = []
+    if old["display_name"] != who:
+        lines.append(f"{old['display_name']} is now **{who}**")
+    oc = {c["created_at"]: c for c in old["characters"]}
+    nc = {c["created_at"]: c for c in new["characters"]}
+    for k, c in nc.items():
+        o = oc.get(k)
+        if o is None:
+            lines.append(f"➕ {who}: {'main' if c['is_main'] else 'alt'} {_clabel(c)} · {c['cls']} {c['spec']}" + (f"/{c['offspec']}" if c.get("offspec") else "") + f" · {c['status']}")
+            continue
+        ch = []
+        if o.get("name") != c.get("name"):
+            ch.append(f"named **{c['name']}**" if c.get("name") else "name cleared")
+        if (o["cls"], o["spec"]) != (c["cls"], c["spec"]):
+            ch.append(f"{o['cls']} {o['spec']} → **{c['cls']} {c['spec']}**")
+        if o.get("offspec") != c.get("offspec"):
+            ch.append(f"offspec {o.get('offspec') or '—'} → {c.get('offspec') or '—'}")
+        if o["is_main"] != c["is_main"]:
+            ch.append("now **main**" if c["is_main"] else "now alt")
+        if o["status"] != c["status"]:
+            ch.append(f"{o['status']} → **{c['status']}**")
+        if o["rank"] != c["rank"]:
+            ch.append(f"rank {o['rank']} → **{c['rank']}**")
+        added, removed = sorted(set(c["rosters"]) - set(o["rosters"])), sorted(set(o["rosters"]) - set(c["rosters"]))
+        if added:
+            ch.append("roster +" + ", +".join(added))
+        if removed:
+            ch.append("roster −" + ", −".join(removed))
+        if not o.get("confirmed_by") and c.get("confirmed_by"):
+            ch.append(f"confirmed by {c['confirmed_by']}")
+        if ch:
+            lines.append(f"{who} · {_clabel(o)}: " + " · ".join(ch))
+    for k, o in oc.items():
+        if k not in nc:
+            lines.append(f"➖ {who}: {_clabel(o)} removed")
+    if old.get("role_prefs") != new.get("role_prefs"):
+        lines.append(f"{who}: roles {_roles_text(old.get('role_prefs', {}))} → **{_roles_text(new.get('role_prefs', {}))}**")
+    for team in sorted(set(old.get("availability", {})) | set(new.get("availability", {}))):
+        a, b = old.get("availability", {}).get(team), new.get("availability", {}).get(team)
+        if a != b:
+            lines.append(f"{who}: availability {team} {a or '—'} → **{b or '—'}**")
+    oa = {(a["start"], a["end"]) for a in old.get("absences", [])}
+    na = {(a["start"], a["end"]) for a in new.get("absences", [])}
+    for s, e in sorted(na - oa):
+        lines.append(f"{who}: absent {s}" + (f" → {e}" if e != s else ""))
+    for s, e in sorted(oa - na):
+        lines.append(f"{who}: absence {s} cleared")
+    if old.get("dm_opt_out") != new.get("dm_opt_out"):
+        lines.append(f"{who}: DMs {'off' if new['dm_opt_out'] else 'on'}")
+    return lines
+
+
+def pool_health_data(reg: "Registry", roster: dict) -> dict:
+    """Readiness of the *potential* pool (every planned/active main) against a roster's size, in the same
+    shape as raidcycle.health_data so it renders through render.health_png. No sheet involved."""
+    from .roster.solver import scaled_role_bounds
+
+    profile = reg.profile
+    size = int(roster.get("size") or 20)
+    key = roster.get("key", "main")
+    mains = [(m, m.main) for m in reg.members.values() if m.main]
+    on_roster = [(m, c) for m, c in mains if key in c.rosters]
+    alts = [(m, c) for m in reg.members.values() for c in m.active() if not c.is_main]
+    bounds = scaled_role_bounds(profile.comp_rules, size)
+
+    def role_of(m: Member, c: RegisteredCharacter) -> str:
+        return m.role_prefs.get("primary") or profile.spec(c.cls, c.spec).role
+
+    counts = {r: sum(1 for m, c in mains if role_of(m, c) == r) for r in ("tank", "healer", "melee", "ranged")}
+    need = {"tank": bounds["tank"]["min"], "healer": bounds["healer"]["min"], "melee": 0, "ranged": 0}
+    roles = []
+    for r in ("tank", "healer", "melee", "ranged"):
+        have, n = counts[r], need[r]
+        cover = {"offspec": [], "flex": [], "alt": []}
+        if n and have < n:
+            for m, c in mains:
+                if role_of(m, c) == r:
+                    continue
+                if c.offspec and profile.spec(c.cls, c.offspec).role == r:
+                    cover["offspec"].append(f"{m.display_name} ({c.offspec})")
+                elif r in m.role_prefs.get("flex", []):
+                    cover["flex"].append(m.display_name)
+                elif any(not a.is_main and profile.spec(a.cls, a.spec).role == r for a in m.active()):
+                    cover["alt"].append(m.display_name)
+        coverable = sum(len(v) for v in cover.values())
+        level = "green" if not n or have >= n else ("amber" if have + coverable >= n else "red")
+        hint = " · ".join(f"+{len(v)} {k}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
+        if n and have < n and not coverable:
+            hint = f"short {n - have} → recruit"
+        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
+    buffs = []
+    for b in profile.party_buffs():
+        providers = [m.display_name for m, c in mains if b.provided_by(profile.spec(c.cls, c.spec))]
+        buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
+    not_on_roster = [m.display_name for m, c in mains if key not in c.rosters]
+    unnamed = sum(1 for m, c in mains if not c.name)
+    hc_level = "green" if len(mains) >= size else ("amber" if len(mains) + len(alts) >= size else "red")
+    return {"headcount": (len(mains), size, len(alts), len(on_roster)), "headcount_level": hc_level, "roles": roles, "buffs": buffs,
+            "unresponsive": not_on_roster, "unnamed": unnamed, "mains": len(mains), "on_roster": len(on_roster), "alts": len(alts)}
+
+
 class Registry:
     def __init__(self, store: GitStore, guild_key: str, profile: GameProfile):
         self.store = store
         self.key = guild_key
         self.profile = profile
         self.members: dict[int, Member] = {}
+        # change listeners: fn(kind: "member"|"config", lines: list[str]); called synchronously after each commit
+        self.listeners: list = []
+        self._snap: dict[int, dict] = {}  # last saved state per member, for diff lines
         self.config = self.load_config()
         self.reload()
 
@@ -165,14 +293,24 @@ class Registry:
         p = self.store.root / self.key / "guild.yaml"
         return GuildConfig(**yaml.safe_load(p.read_text()))
 
-    def save_config(self, message: str) -> None:
+    def save_config(self, message: str, notify: bool = True) -> None:
         p = Path(self.key) / "guild.yaml"
         self.store.write_text(p, "# oibot_GM guild config — edit via /gm config or by PR.\n" + yaml.safe_dump(self.config.model_dump(), sort_keys=False))
         self.store.commit(f"{self.key}: {message}")
+        if notify:
+            self._notify("config", [message])
+
+    def _notify(self, kind: str, lines: list[str]) -> None:
+        for fn in self.listeners:
+            try:
+                fn(self, kind, lines)
+            except Exception as e:  # noqa: BLE001
+                print(f"registry listener failed: {e}")
 
     def reload(self) -> None:
         d = self.store.root / self.key / "members"
         self.members = {}
+        self._snap = {}
         if d.exists():
             for f in d.glob("*.json"):
                 m = Member.model_validate_json(f.read_text())
@@ -183,6 +321,7 @@ class Registry:
                     m.teams = []
                     self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
                 self.members[m.discord_id] = m
+                self._snap[m.discord_id] = m.model_dump()
         self.applicants: dict[int, Applicant] = {}
         ad = self.store.root / self.key / "applicants"
         if ad.exists():
@@ -238,6 +377,10 @@ class Registry:
         self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
         self.members[m.discord_id] = m
         self.store.commit(f"{self.key}: {message}")
+        new = m.model_dump()
+        lines = diff_member(self._snap.get(m.discord_id), new) or [message]
+        self._snap[m.discord_id] = new
+        self._notify("member", lines)
 
     # ---- lookups
     def member(self, discord_id: int, display_name: str | None = None, create: bool = False) -> Member:
@@ -272,11 +415,14 @@ class Registry:
         offspec = self.validate_spec(cls, offspec) if offspec else None
         m = self.member(discord_id, display_name, create=True)
         is_main = slot == "main"
-        m.characters = [c for c in m.characters if not (c.status == "planned" and c.is_main == is_main)]
+        prev = next((c for c in m.characters if c.status == "planned" and c.is_main == is_main), None)
+        m.characters = [c for c in m.characters if c is not prev]
         if is_main:
             for c in m.characters:
                 c.is_main = False
         c = RegisteredCharacter(cls=cls, spec=spec, offspec=offspec, is_main=is_main, status="planned", rank="trial" if is_main else "alt")
+        if prev:  # a re-plan keeps roster placement, rank and identity (the change log shows it as a spec change)
+            c.rosters, c.rank, c.created_at, c.note = list(prev.rosters), prev.rank, prev.created_at, prev.note
         m.characters.append(c)
         self.save(m, f"{display_name} plans {slot}: {cls} {spec}{'/' + offspec if offspec else ''}")
         return m, c

@@ -172,8 +172,9 @@ def _badge(d: ImageDraw.ImageDraw, x: int, y: int, abbr: str, colour: str, s: in
     d.text((x + (s - tw) / 2, y + (s - th) / 2 - 2), abbr, font=f, fill="#14181F")
 
 
-def health_png(title: str, subtitle: str, headcount: tuple[int, int, int, int], roles: list[dict], buffs: list[dict], unresponsive: list[str], footer: str = "") -> bytes:
-    """Roster health card.
+def health_png(title: str, subtitle: str, headcount: tuple[int, int, int, int], roles: list[dict], buffs: list[dict], unresponsive: list[str], footer: str = "",
+               headcount_text: str | None = None, unresponsive_label: str = "No response", buff_hint: str = "badge = buff · name = provider · red outline = nobody signed brings it") -> bytes:
+    """Roster health card (a sheet's health, or the pool's readiness with the labels overridden).
     headcount: (in, size, tentative, sub); roles: [{role, have, need, level, hint}];
     buffs: [{abbr, colour, name, providers: [names]}] (empty providers = missing)."""
     W, M = 1100, 28
@@ -197,7 +198,7 @@ def health_png(title: str, subtitle: str, headcount: tuple[int, int, int, int], 
     if tent:
         tf = min(1.0, (n_in + tent) / size) if size else 0
         d.rounded_rectangle([bar_x + int(bar_w * frac), y + 24, bar_x + int(bar_w * tf), y + 38], radius=7, fill=WARN_SOFT, outline=WARN)
-    d.text((bar_x + bar_w + 16, y + 14), f"{n_in}/{size} in · {tent} tentative · {sub} sub", font=f_body, fill=INK)
+    d.text((bar_x + bar_w + 16, y + 14), headcount_text or f"{n_in}/{size} in · {tent} tentative · {sub} sub", font=f_body, fill=INK)
     y += 82
     # role tiles
     tile_w = (W - 2 * M - 3 * 14) // 4
@@ -214,7 +215,7 @@ def health_png(title: str, subtitle: str, headcount: tuple[int, int, int, int], 
     y += 158
     # buffs
     d.text((M, y), "Buff coverage", font=f_h, fill=INK)
-    d.text((M + 150, y + 3), "badge = buff · name = provider · red outline = nobody signed brings it", font=f_small, fill=MUTED)
+    d.text((M + 150, y + 3), buff_hint, font=f_small, fill=MUTED)
     y += 30
     col_w = (W - 2 * M) // 4
     for i, b in enumerate(buffs):
@@ -227,8 +228,9 @@ def health_png(title: str, subtitle: str, headcount: tuple[int, int, int, int], 
         d.text((cx + 34, cy + 19), (", ".join(b["providers"][:2]) + ("…" if len(b["providers"]) > 2 else "")) if not missing else "missing", font=f_small, fill=MUTED)
     y += rows_buffs * 40 + 16
     if unresponsive:
-        d.text((M, y), f"No response ({len(unresponsive)})", font=f_h, fill=WARN)
-        d.text((M + 170, y + 3), ", ".join(unresponsive[:14]) + ("…" if len(unresponsive) > 14 else ""), font=f_body, fill=MUTED)
+        lbl = f"{unresponsive_label} ({len(unresponsive)})"
+        d.text((M, y), lbl, font=f_h, fill=WARN)
+        d.text((M + 20 + int(d.textlength(lbl, font=f_h)), y + 3), ", ".join(unresponsive[:14]) + ("…" if len(unresponsive) > 14 else ""), font=f_body, fill=MUTED)
         y += 40
     if footer:
         d.text((M, H - 30), footer, font=f_small, fill=MUTED)

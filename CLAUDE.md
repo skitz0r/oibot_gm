@@ -30,10 +30,12 @@ src/oibot_gm/
                        /roster overview|poll|registration-card|add|remove|members|list|confirm|rank|set-main|absences|availability|absent|applicants|applicant (officers);
                        Rosters are first-class: config `rosters[]` (key/size/schedule/instance/cutoffs), membership lives on characters (`RegisteredCharacter.rosters`),
                        raids are opened for a roster, officer posts go to `roster_channel_id`. Internal helpers still say "team" (aliases) — don't rename them casually.
-                       /gm status|config …|change|policy …|rule loot|comp (owner/officers); /raid … (discord_raid.py); /mock … (demo)
+                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup channels, roster, officer-role, timezone)|change|policy …|rule loot|comp; /raid … (discord_raid.py); /mock … (demo)
   raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
   discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
+  discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only) and per-roster
+                       pool-readiness cards + change log in the analytics channel; driven by Registry.listeners (diff_member), debounced
   configops.py         plain-text config: whitelisted ConfigOp schema, describe() diff, apply() via the same code paths as commands
   discord_policy.py    /policy show|edit|reload, /loot-rule, /comp-rule, /gm change, @mention in the ops channel
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks

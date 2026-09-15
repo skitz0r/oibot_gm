@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from . import nl, render
 from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, register_policy_commands
+from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_raid import RaidContext, RaidMixin, SignupButton, register_raid_commands
 from .discord_registry import Guilds, PlanButton, RegisterButton, is_officer, is_owner, register_commands
@@ -658,7 +659,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, RaidMixin, discord.Client):
+class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
     ico = staticmethod(ico)
 
     def __init__(self, ctx: GuildContext, test_guild: int | None):
@@ -1052,6 +1053,7 @@ class OibotGM(FeedMixin, RaidMixin, discord.Client):
                 await self.tree.sync(guild=g)
         print(f"commands synced ({scope})")
         self.loop.create_task(self.scheduler())
+        self.attach_pool_listeners()
         token, bind = feed_config()
         if token:
             self.feed = FeedServer(self.handle_feed_event, token, bind)
@@ -1066,6 +1068,9 @@ class OibotGM(FeedMixin, RaidMixin, discord.Client):
         print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
         for reg in self.registries.by_discord.values():
             await self.ops.emit(reg.config, "info", f"bot online · data @ {st.head()} · {len(reg.members)} members / {len(reg.all_characters())} characters · {len(reg.pending())} unconfirmed")
+            if reg.config.analytics_channel_id and not getattr(self, "_pool_booted", False):
+                await self.refresh_pool(reg)  # state may have changed while offline (PRs to the data repo)
+        self._pool_booted = True
 
 
 def run(guild_dir: Path, signup_file: str) -> None:
