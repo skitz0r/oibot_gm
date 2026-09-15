@@ -22,7 +22,8 @@ src/oibot_gm/
   loot/                scoring.py (candidates + base score), recommend.py (Claude structured output + fallback)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
-  discord_bot.py       OibotGM client + /mock flow (shadow data): signup → lock/propose → chat changes → start → drops → distribute → feedback → confirm
+  discord_bot.py       OibotGM client; loot sessions (MockEvent, carries `guild`/`origin`): /mock flow on shadow data, or a real raid via /raid loot
+  lootctx.py           RegistryLootContext: a registered guild's ledger/precedents/wishlists/compiled policy for the loot pipeline; bot.loot_ctx(session) picks mock vs real
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member)
   discord_registry.py  real commands: /register, /char, /apply, /absent, /availability, /me, /roster (officer), /gm config|status
   raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
