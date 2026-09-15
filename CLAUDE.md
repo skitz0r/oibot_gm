@@ -27,7 +27,9 @@ src/oibot_gm/
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member)
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|plan main|alt|roles|char …|availability|absent … (members);
-                       /roster overview|poll|list|confirm|rank|set-main|team add|remove|list|absences|availability|absent|applicants|applicant (officers);
+                       /roster overview|poll|registration-card|add|remove|members|list|confirm|rank|set-main|absences|availability|absent|applicants|applicant (officers);
+                       Rosters are first-class: config `rosters[]` (key/size/schedule/instance/cutoffs), membership lives on characters (`RegisteredCharacter.rosters`),
+                       raids are opened for a roster, officer posts go to `roster_channel_id`. Internal helpers still say "team" (aliases) — don't rename them casually.
                        /gm status|config …|change|policy …|rule loot|comp (owner/officers); /raid … (discord_raid.py); /mock … (demo)
   raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
   discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
