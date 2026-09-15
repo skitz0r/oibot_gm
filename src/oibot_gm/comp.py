@@ -29,25 +29,77 @@ def pool_players(reg: Registry) -> list[Player]:
     return players
 
 
-def optimize(reg: Registry, roster: dict, time_limit_s: float = 6.0) -> tuple[list[Player], RosterResult | None, cov_mod.Coverage | None]:
-    """Groups for the pool at the roster's size. Returns (players, result, coverage); result None when the pool is empty."""
+ARCHETYPES = ("tank/heal", "melee", "ranged", "casters")
+
+
+def archetype_groups(n_groups: int) -> list[str]:
+    """Label per group: the classic layout seeds one group per archetype, extra groups go to the
+    archetypes that grow with raid size (melee, casters, ranged, then heal); fewer than four fold together."""
+    if n_groups >= 4:
+        labels = list(ARCHETYPES)
+        for extra in ("melee", "casters", "ranged", "tank/heal", "melee", "casters", "ranged", "tank/heal"):
+            if len(labels) >= n_groups:
+                break
+            labels.append(extra)
+        return labels[:n_groups]
+    if n_groups == 3:
+        return ["tank/heal", "melee", "ranged+casters"]
+    if n_groups == 2:
+        return ["tank/heal+casters", "melee+ranged"]
+    return ["everyone"]
+
+
+def archetype_of(profile: GameProfile, p: Player) -> str:
+    s = profile.spec(p.cls, p.spec)
+    if p.role in ("tank", "healer"):
+        return "tank/heal"
+    if p.role == "melee":
+        return "melee"
+    return "ranged" if s.dmg == "physical" else "casters"
+
+
+def seed_preferences(profile: GameProfile, players: list[Player], labels: list[str]) -> dict[str, int]:
+    """Soft 1-based group preference per player: their archetype's groups, filled round-robin in pool order."""
+    slots: dict[str, list[int]] = {}
+    for gi, lab in enumerate(labels, 1):
+        for a in ARCHETYPES:
+            if a in lab:
+                slots.setdefault(a, []).append(gi)
+    counters: dict[str, int] = {}
+    prefs = {}
+    for p in players:
+        a = archetype_of(profile, p)
+        gs = slots.get(a) or [1]
+        i = counters.get(a, 0)
+        prefs[p.signup_name] = gs[i % len(gs)]
+        counters[a] = i + 1
+    return prefs
+
+
+def optimize(reg: Registry, roster: dict, time_limit_s: float = 6.0) -> tuple[list[Player], RosterResult | None, cov_mod.Coverage | None, list[str]]:
+    """Groups for the pool at the roster's *full* size (empty slots stay visible), seeded by archetype:
+    tanks and healers together, melee with the Enhancement shaman, hunters, casters. Seeds are soft;
+    buff synergy can still move someone. Returns (players, result, coverage, group labels)."""
     players = pool_players(reg)
-    if not players:
-        return players, None, None
     size = int(roster.get("size") or reg.profile.comp_rules["raid_size"])
+    n_groups = max(1, -(-size // reg.profile.comp_rules["group_size"]))
+    labels = archetype_groups(n_groups)
+    if not players:
+        return players, None, None, labels
     raid_id = roster.get("instance") if roster.get("instance") in reg.profile.raids else next(iter(reg.profile.raids))
     bounds = solver.scaled_role_bounds(reg.profile.comp_rules, size)
     # the pool is not a sheet: role minimums are advisory, so relax them to what the pool can satisfy
     have = {r: sum(1 for p in players if p.role == r or (p.offspec and reg.profile.spec(p.cls, p.offspec).role == r)) for r in ROLES}
     role_min = {r: min(bounds[r]["min"], have[r]) for r in bounds}
-    opts = solver.SolveOptions(raid_size=min(size, max(len(players), 1)), role_min=role_min, time_limit_s=time_limit_s, workers=4)
+    opts = solver.SolveOptions(raid_size=size, role_min=role_min, prefer_group=seed_preferences(reg.profile, players, labels), prefer_weight=12,
+                               time_limit_s=time_limit_s, workers=4)
     try:
         result = solver.solve(reg.profile, players, raid_id, opts)
-    except Exception:  # noqa: BLE001 — infeasible pools (e.g. 1 player) fall back to a single group
+    except Exception:  # noqa: BLE001 — infeasible pools fall back to "no card"
         result = None
     if result is None:
-        return players, None, None
-    return players, result, cov_mod.compute(reg.profile, players, result)
+        return players, None, None, labels
+    return players, result, cov_mod.compute(reg.profile, players, result), labels
 
 
 # ---------------------------------------------------------------- raid-wide buffs

@@ -300,7 +300,7 @@ def bank_png(title: str, subtitle: str, rows: list[dict], footer: str = "") -> b
     return buf.getvalue()
 
 
-def groups_png(profile: GameProfile, players: list[Player], result: RosterResult, cov, raid_buffs: list[dict], title: str, subtitle: str, assumptions: list[str]) -> bytes:
+def groups_png(profile: GameProfile, players: list[Player], result: RosterResult, cov, raid_buffs: list[dict], title: str, subtitle: str, assumptions: list[str], labels: list[str] | None = None) -> bytes:
     """Compact optimised-groups card: group panels (members + present/missing aura badges + totem picks),
     a raid-buff strip, and the scoping assumptions."""
     by = {p.signup_name: p for p in players}
@@ -326,8 +326,10 @@ def groups_png(profile: GameProfile, players: list[Player], result: RosterResult
         g = cov.groups[gi]
         d.rounded_rectangle([x0, y0, x0 + pw, y0 + ph], radius=8, fill=PANEL, outline=LINE)
         d.text((x0 + 12, y0 + 8), f"Group {gi + 1}", font=f_h, fill=INK)
+        if labels and gi < len(labels):
+            d.text((x0 + 12 + d.textlength(f"Group {gi + 1}", font=f_h) + 8, y0 + 11), labels[gi], font=f_tiny, fill=MUTED)
         val = result.group_reports[gi].value if gi < len(result.group_reports) else 0
-        d.text((x0 + pw - 12 - d.textlength(f"+{val}", font=f_h), y0 + 8), f"+{val}", font=f_h, fill=OK)
+        d.text((x0 + pw - 12 - d.textlength(f"+{val}", font=f_h), y0 + 8), f"+{val}", font=f_h, fill=OK if val else MUTED)
         y = y0 + 34
         for name in names:
             p = by[name]
@@ -335,6 +337,10 @@ def groups_png(profile: GameProfile, players: list[Player], result: RosterResult
             label = (p.character or p.signup_name)[:14]
             d.text((x0 + 30, y), label, font=f_body, fill=CLASS.get(p.cls, INK))
             d.text((x0 + 30 + d.textlength(label, font=f_body) + 6, y + 2), p.spec[:12], font=f_tiny, fill=MUTED)
+            y += 22
+        for _ in range(gsize - len(names)):
+            d.rounded_rectangle([x0 + 12, y + 4, x0 + 23, y + 15], radius=3, outline=LINE, width=1)
+            d.text((x0 + 30, y + 1), "open", font=f_tiny, fill=NA)
             y += 22
         y = y0 + 34 + gsize * 22 + 8
         # badges: present (coloured) then wanted-but-missing (grey, red outline); slot losers are skipped

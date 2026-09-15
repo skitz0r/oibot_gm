@@ -29,17 +29,18 @@ def _stamp() -> str:
 def groups_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.File]:
     """Optimised groups for the pool at this roster's size, with per-group aura coverage and raid buffs."""
     key = roster.get("key", "main")
-    players, result, cov = comp_mod.optimize(reg, roster)
+    players, result, cov, labels = comp_mod.optimize(reg, roster)
     rb = comp_mod.raid_buff_status(reg.profile, players)
     fname = f"groups-{key}.png"
     if result is None or cov is None:
         e = discord.Embed(colour=0x98A3B5, description=f"**Groups · {key}** — no mains in the pool yet" if not players else f"**Groups · {key}** — the solver couldn't build groups from {len(players)} main(s) yet")
         png = render.health_png(f"Optimised groups · {key}", "waiting for registrations", (len(players), int(roster.get("size") or 20), 0, 0), [], [], [], headcount_text=f"{len(players)} mains")
         return e, discord.File(BytesIO(png), filename=fname)
+    open_slots = int(roster.get("size") or 20) - len(result.selected)
     png = render.groups_png(reg.profile, players, result, cov, rb,
                             f"Optimised groups · {roster.get('name', key)} ({roster.get('size', 20)}-man)",
-                            f"{len(result.selected)} of {len(players)} mains placed · synergy {result.synergy_value} · updated {_stamp()}",
-                            reg.profile.buff_assumptions())
+                            f"{len(result.selected)} of {len(players)} mains placed · {open_slots} open slot{'s' if open_slots != 1 else ''} · groups seeded by archetype, synergy {result.synergy_value} · updated {_stamp()}",
+                            reg.profile.buff_assumptions(), labels)
     file = discord.File(BytesIO(png), filename=fname)
     missing_raid = [r for r in rb if not r["providers"]]
     worst = "red" if missing_raid or any(g.missing_summary and "nobody on roster" in " ".join(g.missing_summary) for g in cov.groups) else ("amber" if any(g.missing_summary for g in cov.groups) else "green")

@@ -215,8 +215,8 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         provider_vars = {id(v): v for _, pv in entries for v in pv}
         m.Add(sum(prov for prov, _ in entries) <= sum(provider_vars.values()))
 
-    # symmetry breaking: the first signed player anchors group 0 (unless pins fix the numbering)
-    if not opts.pins:
+    # symmetry breaking: the first signed player anchors group 0 (unless pins or seeds fix the numbering)
+    if not opts.pins and not opts.prefer_group:
         first = next((p for p in players if p.status == "signed" and p.signup_name not in opts.force_out), None)
         if first:
             m.Add(y[first.signup_name, 0] == x[first.signup_name])
