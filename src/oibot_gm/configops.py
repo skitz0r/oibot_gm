@@ -20,28 +20,28 @@ Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <ch
   availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason];
   team_member: add/remove <member> [character] to/from roster <key> (curated roster; defaults to their main).
 Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
-Comp ideals (officer): comp_target: for roster <key>, a slot = role (tank|healer|melee|ranged), a class ("Paladin")
-  or "Class:Spec" ("Shaman:Enhancement"); min and/or max count and an optional note (the justification shown on the
-  desired-comp card). comp_target_clear removes an officer target so the derived value applies again.
+Comp ideals (officer): comp_target: team=<roster key>, field=<slot: a role tank|healer|melee|ranged, a class "Paladin",
+  or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
+  reason=<optional note, the justification shown on the desired-comp card>.
+  comp_target_clear (team, field) removes an officer target so the derived value applies again.
 """
 
 
 class ConfigOp(BaseModel):
-    op: Literal["set", "team_set", "team_add", "team_remove", "team_member", "role_add", "role_remove", "rank", "confirm", "set_main", "availability", "absence", "policy_append", "comp_target", "comp_target_clear"]
-    slot: Optional[str] = Field(default=None, description="comp_target*: role name, Class, or Class:Spec")
-    min: Optional[int] = Field(default=None, description="comp_target: wanted count")
-    max: Optional[int] = Field(default=None, description="comp_target: cap")
+    # Keep this schema small: the structured-output compiler rejects it as "too complex" past ~14 fields, and every
+    # new schema shape costs a slow first compile. New ops reuse the generic fields (field/value/reason) rather than adding their own.
+    op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel")
-    team: Optional[str] = Field(default=None, description="team key for team_* ops and availability")
-    field: Optional[str] = Field(default=None, description="for op=team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits)")
+    team: Optional[str] = Field(default=None, description="team key for team_* ops, availability and comp_target*")
+    field: Optional[str] = Field(default=None, description="team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders; comp_target*: the slot (role, Class or Class:Spec)")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits; comp_target: 'min', 'min-max' or '-max')")
     member: Optional[str] = Field(default=None, description="member display name or mention <@id>")
     character: Optional[str] = None
-    rank: Optional[Literal["trial", "raider", "core", "alt", "social"]] = Field(default=None, description="for op=rank")
+    rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social")
     start: Optional[str] = None
     end: Optional[str] = None
     reason: Optional[str] = None
-    doc: Optional[Literal["loot", "comp"]] = None
+    doc: Optional[str] = Field(default=None, description="for op=policy_append: loot|comp")
     text: Optional[str] = None
 
 
@@ -79,6 +79,17 @@ def _member(reg: Registry, ref: str | None):
     if r.startswith("<@") and r.endswith(">"):
         return reg.members.get(int(r.strip("<@!>")))
     return next((m for m in reg.members.values() if m.display_name.lower() == r.lower()), None)
+
+
+def _range(value: str | None) -> tuple[int | None, int | None]:
+    """'3' → (3, None); '3-5' → (3, 5); '-5' → (None, 5); anything else → (None, None)."""
+    v = (value or "").strip().replace("–", "-").replace(" ", "")
+    if not v:
+        return None, None
+    if v.startswith("-"):
+        return None, int(v[1:]) if v[1:].isdigit() else None
+    lo, _, hi = v.partition("-")
+    return (int(lo) if lo.isdigit() else None), (int(hi) if hi.isdigit() else None)
 
 
 def _channel_id(value: str | None) -> int | None:
@@ -122,12 +133,14 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"team {op.team or reg.config.team_keys()[0]}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
     if op.op in ("comp_target", "comp_target_clear"):
         key = op.team or reg.config.team_keys()[0]
-        cur = ((cfg.team(key) or {}).get("comp_targets") or {}).get(op.slot or "")
+        slot = op.field or op.path or ""
+        cur = ((cfg.team(key) or {}).get("comp_targets") or {}).get(slot)
         cur_s = (f"{cur.get('min', '?')}" + (f"–{cur['max']}" if cur.get("max") is not None else "")) if cur else "derived"
         if op.op == "comp_target_clear":
-            return f"roster {key} comp {op.slot}: {cur_s} → derived"
-        new_s = f"{op.min if op.min is not None else (cur or {}).get('min', '?')}" + (f"–{op.max}" if op.max is not None else "")
-        return f"roster {key} comp {op.slot}: {cur_s} → {new_s}" + (f" ({op.reason or op.text})" if (op.reason or op.text) else "")
+            return f"roster {key} comp {slot}: {cur_s} → derived"
+        lo, hi = _range(op.value)
+        new_s = f"{lo if lo is not None else (cur or {}).get('min', '?')}" + (f"–{hi}" if hi is not None else "")
+        return f"roster {key} comp {slot}: {cur_s} → {new_s}" + (f" ({op.reason or op.text})" if (op.reason or op.text) else "")
     return str(op)
 
 
@@ -224,7 +237,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         t = cfg.team(key)
         if t is None:
             raise RegistryError(f"no roster {key}")
-        slot = (op.slot or "").strip()
+        slot = (op.field or op.path or "").strip()
         if slot not in ("tank", "healer", "melee", "ranged"):
             cls, _, spec = slot.partition(":")
             if cls not in reg.profile.classes or (spec and spec not in reg.profile.classes[cls]):
@@ -235,7 +248,8 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             reg.save_config(f"roster {key} comp target {slot} cleared (by {by})")
             return f"{key}: {slot} back to derived"
         cur = targets.get(slot, {})
-        entry = {"min": op.min if op.min is not None else cur.get("min", 0), "max": op.max if op.max is not None else cur.get("max"), "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
+        lo, hi = _range(op.value)
+        entry = {"min": lo if lo is not None else cur.get("min", 0), "max": hi if hi is not None else cur.get("max"), "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
         if entry["max"] is not None and entry["max"] < entry["min"]:
             raise RegistryError(f"{slot}: max {entry['max']} below min {entry['min']}")
         targets[slot] = {k: v for k, v in entry.items() if v is not None}
