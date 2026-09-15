@@ -223,7 +223,7 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
                 m = reg.members.get(sg.discord_id)
                 if sg.offspec and profile.spec(sg.cls, sg.offspec).role == r and sg.role != r:
                     cover["offspec"].append(f"{sg.display_name} ({sg.offspec})")
-                elif m and r in m.role_prefs.get("flex", []) and sg.role != r:
+                elif m and r in reg.roles_of(m)[1] and sg.role != r:
                     cover["flex"].append(sg.display_name)
                 elif m and any(c.status in ("active", "planned") and not c.is_main and profile.spec(c.cls, c.spec).role == r for c in m.characters) and sg.role != r:
                     cover["alt"].append(sg.display_name)

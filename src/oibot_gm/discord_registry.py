@@ -189,9 +189,9 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
             if not m or not m.active():
                 await interaction.response.send_message("Nothing registered yet — press **Register / plan my main**.", ephemeral=True)
                 return
-            rp = m.role_prefs
+            primary, flex = reg.roles_of(m)
             lines = [char_line(bot.ico, c) for c in m.active()]
-            lines.append(("Roles: " + rp.get("primary", "?") + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "Roles: unset")
+            lines.append(f"Roles: {primary or '?'}" + (f" (+{', '.join(flex)})" if flex else ""))
             rosters = sorted({k for c in m.active() for k in c.rosters})
             if rosters:
                 lines.append("Rosters: " + ", ".join(rosters))
@@ -202,9 +202,8 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
         cls_sel = discord.ui.Select(placeholder="Class", options=[discord.SelectOption(label=c, value=c, emoji=_emoji(bot.ico("class", c))) for c in reg.profile.classes])
         spec_sel = discord.ui.Select(placeholder="Main spec (pick a class first)", options=[discord.SelectOption(label="—", value="-")], disabled=True)
         off_sel = discord.ui.Select(placeholder="Offspec (optional)", options=[discord.SelectOption(label="none", value="-")], disabled=True)
-        role_sel = discord.ui.Select(placeholder="Roles you'd play (first = primary)", min_values=1, max_values=4, options=[discord.SelectOption(label=r, value=r, emoji=_emoji(bot.ico("role", r))) for r in ROLES])
         go = discord.ui.Button(label="Continue → name", style=discord.ButtonStyle.primary, disabled=True)
-        state: dict = {"roles": []}
+        state: dict = {"roles": []}  # roles derive from spec (primary) and offspec (flex); /me plan roles adds more
 
         def specs_for(c):
             return [discord.SelectOption(label=s, value=s, description=reg.profile.spec(c, s).role) for s in reg.profile.classes[c]]
@@ -229,17 +228,13 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
             state["offspec"] = None if off_sel.values[0] == "-" else off_sel.values[0]
             await i.response.defer()
 
-        async def on_roles(i: discord.Interaction):
-            state["roles"] = list(role_sel.values)
-            await i.response.defer()
-
         async def on_go(i: discord.Interaction):
             await i.response.send_modal(NameModal(reg, state["cls"], state["spec"], state.get("offspec"), state["roles"], slot))
 
-        cls_sel.callback, spec_sel.callback, off_sel.callback, role_sel.callback, go.callback = on_cls, on_spec, on_off, on_roles, on_go
-        for item in (cls_sel, spec_sel, off_sel, role_sel, go):
+        cls_sel.callback, spec_sel.callback, off_sel.callback, go.callback = on_cls, on_spec, on_off, on_go
+        for item in (cls_sel, spec_sel, off_sel, go):
             view.add_item(item)
-        await interaction.response.send_message(f"**{'Register or plan your main' if slot == 'main' else 'Add an alt'}** — class, spec, optional offspec, the roles you'd play, then a name (or leave it blank until launch).", view=view, ephemeral=True)
+        await interaction.response.send_message(f"**{'Register or plan your main' if slot == 'main' else 'Add an alt'}** — class, spec, optional offspec (your role follows the spec; an offspec in another role counts as flexibility), then a name (or leave it blank until launch).", view=view, ephemeral=True)
 
 
 def _emoji(raw: str):
@@ -654,8 +649,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         rosters = sorted({k for c in m.active() for k in c.rosters})
         if rosters:
             e.add_field(name="Rosters", value=", ".join(f"{k} ({next(c.label for c in m.active() if k in c.rosters)})" for k in rosters), inline=True)
-        rp = m.role_prefs
-        e.add_field(name="Roles", value=(f"{rp.get('primary')}" + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "unset — /me plan roles", inline=True)
+        primary, flex = reg.roles_of(m)
+        e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me plan roles` to add more", inline=True)
         e.add_field(name="Availability", value=", ".join(f"{t}: {m.availability.get(t, 'unset')}" for t in reg.config.team_keys()), inline=True)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(f"{a.start}" + (f" → {a.end}" if a.end != a.start else "") for a in ups) or "none", inline=True)

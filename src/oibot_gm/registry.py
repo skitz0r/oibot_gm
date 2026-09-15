@@ -235,7 +235,7 @@ def bank_rows(reg: "Registry") -> list[dict]:
         alts = [c for c in m.active() if not c.is_main]
         if not main and not alts:
             continue
-        role = (m.role_prefs.get("primary") or (reg.profile.spec(main.cls, main.spec).role if main else None))
+        role, _ = reg.roles_of(m)
         rows.append({"member": m.display_name, "role": role,
                      "main": {"cls": main.cls, "spec": main.spec, "offspec": main.offspec, "name": main.name, "status": main.status, "rank": main.rank, "rosters": list(main.rosters)} if main else None,
                      "alts": [{"cls": a.cls, "spec": a.spec, "name": a.name, "status": a.status} for a in alts]})
@@ -257,7 +257,7 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
     bounds = scaled_role_bounds(profile.comp_rules, size)
 
     def role_of(m: Member, c: RegisteredCharacter) -> str:
-        return m.role_prefs.get("primary") or profile.spec(c.cls, c.spec).role
+        return reg.roles_of(m)[0] or profile.spec(c.cls, c.spec).role
 
     counts = {r: sum(1 for m, c in mains if role_of(m, c) == r) for r in ("tank", "healer", "melee", "ranged")}
     need = {"tank": bounds["tank"]["min"], "healer": bounds["healer"]["min"], "melee": 0, "ranged": 0}
@@ -271,7 +271,7 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
                     continue
                 if c.offspec and profile.spec(c.cls, c.offspec).role == r:
                     cover["offspec"].append(f"{m.display_name} ({c.offspec})")
-                elif r in m.role_prefs.get("flex", []):
+                elif r in reg.roles_of(m)[1]:
                     cover["flex"].append(m.display_name)
                 elif any(not a.is_main and profile.spec(a.cls, a.spec).role == r for a in m.active()):
                     cover["alt"].append(m.display_name)
@@ -474,6 +474,21 @@ class Registry:
         self.save(m, f"{m.display_name} named planned {slot} → {name}")
         return m, c
 
+    def roles_of(self, m: Member) -> tuple[str | None, list[str]]:
+        """(primary, flex) derived from the main's spec and offspec; an explicit /me plan roles adds to it."""
+        main = m.main
+        primary = m.role_prefs.get("primary") or (self.profile.spec(main.cls, main.spec).role if main else None)
+        flex = set(m.role_prefs.get("flex", []))
+        if main and main.offspec:
+            try:
+                r = self.profile.spec(main.cls, main.offspec).role
+                if r != primary:
+                    flex.add(r)
+            except KeyError:
+                pass
+        flex.discard(primary)
+        return primary, sorted(flex)
+
     def plan_summary(self) -> dict:
         """Class/spec/role distribution across planned+active mains, plus flex and buff providers."""
         mains = [(m, m.main) for m in self.members.values() if m.main]
@@ -482,9 +497,9 @@ class Registry:
         flex: dict[str, list[str]] = {r: [] for r in by_role}
         for m, c in mains:
             by_cls.setdefault(c.cls, []).append(f"{m.display_name} · {c.spec}" + (f"/{c.offspec}" if c.offspec else ""))
-            role = m.role_prefs.get("primary") or self.profile.spec(c.cls, c.spec).role
+            role, fl = self.roles_of(m)
             by_role[role] = by_role.get(role, 0) + 1
-            for f in m.role_prefs.get("flex", []):
+            for f in fl:
                 flex.setdefault(f, []).append(m.display_name)
         providers: dict[str, list[str]] = {}
         for b in self.profile.party_buffs():

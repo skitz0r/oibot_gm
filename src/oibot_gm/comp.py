@@ -23,7 +23,7 @@ ROLES = ("tank", "healer", "melee", "ranged")
 def pool_players(reg: Registry) -> list[Player]:
     players = []
     for i, (m, c) in enumerate(sorted(((m, m.main) for m in reg.members.values() if m.main), key=lambda mc: mc[0].display_name.lower())):
-        role = m.role_prefs.get("primary") or reg.profile.spec(c.cls, c.spec).role
+        role = reg.roles_of(m)[0] or reg.profile.spec(c.cls, c.spec).role
         players.append(Player(signup_name=m.display_name, pos=i + 1, status="signed", cls=c.cls, spec=c.spec, role=role, offspec=c.offspec,
                               character=c.name or m.display_name, map_confidence="high", unmapped=False, rank=c.rank))
     return players
@@ -133,6 +133,8 @@ class CompLine:
     max: int | None = None
     source: str = "derived"  # derived | officer
     level: str = "green"
+    flex: int = 0  # mains whose offspec could fill this slot instead
+    flex_who: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -150,6 +152,26 @@ def _count(players: list[Player], key: str, profile: GameProfile) -> int:
         cls, spec = key.split(":", 1)
         return sum(1 for p in players if p.cls == cls and p.spec == spec)
     return sum(1 for p in players if p.cls == key)
+
+
+def _flex(players: list[Player], key: str, profile: GameProfile) -> list[str]:
+    """Who could fill the slot by switching to their offspec (not counted in have)."""
+    out = []
+    for p in players:
+        if not p.offspec or p.offspec == p.spec:
+            continue
+        try:
+            os_ = profile.spec(p.cls, p.offspec)
+        except KeyError:
+            continue
+        if key in ROLES:
+            if p.role != key and os_.role == key:
+                out.append(f"{p.signup_name} ({p.offspec})")
+        elif ":" in key:
+            cls, spec = key.split(":", 1)
+            if p.cls == cls and p.spec != spec and p.offspec == spec:
+                out.append(f"{p.signup_name} ({p.offspec})")
+    return out
 
 
 def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: dict | None = None, instance: str | None = None) -> IdealComp:
@@ -182,7 +204,8 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
             share = sum(bounds[r]["min"] if r in bounds else size // 4 for r in aud_roles)
             bens = min(size, share)
         n = max(1, min(groups, -(-bens // gsize)))
-        aud = "melee" if aud_roles <= {"tank", "melee"} else ("ranged" if aud_roles <= {"ranged"} else "physical" if "healer" not in aud_roles else "")
+        dmgs = {s.dmg for s in all_specs if b.benefit(s) > 0}
+        aud = "caster" if dmgs <= {"spell"} else "physical" if dmgs <= {"physical"} else ("melee" if aud_roles <= {"tank", "melee"} else "ranged" if aud_roles <= {"ranged"} else "")
         key = prov if ":" in prov and not prov.endswith(":*") else cls
         cur = wants.get(key, (0, ""))
         if n > cur[0]:
@@ -211,17 +234,20 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
     # fill have + level
     for l in ic.lines:
         l.have = _count(players, l.key, profile)
+        l.flex_who = _flex(players, l.key, profile)
+        l.flex = len(l.flex_who)
         if l.max is not None and l.have > l.max:
             l.level = "amber"
         elif l.have >= l.want:
             l.level = "green"
-        elif l.have >= max(1, l.want - 1):
-            l.level = "amber"
+        elif l.have + l.flex >= l.want or l.have >= max(1, l.want - 1):
+            l.level = "amber"  # reachable with offspec switches, or one short
         else:
             l.level = "red"
+    swaps = [f"{p.signup_name} {p.spec}→{p.offspec} ({profile.spec(p.cls, p.offspec).role})" for p in players if p.offspec and p.offspec != p.spec and p.cls in profile.classes and p.offspec in profile.classes[p.cls] and profile.spec(p.cls, p.offspec).role != p.role]
     order = {r: i for i, r in enumerate(ROLES)}
     ic.lines.sort(key=lambda l: (0 if l.key in ROLES else 1, order.get(l.key, 0), -l.want, l.key))
-    ic.notes = profile.buff_assumptions()
+    ic.notes = ([f"offspec flexibility ({len(swaps)}): " + ", ".join(swaps[:8]) + ("…" if len(swaps) > 8 else "")] if swaps else ["offspec flexibility: nobody has registered an offspec in another role"]) + profile.buff_assumptions()
     return ic
 
 

@@ -400,7 +400,7 @@ def comp_png(lines: list, title: str, subtitle: str, notes: list[str]) -> bytes:
     d.text((M, M + 34), subtitle, font=f_small, fill=MUTED)
     y = M + 64
     d.rounded_rectangle([M - 8, y, W - M + 8, y + 26 + max(1, len(lines)) * RH + 6], radius=8, fill=PANEL, outline=LINE)
-    for name, x in (("Slot", M), ("Want", M + 190), ("Have", M + 260), ("", M + 330), ("Why", M + 460)):
+    for name, x in (("Slot", M), ("Want", M + 190), ("Have (+offspec)", M + 260), ("Why", M + 460)):
         d.text((x + 4, y + 5), name.upper(), font=f_small, fill=MUTED)
     y += 26
     d.line([(M, y), (W - M, y)], fill=LINE)
@@ -419,9 +419,14 @@ def comp_png(lines: list, title: str, subtitle: str, notes: list[str]) -> bytes:
         want = f"{l.want}" + (f"–{l.max}" if l.max is not None and l.max != l.want else "")
         d.text((M + 194, yy + 6), want, font=f_body, fill=INK)
         d.text((M + 264, yy + 6), str(l.have), font=f_body, fill=LEVEL[l.level])
+        if getattr(l, "flex", 0):
+            d.text((M + 264 + d.textlength(str(l.have), font=f_body) + 5, yy + 9), f"+{l.flex} offspec", font=f_tiny, fill=MUTED)
         bw = 110
         d.rounded_rectangle([M + 334, yy + 12, M + 334 + bw, yy + 18], radius=3, fill=BARBG)
         frac = min(1.0, l.have / l.want) if l.want else 1.0
+        if getattr(l, "flex", 0) and l.want:
+            ff = min(1.0, (l.have + l.flex) / l.want)
+            d.rounded_rectangle([M + 334 + int(bw * frac), yy + 12, M + 334 + int(bw * ff), yy + 18], radius=3, fill=WARN_SOFT, outline=WARN)
         d.rounded_rectangle([M + 334, yy + 12, M + 334 + int(bw * frac), yy + 18], radius=3, fill=LEVEL[l.level])
         why = ("officer: " if l.source == "officer" else "") + l.why
         d.text((M + 464, yy + 8), why[:96], font=f_tiny, fill=WARN if l.source == "officer" else MUTED)
