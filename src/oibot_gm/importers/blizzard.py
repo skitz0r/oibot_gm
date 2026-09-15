@@ -108,9 +108,14 @@ def verify_profile(profile_dir: Path, namespace: str, region: str = "us", cache_
             issues = []
             if b.name and b.name.lower() != str(row.get("name", "")).lower().split(" (")[0]:
                 issues.append(f"name: {row.get('name')} → {b.name}")
-            if b.slot != "misc" and row.get("slot") not in (b.slot, "ranged_weapon_stat", "token") and not (row.get("slot") == "one_hand" and b.slot == "one_hand"):
+            # profile conventions: tier tokens carry the reward slot; wands live in the ranged slot;
+            # cloaks are 'cloak' here but 'Cloth' armour class in the game data
+            is_token = bool(row.get("token_group")) or b.slot == "token"
+            slot_ok = is_token or row.get("slot") == b.slot or (row.get("slot") == "wand" and b.slot == "ranged_weapon_primary") or (row.get("slot") in ("one_hand", "two_hand") and b.slot in ("one_hand", "two_hand") and row.get("slot") == b.slot)
+            if b.slot != "misc" and not slot_ok:
                 issues.append(f"slot: {row.get('slot')} → {b.slot}")
-            if b.type in ("cloth", "leather", "mail", "plate") and row.get("type") != b.type:
+            armour_ok = row.get("type") == b.type or (row.get("type") == "cloak" and b.slot == "back") or is_token
+            if b.type in ("cloth", "leather", "mail", "plate") and not armour_ok:
                 issues.append(f"armour: {row.get('type')} → {b.type}")
             if issues:
                 out.append({"id": row["id"], "name": row.get("name"), "problem": "; ".join(issues), "blizzard": b.__dict__})

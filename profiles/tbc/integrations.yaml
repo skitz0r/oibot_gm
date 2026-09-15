@@ -1,5 +1,5 @@
 # Integrations for the TBC (Anniversary) profile
 wcl_host: fresh.warcraftlogs.com
 wcl_zone_bt_hyjal: 1060
-blizzard_namespace: static-classic-us    # progression realms include TBC items; try static-classicann-us too
+blizzard_namespace: static-classicann-us   # TBC Anniversary (verified 2026-09-14); static-classic-us = progression
 tmb_expansion_id: 2
