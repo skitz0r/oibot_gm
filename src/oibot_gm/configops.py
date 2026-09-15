@@ -24,13 +24,15 @@ Comp ideals (officer): comp_target: team=<roster key>, field=<slot: a role tank|
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
   reason=<optional note, the justification shown on the desired-comp card>.
   comp_target_clear (team, field) removes an officer target so the derived value applies again.
+  comp_groups: team=<roster key>, value=<comma-separated group labels in order, e.g. "tank, healers, melee, casters">
+  — the archetype layout the group optimiser seeds (labels may combine: "tank/heal", "melee+ranged"); empty value = default layout.
 """
 
 
 class ConfigOp(BaseModel):
     # Keep this schema small: the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear")
+    op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear, comp_groups")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel")
     team: Optional[str] = Field(default=None, description="team key for team_* ops, availability and comp_target*")
     field: Optional[str] = Field(default=None, description="team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders; comp_target*: the slot (role, Class or Class:Spec)")
@@ -131,6 +133,10 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"append to {op.doc} policy: “{op.text}”"
     if op.op == "team_member":
         return f"team {op.team or reg.config.team_keys()[0]}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
+    if op.op == "comp_groups":
+        key = op.team or reg.config.team_keys()[0]
+        cur = (cfg.team(key) or {}).get("comp_groups") or []
+        return f"roster {key} group layout: {', '.join(cur) if cur else 'default'} → {op.value or 'default'}"
     if op.op in ("comp_target", "comp_target_clear"):
         key = op.team or reg.config.team_keys()[0]
         slot = op.field or op.path or ""
@@ -232,6 +238,23 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             return f"{m.display_name} removed from {key}"
         _, c = reg.roster_add(m.discord_id, key, by, op.character)
         return f"{m.display_name} ({c.label}) added to {key}"
+    if op.op == "comp_groups":
+        key = op.team or cfg.team_keys()[0]
+        t = cfg.team(key)
+        if t is None:
+            raise RegistryError(f"no roster {key}")
+        from .comp import label_tokens
+
+        labels = [x.strip() for x in (op.value or "").replace(";", ",").split(",") if x.strip()]
+        bad = [l for l in labels if not label_tokens(l)]
+        if bad:
+            raise RegistryError(f"group labels need a role word (tank, heal, melee, ranged, caster): {', '.join(bad)}")
+        if labels:
+            t["comp_groups"] = labels
+        else:
+            t.pop("comp_groups", None)
+        reg.save_config(f"roster {key} group layout → {labels or 'default'} (by {by})")
+        return f"{key}: groups = {', '.join(labels) if labels else 'default layout'}"
     if op.op in ("comp_target", "comp_target_clear"):
         key = op.team or cfg.team_keys()[0]
         t = cfg.team(key)

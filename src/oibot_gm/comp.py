@@ -30,11 +30,21 @@ def pool_players(reg: Registry) -> list[Player]:
 
 
 ARCHETYPES = ("tank/heal", "melee", "ranged", "casters")
+# label keywords → player archetype tokens; a label may combine several ("tank/heal", "melee+ranged")
+TOKENS = {"tank": ("tank",), "heal": ("heal", "healer", "healers"), "melee": ("melee",), "ranged": ("ranged", "hunter", "hunters", "physical"), "caster": ("caster", "casters", "spell", "dps")}
+FALLBACK = {"tank": ("heal", "melee"), "heal": ("tank", "caster"), "melee": ("ranged", "tank"), "ranged": ("caster", "melee"), "caster": ("ranged", "heal")}
 
 
-def archetype_groups(n_groups: int) -> list[str]:
-    """Label per group: the classic layout seeds one group per archetype, extra groups go to the
-    archetypes that grow with raid size (melee, casters, ranged, then heal); fewer than four fold together."""
+def archetype_groups(n_groups: int, custom: list[str] | None = None) -> list[str]:
+    """Label per group. Officers can set their own layout per roster (`comp_groups`); otherwise the classic
+    layout seeds one group per archetype and extra groups go to the archetypes that grow with raid size
+    (melee, casters, ranged, then heal); fewer than four fold together."""
+    if custom:
+        labels = [str(c).strip() for c in custom if str(c).strip()][:n_groups]
+        pad = ("melee", "casters", "ranged", "tank/heal")
+        while len(labels) < n_groups:
+            labels.append(pad[(len(labels) - len(custom)) % len(pad)])
+        return labels
     if n_groups >= 4:
         labels = list(ARCHETYPES)
         for extra in ("melee", "casters", "ranged", "tank/heal", "melee", "casters", "ranged", "tank/heal"):
@@ -49,30 +59,46 @@ def archetype_groups(n_groups: int) -> list[str]:
     return ["everyone"]
 
 
-def archetype_of(profile: GameProfile, p: Player) -> str:
-    s = profile.spec(p.cls, p.spec)
-    if p.role in ("tank", "healer"):
-        return "tank/heal"
+def token_of(profile: GameProfile, p: Player) -> str:
+    if p.role == "tank":
+        return "tank"
+    if p.role == "healer":
+        return "heal"
     if p.role == "melee":
         return "melee"
-    return "ranged" if s.dmg == "physical" else "casters"
+    return "ranged" if profile.spec(p.cls, p.spec).dmg == "physical" else "caster"
+
+
+def archetype_of(profile: GameProfile, p: Player) -> str:
+    t = token_of(profile, p)
+    return {"tank": "tank/heal", "heal": "tank/heal", "melee": "melee", "ranged": "ranged", "caster": "casters"}[t]
+
+
+def label_tokens(label: str) -> set[str]:
+    words = [w for w in label.lower().replace("/", " ").replace("+", " ").replace(",", " ").replace("-", " ").split() if w]
+    return {tok for tok, kws in TOKENS.items() if any(w in kws for w in words)}
 
 
 def seed_preferences(profile: GameProfile, players: list[Player], labels: list[str]) -> dict[str, int]:
-    """Soft 1-based group preference per player: their archetype's groups, filled round-robin in pool order."""
+    """Soft 1-based group preference per player: the groups whose label names their archetype, filled
+    round-robin in pool order; archetypes with no group of their own fall back to the nearest one."""
     slots: dict[str, list[int]] = {}
     for gi, lab in enumerate(labels, 1):
-        for a in ARCHETYPES:
-            if a in lab:
-                slots.setdefault(a, []).append(gi)
+        for tok in label_tokens(lab):
+            slots.setdefault(tok, []).append(gi)
     counters: dict[str, int] = {}
     prefs = {}
     for p in players:
-        a = archetype_of(profile, p)
-        gs = slots.get(a) or [1]
-        i = counters.get(a, 0)
+        tok = token_of(profile, p)
+        gs = slots.get(tok)
+        for fb in FALLBACK[tok]:
+            if gs:
+                break
+            gs = slots.get(fb)
+        gs = gs or list(range(1, len(labels) + 1))
+        i = counters.get(tok, 0)
         prefs[p.signup_name] = gs[i % len(gs)]
-        counters[a] = i + 1
+        counters[tok] = i + 1
     return prefs
 
 
@@ -83,7 +109,7 @@ def optimize(reg: Registry, roster: dict, time_limit_s: float = 6.0) -> tuple[li
     players = pool_players(reg)
     size = int(roster.get("size") or reg.profile.comp_rules["raid_size"])
     n_groups = max(1, -(-size // reg.profile.comp_rules["group_size"]))
-    labels = archetype_groups(n_groups)
+    labels = archetype_groups(n_groups, roster.get("comp_groups"))
     if not players:
         return players, None, None, labels
     raid_id = roster.get("instance") if roster.get("instance") in reg.profile.raids else next(iter(reg.profile.raids))

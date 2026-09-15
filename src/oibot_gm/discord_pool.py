@@ -54,7 +54,7 @@ def groups_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discor
     adv = [a for a in result.advisories if a.startswith(("🔴", "🟡"))][:3]
     if adv:
         e.add_field(name="Advisories", value="\n".join(adv)[:900], inline=False)
-    e.set_footer(text="Solver output on the whole pool; the real sheet decides who plays. Badges: coloured = aura present in group, red outline = wanted but missing")
+    e.set_footer(text=f"Groups seeded as {', '.join(labels)} — change with e.g. “{key}: groups tank, healers, melee, casters”. Badges: coloured = aura present, red outline = wanted but missing")
     return e, file
 
 
