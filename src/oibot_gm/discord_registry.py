@@ -1028,7 +1028,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         except discord.Forbidden:
             await interaction.followup.send(f"❌ I can't post in {channel.mention} (need Send Messages, Embed Links, Attach Files, Manage Messages to pin).", ephemeral=True)
             return
-        await interaction.followup.send(f"✅ {len(msgs)} readiness card(s) pinned in {channel.mention}; they update themselves and every registry change is logged there.", ephemeral=True)
+        await interaction.followup.send(f"✅ {len(msgs)} analytics card(s) posted in {channel.mention}; they re-post at the bottom after every registry change, with a change-log line above.", ephemeral=True)
         await ops.emit(reg.config, "info", f"analytics channel → #{channel.name} (by {interaction.user.display_name})")
 
     @config.command(name="signup-channel", description="Owner: where raid sheets are posted")

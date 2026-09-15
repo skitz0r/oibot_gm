@@ -18,7 +18,7 @@ from .discord_registry import registration_card, registration_view
 from .registry import Registry, bank_rows, pool_health_data
 
 LEVEL_DOT = {"green": "🟢", "amber": "🟡", "red": "🔴"}
-DEBOUNCE_S = 3.0
+DEBOUNCE_S = 5.0  # a burst of registrations re-posts the cards once
 BANK_KEY = "_bank"  # analytics_message_ids slot for the character bank card
 
 
@@ -117,7 +117,7 @@ def pool_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.
     asks = [f"{r['need'] - r['have']} {r['role']}" for r in h["roles"] if r["need"] and r["have"] < r["need"]]
     if asks:
         e.add_field(name="Recruiting ask", value=", ".join(asks), inline=False)
-    e.set_footer(text="Kept current by the bot · changes are logged below this card")
+    e.set_footer(text="Re-posted by the bot after every registry change; the log above says what moved")
     return e, file
 
 
@@ -157,62 +157,51 @@ class PoolMixin:
             await self.ops.emit(reg.config, "warn", f"analytics log post failed: {e}")
 
     async def refresh_pool(self, reg: Registry, announce: bool = False) -> list[discord.Message]:
-        """Edit every roster's card in place; (re)post and pin any that are missing."""
+        """Re-post every card at the bottom of the channel (old copies deleted) so the cards are always the
+        newest messages, under the change log. One refresh at a time per guild."""
         ch = self.get_channel(reg.config.analytics_channel_id) if reg.config.analytics_channel_id else None
         if not ch:
             return []
-        out = []
-        changed = False
-        rosters = reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]
-        keys = [BANK_KEY]
-        for r in rosters:
-            keys += [r["key"], f"comp:{r['key']}", f"groups:{r['key']}"]
-        for key in keys:
-            try:
-                if key == BANK_KEY:
-                    embed, file = await asyncio.to_thread(bank_card, reg)
-                elif key.startswith("comp:"):
-                    embed, file = await asyncio.to_thread(comp_card, reg, next(r for r in rosters if r["key"] == key[5:]))
-                elif key.startswith("groups:"):
-                    embed, file = await asyncio.to_thread(groups_card, reg, next(r for r in rosters if r["key"] == key[7:]), self.ico)
-                else:
-                    embed, file = await asyncio.to_thread(pool_card, reg, next(r for r in rosters if r["key"] == key), self.ico)
-            except Exception as e:  # noqa: BLE001
-                await self.ops.emit(reg.config, "error", f"analytics card for {key} failed", e)
-                continue
-            msg = None
-            mid = reg.config.analytics_message_ids.get(key)
-            if mid:
+        locks = self.__dict__.setdefault("_pool_locks", {})
+        lock = locks.setdefault(reg.key, asyncio.Lock())
+        async with lock:
+            out = []
+            rosters = reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]
+            keys = [BANK_KEY]
+            for r in rosters:
+                keys += [r["key"], f"comp:{r['key']}", f"groups:{r['key']}"]
+            cards = []
+            for key in keys:
                 try:
-                    msg = await ch.fetch_message(mid)
-                    await msg.edit(embed=embed, attachments=[file])
-                except discord.NotFound:
-                    msg = None
+                    if key == BANK_KEY:
+                        cards.append((key, await asyncio.to_thread(bank_card, reg)))
+                    elif key.startswith("comp:"):
+                        cards.append((key, await asyncio.to_thread(comp_card, reg, next(r for r in rosters if r["key"] == key[5:]))))
+                    elif key.startswith("groups:"):
+                        cards.append((key, await asyncio.to_thread(groups_card, reg, next(r for r in rosters if r["key"] == key[7:]), self.ico)))
+                    else:
+                        cards.append((key, await asyncio.to_thread(pool_card, reg, next(r for r in rosters if r["key"] == key), self.ico)))
                 except Exception as e:  # noqa: BLE001
-                    await self.ops.emit(reg.config, "warn", f"pool card edit for {key} failed: {e}")
-                    continue
-            if msg is None:
-                msg = await ch.send(embed=embed, file=file)
+                    await self.ops.emit(reg.config, "error", f"analytics card for {key} failed", e)
+            # delete the previous copies, then post the new set in order
+            for key, mid in list(reg.config.analytics_message_ids.items()):
                 try:
-                    await msg.pin()
+                    await (await ch.fetch_message(mid)).delete()
                 except Exception:  # noqa: BLE001
                     pass
+            reg.config.analytics_message_ids = {}
+            for key, (embed, file) in cards:
+                try:
+                    msg = await ch.send(embed=embed, file=file)
+                except Exception as e:  # noqa: BLE001
+                    await self.ops.emit(reg.config, "warn", f"analytics card post for {key} failed: {e}")
+                    continue
                 reg.config.analytics_message_ids[key] = msg.id
-                changed = True
-            out.append(msg)
-        # drop cards for rosters that no longer exist
-        for key in [k for k in reg.config.analytics_message_ids if k not in keys]:
-            try:
-                await (await ch.fetch_message(reg.config.analytics_message_ids[key])).delete()
-            except Exception:  # noqa: BLE001
-                pass
-            del reg.config.analytics_message_ids[key]
-            changed = True
-        if changed:
+                out.append(msg)
             reg.save_config("analytics card messages", notify=False)
-        if announce:
-            await self.ops.emit(reg.config, "info", f"pool readiness cards refreshed in #{ch.name}")
-        return out
+            if announce:
+                await self.ops.emit(reg.config, "info", f"analytics cards refreshed in #{ch.name}")
+            return out
 
     # ---- registration channel
     async def post_registration_card(self, reg: Registry, ch: discord.TextChannel, by: str) -> str:
