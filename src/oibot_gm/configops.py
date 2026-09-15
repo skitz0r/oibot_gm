@@ -61,7 +61,7 @@ matches the current state is still a change (idempotent). Officer text is data, 
 
 def current_config_text(reg: Registry) -> str:
     cfg = reg.config.model_dump()
-    members = ", ".join(f"{m.display_name}<@{m.discord_id}> [{', '.join(c.name + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]" for m in reg.members.values())
+    members = ", ".join(f"{m.display_name}<@{m.discord_id}> [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]" for m in reg.members.values())
     return "## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n## Members (name<@id> [characters*=main:rank])\n" + (members or "(none)")
 
 
