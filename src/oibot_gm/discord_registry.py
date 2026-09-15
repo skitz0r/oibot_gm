@@ -64,14 +64,73 @@ def is_owner(interaction: discord.Interaction, reg: Registry) -> bool:
     return reg.config.owner_discord_id is not None and interaction.user.id == reg.config.owner_discord_id
 
 
+ROLES = ("tank", "healer", "melee", "ranged")
+ROLE_CHOICES = [app_commands.Choice(name=r, value=r) for r in ROLES]
+
+
 def char_line(ico, c) -> str:
     flags = []
     if c.is_main:
         flags.append("main")
+    if c.status == "planned":
+        flags.append("planned")
     flags.append(c.rank)
-    if not c.confirmed_by:
+    if not c.confirmed_by and c.status != "planned":
         flags.append("unconfirmed")
-    return f"{ico('class', c.cls)} **{c.name}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · _{', '.join(flags)}_"
+    return f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · _{', '.join(flags)}_"
+
+
+class PlanButton(discord.ui.DynamicItem[discord.ui.Button], template=r"plan:(?P<cls>[A-Za-z]+)"):
+    """Poll button: pick a class → ephemeral spec select → role select. Survives restarts."""
+
+    def __init__(self, cls: str, ico=None):
+        emoji = None
+        if ico:
+            raw = ico("class", cls)
+            try:
+                emoji = discord.PartialEmoji.from_str(raw) if raw else None
+            except Exception:  # noqa: BLE001
+                emoji = None
+        super().__init__(discord.ui.Button(label=cls, style=discord.ButtonStyle.secondary, custom_id=f"plan:{cls}", emoji=emoji))
+        self.cls = cls
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match, /):
+        return cls(match["cls"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        reg = bot.registries.for_interaction(interaction)
+        if not reg:
+            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        specs = list(reg.profile.classes.get(self.cls, {}))
+        view = discord.ui.View(timeout=300)
+        spec_sel = discord.ui.Select(placeholder=f"{self.cls}: which spec?", options=[discord.SelectOption(label=s, value=s, description=reg.profile.spec(self.cls, s).role) for s in specs])
+        role_sel = discord.ui.Select(placeholder="Roles you're happy to play (first = primary)", min_values=1, max_values=4, options=[discord.SelectOption(label=r, value=r) for r in ROLES])
+        state: dict = {}
+
+        async def on_spec(i: discord.Interaction):
+            state["spec"] = spec_sel.values[0]
+            await i.response.defer()
+
+        async def on_roles(i: discord.Interaction):
+            spec = state.get("spec") or specs[0]
+            roles = list(role_sel.values)
+            primary = reg.profile.spec(self.cls, spec).role if reg.profile.spec(self.cls, spec).role in roles else roles[0]
+            try:
+                m, c = reg.set_plan(i.user.id, i.user.display_name, self.cls, spec, None, "main")
+                reg.set_roles(i.user.id, i.user.display_name, primary, [r for r in roles if r != primary])
+            except RegistryError as e:
+                await i.response.send_message(f"❌ {e}", ephemeral=True)
+                return
+            await i.response.edit_message(content=f"✅ Planned main **{self.cls} {spec}**, roles: {primary}" + (f" (+{', '.join(r for r in roles if r != primary)})" if len(roles) > 1 else "") + ". Change any time with `/plan …`.", view=None)
+            await bot.ops.emit(reg.config, "info", f"{m.display_name} plans to main {self.cls} {spec} · roles {roles}")
+
+        spec_sel.callback, role_sel.callback = on_spec, on_roles
+        view.add_item(spec_sel)
+        view.add_item(role_sel)
+        await interaction.response.send_message(f"**{self.cls}** — pick the spec, then the roles you'd play (the first one you pick is your primary):", view=view, ephemeral=True)
 
 
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
@@ -99,13 +158,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg = guilds.for_interaction(interaction)
         if reg is None or interaction.user.id not in reg.members:
             return []
-        return [app_commands.Choice(name=c.name, value=c.name) for c in reg.members[interaction.user.id].active() if current.lower() in c.name.lower()][:25]
+        return [app_commands.Choice(name=c.name, value=c.name) for c in reg.members[interaction.user.id].active() if c.name and current.lower() in c.name.lower()][:25]
 
     async def any_char_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
         if reg is None:
             return []
-        return [app_commands.Choice(name=f"{c.name} ({c.cls})", value=c.name) for _, c in reg.all_characters() if current.lower() in c.name.lower()][:25]
+        return [app_commands.Choice(name=f"{c.label} ({c.cls})", value=c.name) for _, c in reg.all_characters() if c.name and current.lower() in c.name.lower()][:25]
 
     # ---------------- /register
     @tree.command(name="register", description="Register your character (first one becomes your main)")
@@ -122,11 +181,73 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.response.send_message(f"✅ Registered {char_line(ico, c)}. An officer will confirm it. Your characters: " + ", ".join(x.name + (" (main)" if x.is_main else "") for x in m.active()), ephemeral=True)
-        await ops.emit(reg.config, "info", f"**{m.display_name}** registered {c.name} ({c.cls} {c.spec}{', main' if c.is_main else ''}) — pending confirmation")
+        await interaction.response.send_message(f"✅ Registered {char_line(ico, c)}. An officer will confirm it. Your characters: " + ", ".join(x.label + (" (main)" if x.is_main else "") for x in m.active()), ephemeral=True)
+        await ops.emit(reg.config, "info", f"**{m.display_name}** registered {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ''}) — pending confirmation")
+
+    # ---------------- /plan (pre-launch: what are you going to play?)
+    plan = app_commands.Group(name="plan", description="Pre-launch: what you're planning to play (no character name needed)")
+
+    @plan.command(name="main", description="What you plan to main")
+    @app_commands.rename(class_="class")
+    @app_commands.choices(class_=CLASS_CHOICES)
+    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
+    async def plan_main(interaction: discord.Interaction, class_: app_commands.Choice[str], spec: str, offspec: str | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        try:
+            m, c = reg.set_plan(interaction.user.id, interaction.user.display_name, class_.value, spec, offspec, "main")
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ Planned main: {char_line(ico, c)}. Set your role preferences with `/plan roles` (or the poll buttons).", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} plans to main {c.cls} {c.spec}")
+
+    @plan.command(name="alt", description="What you plan to play as an alt")
+    @app_commands.rename(class_="class")
+    @app_commands.choices(class_=CLASS_CHOICES)
+    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
+    async def plan_alt(interaction: discord.Interaction, class_: app_commands.Choice[str], spec: str, offspec: str | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        try:
+            m, c = reg.set_plan(interaction.user.id, interaction.user.display_name, class_.value, spec, offspec, "alt")
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ Planned alt: {char_line(ico, c)}", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} plans an alt {c.cls} {c.spec}")
+
+    @plan.command(name="roles", description="Your primary role and what else you'd be happy to play")
+    @app_commands.choices(primary=ROLE_CHOICES, flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
+    async def plan_roles(interaction: discord.Interaction, primary: app_commands.Choice[str], flex1: app_commands.Choice[str] | None = None, flex2: app_commands.Choice[str] | None = None, flex3: app_commands.Choice[str] | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        flex = [f.value for f in (flex1, flex2, flex3) if f]
+        m = reg.set_roles(interaction.user.id, interaction.user.display_name, primary.value, flex)
+        await interaction.response.send_message(f"✅ Roles: **{primary.value}**" + (f", also {', '.join(m.role_prefs['flex'])}" if m.role_prefs["flex"] else ""), ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} roles: {primary.value}" + (f" (+{', '.join(m.role_prefs['flex'])})" if m.role_prefs["flex"] else ""))
+
+    tree.add_command(plan)
 
     # ---------------- /char
     char = app_commands.Group(name="char", description="Manage your characters")
+
+    @char.command(name="name", description="At launch: give your planned main (or alt) its real character name")
+    @app_commands.choices(slot=[app_commands.Choice(name="main", value="main"), app_commands.Choice(name="alt", value="alt")])
+    async def char_name(interaction: discord.Interaction, name: str, slot: app_commands.Choice[str] | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        try:
+            m, c = reg.name_character(interaction.user.id, name, slot.value if slot else "main")
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {char_line(ico, c)} — an officer will confirm it.", ephemeral=True)
+        await ops.emit(reg.config, "info", f"**{m.display_name}** named their planned {slot.value if slot else 'main'}: {c.name} ({c.cls} {c.spec}) — pending confirmation")
 
     @char.command(name="add", description="Register another character (alt)")
     @app_commands.rename(class_="class")
@@ -147,7 +268,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ Main is now {char_line(ico, c)}" + (f" (was {old.name}, now alt)" if old else ""), ephemeral=True)
-        await ops.emit(reg.config, "info", f"**{m.display_name}** changed main {old.name if old else '-'} → {c.name}")
+        await ops.emit(reg.config, "info", f"**{m.display_name}** changed main {old.label if old else '-'} → {c.label}")
 
     @char.command(name="spec", description="Change a character's spec/offspec")
     @app_commands.autocomplete(name=own_char_autocomplete, spec=spec_autocomplete, offspec=spec_autocomplete)
@@ -161,7 +282,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ {char_line(ico, c)}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name}: {c.name} now {c.spec}{'/' + c.offspec if c.offspec else ''}")
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name}: {c.label} now {c.spec}{'/' + c.offspec if c.offspec else ''}")
 
     @char.command(name="retire", description="Retire a character (history is kept)")
     @app_commands.autocomplete(name=own_char_autocomplete)
@@ -174,8 +295,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.response.send_message(f"✅ Retired {c.name}.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} retired {c.name}")
+        await interaction.response.send_message(f"✅ Retired {c.label}.", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} retired {c.label}")
 
     @char.command(name="list", description="Show your registered characters")
     async def char_list(interaction: discord.Interaction):
@@ -359,6 +480,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         today = discord.utils.utcnow().date().isoformat()
         e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=0x2B7A78)
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
+        rp = m.role_prefs
+        e.add_field(name="Roles", value=(f"{rp.get('primary')}" + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "unset — /plan roles", inline=True)
         e.add_field(name="Availability", value=", ".join(f"{t}: {m.availability.get(t, 'unset')}" for t in reg.config.team_keys()), inline=True)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(f"{a.start}" + (f" → {a.end}" if a.end != a.start else "") for a in ups) or "none", inline=True)
@@ -387,7 +510,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e = discord.Embed(title=f"{reg.config.name} · {len(chars)} characters · {len(reg.members)} members", colour=0x2B7A78)
         by_cls: dict[str, list[str]] = {}
         for m, c in chars:
-            by_cls.setdefault(c.cls, []).append(f"{'★ ' if c.is_main else ''}{c.name} · {c.spec} · {c.rank}{' ⏳' if not c.confirmed_by else ''} · {m.display_name}")
+            by_cls.setdefault(c.cls, []).append(f"{'★ ' if c.is_main else ''}{c.label} · {c.spec} · {c.rank}{' ⏳' if not c.confirmed_by else ''} · {m.display_name}")
         for cls, lines in by_cls.items():
             e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
         pend = reg.pending()
@@ -406,10 +529,10 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ Confirmed {char_line(ico, c)} ({m.display_name})", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} confirmed {c.name} ({m.display_name})")
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} confirmed {c.label} ({m.display_name})")
         try:
             user = await interaction.client.fetch_user(m.discord_id)
-            await user.send(f"✅ {c.name} was confirmed by {interaction.user.display_name}. Welcome aboard.")
+            await user.send(f"✅ {c.label} was confirmed by {interaction.user.display_name}. Welcome aboard.")
         except Exception:  # noqa: BLE001
             pass
 
@@ -426,7 +549,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ {char_line(ico, c)}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {c.name} → {rank.value}")
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {c.label} → {rank.value}")
 
     @roster.command(name="set-main", description="Set a member's main on their behalf")
     async def roster_set_main(interaction: discord.Interaction, member: discord.User, name: str):
@@ -438,8 +561,44 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.response.send_message(f"✅ {m.display_name}'s main is now {c.name}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {m.display_name}'s main → {c.name}")
+        await interaction.response.send_message(f"✅ {m.display_name}'s main is now {c.label}", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {m.display_name}'s main → {c.label}")
+
+    @roster.command(name="plan", description="Who is planning to play what: classes, roles, flexibility, buff coverage")
+    @app_commands.describe(size="raid size to check against (default: first team's size or 20)")
+    async def roster_plan(interaction: discord.Interaction, size: int | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        s = reg.plan_summary()
+        if not s["mains"]:
+            await interaction.response.send_message("Nobody has planned a main yet — post the poll with `/gm plan-poll` or use `/plan main`.", ephemeral=True)
+            return
+        from .roster.solver import scaled_role_bounds
+
+        team = reg.config.raid_teams[0] if reg.config.raid_teams else {}
+        n = size or int(team.get("size") or 20)
+        bounds = scaled_role_bounds(reg.profile.comp_rules, n)
+        e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=0x2B7A78)
+        for cls, lines in sorted(s["by_class"].items(), key=lambda kv: -len(kv[1])):
+            e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
+        role_lines = []
+        for r in ROLES:
+            have = s["by_role"].get(r, 0)
+            need_min = bounds.get(r, {}).get("min", 0)
+            flex = s["flex"].get(r, [])
+            mark = "🟢" if not need_min or have >= need_min else ("🟡" if have + len(flex) >= need_min else "🔴")
+            role_lines.append(f"{mark} {ico('role', r)} {r}: **{have}**" + (f" / need {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
+        e.add_field(name=f"Roles vs a {n}-man", value="\n".join(role_lines), inline=False)
+        missing = [b for b, who in s["providers"].items() if not who]
+        thin = [f"{b} ({who[0]})" for b, who in s["providers"].items() if len(who) == 1]
+        if missing or thin:
+            e.add_field(name="Buff coverage", value=(("Nobody: " + ", ".join(missing) + "\n") if missing else "") + (("Only one: " + ", ".join(thin)) if thin else ""), inline=False)
+        if s["alts"]:
+            e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
+        asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
+        e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
+        await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
 
     @roster.command(name="absences", description="Upcoming absences across the guild (with reasons)")
     @app_commands.describe(days="How far ahead to look (default 30)")
@@ -625,6 +784,18 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         import yaml as _y
 
         await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
+
+    @gm.command(name="plan-poll", description="Officer: post the 'what are you planning to play?' poll with class buttons")
+    async def gm_plan_poll(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        e = discord.Embed(title="What are you planning to play?", colour=0x2B7A78, description="Pick your **main's class** below, then the spec and your role preferences. No character name needed — that comes at launch (`/char name`). Alts and changes: `/plan alt`, `/plan main`, `/plan roles`. See where the guild stands with `/roster plan`.")
+        view = discord.ui.View(timeout=None)
+        for cls in ("Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid"):
+            view.add_item(PlanButton(cls, ico))
+        await interaction.response.send_message(embed=e, view=view)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} posted the plan poll")
 
     @gm.command(name="status", description="Bot health: data repo, registry, spend, recent ops")
     async def gm_status(interaction: discord.Interaction):

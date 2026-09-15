@@ -31,7 +31,7 @@ from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, register_policy_commands
 from .feed import FeedServer, feed_config
 from .discord_raid import RaidContext, RaidMixin, SignupButton, register_raid_commands
-from .discord_registry import Guilds, is_officer, is_owner, register_commands
+from .discord_registry import Guilds, PlanButton, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
 from .llm.provider import Provider, get_provider
@@ -679,7 +679,7 @@ class OibotGM(FeedMixin, RaidMixin, discord.Client):
         register_raid_commands(self.tree, self.registries, self.ops, self)
         self.policies = PolicyContext(self.registries)
         register_policy_commands(self.tree, self.registries, self.ops, self, self.policies)
-        self.add_dynamic_items(SignupButton)
+        self.add_dynamic_items(SignupButton, PlanButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):

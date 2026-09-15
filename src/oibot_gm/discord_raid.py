@@ -100,7 +100,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
         chars = m.active()
         if len(chars) > 1 and self.status in ("in", "tentative", "sub"):
             view = discord.ui.View(timeout=120)
-            sel = discord.ui.Select(placeholder="Which character?", options=[discord.SelectOption(label=f"{c.name} · {c.cls} {c.spec}", value=c.name, default=c.is_main) for c in chars[:25]])
+            sel = discord.ui.Select(placeholder="Which character?", options=[discord.SelectOption(label=f"{c.label} · {c.cls} {c.spec}", value=c.name or c.label, default=c.is_main) for c in chars[:25]])
 
             async def pick(i: discord.Interaction):
                 await bot.apply_signup(i, reg, rs, ev, m, sel.values[0], self.status)

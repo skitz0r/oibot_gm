@@ -25,13 +25,17 @@ def now() -> str:
 
 
 class RegisteredCharacter(BaseModel):
-    name: str
+    name: Optional[str] = None  # None until the character exists (pre-launch "planned")
     cls: str
     spec: str
     offspec: Optional[str] = None
     is_main: bool = False
     rank: str = "trial"
-    status: str = "active"  # active | retired
+    status: str = "active"  # planned | active | retired
+
+    @property
+    def label(self) -> str:
+        return self.name or f"{self.cls} ({self.spec})"
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[str] = None
     created_at: str = Field(default_factory=now)
@@ -56,6 +60,7 @@ class Member(BaseModel):
     characters: list[RegisteredCharacter] = Field(default_factory=list)
     availability: dict[str, str] = Field(default_factory=dict)  # team -> in | out | sub
     absences: list[Absence] = Field(default_factory=list)
+    role_prefs: dict = Field(default_factory=dict)  # {"primary": "healer", "flex": ["ranged"]}
     dm_opt_out: bool = False
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
@@ -68,10 +73,14 @@ class Member(BaseModel):
 
     @property
     def main(self) -> Optional[RegisteredCharacter]:
-        return next((c for c in self.characters if c.is_main and c.status == "active"), None)
+        return next((c for c in self.characters if c.is_main and c.status in ("active", "planned")), None)
 
     def active(self) -> list[RegisteredCharacter]:
-        return [c for c in self.characters if c.status == "active"]
+        """Characters that count for sheets and planning (planned ones have no name yet)."""
+        return [c for c in self.characters if c.status in ("active", "planned")]
+
+    def planned(self) -> list[RegisteredCharacter]:
+        return [c for c in self.characters if c.status == "planned"]
 
 
 class Applicant(BaseModel):
@@ -214,9 +223,68 @@ class Registry:
         n = name.strip().lower()
         for m in self.members.values():
             for c in m.characters:
-                if c.name.lower() == n:
+                if c.name and c.name.lower() == n:
                     return m, c
         return None
+
+    # ---- pre-launch plans (no character names yet)
+    def set_plan(self, discord_id: int, display_name: str, cls: str, spec: str, offspec: str | None, slot: str) -> tuple[Member, RegisteredCharacter]:
+        """slot: main | alt. Replaces any existing *planned* character in that slot."""
+        if cls not in self.profile.classes:
+            raise RegistryError(f"Unknown class {cls}.")
+        spec = self.validate_spec(cls, spec)
+        offspec = self.validate_spec(cls, offspec) if offspec else None
+        m = self.member(discord_id, display_name, create=True)
+        is_main = slot == "main"
+        m.characters = [c for c in m.characters if not (c.status == "planned" and c.is_main == is_main)]
+        if is_main:
+            for c in m.characters:
+                c.is_main = False
+        c = RegisteredCharacter(cls=cls, spec=spec, offspec=offspec, is_main=is_main, status="planned", rank="trial" if is_main else "alt")
+        m.characters.append(c)
+        self.save(m, f"{display_name} plans {slot}: {cls} {spec}{'/' + offspec if offspec else ''}")
+        return m, c
+
+    def set_roles(self, discord_id: int, display_name: str, primary: str, flex: list[str]) -> Member:
+        roles = ("tank", "healer", "melee", "ranged")
+        if primary not in roles or any(f not in roles for f in flex):
+            raise RegistryError(f"Roles are {', '.join(roles)}.")
+        m = self.member(discord_id, display_name, create=True)
+        m.role_prefs = {"primary": primary, "flex": sorted({f for f in flex if f != primary})}
+        self.save(m, f"{display_name} roles: {primary}" + (f" (+{', '.join(m.role_prefs['flex'])})" if m.role_prefs["flex"] else ""))
+        return m
+
+    def name_character(self, discord_id: int, name: str, slot: str = "main") -> tuple[Member, RegisteredCharacter]:
+        """At launch: give a planned character its real name; it becomes active (pending confirmation)."""
+        name = self.normalise_name(name)
+        if self.find(name):
+            raise RegistryError(f"{name} is already registered.")
+        m = self.member(discord_id)
+        c = next((c for c in m.planned() if c.is_main == (slot == "main")), None)
+        if not c:
+            raise RegistryError(f"You have no planned {slot} to name. Use /register instead.")
+        c.name, c.status, c.updated_at = name, "active", now()
+        self.save(m, f"{m.display_name} named planned {slot} → {name}")
+        return m, c
+
+    def plan_summary(self) -> dict:
+        """Class/spec/role distribution across planned+active mains, plus flex and buff providers."""
+        mains = [(m, m.main) for m in self.members.values() if m.main]
+        by_cls: dict[str, list[str]] = {}
+        by_role: dict[str, int] = {r: 0 for r in ("tank", "healer", "melee", "ranged")}
+        flex: dict[str, list[str]] = {r: [] for r in by_role}
+        for m, c in mains:
+            by_cls.setdefault(c.cls, []).append(f"{m.display_name} · {c.spec}" + (f"/{c.offspec}" if c.offspec else ""))
+            role = m.role_prefs.get("primary") or self.profile.spec(c.cls, c.spec).role
+            by_role[role] = by_role.get(role, 0) + 1
+            for f in m.role_prefs.get("flex", []):
+                flex.setdefault(f, []).append(m.display_name)
+        providers: dict[str, list[str]] = {}
+        for b in self.profile.party_buffs():
+            who = [m.display_name for m, c in mains if b.provided_by(self.profile.spec(c.cls, c.spec))]
+            providers[b.name.split(" (")[0]] = who
+        alts = [(m.display_name, f"{c.cls} {c.spec}") for m in self.members.values() for c in m.active() if not c.is_main]
+        return {"mains": len(mains), "by_class": by_cls, "by_role": by_role, "flex": flex, "providers": providers, "alts": alts}
 
     def all_characters(self, active_only: bool = True) -> list[tuple[Member, RegisteredCharacter]]:
         out = []
@@ -269,35 +337,35 @@ class Registry:
 
     def set_main(self, discord_id: int, name: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.name.lower() == name.strip().lower()), None)
+        c = next((c for c in m.active() if (c.name or "").lower() == name.strip().lower()), None)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         old = m.main
         if old is c:
-            raise RegistryError(f"{c.name} is already your main.")
+            raise RegistryError(f"{c.label} is already your main.")
         for other in m.characters:
             other.is_main = False
         c.is_main = True
         if old and old.rank in ("trial", "raider", "core"):
             c.rank, old.rank = old.rank, "alt"  # rank follows the player
         c.updated_at = now()
-        self.save(m, f"{m.display_name} main {old.name if old else '-'} → {c.name}")
+        self.save(m, f"{m.display_name} main {old.label if old else '-'} → {c.label}")
         return m, c, old
 
     def set_spec(self, discord_id: int, name: str, spec: str, offspec: str | None) -> RegisteredCharacter:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.name.lower() == name.strip().lower()), None)
+        c = next((c for c in m.active() if (c.name or "").lower() == name.strip().lower()), None)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         c.spec = self.validate_spec(c.cls, spec)
         c.offspec = self.validate_spec(c.cls, offspec) if offspec else None
         c.updated_at = now()
-        self.save(m, f"{m.display_name}: {c.name} spec {c.spec}{'/' + c.offspec if c.offspec else ''}")
+        self.save(m, f"{m.display_name}: {c.label} spec {c.spec}{'/' + c.offspec if c.offspec else ''}")
         return c
 
     def retire(self, discord_id: int, name: str) -> RegisteredCharacter:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if c.name.lower() == name.strip().lower()), None)
+        c = next((c for c in m.active() if (c.name or "").lower() == name.strip().lower()), None)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         c.status = "retired"
@@ -309,7 +377,7 @@ class Registry:
                 nxt.is_main = True
                 if nxt.rank == "alt" and c.rank in ("trial", "raider", "core"):
                     nxt.rank = c.rank  # the player's standing follows them to the new main
-        self.save(m, f"{m.display_name} retired {c.name}")
+        self.save(m, f"{m.display_name} retired {c.label}")
         return c
 
     # ---- officer actions
@@ -319,7 +387,7 @@ class Registry:
             raise RegistryError(f"No character named {name}.")
         m, c = hit
         c.confirmed_by, c.confirmed_at, c.updated_at = by, now(), now()
-        self.save(m, f"{by} confirmed {c.name}")
+        self.save(m, f"{by} confirmed {c.label}")
         return m, c
 
     def set_rank(self, name: str, rank: str, by: str) -> tuple[Member, RegisteredCharacter]:
@@ -330,7 +398,7 @@ class Registry:
             raise RegistryError(f"No character named {name}.")
         m, c = hit
         c.rank, c.updated_at = rank, now()
-        self.save(m, f"{by} set {c.name} rank {rank}")
+        self.save(m, f"{by} set {c.label} rank {rank}")
         return m, c
 
     def officer_set_main(self, discord_id: int, name: str, by: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:

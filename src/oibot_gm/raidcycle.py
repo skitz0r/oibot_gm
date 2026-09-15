@@ -161,18 +161,18 @@ def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
 
 
 def _signup(reg: Registry, m: Member, c: RegisteredCharacter, status: str, source: str, note: str | None = None) -> Signup:
-    return Signup(discord_id=m.discord_id, display_name=m.display_name, character=c.name, cls=c.cls, spec=c.spec, role=reg.profile.spec(c.cls, c.spec).role, status=status, source=source, note=note)
+    return Signup(discord_id=m.discord_id, display_name=m.display_name, character=c.label, cls=c.cls, spec=c.spec, role=reg.profile.spec(c.cls, c.spec).role, status=status, source=source, note=note)
 
 
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None) -> Signup:
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}")
-    c = next((c for c in m.active() if c.name.lower() == (character or "").lower()), None) if character else m.main
+    c = next((c for c in m.active() if (c.name or c.label).lower() == (character or "").lower()), None) if character else m.main
     if not c:
         raise ValueError("no such active character")
     s = _signup(reg, m, c, status, source, note)
     ev.signups[str(m.discord_id)] = s
-    ev.log.append(f"{m.display_name} {status} as {c.name} ({source})")
+    ev.log.append(f"{m.display_name} {status} as {c.label} ({source})")
     rs.save(ev, f"{m.display_name} {status}")
     return s
 
@@ -224,7 +224,7 @@ def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
             for m in reg.members.values():
                 for c in m.active():
                     if reg.profile.spec(c.cls, c.spec).role == role and str(m.discord_id) not in ev.signups:
-                        alt.append(f"{m.display_name} ({c.name})")
+                        alt.append(f"{m.display_name} ({c.label})")
             hint = (f"; tentative/sub: {', '.join(fix)}" if fix else "") + (f"; not on sheet: {', '.join(alt[:4])}" if alt else "")
             out.append(("red" if have < need - 1 else "amber", f"{role.title()}s {have}/{need}{hint}"))
     # buffs nobody brings
