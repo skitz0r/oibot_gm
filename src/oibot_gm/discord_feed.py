@@ -74,9 +74,14 @@ class FeedMixin:
 
         if kind == "drop":
             ticked = []
+            learned = []
             for it in ev.get("items", []):
                 item = self._resolve_item(it.get("id"))
                 if not item:
+                    # unknown to the profile: remember boss → item so it can be onboarded (`oibot items add`)
+                    if it.get("id"):
+                        db._store().append_jsonl(Path(raid.guild) / "items_learned.jsonl", {"id": int(it["id"]), "name": it.get("name"), "boss": ev.get("boss"), "instance": raid.instance, "event": raid.id, "ts": ev.get("ts")})
+                        learned.append(f"{it.get('name') or it['id']} ({it['id']})")
                     continue
                 boss = self._resolve_boss(ev.get("boss"), item)
                 lst = raid.drops.setdefault(boss, [])
@@ -86,7 +91,10 @@ class FeedMixin:
             if ticked:
                 raid.save(f"{raid.id}: companion drops {len(ticked)}")
                 await self.feed_post(raid, f"📥 {comp.character}'s log: dropped from **{self._resolve_boss(ev.get('boss'), None)}** — " + ", ".join(ticked), view=db.DistributeView(self, raid))
-            return {"ticked": len(ticked)}
+            if learned:
+                db._store().commit(f"{raid.guild}: learned {len(learned)} item(s) from {ev.get('boss') or 'unknown boss'}")
+                await self.feed_post(raid, f"🆕 Not in the item table yet (recorded for onboarding from **{ev.get('boss') or '?'}**): " + ", ".join(learned) + ". An officer can run `oibot items add` to pull their facts from Blizzard.")
+            return {"ticked": len(ticked), "learned": len(learned)}
         if kind == "kill":
             boss = self._resolve_boss(ev.get("boss"), None)
             if boss not in raid.bosses_done:

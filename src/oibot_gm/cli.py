@@ -207,6 +207,72 @@ def loot(guild: Path = GUILD, signup: str = "signup_2026-09-15.yaml", drops: str
     console.print(f"[dim]wrote {ROOT/out/'loot.md'}[/]")
 
 
+items_app = typer.Typer(help="Item onboarding against the Blizzard Game Data API")
+app.add_typer(items_app, name="items")
+
+
+def _namespace(profile: str, namespace: str | None) -> str:
+    if namespace:
+        return namespace
+    integ = ROOT / "profiles" / profile / "integrations.yaml"
+    if integ.exists():
+        return (yaml.safe_load(integ.read_text()) or {}).get("blizzard_namespace", "static-classic-us")
+    return "static-classic-us"
+
+
+@items_app.command("verify")
+def items_verify(profile: str = "tbc", namespace: str | None = None, region: str = "us"):
+    """Cross-check every item row's name/slot/armour class against Blizzard."""
+    load_dotenv(ROOT / ".env")
+    from .importers.blizzard import verify_profile
+
+    ns = _namespace(profile, namespace)
+    problems = verify_profile(ROOT / "profiles" / profile, ns, region, cache_dir=ROOT / "out" / "blizzard-cache")
+    n = sum(1 for _ in (ROOT / "profiles" / profile / "items").glob("*.yaml"))
+    console.print(f"[bold]{profile}[/] via {ns}: {len(problems)} problem rows")
+    for p in problems:
+        console.print(f"  [yellow]{p['id']}[/] {p['name']}: {p['problem']}")
+    (ROOT / "out" / f"items_verify_{profile}.json").write_text(json.dumps(problems, indent=1, default=str))
+
+
+@items_app.command("add")
+def items_add(ids: list[int], profile: str = "forever", boss: str = "?", out_file: str = "onboarded.yaml", namespace: str | None = None, region: str = "us"):
+    """Fetch items from Blizzard and append rows (empty tiers) to profiles/<profile>/items/<out_file>."""
+    load_dotenv(ROOT / ".env")
+    from .importers.blizzard import Blizzard, row_for
+
+    ns = _namespace(profile, namespace)
+    bz = Blizzard(region=region, namespace=ns, cache_dir=ROOT / "out" / "blizzard-cache")
+    path = ROOT / "profiles" / profile / "items" / out_file
+    doc = yaml.safe_load(path.read_text()) if path.exists() else {"items": []}
+    doc.setdefault("items", [])
+    have = {int(r["id"]) for r in doc["items"]}
+    for i in ids:
+        if i in have:
+            console.print(f"  {i}: already present")
+            continue
+        b = bz.item(i)
+        doc["items"].append(row_for(b, boss))
+        console.print(f"  [green]{i}[/] {b.name} · {b.slot} · {b.type} · ilvl {b.ilvl}" + (f" · {', '.join(b.classes)}" if b.classes else ""))
+    path.write_text("# Onboarded from the Blizzard Game Data API (facts) — tiers are the guild's to fill via /prio.\n" + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    console.print(f"[dim]wrote {path}[/]")
+
+
+@items_app.command("lookup")
+def items_lookup(ids: list[int], namespace: str = "static-classic-us", region: str = "us"):
+    """Print what Blizzard says about item ids (namespace discovery helper)."""
+    load_dotenv(ROOT / ".env")
+    from .importers.blizzard import Blizzard
+
+    bz = Blizzard(region=region, namespace=namespace, cache_dir=ROOT / "out" / "blizzard-cache")
+    for i in ids:
+        try:
+            b = bz.item(i)
+            console.print(f"{i}: {b.name} · {b.quality} · {b.slot} ({b.raw_inventory}) · {b.type} ({b.raw_class}/{b.raw_subclass}) · ilvl {b.ilvl} · classes {b.classes or 'any'}")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"{i}: [red]{str(e)[:120]}[/]")
+
+
 @app.command()
 def discord(guild: Path = GUILD, signup: str = "signup_2026-09-15.yaml"):
     """Run the Discord bot (mock raid / loot council demo)."""

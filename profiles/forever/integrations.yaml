@@ -1,0 +1,5 @@
+# Integrations for WoW: Forever — namespace unknown until launch. Candidates to try with `oibot items lookup`:
+# static-classic-forever-us, static-classicforever-us, static-forever-us
+wcl_host: null
+blizzard_namespace: static-classic-us
+tmb_expansion_id: null
