@@ -30,7 +30,10 @@ src/oibot_gm/
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
   configops.py         plain-text config: whitelisted ConfigOp schema, describe() diff, apply() via the same code paths as commands
   discord_policy.py    /policy show|edit|reload, /loot-rule, /comp-rule, /gm change, @mention in the ops channel
+  feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks
+  discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence
   ops.py               ops feed (channel line per action; errors DM the owner)
+companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`

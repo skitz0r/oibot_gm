@@ -197,6 +197,18 @@ class RaidMixin:
             await asyncio.sleep(60)
 
     async def scheduler_tick(self) -> None:
+        # companion presence during an active mock raid
+        feed = getattr(self, "feed", None)
+        raid = next((e for e in self.events.values() if e.state == "raid"), None)
+        if feed and raid:
+            for c in list(feed.companions.values()):
+                if c.silent_for > 300 and not getattr(c, "warned", False):
+                    c.warned = True
+                    cfg = next(iter(self.registries.by_discord.values())).config if self.registries.by_discord else None
+                    if cfg:
+                        await self.ops.emit(cfg, "warn", f"companion {c.character} silent for {int(c.silent_for // 60)} min during {raid.id} — is /chatlog on?")
+                elif c.silent_for <= 300:
+                    c.warned = False
         for reg in self.registries.by_discord.values():
             cfg = reg.config
             rs = self.raids.store(reg)

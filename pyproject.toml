@@ -27,3 +27,8 @@ packages = ["src/oibot_gm"]
 
 [tool.uv]
 python-preference = "managed"
+
+[dependency-groups]
+dev = [
+    "websockets>=17.1",
+]

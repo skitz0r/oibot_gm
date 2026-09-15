@@ -328,7 +328,9 @@ Built and running against the shadow guild (see README / CLAUDE.md):
 
 **§5.15 built:** `/policy show|edit|reload` with compile-and-confirm (Opus compiles prose → `LootCompiled`/`CompCompiled`, ambiguities become questions, an officer confirms before the compiled form goes live), `/loot-rule` and `/comp-rule` append-and-compile, `/gm change <text>` and @mention in the ops channel (Sonnet maps text → whitelisted typed ops; diff with Apply/Cancel; owner-only ops refused for officers). Confirmed comp constraints (keep_together/apart, never/always bench) feed the weekly proposal's solver options.
 
-Known gaps: item rows in `profiles/tbc/items` are unverified (Blizzard API pass pending); tanks land in DPS groups (comp_rules tuning); the mock loot flow still reads the shadow fixtures rather than the registry (no real loot flow for the registered guild yet); no companion (§5.13); Forever profile data is placeholder; `prefer_group`/`role_min` constraints are compiled but not yet consumed by the solver.
+**§5.13 built (2026-09-14):** `feed.py` listener (WebSocket on the tailnet, token hello, idempotent acks, presence) and `companion/oibot_companion.py` (tails `WoWChatLog.txt`; parses `receives loot`, Gargul/RCLC drop announcements, boss-mod kills; buffers and replays; `--replay` for tests). Bot behaviour per event as designed: drops auto-tick the boss table, a `receives loot` that matches the proposal confirms it, one that differs records the in-game award as an override and asks the thread for the reason (the next reply becomes the precedent), no proposal → manual award to the ledger; the scheduler warns when a companion goes silent mid-raid; `/gm status` shows companions.
+
+Known gaps: item rows in `profiles/tbc/items` are unverified (Blizzard API pass pending); tanks land in DPS groups (comp_rules tuning); the loot flow (mock + feed) still runs on the shadow fixtures rather than the registered guild; the companion is a Python script, not yet a packaged exe; Forever profile data is placeholder; `prefer_group`/`role_min` constraints are compiled but not yet consumed by the solver.
 
 ## 6. Architecture
 

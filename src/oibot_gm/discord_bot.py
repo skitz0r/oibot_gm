@@ -27,7 +27,9 @@ from discord import app_commands
 from pydantic import BaseModel, Field
 
 from . import nl, render
+from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, register_policy_commands
+from .feed import FeedServer, feed_config
 from .discord_raid import RaidContext, RaidMixin, SignupButton, register_raid_commands
 from .discord_registry import Guilds, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
@@ -129,6 +131,7 @@ class MockEvent(BaseModel):
     awards: list[LootAward] = Field(default_factory=list)
     overrides: list[dict] = Field(default_factory=list)
     bosses_done: list[str] = Field(default_factory=list)
+    pending_reasons: list[dict] = Field(default_factory=list)  # in-game overrides awaiting a reason
 
     @property
     def raid_name(self) -> str:
@@ -538,11 +541,13 @@ def run_distribution(ctx: GuildContext, ev: MockEvent, keep_overrides: bool = Tr
     ev.save()
 
 
-def confirm_awards(ctx: GuildContext, ev: MockEvent) -> list[str]:
+def confirm_awards(ctx: GuildContext, ev: MockEvent, only: set[int] | None = None) -> list[str]:
+    """Record proposals as awards (all, or just `only` item ids) and drop them from the pending list."""
     raid_date = date.fromisoformat(ev.date)
     lines = []
     st = _store()
-    for p in ev.proposals:
+    chosen = [p for p in ev.proposals if only is None or p.item_id in only]
+    for p in chosen:
         c = next((c for c in p.result.candidates if c.character == p.award_to), None)
         award = LootAward(raider=p.award_to, item_id=p.item_id, tier=c.tier if c else "?", total_weight=c.upgrade_value if c else 0.5, offspec=bool(c and c.offspec), received=raid_date, instance=ev.raid_name, boss=p.boss)
         ev.awards.append(award)
@@ -552,8 +557,8 @@ def confirm_awards(ctx: GuildContext, ev: MockEvent) -> list[str]:
         ev.distributed.append(p.item_id)
         if p.boss not in ev.bosses_done:
             ev.bosses_done.append(p.boss)
-    ev.proposals = []
-    ev.pending_drops = []
+    ev.proposals = [p for p in ev.proposals if p not in chosen]
+    ev.pending_drops = [i for i in ev.pending_drops if only is not None and i not in only] if ev.proposals else []
     ev.save(f"{ev.id}: confirmed {len(lines)} awards")
     return lines
 
@@ -641,7 +646,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(RaidMixin, discord.Client):
+class OibotGM(FeedMixin, RaidMixin, discord.Client):
     ico = staticmethod(ico)
 
     def __init__(self, ctx: GuildContext, test_guild: int | None):
@@ -808,6 +813,10 @@ class OibotGM(RaidMixin, discord.Client):
                 notes = await asyncio.to_thread(apply_ops, self.ctx, ev, req.ops)
                 embed, view, file = await self.propose_roster(ev, (req.reply + "\n" if req.reply else "") + "Changes: " + "; ".join(notes))
                 await message.reply(embed=embed, view=view, file=file)
+        elif ev.state == "raid" and message.channel.id == ev.raid_thread_id and ev.pending_reasons and not ev.proposals:
+            line = await self.record_pending_reason(ev, message.content, message.author.display_name)
+            if line:
+                await message.reply(line)
         elif ev.state == "raid" and message.channel.id == ev.raid_thread_id and ev.proposals:
             async with message.channel.typing():
                 try:
@@ -991,6 +1000,12 @@ class OibotGM(RaidMixin, discord.Client):
             self.tree.copy_global_to(guild=g)
             await self.tree.sync(guild=g)
         self.loop.create_task(self.scheduler())
+        token, bind = feed_config()
+        if token:
+            self.feed = FeedServer(self.handle_feed_event, token, bind)
+            await self.feed.start()
+        else:
+            print("loot feed disabled (set OIBOT_FEED_TOKEN and OIBOT_FEED_BIND)")
 
     async def on_ready(self):
         await self.ensure_emojis()

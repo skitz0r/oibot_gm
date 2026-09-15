@@ -1,0 +1,9 @@
+9/15 20:31:02.115  [Raid Warning] Rhozy: [DBM] Supremus has been defeated!
+9/15 20:31:40.882  [Raid] Rhozy: Gargul: dropped from Supremus: |cffa335ee|Hitem:32262::::::::70:::::|h[Syphon of the Nathrezim]|h|r |cffa335ee|Hitem:32260::::::::70:::::|h[Choker of Endless Nightmares]|h|r |cffa335ee|Hitem:32255::::::::70:::::|h[Felstone Bulwark]|h|r
+9/15 20:33:10.004  Boviche receives loot: |cffa335ee|Hitem:32262::::::::70:::::|h[Syphon of the Nathrezim]|h|r.
+9/15 20:33:25.311  Zathguy receives loot: |cffa335ee|Hitem:32260::::::::70:::::|h[Choker of Endless Nightmares]|h|r.
+9/15 20:33:41.900  You receive loot: |cffa335ee|Hitem:32255::::::::70:::::|h[Felstone Bulwark]|h|r.
+9/15 20:34:00.000  [Raid] Innater: nice
+9/15 20:52:17.410  [Raid Warning] Rhozy: [DBM] Shade of Akama has been defeated!
+9/15 20:52:50.100  [Raid] Rhozy: RCLootCouncil: Loot session started: |cffa335ee|Hitem:32263::::::::70:::::|h[Praetorian's Legguards]|h|r
+9/15 20:54:03.777  Gukmonster receives loot: |cffa335ee|Hitem:32263::::::::70:::::|h[Praetorian's Legguards]|h|r.

@@ -641,6 +641,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.add_field(name="Registry", value=f"{len(reg.members)} members · {len(chars)} characters · {len(reg.pending())} unconfirmed", inline=True)
         e.add_field(name="Config", value=f"owner {'<@%d>' % reg.config.owner_discord_id if reg.config.owner_discord_id else '—'} · ops {'<#%d>' % reg.config.ops_channel_id if reg.config.ops_channel_id else '—'} · officer roles {', '.join(reg.config.officer_roles) or '—'}", inline=False)
         e.add_field(name="LLM", value=provider.summary()[:1000] if provider else "off", inline=False)
+        feed = getattr(interaction.client, "feed", None)
+        e.add_field(name="Loot feed", value=(feed.status() if feed else "disabled (OIBOT_FEED_TOKEN unset)")[:500], inline=False)
         if ops.recent:
             e.add_field(name="Recent ops", value="\n".join(f"`{t}` {LEVEL[l]} {x}"[:120] for t, l, x in ops.recent[-8:])[:1000], inline=False)
         await interaction.response.send_message(embed=e, ephemeral=True)
