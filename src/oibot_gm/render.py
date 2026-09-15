@@ -204,13 +204,14 @@ def health_png(title: str, subtitle: str, headcount: tuple[int, int, int, int], 
     for i, r in enumerate(roles):
         x0 = M + i * (tile_w + 14)
         col = LEVEL[r["level"]]
-        d.rounded_rectangle([x0, y, x0 + tile_w, y + 120], radius=8, fill=PANEL, outline=col, width=2)
+        d.rounded_rectangle([x0, y, x0 + tile_w, y + 138], radius=8, fill=PANEL, outline=col, width=2)
         _role_glyph(d, x0 + 16, y + 16, r["role"], 18)
         d.text((x0 + 44, y + 12), r["role"].title(), font=f_h, fill=INK)
         d.text((x0 + 16, y + 42), f"{r['have']}" + (f" / {r['need']}" if r.get("need") else ""), font=f_big, fill=col)
-        if r.get("hint"):
-            d.text((x0 + 16, y + 90), r["hint"][:46], font=f_small, fill=MUTED)
-    y += 140
+        hint = r.get("hint") or ""
+        for j, part in enumerate([h.strip() for h in hint.split(" · ") if h.strip()][:2]):
+            d.text((x0 + 16, y + 90 + j * 18), part[:44], font=f_small, fill=MUTED)
+    y += 158
     # buffs
     d.text((M, y), "Buff coverage", font=f_h, fill=INK)
     d.text((M + 150, y + 3), "badge = buff · name = provider · red outline = nobody signed brings it", font=f_small, fill=MUTED)

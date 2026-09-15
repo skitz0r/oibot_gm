@@ -27,6 +27,8 @@ class SolveOptions:
     prefer_group: dict[str, int] | None = None  # signup_name -> 1-based group, soft (bonus if honoured)
     prefer_weight: int = 15
     role_min: dict[str, int] | None = None  # role -> minimum, overrides the profile/scaled bounds
+    allow_offspec: bool = True  # let the solver switch players to their offspec to meet role minimums
+    offspec_penalty: int = 8  # objective cost per switch
     time_limit_s: float = 20.0
     workers: int = 8
 
@@ -57,17 +59,60 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
     x = {p.signup_name: m.NewBoolVar(f"x_{p.signup_name}") for p in players}
     y = {(p.signup_name, g): m.NewBoolVar(f"y_{p.signup_name}_{g}") for p in players for g in range(n_groups)}
 
+    # offspec switch: o[p] = 1 means p raids as their offspec (different role); only when the roster needs it
+    off_specs: dict[str, SpecInfo] = {}
+    o: dict[str, cp_model.IntVar] = {}
+    if opts.allow_offspec:
+        for p in players:
+            if p.offspec and p.offspec != p.spec:
+                try:
+                    os_ = profile.spec(p.cls, p.offspec)
+                except KeyError:
+                    continue
+                if os_.role != specs[p.signup_name].role:
+                    off_specs[p.signup_name] = os_
+                    o[p.signup_name] = m.NewBoolVar(f"o_{p.signup_name}")
+                    m.Add(o[p.signup_name] <= x[p.signup_name])
+
+    def role_expr(role: str):
+        terms = []
+        for p in players:
+            n = p.signup_name
+            if n in o:
+                if p.role == role:
+                    terms.append(x[n] - o[n])
+                if off_specs[n].role == role:
+                    terms.append(o[n])
+            elif p.role == role:
+                terms.append(x[n])
+        return terms
+
+    # per-group role expressions (for the healer/tank caps)
+    def group_role_expr(role: str, g: int):
+        terms = []
+        for p in players:
+            n = p.signup_name
+            if n in o:
+                if p.role == role:
+                    terms.append(y[n, g])  # upper bound; switching away only lowers it
+                elif off_specs[n].role == role:
+                    pass  # counted via o below; keep caps conservative
+            elif p.role == role:
+                terms.append(y[n, g])
+        return terms
+
     m.Add(sum(x.values()) == raid_size)
     for p in players:
         m.Add(sum(y[p.signup_name, g] for g in range(n_groups)) == x[p.signup_name])
     for g in range(n_groups):
         m.Add(sum(y[p.signup_name, g] for p in players) <= gsize)
-        m.Add(sum(y[p.signup_name, g] for p in players if p.role == "healer") <= rules["grouping"]["healer_max_per_group"])
-        m.Add(sum(y[p.signup_name, g] for p in players if p.role == "tank") <= rules["grouping"]["tank_max_per_group"])
+        m.Add(sum(group_role_expr("healer", g)) <= rules["grouping"]["healer_max_per_group"])
+        m.Add(sum(group_role_expr("tank", g)) <= rules["grouping"]["tank_max_per_group"])
     for role, bounds in role_bounds.items():
-        have = [x[p.signup_name] for p in players if p.role == role]
+        have = role_expr(role)
+        capable = sum(1 for p in players if p.role == role or (p.signup_name in off_specs and off_specs[p.signup_name].role == role))
         if have:
-            m.Add(sum(have) >= min(bounds["min"], len(have)))
+            m.Add(sum(have) >= min(bounds["min"], capable))
             m.Add(sum(have) <= bounds["max"])
     for name in opts.force_in:
         m.Add(x[name] == 1)
@@ -99,37 +144,68 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
     for name, g1 in (opts.prefer_group or {}).items():
         if name in x and 1 <= g1 <= n_groups:
             terms.append(opts.prefer_weight * SCALE * y[name, g1 - 1])
+    for n in o:
+        terms.append(-opts.offspec_penalty * SCALE * o[n])
 
-    # --- objective: party buff synergy ---
+    # --- objective: party buff synergy (a switched player provides/benefits as their offspec) ---
+    # presence-in-spec variables: ym[p,g] = in group g as main spec, yo[p,g] = in group g as offspec
+    ym: dict[tuple[str, int], cp_model.IntVar] = {}
+    yo: dict[tuple[str, int], cp_model.IntVar] = {}
+    for p in players:
+        n = p.signup_name
+        for g in range(n_groups):
+            if n in o:
+                a = m.NewBoolVar(f"ym_{n}_{g}")
+                bvar = m.NewBoolVar(f"yo_{n}_{g}")
+                m.Add(a + bvar == y[n, g])
+                m.Add(bvar <= o[n])
+                m.Add(a <= 1 - o[n])
+                ym[n, g], yo[n, g] = a, bvar
+            else:
+                ym[n, g] = y[n, g]
+
+    def presence_terms(p, g, b):
+        """[(var, spec)] ways player p can be in group g, with the spec that applies."""
+        out = [(ym[p.signup_name, g], specs[p.signup_name])]
+        if (p.signup_name, g) in yo:
+            out.append((yo[p.signup_name, g], off_specs[p.signup_name]))
+        return out
+
     synergy_terms = []
     for b in profile.party_buffs():
-        providers = [p for p in players if b.provided_by(specs[p.signup_name])]
-        if not providers:
+        any_provider = any(b.provided_by(specs[p.signup_name]) or (p.signup_name in off_specs and b.provided_by(off_specs[p.signup_name])) for p in players)
+        if not any_provider:
             continue
         for g in range(n_groups):
+            prov_vars = [v for p in players for v, s in presence_terms(p, g, b) if b.provided_by(s)]
             if b.stacking == "unique":
                 prov = m.NewBoolVar(f"prov_{b.id}_{g}")
-                m.Add(prov <= sum(y[p.signup_name, g] for p in providers))
+                m.Add(prov <= sum(prov_vars))
                 for q in players:
-                    val = int(round(b.benefit(specs[q.signup_name]) * SCALE))
-                    if val <= 0:
-                        continue
-                    z = m.NewBoolVar(f"z_{b.id}_{g}_{q.signup_name}")
-                    m.Add(z <= prov)
-                    m.Add(z <= y[q.signup_name, g])
-                    synergy_terms.append(val * z)
-            else:  # stack: every provider adds for every other member
-                for p in providers:
-                    for q in players:
-                        if q is p:
-                            continue
-                        val = int(round(b.benefit(specs[q.signup_name]) * SCALE))
+                    for v, s in presence_terms(q, g, b):
+                        val = int(round(b.benefit(s) * SCALE))
                         if val <= 0:
                             continue
-                        w = m.NewBoolVar(f"w_{b.id}_{g}_{p.signup_name}_{q.signup_name}")
-                        m.Add(w <= y[p.signup_name, g])
-                        m.Add(w <= y[q.signup_name, g])
-                        synergy_terms.append(val * w)
+                        z = m.NewBoolVar(f"z_{b.id}_{g}_{q.signup_name}_{s.spec}")
+                        m.Add(z <= prov)
+                        m.Add(z <= v)
+                        synergy_terms.append(val * z)
+            else:  # stack: every provider adds for every other member
+                for p in players:
+                    for pv, ps in presence_terms(p, g, b):
+                        if not b.provided_by(ps):
+                            continue
+                        for q in players:
+                            if q is p:
+                                continue
+                            for qv, qs in presence_terms(q, g, b):
+                                val = int(round(b.benefit(qs) * SCALE))
+                                if val <= 0:
+                                    continue
+                                w = m.NewBoolVar(f"w_{b.id}_{g}_{p.signup_name}_{ps.spec}_{q.signup_name}_{qs.spec}")
+                                m.Add(w <= pv)
+                                m.Add(w <= qv)
+                                synergy_terms.append(val * w)
 
     # symmetry breaking: the first signed player anchors group 0 (unless pins fix the numbering)
     if not opts.pins:
@@ -145,6 +221,14 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         raise RuntimeError(f"no roster found: {solver.StatusName(status)}")
 
+    # apply offspec switches to the Player objects so reports/coverage use the chosen spec
+    switches: dict[str, str] = {}
+    for n, var in o.items():
+        if solver.Value(var):
+            p = next(pp for pp in players if pp.signup_name == n)
+            switches[n] = off_specs[n].spec
+            p.offspec, p.spec, p.role = p.spec, off_specs[n].spec, off_specs[n].role
+            specs[n] = off_specs[n]
     selected = [p for p in players if solver.Value(x[p.signup_name])]
     benched = [p for p in players if not solver.Value(x[p.signup_name])]
     groups: list[list[str]] = [[] for _ in range(n_groups)]
@@ -165,6 +249,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         synergy_value=syn_total,
         role_counts=counts,
         advisories=[],
+        spec_switches=switches,
         solver_status=solver.StatusName(status),
     )
 

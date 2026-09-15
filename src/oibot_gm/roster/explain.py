@@ -37,6 +37,9 @@ def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: 
     tent = [p for p in result.selected if p.note == "tentative"]
     if tent:
         adv.append(f"🟡 Tentative in roster ×{len(tent)} · " + ", ".join(p.signup_name for p in tent[:5]))
+    if result.spec_switches:
+        adv.append("🟡 Offspec to fill roles · " + ", ".join(f"{n} → {s}" for n, s in result.spec_switches.items()))
+        details.append("Offspec switches satisfy role minimums the signed specs couldn't; each costs a small objective penalty so they're only used when needed.")
 
     whatif_map: dict[str, int] = {}
     for p in (result.benched if whatif else []):

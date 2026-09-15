@@ -224,7 +224,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await ops.emit(reg.config, "info", f"**{m.display_name}** registered {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ''}) — pending confirmation")
 
     # ---------------- /plan (pre-launch: what are you going to play?)
-    plan = app_commands.Group(name="plan", description="Pre-launch: what you're planning to play (no character name needed)")
+    me = app_commands.Group(name="me", description="Your plan, characters, availability and absences")
+    plan = app_commands.Group(name="plan", description="Pre-launch: what you're planning to play (no character name needed)", parent=me)
 
     @plan.command(name="main", description="What you plan to main")
     @app_commands.rename(class_="class")
@@ -239,7 +240,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.response.send_message(f"✅ Planned main: {char_line(ico, c)}. Set your role preferences with `/plan roles` (or the poll buttons).", ephemeral=True)
+        await interaction.response.send_message(f"✅ Planned main: {char_line(ico, c)}. Set your role preferences with `/me plan roles` (or the poll buttons).", ephemeral=True)
         await ops.emit(reg.config, "info", f"{m.display_name} plans to main {c.cls} {c.spec}")
 
     @plan.command(name="alt", description="What you plan to play as an alt")
@@ -269,10 +270,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ Roles: **{primary.value}**" + (f", also {', '.join(m.role_prefs['flex'])}" if m.role_prefs["flex"] else ""), ephemeral=True)
         await ops.emit(reg.config, "info", f"{m.display_name} roles: {primary.value}" + (f" (+{', '.join(m.role_prefs['flex'])})" if m.role_prefs["flex"] else ""))
 
-    tree.add_command(plan)
 
     # ---------------- /char
-    char = app_commands.Group(name="char", description="Manage your characters")
+    char = app_commands.Group(name="char", description="Manage your characters", parent=me)
 
     @char.command(name="name", description="At launch: give your planned main (or alt) its real character name")
     @app_commands.choices(slot=[app_commands.Choice(name="main", value="main"), app_commands.Choice(name="alt", value="alt")])
@@ -348,14 +348,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         await interaction.response.send_message("\n".join(char_line(ico, c) for c in m.active()), ephemeral=True)
 
-    tree.add_command(char)
 
-    # ---------------- /availability, /absent, /me
+    # ---------------- /availability, /me absent, /me
     async def team_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
         return [app_commands.Choice(name=t, value=t) for t in (reg.config.team_keys() if reg else []) if current.lower() in t.lower()][:25]
 
-    @tree.command(name="availability", description="Your standing default for a raid team: in, out, or sub-only")
+    @me.command(name="availability", description="Your standing default for a raid team: in, out, or sub-only")
     @app_commands.autocomplete(team=team_autocomplete)
     @app_commands.choices(value=[app_commands.Choice(name=v, value=v) for v in ("in", "out", "sub")])
     async def availability(interaction: discord.Interaction, value: app_commands.Choice[str], team: str | None = None):
@@ -371,7 +370,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ {team}: **{value.value}** (sheets for this team will start with you {value.value}).", ephemeral=True)
         await ops.emit(reg.config, "info", f"{m.display_name} availability {team}={value.value}")
 
-    absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)")
+    absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)", parent=me)
 
     @absent.command(name="add", description="Register an absence: one day or a range")
     @app_commands.describe(start="YYYY-MM-DD", end="YYYY-MM-DD (optional)", reason="Optional; only officers see it")
@@ -411,7 +410,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ Cleared absence starting {start}.", ephemeral=True)
         await ops.emit(reg.config, "info", f"{m.display_name} cleared absence {start}")
 
-    tree.add_command(absent)
 
     # ---------------- /apply (recruitment intake)
     def application_embed(reg: Registry, a) -> discord.Embed:
@@ -440,7 +438,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         try:
             user = await interaction.client.fetch_user(a.discord_id)
             if accept:
-                await user.send(f"✅ Your application for **{a.name}** to {reg.config.name} was accepted by {interaction.user.display_name}. You're registered as a trial; /me shows your status." + (f"\n\n{note}" if note else ""))
+                await user.send(f"✅ Your application for **{a.name}** to {reg.config.name} was accepted by {interaction.user.display_name}. You're registered as a trial; /me view shows your status." + (f"\n\n{note}" if note else ""))
             else:
                 await user.send(f"Your application for **{a.name}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "") + "\n\nYou can apply again later.")
         except Exception:  # noqa: BLE001
@@ -507,7 +505,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         else:
             await ops.emit(reg.config, "warn", f"application from {a.display_name} ({a.name}, {a.cls} {a.spec}) — no applications/ops channel configured; use /roster applicants")
 
-    @tree.command(name="me", description="Your characters, availability and upcoming absences")
+    @me.command(name="view", description="Your plan, characters, availability and upcoming absences")
     async def me(interaction: discord.Interaction):
         reg = await need(interaction)
         if not reg:
@@ -519,13 +517,17 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         today = discord.utils.utcnow().date().isoformat()
         e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=0x2B7A78)
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
+        if m.teams:
+            e.add_field(name="Teams", value=", ".join(m.teams), inline=True)
         rp = m.role_prefs
-        e.add_field(name="Roles", value=(f"{rp.get('primary')}" + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "unset — /plan roles", inline=True)
+        e.add_field(name="Roles", value=(f"{rp.get('primary')}" + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "unset — /me plan roles", inline=True)
         e.add_field(name="Availability", value=", ".join(f"{t}: {m.availability.get(t, 'unset')}" for t in reg.config.team_keys()), inline=True)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(f"{a.start}" + (f" → {a.end}" if a.end != a.start else "") for a in ups) or "none", inline=True)
         e.set_footer(text="Attendance and loot history appear here once the raid ledger is live.")
         await interaction.response.send_message(embed=e, ephemeral=True)
+
+    tree.add_command(me)
 
     # ---------------- /roster (officers)
     roster = app_commands.Group(name="roster", description="Officer: the guild's registered characters")
@@ -604,7 +606,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ {m.display_name}'s main is now {c.label}", ephemeral=True)
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {m.display_name}'s main → {c.label}")
 
-    @roster.command(name="plan", description="Who is planning to play what: classes, roles, flexibility, buff coverage")
+    @roster.command(name="overview", description="Who is planning to play what: classes, roles, flexibility, buff coverage")
     @app_commands.describe(size="raid size to check against (default: first team's size or 20)")
     async def roster_plan(interaction: discord.Interaction, size: int | None = None):
         reg = await need(interaction)
@@ -612,7 +614,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         s = reg.plan_summary()
         if not s["mains"]:
-            await interaction.response.send_message("Nobody has planned a main yet — post the poll with `/gm plan-poll` or use `/plan main`.", ephemeral=True)
+            await interaction.response.send_message("Nobody has planned a main yet — post the poll with `/roster poll` or use `/me plan main`.", ephemeral=True)
             return
         from .roster.solver import scaled_role_bounds
 
@@ -644,6 +646,60 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
         asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
         e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
+        await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
+
+    team = app_commands.Group(name="team", description="Officer: the curated roster for each raid team", parent=roster)
+
+    @team.command(name="add", description="Add a member to a team (they default to In on that team's sheets)")
+    @app_commands.autocomplete(team=team_autocomplete)
+    async def team_add(interaction: discord.Interaction, member: discord.User, team: str | None = None):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        key = team or reg.config.team_keys()[0]
+        try:
+            m = reg.team_add(member.id, key, interaction.user.display_name, display_name=member.display_name)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {m.display_name} → team **{key}** ({len(reg.team_members(key))} members)", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} added {m.display_name} to team {key}")
+
+    @team.command(name="remove", description="Remove a member from a team (they can still sign as sub)")
+    @app_commands.autocomplete(team=team_autocomplete)
+    async def team_remove(interaction: discord.Interaction, member: discord.User, team: str | None = None):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        key = team or reg.config.team_keys()[0]
+        try:
+            m = reg.team_remove(member.id, key, interaction.user.display_name)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {m.display_name} removed from **{key}**", ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} removed {m.display_name} from team {key}")
+
+    @team.command(name="list", description="Team membership by role")
+    @app_commands.autocomplete(team=team_autocomplete)
+    async def team_list(interaction: discord.Interaction, team: str | None = None):
+        reg = await need(interaction)
+        if not reg:
+            return
+        key = team or reg.config.team_keys()[0]
+        members = reg.team_members(key)
+        if not members:
+            await interaction.response.send_message(f"Team **{key}** has no explicit members yet, so every registered main counts. `/roster team add @member` to curate it.", ephemeral=True)
+            return
+        by_role: dict[str, list[str]] = {}
+        for m in members:
+            c = m.main
+            role = (m.role_prefs.get("primary") or (reg.profile.spec(c.cls, c.spec).role if c else "?"))
+            by_role.setdefault(role, []).append(f"{ico('class', c.cls) if c else ''} {m.display_name}" + (f" · {c.spec}" if c else " · no main"))
+        e = discord.Embed(title=f"Team {key} · {len(members)} members", colour=0x2B7A78)
+        for r in ROLES:
+            if by_role.get(r):
+                e.add_field(name=f"{ico('role', r)} {r} ({len(by_role[r])})", value="\n".join(by_role[r])[:1000], inline=True)
         await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
 
     @roster.command(name="absences", description="Upcoming absences across the guild (with reasons)")
@@ -832,12 +888,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
         await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
 
-    @gm.command(name="plan-poll", description="Officer: post the 'what are you planning to play?' poll with class buttons")
+    @roster.command(name="poll", description="Officer: post the 'what are you planning to play?' poll with class buttons")
     async def gm_plan_poll(interaction: discord.Interaction):
         reg = await officer(interaction)
         if not reg:
             return
-        e = discord.Embed(title="What are you planning to play?", colour=0x2B7A78, description="Pick your **main's class** below, then the spec and your role preferences. No character name needed — that comes at launch (`/char name`). Alts and changes: `/plan alt`, `/plan main`, `/plan roles`. See where the guild stands with `/roster plan`.")
+        e = discord.Embed(title="What are you planning to play?", colour=0x2B7A78, description="Pick your **main's class** below, then the spec and your role preferences. No character name needed — that comes at launch (`/me char name`). Alts and changes: `/plan alt`, `/me plan main`, `/me plan roles`. See where the guild stands with `/roster overview`.")
         view = discord.ui.View(timeout=None)
         for cls in ("Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid"):
             view.add_item(PlanButton(cls, ico))

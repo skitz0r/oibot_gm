@@ -37,6 +37,7 @@ class Player(BaseModel):
     cls: str
     spec: str
     role: str
+    offspec: Optional[str] = None  # the solver may switch to it to meet role minimums
     character: Optional[str] = None  # registry name, None when unmapped
     map_confidence: str = "high"
     spec_confidence: str = "high"
@@ -75,6 +76,7 @@ class RosterResult(BaseModel):
     role_counts: dict[str, int]
     advisories: list[str]  # one-liners, level dot first (🔴/🟡/🟢)
     details: list[str] = Field(default_factory=list)  # longer explanations behind the advisories
+    spec_switches: dict[str, str] = Field(default_factory=dict)  # signup_name -> offspec the solver chose
     bench_whatif: dict[str, int] = Field(default_factory=dict)  # name -> objective if forced in
     solver_status: str = ""
     narrative: Optional[str] = None

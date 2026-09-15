@@ -17,13 +17,14 @@ Teams (owner only): team <key> size (10|20|25|40), schedule ('Tue 19:30'), insta
   cutoff_hard_hours, open_days_before, reminders (dm|channel|none), open_dm (true|false: DM everyone when the
   sheet opens asking them to confirm/tentative/bench); add/remove team.
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
-  availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason].
+  availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason];
+  team_member: add/remove <member> to/from team <key> (the curated default roster).
 Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
 """
 
 
 class ConfigOp(BaseModel):
-    op: Literal["set", "team_set", "team_add", "team_remove", "role_add", "role_remove", "rank", "confirm", "set_main", "availability", "absence", "policy_append"]
+    op: Literal["set", "team_set", "team_add", "team_remove", "team_member", "role_add", "role_remove", "rank", "confirm", "set_main", "availability", "absence", "policy_append"]
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel")
     team: Optional[str] = Field(default=None, description="team key for team_* ops and availability")
     field: Optional[str] = Field(default=None, description="for op=team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders")
@@ -111,6 +112,8 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"{op.member}: absent {op.start}" + (f" → {op.end}" if op.end else "") + (f" ({op.reason})" if op.reason else "")
     if op.op == "policy_append":
         return f"append to {op.doc} policy: “{op.text}”"
+    if op.op == "team_member":
+        return f"team {op.team or reg.config.team_keys()[0]}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
     return str(op)
 
 
@@ -192,6 +195,16 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             raise RegistryError(f"unknown member {op.member}")
         reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
         return f"{m.display_name} absent {op.start}"
+    if op.op == "team_member":
+        m = _member(reg, op.member)
+        if not m:
+            raise RegistryError(f"unknown member {op.member}")
+        key = op.team or cfg.team_keys()[0]
+        if (op.value or "add") == "remove":
+            reg.team_remove(m.discord_id, key, by)
+            return f"{m.display_name} removed from {key}"
+        reg.team_add(m.discord_id, key, by)
+        return f"{m.display_name} added to {key}"
     if op.op == "policy_append":
         if policy_store is None or not op.doc or not op.text:
             raise RegistryError("policy append needs a doc and text")

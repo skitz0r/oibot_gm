@@ -61,6 +61,7 @@ class Member(BaseModel):
     availability: dict[str, str] = Field(default_factory=dict)  # team -> in | out | sub
     absences: list[Absence] = Field(default_factory=list)
     role_prefs: dict = Field(default_factory=dict)  # {"primary": "healer", "flex": ["ranged"]}
+    teams: list[str] = Field(default_factory=list)  # officer-curated team membership (the default weekly roster)
     dm_opt_out: bool = False
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
@@ -409,6 +410,31 @@ class Registry:
     def officer_set_main(self, discord_id: int, name: str, by: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m, c, old = self.set_main(discord_id, name)
         return m, c, old
+
+    # ---- team membership (the curated default roster per team)
+    def team_add(self, discord_id: int, team: str, by: str, display_name: str | None = None) -> Member:
+        if team not in self.config.team_keys():
+            raise RegistryError(f"Unknown team {team}. Teams: {', '.join(self.config.team_keys())}.")
+        m = self.member(discord_id, display_name, create=display_name is not None)
+        if team not in m.teams:
+            m.teams.append(team)
+            self.save(m, f"{by} added {m.display_name} to team {team}")
+        return m
+
+    def team_remove(self, discord_id: int, team: str, by: str) -> Member:
+        m = self.member(discord_id)
+        if team in m.teams:
+            m.teams.remove(team)
+            self.save(m, f"{by} removed {m.display_name} from team {team}")
+        return m
+
+    def team_members(self, team: str) -> list[Member]:
+        return [m for m in self.members.values() if team in m.teams]
+
+    def team_pool(self, team: str) -> list[Member]:
+        """Who a sheet expects: the team's members if any are set, else everyone with a main."""
+        members = self.team_members(team)
+        return members if members else [m for m in self.members.values() if m.main]
 
     # ---- availability & absences
     def set_availability(self, discord_id: int, team: str, value: str) -> Member:

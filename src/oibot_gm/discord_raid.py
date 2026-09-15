@@ -109,7 +109,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
             await interaction.response.send_message("Register a character first: `/register`.", ephemeral=True)
             return
         if ev.state != "open" and self.status != "out":
-            await interaction.response.send_message("Signups are locked; use `/callout` if you can't make it, or ask an officer.", ephemeral=True)
+            await interaction.response.send_message("Signups are locked; use `/raid out` if you can't make it, or ask an officer.", ephemeral=True)
             return
         chars = m.active()
         if len(chars) > 1 and self.status in ("in", "tentative", "sub"):
@@ -144,7 +144,7 @@ class RaidMixin:
         except ValueError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        msg = f"✅ {s.character}: **{status}** for {ev.key}"
+        msg = f"✅ {s.character}: **{s.status}** for {ev.key}" + (f" — {s.note}" if s.note and s.status != status else "")
         if interaction.response.is_done():
             await interaction.followup.send(msg, ephemeral=True)
         else:
@@ -174,7 +174,7 @@ class RaidMixin:
         prefilled status and the same buttons, so they confirm or change from the DM."""
         unix = int(ev.start.timestamp())
         sent = 0
-        for m in reg.members.values():
+        for m in reg.team_pool(team["key"]):
             if not m.main or m.dm_opt_out:
                 continue
             s = ev.signups.get(str(m.discord_id))
@@ -194,7 +194,7 @@ class RaidMixin:
         embed, file = await asyncio.to_thread(health_card, reg, ev, team, self.ico)
         await channel.send(embed=embed, file=file)
         if nudge and rc.team_setting(team, "reminders") != "none":
-            targets = [m for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
+            targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
             unix = int(ev.start.timestamp())
             for m in targets:
                 try:
@@ -490,9 +490,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         live = rs.live()
         await interaction.response.send_message("\n".join(f"• {e.key} · {e.state} · <t:{int(e.start.timestamp())}:F> · {len(e.by_status('in'))} in" for e in live) or "No live raids.", ephemeral=True)
 
-    tree.add_command(raid)
-
-    @tree.command(name="callout", description="Can't make the raid you're signed for (records the time relative to the cutoff)")
+    @raid.command(name="out", description="Can't make the raid you're signed for (records the time relative to the cutoff)")
     @app_commands.autocomplete(team=team_autocomplete)
     async def callout_cmd(interaction: discord.Interaction, note: str | None = None, team: str | None = None):
         reg = await need(interaction)
@@ -510,3 +508,5 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if ch:
             await ch.send(f"⚑ {m.display_name} ({co.character}) called out for {ev.key}, {co.hours_before:.0f}h before" + (" — **after lock**" if co.late else "") + (f": {note}" if note else ""))
         await ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {ev.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else ""))
+
+    tree.add_command(raid)

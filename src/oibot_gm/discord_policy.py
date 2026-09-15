@@ -48,7 +48,7 @@ class CompileConfirmView(discord.ui.View):
 async def compile_and_confirm(interaction: discord.Interaction, reg: Registry, ps: policy_mod.PolicyStore, doc: str, previous: str, provider, ops: Ops, followup: bool = False):
     send = interaction.followup.send if followup or interaction.response.is_done() else interaction.response.send_message
     if doc == "persona" or provider is None:
-        note = "Persona saved (no compile step)." if doc == "persona" else "Saved. No LLM available to compile; run `/policy reload` when it is."
+        note = "Persona saved (no compile step)." if doc == "persona" else "Saved. No LLM available to compile; run `/gm policy reload` when it is."
         await send(note, ephemeral=True)
         return
     compiled = await asyncio.to_thread(ps.compile, doc, provider)
@@ -143,7 +143,9 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         return reg
 
     doc_choices = [app_commands.Choice(name=d, value=d) for d in policy_mod.DOCS]
-    policy = app_commands.Group(name="policy", description="Officer: loot policy, standing comp instructions, persona")
+    gm = next(c for c in tree.get_commands() if c.name == "gm")
+    policy = app_commands.Group(name="policy", description="Officer: loot policy, standing comp instructions, persona", parent=gm)
+    rule = app_commands.Group(name="rule", description="Officer: add a rule in plain English (compiled with confirmation)", parent=gm)
 
     @policy.command(name="show", description="Show a policy document and its compiled reading")
     @app_commands.choices(doc=doc_choices)
@@ -159,7 +161,7 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
             items = comp.get("rules") or comp.get("constraints") or []
             e.add_field(name=f"Compiled ({len(items)} items)", value=(comp.get("summary") or "")[:1000], inline=False)
         else:
-            e.set_footer(text="No confirmed compiled form yet — /policy edit or /policy reload")
+            e.set_footer(text="No confirmed compiled form yet — /gm policy edit or /gm policy reload")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @policy.command(name="edit", description="Edit a policy document (the bot shows its reading for confirmation)")
@@ -180,7 +182,6 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         ps = pctx.store(reg)
         await compile_and_confirm(interaction, reg, ps, doc.value, ps.read(doc.value), bot.ctx.provider, ops, followup=True)
 
-    tree.add_command(policy)
 
     async def rule_cmd(interaction: discord.Interaction, doc: str, text: str):
         reg = await officer(interaction)
@@ -192,16 +193,14 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         await interaction.response.defer(ephemeral=True, thinking=True)
         await compile_and_confirm(interaction, reg, ps, doc, previous, bot.ctx.provider, ops, followup=True)
 
-    @tree.command(name="comp-rule", description="Officer: add a standing composition instruction in plain English")
+    @rule.command(name="comp", description="Add a standing composition instruction in plain English")
     async def comp_rule(interaction: discord.Interaction, text: str):
         await rule_cmd(interaction, "comp", text)
 
-    @tree.command(name="loot-rule", description="Officer: add a loot policy rule in plain English")
+    @rule.command(name="loot", description="Add a loot policy rule in plain English")
     async def loot_rule(interaction: discord.Interaction, text: str):
         await rule_cmd(interaction, "loot", text)
 
-    # /gm change lives under the existing /gm group
-    gm = next(c for c in tree.get_commands() if c.name == "gm")
 
     @gm.command(name="change", description="Officer: change configuration in plain English (shows a diff, applies on confirm)")
     async def gm_change(interaction: discord.Interaction, text: str):

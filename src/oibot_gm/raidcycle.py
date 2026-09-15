@@ -26,6 +26,7 @@ class Signup(BaseModel):
     character: str
     cls: str
     spec: str
+    offspec: Optional[str] = None
     role: str
     status: str  # in | tentative | out | sub
     source: str = "member"  # member | prefill | officer | callout | absence
@@ -141,7 +142,8 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
 def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
     """Standing availability + absences seed the sheet so people act on exceptions."""
     day = ev.start.date().isoformat()
-    for m in reg.members.values():
+    explicit = bool(reg.team_members(team["key"]))
+    for m in reg.team_pool(team["key"]):
         main = m.main
         if not main:
             continue
@@ -149,19 +151,19 @@ def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
         avail = m.availability.get(team["key"])
         if absence:
             status, source = "out", "absence"
-        elif avail == "in":
-            status, source = "in", "prefill"
+        elif avail == "in" or (explicit and avail is None):
+            status, source = "in", "prefill"  # team members default in
         elif avail == "sub":
             status, source = "sub", "prefill"
         elif avail == "out":
             status, source = "out", "prefill"
         else:
-            continue  # unset: they must respond
+            continue  # unset, no explicit team: they must respond
         ev.signups[str(m.discord_id)] = _signup(reg, m, main, status, source)
 
 
 def _signup(reg: Registry, m: Member, c: RegisteredCharacter, status: str, source: str, note: str | None = None) -> Signup:
-    return Signup(discord_id=m.discord_id, display_name=m.display_name, character=c.label, cls=c.cls, spec=c.spec, role=reg.profile.spec(c.cls, c.spec).role, status=status, source=source, note=note)
+    return Signup(discord_id=m.discord_id, display_name=m.display_name, character=c.label, cls=c.cls, spec=c.spec, offspec=c.offspec, role=reg.profile.spec(c.cls, c.spec).role, status=status, source=source, note=note)
 
 
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None) -> Signup:
@@ -170,6 +172,9 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     c = next((c for c in m.active() if (c.name or c.label).lower() == (character or "").lower()), None) if character else m.main
     if not c:
         raise ValueError("no such active character")
+    team = reg.config.team(ev.team) or {"key": ev.team}
+    if status == "in" and reg.team_members(team["key"]) and team["key"] not in m.teams and source == "member":
+        status, note = "sub", "not on the team roster; subs are picked when needed"
     s = _signup(reg, m, c, status, source, note)
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"{m.display_name} {status} as {c.label} ({source})")
@@ -213,18 +218,29 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
     roles = []
     for r in ("tank", "healer", "melee", "ranged"):
         have, n = counts[r], need[r]
-        level = "green" if not n or have >= n else ("amber" if have + flex[r] >= n else "red")
-        hint = ""
+        cover = {"offspec": [], "flex": [], "alt": [], "tent/sub": []}
         if n and have < n:
-            fix = [s.display_name for s in tent + subs if s.role == r]
-            off = [m.display_name for m in reg.members.values() if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
-            hint = ("tent/sub: " + ", ".join(fix[:3])) if fix else (("not on sheet: " + ", ".join(off[:3])) if off else "nobody available")
-        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint})
+            for sg in ins:
+                m = reg.members.get(sg.discord_id)
+                if sg.offspec and profile.spec(sg.cls, sg.offspec).role == r and sg.role != r:
+                    cover["offspec"].append(f"{sg.display_name} ({sg.offspec})")
+                elif m and r in m.role_prefs.get("flex", []) and sg.role != r:
+                    cover["flex"].append(sg.display_name)
+                elif m and any(c.status in ("active", "planned") and not c.is_main and profile.spec(c.cls, c.spec).role == r for c in m.characters) and sg.role != r:
+                    cover["alt"].append(sg.display_name)
+            cover["tent/sub"] = [sg.display_name for sg in tent + subs if sg.role == r]
+        coverable = sum(len(v) for v in cover.values())
+        level = "green" if not n or have >= n else ("amber" if have + coverable >= n else "red")
+        hint = " · ".join(f"+{len(v)} {k}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
+        if n and have < n and not coverable:
+            off = [m.display_name for m in reg.team_pool(team["key"]) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
+            hint = ("not on sheet: " + ", ".join(off[:3])) if off else "nobody can cover → recruit"
+        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
     buffs = []
     for b in profile.party_buffs():
         providers = [s.display_name for s in ins if b.provided_by(profile.spec(s.cls, s.spec))]
         buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
-    unresp = [m.display_name for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups]
+    unresp = [m.display_name for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups]
     hc_level = "green" if len(ins) >= size else ("amber" if len(ins) + len(tent) >= size else "red")
     return {"headcount": (len(ins), size, len(tent), len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp}
 
@@ -254,7 +270,7 @@ def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
             continue
         c = reg.find(s.character)
         rank = c[1].rank if c else "unknown"
-        players.append(Player(signup_name=s.display_name, pos=i + 1, status="signed" if s.status in ("in", "tentative") else "bench", cls=s.cls, spec=s.spec, role=s.role, character=s.character, map_confidence="high", unmapped=False, note="tentative" if s.status == "tentative" else None, rank=rank))
+        players.append(Player(signup_name=s.display_name, pos=i + 1, status="signed" if s.status in ("in", "tentative") else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, note="tentative" if s.status == "tentative" else None, rank=rank))
     return players
 
 
