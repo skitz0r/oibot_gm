@@ -386,7 +386,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(f"✅ Planned alt: {char_line(ico, c)}", ephemeral=True)
         await ops.emit(reg.config, "info", f"{m.display_name} plans an alt {c.cls} {c.spec}")
 
-    @plan.command(name="roles", description="Your primary role and what else you'd be happy to play")
+    @plan.command(name="roles", description="Extra roles you would play besides your spec (flexibility; your main role follows your spec)")
     @app_commands.choices(primary=ROLE_CHOICES, flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
     async def plan_roles(interaction: discord.Interaction, primary: app_commands.Choice[str], flex1: app_commands.Choice[str] | None = None, flex2: app_commands.Choice[str] | None = None, flex3: app_commands.Choice[str] | None = None):
         reg = await need(interaction)

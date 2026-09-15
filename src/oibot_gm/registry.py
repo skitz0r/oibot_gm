@@ -475,10 +475,13 @@ class Registry:
         return m, c
 
     def roles_of(self, m: Member) -> tuple[str | None, list[str]]:
-        """(primary, flex) derived from the main's spec and offspec; an explicit /me plan roles adds to it."""
+        """(primary, flex). Primary always follows the main's current spec — a stored preference from an earlier
+        plan must not linger after a re-spec. Stored preferences (/me plan roles) and the offspec's role are flex."""
         main = m.main
-        primary = m.role_prefs.get("primary") or (self.profile.spec(main.cls, main.spec).role if main else None)
+        primary = self.profile.spec(main.cls, main.spec).role if main else m.role_prefs.get("primary")
         flex = set(m.role_prefs.get("flex", []))
+        if m.role_prefs.get("primary"):
+            flex.add(m.role_prefs["primary"])
         if main and main.offspec:
             try:
                 r = self.profile.spec(main.cls, main.offspec).role
