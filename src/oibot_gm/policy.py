@@ -101,20 +101,25 @@ class PolicyStore:
             return provider.complete("policy_compile", COMPILE_SYSTEM["comp"], "## Standing instructions\n" + text, CompCompiled)
         return None
 
-    def comp_constraints(self) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[str], list[str]]:
-        """(keep_together, keep_apart, never_bench, always_bench) from the confirmed compiled comp doc."""
+    def comp_constraints(self) -> dict:
+        """Solver-ready view of the confirmed compiled comp doc."""
         c = self.compiled("comp") or {}
-        kt, ka, nb, ab = [], [], [], []
+        out = {"keep_together": [], "keep_apart": [], "never_bench": [], "always_bench": [], "prefer_group": {}, "role_min": {}}
         for x in c.get("constraints", []):
-            if x["type"] == "keep_together" and x.get("a") and x.get("b"):
-                kt.append((x["a"], x["b"]))
-            elif x["type"] == "keep_apart" and x.get("a") and x.get("b"):
-                ka.append((x["a"], x["b"]))
-            elif x["type"] == "never_bench" and x.get("a"):
-                nb.append(x["a"])
-            elif x["type"] == "always_bench" and x.get("a"):
-                ab.append(x["a"])
-        return kt, ka, nb, ab
+            t = x["type"]
+            if t == "keep_together" and x.get("a") and x.get("b"):
+                out["keep_together"].append((x["a"], x["b"]))
+            elif t == "keep_apart" and x.get("a") and x.get("b"):
+                out["keep_apart"].append((x["a"], x["b"]))
+            elif t == "never_bench" and x.get("a"):
+                out["never_bench"].append(x["a"])
+            elif t == "always_bench" and x.get("a"):
+                out["always_bench"].append(x["a"])
+            elif t == "prefer_group" and x.get("a") and x.get("group"):
+                out["prefer_group"][x["a"]] = int(x["group"])
+            elif t == "role_min" and x.get("role") and x.get("count"):
+                out["role_min"][x["role"].lower()] = int(x["count"])
+        return out
 
 
 def render_compiled(doc: str, compiled: BaseModel) -> str:

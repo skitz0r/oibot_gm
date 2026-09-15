@@ -262,16 +262,18 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[Player], 
     # standing instructions (confirmed compiled comp policy) → solver constraints
     from .policy import PolicyStore
 
-    kt, ka, never_bench, always_bench = PolicyStore(rs.store, rs.key).comp_constraints()
+    cc = PolicyStore(rs.store, rs.key).comp_constraints()
     names = {p.character: p.signup_name for p in players} | {p.signup_name: p.signup_name for p in players}
     resolve = lambda n: names.get(n) or next((v for k, v in names.items() if k.lower() == n.lower()), None)  # noqa: E731
     opts = solver.SolveOptions(
         time_limit_s=12,
         raid_size=size,
-        keep_together=tuple((resolve(a), resolve(b)) for a, b in kt if resolve(a) and resolve(b)),
-        keep_apart=tuple((resolve(a), resolve(b)) for a, b in ka if resolve(a) and resolve(b)),
-        force_in=tuple(x for x in (resolve(n) for n in never_bench) if x),
-        force_out=tuple(x for x in (resolve(n) for n in always_bench) if x),
+        keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
+        keep_apart=tuple((resolve(a), resolve(b)) for a, b in cc["keep_apart"] if resolve(a) and resolve(b)),
+        force_in=tuple(x for x in (resolve(n) for n in cc["never_bench"]) if x),
+        force_out=tuple(x for x in (resolve(n) for n in cc["always_bench"]) if x),
+        prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
+        role_min=cc["role_min"] or None,
     )
     result = solver.solve(reg.profile, players, raid_id, opts)
     result = explain.annotate(reg.profile, players, raid_id, result, whatif=len(players) <= 30)

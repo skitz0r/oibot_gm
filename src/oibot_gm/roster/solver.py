@@ -24,6 +24,9 @@ class SolveOptions:
     keep_together: tuple[tuple[str, str], ...] = ()
     keep_apart: tuple[tuple[str, str], ...] = ()
     raid_size: int | None = None  # override the profile's raid_size (e.g. a 10-man team); role bounds scale with it
+    prefer_group: dict[str, int] | None = None  # signup_name -> 1-based group, soft (bonus if honoured)
+    prefer_weight: int = 15
+    role_min: dict[str, int] | None = None  # role -> minimum, overrides the profile/scaled bounds
     time_limit_s: float = 20.0
     workers: int = 8
 
@@ -43,7 +46,10 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
     target = opts.raid_size or rules["raid_size"]
     n_groups = max(1, -(-target // gsize))  # ceil
     raid_size = min(target, len(players))
-    role_bounds = scaled_role_bounds(rules, target) if opts.raid_size else rules["roles"]
+    role_bounds = {k: dict(v) for k, v in (scaled_role_bounds(rules, target) if opts.raid_size else rules["roles"]).items()}
+    for role, n in (opts.role_min or {}).items():
+        role_bounds.setdefault(role, {"min": 0, "max": target})["min"] = n
+        role_bounds[role]["max"] = max(role_bounds[role]["max"], n)
     specs = {p.signup_name: profile.spec(p.cls, p.spec) for p in players}
     sel = rules["selection"]
 
@@ -88,6 +94,11 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         if p.unmapped:
             v -= sel["unknown_character_penalty"]
         terms.append(v * SCALE * x[p.signup_name])
+
+    # --- objective: soft group preferences from standing instructions ---
+    for name, g1 in (opts.prefer_group or {}).items():
+        if name in x and 1 <= g1 <= n_groups:
+            terms.append(opts.prefer_weight * SCALE * y[name, g1 - 1])
 
     # --- objective: party buff synergy ---
     synergy_terms = []
