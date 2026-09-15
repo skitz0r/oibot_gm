@@ -1078,4 +1078,8 @@ def run(guild_dir: Path, signup_file: str) -> None:
     STORE = GitStore(guild_dir.parent)
     GUILD_KEY = guild_dir.name
     ctx = GuildContext(guild_dir, signup_file)
+    # discord.py reports view/modal callback failures through logging; keep them in the log file
+    import logging
+
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     OibotGM(ctx, test_guild).run(token, log_handler=None)

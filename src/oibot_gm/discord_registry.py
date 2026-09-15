@@ -136,7 +136,7 @@ class PlanButton(discord.ui.DynamicItem[discord.ui.Button], template=r"plan:(?P<
 class NameModal(discord.ui.Modal):
     """Last step of the registration wizard: optional character name (blank = planned, name it at launch)."""
 
-    name = discord.ui.TextInput(label="Character name (leave blank if it doesn't exist yet)", required=False, max_length=12)
+    name = discord.ui.TextInput(label="Character name (blank = not created yet)", required=False, max_length=12)  # labels max 45 chars
 
     def __init__(self, reg: Registry, cls: str, spec: str, offspec: str | None, roles: list[str], slot: str):
         super().__init__(title=f"{cls} {spec} — almost done"[:45])
