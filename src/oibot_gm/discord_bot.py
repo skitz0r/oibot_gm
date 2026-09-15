@@ -16,6 +16,7 @@ import asyncio
 import copy
 import json
 import os
+import re
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
@@ -838,13 +839,23 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
         await interaction.response.send_message(embed=e)
 
     # ---- chat handlers
+    def _addressed(self, message: discord.Message) -> bool:
+        """@user mention, a mention of the bot's own (integration) role, or a reply to one of the bot's messages."""
+        if self.user in message.mentions:
+            return True
+        me = message.guild.me if message.guild else None
+        if me and any(r in message.role_mentions for r in me.roles):
+            return True
+        ref = message.reference.resolved if message.reference else None
+        return isinstance(ref, discord.Message) and ref.author.id == self.user.id
+
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
         # @mention in the ops or analytics channel = plain-text configuration (comp ideals live in analytics)
         reg = self.registries.by_discord.get(message.guild.id)
-        if reg and self.user in message.mentions and message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id):
-            text = message.content.replace(self.user.mention, "").strip()
+        if reg and message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) and self._addressed(message):
+            text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
             if text:
                 member = message.author
                 owner = reg.config.owner_discord_id == member.id
