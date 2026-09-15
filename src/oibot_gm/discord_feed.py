@@ -25,7 +25,8 @@ class FeedMixin:
 
     # ---- helpers
     def active_raid(self):
-        return next((e for e in self.events.values() if e.state == "raid"), None)
+        live = [e for e in self.events.values() if e.state == "raid"]
+        return next((e for e in live if e.origin == "raid"), live[0] if live else None)
 
     async def feed_post(self, ev, text: str, view: discord.ui.View | None = None) -> None:
         ch = self.get_channel(ev.raid_thread_id) if ev.raid_thread_id else None
@@ -33,10 +34,12 @@ class FeedMixin:
             await ch.send(text[:1900], view=view)
 
     def _resolve_item(self, item_id: int):
-        return self.ctx.profile.items.get(int(item_id))
+        raid = self.active_raid()
+        profile = self.loot_ctx(raid).profile if raid else self.ctx.profile
+        return profile.items.get(int(item_id))
 
     def _resolve_boss(self, name: str | None, item) -> str:
-        raid = self.ctx.profile.raids.get(self.active_raid().instance, {}) if self.active_raid() else {}
+        raid = self.loot_ctx(self.active_raid()).profile.raids.get(self.active_raid().instance, {}) if self.active_raid() else {}
         if name:
             for b in raid.get("bosses", []):
                 if b["name"].lower().startswith(name.lower()[:8]):
@@ -67,6 +70,8 @@ class FeedMixin:
             return {"note": "no active raid; event ignored"}
         from . import discord_bot as db
 
+        ctx = self.loot_ctx(raid)
+
         if kind == "drop":
             ticked = []
             for it in ev.get("items", []):
@@ -96,14 +101,14 @@ class FeedMixin:
             who = self._resolve_recipient(ev.get("recipient", "?"))
             prop = next((p for p in raid.proposals if p.item_id == item.id), None)
             if prop and prop.award_to == who:
-                db.confirm_awards(self.ctx, raid, only={item.id})
+                db.confirm_awards(ctx, raid, only={item.id})
                 await self.feed_post(raid, f"✅ **{item.name}** → **{who}** (matches the proposal; recorded)")
                 return {"result": "confirmed"}
             if prop:
                 bot_pick = prop.result.recommendation.primary
                 prop.award_to, prop.source, prop.reason = who, "override", "(reason pending)"
                 raid.pending_reasons.append({"item_id": item.id, "item": item.name, "bot": bot_pick, "human": who})
-                db.confirm_awards(self.ctx, raid, only={item.id})
+                db.confirm_awards(ctx, raid, only={item.id})
                 await self.feed_post(raid, f"⚠ **{item.name}** → **{who}** in game, but the bot proposed **{bot_pick}**. Recorded as an override; **reply here with the reason** so it becomes a precedent.")
                 return {"result": "override_pending_reason"}
             # no proposal: manual award straight to the ledger
@@ -111,8 +116,8 @@ class FeedMixin:
             c = next((c for c in cands if c.character == who), None)
             award = LootAward(raider=who, item_id=item.id, tier=c.tier if c else "?", total_weight=c.upgrade_value if c else 0.5, offspec=bool(c and c.offspec), received=date.fromisoformat(raid.date), instance=raid.raid_name, boss=item.boss)
             raid.awards.append(award)
-            self.ctx.ledger.append(award)
-            db._store().append_jsonl(Path(db.GUILD_KEY) / "ledger.jsonl", {**award.model_dump(), "event": raid.id, "source": "manual", "bot_pick": None, "import_id": f"{raid.id}-{item.id}-{who}"})
+            ctx.ledger.append(award)
+            db._store().append_jsonl(Path(raid.guild) / "ledger.jsonl", {**award.model_dump(), "event": raid.id, "source": "manual", "bot_pick": None, "import_id": f"{raid.id}-{item.id}-{who}"})
             raid.drops.setdefault(item.boss, [])
             if item.id not in raid.drops[item.boss]:
                 raid.drops[item.boss].append(item.id)
@@ -126,7 +131,8 @@ class FeedMixin:
     def _candidates_for(self, raid, item):
         from .loot import scoring
 
-        return scoring.candidates(self.ctx.profile, item, raid.roster.selected if raid.roster else [], self.ctx.ledger + raid.awards, self.ctx.wishlists, date.fromisoformat(raid.date))
+        ctx = self.loot_ctx(raid)
+        return scoring.candidates(ctx.profile, item, raid.roster.selected if raid.roster else [], ctx.ledger + raid.awards, ctx.wishlists, date.fromisoformat(raid.date))
 
     async def record_pending_reason(self, raid, text: str, by: str) -> str | None:
         """A plain reply in the raid thread while an override awaits its reason."""
@@ -137,7 +143,7 @@ class FeedMixin:
 
         precedent = {"date": raid.date, "event": raid.id, "item": pr["item"], "item_id": pr["item_id"], "bot": pr["bot"], "human": pr["human"], "reason": text.strip(), "by": by, "status": "active"}
         raid.overrides.append(precedent)
-        self.ctx.precedents.append(precedent)
-        db._store().append_jsonl(Path(db.GUILD_KEY) / "precedents.jsonl", precedent)
+        self.loot_ctx(raid).precedents.append(precedent)
+        db._store().append_jsonl(Path(raid.guild) / "precedents.jsonl", precedent)
         raid.save(f"{raid.id}: precedent {pr['item']} → {pr['human']}")
         return f"📌 Precedent recorded: {pr['item']} → {pr['human']} over {pr['bot']} — “{text.strip()}”"

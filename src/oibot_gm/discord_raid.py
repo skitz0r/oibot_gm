@@ -355,6 +355,54 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         await interaction.response.send_message(f"🔒 Roster accepted for {ev.key}: {len(ev.roster.selected)} in, {len(ev.roster.benched)} bench.")
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} accepted roster {ev.key}")
 
+    @raid.command(name="loot", description="Officer: open the loot council thread for the accepted roster")
+    @app_commands.autocomplete(team=team_autocomplete)
+    async def raid_loot(interaction: discord.Interaction, team: str | None = None):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        rs, ev, t = current_event(reg, team)
+        if not ev or not ev.roster or ev.state not in ("proposed", "accepted", "locked"):
+            await interaction.response.send_message("Need a proposed/accepted roster first (/raid lock, /raid accept).", ephemeral=True)
+            return
+        from .discord_bot import MockEvent as LootSession
+
+        existing = next((s for s in bot.events.values() if s.id == ev.key and s.state == "raid"), None)
+        if existing:
+            await interaction.response.send_message(f"Loot thread already open: <#{existing.raid_thread_id}>", ephemeral=True)
+            return
+        instance = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
+        players = rc.players_for(reg, ev)
+        e = discord.Embed(title=f"⚔ {reg.profile.raids[instance]['name']} · {ev.key}", colour=TEAL, description=f"Roster ({len(ev.roster.selected)}): " + ", ".join(p.character or p.signup_name for p in ev.roster.selected)[:3800])
+        e.set_footer(text="loot council: tick drops (or let the companion feed do it) → Distribute → chat to adjust → Confirm · /raid end for the summary")
+        await interaction.response.send_message(embed=e)
+        msg = await interaction.original_response()
+        thread = await msg.create_thread(name=f"loot · {ev.key}"[:100])
+        session = LootSession(id=ev.key, channel_id=thread.id, instance=instance, date=ev.start.date().isoformat(), guild=reg.key, origin="raid", signups=players, roster=ev.roster, state="raid", raid_thread_id=thread.id)
+        bot.events[thread.id] = session
+        ev.thread_id = thread.id
+        rs.save(ev, "loot thread opened")
+        session.save(f"{session.id}: loot session opened")
+        await bot.post_boss_tables(session, thread)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} opened loot council for {ev.key}")
+
+    @raid.command(name="end", description="Officer: close the loot council and summarise awards")
+    async def raid_end(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        session = bot.event_for(interaction.channel_id)
+        if not session or session.origin != "raid":
+            await interaction.response.send_message("Run this in the raid's loot thread.", ephemeral=True)
+            return
+        await bot.end_session(session, interaction)
+        rs = bot.raids.store(reg)
+        ev = rs.events.get(session.id)
+        if ev and ev.state != "done":
+            ev.state = "done"
+            rs.save(ev, "done (loot closed)")
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} closed loot council {session.id}: {len(session.awards)} awards, {len(session.overrides)} overrides")
+
     @raid.command(name="set", description="Officer: set someone's status on the sheet")
     @app_commands.choices(status=[app_commands.Choice(name=s, value=s) for s in rc.STATUSES])
     @app_commands.autocomplete(team=team_autocomplete)
