@@ -270,7 +270,15 @@ def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
             continue
         c = reg.find(s.character)
         rank = c[1].rank if c else "unknown"
-        players.append(Player(signup_name=s.display_name, pos=i + 1, status="signed" if s.status in ("in", "tentative") else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, note="tentative" if s.status == "tentative" else None, rank=rank))
+        tank_alt = None
+        if s.offspec and reg.profile.spec(s.cls, s.offspec).role == "tank" and s.role != "tank":
+            tank_alt = f"{s.character} offspec {s.offspec}"
+        else:
+            m = reg.members.get(s.discord_id)
+            alt = next((c for c in (m.active() if m else []) if not c.is_main and reg.profile.spec(c.cls, c.spec).role == "tank"), None)
+            if alt:
+                tank_alt = f"{alt.label} ({alt.cls} {alt.spec})"
+        players.append(Player(signup_name=s.display_name, pos=i + 1, status="signed" if s.status in ("in", "tentative") else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, note="tentative" if s.status == "tentative" else None, rank=rank, tank_capable_main=tank_alt))
     return players
 
 

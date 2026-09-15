@@ -25,7 +25,10 @@ src/oibot_gm/
   discord_bot.py       OibotGM client; loot sessions (MockEvent, carries `guild`/`origin`): /mock flow on shadow data, or a real raid via /raid loot
   lootctx.py           RegistryLootContext: a registered guild's ledger/precedents/wishlists/compiled policy for the loot pipeline; bot.loot_ctx(session) picks mock vs real
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member)
-  discord_registry.py  real commands: /register, /char, /apply, /absent, /availability, /me, /roster (officer), /gm config|status
+  discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
+                       /me view|plan main|alt|roles|char …|availability|absent … (members);
+                       /roster overview|poll|list|confirm|rank|set-main|team add|remove|list|absences|availability|absent|applicants|applicant (officers);
+                       /gm status|config …|change|policy …|rule loot|comp (owner/officers); /raid … (discord_raid.py); /mock … (demo)
   raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
   discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
