@@ -17,7 +17,7 @@ from .store import GitStore
 
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 STATUSES = ("in", "tentative", "out", "sub")
-TEAM_DEFAULTS = {"cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm"}
+TEAM_DEFAULTS = {"cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm", "open_dm": False}
 
 
 class Signup(BaseModel):
@@ -196,48 +196,52 @@ def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, 
 
 # ---------------------------------------------------------------- health
 
-def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
-    """[(level, line)] with level in green|amber|red."""
+def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
+    """Structured health check: headcount, per-role tiles, per-buff providers, non-responders."""
     profile = reg.profile
-    ins = ev.by_status("in")
-    tent = ev.by_status("tentative")
-    subs = ev.by_status("sub")
+    ins, tent, subs = ev.by_status("in"), ev.by_status("tentative"), ev.by_status("sub")
     size = int(team.get("size", 20))
-    rules = profile.comp_rules
-    out: list[tuple[str, str]] = []
-    # headcount
-    n = len(ins)
-    lvl = "green" if n >= size else ("amber" if n + len(tent) >= size else "red")
-    out.append((lvl, f"Headcount {n}/{size} in, {len(tent)} tentative, {len(subs)} sub"))
-    # roles
+    bounds = solver.scaled_role_bounds(profile.comp_rules, size)
     counts = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer", "melee", "ranged")}
-    bounds = solver.scaled_role_bounds(rules, size)
-    need_t = (profile.raids.get(ev.instance or "", {}).get("tank_needs", {}) or {}).get("count") or bounds["tank"]["min"]
-    need_h = bounds["healer"]["min"]
-    for role, need in (("tank", need_t), ("healer", need_h)):
-        have = counts[role]
-        if have >= need:
-            out.append(("green", f"{role.title()}s {have}/{need}"))
-        else:
-            fix = [s.display_name for s in tent + subs if s.role == role]
-            alt = []
-            for m in reg.members.values():
-                for c in m.active():
-                    if reg.profile.spec(c.cls, c.spec).role == role and str(m.discord_id) not in ev.signups:
-                        alt.append(f"{m.display_name} ({c.label})")
-            hint = (f"; tentative/sub: {', '.join(fix)}" if fix else "") + (f"; not on sheet: {', '.join(alt[:4])}" if alt else "")
-            out.append(("red" if have < need - 1 else "amber", f"{role.title()}s {have}/{need}{hint}"))
-    # buffs nobody brings
-    missing = []
+    flex = {r: sum(1 for s in tent + subs if s.role == r) for r in counts}
+    need = {
+        "tank": (profile.raids.get(ev.instance or "", {}).get("tank_needs", {}) or {}).get("count") or bounds["tank"]["min"],
+        "healer": bounds["healer"]["min"],
+        "melee": 0,
+        "ranged": 0,
+    }
+    roles = []
+    for r in ("tank", "healer", "melee", "ranged"):
+        have, n = counts[r], need[r]
+        level = "green" if not n or have >= n else ("amber" if have + flex[r] >= n else "red")
+        hint = ""
+        if n and have < n:
+            fix = [s.display_name for s in tent + subs if s.role == r]
+            off = [m.display_name for m in reg.members.values() if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
+            hint = ("tent/sub: " + ", ".join(fix[:3])) if fix else (("not on sheet: " + ", ".join(off[:3])) if off else "nobody available")
+        roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint})
+    buffs = []
     for b in profile.party_buffs():
-        if not any(b.provided_by(profile.spec(s.cls, s.spec)) for s in ins):
-            missing.append(b.name.split(" (")[0])
+        providers = [s.display_name for s in ins if b.provided_by(profile.spec(s.cls, s.spec))]
+        buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
+    unresp = [m.display_name for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups]
+    hc_level = "green" if len(ins) >= size else ("amber" if len(ins) + len(tent) >= size else "red")
+    return {"headcount": (len(ins), size, len(tent), len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp}
+
+
+def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
+    """[(level, line)] text form of health_data, for logs and ops lines."""
+    h = health_data(reg, ev, team)
+    n, size, tent, subs = h["headcount"]
+    out = [(h["headcount_level"], f"Headcount {n}/{size} in, {tent} tentative, {subs} sub")]
+    for r in h["roles"]:
+        if r["need"]:
+            out.append((r["level"], f"{r['role'].title()}s {r['have']}/{r['need']}" + (f" · {r['hint']}" if r["hint"] else "")))
+    missing = [b["name"] for b in h["buffs"] if not b["providers"]]
     if missing:
         out.append(("amber", "No provider for: " + ", ".join(missing)))
-    # reliability: late callouts recently (from this store's other events) is future work
-    unresp = [m.display_name for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups]
-    if unresp:
-        out.append(("amber" if len(unresp) > 3 else "green", f"No response from {len(unresp)}: " + ", ".join(unresp[:8]) + ("…" if len(unresp) > 8 else "")))
+    if h["unresponsive"]:
+        out.append(("amber" if len(h["unresponsive"]) > 3 else "green", f"No response from {len(h['unresponsive'])}"))
     return out
 
 

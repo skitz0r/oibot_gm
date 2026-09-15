@@ -21,6 +21,19 @@ class Buff:
     stacking: str
     value: dict[str, float]
     note: str = ""
+    icon: dict[str, str] = field(default_factory=dict)  # {abbr, colour} for badges/emojis
+
+    @property
+    def short(self) -> str:
+        return self.name.split(" (")[0]
+
+    @property
+    def abbr(self) -> str:
+        return self.icon.get("abbr") or "".join(w[0] for w in self.short.split() if w[0].isalpha())[:4]
+
+    @property
+    def colour(self) -> str:
+        return self.icon.get("colour", "#98A3B5")
 
     def provided_by(self, spec: SpecInfo) -> bool:
         return any(p == spec.key or p == f"{spec.cls}:*" for p in self.providers)

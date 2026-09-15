@@ -630,10 +630,16 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             mark = "🟢" if not need_min or have >= need_min else ("🟡" if have + len(flex) >= need_min else "🔴")
             role_lines.append(f"{mark} {ico('role', r)} {r}: **{have}**" + (f" / need {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
         e.add_field(name=f"Roles vs a {n}-man", value="\n".join(role_lines), inline=False)
+        ids = {b.short: b.id for b in reg.profile.party_buffs()}
         missing = [b for b, who in s["providers"].items() if not who]
-        thin = [f"{b} ({who[0]})" for b, who in s["providers"].items() if len(who) == 1]
+        thin = [(b, who[0]) for b, who in s["providers"].items() if len(who) == 1]
         if missing or thin:
-            e.add_field(name="Buff coverage", value=(("Nobody: " + ", ".join(missing) + "\n") if missing else "") + (("Only one: " + ", ".join(thin)) if thin else ""), inline=False)
+            val = ""
+            if missing:
+                val += "Nobody: " + " ".join(f"{ico('buff', ids.get(b, ''))}" for b in missing) + "\n" + ", ".join(missing) + "\n"
+            if thin:
+                val += "Only one: " + ", ".join(f"{ico('buff', ids.get(b, ''))} {b} ({who})" for b, who in thin)
+            e.add_field(name="Buff coverage", value=val[:1000], inline=False)
         if s["alts"]:
             e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
         asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
@@ -756,7 +762,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @config.command(name="team", description="Owner: add/update a raid team (schedule like 'Tue 19:30'; cutoffs in hours)")
     @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="'Tue 19:30' in the guild's timezone", instance="raid from the game profile", soft_cutoff="hours before raid: health check + nudges", hard_cutoff="hours before raid: lock + propose", open_days="days before the raid to open the sheet")
     @app_commands.autocomplete(instance=instance_autocomplete)
-    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, remove: bool = False):
+    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, open_dm: bool = False, remove: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -777,7 +783,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         teams = [t for t in reg.config.raid_teams if t["key"] != key]
         if not remove:
-            teams.append({"key": key, "name": key, "size": size, "schedule": schedule, "instance": instance, "cutoff_soft_hours": soft_cutoff, "cutoff_hard_hours": hard_cutoff, "open_days_before": open_days, "reminders": "dm"})
+            teams.append({"key": key, "name": key, "size": size, "schedule": schedule, "instance": instance, "cutoff_soft_hours": soft_cutoff, "cutoff_hard_hours": hard_cutoff, "open_days_before": open_days, "reminders": "dm", "open_dm": open_dm})
         reg.config.raid_teams = teams
         reg.save_config(f"teams: {[t['key'] for t in teams]}")
         await interaction.response.send_message("✅ Teams: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'}, lock {t.get('cutoff_hard_hours', 24)}h)" for t in teams) or "none (default 'main')"), ephemeral=True)

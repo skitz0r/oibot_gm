@@ -739,11 +739,16 @@ class OibotGM(FeedMixin, RaidMixin, discord.Client):
             print(f"application emojis unavailable: {e}")
             return
         wanted = {f"class_{c.lower()}": ("class", c) for c in render.CLASS} | {f"role_{r}": ("role", r) for r in render.ROLE_COLOUR}
+        buff_defs = {}
+        for reg in list(self.registries.by_discord.values()) + [self.ctx]:
+            for b in reg.profile.party_buffs():
+                buff_defs[b.id] = (b.abbr, b.colour)
+        wanted |= {f"buff_{bid}": ("buff", bid) for bid in buff_defs}
         for name, (kind, key) in wanted.items():
             em = existing.get(name)
             if em is None:
                 try:
-                    png = render.class_badge_png(key) if kind == "class" else render.role_badge_png(key)
+                    png = render.class_badge_png(key) if kind == "class" else render.role_badge_png(key) if kind == "role" else render.buff_badge_png(*buff_defs[key])
                     em = await self.create_application_emoji(name=name, image=png)
                 except Exception as e:  # noqa: BLE001
                     print(f"emoji {name}: {e}")

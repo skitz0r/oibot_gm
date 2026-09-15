@@ -14,7 +14,8 @@ SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never gue
 Guild (owner only): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
   officer_role add/remove (role name).
 Teams (owner only): team <key> size (10|20|25|40), schedule ('Tue 19:30'), instance (raid id), cutoff_soft_hours,
-  cutoff_hard_hours, open_days_before, reminders (dm|channel|none); add/remove team.
+  cutoff_hard_hours, open_days_before, reminders (dm|channel|none), open_dm (true|false: DM everyone when the
+  sheet opens asking them to confirm/tentative/bench); add/remove team.
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason].
 Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
@@ -142,15 +143,17 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             cfg.raid_teams.append(t)
         if op.op == "team_set":
             field = op.field or op.path or ""
-            if field not in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "reminders", "name"):
+            if field not in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "reminders", "name", "open_dm"):
                 raise RegistryError(f"unknown team field '{field}'")
+            if field == "open_dm":
+                op.value = "true" if str(op.value).lower() in ("true", "yes", "on", "1") else "false"
             if field == "schedule":
                 from .raidcycle import parse_schedule
 
                 parse_schedule(op.value or "")
             if field == "instance" and op.value not in reg.profile.raids:
                 raise RegistryError(f"unknown instance {op.value}; options: {', '.join(reg.profile.raids)}")
-            t[field] = int(op.value) if str(op.value).isdigit() else op.value
+            t[field] = int(op.value) if str(op.value).isdigit() else (op.value == "true" if field == "open_dm" else op.value)
         f = op.field or op.path or "added"
         reg.save_config(f"team {op.team} {f} → {op.value} (by {by})")
         return f"team {op.team} {f} = {op.value}"

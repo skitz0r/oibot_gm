@@ -52,17 +52,31 @@ def sheet_embed(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.Emb
         e.add_field(name=f"Sub ({len(subs)})", value=", ".join(f"{s.character} ({s.spec})" for s in subs)[:1000], inline=False)
     if outs:
         e.add_field(name=f"Out ({len(outs)})", value=", ".join(s.character + (" ⚑" if s.source == "callout" else "") for s in outs)[:1000], inline=False)
+    soft = start - timedelta(hours=rc.team_setting(team, "cutoff_soft_hours"))
     hard = start - timedelta(hours=rc.team_setting(team, "cutoff_hard_hours"))
-    e.set_footer(text=f"{ev.key} · {ev.state} · locks {hard.strftime('%a %H:%M')} server · ᵖ prefilled from availability · buttons use your main; pick an alt from the menu")
+    e.add_field(name="Timeline", value=f"health check + nudges <t:{int(soft.timestamp())}:R> · lock + roster <t:{int(hard.timestamp())}:R> · raid <t:{unix}:R>", inline=False)
+    e.set_footer(text=f"{ev.key} · {ev.state} · ᵖ prefilled from availability · buttons use your main; pick an alt from the menu")
     return e
 
 
-def health_embed(reg: Registry, ev: rc.RaidEvent, team: dict) -> discord.Embed:
-    rows = rc.health(reg, ev, team)
-    worst = "red" if any(l == "red" for l, _ in rows) else ("amber" if any(l == "amber" for l, _ in rows) else "green")
+def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[discord.Embed, discord.File]:
+    """Image card + a one-line embed. Numbers are in the image; the embed carries the level and the next timers."""
+    h = rc.health_data(reg, ev, team)
+    levels = [h["headcount_level"]] + [r["level"] for r in h["roles"] if r["need"]]
+    worst = "red" if "red" in levels else ("amber" if "amber" in levels else "green")
     colour = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]
-    e = discord.Embed(title=f"Roster health · {ev.key}", colour=colour, description="\n".join(f"{LEVEL_DOT[l]} {t}" for l, t in rows))
-    return e
+    start = ev.start
+    soft = start - timedelta(hours=rc.team_setting(team, "cutoff_soft_hours"))
+    hard = start - timedelta(hours=rc.team_setting(team, "cutoff_hard_hours"))
+    png = render.health_png(f"Roster health · {team.get('name', ev.team)} · {ev.key}", f"{start.strftime('%a %b %d %H:%M')} server · locks {hard.strftime('%a %H:%M')}", h["headcount"], h["roles"], h["buffs"], h["unresponsive"], footer="tiles: have / need · amber = tentative/sub could cover · badges: party buffs from signed players")
+    file = discord.File(BytesIO(png), filename="health.png")
+    n, size, tent, subs = h["headcount"]
+    e = discord.Embed(colour=colour, description=f"{LEVEL_DOT[worst]} **{n}/{size}** in · nudge <t:{int(soft.timestamp())}:R> · lock <t:{int(hard.timestamp())}:R>")
+    e.set_image(url="attachment://health.png")
+    missing = [b for b in h["buffs"] if not b["providers"]]
+    if missing:
+        e.add_field(name="Missing buffs", value=" ".join(f"{ico('buff', b['id'])}" for b in missing) + "\n" + ", ".join(b["name"] for b in missing)[:900], inline=False)
+    return e, file
 
 
 # ---------------------------------------------------------------- persistent buttons
@@ -152,10 +166,33 @@ class RaidMixin:
         msg = await channel.send(embed=sheet_embed(reg, ev, team, self.ico), view=sheet_view(ev.key))
         ev.channel_id, ev.message_id = channel.id, msg.id
         rs.save(ev, "sheet posted")
+        if rc.team_setting(team, "open_dm"):
+            await self.dm_on_open(reg, rs, ev, team)
+
+    async def dm_on_open(self, reg, rs, ev, team) -> int:
+        """Optional per-team: DM every registered raider when the sheet opens, with their
+        prefilled status and the same buttons, so they confirm or change from the DM."""
+        unix = int(ev.start.timestamp())
+        sent = 0
+        for m in reg.members.values():
+            if not m.main or m.dm_opt_out:
+                continue
+            s = ev.signups.get(str(m.discord_id))
+            status = f"You're prefilled as **{s.status}** on {s.character}" if s else "You haven't responded yet"
+            try:
+                user = await self.fetch_user(m.discord_id)
+                await user.send(f"**{reg.config.name} · {team.get('name', ev.team)}** raid <t:{unix}:F> (<t:{unix}:R>). {status}. Confirm or change:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else ""), view=sheet_view(ev.key))
+                sent += 1
+            except Exception:  # noqa: BLE001
+                pass
+        ev.log.append(f"open DMs sent to {sent}")
+        rs.save(ev, f"open DMs {sent}")
+        return sent
 
     async def post_health(self, reg, rs, ev, channel, nudge: bool) -> None:
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-        await channel.send(embed=health_embed(reg, ev, team))
+        embed, file = await asyncio.to_thread(health_card, reg, ev, team, self.ico)
+        await channel.send(embed=embed, file=file)
         if nudge and rc.team_setting(team, "reminders") != "none":
             targets = [m for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
             unix = int(ev.start.timestamp())
@@ -180,10 +217,10 @@ class RaidMixin:
         png = await asyncio.to_thread(render.roster_png, reg.profile, players, result, f"{team.get('name', ev.team)} · {ev.key}", f"{len(result.selected)} in · synergy {result.synergy_value}")
         e = discord.Embed(title=f"Proposed roster · {ev.key}", colour=TEAL, description=f"{len(result.selected)} in · " + " · ".join(f"{self.ico('role', k)} {v}" for k, v in result.role_counts.items()) + f" · synergy **{result.synergy_value}**")
         e.set_image(url="attachment://roster.png")
-        e.add_field(name="Bench", value=", ".join(f"{p.character} ({p.spec})" for p in result.benched) or "nobody", inline=False)
+        e.add_field(name="Bench", value=", ".join(f"{self.ico('class', p.cls)} {p.character or p.signup_name}" for p in result.benched) or "nobody", inline=False)
         if result.advisories:
-            e.add_field(name="Advisories", value="\n".join(f"• {a[:300]}" for a in result.advisories[:4])[:1000], inline=False)
-        e.set_footer(text="Officers: /raid accept to lock the roster, or /raid lock again after changes")
+            e.add_field(name="Advisories", value="\n".join(a[:120] for a in result.advisories[:6])[:1000], inline=False)
+        e.set_footer(text="/raid accept to lock the roster · /raid lock again after changes")
         await channel.send(embed=e, file=discord.File(BytesIO(png), filename="roster.png"))
 
     async def scheduler(self) -> None:
@@ -324,7 +361,8 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if not ev:
             await interaction.response.send_message("No open sheet.", ephemeral=True)
             return
-        await interaction.response.send_message(embed=health_embed(reg, ev, t), ephemeral=not is_officer(interaction, reg))
+        embed, file = await asyncio.to_thread(health_card, reg, ev, t, bot.ico)
+        await interaction.response.send_message(embed=embed, file=file, ephemeral=not is_officer(interaction, reg))
 
     @raid.command(name="lock", description="Officer: lock signups now and propose a roster")
     @app_commands.autocomplete(team=team_autocomplete)

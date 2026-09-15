@@ -73,7 +73,8 @@ class RosterResult(BaseModel):
     objective: int
     synergy_value: int
     role_counts: dict[str, int]
-    advisories: list[str]
+    advisories: list[str]  # one-liners, level dot first (🔴/🟡/🟢)
+    details: list[str] = Field(default_factory=list)  # longer explanations behind the advisories
     bench_whatif: dict[str, int] = Field(default_factory=dict)  # name -> objective if forced in
     solver_status: str = ""
     narrative: Optional[str] = None

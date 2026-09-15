@@ -16,6 +16,7 @@
 # meant to be tuned against real WCL group layouts (shadow mode).
 buffs:
   - id: windfury_totem
+    icon: {abbr: WF, colour: "#5C9BFF"}
     name: Windfury Totem
     providers: [Shaman:Enhancement]
     scope: party
@@ -25,6 +26,7 @@ buffs:
     note: Enh shaman drops it; other shamans could but are wanted elsewhere.
 
   - id: unleashed_rage
+    icon: {abbr: UR, colour: "#C0392B"}
     name: Unleashed Rage (10% AP)
     providers: [Shaman:Enhancement]
     scope: party
@@ -33,6 +35,7 @@ buffs:
     value: {physical: 5, tank: 2}
 
   - id: bloodlust
+    icon: {abbr: BL, colour: "#E5484D"}
     name: Bloodlust / Heroism
     providers: [Shaman:*]
     scope: party
@@ -42,6 +45,7 @@ buffs:
     note: Party-wide in TBC, so one shaman per group is the classic layout.
 
   - id: totem_of_wrath
+    icon: {abbr: ToW, colour: "#F0A030"}
     name: Totem of Wrath
     providers: [Shaman:Elemental]
     scope: party
@@ -50,6 +54,7 @@ buffs:
     value: {spell: 6}
 
   - id: wrath_of_air
+    icon: {abbr: WoA, colour: "#7FD3F5"}
     name: Wrath of Air Totem
     providers: [Shaman:Elemental, Shaman:Restoration]
     scope: party
@@ -58,6 +63,7 @@ buffs:
     value: {spell: 3, healer: 2}
 
   - id: mana_tide
+    icon: {abbr: MT, colour: "#4FB3E8"}
     name: Mana Tide / Mana Spring
     providers: [Shaman:Restoration]
     scope: party
@@ -66,6 +72,7 @@ buffs:
     value: {healer: 5, mana: 3}
 
   - id: ferocious_inspiration
+    icon: {abbr: FI, colour: "#ABD473"}
     name: Ferocious Inspiration (3% dmg, stacks)
     providers: [Hunter:BeastMastery]
     scope: party
@@ -74,6 +81,7 @@ buffs:
     value: {physical: 4, spell: 4}
 
   - id: trueshot_aura
+    icon: {abbr: TA, colour: "#8FBF5A"}
     name: Trueshot Aura
     providers: [Hunter:Marksmanship]
     scope: party
@@ -82,6 +90,7 @@ buffs:
     value: {physical: 4}
 
   - id: leader_of_the_pack
+    icon: {abbr: LotP, colour: "#FF7D0A"}
     name: Leader of the Pack (5% crit)
     providers: [Druid:Feral, Druid:Guardian]
     scope: party
@@ -90,6 +99,7 @@ buffs:
     value: {physical: 5, tank: 2}
 
   - id: moonkin_aura
+    icon: {abbr: MA, colour: "#D7A6FF"}
     name: Moonkin Aura (5% spell crit)
     providers: [Druid:Balance]
     scope: party
@@ -98,6 +108,7 @@ buffs:
     value: {spell: 5}
 
   - id: battle_shout
+    icon: {abbr: BS, colour: "#C79C6E"}
     name: Battle Shout
     providers: [Warrior:*]
     scope: party
@@ -106,6 +117,7 @@ buffs:
     value: {physical: 4, tank: 2}
 
   - id: blood_pact
+    icon: {abbr: BP, colour: "#9482C9"}
     name: Blood Pact (imp)
     providers: [Warlock:*]
     scope: party
@@ -114,6 +126,7 @@ buffs:
     value: {all: 1}
 
   - id: vampiric_touch
+    icon: {abbr: VT, colour: "#B39DDB"}
     name: Vampiric Touch (mana return)
     providers: [Priest:Shadow]
     scope: party
@@ -123,6 +136,7 @@ buffs:
     note: The "mana group" anchor.
 
   - id: sanctity_aura
+    icon: {abbr: SA, colour: "#F58CBA"}
     name: Sanctity Aura
     providers: [Paladin:Retribution]
     scope: party
