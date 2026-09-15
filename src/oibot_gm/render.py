@@ -432,7 +432,7 @@ def comp_png(lines: list, title: str, subtitle: str, notes: list[str]) -> bytes:
         d.text((M + 464, yy + 8), why[:96], font=f_tiny, fill=WARN if l.source == "officer" else MUTED)
     y += max(1, len(lines)) * RH + 16
     for a in notes:
-        d.text((M, y), ("assumes " + a)[:150], font=f_tiny, fill=MUTED)
+        d.text((M, y), (a if a.startswith("offspec") else "assumes " + a)[:150], font=f_tiny, fill=MUTED)
         y += 18
     buf = BytesIO()
     img.save(buf, "PNG", optimize=True)
