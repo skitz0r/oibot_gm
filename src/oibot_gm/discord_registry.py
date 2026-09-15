@@ -140,31 +140,70 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
         return reg
 
+    def _ns(interaction: discord.Interaction, *names: str):
+        """First present option value from the interaction namespace (renamed options use their display name)."""
+        for n in names:
+            v = getattr(interaction.namespace, n, None)
+            if v:
+                return getattr(v, "value", v)
+        return None
+
     async def spec_autocomplete(interaction: discord.Interaction, current: str):
+        """Specs filtered by the class picked in the same command (or by the named character's class)."""
         reg = guilds.for_interaction(interaction)
-        cls = getattr(interaction.namespace, "class_", None) or getattr(interaction.namespace, "cls", None)
         if reg is None:
             return []
+        cls = _ns(interaction, "class", "class_", "cls")
         if not cls:
-            hit = None
-            name = getattr(interaction.namespace, "name", None)
-            if name:
-                hit = reg.find(name)
+            name = _ns(interaction, "name")
+            hit = reg.find(name) if name else None
+            if not hit and name and interaction.user.id in reg.members:
+                hit = next(((reg.members[interaction.user.id], c) for c in reg.members[interaction.user.id].active() if c.label.lower() == name.lower()), None)
             cls = hit[1].cls if hit else None
         specs = list(reg.profile.classes.get(cls, {})) if cls else sorted({s for c in reg.profile.classes.values() for s in c})
         return [app_commands.Choice(name=s, value=s) for s in specs if current.lower() in s.lower()][:25]
 
     async def own_char_autocomplete(interaction: discord.Interaction, current: str):
+        """The caller's characters, planned ones by label."""
         reg = guilds.for_interaction(interaction)
         if reg is None or interaction.user.id not in reg.members:
             return []
-        return [app_commands.Choice(name=c.name, value=c.name) for c in reg.members[interaction.user.id].active() if c.name and current.lower() in c.name.lower()][:25]
+        out = []
+        for c in reg.members[interaction.user.id].active():
+            key = c.name or c.label
+            if current.lower() in key.lower():
+                out.append(app_commands.Choice(name=f"{c.label} · {c.cls} {c.spec}"[:100], value=key))
+        return out[:25]
 
-    async def any_char_autocomplete(interaction: discord.Interaction, current: str):
+    async def member_char_autocomplete(interaction: discord.Interaction, current: str):
+        """Characters of the member picked in the same command (officer commands with a `member` option)."""
+        reg = guilds.for_interaction(interaction)
+        member = _ns(interaction, "member")
+        if reg is None or member is None:
+            return []
+        mid = getattr(member, "id", None) or (int(member) if str(member).isdigit() else None)
+        m = reg.members.get(mid) if mid else None
+        if not m:
+            return []
+        return [app_commands.Choice(name=f"{c.label} · {c.cls} {c.spec}"[:100], value=c.name or c.label) for c in m.active() if current.lower() in (c.name or c.label).lower()][:25]
+
+    async def instance_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
         if reg is None:
             return []
-        return [app_commands.Choice(name=f"{c.label} ({c.cls})", value=c.name) for _, c in reg.all_characters() if c.name and current.lower() in c.name.lower()][:25]
+        return [app_commands.Choice(name=f"{r['name']} ({r.get('size', '?')})", value=rid) for rid, r in reg.profile.raids.items() if current.lower() in rid or current.lower() in r["name"].lower()][:25]
+
+    async def any_char_autocomplete(interaction: discord.Interaction, current: str):
+        """Every character in the guild (officers), planned ones by label with the owner's name."""
+        reg = guilds.for_interaction(interaction)
+        if reg is None:
+            return []
+        out = []
+        for m, c in reg.all_characters():
+            key = c.name or c.label
+            if current.lower() in key.lower() or current.lower() in m.display_name.lower():
+                out.append(app_commands.Choice(name=f"{c.label} · {c.cls} · {m.display_name}"[:100], value=key))
+        return out[:25]
 
     # ---------------- /register
     @tree.command(name="register", description="Register your character (first one becomes your main)")
@@ -552,6 +591,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {c.label} → {rank.value}")
 
     @roster.command(name="set-main", description="Set a member's main on their behalf")
+    @app_commands.autocomplete(name=member_char_autocomplete)
     async def roster_set_main(interaction: discord.Interaction, member: discord.User, name: str):
         reg = await officer(interaction)
         if not reg:
@@ -714,7 +754,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await ops.emit(reg.config, "warn", f"officer roles now {reg.config.officer_roles} (by {interaction.user.display_name})")
 
     @config.command(name="team", description="Owner: add/update a raid team (schedule like 'Tue 19:30'; cutoffs in hours)")
-    @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="'Tue 19:30' in the guild's timezone", instance="raid id from the game profile", soft_cutoff="hours before raid: health check + nudges", hard_cutoff="hours before raid: lock + propose", open_days="days before the raid to open the sheet")
+    @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="'Tue 19:30' in the guild's timezone", instance="raid from the game profile", soft_cutoff="hours before raid: health check + nudges", hard_cutoff="hours before raid: lock + propose", open_days="days before the raid to open the sheet")
+    @app_commands.autocomplete(instance=instance_autocomplete)
     async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, remove: bool = False):
         reg = await need(interaction)
         if not reg:
@@ -819,6 +860,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     tree.add_command(gm)
+    # exported for other command modules that take a member + character
+    register_commands.member_char_autocomplete = member_char_autocomplete  # type: ignore[attr-defined]
 
 
 LEVEL = ops_mod.LEVEL_ICON

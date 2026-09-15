@@ -403,9 +403,11 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             rs.save(ev, "done (loot closed)")
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} closed loot council {session.id}: {len(session.awards)} awards, {len(session.overrides)} overrides")
 
+    from .discord_registry import register_commands as _rc
+
     @raid.command(name="set", description="Officer: set someone's status on the sheet")
     @app_commands.choices(status=[app_commands.Choice(name=s, value=s) for s in rc.STATUSES])
-    @app_commands.autocomplete(team=team_autocomplete)
+    @app_commands.autocomplete(team=team_autocomplete, character=_rc.member_char_autocomplete)
     async def raid_set(interaction: discord.Interaction, member: discord.User, status: app_commands.Choice[str], character: str | None = None, team: str | None = None):
         reg = await officer(interaction)
         if not reg:

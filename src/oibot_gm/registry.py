@@ -32,15 +32,15 @@ class RegisteredCharacter(BaseModel):
     is_main: bool = False
     rank: str = "trial"
     status: str = "active"  # planned | active | retired
-
-    @property
-    def label(self) -> str:
-        return self.name or f"{self.cls} ({self.spec})"
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[str] = None
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
     note: Optional[str] = None  # officer-only
+
+    @property
+    def label(self) -> str:
+        return self.name or f"{self.cls} ({self.spec})"
 
 
 class Absence(BaseModel):
@@ -220,10 +220,15 @@ class Registry:
         return m
 
     def find(self, name: str) -> tuple[Member, RegisteredCharacter] | None:
+        """By character name; planned (unnamed) characters match by their label, e.g. 'Shaman (Enhancement)'."""
         n = name.strip().lower()
         for m in self.members.values():
             for c in m.characters:
                 if c.name and c.name.lower() == n:
+                    return m, c
+        for m in self.members.values():
+            for c in m.characters:
+                if not c.name and c.status == "planned" and c.label.lower() == n:
                     return m, c
         return None
 
@@ -337,7 +342,7 @@ class Registry:
 
     def set_main(self, discord_id: int, name: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if (c.name or "").lower() == name.strip().lower()), None)
+        c = next((c for c in m.active() if (c.name or c.label).lower() == name.strip().lower()), None)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         old = m.main
@@ -354,7 +359,7 @@ class Registry:
 
     def set_spec(self, discord_id: int, name: str, spec: str, offspec: str | None) -> RegisteredCharacter:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if (c.name or "").lower() == name.strip().lower()), None)
+        c = next((c for c in m.active() if (c.name or c.label).lower() == name.strip().lower()), None)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         c.spec = self.validate_spec(c.cls, spec)
@@ -365,7 +370,7 @@ class Registry:
 
     def retire(self, discord_id: int, name: str) -> RegisteredCharacter:
         m = self.member(discord_id)
-        c = next((c for c in m.active() if (c.name or "").lower() == name.strip().lower()), None)
+        c = next((c for c in m.active() if (c.name or c.label).lower() == name.strip().lower()), None)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
         c.status = "retired"
