@@ -15,10 +15,25 @@ import discord
 
 from . import render
 from .discord_registry import registration_card, registration_view
-from .registry import Registry, pool_health_data
+from .registry import Registry, bank_rows, pool_health_data
 
 LEVEL_DOT = {"green": "🟢", "amber": "🟡", "red": "🔴"}
 DEBOUNCE_S = 3.0
+BANK_KEY = "_bank"  # analytics_message_ids slot for the character bank card
+
+
+def bank_card(reg: Registry) -> tuple[discord.Embed, discord.File]:
+    rows = bank_rows(reg)
+    mains = sum(1 for r in rows if r["main"])
+    alts = sum(len(r["alts"]) for r in rows)
+    unnamed = sum(1 for r in rows if r["main"] and not r["main"]["name"])
+    png = render.bank_png(f"Character bank · {reg.config.name}", f"{len(rows)} members · {mains} mains · {alts} alts" + (f" · {unnamed} mains unnamed" if unnamed else "") + f" · updated {datetime.now().strftime('%a %b %d %H:%M')}",
+                          rows, footer="sorted by role then class · grey name = planned, not yet created · rank/rosters are officer-set")
+    file = discord.File(BytesIO(png), filename="bank.png")
+    e = discord.Embed(colour=0x2B7A78, description=f"**{len(rows)}** members · **{mains}** mains · **{alts}** alts")
+    e.set_image(url="attachment://bank.png")
+    e.set_footer(text="Kept current by the bot")
+    return e, file
 
 
 def pool_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.File]:
@@ -90,12 +105,14 @@ class PoolMixin:
         out = []
         changed = False
         rosters = reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]
-        for roster in rosters:
-            key = roster["key"]
+        for key in [BANK_KEY] + [r["key"] for r in rosters]:
             try:
-                embed, file = await asyncio.to_thread(pool_card, reg, roster, self.ico)
+                if key == BANK_KEY:
+                    embed, file = await asyncio.to_thread(bank_card, reg)
+                else:
+                    embed, file = await asyncio.to_thread(pool_card, reg, next(r for r in rosters if r["key"] == key), self.ico)
             except Exception as e:  # noqa: BLE001
-                await self.ops.emit(reg.config, "error", f"pool card for {key} failed", e)
+                await self.ops.emit(reg.config, "error", f"analytics card for {key} failed", e)
                 continue
             msg = None
             mid = reg.config.analytics_message_ids.get(key)
@@ -118,7 +135,7 @@ class PoolMixin:
                 changed = True
             out.append(msg)
         # drop cards for rosters that no longer exist
-        for key in [k for k in reg.config.analytics_message_ids if k not in {r["key"] for r in rosters}]:
+        for key in [k for k in reg.config.analytics_message_ids if k != BANK_KEY and k not in {r["key"] for r in rosters}]:
             try:
                 await (await ch.fetch_message(reg.config.analytics_message_ids[key])).delete()
             except Exception:  # noqa: BLE001

@@ -239,6 +239,67 @@ def health_png(title: str, subtitle: str, headcount: tuple[int, int, int, int], 
     return buf.getvalue()
 
 
+def bank_png(title: str, subtitle: str, rows: list[dict], footer: str = "") -> bytes:
+    """Character bank table: one row per member.
+    rows: [{member, role, main: {cls, spec, offspec, name, status, rank, rosters} | None, alts: [{cls, spec, name, status}]}]"""
+    W, M, RH = 1100, 28, 34
+    f_title, f_h, f_body, f_small = font(28, True), font(15, True), font(16), font(13)
+    cols = [("Member", M), ("Main", M + 170), ("Spec", M + 380), ("Role", M + 585), ("Rank", M + 675), ("Rosters", M + 745), ("Alts", M + 845)]
+    H = M + 60 + 30 + max(1, len(rows)) * RH + 20 + (30 if footer else 0)
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+    d.text((M, M), title, font=f_title, fill=INK)
+    d.text((M, M + 34), subtitle, font=f_small, fill=MUTED)
+    y = M + 64
+    d.rounded_rectangle([M - 8, y, W - M + 8, y + 26 + max(1, len(rows)) * RH + 6], radius=8, fill=PANEL, outline=LINE)
+    for name, x in cols:
+        d.text((x + 4, y + 5), name.upper(), font=f_small, fill=MUTED)
+    y += 26
+    d.line([(M, y), (W - M, y)], fill=LINE)
+    if not rows:
+        d.text((M + 4, y + 8), "nobody has registered yet", font=f_body, fill=MUTED)
+    for i, r in enumerate(rows):
+        yy = y + i * RH
+        if i % 2:
+            d.rectangle([M - 4, yy + 1, W - M + 4, yy + RH - 1], fill="#1F2630")
+        d.text((cols[0][1] + 4, yy + 8), r["member"][:17], font=f_body, fill=INK)
+        mc = r.get("main")
+        if mc:
+            col = CLASS.get(mc["cls"], INK)
+            d.rounded_rectangle([cols[1][1] + 4, yy + 8, cols[1][1] + 12, yy + 26], radius=2, fill=col)
+            label = mc["name"] or f"{mc['cls']} (unnamed)"
+            d.text((cols[1][1] + 20, yy + 8), label[:22], font=f_body, fill=col if mc["name"] else MUTED)
+            spec = mc["spec"] + (f"/{mc['offspec']}" if mc.get("offspec") and mc["offspec"] != mc["spec"] else "")
+            d.text((cols[2][1] + 4, yy + 8 + (2 if len(spec) > 16 else 0)), spec[:26], font=f_small if len(spec) > 16 else f_body, fill=INK)
+            _role_glyph(d, cols[3][1] + 4, yy + 11, r.get("role") or "", 12)
+            d.text((cols[3][1] + 22, yy + 8), (r.get("role") or "?")[:7], font=f_body, fill=ROLE_COLOUR.get(r.get("role") or "", MUTED))
+            d.text((cols[4][1] + 4, yy + 8), mc.get("rank", "")[:8], font=f_body, fill=INK if mc.get("rank") not in ("trial", "alt") else MUTED)
+            d.text((cols[5][1] + 4, yy + 8), (", ".join(mc.get("rosters") or []) or "—")[:12], font=f_body, fill=INK if mc.get("rosters") else MUTED)
+        else:
+            d.text((cols[1][1] + 4, yy + 8), "no main", font=f_body, fill=MUTED)
+        x = cols[6][1] + 4
+        alts = r.get("alts", [])
+        fa = f_small if len(alts) > 1 else f_body
+        shown = 0
+        for a in alts:
+            col = CLASS.get(a["cls"], INK)
+            t = ((a["name"] or a["cls"]) + f" · {a['spec']}")[:20]
+            w = 20 + int(d.textlength(t, font=fa))
+            if x + w > W - M - 30 and shown:
+                break
+            d.rounded_rectangle([x, yy + 8, x + 8, yy + 26], radius=2, fill=col)
+            d.text((x + 14, yy + 8 + (2 if fa is f_small else 0)), t, font=fa, fill=col if a["name"] else MUTED)
+            x += w
+            shown += 1
+        if len(alts) > shown:
+            d.text((x, yy + 10), f"+{len(alts) - shown}", font=f_small, fill=MUTED)
+    if footer:
+        d.text((M, H - 26), footer, font=f_small, fill=MUTED)
+    buf = BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
 def class_badge_png(cls: str, size: int = 96) -> bytes:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)

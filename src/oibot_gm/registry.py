@@ -227,6 +227,22 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
     return lines
 
 
+def bank_rows(reg: "Registry") -> list[dict]:
+    """Character bank: one row per member (main first by class, then those without a main), for render.bank_png."""
+    rows = []
+    for m in reg.members.values():
+        main = m.main
+        alts = [c for c in m.active() if not c.is_main]
+        if not main and not alts:
+            continue
+        role = (m.role_prefs.get("primary") or (reg.profile.spec(main.cls, main.spec).role if main else None))
+        rows.append({"member": m.display_name, "role": role,
+                     "main": {"cls": main.cls, "spec": main.spec, "offspec": main.offspec, "name": main.name, "status": main.status, "rank": main.rank, "rosters": list(main.rosters)} if main else None,
+                     "alts": [{"cls": a.cls, "spec": a.spec, "name": a.name, "status": a.status} for a in alts]})
+    order = {"tank": 0, "healer": 1, "melee": 2, "ranged": 3}
+    return sorted(rows, key=lambda r: (r["main"] is None, order.get(r["role"], 9), r["main"]["cls"] if r["main"] else "", r["member"].lower()))
+
+
 def pool_health_data(reg: "Registry", roster: dict) -> dict:
     """Readiness of the *potential* pool (every planned/active main) against a roster's size, in the same
     shape as raidcycle.health_data so it renders through render.health_png. No sheet involved."""

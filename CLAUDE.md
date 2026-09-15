@@ -34,7 +34,7 @@ src/oibot_gm/
   raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
   discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
-  discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only) and per-roster
+  discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only), character bank table and per-roster
                        pool-readiness cards + change log in the analytics channel; driven by Registry.listeners (diff_member), debounced
   configops.py         plain-text config: whitelisted ConfigOp schema, describe() diff, apply() via the same code paths as commands
   discord_policy.py    /policy show|edit|reload, /loot-rule, /comp-rule, /gm change, @mention in the ops channel
