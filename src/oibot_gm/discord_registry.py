@@ -133,6 +133,136 @@ class PlanButton(discord.ui.DynamicItem[discord.ui.Button], template=r"plan:(?P<
         await interaction.response.send_message(f"**{self.cls}** — pick the spec, then the roles you'd play (the first one you pick is your primary):", view=view, ephemeral=True)
 
 
+class NameModal(discord.ui.Modal):
+    """Last step of the registration wizard: optional character name (blank = planned, name it at launch)."""
+
+    name = discord.ui.TextInput(label="Character name (leave blank if it doesn't exist yet)", required=False, max_length=12)
+
+    def __init__(self, reg: Registry, cls: str, spec: str, offspec: str | None, roles: list[str], slot: str):
+        super().__init__(title=f"{cls} {spec} — almost done"[:45])
+        self.reg, self.cls, self.spec, self.offspec, self.roles, self.slot = reg, cls, spec, offspec, roles, slot
+
+    async def on_submit(self, interaction: discord.Interaction):
+        reg, bot = self.reg, interaction.client
+        name = str(self.name.value).strip()
+        try:
+            if name:
+                m, c = reg.add_character(interaction.user.id, interaction.user.display_name, name, self.cls, self.spec, self.offspec, self.slot == "main")
+            else:
+                m, c = reg.set_plan(interaction.user.id, interaction.user.display_name, self.cls, self.spec, self.offspec, self.slot)
+            if self.roles:
+                primary = self.roles[0]
+                reg.set_roles(interaction.user.id, interaction.user.display_name, primary, self.roles[1:])
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        what = f"{'Registered' if name else 'Planned'} {'main' if self.slot == 'main' else 'alt'}: **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''}"
+        roles = f" · roles: {self.roles[0]}" + (f" (+{', '.join(self.roles[1:])})" if len(self.roles) > 1 else "") if self.roles else ""
+        tail = " An officer will confirm the character." if name else " Add the name at launch with `/me char name`."
+        await interaction.response.send_message(f"✅ {what}{roles}.{tail} `/me view` shows everything.", ephemeral=True)
+        await bot.ops.emit(reg.config, "info", f"**{m.display_name}** {'registered' if name else 'planned'} {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ', alt'})" + (f" · roles {self.roles}" if self.roles else "") + ("" if not name else " — pending confirmation"))
+
+
+class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(?P<action>register|alt|status)"):
+    """Persistent registration card: Register/Plan main → class → spec/offspec → roles → name (optional)."""
+
+    LABELS = {"register": ("Register / plan my main", discord.ButtonStyle.success), "alt": ("Add an alt", discord.ButtonStyle.secondary), "status": ("My status", discord.ButtonStyle.secondary)}
+
+    def __init__(self, action: str):
+        label, style = self.LABELS[action]
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"reg:{action}"))
+        self.action = action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match, /):
+        return cls(match["action"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        reg = bot.registries.for_interaction(interaction)
+        if not reg:
+            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        if self.action == "status":
+            m = reg.members.get(interaction.user.id)
+            if not m or not m.active():
+                await interaction.response.send_message("Nothing registered yet — press **Register / plan my main**.", ephemeral=True)
+                return
+            rp = m.role_prefs
+            lines = [char_line(bot.ico, c) for c in m.active()]
+            lines.append(("Roles: " + rp.get("primary", "?") + (f" (+{', '.join(rp.get('flex', []))})" if rp.get("flex") else "")) if rp else "Roles: unset")
+            if m.teams:
+                lines.append("Rosters: " + ", ".join(m.teams))
+            await interaction.response.send_message("\n".join(lines), ephemeral=True)
+            return
+        slot = "main" if self.action == "register" else "alt"
+        view = discord.ui.View(timeout=600)
+        cls_sel = discord.ui.Select(placeholder="Class", options=[discord.SelectOption(label=c, value=c, emoji=_emoji(bot.ico("class", c))) for c in reg.profile.classes])
+        spec_sel = discord.ui.Select(placeholder="Main spec (pick a class first)", options=[discord.SelectOption(label="—", value="-")], disabled=True)
+        off_sel = discord.ui.Select(placeholder="Offspec (optional)", options=[discord.SelectOption(label="none", value="-")], disabled=True)
+        role_sel = discord.ui.Select(placeholder="Roles you'd play (first = primary)", min_values=1, max_values=4, options=[discord.SelectOption(label=r, value=r, emoji=_emoji(bot.ico("role", r))) for r in ROLES])
+        go = discord.ui.Button(label="Continue → name", style=discord.ButtonStyle.primary, disabled=True)
+        state: dict = {"roles": []}
+
+        def specs_for(c):
+            return [discord.SelectOption(label=s, value=s, description=reg.profile.spec(c, s).role) for s in reg.profile.classes[c]]
+
+        async def on_cls(i: discord.Interaction):
+            state["cls"] = cls_sel.values[0]
+            state.pop("spec", None)
+            spec_sel.options = specs_for(state["cls"])
+            spec_sel.placeholder = f"{state['cls']}: main spec"
+            spec_sel.disabled = False
+            off_sel.options = [discord.SelectOption(label="none", value="-")] + specs_for(state["cls"])
+            off_sel.disabled = False
+            go.disabled = True
+            await i.response.edit_message(view=view)
+
+        async def on_spec(i: discord.Interaction):
+            state["spec"] = spec_sel.values[0]
+            go.disabled = False
+            await i.response.edit_message(view=view)
+
+        async def on_off(i: discord.Interaction):
+            state["offspec"] = None if off_sel.values[0] == "-" else off_sel.values[0]
+            await i.response.defer()
+
+        async def on_roles(i: discord.Interaction):
+            state["roles"] = list(role_sel.values)
+            await i.response.defer()
+
+        async def on_go(i: discord.Interaction):
+            await i.response.send_modal(NameModal(reg, state["cls"], state["spec"], state.get("offspec"), state["roles"], slot))
+
+        cls_sel.callback, spec_sel.callback, off_sel.callback, role_sel.callback, go.callback = on_cls, on_spec, on_off, on_roles, on_go
+        for item in (cls_sel, spec_sel, off_sel, role_sel, go):
+            view.add_item(item)
+        await interaction.response.send_message(f"**{'Register or plan your main' if slot == 'main' else 'Add an alt'}** — class, spec, optional offspec, the roles you'd play, then a name (or leave it blank until launch).", view=view, ephemeral=True)
+
+
+def _emoji(raw: str):
+    try:
+        return discord.PartialEmoji.from_str(raw) if raw else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def registration_card(reg: Registry) -> discord.Embed:
+    e = discord.Embed(title=f"{reg.config.name} · character registration", colour=0x2B7A78,
+                      description="**Register / plan my main** — class, spec, roles, and your character's name if it exists (leave it blank before launch).\n"
+                                  "**Add an alt** — same flow for an alt.\n**My status** — what the bot has for you.\n\n"
+                                  "Keyboard route: `/me plan …`, `/me char …`, `/me view`. Availability and absences: `/me availability`, `/me absent add`.")
+    e.set_footer(text="Your Discord account is your identity; character names can be added later with /me char name.")
+    return e
+
+
+def registration_view() -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    for a in ("register", "alt", "status"):
+        v.add_item(RegisterButton(a))
+    return v
+
+
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
     async def need(interaction: discord.Interaction) -> Registry | None:
         reg = guilds.for_interaction(interaction)
@@ -887,6 +1017,19 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         import yaml as _y
 
         await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
+
+    @roster.command(name="registration-card", description="Officer: post the persistent registration card (pin it in a public channel)")
+    async def roster_regcard(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        await interaction.response.send_message(embed=registration_card(reg), view=registration_view())
+        try:
+            msg = await interaction.original_response()
+            await msg.pin()
+        except Exception:  # noqa: BLE001
+            pass
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} posted the registration card in #{getattr(interaction.channel, 'name', '?')}")
 
     @roster.command(name="poll", description="Officer: post the 'what are you planning to play?' poll with class buttons")
     async def gm_plan_poll(interaction: discord.Interaction):
