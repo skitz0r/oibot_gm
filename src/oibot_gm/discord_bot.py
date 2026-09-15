@@ -1030,13 +1030,22 @@ class OibotGM(FeedMixin, RaidMixin, discord.Client):
         self.tree.add_command(mock)
 
     async def setup_hook(self):
-        # global sync (so /register etc. work in DMs; propagates within ~1h) plus an
-        # instant guild-scoped copy for the test server
-        await self.tree.sync()
-        if self.test_guild:
-            g = discord.Object(id=self.test_guild)
+        # One scope only, or Discord lists every command twice. Default: global (works in DMs;
+        # new commands can take a while to propagate). OIBOT_COMMAND_SCOPE=guild gives instant
+        # updates in the test server but no DM commands.
+        scope = os.environ.get("OIBOT_COMMAND_SCOPE", "global")
+        g = discord.Object(id=self.test_guild) if self.test_guild else None
+        if scope == "guild" and g:
             self.tree.copy_global_to(guild=g)
             await self.tree.sync(guild=g)
+            self.tree.clear_commands(guild=None)
+            await self.tree.sync()
+        else:
+            await self.tree.sync()
+            if g:
+                self.tree.clear_commands(guild=g)
+                await self.tree.sync(guild=g)
+        print(f"commands synced ({scope})")
         self.loop.create_task(self.scheduler())
         token, bind = feed_config()
         if token:
