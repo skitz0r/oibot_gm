@@ -83,6 +83,7 @@
         {% endfor %}
       </div>
       <label>notes <input name="notes" value="{{ r.eff.notes or '' }}" class="{{ 'over' if 'notes' in r.over else '' }}"></label>
+      <label><input type="checkbox" name="auto" {{ 'checked' if r.eff.auto else '' }}> auto-propose runs daily (officers accept by DM; accepted runs open sheets in the roster channel)</label>
       {% if owner %}<div class="row"><button>Save</button>{% if r.over %}<button formaction="/admin/raid/reset" class="danger" formnovalidate>Reset to defaults</button>{% endif %}</div>{% else %}<span class="muted">(owner edits raid rules)</span>{% endif %}
     </form>
   </div>

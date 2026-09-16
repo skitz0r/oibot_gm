@@ -20,7 +20,8 @@ src/oibot_gm/
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
   roster/              solver.py (CP-SAT select+group, pins/forces), explain.py (advisories), coverage.py (slot-aware),
-                       builder.py (CP-SAT: seat the pool into every roster shell for a lockout window; diff/apply placements)
+                       builder.py (CP-SAT: seat the pool into every roster shell for a lockout window; diff/apply placements),
+                       autoplan.py (windows from availability grids → runs → Proposal; officers accept by DM → ephemeral rosters + sheets)
   loot/                scoring.py (candidates + base score), recommend.py (Claude structured output + fallback)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas

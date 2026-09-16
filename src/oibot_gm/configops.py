@@ -27,7 +27,7 @@ Comp ideals (officer): comp_target: team=<roster key>, field=<slot: a role tank|
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
   reason=<optional note, the justification shown on the desired-comp card>.
   comp_target_clear (team, field) removes an officer target so the derived value applies again.
-  raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<lockout_days|duration_hours|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
+  raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<lockout_days|duration_hours|notes|auto|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value (auto: true|false = plan runs daily and DM officers).
   raid_reset (owner): team=<raid id> — drop the guild's overrides for that raid.
   comp_groups: team=<roster key>, value=<comma-separated group labels in order, e.g. "tank, healers, melee, casters">
   — the archetype layout the group optimiser seeds (labels may combine: "tank/heal", "melee+ranged"); empty value = default layout.

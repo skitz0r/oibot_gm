@@ -121,6 +121,7 @@ class GuildConfig(BaseModel):
     analytics_channel_id: Optional[int] = None  # officer: live pool-readiness cards (edited on every change) + change log
     analytics_message_ids: dict[str, int] = Field(default_factory=dict)  # roster key -> card message id
     timezone: str = "America/Chicago"  # server time for schedules
+    auto_propose_hour: int = 12  # guild-local hour when the planner runs for raids with auto-propose on
     slots: list[str] = Field(default_factory=list)  # candidate raid times members rate ('Tue 19:30'); officers pick rosters from the heat-map
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
     about: Optional[str] = None  # short public blurb for the static guide (owner-set)
@@ -530,7 +531,7 @@ class Registry:
         return {"tank": b["tank"], "healer": b["healer"], "dps": {"min": 0, "max": size}}
 
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
-        """Owner override for a raid: lockout_days | duration_hours | notes | tank_min/max | healer_min/max | dps_min/max."""
+        """Owner override for a raid: lockout_days | duration_hours | notes | auto | tank_min/max | healer_min/max | dps_min/max."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         over = self.config.raids.setdefault(instance, {})
@@ -544,6 +545,8 @@ class Registry:
             over[field] = int(num) if field == "lockout_days" else num
         elif field == "notes":
             over["notes"] = str(value or "").strip()
+        elif field == "auto":
+            over["auto"] = str(value).lower() in ("true", "yes", "on", "1")
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
             role, bound = field.split("_")
             try:

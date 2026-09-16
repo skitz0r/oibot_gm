@@ -394,6 +394,9 @@ def create_app(bot) -> FastAPI:
                 val = d.get(f, "")
                 if val != "" and str(val) != str(cur.get(f, "")):
                     done.append(v.reg.set_raid_override(inst, f, val, v.name))
+            want_auto = d.get("auto") == "on"
+            if want_auto != bool(cur.get("auto")):
+                done.append(v.reg.set_raid_override(inst, "auto", "true" if want_auto else "false", v.name))
             for role in ("tank", "healer", "dps"):
                 for bound in ("min", "max"):
                     val = d.get(f"{role}_{bound}", "")

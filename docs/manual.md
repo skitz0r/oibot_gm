@@ -126,6 +126,13 @@ cards, because WoW: Forever has not published totem scoping yet.
   have vs want, and how many could fill a slot by switching to their offspec. Officers override targets in
   plain text: "reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target",
   "groups tank, healers, melee, casters".
+- **Auto-planner** (per raid, *auto-propose* on Admin → Raids, or `/raid plan <raid>` on demand): once a
+  day the bot looks at everyone's availability grid for the raid's next lockout window, picks the best
+  windows, makes as many runs as the character bank supports (seated by the builder, kept only when ≥ 80 %
+  full with the tanks and healers it needs) and **DMs the officers** the proposal with Accept / Reject.
+  Accept opens a dated sheet per run in the roster channel, pre-filled In for everyone seated, and DMs
+  them the In / Out buttons — the sheet is the verification; declines go straight to the fill engine.
+  Reject discards it and the planner tries again the next day.
 - **Build rosters** (Admin → *Build all rosters*, or `/roster build`): proposes every roster for the coming
   window from the pool — respecting raid-time answers, lockouts, one raid per person per slot, roles and
   buffs, and keeping current placements where possible — with a reason per seat and a list of who isn't

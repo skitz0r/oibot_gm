@@ -202,6 +202,49 @@ class PlaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"place:(?
         await bot.after_placement_answer(reg, self.uid, self.roster, self.answer == "yes", line)
 
 
+class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"prop:(?P<pid>[A-Za-z0-9_\-]+):(?P<answer>accept|reject)"):
+    """Officer DM: accept or reject an auto-planned set of runs. Persistent; first officer to act decides."""
+
+    def __init__(self, pid: str, answer: str):
+        super().__init__(discord.ui.Button(label="Accept — open the sheets" if answer == "accept" else "Reject", style=discord.ButtonStyle.success if answer == "accept" else discord.ButtonStyle.secondary, custom_id=f"prop:{pid}:{answer}"))
+        self.pid, self.answer = pid, answer
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["pid"], match["answer"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        reg = bot.registries.for_interaction(interaction)
+        if not reg or not await bot.is_officer_anywhere(reg, interaction.user.id):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        ps = bot.proposals(reg)
+        p = ps.items.get(self.pid)
+        if not p or p.state != "proposed":
+            await interaction.response.send_message(f"That proposal is {p.state if p else 'gone'}" + (f" (by {p.decided_by})" if p and p.decided_by else "") + ".", ephemeral=True)
+            return
+        await interaction.response.defer()
+        if self.answer == "reject":
+            p.state, p.decided_by, p.decided_at = "rejected", interaction.user.display_name, rc.now()
+            ps.save(p, f"rejected by {p.decided_by}")
+            line = f"proposal {p.id} rejected by {p.decided_by}"
+        else:
+            line = await bot.accept_proposal(reg, p, interaction.user.display_name)
+        try:
+            await interaction.edit_original_response(content=(interaction.message.content or "") + f"\n\n**→ {line}**", view=None)
+        except Exception:  # noqa: BLE001
+            pass
+        await bot.ops.emit(reg.config, "info", line)
+
+
+def proposal_view(pid: str) -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(ProposalButton(pid, "accept"))
+    v.add_item(ProposalButton(pid, "reject"))
+    return v
+
+
 def place_view(roster: str, uid: int) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
     v.add_item(PlaceButton(roster, uid, "yes"))
@@ -350,6 +393,137 @@ class RaidMixin:
         if ask.answer == "no" and ev.state == "open":
             await self.run_fill(reg, rs, ev, team, by="answer")
 
+    # ---- auto-planner: propose runs → officers accept by DM → dated rosters + sheets → members verify on the sheet
+    def proposals(self, reg):
+        from .roster.autoplan import ProposalStore
+
+        cache = self.__dict__.setdefault("_proposal_stores", {})
+        return cache.setdefault(reg.key, ProposalStore(self.registries.store, reg.key))
+
+    async def is_officer_anywhere(self, reg, uid: int) -> bool:
+        if reg.config.owner_discord_id == uid:
+            return True
+        guild = self.get_guild(reg.config.discord_guild_id)
+        if not guild:
+            return False
+        m = guild.get_member(uid)
+        if m is None:
+            try:
+                m = await guild.fetch_member(uid)
+            except Exception:  # noqa: BLE001
+                return False
+        return self.officiates(m, guild)
+
+    async def officer_ids(self, reg) -> list[int]:
+        guild = self.get_guild(reg.config.discord_guild_id)
+        ids = set()
+        if reg.config.owner_discord_id:
+            ids.add(reg.config.owner_discord_id)
+        if guild:
+            for m in guild.members:
+                if not m.bot and self.officiates(m, guild):
+                    ids.add(m.id)
+        return sorted(ids)
+
+    async def auto_propose(self, reg, instance: str, by: str = "scheduler") -> str:
+        """Plan the raid's next lockout window and DM officers the proposal. Returns a status line."""
+        from .roster import autoplan
+
+        ps = self.proposals(reg)
+        if ps.open_for(instance):
+            return f"{instance}: a proposal is already waiting for an officer"
+        rs = self.raids.store(reg)
+        p = await asyncio.to_thread(autoplan.plan, reg, rs, instance)
+        if p is None:
+            return f"{instance}: nothing viable this window (not enough available characters)"
+        rd = reg.raid_def(instance)
+        lines = [f"**{rd.get('name', instance)}** — proposed runs for {p.window_start[:10]} → {p.window_end[:10]} ({rd.get('lockout_days')}-day lockout):"]
+        for r in p.runs:
+            unix = int(datetime.fromisoformat(r.starts_at).timestamp())
+            roles = {k: sum(1 for s in r.seats if s["role"] == k) for k in ("tank", "healer", "melee", "ranged")}
+            lines.append(f"• **{r.name}** <t:{unix}:F> — {len(r.seats)}/{r.size} · " + " · ".join(f"{k} {v}" for k, v in roles.items()))
+            lines.append("  " + ", ".join(f"{s['character']} ({s['display_name']})" for s in r.seats)[:900])
+        if p.unplaced:
+            lines.append(f"Not seated ({len(p.unplaced)}): " + "; ".join(f"{n} — {w}" for n, w in p.unplaced[:6])[:600])
+        lines.append("Accept opens a dated sheet per run in the roster channel, pre-filled In for everyone seated, and DMs them the buttons. Reject discards it; the planner tries again tomorrow.")
+        text = "\n".join(lines)[:1900]
+        officers = await self.officer_ids(reg)
+        for uid in officers:
+            try:
+                user = await self.fetch_user(uid)
+                await user.send(text, view=proposal_view(p.id))
+                p.asked.append(uid)
+            except Exception:  # noqa: BLE001
+                pass
+        ps.save(p, f"proposed {len(p.runs)} run(s), asked {len(p.asked)} officer(s) ({by})")
+        return f"{instance}: proposed {len(p.runs)} run(s) to {len(p.asked)} officer(s)"
+
+    async def accept_proposal(self, reg, p, by: str) -> str:
+        """Each run → a dated roster (schedule = its weekday/time, one-off), seats placed, sheet opened in the roster
+        channel pre-filled In, DMed to the seated members; the sheet is their verification."""
+        from .roster.autoplan import ProposalStore  # noqa: F401
+
+        ps = self.proposals(reg)
+        p.state, p.decided_by, p.decided_at = "accepted", by, rc.now()
+        rd = reg.raid_def(p.instance)
+        rs = self.raids.store(reg)
+        opened = []
+        cfg = reg.config
+        channel = (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(cfg.signup_channel_id) if cfg.signup_channel_id else None)
+        for r in p.runs:
+            start = datetime.fromisoformat(r.starts_at)
+            if not cfg.roster(r.key):
+                cfg.rosters.append({"key": r.key, "name": r.name, "size": r.size, "schedule": start.strftime("%a %H:%M"), "instance": p.instance,
+                                    "cutoff_soft_hours": min(48, max(6, int((start - datetime.now(start.tzinfo)).total_seconds() // 3600 // 2))),
+                                    "cutoff_hard_hours": 6, "open_days_before": 14, "reminders": "dm", "open_dm": True, "autofill": True, "ephemeral": True, "proposal": p.id})
+                reg.save_config(f"auto roster {r.key} ({r.name}) from proposal {p.id} (by {by})", notify=False)
+            for s in r.seats:
+                try:
+                    reg.roster_add(s["discord_id"], r.key, by, s["character"])
+                except Exception:  # noqa: BLE001
+                    pass
+            team = cfg.roster(r.key)
+            ev = rc.open_event(reg, rs, team, start)
+            if channel:
+                await self.post_sheet(reg, rs, ev, channel)
+            opened.append(ev.key)
+        ps.save(p, f"accepted by {by}: {len(opened)} sheet(s) opened")
+        if channel:
+            await channel.send(f"📋 **{rd.get('name', p.instance)}** — {len(opened)} run(s) accepted by {by}. Seated members: confirm on your sheet (In / Out); the bot fills gaps from the pool.")
+        return f"proposal {p.id} accepted by {by}: opened {', '.join(opened)}"
+
+    async def auto_propose_tick(self) -> None:
+        """Once a day (guild-local hour `auto_propose_hour`), plan every raid with auto-propose on."""
+        for reg in self.registries.by_discord.values():
+            z = ZoneInfo(reg.config.timezone)
+            now = datetime.now(z)
+            stamp = now.strftime("%Y-%m-%d")
+            done = self.__dict__.setdefault("_auto_done", {})
+            if now.hour < int(getattr(reg.config, "auto_propose_hour", 12)) or done.get(reg.key) == stamp:
+                continue
+            done[reg.key] = stamp
+            for inst in reg.profile.raids:
+                if reg.raid_def(inst).get("auto"):
+                    line = await self.auto_propose(reg, inst)
+                    await self.ops.emit(reg.config, "info", f"auto-plan: {line}")
+
+    async def cleanup_ephemeral(self, reg, rs) -> None:
+        """Drop dated rosters whose sheet is done/cancelled, and their memberships."""
+        cfg = reg.config
+        gone = []
+        for t in list(cfg.rosters):
+            if not t.get("ephemeral"):
+                continue
+            evs = [e for e in rs.events.values() if e.team == t["key"]]
+            if evs and all(e.state in ("done", "cancelled") for e in evs):
+                for m in list(reg.members.values()):
+                    if reg.on_roster(m, t["key"]):
+                        reg.roster_remove(m.discord_id, t["key"], "cleanup")
+                cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
+                gone.append(t["key"])
+        if gone:
+            reg.save_config(f"ephemeral rosters closed: {gone}", notify=False)
+
     # ---- placement confirmations after an approved build
     async def send_placement_asks(self, reg, adds: list[tuple[int, str, str]], by: str) -> int:
         """DM every newly placed member: accept keeps the seat (and defaults them In), decline gives it back."""
@@ -426,13 +600,18 @@ class RaidMixin:
                         await self.ops.emit(cfg, "warn", f"companion {c.character} silent for {int(c.silent_for // 60)} min during {raid.id} — is /chatlog on?")
                 elif c.silent_for <= 300:
                     c.warned = False
+        try:
+            await self.auto_propose_tick()
+        except Exception as e:  # noqa: BLE001
+            print(f"auto-plan error: {e}")
         for reg in self.registries.by_discord.values():
             cfg = reg.config
             rs = self.raids.store(reg)
             channel = self.get_channel(cfg.signup_channel_id) if cfg.signup_channel_id else None
+            await self.cleanup_ephemeral(reg, rs)
             for team in cfg.raid_teams:
-                if not team.get("schedule"):
-                    continue
+                if not team.get("schedule") or team.get("ephemeral"):
+                    continue  # ephemeral (auto-planned) rosters are opened once by accept_proposal, never on a weekly cadence
                 try:
                     nxt = rc.next_raid_time(team["schedule"], cfg.timezone)
                 except ValueError:
@@ -706,6 +885,20 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             officer_ch = bot.get_channel(reg.config.roster_channel_id) if reg.config.roster_channel_id else ch
             if sent and officer_ch:
                 await officer_ch.send(f"🧩 {ev.key}: replacement for {m.display_name} — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+
+    @raid.command(name="plan", description="Officer: auto-plan a raid's next lockout window now and DM officers the proposal")
+    @app_commands.autocomplete(raid=lambda i, c: [app_commands.Choice(name=r, value=r) for r in (guilds.for_interaction(i).profile.raids if guilds.for_interaction(i) else []) if c.lower() in r.lower()][:25])
+    async def raid_plan(interaction: discord.Interaction, raid: str):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        if raid not in reg.profile.raids:
+            await interaction.response.send_message(f"Unknown raid. Options: {', '.join(reg.profile.raids)}", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        line = await bot.auto_propose(reg, raid, by=interaction.user.display_name)
+        await interaction.followup.send(line, ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} ran the planner: {line}")
 
     @raid.command(name="fill", description="Officer: ask the next best people to cover the sheet's gaps (subs, pool, other rosters, offspec/alt)")
     @app_commands.autocomplete(roster=roster_autocomplete)
