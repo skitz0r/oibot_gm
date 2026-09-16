@@ -368,6 +368,39 @@ def create_app(bot) -> FastAPI:
     async def admin_comp_groups(request: Request):
         return await mutate(request, "/admin", lambda v, d: _cfg_op(v, op="comp_groups", team=d["key"], value=d.get("value", "")), officer=True)
 
+    # ---- roster builder: propose every roster for the coming lockout window, approve → placements
+    build_cache: dict[str, tuple[float, object]] = {}
+
+    @app.get("/admin/build", response_class=HTMLResponse)
+    async def admin_build(request: Request):
+        from ..roster import builder
+
+        v = await need(request, officer=True)
+        reg = v.reg
+        shells = builder.shells_from_config(reg)
+        if not shells:
+            return page(request, "build.html", v, result=None, shells=[], token="", adds=[], removes=[], names={})
+        result = await asyncio.to_thread(builder.build, reg, bot.raids.store(reg), shells)
+        token = secrets.token_hex(8)
+        build_cache[token] = (time.time(), result)
+        for k in [k for k, (t, _) in build_cache.items() if time.time() - t > 1800]:
+            del build_cache[k]
+        adds, removes = builder.diff_placements(reg, result)
+        names = {m.discord_id: m.display_name for m in reg.members.values()}
+        return page(request, "build.html", v, result=result, shells=shells, token=token, adds=adds, removes=removes, names=names)
+
+    @app.post("/admin/build/apply")
+    async def admin_build_apply(request: Request):
+        from ..roster import builder
+
+        def go(v, d):
+            hit = build_cache.pop(d.get("token", ""), None)
+            if not hit:
+                raise ValueError("That proposal expired — build again.")
+            done = builder.apply(v.reg, hit[1], v.name)
+            return f"applied {len(done)} placement change(s)"
+        return await mutate(request, "/admin", go, officer=True)
+
     @app.get("/bank", response_class=HTMLResponse)
     async def bank(request: Request):
         v = await need(request, officer=True)

@@ -5,6 +5,7 @@
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
 
 <h2>Pool → rosters</h2>
+<p><a class="btn" href="/admin/build">Build all rosters for the coming window →</a> <span class="sub">one solve over the pool: slots, lockouts, roles, buffs, rotation; you approve before anything changes</span></p>
 <p class="sub">Tick a roster to place a member's main on it (one character per member per roster). Ranks and confirmations inline. Everything commits under your name and shows in the analytics change log.</p>
 {% if rosters %}
 <p>{% for t in rosters %}<form method="post" action="/admin/place-all" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="roster" value="{{ t.key }}"><button>Place every main on {{ t.name or t.key }}</button></form>{% endfor %}</p>

@@ -6,6 +6,7 @@ officer role; /gm config needs the owner."""
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from pathlib import Path
 
@@ -1116,7 +1117,29 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
         await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
 
-    @roster.command(name="registration-card", description="Officer: post the persistent registration card (pin it in a public channel)")
+    @roster.command(name="build", description="Officer: propose every roster for the coming lockout window from the pool (approve on the site)")
+    async def roster_build(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        from .roster import builder
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        shells = builder.shells_from_config(reg)
+        if not shells:
+            await interaction.followup.send("No roster has a schedule yet — `/gm config roster key:main schedule:'Tue 19:30'` first.", ephemeral=True)
+            return
+        res = await asyncio.to_thread(builder.build, reg, interaction.client.raids.store(reg), shells)
+        adds, removes = builder.diff_placements(reg, res)
+        e = discord.Embed(title="Proposed rosters · coming window", colour=0x2B7A78, description=" · ".join(res.notes)[:1000])
+        for sh in shells:
+            seats = res.rosters.get(sh.key, [])
+            lines = [f"{ico('role', s.role)} {ico('class', s.cls)} **{s.character}** ({s.display_name}) · {', '.join(s.reasons[:2])}" for s in seats]
+            e.add_field(name=f"{sh.name} · {sh.slot} · {len(seats)}/{sh.size}" + ("".join(f" · short {n} {r}" for r, n in res.shortfalls.get(sh.key, {}).items())), value="\n".join(lines)[:1000] or "nobody", inline=False)
+        if res.unplaced:
+            e.add_field(name=f"Not seated ({len(res.unplaced)})", value="; ".join(f"{n} — {w}" for n, w in res.unplaced[:8])[:1000], inline=False)
+        e.set_footer(text=f"{len(adds)} placements to add, {len(removes)} to remove vs today · approve at {os.environ.get('OIBOT_WEB_URL', 'the website')}/admin/build")
+        await interaction.followup.send(embed=e, ephemeral=True)
     async def roster_regcard(interaction: discord.Interaction):
         reg = await officer(interaction)
         if not reg:

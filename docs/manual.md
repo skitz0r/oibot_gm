@@ -118,6 +118,10 @@ cards, because WoW: Forever has not published totem scoping yet.
   have vs want, and how many could fill a slot by switching to their offspec. Officers override targets in
   plain text: "reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target",
   "groups tank, healers, melee, casters".
+- **Build rosters** (Admin → *Build all rosters*, or `/roster build`): proposes every roster for the coming
+  window from the pool — respecting raid-time answers, lockouts, one raid per person per slot, roles and
+  buffs, and keeping current placements where possible — with a reason per seat and a list of who isn't
+  seated and why. Officers approve on the site before anything changes.
 - `/roster overview` shows the readiness card on demand; `/roster members` lists a roster.
 
 ## 7. Officers: day-to-day commands
