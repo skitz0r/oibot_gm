@@ -32,9 +32,9 @@ Fire → ranged…); an offspec in another role counts as flexibility.
 
 ## 2a. The website
 
-**https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there with forms:
-your characters (add, spec/offspec, name at launch, make main, retire), absences,
-per-character "can also play" roles, the availability grid and DM opt-out on **Me**; officers get **Admin** (place members on rosters, ranks, confirmations,
+**https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there:
+your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
+the availability grid (drag to mark preferred/available, then **Save availability**) and DM opt-out on **Me**; officers get **Admin** (place members on rosters, ranks, confirmations,
 roster settings, comp targets, group layout), **Bank**, **Rosters**, **Raids**, **Config** and **Ops**. Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 Signing up for a raid is still done on the sheet in Discord.

@@ -770,6 +770,9 @@ def create_app(bot) -> FastAPI:
 
         return Response(await cached_png(f"{kind}:{key}", build), media_type="image/png")
 
+    from .api import install_api
+
+    install_api(app, bot, viewer=viewer, icon_url=icon_url)
     return app
 
 
