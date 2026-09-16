@@ -30,6 +30,15 @@ Fire → ranged…); an offspec in another role counts as flexibility.
 - **Ops channel (officers)** — every action the bot takes, one line each; errors also DM the owner.
 - **Applications channel** — review cards for `/apply` with Accept / Decline buttons.
 
+## 2a. The website
+
+**https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there with forms:
+your characters (add, spec/offspec, name at launch, make main, retire), standing availability, absences,
+flex roles and DM opt-out on **Me**; officers get **Admin** (place members on rosters, ranks, confirmations,
+roster settings, comp targets, group layout), **Bank**, **Rosters**, **Raids**, **Config** and **Ops**. Only
+members of the Discord server can log in; officer pages follow the same rules as the officer commands.
+Signing up for a raid is still done on the sheet in Discord.
+
 ## 3. Members: registering and keeping your record current
 
 - **Register / plan a main**: press *Register / plan my main* in #register (class → spec → optional
