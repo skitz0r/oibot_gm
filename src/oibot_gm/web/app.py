@@ -316,8 +316,7 @@ def create_app(bot) -> FastAPI:
         instances = list(reg.profile.raids)
         return page(request, "admin.html", v, rows=rows, rosters=rosters, ranks=("trial", "raider", "core", "alt", "social"), instances=instances, owner=v.owner,
                     slots=reg.config.slots, heat=reg.slot_summary(), week_heat=reg.week_heat(), tz=reg.config.timezone,
-                    grid_members=sum(1 for m in reg.members.values() if m.main and m.week),
-                    raids=[{"id": rid, "eff": reg.raid_def(rid), "over": reg.config.raids.get(rid, {})} for rid in reg.profile.raids])
+                    grid_members=sum(1 for m in reg.members.values() if m.main and m.week))
 
     def _cfg_op(v: Viewer, **kw):
         from .. import configops
@@ -403,7 +402,7 @@ def create_app(bot) -> FastAPI:
                     if val != "" and str(val) != str(((cur.get("comp") or {}).get(role) or {}).get(bound, "")):
                         done.append(v.reg.set_raid_override(inst, f"{role}_{bound}", val, v.name))
             return "; ".join(done) or f"{inst}: no changes"
-        return await mutate(request, "/admin", go, officer=True)
+        return await mutate(request, "/raids", go, officer=True)
 
     @app.post("/admin/raid/reset")
     async def admin_raid_reset(request: Request):
@@ -411,7 +410,7 @@ def create_app(bot) -> FastAPI:
             if not v.owner:
                 raise ValueError("Owner only.")
             return v.reg.clear_raid_override(d["instance"], v.name)
-        return await mutate(request, "/admin", go, officer=True)
+        return await mutate(request, "/raids", go, officer=True)
 
     @app.post("/admin/comp/target")
     async def admin_comp_target(request: Request):
@@ -488,12 +487,50 @@ def create_app(bot) -> FastAPI:
         v = await need(request, officer=True)
         reg = v.reg
         rs = bot.raids.store(reg)
+        ps = bot.proposals(reg)
+        events = sorted(rs.events.values(), key=lambda e: e.starts_at, reverse=True)
+
+        def ev_row(ev):
+            t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
+            live = ev.state not in ("done", "cancelled")
+            return {"ev": ev, "team": t, "needs": rc.needs(reg, ev, t) if live else None, "busy": rc.conflicts(rs, ev) if live else {}, "by": {st: ev.by_status(st) for st in rc.STATUSES}}
+
         out = []
-        for ev in sorted(rs.events.values(), key=lambda e: e.starts_at, reverse=True)[:12]:
-            t = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-            nd = rc.needs(reg, ev, t) if ev.state not in ("done", "cancelled") else None
-            out.append({"ev": ev, "team": t, "needs": nd, "busy": rc.conflicts(rs, ev) if nd else {}, "by": {s: ev.by_status(s) for s in rc.STATUSES}})
-        return page(request, "raids.html", v, raids=out)
+        for rid in reg.profile.raids:
+            rd = reg.raid_def(rid)
+            rosters = [t for t in reg.config.rosters if t.get("instance") == rid]
+            evs = [ev_row(e) for e in events if e.instance == rid][:8]
+            props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)[:5]
+            out.append({"id": rid, "eff": rd, "over": reg.config.raids.get(rid, {}), "rosters": rosters, "events": evs, "proposals": props,
+                        "placed": sum(len(reg.roster_members(t["key"])) for t in rosters)})
+        orphans = [ev_row(e) for e in events if e.instance not in reg.profile.raids][:6]
+        return page(request, "raids.html", v, raids=out, orphans=orphans, owner=v.owner, names={m.discord_id: m.display_name for m in reg.members.values()})
+
+    @app.post("/admin/plan")
+    async def admin_plan(request: Request):
+        v, d = await form(request, officer=True)
+        inst = d.get("instance", "")
+        if inst not in v.reg.profile.raids:
+            return back("/raids", err="unknown raid")
+        line = await bot.auto_propose(v.reg, inst, by=v.name)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} ran the planner: {line}")
+        return back("/raids", ok=line)
+
+    @app.post("/admin/proposal")
+    async def admin_proposal(request: Request):
+        v, d = await form(request, officer=True)
+        ps = bot.proposals(v.reg)
+        p = ps.items.get(d.get("pid", ""))
+        if not p or p.state != "proposed":
+            return back("/raids", err="that proposal is no longer open")
+        if d.get("answer") == "accept":
+            line = await bot.accept_proposal(v.reg, p, v.name)
+        else:
+            p.state, p.decided_by, p.decided_at = "rejected", v.name, rc.now()
+            ps.save(p, f"rejected by {v.name}")
+            line = f"proposal {p.id} rejected"
+        await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
+        return back("/raids", ok=line)
 
     @app.get("/config", response_class=HTMLResponse)
     async def config(request: Request):
