@@ -57,24 +57,6 @@
 
 <div class="grid">
   <div class="panel">
-    <h3 style="margin-top:0">Standing availability</h3>
-    <p class="sub">Your default for each roster's raids; sheets are pre-filled from it.</p>
-    <form method="post" action="/me/availability">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      {% for t in rosters %}
-      <label class="row">{{ t.name or t.key }}{% if t.schedule %} <span class="muted">({{ t.schedule }})</span>{% endif %}
-        <select name="avail_{{ t.key }}">
-          {% set cur = member.availability.get(t.key) if member else none %}
-          <option value="" {{ 'selected' if not cur else '' }}>unset (ask me each week)</option>
-          <option value="in" {{ 'selected' if cur == 'in' else '' }}>in by default</option>
-          <option value="sub" {{ 'selected' if cur == 'sub' else '' }}>sub only</option>
-          <option value="out" {{ 'selected' if cur == 'out' else '' }}>out</option>
-        </select></label>
-      {% endfor %}
-      <button>Save</button>
-    </form>
-  </div>
-  <div class="panel">
     <h3 style="margin-top:0">Absences</h3>
     {% if member %}{% for a in member.upcoming_absences(today) %}
     <form method="post" action="/me/absence/clear" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="start" value="{{ a.start }}"><span class="pill">{{ a.start }}{% if a.end != a.start %} → {{ a.end }}{% endif %}</span> <button>clear</button></form>
@@ -100,19 +82,6 @@
     <div class="wk" id="wk"></div>
     <form method="post" action="/me/week" id="wk-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="week" id="wk-json"><button>Save availability</button></form>
   </div>
-  {% if v.reg.config.slots and not week %}
-  <div class="panel">
-    <h3 style="margin-top:0">Raid times I can make</h3>
-    <p class="sub">Officers build the 10-man and 20-man runs from these. <b>yes</b> = count on me, <b>maybe</b> = ask, <b>no</b> = never.</p>
-    <form method="post" action="/me/slots">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      {% for slot in v.reg.config.slots %}{% set cur = member.slot_prefs.get(slot) if member else none %}
-      <label class="row">{{ slot }} <select name="slot_{{ loop.index0 }}"><option value="" {{ 'selected' if not cur else '' }}>—</option><option value="yes" {{ 'selected' if cur == 'yes' else '' }}>yes</option><option value="maybe" {{ 'selected' if cur == 'maybe' else '' }}>maybe</option><option value="no" {{ 'selected' if cur == 'no' else '' }}>no</option></select></label>
-      {% endfor %}
-      <button>Save</button>
-    </form>
-  </div>
-  {% endif %}
   <div class="panel">
     <h3 style="margin-top:0">Flex &amp; DMs</h3>
     <form method="post" action="/me/roles" class="row">

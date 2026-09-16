@@ -33,8 +33,8 @@ Fire → ranged…); an offspec in another role counts as flexibility.
 ## 2a. The website
 
 **https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there with forms:
-your characters (add, spec/offspec, name at launch, make main, retire), standing availability, absences,
-flex roles and DM opt-out on **Me**; officers get **Admin** (place members on rosters, ranks, confirmations,
+your characters (add, spec/offspec, name at launch, make main, retire), absences,
+flex roles, the availability grid and DM opt-out on **Me**; officers get **Admin** (place members on rosters, ranks, confirmations,
 roster settings, comp targets, group layout), **Bank**, **Rosters**, **Raids**, **Config** and **Ops**. Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 Signing up for a raid is still done on the sheet in Discord.
@@ -51,8 +51,6 @@ Signing up for a raid is still done on the sheet in Discord.
 - **Extra roles you'd play**: `/me plan roles` (your main role always follows your spec; this adds flex).
   If *My status* shows a flex role you no longer want (e.g. "healer" left over from an earlier plan), run
   `/me plan roles` again with only the roles you mean — it overwrites the stored preference.
-- **Standing availability per roster** (in / out / sub-only): `/me availability`. It pre-fills sheets so you
-  only act on exceptions.
 - **Absences**: `/me absent add start [end] [reason]`, `/me absent list`, `/me absent clear`. Absent days
   pre-fill you as Out and the bot won't ask you to fill on those days.
 - **When you can raid**: on the website (Me → *When I can raid*) drag across a week grid and mark blocks
