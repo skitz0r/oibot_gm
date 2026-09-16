@@ -439,6 +439,80 @@ def comp_png(lines: list, title: str, subtitle: str, notes: list[str]) -> bytes:
     return buf.getvalue()
 
 
+RAID_ART = {
+    # our own stylised emblems, no game art: (sky top, sky bottom, ridge colours far→near, accent, glyph)
+    "barrow_deeps": ("#1B1E3A", "#3A2F5C", ["#4A4470", "#2E2A4C", "#1A1830"], "#9C8CFF", "cave"),
+    "hyjal_summit_forever": ("#0F2A2A", "#1E5C48", ["#2F7A5A", "#1F5A44", "#12382C"], "#E8C36A", "tree"),
+    "onyxias_lair": ("#2A0F0F", "#5C1E12", ["#7A2E1E", "#4A1A12", "#2A0E0A"], "#FF8A3D", "dragon"),
+}
+
+
+def raid_thumb_png(raid_id: str, name: str, size: int, lockout_days: int, w: int = 640, h: int = 300) -> bytes:
+    """Generative emblem card for a raid: layered ridges under a gradient sky, a glyph, the size badge."""
+    import colorsys
+    import hashlib
+
+    art = RAID_ART.get(raid_id)
+    if not art:
+        hue = int(hashlib.md5(raid_id.encode()).hexdigest()[:2], 16) / 255
+        top = "#%02x%02x%02x" % tuple(int(c * 255) for c in colorsys.hsv_to_rgb(hue, 0.5, 0.25))
+        bot = "#%02x%02x%02x" % tuple(int(c * 255) for c in colorsys.hsv_to_rgb(hue, 0.45, 0.45))
+        ridges = ["#%02x%02x%02x" % tuple(int(c * 255) for c in colorsys.hsv_to_rgb(hue, 0.4, v)) for v in (0.5, 0.35, 0.2)]
+        art = (top, bot, ridges, "#E8C36A", "peak")
+    top, bot, ridges, accent, glyph = art
+    img = Image.new("RGB", (w, h), top)
+    d = ImageDraw.Draw(img)
+    t = tuple(int(top[i:i + 2], 16) for i in (1, 3, 5))
+    b = tuple(int(bot[i:i + 2], 16) for i in (1, 3, 5))
+    for y in range(h):
+        f = y / h
+        d.line([(0, y), (w, y)], fill=tuple(int(t[i] + (b[i] - t[i]) * f) for i in range(3)))
+    # stars / embers
+    rnd = __import__("random").Random(raid_id)
+    for _ in range(70):
+        x, y = rnd.randint(0, w), rnd.randint(0, h // 2)
+        d.point((x, y), fill=accent if rnd.random() < 0.3 else "#FFFFFF")
+    # ridges
+    for i, col in enumerate(ridges):
+        base = int(h * (0.55 + 0.13 * i))
+        pts = [(0, h)]
+        x = 0
+        while x <= w:
+            amp = 40 + 25 * i
+            y = base - int(abs(((x * (7 + 3 * i)) % 200) - 100) / 100 * amp) + rnd.randint(-6, 6)
+            pts.append((x, y))
+            x += 20
+        pts.append((w, h))
+        d.polygon(pts, fill=col)
+    # glyph
+    cx, cy = w // 2, int(h * 0.42)
+    if glyph == "cave":
+        d.ellipse([cx - 70, cy - 50, cx + 70, cy + 70], fill="#0B0A16")
+        d.ellipse([cx - 54, cy - 34, cx + 54, cy + 60], fill="#161430")
+        d.polygon([(cx - 8, cy + 8), (cx + 8, cy + 8), (cx, cy + 40)], fill=accent)
+    elif glyph == "tree":
+        d.rectangle([cx - 8, cy, cx + 8, cy + 90], fill="#5A3B1E")
+        for k, r in enumerate((70, 55, 40)):
+            d.polygon([(cx - r, cy + 20 - k * 28), (cx + r, cy + 20 - k * 28), (cx, cy - 60 - k * 28)], fill=("#2E9E6B", "#3FB27C", "#5CC896")[k])
+        d.ellipse([cx - 6, cy - 110, cx + 6, cy - 98], fill=accent)
+    elif glyph == "dragon":
+        d.polygon([(cx - 120, cy + 10), (cx - 40, cy - 60), (cx - 10, cy - 10), (cx + 10, cy - 10), (cx + 40, cy - 60), (cx + 120, cy + 10), (cx + 30, cy), (cx, cy + 40), (cx - 30, cy)], fill="#1A0908")
+        d.ellipse([cx - 12, cy - 16, cx - 4, cy - 8], fill=accent)
+        d.ellipse([cx + 4, cy - 16, cx + 12, cy - 8], fill=accent)
+    else:
+        d.polygon([(cx - 60, cy + 40), (cx, cy - 60), (cx + 60, cy + 40)], fill="#DDE3EA")
+    # size badge + text
+    f_big, f_small = font(34, True), font(16)
+    d.rounded_rectangle([w - 110, 18, w - 18, 70], radius=10, fill=accent)
+    tw = d.textlength(str(size), font=f_big)
+    d.text((w - 64 - tw / 2, 24), str(size), font=f_big, fill="#141414")
+    d.text((22, h - 62), name, font=font(28, True), fill="#F4F1EA")
+    d.text((22, h - 30), f"{size}-player · every {lockout_days} day{'s' if lockout_days != 1 else ''}", font=f_small, fill="#D9D5CB")
+    buf = BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
 def class_badge_png(cls: str, size: int = 96) -> bytes:
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)

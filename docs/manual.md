@@ -66,7 +66,9 @@ Signing up for a raid is still done on the sheet in Discord.
 
 A **raid** is an instance and its rules: size, lockout cadence, expected duration and the desired tank /
 healer / dps counts. At launch: **Barrow Deeps** (10-player, 3-day lockout guess), **Hyjal Summit**
-(20-player, weekly), **Onyxia's Lair** (40-player, 5-day like Classic). The owner adjusts these as the
+(20-player, weekly), **Onyxia's Lair** (40-player, 5-day like Classic). Each raid also has a **first opens at**
+(seeded 9 Dec 2026, 15:00 PST for all three); lockout windows run from that moment in steps of the cadence,
+so the planner proposes runs inside the real windows. The owner adjusts these as the
 real numbers are learned (`/gm config raid`, Admin → Raids, or plain text); every roster of that raid
 inherits them.
 

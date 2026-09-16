@@ -5,7 +5,7 @@
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
 
 <h2>Pool</h2>
-<p class="sub">Everyone with a character: ranks and confirmations inline. Runs are planned automatically from the availability grids (see <a href="/rosters">Rosters</a>); the roster columns below only appear if you keep a standing roster.</p>
+<p class="intro">Everyone with a character — set ranks and confirm named characters here. Runs are planned from availability on <a href="/rosters">Rosters</a>.</p>
 {% if rosters %}
 <p><a class="btn" href="/admin/build">Build standing rosters →</a> {% for t in rosters %}<form method="post" action="/admin/place-all" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="roster" value="{{ t.key }}"><button>Place every main on {{ t.name or t.key }}</button></form>{% endfor %}</p>
 {% endif %}
@@ -38,7 +38,8 @@
     <label>Candidate slots members rate <input name="value" value="{{ slots|join(', ') }}" placeholder="Tue 19:30, Thu 20:00, Sun 18:00" size="44"></label>
     {% if owner %}<button>Save</button>{% else %}<span class="muted">(owner sets these)</span>{% endif %}
   </form>
-  <h3>Availability heat-map <span class="muted">({{ grid_members }} mains with a grid · {{ tz }} · darker = more people; green tint = preferred)</span></h3>
+  <h3>Availability heat-map</h3>
+  <p class="sub">{{ grid_members }} mains have filled the grid · {{ tz }} · darker = more people, green = mostly preferred</p>
   <div class="hm">
     <div class="lab"></div>{% for h in range(24) %}<div class="hr">{{ '12a' if h == 0 else (h ~ 'a' if h < 12 else ('12p' if h == 12 else (h - 12) ~ 'p')) if h % 2 == 0 else '' }}</div>{% endfor %}
     {% for row in week_heat %}{% set d = loop.index0 %}
@@ -109,17 +110,11 @@
 </div>
 {% endif %}
 
+</details>
 <style>
   .hm { display:grid; grid-template-columns: 44px repeat(48, 1fr); gap:1px; margin:8px 0; }
   .hm .lab { font-size:12px; color:var(--muted); display:flex; align-items:center; }
   .hm .hr { font-size:10px; color:var(--muted); grid-column: span 2; }
   .hm .c { height:18px; background:var(--zebra); border-radius:2px; }
-  form.inline { display:inline-flex; gap:6px; align-items:center; margin:0 4px 4px 0; }
-  form.row, label.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
-  select, input { background:var(--zebra); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }
-  input.over { border-color: var(--warn); color: var(--warn); }
-  input[type=checkbox] { width:auto; }
-  button { background:var(--accent); color:#0B1512; border:0; border-radius:5px; padding:5px 10px; font:inherit; font-weight:600; cursor:pointer; }
-  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
 </style>
 {% endblock %}

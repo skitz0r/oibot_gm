@@ -1057,7 +1057,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="raid", description="Owner: raid rules — lockout days, duration, tank/healer/dps min-max, notes")
     @app_commands.autocomplete(raid=instance_autocomplete)
-    async def cfg_raid(interaction: discord.Interaction, raid: str, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, auto: bool | None = None, reset: bool = False):
+    async def cfg_raid(interaction: discord.Interaction, raid: str, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, auto: bool | None = None, first_open: str | None = None, reset: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -1069,7 +1069,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 msg = [reg.clear_raid_override(raid, interaction.user.display_name)]
             else:
                 msg = []
-                for field, val in (("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("auto", auto)):
+                for field, val in (("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("auto", auto), ("first_open", first_open)):
                     if val is not None:
                         msg.append(reg.set_raid_override(raid, field, val, interaction.user.display_name))
                 for role, val in (("tank", tanks), ("healer", healers), ("dps", dps)):
@@ -1083,7 +1083,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         rd = reg.raid_def(raid)
         comp = rd.get("comp") or {}
-        eff = f"**{rd.get('name', raid)}** · {rd.get('size')}-player · lockout {rd['lockout_days']}d · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items())
+        fo = reg.first_open(raid)
+        eff = f"**{rd.get('name', raid)}** · {rd.get('size')}-player · lockout {rd['lockout_days']}d" + (f" from <t:{int(fo.timestamp())}:f>" if fo else "") + f" · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items())
         await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff + (f"\n{rd['notes']}" if rd.get("notes") else ""), ephemeral=True)
 
     @config.command(name="slots", description="Owner: candidate raid times members rate, e.g. 'Tue 19:30, Thu 20:00' (blank clears)")

@@ -172,6 +172,19 @@ def create_app(bot) -> FastAPI:
         resp.delete_cookie(COOKIE)
         return resp
 
+    thumb_cache: dict[str, bytes] = {}
+
+    @app.get("/img/raid/{rid}.png")
+    async def raid_thumb(rid: str):
+        reg = next(iter(bot.registries.by_discord.values()), None)
+        if reg is None or rid not in reg.profile.raids:
+            raise HTTPException(404)
+        rd = reg.raid_def(rid)
+        key = f"{rid}:{rd.get('size')}:{rd.get('lockout_days')}"
+        if key not in thumb_cache:
+            thumb_cache[key] = await asyncio.to_thread(render.raid_thumb_png, rid, rd.get("name", rid), int(rd.get("size") or 0), int(rd.get("lockout_days") or 7))
+        return Response(thumb_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+
     @app.get("/healthz")
     async def healthz():
         return {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(bot.registries.by_discord)}
@@ -393,6 +406,10 @@ def create_app(bot) -> FastAPI:
                 val = d.get(f, "")
                 if val != "" and str(val) != str(cur.get(f, "")):
                     done.append(v.reg.set_raid_override(inst, f, val, v.name))
+            fo = d.get("first_open", "")
+            cur_fo = v.reg.first_open(inst)
+            if fo and (cur_fo is None or fo[:16] != cur_fo.astimezone(__import__("zoneinfo").ZoneInfo(v.reg.config.timezone)).strftime("%Y-%m-%dT%H:%M")):
+                done.append(v.reg.set_raid_override(inst, "first_open", fo, v.name))
             want_auto = d.get("auto") == "on"
             if want_auto != bool(cur.get("auto")):
                 done.append(v.reg.set_raid_override(inst, "auto", "true" if want_auto else "false", v.name))
@@ -495,8 +512,10 @@ def create_app(bot) -> FastAPI:
             current = [e for e in evs if e["live"] and e["ev"].start <= horizon]
             past = [e for e in evs if not e["live"] or e["ev"].start > horizon][:6]
             props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)
+            ws, we = reg.lockout_window(rid, now)
+            fo = reg.first_open(rid)
             out.append({"id": rid, "eff": rd, "current": current, "past": past, "open": [p for p in props if p.state == "proposed"], "history": [p for p in props if p.state != "proposed"][:4],
-                        "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")]})
+                        "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")], "window": (ws, we), "opened": bool(fo and fo <= now), "first_open": fo})
         orphans = [ev_row(e) for e in events if e.instance not in reg.profile.raids][:6]
         return page(request, "rosters.html", v, raids=out, orphans=orphans)
 
@@ -505,9 +524,17 @@ def create_app(bot) -> FastAPI:
         v = await need(request, officer=True)
         reg = v.reg
         ps = bot.proposals(reg)
-        out = [{"id": rid, "eff": reg.raid_def(rid), "over": reg.config.raids.get(rid, {}), "runs": len(reg.run_keys(rid)),
-                "open": len(ps.open_for(rid))} for rid in reg.profile.raids]
-        return page(request, "raids.html", v, raids=out, owner=v.owner)
+        from zoneinfo import ZoneInfo
+
+        z = ZoneInfo(reg.config.timezone)
+        now = datetime.now(z)
+        out = []
+        for rid in reg.profile.raids:
+            fo = reg.first_open(rid)
+            ws, we = reg.lockout_window(rid, now)
+            out.append({"id": rid, "eff": reg.raid_def(rid), "over": reg.config.raids.get(rid, {}), "runs": len(reg.run_keys(rid)), "open": len(ps.open_for(rid)),
+                        "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "window": (ws.astimezone(z), we.astimezone(z)), "opened": bool(fo and fo <= now)})
+        return page(request, "raids.html", v, raids=out, owner=v.owner, tz=reg.config.timezone)
 
     @app.post("/admin/plan")
     async def admin_plan(request: Request):

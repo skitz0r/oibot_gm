@@ -95,8 +95,8 @@ def recent_runs(reg: Registry, rs, shells: list[Shell]) -> dict[tuple[str, str],
         for sh in shells:
             if sh.instance != ev.instance or ev.team == sh.key and ev.start == sh.start:
                 continue
-            days = _lockout_days(reg, ev.instance)
-            if sh.start - timedelta(days=days) < ev.start <= sh.start:
+            ws, we = reg.lockout_window(ev.instance, sh.start)
+            if ws <= ev.start < we and ev.start <= sh.start:  # same lockout window as this shell
                 for p in ev.roster.selected:
                     locked.setdefault((p.character or p.signup_name, ev.instance), set()).add(sh.key)
     return locked

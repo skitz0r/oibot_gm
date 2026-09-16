@@ -524,6 +524,35 @@ class Registry:
         """Roster keys (standing or dated runs) of an instance."""
         return {t["key"] for t in self.config.rosters if t.get("instance") == instance}
 
+    def first_open(self, instance: str | None):
+        """Anchor datetime (aware) for the instance's lockout windows, or None."""
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _Z
+
+        raw = self.raid_def(instance).get("first_open")
+        if not raw:
+            return None
+        try:
+            t = _dt.fromisoformat(str(raw))
+        except ValueError:
+            return None
+        return t if t.tzinfo else t.replace(tzinfo=_Z(self.config.timezone))
+
+    def lockout_window(self, instance: str | None, at) -> tuple:
+        """(start, end) of the lockout window containing `at`: anchored on first_open + k × lockout_days when the
+        raid has an anchor (before it opens: the first window), else a rolling window ending at `at`."""
+        from datetime import timedelta as _td
+
+        days = int(self.raid_def(instance).get("lockout_days", 7))
+        anchor = self.first_open(instance)
+        if anchor is None:
+            return at - _td(days=days), at
+        if at < anchor:
+            return anchor, anchor + _td(days=days)
+        k = int((at - anchor).total_seconds() // (days * 86400))
+        start = anchor + _td(days=days * k)
+        return start, start + _td(days=days)
+
     def role_bounds(self, instance: str | None, size: int) -> dict[str, dict[str, int]]:
         """tank/healer/dps {min,max} for a run: the raid's desired comp when it has one (scaled if the roster
         size differs from the raid's), else the generic comp_rules scaled to the size."""
@@ -543,7 +572,7 @@ class Registry:
         return {"tank": b["tank"], "healer": b["healer"], "dps": {"min": 0, "max": size}}
 
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
-        """Owner override for a raid: lockout_days | duration_hours | notes | auto | tank_min/max | healer_min/max | dps_min/max."""
+        """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         over = self.config.raids.setdefault(instance, {})
@@ -559,6 +588,21 @@ class Registry:
             over["notes"] = str(value or "").strip()
         elif field == "auto":
             over["auto"] = str(value).lower() in ("true", "yes", "on", "1")
+        elif field == "first_open":
+            from datetime import datetime as _dt
+            from zoneinfo import ZoneInfo as _Z
+
+            raw = str(value or "").strip().replace(" ", "T", 1) if value else ""
+            if not raw:
+                over.pop("first_open", None)
+            else:
+                try:
+                    t = _dt.fromisoformat(raw)
+                except ValueError:
+                    raise RegistryError("first_open looks like 2026-12-09T15:00 (guild timezone) or 2026-12-09T15:00-08:00")
+                if t.tzinfo is None:
+                    t = t.replace(tzinfo=_Z(self.config.timezone))
+                over["first_open"] = t.isoformat()
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
             role, bound = field.split("_")
             try:

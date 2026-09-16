@@ -3,14 +3,16 @@
 <h1>Raids</h1>
 {% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
-<p class="sub">The instances and their rules. Defaults come from the game profile; your overrides (orange) win. Every run of a raid — planned or standing — inherits its size, lockout cadence, duration and desired comp. Runs themselves live on <a href="/rosters">Rosters</a>.</p>
-<div class="grid">
+<p class="intro">Each raid's rules — lockout, length, desired comp. Orange = your override of the game defaults. Runs live on <a href="/rosters">Rosters</a>.</p>
+<div class="stack">
 {% for r in raids %}
   <div class="panel">
-    <form method="post" action="/admin/raid" class="row" style="flex-direction:column;align-items:stretch">
+    <form method="post" action="/admin/raid" class="raid-card">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}">
-      <h3 style="margin:0">{{ r.eff.name }} <span class="muted">· {{ r.eff.size }}-player · <code>{{ r.id }}</code> · {{ r.runs }} run(s){% if r.open %} · <span class="warn">{{ r.open }} proposal waiting</span>{% endif %}</span></h3>
+      <div class="side"><img src="/img/raid/{{ r.id }}.png" alt=""><h2>{{ r.eff.name }}</h2><div class="meta">{{ r.runs }} run(s){% if r.open %} · <span class="warn">{{ r.open }} proposal waiting</span>{% endif %}<br>{% if r.opened %}current window {{ r.window[0].strftime('%a %d %b %H:%M') }} → {{ r.window[1].strftime('%a %d %b %H:%M') }}{% elif r.first_open_local %}opens {{ r.window[0].strftime('%a %d %b %Y %H:%M') }} {{ tz }}{% else %}no opening date set{% endif %}</div></div>
+      <div class="rules">
       <div class="row">
+        <label>first opens <input name="first_open" type="datetime-local" value="{{ r.first_open_local }}" class="{{ 'over' if 'first_open' in r.over else '' }}"> <span class="muted">{{ tz }}</span></label>
         <label>lockout days <input name="lockout_days" type="number" step="1" min="1" value="{{ r.eff.lockout_days }}" style="width:5em" class="{{ 'over' if 'lockout_days' in r.over else '' }}"></label>
         <label>duration h <input name="duration_hours" type="number" step="0.5" min="0.5" value="{{ r.eff.duration_hours }}" style="width:5em" class="{{ 'over' if 'duration_hours' in r.over else '' }}"></label>
       </div>
@@ -20,18 +22,20 @@
         {% endfor %}
       </div>
       <label>notes <input name="notes" value="{{ r.eff.notes or '' }}" class="{{ 'over' if 'notes' in r.over else '' }}"></label>
-      <label><input type="checkbox" name="auto" {{ 'checked' if r.eff.auto else '' }}> auto-propose runs daily (officers accept by DM or on Rosters)</label>
+      <label><input type="checkbox" name="auto" {{ 'checked' if r.eff.auto else '' }}> auto-propose runs daily</label>
       {% if owner %}<div class="row"><button>Save</button>{% if r.over %}<button formaction="/admin/raid/reset" class="danger" formnovalidate>Reset to defaults</button>{% endif %}</div>{% else %}<span class="muted">(owner edits raid rules)</span>{% endif %}
+      </div>
     </form>
     {% if r.over.comp_targets or r.over.comp_groups %}<p class="sub">Comp targets: {{ r.over.comp_targets or '—' }} · group layout: {{ (r.over.comp_groups or [])|join(', ') or 'default' }} (set in plain text in the analytics channel)</p>{% endif %}
   </div>
 {% endfor %}
 </div>
 <style>
-  form.row, .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
-  select, input { background:var(--zebra); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }
-  input[type=checkbox] { width:auto; } input.over { border-color: var(--warn); color: var(--warn); }
-  button { background:var(--accent); color:#0B1512; border:0; border-radius:5px; padding:5px 10px; font:inherit; font-weight:600; cursor:pointer; }
-  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
+  input.over { border-color: var(--warn); color: var(--warn); }
+  .raid-card { display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; }
+  .raid-card .side { flex:0 0 240px; } .raid-card .side img { width:240px; height:112px; object-fit:cover; border-radius:8px; border:1px solid var(--line); display:block; margin-bottom:8px; }
+  .raid-card .side h2 { margin:0; font-size:18px; } .raid-card .side .meta { color:var(--muted); font-size:13px; }
+  .raid-card .rules { flex:1 1 420px; }
+  @media (max-width:640px) { .raid-card .side { flex-basis:100%; } .raid-card .side img { width:100%; height:auto; } }
 </style>
 {% endblock %}

@@ -3,12 +3,12 @@
 <h1>Rosters</h1>
 {% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
-<p class="sub">Runs for the current and upcoming lockouts, per raid. <b>Tentative</b> = the planner's proposal waiting for an officer; <b>accepted</b> = a dated run with its sheet, where seated members confirm In / Out and the bot fills gaps. Rules and the auto-propose switch are on <a href="/raids">Raids</a>.</p>
+<p class="intro">Runs for the current lockout, per raid: tentative proposals to accept, then accepted runs with their sheets. Rules are on <a href="/raids">Raids</a>.</p>
 
 {% for r in raids %}
 <div class="panel">
-  <h2 style="margin-top:0">{{ r.eff.name }} <span class="sub">· {{ r.eff.size }}-player · lockout {{ r.eff.lockout_days }}d · {{ r.current|length }} run(s) this window</span></h2>
-  <form method="post" action="/admin/plan" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}"><button>Plan the next {{ r.eff.lockout_days }} days</button> <span class="muted">from availability grids → proposal to officers</span></form>
+  <div class="hero"><img src="/img/raid/{{ r.id }}.png" alt=""><div><h2>{{ r.eff.name }}</h2><div class="meta">{% if r.opened %}window {{ r.window[0].strftime('%a %d %b') }} → {{ r.window[1].strftime('%a %d %b') }}{% elif r.first_open %}opens {{ r.first_open.strftime('%a %d %b %Y %H:%M') }}{% else %}no opening date{% endif %} · {{ r.current|length }} run(s){% if r.open %} · <span class="warn">{{ r.open|length }} tentative</span>{% endif %}</div>
+  <form method="post" action="/admin/plan" class="row" style="margin:6px 0 0"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}"><button class="quiet">Plan the next {{ r.eff.lockout_days }} days</button></form></div></div>
 
   {% for p in r.open %}
   <div class="panel" style="border-color:var(--accent)">
@@ -44,7 +44,7 @@
     </details>
   </div>
   {% endfor %}
-  {% if not r.open and not r.current %}<p class="sub">Nothing planned for this window yet — press <b>Plan</b>, or turn on auto-propose on Raids.</p>{% endif %}
+  {% if not r.open and not r.current %}<p class="sub">Nothing planned yet — press <b>Plan</b>, or turn on auto-propose on Raids.</p>{% endif %}
 
   {% if r.standing %}<p class="sub">Standing rosters of this raid: {% for t in r.standing %}<code>{{ t.key }}</code> {{ t.schedule or '' }}{% if not loop.last %}, {% endif %}{% endfor %} (managed on <a href="/admin">Admin</a>)</p>{% endif %}
   {% if r.history or r.past %}
@@ -61,10 +61,5 @@
 <p class="sub">These rosters have no instance — set one on <a href="/admin">Admin</a> so they inherit a raid's rules.</p>
 {% for e in orphans %}<div class="panel"><b>{{ e.ev.key }}</b> · {{ e.team.name or e.team.key }} · {{ e.ev.state }} · starts {{ e.ev.starts_at[:16] }} · in {{ e.by['in']|length }} · out {{ e.by['out']|length }}</div>{% endfor %}
 {% endif %}
-<style>
-  form.inline { display:inline-flex; gap:6px; align-items:center; margin:0 4px 4px 0; }
-  form.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
-  button { background:var(--accent); color:#0B1512; border:0; border-radius:5px; padding:5px 10px; font:inherit; font-weight:600; cursor:pointer; }
-  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
-</style>
+
 {% endblock %}

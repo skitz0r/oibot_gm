@@ -37,11 +37,12 @@
   </tr>
   {% endfor %}
 </table></div>
-<p class="sub">Roles: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} (+{{ roles[1]|join(', ') }}){% endif %} — your main role follows your main's spec; an offspec in another role counts as flexibility.</p>
+<p class="sub">Role: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} · flex {{ roles[1]|join(', ') }}{% endif %} <span class="muted">(from your spec and offspec)</span></p>
 {% else %}
 <p class="sub">No characters yet — add your main below. Leave the name blank if the character doesn't exist yet.</p>
 {% endif %}
 
+<div class="grid">
 <div class="panel">
   <h3 style="margin-top:0">Add a character</h3>
   <form method="post" action="/me/character/add" class="row">
@@ -54,8 +55,6 @@
     <button>Add</button>
   </form>
 </div>
-
-<div class="grid">
   <div class="panel">
     <h3 style="margin-top:0">Absences</h3>
     {% if member %}{% for a in member.upcoming_absences(today) %}
@@ -69,31 +68,38 @@
       <button>Add</button>
     </form>
   </div>
-  <div class="panel" style="grid-column: 1 / -1">
-    <h3 style="margin-top:0">When I can raid <span class="muted">({{ tz }})</span></h3>
-    <p class="sub">Drag across the grid, then mark the selection <b class="ok">preferred</b> or <b class="warn">available</b>. Anything unmarked counts as unavailable. Rosters are built from this: a raid needs its whole window (usually 3 h) inside your marked time.</p>
+</div>
+
+<div class="panel">
+    <h3 style="margin-top:0">When I can raid <span class="muted">· {{ tz }}</span></h3>
+    <p class="sub">Drag, then mark <b class="ok">preferred</b> or <b class="warn">available</b>; unmarked = unavailable. A run counts you in only if its whole window fits. Underlines show scheduled raids.</p>
     <div class="wk-tools">
       <button type="button" data-level="preferred" class="wk-pref">Mark preferred</button>
       <button type="button" data-level="available" class="wk-avail">Mark available</button>
-      <button type="button" data-level="" class="wk-clear">Clear</button>
-      <button type="button" id="wk-seed" class="wk-clear">Seed usual raid times (Mon–Fri 18–22, Sat–Sun 12–22)</button>
+      <button type="button" data-level="" class="quiet">Clear</button>
+      <button type="button" id="wk-seed" class="quiet">Seed usual times</button>
       <span class="muted" id="wk-summary"></span>
     </div>
-    <div class="wk" id="wk"></div>
-    <form method="post" action="/me/week" id="wk-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="week" id="wk-json"><button>Save availability</button></form>
-  </div>
+    <div class="scroll-x"><div class="wk" id="wk"></div></div>
+    <form method="post" action="/me/week" id="wk-form" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="week" id="wk-json"><button>Save availability</button><span class="muted">usual times = Mon–Fri 18–22, Sat–Sun 12–22</span></form>
+</div>
+
+<div class="grid">
   <div class="panel">
-    <h3 style="margin-top:0">Flex &amp; DMs</h3>
+    <h3 style="margin-top:0">Flex roles</h3>
     <form method="post" action="/me/roles" class="row">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <span class="muted">Also happy to play:</span>
       {% for r in ['tank', 'healer', 'melee', 'ranged'] %}{% if r != roles[0] %}<label><input type="checkbox" name="flex_{{ r }}" {{ 'checked' if r in roles[1] else '' }}> {{ r }}</label>{% endif %}{% endfor %}
-      <button>Save</button>
+      <button class="quiet">Save</button>
     </form>
+    <p class="sub">Roles you'd play besides your spec.</p>
+  </div>
+  <div class="panel">
+    <h3 style="margin-top:0">Direct messages</h3>
     <form method="post" action="/me/dm" class="row">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label><input type="checkbox" name="dm" {{ 'checked' if not (member and member.dm_opt_out) else '' }}> DM me sheets, nudges and fill requests</label>
-      <button>Save</button>
+      <label><input type="checkbox" name="dm" {{ 'checked' if not (member and member.dm_opt_out) else '' }}> sheets, nudges and fill requests</label>
+      <button class="quiet">Save</button>
     </form>
   </div>
 </div>
@@ -111,23 +117,18 @@
 {% endfor %}
 
 <style>
-  form.inline { display:inline-flex; gap:6px; align-items:center; margin:0 4px 4px 0; }
-  form.row, label.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
-  select, input[type=text], input[type=date], input:not([type]) { background:var(--zebra); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }
-  button { background:var(--accent); color:#0B1512; border:0; border-radius:5px; padding:5px 10px; font:inherit; font-weight:600; cursor:pointer; }
-  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
   td.actions { white-space:nowrap; }
+  .wk-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .wk-pref { background:#2E9E6B !important; color:#fff !important; } .wk-avail { background:#B8892A !important; color:#fff !important; }
 </style>
 <style>
-  .wk { display:grid; grid-template-columns: 44px repeat(48, 1fr); gap:1px; user-select:none; margin:8px 0; }
+  .wk { display:grid; grid-template-columns: 44px repeat(48, 1fr); gap:1px; user-select:none; margin:8px 0; min-width:760px; }
   .wk .lab { font-size:12px; color:var(--muted); display:flex; align-items:center; }
   .wk .hr { font-size:10px; color:var(--muted); text-align:left; grid-column: span 2; }
   .wk .c { height:22px; background:var(--zebra); border-radius:2px; cursor:crosshair; }
   .wk .c.available { background:#B8892A; } .wk .c.preferred { background:#2E9E6B; }
   .wk .c.sel { outline:2px solid var(--ink); outline-offset:-2px; }
   .wk .c.raid { box-shadow: inset 0 -3px 0 var(--accent); }
-  .wk-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-  .wk-tools button { font-weight:500; } .wk-pref { background:#2E9E6B !important; color:#fff !important; } .wk-avail { background:#B8892A !important; color:#fff !important; } .wk-clear { background:var(--zebra) !important; color:var(--ink) !important; border:1px solid var(--line) !important; }
 </style>
 <script>
   // ---- weekly availability grid: 7 days × 48 half-hours, drag to select, mark, save as ranges
@@ -177,6 +178,7 @@
       render();
     });
     render();
+    const sx = grid.parentElement; if (sx && sx.scrollWidth > sx.clientWidth) sx.scrollLeft = sx.scrollWidth * 0.62;  // phones: open at the evening
   })();
   const CLASSES = {{ classes|tojson }};
   function fill(sel, cls, current, optional) {

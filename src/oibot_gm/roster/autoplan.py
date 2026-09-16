@@ -129,8 +129,11 @@ def plan(reg: Registry, rs, instance: str, start: datetime | None = None) -> Pro
     rd = reg.raid_def(instance)
     size = int(rd.get("size") or 20)
     z = ZoneInfo(reg.config.timezone)
-    window_start = (start or datetime.now(z)) + timedelta(hours=LEAD_HOURS)
-    window_end = window_start + timedelta(days=int(rd.get("lockout_days", 7)))
+    earliest = (start or datetime.now(z)) + timedelta(hours=LEAD_HOURS)
+    ws, we = reg.lockout_window(instance, earliest)
+    if we - earliest < timedelta(hours=float(rd.get("duration_hours", 3)) + 12):
+        ws, we = reg.lockout_window(instance, we + timedelta(minutes=1))  # too little of this window left: plan the next one
+    window_start, window_end = max(ws, earliest), we
     members = eligible_pool(reg, rs, instance, window_start, window_end)
     if len(members) < size * MIN_FILL:
         return None
