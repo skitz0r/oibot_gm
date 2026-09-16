@@ -40,6 +40,8 @@ Fire → ranged…); an offspec in another role counts as flexibility.
 - **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main`. **Retire**: `/me char retire`.
 - **Name a planned character at launch**: `/me char name`.
 - **Extra roles you'd play**: `/me plan roles` (your main role always follows your spec; this adds flex).
+  If *My status* shows a flex role you no longer want (e.g. "healer" left over from an earlier plan), run
+  `/me plan roles` again with only the roles you mean — it overwrites the stored preference.
 - **Standing availability per roster** (in / out / sub-only): `/me availability`. It pre-fills sheets so you
   only act on exceptions.
 - **Absences**: `/me absent add start [end] [reason]`, `/me absent list`, `/me absent clear`. Absent days
