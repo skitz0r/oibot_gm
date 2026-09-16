@@ -40,10 +40,9 @@
   <div class="panel" style="border-color:{{ 'var(--accent)' if p.viable else 'var(--warn)' }}">
     <b>{{ 'Tentative' if p.viable else 'Best effort — not viable yet' }}</b> · window {{ p.window_start[:10] }} → {{ p.window_end[:10] }} · {{ p.notes|join(' · ') }}
     {% if p.problems %}<div class="warn" style="margin-top:4px">{% for x in p.problems %}⚠ {{ x }}<br>{% endfor %}</div>{% endif %}
-    <div class="grid" style="margin-top:6px">
+    <div class="stack" style="margin-top:6px">
       {% for run in p.runs %}
       <div><b>{{ run.name }}</b> <span class="muted">{{ run.seats|length }}/{{ run.size }}</span>
-        <table>{% for s in run.seats %}<tr><td><img class="ico" src="/img/role/{{ s.role }}.png" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="/img/class/{{ s.cls }}.png" alt=""> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.spec }}</td></tr>{% endfor %}</table>
         {{ groups_block(r.run_summaries.get((p.id, run.key))) }}</div>
       {% endfor %}
     </div>

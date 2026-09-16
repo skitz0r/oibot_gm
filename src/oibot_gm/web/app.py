@@ -540,10 +540,9 @@ def create_app(bot) -> FastAPI:
         out = []
         for rid in reg.profile.raids:
             rd = reg.raid_def(rid)
-            horizon = now + timedelta(days=int(rd.get("lockout_days", 7)) + 1)
             evs = [ev_row(e) for e in events if e.instance == rid]
-            current = [e for e in evs if e["live"] and e["ev"].start <= horizon]
-            past = [e for e in evs if not e["live"] or e["ev"].start > horizon][:6]
+            current = sorted([e for e in evs if e["live"]], key=lambda e: e["ev"].starts_at)  # every open/locked/accepted sheet is upcoming
+            past = [e for e in evs if not e["live"]][:6]
             props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)
             run_summaries = {}
             for p in props:
