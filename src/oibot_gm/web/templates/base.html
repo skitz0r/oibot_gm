@@ -31,6 +31,20 @@
   button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
   button[disabled] { opacity:.4; cursor:default; }
   .scroll-x { overflow-x:auto; }
+  input, select, textarea { max-width:100%; }
+  img { max-width:100%; }
+  @media (max-width:760px) {
+    /* no page ever scrolls sideways: wide tables stack into cards on phones */
+    .tbl table, .tbl thead, .tbl tbody, .tbl tr, .tbl th, .tbl td { display:block; width:100%; }
+    .tbl thead { display:none; }
+    .tbl tr { border-bottom:1px solid var(--line); padding:6px 0; }
+    .tbl td { border:0; padding:2px 8px; background:transparent !important; }
+    .tbl td:empty { display:none; }
+    header .me { white-space:normal; }
+    label { flex-wrap:wrap; max-width:100%; }
+    input:not([type]), input[type=text], input[type=search], input[type=datetime-local] { width:100%; min-width:0; }
+    .row > label, .row > form { width:100%; }
+  }
   details > summary { cursor:pointer; color:var(--muted); padding:4px 0; }
   main { max-width:1200px; margin:0 auto; padding:20px; }
   h1 { font-size:24px; margin:0 0 4px; } h2 { font-size:18px; margin:26px 0 8px; } h3 { font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin:18px 0 6px; }

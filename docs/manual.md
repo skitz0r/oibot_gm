@@ -42,15 +42,15 @@ Signing up for a raid is still done on the sheet in Discord.
 ## 3. Members: registering and keeping your record current
 
 - **Register / plan a main**: press *Register / plan my main* in #register (class → spec → optional
-  offspec → name; leave the name blank until the character exists) or use `/register` / `/me plan main`.
+  offspec → first and last name; Forever characters have two-word names; leave them blank until the
+  character exists) or use `/register` / `/me plan main`.
   Pressing the button again replaces a planned main (roster placement and rank carry over). A named
   character waits for an officer to confirm it.
 - **Alts**: *Add an alt* button, `/me char add`, `/me plan alt`.
-- **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main`. **Retire**: `/me char retire`.
+- **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main` (or the crown on the website).
+  **Delete**: the bin icon on the website removes a character and its roster placements (`/me char retire`
+  keeps history instead).
 - **Name a planned character at launch**: `/me char name`.
-- **Can also play**: per character, tick the extra roles it can cover besides its spec/offspec (website,
-  the role icons on the character row; `/me plan roles` does it for your main). The bot uses it when a
-  run is short a role.
 - **Absences**: `/me absent add start [end] [reason]`, `/me absent list`, `/me absent clear`. Absent days
   pre-fill you as Out and the bot won't ask you to fill on those days.
 - **When you can raid**: on the website (Me → *When I can raid*) drag across a week grid and mark blocks

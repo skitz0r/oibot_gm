@@ -209,6 +209,10 @@ def create_app(bot) -> FastAPI:
         return f"/img/{kind}/{key}.png" if kind in ("class", "role") else "/img/role/melee.png"
 
     templates.env.globals["ico_url"] = icon_url
+    from markupsafe import Markup
+
+    templates.env.globals["crown"] = Markup('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 10H5L3 8zm2 12h14v2H5v-2z"/></svg>')
+    templates.env.globals["trash"] = Markup('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>')
 
     @app.get("/img/icon/{name}.jpg")
     async def cdn_icon(name: str):
@@ -300,6 +304,39 @@ def create_app(bot) -> FastAPI:
     @app.post("/me/character/name")
     async def me_name(request: Request):
         return await mutate(request, "/", lambda v, d: f"named your {d.get('slot', 'main')} {v.reg.name_character(v.uid, d['name'], d.get('slot') or 'main')[1].label} — pending confirmation")
+
+    @app.post("/me/characters")
+    async def me_characters(request: Request):
+        """One Save for the whole table: spec/offspec per row, names for planned rows, the add row if a class was picked."""
+        def go(v, d):
+            reg, done = v.reg, []
+            m = reg.members.get(v.uid)
+            rows = [c for c in (m.active() if m else [])]
+            for i, c in enumerate(rows):
+                label = d.get(f"label_{i}")
+                if not label or not c.matches(label):
+                    continue
+                spec, off = d.get(f"spec_{i}", c.spec), d.get(f"offspec_{i}", "") or None
+                if (spec, off) != (c.spec, c.offspec):
+                    reg.set_spec(v.uid, c.label, spec, off)
+                    done.append(f"{c.label}: {spec}" + (f"/{off}" if off else ""))
+                if not c.name and d.get(f"name_{i}"):
+                    _, named = reg.name_character(v.uid, d[f"name_{i}"], "main" if c.is_main else "alt", surname=d.get(f"surname_{i}") or None, label=c.label)
+                    done.append(f"named {named.label}")
+            if d.get("add_cls"):
+                slot = "main" if d.get("add_slot") == "main" else "alt"
+                if d.get("add_name"):
+                    _, c = reg.add_character(v.uid, v.name, d["add_name"], d["add_cls"], d["add_spec"], d.get("add_offspec") or None, slot == "main", surname=d.get("add_surname") or None)
+                    done.append(f"added {c.label}")
+                else:
+                    _, c = reg.set_plan(v.uid, v.name, d["add_cls"], d["add_spec"], d.get("add_offspec") or None, slot)
+                    done.append(f"planned {c.cls} {c.spec}")
+            return "; ".join(done) or "no changes"
+        return await mutate(request, "/", go)
+
+    @app.post("/me/character/delete")
+    async def me_delete(request: Request):
+        return await mutate(request, "/", lambda v, d: f"deleted {v.reg.delete_character(v.uid, d['label']).label}")
 
     @app.post("/me/character/flex")
     async def me_flex(request: Request):

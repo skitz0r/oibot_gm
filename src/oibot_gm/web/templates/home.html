@@ -12,51 +12,34 @@
 </div>
 {% endfor %}
 <h2>Characters</h2>
-<div class="tbl"><table class="chars">
-  <tr><th>Character</th><th>Spec / offspec</th><th>Can also play</th><th>Status</th><th>Rank</th><th>Rosters</th><th></th></tr>
-  {% if member %}{% for c in member.active() %}
-  <tr>
-    <td class="who"><img class="ico" src="{{ ico_url('class', c.cls) }}" alt="{{ c.cls }}"><div><b class="{{ c.cls }}">{{ c.label }}</b>{% if c.is_main %} <span class="pill">main</span>{% endif %}<br><span class="muted">{{ c.cls }}</span></div></td>
-    <td>
-      <form method="post" action="/me/character/spec" class="inline">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}">
-        <img class="ico sm" src="{{ ico_url('spec', c.cls ~ ':' ~ c.spec) }}" alt="{{ c.spec }}" title="{{ c.spec }} ({{ spec_role(c) }})">
-        <select name="spec" data-cls="{{ c.cls }}" data-current="{{ c.spec }}"></select>
-        {% if c.offspec %}<img class="ico sm" src="{{ ico_url('spec', c.cls ~ ':' ~ c.offspec) }}" alt="{{ c.offspec }}" title="offspec: {{ c.offspec }} ({{ off_role(c) }})">{% endif %}
-        <select name="offspec" data-cls="{{ c.cls }}" data-current="{{ c.offspec or '' }}" data-optional="1"></select>
-        <button class="quiet">Save</button>
-      </form>
-    </td>
-    <td>
-      <form method="post" action="/me/character/flex" class="inline flex">
-        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}">
-        {% set own = [spec_role(c), off_role(c)] %}
-        {% for r in ['tank', 'healer', 'melee', 'ranged'] %}{% if r not in own %}<label title="{{ r }}"><input type="checkbox" name="flex_{{ r }}" {{ 'checked' if r in c.flex else '' }}><img class="ico sm" src="{{ ico_url('role', r) }}" alt="{{ r }}"></label>{% endif %}{% endfor %}
-        <button class="quiet">Save</button>
-      </form>
-    </td>
-    <td>{{ c.status }}{% if c.name and not c.confirmed_by %}<br><span class="pill">awaiting confirmation</span>{% endif %}
-      {% if not c.name %}<form method="post" action="/me/character/name" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="slot" value="{{ 'main' if c.is_main else 'alt' }}"><input name="name" placeholder="name at launch" maxlength="12" size="11"><button class="quiet">Name</button></form>{% endif %}</td>
-    <td>{{ c.rank }}</td>
-    <td>{{ c.rosters|join(', ') or '—' }}</td>
-    <td class="actions">
-      {% if not c.is_main %}<form method="post" action="/me/character/main" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button class="quiet">Make main</button></form>{% endif %}
-      <form method="post" action="/me/character/retire" class="inline" onsubmit="return confirm('Retire {{ c.label }}? History is kept; you can register it again later.')"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button class="danger">Retire</button></form>
-    </td>
-  </tr>
+<form method="post" action="/me/characters" id="chars-form"><input type="hidden" name="csrf" value="{{ csrf }}"></form>
+<div class="chars">
+  <div class="hd"><span></span><span>Character</span><span>Spec</span><span>Offspec</span><span>Status</span><span></span></div>
+  {% if member %}{% for c in member.active() %}{% set i = loop.index0 %}
+  <div class="rw">
+    <input type="hidden" form="chars-form" name="label_{{ i }}" value="{{ c.label }}">
+    <span class="mainmark">{% if c.is_main %}<span class="crown on" title="your main">{{ crown }}</span>{% else %}<form method="post" action="/me/character/main" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button class="crown" title="make {{ c.label }} your main">{{ crown }}</button></form>{% endif %}</span>
+    <span class="who"><img class="ico" src="{{ ico_url('class', c.cls) }}" alt="{{ c.cls }}">
+      {% if c.name %}<span><b class="{{ c.cls }}">{{ c.label }}</b><br><span class="muted">{{ c.cls }}</span></span>
+      {% else %}<span><span class="names"><input form="chars-form" name="name_{{ i }}" maxlength="12" placeholder="first"><input form="chars-form" name="surname_{{ i }}" maxlength="12" placeholder="last"></span><span class="muted">{{ c.cls }} · planned, name it at launch</span></span>{% endif %}</span>
+    <span class="spec"><img class="ico sm" src="{{ ico_url('spec', c.cls ~ ':' ~ c.spec) }}" alt="" title="{{ c.spec }} ({{ spec_role(c) }})"><select form="chars-form" name="spec_{{ i }}" data-cls="{{ c.cls }}" data-current="{{ c.spec }}"></select></span>
+    <span class="spec">{% if c.offspec %}<img class="ico sm" src="{{ ico_url('spec', c.cls ~ ':' ~ c.offspec) }}" alt="" title="{{ c.offspec }} ({{ off_role(c) }})">{% else %}<span class="ico sm"></span>{% endif %}<select form="chars-form" name="offspec_{{ i }}" data-cls="{{ c.cls }}" data-current="{{ c.offspec or '' }}" data-optional="1"></select></span>
+    <span class="st">{% if not c.name %}<span class="pill">planned</span>{% elif c.confirmed_by %}<span class="pill ok">confirmed</span>{% else %}<span class="pill">awaiting officer</span>{% endif %}</span>
+    <span class="act"><form method="post" action="/me/character/delete" class="inline" onsubmit="return confirm('Delete {{ c.label }}? This removes it from every roster.')"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button class="icon danger" title="delete {{ c.label }}">{{ trash }}</button></form></span>
+  </div>
   {% endfor %}{% endif %}
-  <tr class="add">
-    <form method="post" action="/me/character/add" id="add-form"><input type="hidden" name="csrf" value="{{ csrf }}"></form>
-    <td class="who"><img class="ico dim" id="add-ico" src="{{ ico_url('class', 'Warrior') }}" alt=""><div class="row" style="margin:0;gap:6px">
-      <select form="add-form" name="cls" id="add-cls">{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select>
-      <input form="add-form" name="name" maxlength="12" size="10" placeholder="name (blank = planned)"></div></td>
-    <td><select form="add-form" name="spec" id="add-spec"></select> <select form="add-form" name="offspec" id="add-off"></select></td>
-    <td class="muted">after adding</td>
-    <td colspan="3"><select form="add-form" name="slot"><option value="main" {{ '' if member and member.main else 'selected' }}>as main</option><option value="alt" {{ 'selected' if member and member.main else '' }}>as alt</option></select></td>
-    <td class="actions"><button form="add-form">Add</button></td>
-  </tr>
-</table></div>
-<p class="sub">Role: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} · flex {{ roles[1]|join(', ') }}{% endif %} <span class="muted">— from your main's spec, offspec and "can also play"</span></p>
+  <div class="rw add">
+    <span class="mainmark"><span class="crown dim">{{ crown }}</span></span>
+    <span class="who"><img class="ico dim" id="add-ico" src="{{ ico_url('class', 'Warrior') }}" alt=""><span>
+      <span class="names"><select form="chars-form" name="add_cls" id="add-cls"><option value="">+ add a character…</option>{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select></span>
+      <span class="names"><input form="chars-form" name="add_name" maxlength="12" placeholder="first (blank = planned)"><input form="chars-form" name="add_surname" maxlength="12" placeholder="last"></span></span></span>
+    <span class="spec"><span class="ico sm"></span><select form="chars-form" name="add_spec" id="add-spec"></select></span>
+    <span class="spec"><span class="ico sm"></span><select form="chars-form" name="add_offspec" id="add-off"></select></span>
+    <span class="st"><select form="chars-form" name="add_slot"><option value="main" {{ '' if member and member.main else 'selected' }}>as main</option><option value="alt" {{ 'selected' if member and member.main else '' }}>as alt</option></select></span>
+    <span class="act"></span>
+  </div>
+</div>
+<div class="row"><button form="chars-form">Save characters</button><span class="sub">Role: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} · flex {{ roles[1]|join(', ') }}{% endif %} <span class="muted">— from your main's spec and offspec</span></span></div>
 
 <div class="panel">
     <h3 style="margin-top:0">When I can raid <span class="muted">· {{ tz }}</span></h3>
@@ -68,7 +51,7 @@
       <button type="button" id="wk-seed" class="quiet">Seed usual times</button>
       <span class="muted" id="wk-summary"></span>
     </div>
-    <div class="scroll-x"><div class="wk" id="wk"></div></div>
+    <div class="wk" id="wk"></div>
     <form method="post" action="/me/week" id="wk-form" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="week" id="wk-json"><button>Save availability</button><span class="muted">usual times = Mon–Fri 18–22, Sat–Sun 12–22</span></form>
 </div>
 
@@ -110,17 +93,34 @@
 {% endfor %}
 
 <style>
-  td.actions { white-space:nowrap; }
-  .ico { width:28px; height:28px; border-radius:6px; vertical-align:middle; } .ico.sm { width:22px; height:22px; border-radius:5px; } .ico.dim { opacity:.5; }
-  td.who { display:flex; gap:10px; align-items:center; }
-  form.flex label { margin-right:2px; cursor:pointer; } form.flex label input { display:none; } form.flex label img { opacity:.25; border:2px solid transparent; border-radius:50%; }
-  form.flex label input:checked + img { opacity:1; border-color:var(--accent); }
-  tr.add td { background:transparent !important; border-top:1px dashed var(--line); }
+  .ico { width:28px; height:28px; border-radius:6px; vertical-align:middle; flex:none; } .ico.sm { width:22px; height:22px; border-radius:5px; display:inline-block; } .ico.dim { opacity:.5; }
+  .chars { display:grid; grid-template-columns: 36px minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) 128px 44px; gap:0; align-items:center; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:var(--panel); }
+  .chars > .hd, .chars > .rw { display:contents; }
+  .chars .hd > span { padding:8px 10px; color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--line); }
+  .chars .rw > span { padding:10px; border-bottom:1px solid var(--line); min-height:56px; display:flex; align-items:center; gap:8px; min-width:0; }
+  .chars .rw.add > span { border-bottom:0; background:rgba(255,255,255,.02); }
+  .chars .who { gap:10px; } .chars .who > span { display:flex; flex-direction:column; gap:4px; min-width:0; } .chars .who b { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chars .names { display:flex; gap:6px; } .chars .names input { width:9em; min-width:0; }
+  .chars .spec select { width:100%; min-width:0; }
+  .crown { background:none; border:0; padding:0; cursor:pointer; color:var(--muted); opacity:.35; display:inline-flex; } .crown.on { color:var(--warn); opacity:1; cursor:default; } .crown.dim { opacity:.15; }
+  .crown:hover:not(.on):not(.dim) { opacity:.9; color:var(--warn); } .crown svg { width:20px; height:20px; }
+  button.icon { background:none; border:0; padding:4px; color:var(--muted); cursor:pointer; display:inline-flex; } button.icon.danger:hover { color:var(--bad); } button.icon svg { width:18px; height:18px; }
+  .pill.ok { color:var(--ok); border-color:var(--ok); }
+  @media (max-width:760px) {
+    .chars { grid-template-columns: 30px 1fr 40px; }
+    .chars .hd { display:none; }
+    .chars .rw > span { min-height:0; border-bottom:0; padding:6px 8px; }
+    .chars .rw > .spec, .chars .rw > .st { grid-column: 2 / 3; }
+    .chars .rw > .act { grid-row: span 1; }
+    .chars .rw > .st { border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:6px; }
+  }
   .wk-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .wk-pref { background:#2E9E6B !important; color:#fff !important; } .wk-avail { background:#B8892A !important; color:#fff !important; }
 </style>
 <style>
-  .wk { display:grid; grid-template-columns: 44px repeat(48, 1fr); gap:1px; user-select:none; margin:8px 0; min-width:760px; }
+  .wk { display:grid; gap:1px; user-select:none; margin:8px 0; }
+  .wk.landscape { grid-template-columns: 44px repeat(48, minmax(0, 1fr)); }
+  .wk.portrait { grid-template-columns: 44px repeat(7, minmax(0, 1fr)); } .wk.portrait .c { height:13px; } .wk.portrait .hr { grid-column: auto; text-align:center; }
   .wk .lab { font-size:12px; color:var(--muted); display:flex; align-items:center; }
   .wk .hr { font-size:10px; color:var(--muted); text-align:left; grid-column: span 2; }
   .wk .c { height:22px; background:var(--zebra); border-radius:2px; cursor:crosshair; }
@@ -142,17 +142,29 @@
     const grid = document.getElementById("wk"), out = document.getElementById("wk-json"), summary = document.getElementById("wk-summary");
     let sel = new Set(), dragging = false, anchor = null;
     function key(d, i) { return d + ":" + i; }
+    function hourLabel(h) { return h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p"; }
+    function cell(d, i) {
+      const c = document.createElement("div");
+      c.className = "c " + state[d][i] + (sel.has(key(d, i)) ? " sel" : "") + (raidCells.has(key(d, i)) ? " raid" : "");
+      c.dataset.d = d; c.dataset.i = i; c.title = DAYS[d] + " " + String(Math.floor(i / 2)).padStart(2, "0") + ":" + (i % 2 ? "30" : "00");
+      return c;
+    }
     function render() {
+      const portrait = window.innerWidth < 760;  // phones: days across, hours down — never a horizontal scroll
+      grid.className = "wk " + (portrait ? "portrait" : "landscape");
       grid.innerHTML = "";
       grid.appendChild(Object.assign(document.createElement("div"), { className: "lab" }));
-      for (let h = 0; h < 24; h++) { const e = document.createElement("div"); e.className = "hr"; e.textContent = h % 2 === 0 ? (h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p") : ""; grid.appendChild(e); }
-      for (let d = 0; d < 7; d++) {
-        grid.appendChild(Object.assign(document.createElement("div"), { className: "lab", textContent: DAYS[d] }));
+      if (!portrait) {
+        for (let h = 0; h < 24; h++) { const e = document.createElement("div"); e.className = "hr"; e.textContent = h % 2 === 0 ? hourLabel(h) : ""; grid.appendChild(e); }
+        for (let d = 0; d < 7; d++) {
+          grid.appendChild(Object.assign(document.createElement("div"), { className: "lab", textContent: DAYS[d] }));
+          for (let i = 0; i < N; i++) grid.appendChild(cell(d, i));
+        }
+      } else {
+        for (let d = 0; d < 7; d++) grid.appendChild(Object.assign(document.createElement("div"), { className: "hr", textContent: DAYS[d] }));
         for (let i = 0; i < N; i++) {
-          const c = document.createElement("div");
-          c.className = "c " + state[d][i] + (sel.has(key(d, i)) ? " sel" : "") + (raidCells.has(key(d, i)) ? " raid" : "");
-          c.dataset.d = d; c.dataset.i = i; c.title = DAYS[d] + " " + String(Math.floor(i / 2)).padStart(2, "0") + ":" + (i % 2 ? "30" : "00");
-          grid.appendChild(c);
+          grid.appendChild(Object.assign(document.createElement("div"), { className: "lab", textContent: i % 4 === 0 ? hourLabel(i / 2) : "" }));
+          for (let d = 0; d < 7; d++) grid.appendChild(cell(d, i));
         }
       }
       const hours = state.flat().filter(Boolean).length / 2, pref = state.flat().filter(x => x === "preferred").length / 2;
@@ -176,7 +188,7 @@
       render();
     });
     render();
-    const sx = grid.parentElement; if (sx && sx.scrollWidth > sx.clientWidth) sx.scrollLeft = sx.scrollWidth * 0.62;  // phones: open at the evening
+    window.addEventListener("resize", render);
   })();
   const CLASSES = {{ classes|tojson }};
   const CLASS_ICONS = {{ class_icons|tojson }};
@@ -189,7 +201,7 @@
   }
   document.querySelectorAll("select[data-cls]").forEach(s => fill(s, s.dataset.cls, s.dataset.current, !!s.dataset.optional));
   const addCls = document.getElementById("add-cls"), addSpec = document.getElementById("add-spec"), addOff = document.getElementById("add-off");
-  function refreshAdd() { fill(addSpec, addCls.value, "", false); fill(addOff, addCls.value, "", true); document.getElementById("add-ico").src = CLASS_ICONS[addCls.value] || ("/img/class/" + addCls.value + ".png"); }
+  function refreshAdd() { const cls = addCls.value; addSpec.disabled = addOff.disabled = !cls; fill(addSpec, cls, "", false); fill(addOff, cls, "", true); document.getElementById("add-ico").src = cls ? (CLASS_ICONS[cls] || "") : "{{ ico_url('class', 'Warrior') }}"; document.getElementById("add-ico").style.opacity = cls ? 1 : .35; }
   addCls.addEventListener("change", refreshAdd); refreshAdd();
 </script>
 {% endblock %}

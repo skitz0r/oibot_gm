@@ -138,7 +138,8 @@ class PlanButton(discord.ui.DynamicItem[discord.ui.Button], template=r"plan:(?P<
 class NameModal(discord.ui.Modal):
     """Last step of the registration wizard: optional character name (blank = planned, name it at launch)."""
 
-    name = discord.ui.TextInput(label="Character name (blank = not created yet)", required=False, max_length=12)  # labels max 45 chars
+    name = discord.ui.TextInput(label="First name (blank = not created yet)", required=False, max_length=12)  # labels max 45 chars
+    surname = discord.ui.TextInput(label="Last name (Forever names are two words)", required=False, max_length=12)
 
     def __init__(self, reg: Registry, cls: str, spec: str, offspec: str | None, roles: list[str], slot: str):
         super().__init__(title=f"{cls} {spec} — almost done"[:45])
@@ -149,7 +150,7 @@ class NameModal(discord.ui.Modal):
         name = str(self.name.value).strip()
         try:
             if name:
-                m, c = reg.add_character(interaction.user.id, interaction.user.display_name, name, self.cls, self.spec, self.offspec, self.slot == "main")
+                m, c = reg.add_character(interaction.user.id, interaction.user.display_name, name, self.cls, self.spec, self.offspec, self.slot == "main", surname=str(self.surname.value).strip() or None)
             else:
                 m, c = reg.set_plan(interaction.user.id, interaction.user.display_name, self.cls, self.spec, self.offspec, self.slot)
             if self.roles:
@@ -335,16 +336,16 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     # ---------------- /register
     @tree.command(name="register", description="Register your character (first one becomes your main)")
-    @app_commands.describe(name="Character name", class_="Class", spec="Main spec", offspec="Offspec (optional)", main="Make this your main")
+    @app_commands.describe(name="First name", class_="Class", spec="Main spec", offspec="Offspec (optional)", main="Make this your main", surname="Last name (Forever names are two words)")
     @app_commands.rename(class_="class")
     @app_commands.choices(class_=CLASS_CHOICES)
     @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def register(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None, main: bool = False):
+    async def register(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None, main: bool = False, surname: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
         try:
-            m, c = reg.add_character(interaction.user.id, interaction.user.display_name, name, class_.value, spec, offspec, main)
+            m, c = reg.add_character(interaction.user.id, interaction.user.display_name, name, class_.value, spec, offspec, main, surname=surname)
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -404,17 +405,17 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @char.command(name="name", description="At launch: give your planned main (or alt) its real character name")
     @app_commands.choices(slot=[app_commands.Choice(name="main", value="main"), app_commands.Choice(name="alt", value="alt")])
-    async def char_name(interaction: discord.Interaction, name: str, slot: app_commands.Choice[str] | None = None):
+    async def char_name(interaction: discord.Interaction, name: str, slot: app_commands.Choice[str] | None = None, surname: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
         try:
-            m, c = reg.name_character(interaction.user.id, name, slot.value if slot else "main")
+            m, c = reg.name_character(interaction.user.id, name, slot.value if slot else "main", surname=surname)
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ {char_line(ico, c)} — an officer will confirm it.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"**{m.display_name}** named their planned {slot.value if slot else 'main'}: {c.name} ({c.cls} {c.spec}) — pending confirmation")
+        await ops.emit(reg.config, "info", f"**{m.display_name}** named their planned {slot.value if slot else 'main'}: {c.label} ({c.cls} {c.spec}) — pending confirmation")
 
     @char.command(name="add", description="Register another character (alt)")
     @app_commands.rename(class_="class")
