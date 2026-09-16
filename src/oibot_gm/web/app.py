@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import secrets
 import time
 from datetime import datetime
@@ -186,6 +187,44 @@ def create_app(bot) -> FastAPI:
         return Response(thumb_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
     badge_cache: dict[str, bytes] = {}
+    ICON_DIR = Path(__file__).resolve().parents[3] / "out" / "icons"
+    ICON_DIR.mkdir(parents=True, exist_ok=True)
+    ICON_CDN = "https://render.worldofwarcraft.com/us/icons/56/{name}.jpg"
+
+    def icon_url(kind: str, key: str) -> str:
+        """Blizzard's icon art (proxied + cached) when the profile names one, else our generated badge."""
+        reg = next(iter(bot.registries.by_discord.values()), None)
+        icons = reg.profile.icons if reg else {}
+        name = None
+        if kind == "class":
+            name = icons.get("classes", {}).get(key)
+        elif kind == "role":
+            name = icons.get("roles", {}).get(key)
+        elif kind == "spec":
+            name = icons.get("specs", {}).get(key)
+        elif kind == "art":
+            name = key or None
+        if name:
+            return f"/img/icon/{name}.jpg"
+        return f"/img/{kind}/{key}.png" if kind in ("class", "role") else "/img/role/melee.png"
+
+    templates.env.globals["ico_url"] = icon_url
+
+    @app.get("/img/icon/{name}.jpg")
+    async def cdn_icon(name: str):
+        if not re.fullmatch(r"[a-z0-9_]{3,64}", name):
+            raise HTTPException(404)
+        f = ICON_DIR / f"{name}.jpg"
+        if not f.exists():
+            try:
+                async with httpx.AsyncClient(timeout=10) as hc:
+                    r = await hc.get(ICON_CDN.format(name=name))
+                if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
+                    raise HTTPException(404)
+                f.write_bytes(r.content)
+            except httpx.HTTPError:
+                raise HTTPException(502)
+        return Response(f.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "public, max-age=604800"})
 
     @app.get("/img/class/{cls}.png")
     async def class_icon(cls: str):
@@ -225,8 +264,9 @@ def create_app(bot) -> FastAPI:
             mine.append({"ev": ev, "signup": s, "asks": asks, "team": reg.config.team(ev.team) or {"key": ev.team, "size": 20}})
         roles = reg.roles_of(v.member) if v.member else (None, [])
         classes = {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()}
+        class_icons = {c: icon_url("class", c) for c in reg.profile.classes}
         return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=datetime.now().date().isoformat(), classes=classes,
-                    rosters=reg.config.rosters or [{"key": "main", "name": "main"}], spec_role=lambda c: reg.profile.spec(c.cls, c.spec).role, off_role=lambda c: (reg.profile.spec(c.cls, c.offspec).role if c.offspec else None),
+                    rosters=reg.config.rosters or [{"key": "main", "name": "main"}], class_icons=class_icons, spec_role=lambda c: reg.profile.spec(c.cls, c.spec).role, off_role=lambda c: (reg.profile.spec(c.cls, c.offspec).role if c.offspec else None),
                     week=(v.member.week if v.member else []), tz=reg.config.timezone, placement_asks=reg.open_placement_asks(v.uid),
                     raid_windows=[{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")])
 

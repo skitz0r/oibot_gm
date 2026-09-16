@@ -14,8 +14,8 @@
   {% for r in rows %}
   <tr>
     <td>{{ r.m.display_name }}<br><span class="muted">{{ r.verification }}</span>{% for a in r.m.placement_asks if a.answer is none %}<br><span class="pill warn">confirm {{ a.roster }}?</span>{% endfor %}{% for a in r.m.placement_asks[-2:] if a.answer %}<br><span class="pill {{ 'ok' if a.answer == 'yes' else 'bad' }}">{{ a.roster }} {{ a.answer }}</span>{% endfor %}</td>
-    <td>{% if r.main %}<img class="ico" src="/img/class/{{ r.main.cls }}.png" alt=""> <span class="{{ r.main.cls }}">{{ r.main.label }}</span><br><span class="muted">{{ r.main.spec }}{% if r.main.offspec %}/{{ r.main.offspec }}{% endif %}</span>{% else %}<span class="muted">no main</span>{% endif %}</td>
-    <td>{% if r.roles[0] %}<img class="ico" src="/img/role/{{ r.roles[0] }}.png" alt=""> {% endif %}{{ r.roles[0] or '?' }}{% if r.roles[1] %}<br><span class="muted">+{{ r.roles[1]|join(', ') }}</span>{% endif %}</td>
+    <td>{% if r.main %}<img class="ico" src="{{ ico_url('class', r.main.cls) }}" alt=""> <span class="{{ r.main.cls }}">{{ r.main.label }}</span><br><span class="muted">{{ r.main.spec }}{% if r.main.offspec %}/{{ r.main.offspec }}{% endif %}</span>{% else %}<span class="muted">no main</span>{% endif %}</td>
+    <td>{% if r.roles[0] %}<img class="ico" src="{{ ico_url('role', r.roles[0]) }}" alt=""> {% endif %}{{ r.roles[0] or '?' }}{% if r.roles[1] %}<br><span class="muted">+{{ r.roles[1]|join(', ') }}</span>{% endif %}</td>
     <td>{% if r.main %}<form method="post" action="/admin/rank" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ r.main.label }}">
       <select name="rank" onchange="this.form.submit()">{% for k in ranks %}<option {{ 'selected' if k == r.main.rank else '' }}>{{ k }}</option>{% endfor %}</select></form>{% endif %}</td>
     <td>{% if r.main and r.main.name %}{% if r.main.confirmed_by %}<span class="ok">✓ {{ r.main.confirmed_by }}</span>{% else %}<form method="post" action="/admin/confirm" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ r.main.label }}"><button>Confirm</button></form>{% endif %}{% else %}<span class="muted">unnamed</span>{% endif %}</td>
@@ -113,7 +113,7 @@
 
 </details>
 <style>
-  .ico { width:20px; height:20px; border-radius:50%; vertical-align:-5px; }
+  .ico { width:20px; height:20px; border-radius:4px; vertical-align:-5px; }
   .hm { display:grid; grid-template-columns: 44px repeat(48, 1fr); gap:1px; margin:8px 0; }
   .hm .lab { font-size:12px; color:var(--muted); display:flex; align-items:center; }
   .hm .hr { font-size:10px; color:var(--muted); grid-column: span 2; }

@@ -102,3 +102,51 @@ biscouncil:
     28: [Warlock, Affliction]
     30: [Warlock, Destruction]
     32: [Warrior, Fury]
+
+# Icon file names on Blizzard's render CDN (https://render.worldofwarcraft.com/us/icons/56/<name>.jpg) — the same
+# files the Game Data API's media endpoints point at. The site proxies and caches them; badges are the fallback.
+icons:
+  classes:
+    Warrior: classicon_warrior
+    Paladin: classicon_paladin
+    Hunter: classicon_hunter
+    Rogue: classicon_rogue
+    Priest: classicon_priest
+    Shaman: classicon_shaman
+    Mage: classicon_mage
+    Warlock: classicon_warlock
+    Druid: classicon_druid
+  roles:
+    tank: inv_shield_06
+    healer: spell_holy_flashheal
+    melee: ability_dualwield
+    ranged: ability_hunter_snipershot
+  specs:
+    "Warrior:Arms": ability_warrior_savageblow
+    "Warrior:Fury": ability_warrior_innerrage
+    "Warrior:Protection": ability_warrior_defensivestance
+    "Paladin:Holy": spell_holy_holybolt
+    "Paladin:Protection": spell_holy_devotionaura
+    "Paladin:Retribution": spell_holy_auraoflight
+    "Hunter:BeastMastery": ability_hunter_beasttaming
+    "Hunter:Marksmanship": ability_marksmanship
+    "Hunter:Survival": ability_hunter_swiftstrike
+    "Rogue:Assassination": ability_rogue_eviscerate
+    "Rogue:Combat": ability_backstab
+    "Rogue:Subtlety": ability_stealth
+    "Priest:Discipline": spell_holy_wordfortitude
+    "Priest:Holy": spell_holy_holybolt
+    "Priest:Shadow": spell_shadow_shadowwordpain
+    "Shaman:Elemental": spell_nature_lightning
+    "Shaman:Enhancement": spell_nature_lightningshield
+    "Shaman:Restoration": spell_nature_magicimmunity
+    "Mage:Arcane": spell_holy_magicalsentry
+    "Mage:Fire": spell_fire_firebolt02
+    "Mage:Frost": spell_frost_frostbolt02
+    "Warlock:Affliction": spell_shadow_deathcoil
+    "Warlock:Demonology": spell_shadow_metamorphosis
+    "Warlock:Destruction": spell_shadow_rainoffire
+    "Druid:Balance": spell_nature_starfall
+    "Druid:Feral": ability_druid_catform
+    "Druid:Guardian": ability_racial_bearform
+    "Druid:Restoration": spell_nature_healingtouch

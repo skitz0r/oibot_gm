@@ -3,7 +3,7 @@
 {% if sm %}
 <div class="runsum">
   <div class="row" style="margin:4px 0 8px">
-    {% for role, n in sm.roles.items() %}<span class="chip role"><img class="ico" src="/img/role/{{ role }}.png" alt=""> {{ n }} {{ role }}</span>{% endfor %}
+    {% for role, n in sm.roles.items() %}<span class="chip role"><img class="ico" src="{{ ico_url('role', role) }}" alt=""> {{ n }} {{ role }}</span>{% endfor %}
     {% if sm.synergy is not none %}<span class="muted">synergy {{ sm.synergy }}</span>{% endif %}
   </div>
   {% if sm.groups %}
@@ -11,15 +11,15 @@
     {% for g in sm.groups %}
     <div class="group">
       <div class="gh"><b>Group {{ g.n }}</b> <span class="ok">+{{ g.value }}</span></div>
-      {% for m in g.members %}<div class="gm"><img class="ico" src="/img/role/{{ m.role }}.png" alt="{{ m.role }}" title="{{ m.role }}"><img class="ico" src="/img/class/{{ m.cls }}.png" alt=""><span class="{{ m.cls }}">{{ m.name }}</span> <span class="muted">{{ m.spec }}</span></div>{% endfor %}
+      {% for m in g.members %}<div class="gm"><img class="ico" src="{{ ico_url('role', m.role) }}" alt="{{ m.role }}" title="{{ m.role }}"><img class="ico" src="{{ ico_url('spec', m.cls ~ ':' ~ m.spec) }}" alt="{{ m.spec }}" title="{{ m.cls }} {{ m.spec }}"><span class="{{ m.cls }}">{{ m.name }}</span> <span class="muted">{{ m.spec }}</span></div>{% endfor %}
       {% for _ in range(5 - g.members|length) %}<div class="gm muted">· open</div>{% endfor %}
-      <div class="badges">{% for b in g.present %}<span class="badge" style="background:{{ b.colour }}" title="{{ b.name }} — {{ b.who }}">{{ b.abbr }}</span>{% endfor %}{% for b in g.missing %}<span class="badge miss" title="{{ b.name }} — nobody in this group brings it">{{ b.abbr }}</span>{% endfor %}</div>
+      <div class="badges">{% for b in g.present %}{% if b.art %}<img class="aura" src="{{ ico_url('art', b.art) }}" alt="{{ b.abbr }}" title="{{ b.name }} — {{ b.who }}">{% else %}<span class="badge" style="background:{{ b.colour }}" title="{{ b.name }} — {{ b.who }}">{{ b.abbr }}</span>{% endif %}{% endfor %}{% for b in g.missing %}{% if b.art %}<img class="aura miss" src="{{ ico_url('art', b.art) }}" alt="{{ b.abbr }}" title="{{ b.name }} — nobody in this group brings it">{% else %}<span class="badge miss" title="{{ b.name }} — nobody in this group brings it">{{ b.abbr }}</span>{% endif %}{% endfor %}</div>
       {% if g.picks %}<div class="muted small">totems: {{ g.picks|join(' · ') }}</div>{% endif %}
     </div>
     {% endfor %}
   </div>
   {% endif %}
-  <div class="row" style="margin-top:8px"><span class="muted small">raid-wide:</span>{% for b in sm.raid %}<span class="chip {{ b.ok }}" title="{{ b.detail }} · {{ b.status }}"><span class="badge" style="background:{{ b.colour if b.n else '#3A4351' }}">{{ b.abbr[:4] }}</span> {{ b.name }} ×{{ b.n }}</span>{% endfor %}</div>
+  <div class="row" style="margin-top:8px"><span class="muted small">raid-wide:</span>{% for b in sm.raid %}<span class="chip {{ b.ok }}" title="{{ b.detail }} · {{ b.status }}">{% if b.art %}<img class="aura sm {{ '' if b.n else 'miss' }}" src="{{ ico_url('art', b.art) }}" alt="">{% else %}<span class="badge" style="background:{{ b.colour if b.n else '#3A4351' }}">{{ b.abbr[:4] }}</span>{% endif %} {{ b.name }} ×{{ b.n }}</span>{% endfor %}</div>
   {% if sm.unmet %}<div class="warn small">nobody in this run brings: {{ sm.unmet|join(', ') }}</div>{% endif %}
   <div class="muted small">{{ sm.assumptions|join(' · ') }}</div>
 </div>
@@ -60,7 +60,7 @@
     <div class="grid" style="margin-top:6px">
       {% for status in ['in', 'tentative', 'sub', 'out'] %}
       <div><h3>{{ status }} ({{ e.by[status]|length }})</h3>
-        <table>{% for s in e.by[status] %}<tr><td><img class="ico" src="/img/role/{{ s.role }}.png" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="/img/class/{{ s.cls }}.png" alt=""> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.source }}{% if s.note %} — {{ s.note }}{% endif %}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table></div>
+        <table>{% for s in e.by[status] %}<tr><td><img class="ico" src="{{ ico_url('role', s.role) }}" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="{{ ico_url('spec', s.cls ~ ':' ~ s.spec) }}" alt="" title="{{ s.cls }} {{ s.spec }}"> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.source }}{% if s.note %} — {{ s.note }}{% endif %}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table></div>
       {% endfor %}
     </div>
     {{ groups_block(e.summary) }}
@@ -90,7 +90,9 @@
 {% endif %}
 
 <style>
-  .ico { width:20px; height:20px; border-radius:50%; vertical-align:-5px; }
+  .ico { width:20px; height:20px; border-radius:4px; vertical-align:-5px; }
+  .aura { width:26px; height:26px; border-radius:5px; border:2px solid transparent; } .aura.sm { width:20px; height:20px; vertical-align:-5px; }
+  .aura.miss { opacity:.35; filter:grayscale(1); border-color:var(--bad); }
   .small { font-size:13px; }
   .chip { display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border-radius:999px; border:1px solid var(--line); font-size:13px; }
   .chip.green { border-color:var(--ok); } .chip.amber { border-color:var(--warn); } .chip.red { border-color:var(--bad); color:var(--bad); }

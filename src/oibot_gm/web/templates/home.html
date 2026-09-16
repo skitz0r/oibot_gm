@@ -16,13 +16,13 @@
   <tr><th>Character</th><th>Spec / offspec</th><th>Can also play</th><th>Status</th><th>Rank</th><th>Rosters</th><th></th></tr>
   {% if member %}{% for c in member.active() %}
   <tr>
-    <td class="who"><img class="ico" src="/img/class/{{ c.cls }}.png" alt="{{ c.cls }}"><div><b class="{{ c.cls }}">{{ c.label }}</b>{% if c.is_main %} <span class="pill">main</span>{% endif %}<br><span class="muted">{{ c.cls }}</span></div></td>
+    <td class="who"><img class="ico" src="{{ ico_url('class', c.cls) }}" alt="{{ c.cls }}"><div><b class="{{ c.cls }}">{{ c.label }}</b>{% if c.is_main %} <span class="pill">main</span>{% endif %}<br><span class="muted">{{ c.cls }}</span></div></td>
     <td>
       <form method="post" action="/me/character/spec" class="inline">
         <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}">
-        <img class="ico sm" src="/img/role/{{ spec_role(c) }}.png" alt="{{ spec_role(c) }}" title="{{ spec_role(c) }}">
+        <img class="ico sm" src="{{ ico_url('spec', c.cls ~ ':' ~ c.spec) }}" alt="{{ c.spec }}" title="{{ c.spec }} ({{ spec_role(c) }})">
         <select name="spec" data-cls="{{ c.cls }}" data-current="{{ c.spec }}"></select>
-        {% if off_role(c) %}<img class="ico sm" src="/img/role/{{ off_role(c) }}.png" alt="{{ off_role(c) }}" title="offspec: {{ off_role(c) }}">{% endif %}
+        {% if c.offspec %}<img class="ico sm" src="{{ ico_url('spec', c.cls ~ ':' ~ c.offspec) }}" alt="{{ c.offspec }}" title="offspec: {{ c.offspec }} ({{ off_role(c) }})">{% endif %}
         <select name="offspec" data-cls="{{ c.cls }}" data-current="{{ c.offspec or '' }}" data-optional="1"></select>
         <button class="quiet">Save</button>
       </form>
@@ -31,7 +31,7 @@
       <form method="post" action="/me/character/flex" class="inline flex">
         <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}">
         {% set own = [spec_role(c), off_role(c)] %}
-        {% for r in ['tank', 'healer', 'melee', 'ranged'] %}{% if r not in own %}<label title="{{ r }}"><input type="checkbox" name="flex_{{ r }}" {{ 'checked' if r in c.flex else '' }}><img class="ico sm" src="/img/role/{{ r }}.png" alt="{{ r }}"></label>{% endif %}{% endfor %}
+        {% for r in ['tank', 'healer', 'melee', 'ranged'] %}{% if r not in own %}<label title="{{ r }}"><input type="checkbox" name="flex_{{ r }}" {{ 'checked' if r in c.flex else '' }}><img class="ico sm" src="{{ ico_url('role', r) }}" alt="{{ r }}"></label>{% endif %}{% endfor %}
         <button class="quiet">Save</button>
       </form>
     </td>
@@ -47,7 +47,7 @@
   {% endfor %}{% endif %}
   <tr class="add">
     <form method="post" action="/me/character/add" id="add-form"><input type="hidden" name="csrf" value="{{ csrf }}"></form>
-    <td class="who"><img class="ico dim" id="add-ico" src="/img/class/Warrior.png" alt=""><div class="row" style="margin:0;gap:6px">
+    <td class="who"><img class="ico dim" id="add-ico" src="{{ ico_url('class', 'Warrior') }}" alt=""><div class="row" style="margin:0;gap:6px">
       <select form="add-form" name="cls" id="add-cls">{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select>
       <input form="add-form" name="name" maxlength="12" size="10" placeholder="name (blank = planned)"></div></td>
     <td><select form="add-form" name="spec" id="add-spec"></select> <select form="add-form" name="offspec" id="add-off"></select></td>
@@ -111,7 +111,7 @@
 
 <style>
   td.actions { white-space:nowrap; }
-  .ico { width:28px; height:28px; border-radius:50%; vertical-align:middle; } .ico.sm { width:20px; height:20px; } .ico.dim { opacity:.5; }
+  .ico { width:28px; height:28px; border-radius:6px; vertical-align:middle; } .ico.sm { width:22px; height:22px; border-radius:5px; } .ico.dim { opacity:.5; }
   td.who { display:flex; gap:10px; align-items:center; }
   form.flex label { margin-right:2px; cursor:pointer; } form.flex label input { display:none; } form.flex label img { opacity:.25; border:2px solid transparent; border-radius:50%; }
   form.flex label input:checked + img { opacity:1; border-color:var(--accent); }
@@ -179,6 +179,7 @@
     const sx = grid.parentElement; if (sx && sx.scrollWidth > sx.clientWidth) sx.scrollLeft = sx.scrollWidth * 0.62;  // phones: open at the evening
   })();
   const CLASSES = {{ classes|tojson }};
+  const CLASS_ICONS = {{ class_icons|tojson }};
   function fill(sel, cls, current, optional) {
     sel.innerHTML = "";
     if (optional) { const o = document.createElement("option"); o.value = ""; o.textContent = "no offspec"; sel.appendChild(o); }
@@ -188,7 +189,7 @@
   }
   document.querySelectorAll("select[data-cls]").forEach(s => fill(s, s.dataset.cls, s.dataset.current, !!s.dataset.optional));
   const addCls = document.getElementById("add-cls"), addSpec = document.getElementById("add-spec"), addOff = document.getElementById("add-off");
-  function refreshAdd() { fill(addSpec, addCls.value, "", false); fill(addOff, addCls.value, "", true); document.getElementById("add-ico").src = "/img/class/" + addCls.value + ".png"; }
+  function refreshAdd() { fill(addSpec, addCls.value, "", false); fill(addOff, addCls.value, "", true); document.getElementById("add-ico").src = CLASS_ICONS[addCls.value] || ("/img/class/" + addCls.value + ".png"); }
   addCls.addEventListener("change", refreshAdd); refreshAdd();
 </script>
 {% endblock %}

@@ -19,7 +19,7 @@
 buffs:
   # ---------------------------------------------------------------- shaman totems (party, static radius)
   - id: windfury_totem
-    icon: {abbr: WF, colour: "#5C9BFF"}
+    icon: {abbr: WF, colour: "#5C9BFF", art: spell_nature_windfury}
     name: Windfury Totem
     providers: [Shaman:*]
     scope: party
@@ -31,7 +31,7 @@ buffs:
     note: Air totem. Vanilla party-wide; Forever scope not published.
 
   - id: grace_of_air
-    icon: {abbr: GoA, colour: "#9FD8F5"}
+    icon: {abbr: GoA, colour: "#9FD8F5", art: spell_nature_invisibilitytotem}
     name: Grace of Air Totem
     providers: [Shaman:*]
     scope: party
@@ -43,7 +43,7 @@ buffs:
     note: Air totem (agility). Wins the air slot in hunter/rogue groups without warriors.
 
   - id: tranquil_air
-    icon: {abbr: TqA, colour: "#B7E4F2"}
+    icon: {abbr: TqA, colour: "#B7E4F2", art: spell_nature_brilliance}
     name: Tranquil Air Totem
     providers: [Shaman:*]
     scope: party
@@ -55,7 +55,7 @@ buffs:
     note: Air totem (threat). Only wins the slot in a pure caster group.
 
   - id: strength_of_earth
-    icon: {abbr: SoE, colour: "#B0855B"}
+    icon: {abbr: SoE, colour: "#B0855B", art: spell_nature_earthbindtotem}
     name: Strength of Earth Totem
     providers: [Shaman:*]
     scope: party
@@ -67,7 +67,7 @@ buffs:
     note: Earth totem.
 
   - id: stoneskin
-    icon: {abbr: SS, colour: "#8D8D8D"}
+    icon: {abbr: SS, colour: "#8D8D8D", art: spell_nature_stoneskintotem}
     name: Stoneskin Totem
     providers: [Shaman:*]
     scope: party
@@ -79,7 +79,7 @@ buffs:
     note: Earth totem; loses to Strength of Earth unless the group is all casters/healers.
 
   - id: mana_spring
-    icon: {abbr: MSp, colour: "#4FB3E8"}
+    icon: {abbr: MSp, colour: "#4FB3E8", art: spell_nature_manaregentotem}
     name: Mana Spring Totem
     providers: [Shaman:*]
     scope: party
@@ -91,7 +91,7 @@ buffs:
     note: Water totem.
 
   - id: mana_tide
-    icon: {abbr: MT, colour: "#2F8FD6"}
+    icon: {abbr: MT, colour: "#2F8FD6", art: spell_frost_summonwaterelemental}
     name: Mana Tide Totem
     providers: [Shaman:Restoration]
     scope: party
@@ -103,7 +103,7 @@ buffs:
     note: Restoration talent (Vanilla). Cooldown totem, so it does not compete with Mana Spring for the slot.
 
   - id: healing_stream
-    icon: {abbr: HSt, colour: "#7FD3C8"}
+    icon: {abbr: HSt, colour: "#7FD3C8", art: inv_spear_04}
     name: Healing Stream Totem
     providers: [Shaman:*]
     scope: party
@@ -115,7 +115,7 @@ buffs:
     note: Water totem; usually loses the slot to Mana Spring.
 
   - id: fire_resistance
-    icon: {abbr: FR, colour: "#E06A3A"}
+    icon: {abbr: FR, colour: "#E06A3A", art: spell_fireresistancetotem_01}
     name: Fire Resistance Totem
     providers: [Shaman:*]
     scope: party
@@ -128,7 +128,7 @@ buffs:
 
   # ---------------------------------------------------------------- other party auras
   - id: trueshot_aura
-    icon: {abbr: TA, colour: "#8FBF5A"}
+    icon: {abbr: TA, colour: "#8FBF5A", art: ability_trueshot}
     name: Trueshot Aura (+30 ranged AP)
     providers: [Hunter:Marksmanship]
     scope: party
@@ -139,7 +139,7 @@ buffs:
     note: "Beta capture: 'Increases the Ranged Attack Power of party members within 45 yards by 30' (MM row 4). Ranged-only now."
 
   - id: leader_of_the_pack
-    icon: {abbr: LotP, colour: "#FF7D0A"}
+    icon: {abbr: LotP, colour: "#FF7D0A", art: spell_nature_unyeildingstamina}
     name: Leader of the Pack (3% crit)
     providers: [Druid:Feral, Druid:Guardian]
     scope: party
@@ -150,7 +150,7 @@ buffs:
     note: Vanilla Feral talent; party-wide. Not in the Forever druid captures either way.
 
   - id: moonkin_aura
-    icon: {abbr: MA, colour: "#D7A6FF"}
+    icon: {abbr: MA, colour: "#D7A6FF", art: spell_nature_moonglow}
     name: Moonkin Aura (3% spell crit)
     providers: [Druid:Balance]
     scope: party
@@ -161,7 +161,7 @@ buffs:
     note: Vanilla Balance talent; party-wide.
 
   - id: battle_shout
-    icon: {abbr: BS, colour: "#C79C6E"}
+    icon: {abbr: BS, colour: "#C79C6E", art: ability_warrior_battleshout}
     name: Battle Shout
     providers: [Warrior:*]
     scope: party
@@ -172,7 +172,7 @@ buffs:
     note: Vanilla party-wide, 2 min. Fury warriors keep it up.
 
   - id: blood_pact
-    icon: {abbr: BP, colour: "#9482C9"}
+    icon: {abbr: BP, colour: "#9482C9", art: spell_shadow_bloodboil}
     name: Blood Pact (imp)
     providers: [Warlock:*]
     scope: party
@@ -183,7 +183,7 @@ buffs:
     note: Vanilla party-wide, needs an imp out. Demonic Sacrifice locks won't have one.
 
   - id: sanctity_aura
-    icon: {abbr: SA, colour: "#F58CBA"}
+    icon: {abbr: SA, colour: "#F58CBA", art: spell_holy_mindvision}
     name: Sanctity Aura (10% holy)
     providers: [Paladin:Retribution]
     scope: party
@@ -194,7 +194,7 @@ buffs:
     note: Vanilla Ret talent; party-wide. One paladin aura at a time (Devotion/Retribution/Concentration/Sanctity).
 
   - id: vampiric_embrace
-    icon: {abbr: VE, colour: "#B39DDB"}
+    icon: {abbr: VE, colour: "#B39DDB", art: spell_shadow_unsummonbuilding}
     name: Vampiric Embrace (party heal)
     providers: [Priest:Shadow]
     scope: party
@@ -206,7 +206,7 @@ buffs:
 
   # ---------------------------------------------------------------- raid-wide cast buffs (coverage = enough providers)
   - id: fortitude
-    icon: {abbr: Fort, colour: "#E6E6E6"}
+    icon: {abbr: Fort, colour: "#E6E6E6", art: spell_holy_wordfortitude}
     name: "Power Word: Fortitude"
     providers: [Priest:*]
     scope: raid
@@ -217,7 +217,7 @@ buffs:
     note: Prayer of Fortitude covers the raid; 1 priest is enough, 2 is comfortable.
 
   - id: divine_spirit
-    icon: {abbr: Spirit, colour: "#C9D6FF"}
+    icon: {abbr: Spirit, colour: "#C9D6FF", art: spell_holy_divinespirit}
     name: Divine Spirit
     providers: [Priest:*]
     scope: raid
@@ -228,7 +228,7 @@ buffs:
     note: "Blizzard deep dive: Divine Spirit is baseline (was a Discipline talent), so any priest brings it."
 
   - id: shadow_protection
-    icon: {abbr: SP, colour: "#7E6AA8"}
+    icon: {abbr: SP, colour: "#7E6AA8", art: spell_shadow_antishadow}
     name: Shadow Protection
     providers: [Priest:*]
     scope: raid
@@ -238,7 +238,7 @@ buffs:
     value: {all: 1}
 
   - id: mark_of_the_wild
-    icon: {abbr: MotW, colour: "#FF7D0A"}
+    icon: {abbr: MotW, colour: "#FF7D0A", art: spell_nature_regeneration}
     name: Mark of the Wild (improved)
     providers: [Druid:*]
     scope: raid
@@ -249,7 +249,7 @@ buffs:
     note: "Blizzard deep dive: Improved Mark of the Wild is baseline; Gift of the Wild covers the raid."
 
   - id: arcane_intellect
-    icon: {abbr: AI, colour: "#69CCF0"}
+    icon: {abbr: AI, colour: "#69CCF0", art: spell_holy_magicalsentry}
     name: Arcane Intellect
     providers: [Mage:*]
     scope: raid
@@ -260,7 +260,7 @@ buffs:
     note: Arcane Brilliance covers the raid.
 
   - id: blessings
-    icon: {abbr: Bless, colour: "#F58CBA"}
+    icon: {abbr: Bless, colour: "#F58CBA", art: spell_magic_greaterblessingofkings}
     name: Paladin Blessings
     providers: [Paladin:*]
     scope: raid

@@ -156,8 +156,8 @@ def groups_summary(reg: Registry, players: list[Player], result: RosterResult | 
         out["groups"].append({
             "n": gi + 1,
             "members": [{"name": by[n].character or n, "member": n, "cls": by[n].cls, "spec": by[n].spec, "role": by[n].role} for n in names],
-            "present": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present],
-            "missing": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "name": buffs[b].short} for b in missing],
+            "present": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present],
+            "missing": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short} for b in missing],
             "picks": [f"{slot.split('_')[1].title()} {buffs[bid].abbr}" for slot, bid in sorted(g.picks.items()) if not slot.endswith("_cd") and g.wanted.get(bid, 0) >= 2],
             "value": result.group_reports[gi].value if gi < len(result.group_reports) else 0,
         })
@@ -210,7 +210,7 @@ def raid_buff_status(profile: GameProfile, players: list[Player]) -> list[dict]:
         else:
             detail = ", ".join(provs[:3]) + ("…" if len(provs) > 3 else "") if provs else "nobody"
             ok = "green" if len(provs) >= 2 else ("amber" if provs else "red")
-        out.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "status": b.status, "providers": provs, "ok": ok, "detail": detail, "choices": b.choices})
+        out.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "art": b.art, "name": b.short, "status": b.status, "providers": provs, "ok": ok, "detail": detail, "choices": b.choices})
     return out
 
 

@@ -8,13 +8,13 @@
   <tr>
     <td>{{ r.member }}</td>
     {% if r.main %}
-    <td class="{{ r.main.cls }}"><img class="ico" src="/img/class/{{ r.main.cls }}.png" alt=""> {{ r.main.name or r.main.cls ~ ' (unnamed)' }}</td>
+    <td class="{{ r.main.cls }}"><img class="ico" src="{{ ico_url('class', r.main.cls) }}" alt=""> {{ r.main.name or r.main.cls ~ ' (unnamed)' }}</td>
     <td>{{ r.main.spec }}{% if r.main.offspec %}/{{ r.main.offspec }}{% endif %}</td>
-    <td><img class="ico" src="/img/role/{{ r.role }}.png" alt=""> {{ r.role }}</td><td>{{ r.main.rank }}</td><td>{{ r.main.rosters|join(', ') or '—' }}</td><td>{{ r.main.status }}</td>
+    <td><img class="ico" src="{{ ico_url('role', r.role) }}" alt=""> {{ r.role }}</td><td>{{ r.main.rank }}</td><td>{{ r.main.rosters|join(', ') or '—' }}</td><td>{{ r.main.status }}</td>
     {% else %}<td colspan="6" class="muted">no main</td>{% endif %}
-    <td>{% for a in r.alts %}<img class="ico" src="/img/class/{{ a.cls }}.png" alt=""> <span class="{{ a.cls }}">{{ a.name or a.cls }}</span> · {{ a.spec }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    <td>{% for a in r.alts %}<img class="ico" src="{{ ico_url('class', a.cls) }}" alt=""> <span class="{{ a.cls }}">{{ a.name or a.cls }}</span> · {{ a.spec }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
   </tr>
   {% endfor %}
 </table></div>
-<style>.ico { width:20px; height:20px; border-radius:50%; vertical-align:-5px; }</style>
+<style>.ico { width:20px; height:20px; border-radius:4px; vertical-align:-5px; }</style>
 {% endblock %}

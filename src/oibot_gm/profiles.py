@@ -43,6 +43,10 @@ class Buff:
     def colour(self) -> str:
         return self.icon.get("colour", "#98A3B5")
 
+    @property
+    def art(self) -> str | None:
+        return self.icon.get("art")
+
     def provided_by(self, spec: SpecInfo) -> bool:
         return any(p == spec.key or p == f"{spec.cls}:*" for p in self.providers)
 
@@ -121,6 +125,7 @@ class GameProfile:
     items: dict[int, Item]
     known_items: dict[int, str]
     loot: dict[str, Any]
+    icons: dict[str, dict[str, str]] = field(default_factory=dict)  # {classes, roles, specs('Class:Spec')} -> CDN icon names
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
@@ -145,6 +150,7 @@ class GameProfile:
             root=root,
             classes=c["classes"],
             spec_aliases=c.get("spec_aliases", {}),
+            icons=c.get("icons", {}),
             token_groups=c.get("token_groups", {}),
             armor=c.get("armor", {}),
             biscouncil=c.get("biscouncil", {}),
