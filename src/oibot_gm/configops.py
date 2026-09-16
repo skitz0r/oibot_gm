@@ -15,7 +15,8 @@ Guild (owner only): timezone (IANA name), signup_channel (channel mention), ops_
   roster_channel (officer channel for overviews/proposals), officer_role add/remove (role name).
 Rosters (owner only; the ops are still named team_*): team <key> size (10|20|25|40), schedule ('Tue 19:30'),
   instance (raid id), cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders (dm|channel|none),
-  open_dm (true|false: DM everyone when the sheet opens); add/remove roster (team_add/team_remove).
+  open_dm (true|false: DM everyone when the sheet opens), autofill (true|false: between the soft and hard cutoffs the bot DMs
+  subs / pool / other rosters / offspec-alt switches to close gaps); add/remove roster (team_add/team_remove).
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason];
   team_member: add/remove <member> [character] to/from roster <key> (curated roster; defaults to their main).
@@ -175,13 +176,13 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if t is None:
             if op.op == "team_set":
                 raise RegistryError(f"no team {op.team}")
-            t = {"key": op.team, "name": op.team, "size": 20, "schedule": "", "instance": None, "cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm", "open_dm": False}
+            t = {"key": op.team, "name": op.team, "size": 20, "schedule": "", "instance": None, "cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm", "open_dm": False, "autofill": True}
             cfg.rosters.append(t)
         if op.op == "team_set":
             field = op.field or op.path or ""
-            if field not in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "reminders", "name", "open_dm"):
+            if field not in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "reminders", "name", "open_dm", "autofill"):
                 raise RegistryError(f"unknown team field '{field}'")
-            if field == "open_dm":
+            if field in ("open_dm", "autofill"):
                 op.value = "true" if str(op.value).lower() in ("true", "yes", "on", "1") else "false"
             if field == "schedule":
                 from .raidcycle import parse_schedule
@@ -189,7 +190,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
                 parse_schedule(op.value or "")
             if field == "instance" and op.value not in reg.profile.raids:
                 raise RegistryError(f"unknown instance {op.value}; options: {', '.join(reg.profile.raids)}")
-            t[field] = int(op.value) if str(op.value).isdigit() else (op.value == "true" if field == "open_dm" else op.value)
+            t[field] = int(op.value) if str(op.value).isdigit() else (op.value == "true" if field in ("open_dm", "autofill") else op.value)
         f = op.field or op.path or "added"
         reg.save_config(f"team {op.team} {f} → {op.value} (by {by})")
         return f"team {op.team} {f} = {op.value}"

@@ -340,6 +340,18 @@ Built and running against the shadow guild (see README / CLAUDE.md):
 
 Known gaps: the companion is a Python script, not yet a packaged exe; Forever profile has no items/bosses yet, so `/raid loot` for guild `oi` opens a thread with no loot tables (feed awards still record); attendance from real sheets is not yet fed into loot scoring; instance `tank_needs` and team size can disagree when a team is smaller than the instance (health uses the instance count, the solver the scaled minimum); post-lock replacement flow and Gargul export string not built.
 
+### 5.16 Filling gaps: bench, subs, offspec and alt swaps (built 2026-09-15)
+
+Between the soft cutoff (health check) and the hard cutoff (lock), a roster with `autofill: true` (default) has the bot close its own gaps by DM, one small batch at a time, so officers only see the summary:
+
+1. `raidcycle.needs` reads the health check: headcount short by N, tanks/healers under the scaled minimum.
+2. `raidcycle.fill_candidates` orders who to ask. Role gaps first: a **sub** of that role already on the sheet → a **roster-pool member who hasn't answered** → a **member of another roster** who is free that night (not In/Tentative on a raid within ±4 h, not absent, availability not `out`, ranked core → raider → trial) → an In player's **offspec** in that role → an In player's **alt** in that role. Then plain headcount through the same sub → pool → other-roster tiers. People already asked, opted out of DMs, or double-booked are skipped.
+3. `fill_batch` sends shortfall + 1 asks, never more than 3 outstanding. Each DM says what is short and what they'd play, with **Yes, count me in / Can't this time** buttons (`FillButton`, persistent, answerable only by the person asked).
+4. Yes → they're on the sheet as asked (`source: fill`; offspec switches the signup's spec/role; alt signs the alt), the sheet refreshes, the roster channel gets `🧩 <raid>: X is in as Y (healer) · still short 1` (or **gaps filled**). No → the next candidate is asked immediately. After lock, a yes posts "run `/raid lock` to re-propose".
+5. A **callout** after the health check triggers a replacement ask straight away. `/raid fill roster:<key>` runs a batch on demand; `preview:true` shows the ordered list, the outstanding asks and who is double-booked without sending anything. The health card shows **Double-booked** and **Fill** (asked / filled) fields.
+
+Two 10-mans on the same night are handled by the conflict check (a member In on roster A is never asked to fill B) and by the per-roster analytics; `/roster add` places a main on exactly one of them.
+
 ## 6. Architecture
 
 ```mermaid

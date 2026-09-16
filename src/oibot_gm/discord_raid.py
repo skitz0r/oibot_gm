@@ -59,7 +59,7 @@ def sheet_embed(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.Emb
     return e
 
 
-def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[discord.Embed, discord.File]:
+def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico, rs=None) -> tuple[discord.Embed, discord.File]:
     """Image card + a one-line embed. Numbers are in the image; the embed carries the level and the next timers."""
     h = rc.health_data(reg, ev, team)
     levels = [h["headcount_level"]] + [r["level"] for r in h["roles"] if r["need"]]
@@ -76,6 +76,15 @@ def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[disco
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
         e.add_field(name="Missing buffs", value=" ".join(f"{ico('buff', b['id'])}" for b in missing) + "\n" + ", ".join(b["name"] for b in missing)[:900], inline=False)
+    if rs is not None:
+        busy = rc.conflicts(rs, ev)
+        double = [f"{reg.members[u].display_name} ({k})" for u, k in busy.items() if u in reg.members and str(u) in ev.signups and ev.signups[str(u)].status in ("in", "tentative")]
+        if double:
+            e.add_field(name="Double-booked", value=", ".join(double)[:900], inline=False)
+        open_asks = [a for a in ev.fill_asks if a.open]
+        answered = [a for a in ev.fill_asks if a.answer == "yes"]
+        if open_asks or answered:
+            e.add_field(name="Fill", value=(f"asked: {', '.join(a.display_name for a in open_asks)}" if open_asks else "") + (f"\nfilled: {', '.join(a.display_name for a in answered)}" if answered else ""), inline=False)
     return e, file
 
 
@@ -124,6 +133,47 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
             await interaction.response.send_message("Which character?", view=view, ephemeral=True)
             return
         await bot.apply_signup(interaction, reg, rs, ev, m, None, self.status)
+
+
+class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill:(?P<key>[A-Za-z0-9_\-]+):(?P<uid>\d+):(?P<answer>yes|no)"):
+    """Yes/No on a fill DM. Survives restarts; only the person asked can answer."""
+
+    def __init__(self, key: str, uid: int, answer: str):
+        super().__init__(discord.ui.Button(label="Yes, count me in" if answer == "yes" else "Can't this time", style=discord.ButtonStyle.success if answer == "yes" else discord.ButtonStyle.secondary, custom_id=f"fill:{key}:{uid}:{answer}"))
+        self.key, self.uid, self.answer = key, uid, answer
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["key"], int(match["uid"]), match["answer"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("That question was for someone else.", ephemeral=True)
+            return
+        reg = bot.registries.for_interaction(interaction)
+        rs = bot.raids.store(reg) if reg else None
+        ev = rs.events.get(self.key) if rs else None
+        if not ev or ev.state in ("done", "cancelled"):
+            await interaction.response.send_message("That raid is closed — thanks anyway.", ephemeral=True)
+            return
+        ask = next((a for a in ev.fill_asks if a.discord_id == self.uid and a.open), None)
+        if not ask:
+            await interaction.response.send_message("Already answered (or the gap was filled).", ephemeral=True)
+            return
+        line = rc.apply_fill_answer(reg, rs, ev, ask, self.answer == "yes")
+        try:
+            await interaction.response.edit_message(content=interaction.message.content + f"\n\n**→ {line}**", view=None)
+        except Exception:  # noqa: BLE001
+            await interaction.response.send_message(line, ephemeral=True)
+        await bot.after_fill_answer(reg, rs, ev, ask, line)
+
+
+def fill_view(key: str, uid: int) -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(FillButton(key, uid, "yes"))
+    v.add_item(FillButton(key, uid, "no"))
+    return v
 
 
 def sheet_view(key: str) -> discord.ui.View:
@@ -191,7 +241,7 @@ class RaidMixin:
 
     async def post_health(self, reg, rs, ev, channel, nudge: bool) -> None:
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-        embed, file = await asyncio.to_thread(health_card, reg, ev, team, self.ico)
+        embed, file = await asyncio.to_thread(health_card, reg, ev, team, self.ico, rs)
         await channel.send(embed=embed, file=file)
         if nudge and rc.team_setting(team, "reminders") != "none":
             targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
@@ -207,6 +257,58 @@ class RaidMixin:
                 rs.save(ev, f"nudged {len(targets)}")
         ev.health_posted = True
         rs.save(ev, "health posted")
+
+    # ---- filling gaps by DM
+    async def run_fill(self, reg, rs, ev, team, by: str = "scheduler") -> tuple[list, dict]:
+        """Send the next batch of fill DMs. Returns (asks sent, needs)."""
+        nd = rc.needs(reg, ev, team)
+        if not nd["headcount"] and not nd["roles"]:
+            if ev.fill_state == "asking":
+                ev.fill_state = "filled"
+                rs.save(ev, "fill: complete")
+            return [], nd
+        batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team)
+        unix = int(ev.start.timestamp())
+        name = f"{reg.config.name} · {team.get('name', ev.team)}"
+        sent = []
+        for ask in batch:
+            what = {
+                "sub": f"you signed as a sub — can you come as **{ask.character}** ({ask.spec})?",
+                "pool": f"you haven't answered the sheet — can you come as **{ask.character}** ({ask.spec})?",
+                "other_roster": f"could you help out on **{ask.character}** ({ask.spec})?",
+                "offspec": f"would you play **{ask.spec}** on {ask.character} instead of your main spec?",
+                "alt": f"could you bring your alt **{ask.character}** ({ask.spec}) instead?",
+            }[ask.kind]
+            text = f"**{name}** raid <t:{unix}:F> (<t:{unix}:R>) is {ask.reason.replace('short', 'short')} — {what}" + (f"\nSheet: <#{ev.channel_id}>" if ev.channel_id else "")
+            try:
+                user = await self.fetch_user(ask.discord_id)
+                await user.send(text, view=fill_view(ev.key, ask.discord_id))
+                ev.fill_asks.append(ask)
+                sent.append(ask)
+            except Exception:  # noqa: BLE001
+                ask.answer, ask.answered_at = "expired", rc.now()
+                ev.fill_asks.append(ask)
+        if sent:
+            ev.fill_state = "asking"
+            ev.log.append(f"fill ({by}): asked {', '.join(a.display_name for a in sent)}")
+            rs.save(ev, f"fill asked {len(sent)}")
+        elif not [a for a in ev.fill_asks if a.open]:
+            ev.fill_state = "exhausted"
+            rs.save(ev, "fill: nobody left to ask")
+        return sent, nd
+
+    async def after_fill_answer(self, reg, rs, ev, ask, line: str) -> None:
+        await self.refresh_sheet(reg, ev)
+        cfg = reg.config
+        team = cfg.team(ev.team) or {"key": ev.team, "size": 20}
+        officer_ch = self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else (self.get_channel(ev.channel_id) if ev.channel_id else None)
+        nd = rc.needs(reg, ev, team)
+        still = (f"still short {nd['headcount']}" if nd["headcount"] else "") + ("".join(f", {n} {r}" for r, n in nd["roles"].items()))
+        if officer_ch:
+            await officer_ch.send(f"🧩 {ev.key}: {line}" + (f" · {still.strip(', ')}" if still else " · **gaps filled**") + (" · run `/raid lock` to re-propose" if ev.state != "open" and ask.answer == "yes" else ""))
+        await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
+        if ask.answer == "no" and ev.state == "open":
+            await self.run_fill(reg, rs, ev, team, by="answer")
 
     async def lock_and_propose(self, reg, rs, ev, channel) -> None:
         ev.state = "locked"
@@ -273,6 +375,15 @@ class RaidMixin:
                 if ev.state == "open" and not ev.health_posted and now >= ev.start - timedelta(hours=rc.team_setting(team, "cutoff_soft_hours")):
                     await self.post_health(reg, rs, ev, officer_ch, nudge=True)
                     await self.ops.emit(cfg, "info", f"{ev.key}: health check posted, nudged {len(ev.nudged)}")
+                if ev.state == "open" and ev.health_posted and rc.team_setting(team, "autofill") and ev.fill_state in ("idle", "asking"):
+                    # between the soft and hard cutoffs: keep asking the next candidates until the gaps close
+                    sent, nd = await self.run_fill(reg, rs, ev, team)
+                    if sent:
+                        await officer_ch.send(f"🧩 {ev.key}: short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()) + " — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+                    elif ev.fill_state == "exhausted" and "fill exhausted" not in ev.log:
+                        ev.log.append("fill exhausted")
+                        rs.save(ev, "fill exhausted")
+                        await officer_ch.send(f"🧩 {ev.key}: nobody left to ask — short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()))
                 if ev.state == "open" and now >= ev.start - timedelta(hours=rc.team_setting(team, "cutoff_hard_hours")):
                     await self.lock_and_propose(reg, rs, ev, officer_ch)
                     if officer_ch is not ch:
@@ -364,7 +475,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if not ev:
             await interaction.response.send_message("No open sheet.", ephemeral=True)
             return
-        embed, file = await asyncio.to_thread(health_card, reg, ev, t, bot.ico)
+        embed, file = await asyncio.to_thread(health_card, reg, ev, t, bot.ico, rs)
         await interaction.response.send_message(embed=embed, file=file, ephemeral=not is_officer(interaction, reg))
 
     @raid.command(name="lock", description="Officer: lock signups now and propose a roster")
@@ -512,5 +623,35 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if ch:
             await ch.send(f"⚑ {m.display_name} ({co.character}) called out for {ev.key}, {co.hours_before:.0f}h before" + (" — **after lock**" if co.late else "") + (f": {note}" if note else ""))
         await ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {ev.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else ""))
+        if rc.team_setting(t, "autofill") and ev.health_posted:
+            sent, nd = await bot.run_fill(reg, rs, ev, t, by="callout")
+            officer_ch = bot.get_channel(reg.config.roster_channel_id) if reg.config.roster_channel_id else ch
+            if sent and officer_ch:
+                await officer_ch.send(f"🧩 {ev.key}: replacement for {m.display_name} — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+
+    @raid.command(name="fill", description="Officer: ask the next best people to cover the sheet's gaps (subs, pool, other rosters, offspec/alt)")
+    @app_commands.autocomplete(roster=roster_autocomplete)
+    @app_commands.describe(preview="only show who would be asked")
+    async def raid_fill(interaction: discord.Interaction, roster: str | None = None, preview: bool = False):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        rs, ev, t = current_event(reg, roster)
+        if not ev:
+            await interaction.response.send_message("No live raid for that roster.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        nd = rc.needs(reg, ev, t)
+        gaps = (f"short {nd['headcount']}" if nd["headcount"] else "headcount ok") + "".join(f" · {n} {r} short" for r, n in nd["roles"].items())
+        busy = rc.conflicts(rs, ev)
+        if preview:
+            cands = await asyncio.to_thread(rc.fill_candidates, reg, rs, ev, t)
+            lines = [f"{i + 1}. {a.display_name} — {a.kind}: {a.character} ({a.spec}, {a.role}) for {a.reason}" for i, a in enumerate(cands[:15])]
+            open_asks = [a for a in ev.fill_asks if a.open]
+            await interaction.followup.send(f"**{ev.key}** · {gaps}" + (f" · double-booked: {', '.join(reg.members[u].display_name for u in busy if u in reg.members)}" if busy else "") + f"\nOutstanding asks: {', '.join(a.display_name for a in open_asks) or 'none'}\nWould ask next:\n" + ("\n".join(lines) or "nobody left"), ephemeral=True)
+            return
+        sent, nd = await bot.run_fill(reg, rs, ev, t, by=interaction.user.display_name)
+        await interaction.followup.send(f"**{ev.key}** · {gaps}\n" + ("Asked: " + ", ".join(f"{a.display_name} ({a.kind}: {a.character})" for a in sent) if sent else ("Nothing to fill." if not (nd["headcount"] or nd["roles"]) else "Nobody left to ask (or the asks outstanding already cover it).")), ephemeral=True)
+        await ops.emit(reg.config, "info", f"{interaction.user.display_name} ran fill for {ev.key}: asked {len(sent)}")
 
     tree.add_command(raid)

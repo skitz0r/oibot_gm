@@ -32,8 +32,9 @@ src/oibot_gm/
                        Rosters are first-class: config `rosters[]` (key/size/schedule/instance/cutoffs), membership lives on characters (`RegisteredCharacter.rosters`),
                        raids are opened for a roster, officer posts go to `roster_channel_id`. Internal helpers still say "team" (aliases) — don't rename them casually.
                        /gm status|config …(owner: ops/applications/registration/analytics/roster/signup channels, roster, officer-role, timezone)|change|policy …|rule loot|comp; /raid … (discord_raid.py); /mock … (demo)
-  raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM
-  discord_raid.py      sheets with persistent DynamicItem buttons, /raid, /callout, scheduler loop (RaidMixin on the client)
+  raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM;
+                       fill engine (needs → fill_candidates → fill_batch → apply_fill_answer; conflicts across rosters)
+  discord_raid.py      sheets with persistent DynamicItem buttons, /raid (incl. /raid fill), FillButton DMs, scheduler loop (RaidMixin on the client)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with the character
                        bank, and per roster: pool readiness, optimised groups (solver on the pool, totem picks, raid buffs), desired comp

@@ -955,7 +955,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @config.command(name="roster", description="Owner: add/update a roster (size, schedule like 'Tue 19:30', instance, cutoffs)")
     @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="'Tue 19:30' in the guild's timezone", instance="raid from the game profile", soft_cutoff="hours before raid: health check + nudges", hard_cutoff="hours before raid: lock + propose", open_days="days before the raid to open the sheet")
     @app_commands.autocomplete(instance=instance_autocomplete)
-    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, open_dm: bool = False, remove: bool = False):
+    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, open_dm: bool = False, autofill: bool = True, remove: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -976,7 +976,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         teams = [t for t in reg.config.raid_teams if t["key"] != key]
         if not remove:
-            teams.append({"key": key, "name": key, "size": size, "schedule": schedule, "instance": instance, "cutoff_soft_hours": soft_cutoff, "cutoff_hard_hours": hard_cutoff, "open_days_before": open_days, "reminders": "dm", "open_dm": open_dm})
+            teams.append({"key": key, "name": key, "size": size, "schedule": schedule, "instance": instance, "cutoff_soft_hours": soft_cutoff, "cutoff_hard_hours": hard_cutoff, "open_days_before": open_days, "reminders": "dm", "open_dm": open_dm, "autofill": autofill})
         reg.config.raid_teams = teams
         reg.save_config(f"rosters: {[t['key'] for t in teams]}")
         await interaction.response.send_message("✅ Rosters: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'}, lock {t.get('cutoff_hard_hours', 24)}h)" for t in teams) or "none (default 'main')"), ephemeral=True)
