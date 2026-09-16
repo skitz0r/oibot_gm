@@ -11,11 +11,11 @@
   <div class="panel">
     <h3 style="margin-top:0">{{ sh.name }} <span class="muted">· {{ sh.instance or 'no instance' }} · {{ sh.slot }} · {{ result.rosters[sh.key]|length }}/{{ sh.size }}</span></h3>
     {% if result.shortfalls.get(sh.key) %}<p class="bad">short: {% for r, n in result.shortfalls[sh.key].items() %}{{ n }} {{ r }} {% endfor %}</p>{% endif %}
-    <table>
+    <div class="tbl"><table>
       {% for s in result.rosters[sh.key] %}
       <tr><td class="muted">{{ s.role }}</td><td class="{{ s.cls }}">{{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.spec }} · {{ s.reasons|join(', ') }}</td></tr>
       {% endfor %}
-    </table>
+    </table></div>
   </div>
 {% endfor %}
 </div>
