@@ -1,7 +1,41 @@
-# WoW: Forever raids (announced 2026-09-12; open 2026-12-09). Bosses and loot
-# tables are not published yet — placeholders. Encounter ids TBD.
-# lockout_days: how often a character can run it (10-mans may move to 3; unconfirmed).
+# WoW: Forever raids (roadmap 2026-09-12; raids unlock 2026-12-09). A *raid* is the instance and its rules;
+# a guild *roster* is a scheduled run of one. Guild overrides for any of these fields live in the guild's
+# config (`raids:` in guild.yaml, set with /gm config raid or on the site) and win over the defaults here.
+#
+# lockout_days:   how often one character can run it. Seeds: 20-man weekly; 10-man 3 days (Classic's
+#                 ZG/AQ20 cadence, unconfirmed for Forever); Onyxia 5 days (Classic Onyxia's cadence).
+# duration_hours: expected run length; availability grids are checked for the whole window.
+# comp:           desired role counts for a full run — {min, max} per role; the solver, health check and
+#                 desired-comp card use these instead of the generic comp_rules when present.
+# bosses / loot:  not published; discovered in game after unlock.
 raids:
-  - {id: barrow_deeps, name: Barrow Deeps, size: 10, lockout_days: 7, duration_hours: 3, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
-  - {id: hyjal_summit_forever, name: Hyjal Summit, size: 20, lockout_days: 7, duration_hours: 3, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
-  - {id: onyxias_lair, name: "Onyxia's Lair", size: 40, lockout_days: 7, duration_hours: 3, wcl_zone: null, tank_needs: {count: 3, note: "TBD"}, bosses: []}
+  - id: barrow_deeps
+    name: Barrow Deeps
+    size: 10
+    lockout_days: 3
+    duration_hours: 2.5
+    wcl_zone: null
+    comp: {tank: {min: 2, max: 2}, healer: {min: 2, max: 3}, dps: {min: 5, max: 6}}
+    tank_needs: {count: 2, note: "guess: two tanks for a 10-player instance until encounters are known"}
+    notes: "10-player. Lockout and comp are guesses until the beta datamine or launch says otherwise."
+    bosses: []
+  - id: hyjal_summit_forever
+    name: Hyjal Summit
+    size: 20
+    lockout_days: 7
+    duration_hours: 3
+    wcl_zone: null
+    comp: {tank: {min: 2, max: 3}, healer: {min: 5, max: 6}, dps: {min: 11, max: 13}}
+    tank_needs: {count: 2, note: "guess: 2–3 tanks; adjust once fights are known"}
+    notes: "20-player, weekly."
+    bosses: []
+  - id: onyxias_lair
+    name: "Onyxia's Lair"
+    size: 40
+    lockout_days: 5
+    duration_hours: 1.5
+    wcl_zone: null
+    comp: {tank: {min: 3, max: 4}, healer: {min: 8, max: 10}, dps: {min: 26, max: 29}}
+    tank_needs: {count: 3, note: "Classic Onyxia: main tank plus off-tanks for the whelps/phase 3 fears"}
+    notes: "40-player; Classic Onyxia reset every 5 days and took about an hour."
+    bosses: []

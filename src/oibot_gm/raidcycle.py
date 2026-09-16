@@ -359,12 +359,12 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
     """Structured health check: headcount, per-role tiles, per-buff providers, non-responders."""
     profile = reg.profile
     ins, tent, subs = ev.by_status("in"), ev.by_status("tentative"), ev.by_status("sub")
-    size = int(team.get("size", 20))
-    bounds = solver.scaled_role_bounds(profile.comp_rules, size)
+    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+    bounds = reg.role_bounds(ev.instance, size)
     counts = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer", "melee", "ranged")}
     flex = {r: sum(1 for s in tent + subs if s.role == r) for r in counts}
     need = {
-        "tank": (profile.raids.get(ev.instance or "", {}).get("tank_needs", {}) or {}).get("count") or bounds["tank"]["min"],
+        "tank": bounds["tank"]["min"],
         "healer": bounds["healer"]["min"],
         "melee": 0,
         "ranged": 0,
@@ -440,7 +440,8 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[Player], 
     players = players_for(reg, ev)
     raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
     team = reg.config.team(ev.team) or {}
-    size = int(team.get("size") or reg.profile.raids.get(raid_id, {}).get("size") or reg.profile.comp_rules["raid_size"])
+    size = int(team.get("size") or reg.raid_def(raid_id).get("size") or reg.profile.comp_rules["raid_size"])
+    rb = reg.role_bounds(raid_id, size)
     # standing instructions (confirmed compiled comp policy) → solver constraints
     from .policy import PolicyStore
 
@@ -455,7 +456,7 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[Player], 
         force_in=tuple(x for x in (resolve(n) for n in cc["never_bench"]) if x),
         force_out=tuple(x for x in (resolve(n) for n in cc["always_bench"]) if x),
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
-        role_min=cc["role_min"] or None,
+        role_min=cc["role_min"] or {r: rb[r]["min"] for r in ("tank", "healer") if rb[r]["min"]} or None,
     )
     result = solver.solve(reg.profile, players, raid_id, opts)
     result = explain.annotate(reg.profile, players, raid_id, result, whatif=len(players) <= 30)

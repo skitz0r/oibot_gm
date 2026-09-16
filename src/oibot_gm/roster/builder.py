@@ -74,13 +74,13 @@ def shells_from_config(reg: Registry) -> list[Shell]:
             start = next_raid_time(t["schedule"], reg.config.timezone)
         except ValueError:
             continue
-        sh = Shell(key=t["key"], name=t.get("name", t["key"]), instance=t.get("instance"), size=int(t.get("size") or 20), start=start, slot=t["schedule"])
+        sh = Shell(key=t["key"], name=t.get("name", t["key"]), instance=t.get("instance"), size=int(t.get("size") or reg.raid_def(t.get("instance")).get("size") or 20), start=start, slot=t["schedule"])
         out.append(sh)
     return out
 
 
-def _lockout_days(profile: GameProfile, instance: str | None) -> int:
-    return int((profile.raids.get(instance or "", {}) or {}).get("lockout_days", 7))
+def _lockout_days(reg: Registry, instance: str | None) -> int:
+    return int(reg.raid_def(instance).get("lockout_days", 7))
 
 
 def recent_runs(reg: Registry, rs, shells: list[Shell]) -> dict[tuple[str, str], set[str]]:
@@ -95,7 +95,7 @@ def recent_runs(reg: Registry, rs, shells: list[Shell]) -> dict[tuple[str, str],
         for sh in shells:
             if sh.instance != ev.instance or ev.team == sh.key and ev.start == sh.start:
                 continue
-            days = _lockout_days(reg.profile, ev.instance)
+            days = _lockout_days(reg, ev.instance)
             if sh.start - timedelta(days=days) < ev.start <= sh.start:
                 for p in ev.roster.selected:
                     locked.setdefault((p.character or p.signup_name, ev.instance), set()).add(sh.key)
@@ -150,7 +150,7 @@ def build(reg: Registry, rs, shells: list[Shell] | None = None, need_fn=None, ti
         why = []
         for sh in shells:
             day = sh.start.date().isoformat()
-            hours = float((profile.raids.get(sh.instance or "", {}) or {}).get("duration_hours", 3))
+            hours = float(reg.raid_def(sh.instance).get("duration_hours", 3))
             pref = reg.slot_pref(mm, sh.start, hours, sh.slot)
             if pref == "no":
                 why.append(f"{sh.key}: not available then")
@@ -216,7 +216,7 @@ def build(reg: Registry, rs, shells: list[Shell] | None = None, need_fn=None, ti
     for sh in shells:
         seats = [x[k] for k in x if k[2] == sh.key]
         m.Add(sum(seats) <= sh.size)
-        bounds = solver.scaled_role_bounds(profile.comp_rules, sh.size)
+        bounds = reg.role_bounds(sh.instance, sh.size)
         for role in ("tank", "healer"):
             have = [x[k] for k in x if k[2] == sh.key and meta[k][2] == role]
             short = m.NewIntVar(0, sh.size, f"short_{sh.key}_{role}")

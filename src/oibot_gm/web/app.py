@@ -316,7 +316,8 @@ def create_app(bot) -> FastAPI:
         instances = list(reg.profile.raids)
         return page(request, "admin.html", v, rows=rows, rosters=rosters, ranks=("trial", "raider", "core", "alt", "social"), instances=instances, owner=v.owner,
                     slots=reg.config.slots, heat=reg.slot_summary(), week_heat=reg.week_heat(), tz=reg.config.timezone,
-                    grid_members=sum(1 for m in reg.members.values() if m.main and m.week))
+                    grid_members=sum(1 for m in reg.members.values() if m.main and m.week),
+                    raids=[{"id": rid, "eff": reg.raid_def(rid), "over": reg.config.raids.get(rid, {})} for rid in reg.profile.raids])
 
     def _cfg_op(v: Viewer, **kw):
         from .. import configops
@@ -380,6 +381,34 @@ def create_app(bot) -> FastAPI:
     @app.post("/admin/roster/remove")
     async def admin_roster_remove(request: Request):
         return await mutate(request, "/admin", lambda v, d: _cfg_op(v, op="team_remove", team=d["key"]), officer=True)
+
+    @app.post("/admin/raid")
+    async def admin_raid(request: Request):
+        def go(v, d):
+            if not v.owner:
+                raise ValueError("Owner only.")
+            inst = d["instance"]
+            done = []
+            cur = v.reg.raid_def(inst)
+            for f in ("lockout_days", "duration_hours", "notes"):
+                val = d.get(f, "")
+                if val != "" and str(val) != str(cur.get(f, "")):
+                    done.append(v.reg.set_raid_override(inst, f, val, v.name))
+            for role in ("tank", "healer", "dps"):
+                for bound in ("min", "max"):
+                    val = d.get(f"{role}_{bound}", "")
+                    if val != "" and str(val) != str(((cur.get("comp") or {}).get(role) or {}).get(bound, "")):
+                        done.append(v.reg.set_raid_override(inst, f"{role}_{bound}", val, v.name))
+            return "; ".join(done) or f"{inst}: no changes"
+        return await mutate(request, "/admin", go, officer=True)
+
+    @app.post("/admin/raid/reset")
+    async def admin_raid_reset(request: Request):
+        def go(v, d):
+            if not v.owner:
+                raise ValueError("Owner only.")
+            return v.reg.clear_raid_override(d["instance"], v.name)
+        return await mutate(request, "/admin", go, officer=True)
 
     @app.post("/admin/comp/target")
     async def admin_comp_target(request: Request):
@@ -447,7 +476,7 @@ def create_app(bot) -> FastAPI:
         for t in reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]:
             h = pool_health_data(reg, t)
             members = reg.roster_members(t["key"])
-            ic = comp_mod.ideal_comp(reg.profile, int(t.get("size") or 20), comp_mod.pool_players(reg), t.get("comp_targets") or {}, t.get("instance"))
+            ic = comp_mod.ideal_comp(reg.profile, int(t.get("size") or 20), comp_mod.pool_players(reg), t.get("comp_targets") or {}, t.get("instance"), reg)
             out.append({"t": t, "health": h, "members": members, "comp": ic})
         return page(request, "rosters.html", v, rosters=out)
 
@@ -527,7 +556,7 @@ def create_app(bot) -> FastAPI:
                 return render.groups_png(reg.profile, players, result, cov, rb, f"Optimised groups · {t.get('name', key)} ({t.get('size', 20)}-man)", f"{len(result.selected)} of {len(players)} mains placed", reg.profile.buff_assumptions(), labels)
             if kind == "comp":
                 players = comp_mod.pool_players(reg)
-                ic = comp_mod.ideal_comp(reg.profile, int(t.get("size") or 20), players, t.get("comp_targets") or {}, t.get("instance"))
+                ic = comp_mod.ideal_comp(reg.profile, int(t.get("size") or 20), players, t.get("comp_targets") or {}, t.get("instance"), reg)
                 return render.comp_png(ic.lines, f"Desired comp · {t.get('name', key)} ({ic.size}-man, {ic.groups} groups)", "derived from the buff matrix and comp rules", ic.notes)
             if kind == "health":
                 rs = bot.raids.store(reg)

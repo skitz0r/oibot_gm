@@ -27,6 +27,8 @@ Comp ideals (officer): comp_target: team=<roster key>, field=<slot: a role tank|
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
   reason=<optional note, the justification shown on the desired-comp card>.
   comp_target_clear (team, field) removes an officer target so the derived value applies again.
+  raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<lockout_days|duration_hours|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
+  raid_reset (owner): team=<raid id> — drop the guild's overrides for that raid.
   comp_groups: team=<roster key>, value=<comma-separated group labels in order, e.g. "tank, healers, melee, casters">
   — the archetype layout the group optimiser seeds (labels may combine: "tank/heal", "melee+ranged"); empty value = default layout.
 """
@@ -35,7 +37,7 @@ Comp ideals (officer): comp_target: team=<roster key>, field=<slot: a role tank|
 class ConfigOp(BaseModel):
     # Keep this schema small: the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear, comp_groups")
+    op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|ask_audience|about|slots")
     team: Optional[str] = Field(default=None, description="team key for team_* ops, availability and comp_target*")
     field: Optional[str] = Field(default=None, description="team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders; comp_target*: the slot (role, Class or Class:Spec)")
@@ -74,7 +76,7 @@ def parse(provider: Provider, reg: Registry, text: str) -> ConfigRequest:
     return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg) + "\n\n## Request\n" + text, ConfigRequest)
 
 
-OWNER_OPS = {"set", "team_set", "team_add", "team_remove", "role_add", "role_remove"}
+OWNER_OPS = {"set", "team_set", "team_add", "team_remove", "role_add", "role_remove", "raid_set", "raid_reset"}
 
 
 def _member(reg: Registry, ref: str | None):
@@ -140,6 +142,13 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         key = op.team or reg.config.team_keys()[0]
         cur = (cfg.team(key) or {}).get("comp_groups") or []
         return f"roster {key} group layout: {', '.join(cur) if cur else 'default'} → {op.value or 'default'}"
+    if op.op == "raid_set":
+        rd = reg.raid_def(op.team)
+        f = op.field or ""
+        cur = rd.get(f) if f in ("lockout_days", "duration_hours", "notes") else ((rd.get("comp") or {}).get(f.split("_")[0], {}) or {}).get(f.split("_")[-1]) if "_" in f else "?"
+        return f"raid {op.team} {f}: {cur if cur is not None else '—'} → {op.value}"
+    if op.op == "raid_reset":
+        return f"raid {op.team}: overrides {cfg.raids.get(op.team or '', {}) or 'none'} → profile defaults"
     if op.op in ("comp_target", "comp_target_clear"):
         key = op.team or reg.config.team_keys()[0]
         slot = op.field or op.path or ""
@@ -254,6 +263,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             return f"{m.display_name} removed from {key}"
         _, c = reg.roster_add(m.discord_id, key, by, op.character)
         return f"{m.display_name} ({c.label}) added to {key}"
+    if op.op == "raid_set":
+        return reg.set_raid_override(op.team or "", op.field or "", op.value, by)
+    if op.op == "raid_reset":
+        return reg.clear_raid_override(op.team or "", by)
     if op.op == "comp_groups":
         key = op.team or cfg.team_keys()[0]
         t = cfg.team(key)

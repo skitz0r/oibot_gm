@@ -127,6 +127,8 @@ class GuildConfig(BaseModel):
     officer_roles: list[str] = Field(default_factory=list)
     # rosters: {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders, open_dm}
     rosters: list[dict] = Field(default_factory=list)
+    # raids: guild overrides per instance id over profiles/<game>/raids.yaml: {lockout_days, duration_hours, comp: {tank/healer/dps: {min,max}}, notes}
+    raids: dict[str, dict] = Field(default_factory=dict)
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -263,15 +265,13 @@ def bank_rows(reg: "Registry") -> list[dict]:
 def pool_health_data(reg: "Registry", roster: dict) -> dict:
     """Readiness of the *potential* pool (every planned/active main) against a roster's size, in the same
     shape as raidcycle.health_data so it renders through render.health_png. No sheet involved."""
-    from .roster.solver import scaled_role_bounds
-
     profile = reg.profile
-    size = int(roster.get("size") or 20)
+    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or 20)
     key = roster.get("key", "main")
     mains = [(m, m.main) for m in reg.members.values() if m.main]
     on_roster = [(m, c) for m, c in mains if key in c.rosters]
     alts = [(m, c) for m in reg.members.values() for c in m.active() if not c.is_main]
-    bounds = scaled_role_bounds(profile.comp_rules, size)
+    bounds = reg.role_bounds(roster.get("instance"), size)
 
     def role_of(m: Member, c: RegisteredCharacter) -> str:
         return reg.roles_of(m)[0] or profile.spec(c.cls, c.spec).role
@@ -490,6 +490,79 @@ class Registry:
         c.name, c.status, c.updated_at = name, "active", now()
         self.save(m, f"{m.display_name} named planned {slot} → {name}")
         return m, c
+
+    # ---- raids (instances) = defaults from the game profile + guild overrides
+    RAID_FIELDS = ("lockout_days", "duration_hours", "notes")
+
+    def raid_def(self, instance: str | None) -> dict:
+        """Effective raid definition: profile raids.yaml merged with guild overrides (comp merged per role)."""
+        base = dict(self.profile.raids.get(instance or "", {}) or {})
+        over = self.config.raids.get(instance or "", {}) if instance else {}
+        out = {**base}
+        for k, v in over.items():
+            if k == "comp":
+                comp = {r: dict(b) for r, b in (base.get("comp") or {}).items()}
+                for r, b in (v or {}).items():
+                    comp[r] = {**comp.get(r, {}), **b}
+                out["comp"] = comp
+            else:
+                out[k] = v
+        out.setdefault("lockout_days", 7)
+        out.setdefault("duration_hours", 3)
+        return out
+
+    def role_bounds(self, instance: str | None, size: int) -> dict[str, dict[str, int]]:
+        """tank/healer/dps {min,max} for a run: the raid's desired comp when it has one (scaled if the roster
+        size differs from the raid's), else the generic comp_rules scaled to the size."""
+        from .roster.solver import scaled_role_bounds
+
+        rd = self.raid_def(instance)
+        comp = rd.get("comp")
+        if comp and comp.get("tank") and comp.get("healer"):
+            f = size / int(rd.get("size") or size or 1) if rd.get("size") else 1.0
+            out = {}
+            for role in ("tank", "healer", "dps"):
+                b = comp.get(role) or {}
+                lo, hi = int(b.get("min", 0)), int(b.get("max", size))
+                out[role] = {"min": max(0, round(lo * f)), "max": max(1, round(hi * f))}
+            return out
+        b = scaled_role_bounds(self.profile.comp_rules, size)
+        return {"tank": b["tank"], "healer": b["healer"], "dps": {"min": 0, "max": size}}
+
+    def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
+        """Owner override for a raid: lockout_days | duration_hours | notes | tank_min/max | healer_min/max | dps_min/max."""
+        if instance not in self.profile.raids:
+            raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+        over = self.config.raids.setdefault(instance, {})
+        if field in ("lockout_days", "duration_hours"):
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                raise RegistryError(f"{field} must be a number")
+            if num <= 0:
+                raise RegistryError(f"{field} must be positive")
+            over[field] = int(num) if field == "lockout_days" else num
+        elif field == "notes":
+            over["notes"] = str(value or "").strip()
+        elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
+            role, bound = field.split("_")
+            try:
+                n = int(value)
+            except (TypeError, ValueError):
+                raise RegistryError(f"{field} must be a whole number")
+            over.setdefault("comp", {}).setdefault(role, {})[bound] = n
+            eff = self.raid_def(instance)["comp"][role]
+            if eff.get("min", 0) > eff.get("max", 999):
+                raise RegistryError(f"{role}: min {eff['min']} above max {eff['max']}")
+        else:
+            raise RegistryError(f"unknown raid field {field}")
+        self.save_config(f"raid {instance} {field} → {value} (by {by})")
+        return f"{instance}: {field} = {value}"
+
+    def clear_raid_override(self, instance: str, by: str) -> str:
+        self.config.raids.pop(instance, None)
+        self.save_config(f"raid {instance} overrides cleared (by {by})")
+        return f"{instance}: back to profile defaults"
 
     def verification(self, discord_id: int) -> str:
         """unregistered | registered (planned/active character) | confirmed (an officer confirmed one)."""

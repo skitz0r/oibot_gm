@@ -747,11 +747,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not s["mains"]:
             await interaction.response.send_message("Nobody has planned a main yet — post the poll with `/roster poll` or use `/me plan main`.", ephemeral=True)
             return
-        from .roster.solver import scaled_role_bounds
-
         team = reg.config.rosters[0] if reg.config.rosters else {}
-        n = size or int(team.get("size") or 20)
-        bounds = scaled_role_bounds(reg.profile.comp_rules, n)
+        n = size or int(team.get("size") or reg.raid_def(team.get("instance")).get("size") or 20)
+        bounds = reg.role_bounds(team.get("instance"), n)
         e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=0x2B7A78)
         for cls, lines in sorted(s["by_class"].items(), key=lambda kv: -len(kv[1])):
             e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
@@ -1056,6 +1054,37 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.config.ask_audience = audience.value
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
+
+    @config.command(name="raid", description="Owner: a raid's rules — lockout days, duration, tank/healer/dps min–max, notes (blank = profile default)")
+    @app_commands.autocomplete(raid=instance_autocomplete)
+    async def cfg_raid(interaction: discord.Interaction, raid: str, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, reset: bool = False):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        try:
+            if reset:
+                msg = [reg.clear_raid_override(raid, interaction.user.display_name)]
+            else:
+                msg = []
+                for field, val in (("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes)):
+                    if val is not None:
+                        msg.append(reg.set_raid_override(raid, field, val, interaction.user.display_name))
+                for role, val in (("tank", tanks), ("healer", healers), ("dps", dps)):
+                    if val:
+                        lo, _, hi = val.replace("–", "-").partition("-")
+                        msg.append(reg.set_raid_override(raid, f"{role}_min", lo.strip(), interaction.user.display_name))
+                        if hi.strip():
+                            msg.append(reg.set_raid_override(raid, f"{role}_max", hi.strip(), interaction.user.display_name))
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        rd = reg.raid_def(raid)
+        comp = rd.get("comp") or {}
+        eff = f"**{rd.get('name', raid)}** · {rd.get('size')}-player · lockout {rd['lockout_days']}d · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items())
+        await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff + (f"\n{rd['notes']}" if rd.get("notes") else ""), ephemeral=True)
 
     @config.command(name="slots", description="Owner: candidate raid times members rate, e.g. 'Tue 19:30, Thu 20:00' (blank clears)")
     async def cfg_slots(interaction: discord.Interaction, times: str = ""):

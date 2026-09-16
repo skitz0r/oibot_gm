@@ -64,7 +64,13 @@ Signing up for a raid is still done on the sheet in Discord.
 - **See everything the bot has on you**: `/me view` or the *My status* button.
 - All `/me` commands also work in a DM with the bot.
 
-## 4. Rosters and the weekly cycle
+## 4. Raids, rosters and the weekly cycle
+
+A **raid** is an instance and its rules: size, lockout cadence, expected duration and the desired tank /
+healer / dps counts. At launch: **Barrow Deeps** (10-player, 3-day lockout guess), **Hyjal Summit**
+(20-player, weekly), **Onyxia's Lair** (40-player, 5-day like Classic). The owner adjusts these as the
+real numbers are learned (`/gm config raid`, Admin → Raids, or plain text); every roster of that raid
+inherits them.
 
 A **roster** is a named run with a size, a schedule ("Tue 19:30" server time), an instance, and cutoffs. A character
 can be on the 20-man and a 10-man as long as the times don't overlap; each raid has its own lockout (weekly for now)

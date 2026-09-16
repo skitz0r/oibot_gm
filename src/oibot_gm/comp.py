@@ -107,16 +107,16 @@ def optimize(reg: Registry, roster: dict, time_limit_s: float = 6.0) -> tuple[li
     tanks and healers together, melee with the Enhancement shaman, hunters, casters. Seeds are soft;
     buff synergy can still move someone. Returns (players, result, coverage, group labels)."""
     players = pool_players(reg)
-    size = int(roster.get("size") or reg.profile.comp_rules["raid_size"])
+    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or reg.profile.comp_rules["raid_size"])
     n_groups = max(1, -(-size // reg.profile.comp_rules["group_size"]))
     labels = archetype_groups(n_groups, roster.get("comp_groups"))
     if not players:
         return players, None, None, labels
     raid_id = roster.get("instance") if roster.get("instance") in reg.profile.raids else next(iter(reg.profile.raids))
-    bounds = solver.scaled_role_bounds(reg.profile.comp_rules, size)
+    bounds = reg.role_bounds(roster.get("instance"), size)
     # the pool is not a sheet: role minimums are advisory, so relax them to what the pool can satisfy
     have = {r: sum(1 for p in players if p.role == r or (p.offspec and reg.profile.spec(p.cls, p.offspec).role == r)) for r in ROLES}
-    role_min = {r: min(bounds[r]["min"], have[r]) for r in bounds}
+    role_min = {r: min(bounds[r]["min"], have[r]) for r in ("tank", "healer")}
     opts = solver.SolveOptions(raid_size=size, role_min=role_min, prefer_group=seed_preferences(reg.profile, players, labels), prefer_weight=12,
                                time_limit_s=time_limit_s, workers=4)
     try:
@@ -172,6 +172,8 @@ class IdealComp:
 
 
 def _count(players: list[Player], key: str, profile: GameProfile) -> int:
+    if key == "dps":
+        return sum(1 for p in players if p.role in ("melee", "ranged"))
     if key in ROLES:
         return sum(1 for p in players if p.role == key)
     if ":" in key:
@@ -190,7 +192,10 @@ def _flex(players: list[Player], key: str, profile: GameProfile) -> list[str]:
             os_ = profile.spec(p.cls, p.offspec)
         except KeyError:
             continue
-        if key in ROLES:
+        if key == "dps":
+            if p.role not in ("melee", "ranged") and os_.role in ("melee", "ranged"):
+                out.append(f"{p.signup_name} ({p.offspec})")
+        elif key in ROLES:
             if p.role != key and os_.role == key:
                 out.append(f"{p.signup_name} ({p.offspec})")
         elif ":" in key:
@@ -200,17 +205,21 @@ def _flex(players: list[Player], key: str, profile: GameProfile) -> list[str]:
     return out
 
 
-def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: dict | None = None, instance: str | None = None) -> IdealComp:
+def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: dict | None = None, instance: str | None = None, reg=None) -> IdealComp:
     """Derived targets: role bounds (scaled), one provider per group for party auras that matter to most
     groups, enough providers for raid buffs (blessings = one per choice). Officer targets override."""
     rules = profile.comp_rules
     groups = -(-size // rules["group_size"])
-    bounds = solver.scaled_role_bounds(rules, size)
+    rd = reg.raid_def(instance) if reg else dict(profile.raids.get(instance or "", {}) or {})
+    from_raid = bool(rd.get("comp"))
+    bounds = reg.role_bounds(instance, size) if reg else solver.scaled_role_bounds(rules, size)
     ic = IdealComp(size=size, groups=groups)
-    tank_note = (profile.raids.get(instance or "", {}).get("tank_needs") or {}).get("note")
-    tanks = (profile.raids.get(instance or "", {}).get("tank_needs") or {}).get("count") or bounds["tank"]["min"]
-    ic.lines.append(CompLine("tank", tanks, 0, f"{'instance needs ' + str(tanks) if tank_note else 'comp rule min'} for a {size}-man" + (f" ({tank_note})" if tank_note else ""), max=bounds["tank"]["max"]))
-    ic.lines.append(CompLine("healer", bounds["healer"]["min"], 0, f"comp rule: {rules['roles']['healer']['min']}/{rules['raid_size']} scaled to {size}", max=bounds["healer"]["max"]))
+    src = f"{rd.get('name', instance)} desired comp" if from_raid else "comp rule"
+    note = (rd.get("tank_needs") or {}).get("note")
+    ic.lines.append(CompLine("tank", bounds["tank"]["min"], 0, f"{src}: {bounds['tank']['min']}–{bounds['tank']['max']} for a {size}-man" + (f" ({note})" if note else ""), max=bounds["tank"]["max"]))
+    ic.lines.append(CompLine("healer", bounds["healer"]["min"], 0, f"{src}: {bounds['healer']['min']}–{bounds['healer']['max']} for a {size}-man", max=bounds["healer"]["max"]))
+    if from_raid and bounds.get("dps", {}).get("min"):
+        ic.lines.append(CompLine("dps", bounds["dps"]["min"], 0, f"{src}: {bounds['dps']['min']}–{bounds['dps']['max']} damage dealers", max=bounds["dps"]["max"]))
     # class wants from the buff matrix: party auras worth having (max benefit ≥ 3) want one provider per group
     # that has beneficiaries; the pool tells us how many such groups there are (else assume by role share)
     wants: dict[str, tuple[int, str]] = {}
@@ -271,8 +280,8 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
         else:
             l.level = "red"
     swaps = [f"{p.signup_name} {p.spec}→{p.offspec} ({profile.spec(p.cls, p.offspec).role})" for p in players if p.offspec and p.offspec != p.spec and p.cls in profile.classes and p.offspec in profile.classes[p.cls] and profile.spec(p.cls, p.offspec).role != p.role]
-    order = {r: i for i, r in enumerate(ROLES)}
-    ic.lines.sort(key=lambda l: (0 if l.key in ROLES else 1, order.get(l.key, 0), -l.want, l.key))
+    order = {r: i for i, r in enumerate(ROLES + ("dps",))}
+    ic.lines.sort(key=lambda l: (0 if l.key in order else 1, order.get(l.key, 0), -l.want, l.key))
     ic.notes = ([f"offspec flexibility ({len(swaps)}): " + ", ".join(swaps[:8]) + ("…" if len(swaps) > 8 else "")] if swaps else ["offspec flexibility: nobody has registered an offspec in another role"]) + profile.buff_assumptions()
     return ic
 

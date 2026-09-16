@@ -62,8 +62,8 @@ def comp_card(reg: Registry, roster: dict) -> tuple[discord.Embed, discord.File]
     """Desired comp for this roster's size vs the pool, with justifications; officer targets from roster config."""
     key = roster.get("key", "main")
     players = comp_mod.pool_players(reg)
-    size = int(roster.get("size") or 20)
-    ic = comp_mod.ideal_comp(reg.profile, size, players, roster.get("comp_targets") or {}, roster.get("instance"))
+    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or 20)
+    ic = comp_mod.ideal_comp(reg.profile, size, players, roster.get("comp_targets") or {}, roster.get("instance"), reg)
     n_off = sum(1 for l in ic.lines if l.source == "officer")
     png = render.comp_png(ic.lines, f"Desired comp · {roster.get('name', key)} ({size}-man, {ic.groups} groups)",
                           f"derived from the buff matrix and comp rules · {n_off} officer target(s) · updated {_stamp()}", ic.notes)
