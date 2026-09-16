@@ -11,8 +11,9 @@
   <form method="post" action="/admin/plan" class="row" style="margin:6px 0 0"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}"><button class="quiet">Plan the next {{ r.eff.lockout_days }} days</button></form></div></div>
 
   {% for p in r.open %}
-  <div class="panel" style="border-color:var(--accent)">
-    <b>Tentative</b> · proposal {{ p.id }} · window {{ p.window_start[:10] }} → {{ p.window_end[:10] }} · {{ p.notes|join(' · ') }}
+  <div class="panel" style="border-color:{{ 'var(--accent)' if p.viable else 'var(--warn)' }}">
+    <b>{{ 'Tentative' if p.viable else 'Best effort — not viable yet' }}</b> · window {{ p.window_start[:10] }} → {{ p.window_end[:10] }} · {{ p.notes|join(' · ') }}
+    {% if p.problems %}<div class="warn" style="margin-top:4px">{% for x in p.problems %}⚠ {{ x }}<br>{% endfor %}</div>{% endif %}
     <div class="grid" style="margin-top:6px">
       {% for run in p.runs %}
       <div><b>{{ run.name }}</b> <span class="muted">{{ run.seats|length }}/{{ run.size }}</span>
@@ -20,7 +21,7 @@
       {% endfor %}
     </div>
     {% if p.unplaced %}<p class="sub">Not seated: {% for n, why in p.unplaced[:10] %}{{ n }} — {{ why }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-    <form method="post" action="/admin/proposal" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="pid" value="{{ p.id }}"><input type="hidden" name="answer" value="accept"><button>Accept — open the sheets</button></form>
+    <form method="post" action="/admin/proposal" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="pid" value="{{ p.id }}"><input type="hidden" name="answer" value="accept"><button>{{ 'Accept — open the sheets' if p.viable else 'Open the sheets anyway (fill engine will chase the gaps)' }}</button></form>
     <form method="post" action="/admin/proposal" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="pid" value="{{ p.id }}"><input type="hidden" name="answer" value="reject"><button class="danger">Reject</button></form>
   </div>
   {% endfor %}

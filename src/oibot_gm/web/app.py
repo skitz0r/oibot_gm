@@ -514,7 +514,7 @@ def create_app(bot) -> FastAPI:
             props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)
             ws, we = reg.lockout_window(rid, now)
             fo = reg.first_open(rid)
-            out.append({"id": rid, "eff": rd, "current": current, "past": past, "open": [p for p in props if p.state == "proposed"], "history": [p for p in props if p.state != "proposed"][:4],
+            out.append({"id": rid, "eff": rd, "current": current, "past": past, "open": [p for p in props if p.state in ("proposed", "draft")], "history": [p for p in props if p.state not in ("proposed", "draft")][:4],
                         "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")], "window": (ws, we), "opened": bool(fo and fo <= now), "first_open": fo})
         orphans = [ev_row(e) for e in events if e.instance not in reg.profile.raids][:6]
         return page(request, "rosters.html", v, raids=out, orphans=orphans)
@@ -551,7 +551,7 @@ def create_app(bot) -> FastAPI:
         v, d = await form(request, officer=True)
         ps = bot.proposals(v.reg)
         p = ps.items.get(d.get("pid", ""))
-        if not p or p.state != "proposed":
+        if not p or p.state not in ("proposed", "draft"):
             return back("/rosters", err="that proposal is no longer open")
         if d.get("answer") == "accept":
             line = await bot.accept_proposal(v.reg, p, v.name)

@@ -139,7 +139,9 @@ cards, because WoW: Forever has not published totem scoping yet.
   full with the tanks and healers it needs) and **DMs the officers** the proposal with Accept / Reject.
   Accept opens a dated sheet per run in the roster channel, pre-filled In for everyone seated, and DMs
   them the In / Out buttons — the sheet is the verification; declines go straight to the fill engine.
-  Reject discards it and the planner tries again the next day.
+  Reject discards it and the planner tries again the next day. When the bank can't field a viable run
+  yet, the planner still shows its best effort on the Rosters page (who it would seat, what's short) and
+  officers can open those sheets anyway and let the fill engine chase the gaps.
 - **Build rosters** (Admin → *Build all rosters*, or `/roster build`): proposes every roster for the coming
   window from the pool — respecting raid-time answers, lockouts, one raid per person per slot, roles and
   buffs, and keeping current placements where possible — with a reason per seat and a list of who isn't

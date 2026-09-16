@@ -221,7 +221,7 @@ class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"prop:
             return
         ps = bot.proposals(reg)
         p = ps.items.get(self.pid)
-        if not p or p.state != "proposed":
+        if not p or p.state not in ("proposed", "draft"):
             await interaction.response.send_message(f"That proposal is {p.state if p else 'gone'}" + (f" (by {p.decided_by})" if p and p.decided_by else "") + ".", ephemeral=True)
             return
         await interaction.response.defer()
@@ -435,8 +435,13 @@ class RaidMixin:
         rs = self.raids.store(reg)
         p = await asyncio.to_thread(autoplan.plan, reg, rs, instance)
         if p is None:
-            return f"{instance}: nothing viable this window (not enough available characters)"
+            return f"{instance}: no eligible characters at all for this window"
+        for old in ps.drafts_for(instance):
+            ps.drop(old, "superseded draft")
         rd = reg.raid_def(instance)
+        if not p.viable:
+            ps.save(p, f"best-effort draft: {len(p.runs)} run(s) ({by})")
+            return f"{instance}: best effort only — " + "; ".join(p.problems[:3]) + f" — see {os.environ.get('OIBOT_WEB_URL', 'the website')}/rosters (you can open the sheets anyway)"
         lines = [f"**{rd.get('name', instance)}** — proposed runs for {p.window_start[:10]} → {p.window_end[:10]} ({rd.get('lockout_days')}-day lockout):"]
         for r in p.runs:
             unix = int(datetime.fromisoformat(r.starts_at).timestamp())
