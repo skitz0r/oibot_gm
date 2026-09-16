@@ -28,6 +28,80 @@ def manual_section(marker: str) -> str:
     return ""
 
 
+GUIDE_OPTIONS = [
+    ("about", "About the guild", "who we are, what we raid, how big"),
+    ("schedule", "Raid schedule", "rosters and their next raid times"),
+    ("register", "How to register", "the registration card and what happens next"),
+    ("signups", "How signups work", "sheets, cutoffs, callouts, fill DMs"),
+    ("apply", "How to apply", "joining as a recruit"),
+    ("contact", "Who to contact", "officers and the owner"),
+]
+
+
+def guide_text(reg, key: str) -> str:
+    """Static answers for people who may not ask free-form questions: config + manual excerpts, no LLM."""
+    cfg = reg.config
+    if key == "about":
+        rosters = ", ".join(f"{t.get('name', t['key'])} ({t.get('size')}-man{', ' + t['schedule'] if t.get('schedule') else ''})" for t in cfg.rosters) or "no rosters configured yet"
+        return f"**{cfg.name}**\n{cfg.about or 'A WoW: Forever raiding guild.'}\n\nRosters: {rosters}.\nMembers registered: {len(reg.members)}."
+    if key == "schedule":
+        from . import raidcycle as rc
+
+        lines = []
+        for t in cfg.rosters:
+            if t.get("schedule"):
+                try:
+                    nxt = rc.next_raid_time(t["schedule"], cfg.timezone)
+                    lines.append(f"• **{t.get('name', t['key'])}** ({t.get('size')}-man) — {t['schedule']} {cfg.timezone} · next <t:{int(nxt.timestamp())}:F> (<t:{int(nxt.timestamp())}:R>)")
+                except ValueError:
+                    lines.append(f"• **{t.get('name', t['key'])}** — {t['schedule']}")
+            else:
+                lines.append(f"• **{t.get('name', t['key'])}** ({t.get('size')}-man) — no schedule yet")
+        return "**Raid schedule**\n" + ("\n".join(lines) or "Nothing scheduled yet.")
+    if key == "register":
+        where = f"<#{cfg.registration_channel_id}>" if cfg.registration_channel_id else "the registration card an officer posts"
+        return f"**How to register**\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters and places you on a roster.\n4. `/me view` shows what the bot has on you; `/me availability` sets your default for raids."
+    if key == "signups":
+        return manual_section("## 4")[:1900] or "See `/help topic:sheets`."
+    if key == "apply":
+        return "**Applying**\nUse `/apply` with your character, spec, logs link and a few words about you. Officers review it on a card and you'll get a DM with the decision. Accepted applicants are registered as trial."
+    if key == "contact":
+        officers = ", ".join(f"@{r}" for r in cfg.officer_roles) or "anyone with Manage Server"
+        owner = f"<@{cfg.owner_discord_id}>" if cfg.owner_discord_id else "not set"
+        return f"**Who to contact**\nOfficers: {officers}. Owner: {owner}." + (f"\nOps channel: <#{cfg.ops_channel_id}>" if cfg.ops_channel_id else "")
+    return "Pick a topic."
+
+
+class GuideSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"guide:menu"):
+    """Persistent static guide for people outside the ask audience."""
+
+    def __init__(self):
+        super().__init__(discord.ui.Select(placeholder="What do you want to know?", custom_id="guide:menu", options=[discord.SelectOption(label=lab, value=k, description=d) for k, lab, d in GUIDE_OPTIONS]))
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match, /):
+        return cls()
+
+    async def callback(self, interaction: discord.Interaction):
+        reg = interaction.client.registries.for_interaction(interaction)
+        if not reg:
+            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        await interaction.response.send_message(guide_text(reg, self.item.values[0])[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
+def guide_view() -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(GuideSelect())
+    return v
+
+
+def guide_intro(reg) -> str:
+    aud = reg.config.ask_audience
+    who = {"officers": "officers", "confirmed": "members with a confirmed character", "registered": "registered members", "everyone": "everyone"}[aud]
+    return f"Hi — I'm the {reg.config.name} raid bot. Pick a topic below. (Free-form questions are open to {who}; register in <#{reg.config.registration_channel_id}> to unlock them.)" if reg.config.registration_channel_id else f"Hi — I'm the {reg.config.name} raid bot. Pick a topic below. (Free-form questions are open to {who}.)"
+
+
 def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: Ops, bot) -> None:
     @tree.command(name="help", description="What the bot does and which commands you can use (no AI)")
     @app_commands.describe(topic="register, characters, availability, rosters, sheets, fill, groups, analytics, officers, setup, loot, limits")
@@ -65,8 +139,12 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if not reg:
             await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
             return
+        officer = is_officer(interaction, reg)
+        if not reg.may_ask(interaction.user.id, officer):
+            await interaction.response.send_message(guide_intro(reg), view=guide_view(), ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        text = await bot.help_answer(reg, interaction.user.id, is_officer(interaction, reg), question)
+        text = await bot.help_answer(reg, interaction.user.id, officer, question)
         await interaction.followup.send(text, ephemeral=True)
 
 
@@ -74,6 +152,8 @@ class HelpMixin:
     """Needs self.ctx.provider, self.tree, self.raids, self.ops."""
 
     async def help_answer(self, reg, user_id: int, officer: bool, question: str) -> str:
+        if not reg.may_ask(user_id, officer):
+            return None  # caller shows the static guide
         provider = self.ctx.provider
         if provider is None:
             return "I can't answer free-form questions right now (no LLM configured). `/help` lists what I do."

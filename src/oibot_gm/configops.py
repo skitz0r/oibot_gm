@@ -12,7 +12,8 @@ from .registry import RANKS, Registry, RegistryError
 
 SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never guess)
 Guild (owner only): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
-  roster_channel (officer channel for overviews/proposals), officer_role add/remove (role name).
+  roster_channel (officer channel for overviews/proposals), officer_role add/remove (role name),
+  ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb).
 Rosters (owner only; the ops are still named team_*): team <key> size (10|20|25|40), schedule ('Tue 19:30'),
   instance (raid id), cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders (dm|channel|none),
   open_dm (true|false: DM everyone when the sheet opens), autofill (true|false: between the soft and hard cutoffs the bot DMs
@@ -34,7 +35,7 @@ class ConfigOp(BaseModel):
     # Keep this schema small: the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear, comp_groups")
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel")
+    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|ask_audience|about")
     team: Optional[str] = Field(default=None, description="team key for team_* ops, availability and comp_target*")
     field: Optional[str] = Field(default=None, description="team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders; comp_target*: the slot (role, Class or Class:Spec)")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits; comp_target: 'min', 'min-max' or '-max')")
@@ -106,7 +107,7 @@ def describe(reg: Registry, op: ConfigOp) -> str:
     """Human-readable 'current → new' for the diff, without applying."""
     cfg = reg.config
     if op.op == "set":
-        cur = {"timezone": cfg.timezone, "signup_channel": cfg.signup_channel_id and f"<#{cfg.signup_channel_id}>", "ops_channel": cfg.ops_channel_id and f"<#{cfg.ops_channel_id}>", "applications_channel": cfg.applications_channel_id and f"<#{cfg.applications_channel_id}>", "roster_channel": cfg.roster_channel_id and f"<#{cfg.roster_channel_id}>"}.get(op.path or "", "?")
+        cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:60], "signup_channel": cfg.signup_channel_id and f"<#{cfg.signup_channel_id}>", "ops_channel": cfg.ops_channel_id and f"<#{cfg.ops_channel_id}>", "applications_channel": cfg.applications_channel_id and f"<#{cfg.applications_channel_id}>", "roster_channel": cfg.roster_channel_id and f"<#{cfg.roster_channel_id}>"}.get(op.path or "", "?")
         return f"{op.path}: {cur or '—'} → {op.value}"
     if op.op == "team_set":
         t = cfg.team(op.team or "") or {}
@@ -162,6 +163,12 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
 
             ZoneInfo(op.value or "")
             cfg.timezone = op.value or cfg.timezone
+        elif op.path == "ask_audience":
+            if op.value not in ("officers", "confirmed", "registered", "everyone"):
+                raise RegistryError("ask_audience is officers|confirmed|registered|everyone")
+            cfg.ask_audience = op.value
+        elif op.path == "about":
+            cfg.about = (op.value or "").strip()[:600] or None
         elif op.path in ("signup_channel", "ops_channel", "applications_channel", "roster_channel"):
             cid = _channel_id(op.value)
             if not cid:

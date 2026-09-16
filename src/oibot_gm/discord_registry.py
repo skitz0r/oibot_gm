@@ -1043,6 +1043,31 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"signup channel → #{channel.name}")
         await interaction.response.send_message(f"✅ Sheets → {channel.mention}", ephemeral=True)
 
+    @config.command(name="ask-audience", description="Owner: who may ask the bot free-form questions (/ask, DMs, @mentions); others get the static guide")
+    @app_commands.choices(audience=[app_commands.Choice(name=a, value=a) for a in ("officers", "confirmed", "registered", "everyone")])
+    async def cfg_ask_audience(interaction: discord.Interaction, audience: app_commands.Choice[str]):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        reg.config.ask_audience = audience.value
+        reg.save_config(f"ask audience → {audience.value}")
+        await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
+
+    @config.command(name="about", description="Owner: one-paragraph public blurb for the static guide ('About the guild')")
+    async def cfg_about(interaction: discord.Interaction, text: str):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        reg.config.about = text.strip()[:600] or None
+        reg.save_config("about text updated")
+        await interaction.response.send_message("✅ About text saved.", ephemeral=True)
+
     @config.command(name="timezone", description="Owner: IANA timezone for schedules, e.g. America/Chicago")
     async def cfg_tz(interaction: discord.Interaction, timezone: str):
         reg = await need(interaction)

@@ -142,6 +142,14 @@ time). Absence reasons and officer notes are officer-only. The bot DMs only for 
 asks; members can ask an officer to opt them out. Claude is used sparingly — never for registry, signup
 or solver work — and spend is capped by a budget the owner sets; `/gm status` shows it.
 
+## 10a. Asking the bot questions
+
+`/ask`, a DM, or an @mention outside the officer channels gets a free-form answer from this manual and
+your own record. Who may do that is set by the owner (`ask_audience`: officers, confirmed members,
+registered members, or everyone; default registered). Anyone outside that audience gets the **static
+guide** instead — a menu with *About the guild*, *Raid schedule*, *How to register*, *How signups work*,
+*How to apply*, *Who to contact* — built from the guild's settings, no AI involved.
+
 ## 11. Things the bot cannot do (yet)
 
 Add or tier loot items from Discord; record wishlists; list or retire precedents; show loot history;

@@ -118,6 +118,8 @@ class GuildConfig(BaseModel):
     analytics_channel_id: Optional[int] = None  # officer: live pool-readiness cards (edited on every change) + change log
     analytics_message_ids: dict[str, int] = Field(default_factory=dict)  # roster key -> card message id
     timezone: str = "America/Chicago"  # server time for schedules
+    ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
+    about: Optional[str] = None  # short public blurb for the static guide (owner-set)
     officer_roles: list[str] = Field(default_factory=list)
     # rosters: {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders, open_dm}
     rosters: list[dict] = Field(default_factory=list)
@@ -473,6 +475,20 @@ class Registry:
         c.name, c.status, c.updated_at = name, "active", now()
         self.save(m, f"{m.display_name} named planned {slot} → {name}")
         return m, c
+
+    def verification(self, discord_id: int) -> str:
+        """unregistered | registered (planned/active character) | confirmed (an officer confirmed one)."""
+        m = self.members.get(discord_id)
+        if not m or not m.active():
+            return "unregistered"
+        return "confirmed" if any(c.confirmed_by for c in m.active()) else "registered"
+
+    def may_ask(self, discord_id: int, is_officer: bool) -> bool:
+        aud = self.config.ask_audience
+        if is_officer or aud == "everyone":
+            return True
+        lvl = self.verification(discord_id)
+        return (aud == "registered" and lvl in ("registered", "confirmed")) or (aud == "confirmed" and lvl == "confirmed")
 
     def roles_of(self, m: Member) -> tuple[str | None, list[str]]:
         """(primary, flex). Primary always follows the main's current spec — a stored preference from an earlier

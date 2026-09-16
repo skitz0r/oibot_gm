@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from . import nl, render
 from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, register_policy_commands
-from .discord_help import HelpMixin, register_help_commands
+from .discord_help import GuideSelect, HelpMixin, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_raid import FillButton, RaidContext, RaidMixin, SignupButton, register_raid_commands
@@ -693,7 +693,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
         self.policies = PolicyContext(self.registries)
         register_policy_commands(self.tree, self.registries, self.ops, self, self.policies)
         register_help_commands(self.tree, self.registries, self.ops, self)
-        self.add_dynamic_items(SignupButton, FillButton, PlanButton, RegisterButton)
+        self.add_dynamic_items(SignupButton, FillButton, PlanButton, RegisterButton, GuideSelect)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -886,7 +886,11 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
             reg = next(iter(self.registries.by_discord.values()), None) if len(self.registries.by_discord) == 1 else next((r for r in self.registries.by_discord.values() if message.author.id in r.members), None)
             if reg and message.content.strip():
                 async with message.channel.typing():
-                    await message.reply(await self.help_answer(reg, message.author.id, reg.config.owner_discord_id == message.author.id, message.content))
+                    text = await self.help_answer(reg, message.author.id, reg.config.owner_discord_id == message.author.id, message.content)
+                if text is None:  # outside the ask audience: static guide only
+                    await message.reply(guide_intro(reg), view=guide_view())
+                else:
+                    await message.reply(text)
             return
         reg = self.registries.by_discord.get(message.guild.id)
         # @mention anywhere else = a question about how the bot works (no state changes)
@@ -894,7 +898,11 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
             text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
             if text:
                 async with message.channel.typing():
-                    await message.reply(await self.help_answer(reg, message.author.id, self.officiates(message.author, message.guild), text))
+                    answer = await self.help_answer(reg, message.author.id, self.officiates(message.author, message.guild), text)
+                if answer is None:
+                    await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=discord.AllowedMentions.none())
+                else:
+                    await message.reply(answer, allowed_mentions=discord.AllowedMentions.none())
             return
         # @mention in the ops or analytics channel = plain-text configuration (comp ideals live in analytics)
         if reg and message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) and self._addressed(message):
