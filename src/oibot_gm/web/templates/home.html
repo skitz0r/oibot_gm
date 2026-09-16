@@ -1,35 +1,133 @@
 {% extends "base.html" %}{% set active = 'home' %}
 {% block body %}
 <h1>{{ v.name }}</h1>
-{% if not member or not member.active() %}
-<div class="panel">You have no registered characters yet. Register in Discord: press <b>Register / plan my main</b> in the registration channel, or <code>/register</code>.</div>
+{% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
+{% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
+
+<h2>Characters</h2>
+{% if member and member.active() %}
+<div class="tbl"><table>
+  <tr><th>Character</th><th>Spec / offspec</th><th>Status</th><th>Rank</th><th>Rosters</th><th></th></tr>
+  {% for c in member.active() %}
+  <tr>
+    <td class="{{ c.cls }}"><b>{{ c.label }}</b>{% if c.is_main %} ★ main{% endif %}<br><span class="muted">{{ c.cls }}</span></td>
+    <td>
+      <form method="post" action="/me/character/spec" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}">
+        <select name="spec" data-cls="{{ c.cls }}" data-current="{{ c.spec }}"></select>
+        <select name="offspec" data-cls="{{ c.cls }}" data-current="{{ c.offspec or '' }}" data-optional="1"></select>
+        <button>Save</button>
+      </form>
+    </td>
+    <td>{{ c.status }}{% if c.name and not c.confirmed_by %}<br><span class="pill">awaiting officer confirmation</span>{% endif %}
+      {% if not c.name %}<form method="post" action="/me/character/name" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="slot" value="{{ 'main' if c.is_main else 'alt' }}"><input name="name" placeholder="name at launch" maxlength="12" size="12"><button>Name it</button></form>{% endif %}</td>
+    <td>{{ c.rank }}</td>
+    <td>{{ c.rosters|join(', ') or '—' }}</td>
+    <td class="actions">
+      {% if not c.is_main %}<form method="post" action="/me/character/main" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button>Make main</button></form>{% endif %}
+      <form method="post" action="/me/character/retire" class="inline" onsubmit="return confirm('Retire {{ c.label }}? History is kept; you can register it again later.')"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button class="danger">Retire</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table></div>
+<p class="sub">Roles: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} (+{{ roles[1]|join(', ') }}){% endif %} — your main role follows your main's spec; an offspec in another role counts as flexibility.</p>
 {% else %}
+<p class="sub">No characters yet — add your main below. Leave the name blank if the character doesn't exist yet.</p>
+{% endif %}
+
+<div class="panel">
+  <h3 style="margin-top:0">Add a character</h3>
+  <form method="post" action="/me/character/add" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Slot <select name="slot"><option value="main" {{ '' if member and member.main else 'selected' }}>main</option><option value="alt" {{ 'selected' if member and member.main else '' }}>alt</option></select></label>
+    <label>Class <select name="cls" id="add-cls">{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select></label>
+    <label>Spec <select name="spec" id="add-spec"></select></label>
+    <label>Offspec <select name="offspec" id="add-off"></select></label>
+    <label>Name <input name="name" maxlength="12" size="12" placeholder="blank = planned"></label>
+    <button>Add</button>
+  </form>
+</div>
+
 <div class="grid">
   <div class="panel">
-    <h3>Characters</h3>
-    <table>
-      <tr><th>Character</th><th>Spec</th><th>Status</th><th>Rank</th><th>Rosters</th></tr>
-      {% for c in member.active() %}
-      <tr><td class="{{ c.cls }}">{{ c.label }}{% if c.is_main %} ★{% endif %}</td><td>{{ c.spec }}{% if c.offspec %}/{{ c.offspec }}{% endif %}</td><td>{{ c.status }}{% if not c.confirmed_by %} <span class="pill">unconfirmed</span>{% endif %}</td><td>{{ c.rank }}</td><td>{{ c.rosters|join(', ') or '—' }}</td></tr>
+    <h3 style="margin-top:0">Standing availability</h3>
+    <p class="sub">Your default for each roster's raids; sheets are pre-filled from it.</p>
+    <form method="post" action="/me/availability">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for t in rosters %}
+      <label class="row">{{ t.name or t.key }}{% if t.schedule %} <span class="muted">({{ t.schedule }})</span>{% endif %}
+        <select name="avail_{{ t.key }}">
+          {% set cur = member.availability.get(t.key) if member else none %}
+          <option value="" {{ 'selected' if not cur else '' }}>unset (ask me each week)</option>
+          <option value="in" {{ 'selected' if cur == 'in' else '' }}>in by default</option>
+          <option value="sub" {{ 'selected' if cur == 'sub' else '' }}>sub only</option>
+          <option value="out" {{ 'selected' if cur == 'out' else '' }}>out</option>
+        </select></label>
       {% endfor %}
-    </table>
-    <p class="sub">Roles: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} (+{{ roles[1]|join(', ') }}){% endif %} — derived from your spec/offspec.</p>
+      <button>Save</button>
+    </form>
   </div>
   <div class="panel">
-    <h3>Availability &amp; absences</h3>
-    <p>{% for k, val in member.availability.items() %}<span class="pill">{{ k }}: {{ val }}</span> {% else %}<span class="sub">no standing availability set (<code>/me availability</code>)</span>{% endfor %}</p>
-    <p>{% for a in member.upcoming_absences(today) %}<span class="pill">{{ a.start }}{% if a.end != a.start %} → {{ a.end }}{% endif %}</span> {% else %}<span class="sub">no upcoming absences</span>{% endfor %}</p>
+    <h3 style="margin-top:0">Absences</h3>
+    {% if member %}{% for a in member.upcoming_absences(today) %}
+    <form method="post" action="/me/absence/clear" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="start" value="{{ a.start }}"><span class="pill">{{ a.start }}{% if a.end != a.start %} → {{ a.end }}{% endif %}</span> <button>clear</button></form>
+    {% else %}<p class="sub">none upcoming</p>{% endfor %}{% endif %}
+    <form method="post" action="/me/absence/add" class="row">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>From <input type="date" name="start" required></label>
+      <label>To <input type="date" name="end"></label>
+      <label>Reason <input name="reason" placeholder="officers only" size="16"></label>
+      <button>Add</button>
+    </form>
+  </div>
+  <div class="panel">
+    <h3 style="margin-top:0">Flex &amp; DMs</h3>
+    <form method="post" action="/me/roles" class="row">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <span class="muted">Also happy to play:</span>
+      {% for r in ['tank', 'healer', 'melee', 'ranged'] %}{% if r != roles[0] %}<label><input type="checkbox" name="flex_{{ r }}" {{ 'checked' if r in roles[1] else '' }}> {{ r }}</label>{% endif %}{% endfor %}
+      <button>Save</button>
+    </form>
+    <form method="post" action="/me/dm" class="row">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label><input type="checkbox" name="dm" {{ 'checked' if not (member and member.dm_opt_out) else '' }}> DM me sheets, nudges and fill requests</label>
+      <button>Save</button>
+    </form>
   </div>
 </div>
-{% endif %}
+
 <h2>My sheets</h2>
 {% for r in raids %}
 <div class="panel">
   <b>{{ r.team.name or r.team.key }}</b> · {{ r.ev.key }} · {{ r.ev.state }} · starts {{ r.ev.starts_at[:16] }}
   — {% if r.signup %}you are <b>{{ r.signup.status }}</b> as {{ r.signup.character }} ({{ r.signup.spec }}){% if r.signup.note %} <span class="sub">— {{ r.signup.note }}</span>{% endif %}{% else %}<span class="warn">you haven't responded</span>{% endif %}
   {% for a in r.asks %}<div class="sub">🧩 asked to {{ a.kind }} as {{ a.character }} ({{ a.spec }}) — {{ a.answer or 'waiting for your answer in DMs' }}</div>{% endfor %}
+  <div class="sub">Answer on the sheet in Discord (In / Tentative / Sub / Out).</div>
 </div>
 {% else %}
 <p class="sub">No live raids.</p>
 {% endfor %}
+
+<style>
+  form.inline { display:inline-flex; gap:6px; align-items:center; margin:0 4px 4px 0; }
+  form.row, label.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
+  select, input[type=text], input[type=date], input:not([type]) { background:var(--zebra); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }
+  button { background:var(--accent); color:#0B1512; border:0; border-radius:5px; padding:5px 10px; font:inherit; font-weight:600; cursor:pointer; }
+  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
+  td.actions { white-space:nowrap; }
+</style>
+<script>
+  const CLASSES = {{ classes|tojson }};
+  function fill(sel, cls, current, optional) {
+    sel.innerHTML = "";
+    if (optional) { const o = document.createElement("option"); o.value = ""; o.textContent = "no offspec"; sel.appendChild(o); }
+    for (const [spec, role] of Object.entries(CLASSES[cls] || {})) {
+      const o = document.createElement("option"); o.value = spec; o.textContent = spec + " (" + role + ")"; if (spec === current) o.selected = true; sel.appendChild(o);
+    }
+  }
+  document.querySelectorAll("select[data-cls]").forEach(s => fill(s, s.dataset.cls, s.dataset.current, !!s.dataset.optional));
+  const addCls = document.getElementById("add-cls"), addSpec = document.getElementById("add-spec"), addOff = document.getElementById("add-off");
+  function refreshAdd() { fill(addSpec, addCls.value, "", false); fill(addOff, addCls.value, "", true); }
+  addCls.addEventListener("change", refreshAdd); refreshAdd();
+</script>
 {% endblock %}

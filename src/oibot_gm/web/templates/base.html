@@ -40,6 +40,7 @@
   <nav>
     <a href="/" class="{{ 'on' if active == 'home' else '' }}">Me</a>
     {% if v and v.officer %}
+    <a href="/admin" class="{{ 'on' if active == 'admin' else '' }}">Admin</a>
     <a href="/bank" class="{{ 'on' if active == 'bank' else '' }}">Bank</a>
     <a href="/rosters" class="{{ 'on' if active == 'rosters' else '' }}">Rosters</a>
     <a href="/raids" class="{{ 'on' if active == 'raids' else '' }}">Raids</a>

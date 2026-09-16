@@ -360,6 +360,15 @@ Two 10-mans on the same night are handled by the conflict check (a member In on 
 
 FastAPI app (`web/app.py`) running inside the bot process so it sees live objects, bound to localhost and published through a named Cloudflare Tunnel (`oibot-gm` → `gm.earlyandoften.gg`; the domain's DNS moved to Cloudflare, GoDaddy stays registrar, the GitHub Pages records are DNS-only). Discord OAuth2 (`identify` scope) gives the visitor's id; authorization is the bot's own `officiates` check against the live guild member, so the site enforces the same tiers as the commands. First cut is read-mostly: **Me** (characters, derived roles, availability, absences, my sheets and fill asks), and for officers **Bank**, **Rosters** (settings, placed members, pool numbers, desired comp table, cards), **Raids** (signups by status, needs, double-booked, fill asks, callouts, log, health card), **Config** (YAML + policy docs with compile state), **Ops** (data-repo head, LLM spend, companions, recent actions, precedents, ledger). PNG cards render on demand and are cached per data-repo head. Edits come next and must go through the same functions as the slash commands.
 
+### 5.19 Roster building from the pool — plan (2026-09-16)
+
+1. **Member self-service on the site**: characters (add main/alt, spec/offspec, name at launch, make main, retire), availability per roster, absences, DM opt-out — every action through the same `Registry` functions as the Discord buttons.
+2. **Officer roster admin on the site**: pool table with a column per roster (place/unplace, one character per member per roster), rank and confirm inline, "place every main on *main*"; roster settings, comp targets and group layout as forms through `configops.apply`.
+3. **Time-slot preferences**: weekly grid (evening slots × days) per member — yes / maybe / no; officer heat-map per slot.
+4. **Auto-build rosters**: solver assigns pool mains to N roster shells (size, slot) at once — hard: slot *no*, one character per member per roster, role bounds; objective: per-roster synergy, preferred slots, keep-together, rank spread. Proposal with cards + justifications; plain-text edits; approve → placements commit.
+5. **Spec assignment and verification**: offspec/alt seats in a proposal become DM asks (fill-ask machinery: Accept / Can't); declines re-open the seat and re-solve; accepts set availability.
+6. **Steady state**: existing weekly cycle + fill engine per roster; cross-roster conflicts already enforced. Open: Forever lockout rules (10 and 20 in one week?), stable teams vs weekly re-draw.
+
 ## 6. Architecture
 
 ```mermaid

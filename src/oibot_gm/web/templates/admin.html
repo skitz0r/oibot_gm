@@ -1,0 +1,87 @@
+{% extends "base.html" %}{% set active = 'admin' %}
+{% block body %}
+<h1>Roster admin</h1>
+{% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
+{% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
+
+<h2>Pool → rosters</h2>
+<p class="sub">Tick a roster to place a member's main on it (one character per member per roster). Ranks and confirmations inline. Everything commits under your name and shows in the analytics change log.</p>
+{% if rosters %}
+<p>{% for t in rosters %}<form method="post" action="/admin/place-all" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="roster" value="{{ t.key }}"><button>Place every main on {{ t.name or t.key }}</button></form>{% endfor %}</p>
+{% endif %}
+<div class="tbl"><table>
+  <tr><th>Member</th><th>Main</th><th>Role</th><th>Rank</th><th>Confirmed</th>{% for t in rosters %}<th>{{ t.name or t.key }} ({{ t.size }})</th>{% endfor %}<th>Alts</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.m.display_name }}<br><span class="muted">{{ r.verification }}</span></td>
+    <td>{% if r.main %}<span class="{{ r.main.cls }}">{{ r.main.label }}</span><br><span class="muted">{{ r.main.spec }}{% if r.main.offspec %}/{{ r.main.offspec }}{% endif %}</span>{% else %}<span class="muted">no main</span>{% endif %}</td>
+    <td>{{ r.roles[0] or '?' }}{% if r.roles[1] %}<br><span class="muted">+{{ r.roles[1]|join(', ') }}</span>{% endif %}</td>
+    <td>{% if r.main %}<form method="post" action="/admin/rank" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ r.main.label }}">
+      <select name="rank" onchange="this.form.submit()">{% for k in ranks %}<option {{ 'selected' if k == r.main.rank else '' }}>{{ k }}</option>{% endfor %}</select></form>{% endif %}</td>
+    <td>{% if r.main and r.main.name %}{% if r.main.confirmed_by %}<span class="ok">✓ {{ r.main.confirmed_by }}</span>{% else %}<form method="post" action="/admin/confirm" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ r.main.label }}"><button>Confirm</button></form>{% endif %}{% else %}<span class="muted">unnamed</span>{% endif %}</td>
+    {% for t in rosters %}
+    <td>{% set c = r.placed[t.key] %}
+      <form method="post" action="/admin/place" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="uid" value="{{ r.m.discord_id }}"><input type="hidden" name="roster" value="{{ t.key }}">
+      {% if c %}<input type="hidden" name="action" value="remove"><label><input type="checkbox" checked onchange="this.form.submit()"> {{ c.label }}</label>
+      {% elif r.main %}<input type="hidden" name="action" value="add"><label><input type="checkbox" onchange="this.form.submit()"> place</label>{% endif %}
+      </form></td>
+    {% endfor %}
+    <td>{% for c in r.chars if not c.is_main %}<span class="{{ c.cls }}">{{ c.label }}</span> · {{ c.spec }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+
+<h2>Rosters</h2>
+{% for t in rosters %}
+<div class="panel">
+  <form method="post" action="/admin/roster/settings" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ t.key }}">
+    <b>{{ t.key }}</b>
+    <label>name <input name="name" value="{{ t.name or t.key }}" size="10"></label>
+    <label>size <input name="size" type="number" value="{{ t.size }}" min="5" max="40" style="width:5em"></label>
+    <label>schedule <input name="schedule" value="{{ t.schedule or '' }}" placeholder="Tue 19:30" size="10"></label>
+    <label>instance <select name="instance"><option value="">—</option>{% for i in instances %}<option {{ 'selected' if i == t.instance else '' }}>{{ i }}</option>{% endfor %}</select></label>
+    <label>soft cutoff h <input name="cutoff_soft_hours" type="number" value="{{ t.cutoff_soft_hours or 48 }}" style="width:5em"></label>
+    <label>hard cutoff h <input name="cutoff_hard_hours" type="number" value="{{ t.cutoff_hard_hours or 24 }}" style="width:5em"></label>
+    <label>open days before <input name="open_days_before" type="number" value="{{ t.open_days_before or 6 }}" style="width:4em"></label>
+    <label><input type="checkbox" name="open_dm" {{ 'checked' if t.open_dm else '' }}> DM on open</label>
+    <label><input type="checkbox" name="autofill" {{ 'checked' if t.autofill is not defined or t.autofill else '' }}> autofill</label>
+    {% if owner %}<button>Save</button>{% else %}<span class="muted">(owner saves settings)</span>{% endif %}
+  </form>
+  <div class="row" style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+    <div>
+      <h3>Comp targets</h3>
+      {% for slot, tg in (t.comp_targets or {}).items() %}
+      <form method="post" action="/admin/comp/target/clear" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ t.key }}"><input type="hidden" name="slot" value="{{ slot }}"><span class="pill">{{ slot }}: {{ tg.min }}{% if tg.max is defined and tg.max is not none %}–{{ tg.max }}{% endif %}{% if tg.note %} · {{ tg.note }}{% endif %}</span> <button>clear</button></form>
+      {% else %}<span class="muted">none — derived values apply</span>{% endfor %}
+      <form method="post" action="/admin/comp/target" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ t.key }}">
+        <input name="slot" placeholder="healer / Paladin / Shaman:Enhancement" size="24"><input name="value" placeholder="3, 3-5 or -2" size="8"><input name="reason" placeholder="why" size="20"><button>Set</button></form>
+    </div>
+    <div>
+      <h3>Group layout</h3>
+      <form method="post" action="/admin/comp/groups" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ t.key }}">
+        <input name="value" value="{{ (t.comp_groups or [])|join(', ') }}" placeholder="tank/heal, melee, ranged, casters (blank = default)" size="40"><button>Set</button></form>
+    </div>
+    {% if owner %}<form method="post" action="/admin/roster/remove" class="inline" onsubmit="return confirm('Remove roster {{ t.key }}? Members keep their characters.')"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="key" value="{{ t.key }}"><button class="danger">Remove roster</button></form>{% endif %}
+  </div>
+</div>
+{% endfor %}
+{% if owner %}
+<div class="panel">
+  <form method="post" action="/admin/roster/settings" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <b>New roster</b> <label>key <input name="key" placeholder="b" size="6" required></label> <label>name <input name="name" placeholder="10-man B" size="10"></label> <label>size <input name="size" type="number" value="10" style="width:5em"></label> <label>schedule <input name="schedule" placeholder="Thu 20:00" size="10"></label>
+    <input type="hidden" name="autofill" value="on"><button>Create</button>
+  </form>
+</div>
+{% endif %}
+
+<style>
+  form.inline { display:inline-flex; gap:6px; align-items:center; margin:0 4px 4px 0; }
+  form.row, label.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
+  select, input { background:var(--zebra); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }
+  input[type=checkbox] { width:auto; }
+  button { background:var(--accent); color:#0B1512; border:0; border-radius:5px; padding:5px 10px; font:inherit; font-weight:600; cursor:pointer; }
+  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
+</style>
+{% endblock %}

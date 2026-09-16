@@ -106,8 +106,40 @@ def create_app(bot) -> FastAPI:
             raise HTTPException(status_code=403, detail="Officers only.")
         return v
 
+    def csrf_token(v: Viewer) -> str:
+        return signer.dumps({"csrf": v.uid})
+
     def page(request: Request, name: str, v: Viewer | None, **ctx) -> HTMLResponse:
-        return templates.TemplateResponse(request, name, {"v": v, "now": datetime.now().strftime("%a %d %b %H:%M"), **ctx})
+        return templates.TemplateResponse(request, name, {"v": v, "now": datetime.now().strftime("%a %d %b %H:%M"), "csrf": csrf_token(v) if v else "",
+                                                          "ok": request.query_params.get("ok"), "err": request.query_params.get("err"), **ctx})
+
+    async def form(request: Request, officer: bool = False) -> tuple[Viewer, dict]:
+        """Viewer + POSTed fields, after the CSRF check (token is bound to the session's user id)."""
+        v = await need(request, officer=officer)
+        data = dict(await request.form())
+        try:
+            tok = signer.loads(data.get("csrf", ""))
+        except BadSignature:
+            tok = {}
+        if tok.get("csrf") != v.uid:
+            raise HTTPException(403, "Form expired — reload the page and try again.")
+        return v, {k: (str(val).strip() if val is not None else "") for k, val in data.items()}
+
+    def back(to: str, ok: str | None = None, err: str | None = None) -> RedirectResponse:
+        q = urlencode({"ok": ok} if ok else {"err": err} if err else {})
+        return RedirectResponse(f"{to}?{q}" if q else to, status_code=303)
+
+    async def mutate(request: Request, to: str, fn, officer: bool = False):
+        """Run a registry mutation from a form: same functions and validation as the Discord commands."""
+        from ..registry import RegistryError
+
+        v, d = await form(request, officer=officer)
+        try:
+            msg = await asyncio.to_thread(fn, v, d)
+        except (RegistryError, ValueError) as e:
+            return back(to, err=str(e))
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        return back(to, ok=msg)
 
     # ---- auth
     @app.get("/auth/login")
@@ -159,7 +191,169 @@ def create_app(bot) -> FastAPI:
             asks = [a for a in ev.fill_asks if a.discord_id == v.uid]
             mine.append({"ev": ev, "signup": s, "asks": asks, "team": reg.config.team(ev.team) or {"key": ev.team, "size": 20}})
         roles = reg.roles_of(v.member) if v.member else (None, [])
-        return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=datetime.now().date().isoformat())
+        classes = {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()}
+        return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=datetime.now().date().isoformat(), classes=classes,
+                    rosters=reg.config.rosters or [{"key": "main", "name": "main"}], stored_roles=(v.member.role_prefs if v.member else {}))
+
+    # ---- member self-service (POST → Registry, exactly what the Discord buttons call)
+    @app.post("/me/character/add")
+    async def me_add(request: Request):
+        def go(v, d):
+            slot = "main" if d.get("slot") == "main" else "alt"
+            if d.get("name"):
+                m, c = v.reg.add_character(v.uid, v.name, d["name"], d["cls"], d["spec"], d.get("offspec") or None, slot == "main")
+                return f"registered {c.label} ({c.cls} {c.spec}, {'main' if c.is_main else 'alt'}) — an officer will confirm it"
+            m, c = v.reg.set_plan(v.uid, v.name, d["cls"], d["spec"], d.get("offspec") or None, slot)
+            return f"planned {slot}: {c.cls} {c.spec}" + (f"/{c.offspec}" if c.offspec else "")
+        return await mutate(request, "/", go)
+
+    @app.post("/me/character/spec")
+    async def me_spec(request: Request):
+        def go(v, d):
+            c = v.reg.set_spec(v.uid, d["label"], d["spec"], d.get("offspec") or None)
+            return f"{c.label}: {c.spec}" + (f"/{c.offspec}" if c.offspec else "")
+        return await mutate(request, "/", go)
+
+    @app.post("/me/character/main")
+    async def me_main(request: Request):
+        return await mutate(request, "/", lambda v, d: f"main is now {v.reg.set_main(v.uid, d['label'])[1].label}")
+
+    @app.post("/me/character/retire")
+    async def me_retire(request: Request):
+        return await mutate(request, "/", lambda v, d: f"retired {v.reg.retire(v.uid, d['label']).label}")
+
+    @app.post("/me/character/name")
+    async def me_name(request: Request):
+        return await mutate(request, "/", lambda v, d: f"named your {d.get('slot', 'main')} {v.reg.name_character(v.uid, d['name'], d.get('slot') or 'main')[1].label} — pending confirmation")
+
+    @app.post("/me/roles")
+    async def me_roles(request: Request):
+        def go(v, d):
+            m = v.reg.members.get(v.uid)
+            primary = v.reg.roles_of(m)[0] if m else "melee"
+            flex = [r for r in ("tank", "healer", "melee", "ranged") if d.get(f"flex_{r}") and r != primary]
+            v.reg.set_roles(v.uid, v.name, primary, flex)
+            return "flex roles: " + (", ".join(flex) or "none")
+        return await mutate(request, "/", go)
+
+    @app.post("/me/availability")
+    async def me_availability(request: Request):
+        def go(v, d):
+            for t in v.reg.config.team_keys():
+                val = d.get(f"avail_{t}")
+                cur = v.reg.members[v.uid].availability.get(t) if v.uid in v.reg.members else None
+                if val in ("in", "out", "sub") and val != cur:
+                    v.reg.set_availability(v.uid, t, val)
+            return "availability saved"
+        return await mutate(request, "/", go)
+
+    @app.post("/me/absence/add")
+    async def me_absence_add(request: Request):
+        return await mutate(request, "/", lambda v, d: f"absent {v.reg.add_absence(v.uid, d['start'], d.get('end') or None, d.get('reason') or None, v.name, v.name)[1].start}")
+
+    @app.post("/me/absence/clear")
+    async def me_absence_clear(request: Request):
+        return await mutate(request, "/", lambda v, d: (v.reg.clear_absence(v.uid, d["start"]) and f"cleared absence {d['start']}"))
+
+    @app.post("/me/dm")
+    async def me_dm(request: Request):
+        def go(v, d):
+            m = v.reg.member(v.uid)
+            m.dm_opt_out = d.get("dm") != "on"
+            v.reg.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'}")
+            return f"DMs {'off' if m.dm_opt_out else 'on'}"
+        return await mutate(request, "/", go)
+
+    # ---- officer roster admin (placements, ranks, confirmations, roster settings, comp ideals)
+    @app.get("/admin", response_class=HTMLResponse)
+    async def admin(request: Request):
+        v = await need(request, officer=True)
+        reg = v.reg
+        rosters = reg.config.rosters or []
+        rows = []
+        for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower()):
+            chars = m.active()
+            if not chars:
+                continue
+            placed = {t["key"]: next((c for c in chars if t["key"] in c.rosters), None) for t in rosters}
+            rows.append({"m": m, "chars": chars, "main": m.main, "placed": placed, "roles": reg.roles_of(m), "verification": reg.verification(m.discord_id)})
+        instances = list(reg.profile.raids)
+        return page(request, "admin.html", v, rows=rows, rosters=rosters, ranks=("trial", "raider", "core", "alt", "social"), instances=instances, owner=v.owner)
+
+    def _cfg_op(v: Viewer, **kw):
+        from .. import configops
+
+        op = configops.ConfigOp(**kw)
+        return configops.apply(v.reg, op, v.name, v.owner, None)
+
+    @app.post("/admin/place")
+    async def admin_place(request: Request):
+        def go(v, d):
+            uid, key = int(d["uid"]), d["roster"]
+            if d.get("action") == "remove":
+                m = v.reg.roster_remove(uid, key, v.name)
+                return f"{m.display_name} removed from {key}"
+            m, c = v.reg.roster_add(uid, key, v.name, d.get("character") or None)
+            return f"{m.display_name} ({c.label}) → {key}"
+        return await mutate(request, "/admin", go, officer=True)
+
+    @app.post("/admin/place-all")
+    async def admin_place_all(request: Request):
+        def go(v, d):
+            key, n = d["roster"], 0
+            for m in list(v.reg.members.values()):
+                if m.main and not v.reg.on_roster(m, key):
+                    v.reg.roster_add(m.discord_id, key, v.name)
+                    n += 1
+            return f"placed {n} main(s) on {key}"
+        return await mutate(request, "/admin", go, officer=True)
+
+    @app.post("/admin/rank")
+    async def admin_rank(request: Request):
+        return await mutate(request, "/admin", lambda v, d: f"{d['label']} → {v.reg.set_rank(d['label'], d['rank'], v.name)[1].rank}", officer=True)
+
+    @app.post("/admin/confirm")
+    async def admin_confirm(request: Request):
+        return await mutate(request, "/admin", lambda v, d: f"confirmed {v.reg.confirm(d['label'], v.name)[1].label}", officer=True)
+
+    @app.post("/admin/roster/settings")
+    async def admin_roster_settings(request: Request):
+        def go(v, d):
+            key = d["key"]
+            done = []
+            if not v.reg.config.roster(key):
+                _cfg_op(v, op="team_add", team=key)
+                done.append("created")
+            for f in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "name"):
+                if f in d and str(d[f]) != str((v.reg.config.roster(key) or {}).get(f, "")):
+                    if f == "instance" and not d[f]:
+                        continue
+                    _cfg_op(v, op="team_set", team=key, field=f, value=d[f])
+                    done.append(f)
+            for f in ("open_dm", "autofill"):
+                want = "true" if d.get(f) == "on" else "false"
+                cur = (v.reg.config.roster(key) or {}).get(f, f == "autofill")
+                if (want == "true") != bool(cur):
+                    _cfg_op(v, op="team_set", team=key, field=f, value=want)
+                    done.append(f)
+            return f"roster {key}: " + (", ".join(done) or "no changes")
+        return await mutate(request, "/admin", go, officer=True)
+
+    @app.post("/admin/roster/remove")
+    async def admin_roster_remove(request: Request):
+        return await mutate(request, "/admin", lambda v, d: _cfg_op(v, op="team_remove", team=d["key"]), officer=True)
+
+    @app.post("/admin/comp/target")
+    async def admin_comp_target(request: Request):
+        return await mutate(request, "/admin", lambda v, d: _cfg_op(v, op="comp_target", team=d["key"], field=d["slot"], value=d["value"], reason=d.get("reason") or None), officer=True)
+
+    @app.post("/admin/comp/target/clear")
+    async def admin_comp_target_clear(request: Request):
+        return await mutate(request, "/admin", lambda v, d: _cfg_op(v, op="comp_target_clear", team=d["key"], field=d["slot"]), officer=True)
+
+    @app.post("/admin/comp/groups")
+    async def admin_comp_groups(request: Request):
+        return await mutate(request, "/admin", lambda v, d: _cfg_op(v, op="comp_groups", team=d["key"], value=d.get("value", "")), officer=True)
 
     @app.get("/bank", response_class=HTMLResponse)
     async def bank(request: Request):
