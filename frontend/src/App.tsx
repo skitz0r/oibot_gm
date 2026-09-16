@@ -5,13 +5,13 @@ import { IconAdjustments, IconChartBar, IconListDetails, IconMountain, IconTable
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, type Meta } from "./api";
 import { MePage } from "./pages/Me";
+import { RostersPage } from "./pages/Rosters";
+import { RaidsPage } from "./pages/Raids";
 
-const NAV = [
-  { to: "/me", label: "Me", icon: IconUser },
+const NAV = [{ to: "/me", label: "Me", icon: IconUser }];
+const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
-];
-const OFFICER = [
   { to: "/bank", label: "Bank", icon: IconUsers },
   { to: "/admin", label: "Admin", icon: IconAdjustments },
   { to: "/ops", label: "Ops", icon: IconChartBar },
@@ -56,8 +56,8 @@ export default function App() {
         <Box maw={1180} mx="auto">
           <Routes>
             <Route path="/me" element={<MePage meta={meta} />} />
-            <Route path="/rosters" element={<Soon name="Rosters" />} />
-            <Route path="/raids" element={<Soon name="Raids" />} />
+            <Route path="/rosters" element={meta.viewer.officer ? <RostersPage meta={meta} /> : <Navigate to="/me" replace />} />
+            <Route path="/raids" element={meta.viewer.officer ? <RaidsPage /> : <Navigate to="/me" replace />} />
             <Route path="/bank" element={<Soon name="Bank" />} />
             <Route path="/admin" element={<Soon name="Admin" />} />
             <Route path="/ops" element={<Soon name="Ops" />} />

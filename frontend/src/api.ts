@@ -39,6 +39,31 @@ export interface WeekBlock { day: number; start: number; end: number; level: "pr
 export interface Absence { start: string; end: string; reason: string | null }
 export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; character: string | null; note: string | null }
 export interface PlacementAsk { roster: string; character: string; asked_at: string }
+export interface Aura { abbr: string; colour: string; art: string | null; name: string; who?: string }
+export interface GroupSummary {
+  roles: Record<string, number>; synergy: number | null; unmet: string[]; assumptions: string[];
+  raid: { abbr: string; colour: string; art?: string | null; name: string; ok: string; n: number; detail: string; status: string }[];
+  groups: { n: number; members: { name: string; member: string; cls: string; spec: string; role: string }[]; present: Aura[]; missing: Aura[]; picks: string[]; value: number }[];
+}
+export interface Signup { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; status: string; source: string; note: string | null }
+export interface Sheet {
+  key: string; name: string; roster: string; size: number; instance: string | null; starts_at: string; when: string; state: string; live: boolean; fill_state: string;
+  by: Record<string, Signup[]>; needs: { headcount: number; roles: Record<string, number>; size: number } | null; double_booked: number; summary: GroupSummary | null;
+  fill_asks: { display_name: string; kind: string; character: string; spec: string; role: string; reason: string; answer: string | null }[];
+  callouts: { display_name: string; hours_before: number; late: boolean }[]; log: string[];
+}
+export interface ProposalRun { key: string; name: string; size: number; starts_at: string; when: string; slot: string; seats: number; shortfalls: Record<string, number>; summary: GroupSummary | null }
+export interface Proposal { id: string; state: string; viable: boolean; problems: string[]; notes: string[]; unplaced: [string, string][]; window: [string, string]; decided_by: string | null; created_at: string; runs: ProposalRun[] }
+export interface RaidRuns {
+  id: string; name: string; size: number; lockout_days: number; duration_hours: number; opened: boolean; window: [string, string]; first_open: string | null;
+  current: Sheet[]; past: Sheet[]; open: Proposal[]; history: Proposal[]; standing: { key: string; name: string | null; schedule: string | null }[];
+}
+export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; tz: string }
+export interface RaidRule {
+  id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; auto: boolean; comp: Record<string, { min?: number; max?: number }>;
+  overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; runs: number; open: number;
+}
+export interface Raids { raids: RaidRule[]; tz: string; owner: boolean }
 export interface Me {
   display_name: string; registered: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
   week: WeekBlock[]; absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[]; raid_windows: { slot: string; name: string }[];

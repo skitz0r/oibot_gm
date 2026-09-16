@@ -6,11 +6,14 @@ a header a cross-site form cannot set — and the session cookie is SameSite, so
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from .. import comp as comp_mod, raidcycle as rc
 from ..registry import RegistryError
 
 HERE = Path(__file__).parent
@@ -172,6 +175,148 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url) -> None:
             v.reg.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'}")
             return f"DMs {'off' if m.dm_opt_out else 'on'}"
         return await run(request, go)
+
+    # ---- rosters: runs per raid (officers)
+    summary_cache = bot.__dict__.setdefault("_run_summaries", {})
+
+    def run_summary(reg, cache_key: str, players, roster: dict) -> dict:
+        hit = summary_cache.get(cache_key)
+        if hit and time.time() - hit[0] < 600:
+            return hit[1]
+        result, cov, _labels = comp_mod.groups_for(reg, players, roster)
+        sm = comp_mod.groups_summary(reg, players, result, cov)
+        summary_cache[cache_key] = (time.time(), sm)
+        return sm
+
+    def signup_json(s) -> dict:
+        return {"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "role": s.role, "status": s.status, "source": s.source, "note": s.note}
+
+    def rosters_data(reg) -> dict:
+        rs, ps = bot.raids.store(reg), bot.proposals(reg)
+        now = reg.now_local()
+        events = sorted(rs.events.values(), key=lambda e: e.starts_at, reverse=True)
+
+        def ev_json(ev) -> dict:
+            t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
+            live = ev.state not in ("done", "cancelled")
+            sm, needs, busy = None, None, {}
+            if live:
+                players = [p for p in rc.players_for(reg, ev) if p.status == "signed"]
+                sm = run_summary(reg, f"sheet:{ev.key}:{len(ev.signups)}:{ev.state}", players, {**(reg.raid_shell(ev.instance) if ev.instance in reg.profile.raids else {}), **t})
+                needs, busy = rc.needs(reg, ev, t), rc.conflicts(rs, ev)
+            return {"key": ev.key, "name": t.get("name") or t["key"], "roster": t["key"], "size": int(t.get("size") or 20), "instance": ev.instance,
+                    "starts_at": ev.starts_at, "when": reg.local(ev.starts_at, "%a %d %b %H:%M"), "state": ev.state, "live": live, "fill_state": ev.fill_state,
+                    "by": {st: [signup_json(s) for s in ev.by_status(st)] for st in rc.STATUSES},
+                    "needs": needs, "double_booked": len(busy), "summary": sm,
+                    "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer} for a in ev.fill_asks],
+                    "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
+
+        def prop_json(p, rid: str) -> dict:
+            runs = []
+            for run in p.runs:
+                sm = run_summary(reg, f"run:{p.id}:{run.key}", comp_mod.players_from_seats(reg, run.seats), {**reg.raid_shell(rid), "key": run.key, "size": run.size}) if p.state in ("proposed", "draft") else None
+                runs.append({"key": run.key, "name": run.name, "size": run.size, "starts_at": run.starts_at, "when": reg.local(run.starts_at, "%a %d %b %H:%M"), "slot": run.slot, "seats": len(run.seats),
+                             "shortfalls": dict(run.shortfalls), "summary": sm})
+            return {"id": p.id, "state": p.state, "viable": p.viable, "problems": list(p.problems), "notes": list(p.notes), "unplaced": [list(x) for x in p.unplaced[:12]],
+                    "window": [reg.local(p.window_start, "%a %d %b"), reg.local(p.window_end, "%a %d %b")], "decided_by": p.decided_by, "created_at": p.created_at, "runs": runs}
+
+        out = []
+        for rid in reg.profile.raids:
+            rd = reg.raid_def(rid)
+            evs = [ev_json(e) for e in events if e.instance == rid]
+            props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)
+            ws, we = reg.lockout_window(rid, now)
+            fo = reg.first_open(rid)
+            out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "lockout_days": int(rd["lockout_days"]), "duration_hours": rd["duration_hours"],
+                        "opened": bool(fo and fo <= now), "window": [reg.local(ws, "%a %d %b"), reg.local(we, "%a %d %b")], "first_open": reg.local(fo, "%a %d %b %Y %H:%M") if fo else None,
+                        "current": sorted([e for e in evs if e["live"]], key=lambda e: e["starts_at"]), "past": [e for e in evs if not e["live"]][:6],
+                        "open": [prop_json(p, rid) for p in props if p.state in ("proposed", "draft")], "history": [prop_json(p, rid) for p in props if p.state not in ("proposed", "draft")][:4],
+                        "standing": [{"key": t["key"], "name": t.get("name"), "schedule": t.get("schedule")} for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")]})
+        orphans = [ev_json(e) for e in events if e.instance not in reg.profile.raids][:6]
+        return {"raids": out, "orphans": orphans, "tz": reg.config.timezone}
+
+    @app.get("/api/rosters")
+    async def rosters(request: Request):
+        v = await who(request, officer=True)
+        return await asyncio.to_thread(rosters_data, v.reg)
+
+    @app.post("/api/admin/plan")
+    async def admin_plan(request: Request):
+        v, d = await body(request, officer=True)
+        inst = d.get("instance", "")
+        if inst not in v.reg.profile.raids:
+            return JSONResponse({"error": "unknown raid"}, status_code=400)
+        line = await bot.auto_propose(v.reg, inst, by=v.name)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} ran the planner: {line}")
+        return {"message": line}
+
+    @app.post("/api/admin/proposal")
+    async def admin_proposal(request: Request):
+        v, d = await body(request, officer=True)
+        ps = bot.proposals(v.reg)
+        p = ps.items.get(d.get("pid", ""))
+        if not p or p.state not in ("proposed", "draft"):
+            return JSONResponse({"error": "that proposal is no longer open"}, status_code=400)
+        if d.get("answer") == "accept":
+            line = await bot.accept_proposal(v.reg, p, v.name)
+        else:
+            p.state, p.decided_by, p.decided_at = "rejected", v.name, rc.now()
+            ps.save(p, f"rejected by {v.name}")
+            line = f"proposal {p.id} rejected"
+        await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
+        return {"message": line}
+
+    # ---- raids: rules per raid (officers read, owner edits)
+    @app.get("/api/raids")
+    async def raids(request: Request):
+        v = await who(request, officer=True)
+        reg, ps = v.reg, bot.proposals(v.reg)
+        z = ZoneInfo(reg.config.timezone)
+        now = reg.now_local()
+        out = []
+        for rid in reg.profile.raids:
+            eff, over, fo = reg.raid_def(rid), reg.config.raids.get(rid, {}), reg.first_open(rid)
+            ws, we = reg.lockout_window(rid, now)
+            out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
+                        "notes": eff.get("notes") or "", "auto": bool(eff.get("auto")), "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
+                        "overridden": sorted(k for k in over if k not in ("comp",)) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb],
+                        "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
+                        "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
+                        "window": [reg.local(ws, "%a %d %b %H:%M"), reg.local(we, "%a %d %b %H:%M")], "runs": len(reg.run_keys(rid)), "open": len(ps.open_for(rid))})
+        return {"raids": out, "tz": reg.config.timezone, "owner": v.owner}
+
+    @app.post("/api/admin/raid")
+    async def admin_raid(request: Request):
+        def go(v, d):
+            if not v.owner:
+                raise ValueError("Owner only.")
+            inst = d["instance"]
+            cur, done = v.reg.raid_def(inst), []
+            for f in ("lockout_days", "duration_hours", "notes"):
+                val = d.get(f)
+                if val not in (None, "") and str(val) != str(cur.get(f, "")):
+                    done.append(v.reg.set_raid_override(inst, f, str(val), v.name))
+            fo = d.get("first_open") or ""
+            cur_fo = v.reg.first_open(inst)
+            if fo and (cur_fo is None or fo[:16] != cur_fo.astimezone(ZoneInfo(v.reg.config.timezone)).strftime("%Y-%m-%dT%H:%M")):
+                done.append(v.reg.set_raid_override(inst, "first_open", fo, v.name))
+            if "auto" in d and bool(d["auto"]) != bool(cur.get("auto")):
+                done.append(v.reg.set_raid_override(inst, "auto", "true" if d["auto"] else "false", v.name))
+            for role in ("tank", "healer", "dps"):
+                for bound in ("min", "max"):
+                    val = (d.get("comp") or {}).get(role, {}).get(bound)
+                    if val not in (None, "") and str(val) != str(((cur.get("comp") or {}).get(role) or {}).get(bound, "")):
+                        done.append(v.reg.set_raid_override(inst, f"{role}_{bound}", str(val), v.name))
+            return "; ".join(done) or f"{inst}: no changes"
+        return await run(request, go, officer=True)
+
+    @app.post("/api/admin/raid/reset")
+    async def admin_raid_reset(request: Request):
+        def go(v, d):
+            if not v.owner:
+                raise ValueError("Owner only.")
+            return v.reg.clear_raid_override(d["instance"], v.name)
+        return await run(request, go, officer=True)
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")
