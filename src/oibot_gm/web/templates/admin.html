@@ -65,7 +65,8 @@
   {% endif %}
 </div>
 
-<h2>Rosters</h2>
+<details>
+<summary><b>Standing rosters</b> <span class="muted">(optional — a fixed weekly team; the planner doesn't need these)</span></summary>
 {% for t in rosters %}
 <div class="panel">
   <form method="post" action="/admin/roster/settings" class="row">
