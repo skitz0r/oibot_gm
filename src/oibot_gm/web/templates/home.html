@@ -47,13 +47,12 @@
   {% endfor %}{% endif %}
   <tr class="add">
     <form method="post" action="/me/character/add" id="add-form"><input type="hidden" name="csrf" value="{{ csrf }}"></form>
-    <td class="who"><img class="ico dim" id="add-ico" src="/img/class/Warrior.png" alt=""><div>
-      <input form="add-form" name="name" maxlength="12" size="11" placeholder="name (blank = planned)"><br>
+    <td class="who"><img class="ico dim" id="add-ico" src="/img/class/Warrior.png" alt=""><div class="row" style="margin:0;gap:6px">
       <select form="add-form" name="cls" id="add-cls">{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select>
-      <select form="add-form" name="slot"><option value="main" {{ '' if member and member.main else 'selected' }}>main</option><option value="alt" {{ 'selected' if member and member.main else '' }}>alt</option></select></div></td>
+      <input form="add-form" name="name" maxlength="12" size="10" placeholder="name (blank = planned)"></div></td>
     <td><select form="add-form" name="spec" id="add-spec"></select> <select form="add-form" name="offspec" id="add-off"></select></td>
-    <td class="muted">set after adding</td>
-    <td class="muted" colspan="3">new character</td>
+    <td class="muted">after adding</td>
+    <td colspan="3"><select form="add-form" name="slot"><option value="main" {{ '' if member and member.main else 'selected' }}>as main</option><option value="alt" {{ 'selected' if member and member.main else '' }}>as alt</option></select></td>
     <td class="actions"><button form="add-form">Add</button></td>
   </tr>
 </table></div>
