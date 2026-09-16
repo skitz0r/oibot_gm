@@ -524,7 +524,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not reg:
             return
         m = reg.members.get(interaction.user.id)
-        today = discord.utils.utcnow().date().isoformat()
+        today = reg.now_local().date().isoformat()
         ups = m.upcoming_absences(today) if m else []
         await interaction.response.send_message("\n".join(f"• {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") for a in ups) or "No upcoming absences.", ephemeral=True)
 
@@ -645,7 +645,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not m:
             await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
             return
-        today = discord.utils.utcnow().date().isoformat()
+        today = reg.now_local().date().isoformat()
         e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=0x2B7A78)
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
         rosters = sorted({k for c in m.active() for k in c.rosters})
@@ -842,7 +842,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         from datetime import timedelta
 
-        today = discord.utils.utcnow().date()
+        today = reg.now_local().date()
         rows = reg.absences_between(today.isoformat(), (today + timedelta(days=days)).isoformat())
         lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
         await interaction.response.send_message("\n".join(lines)[:1900] or f"No absences in the next {days} days.", ephemeral=True)
@@ -1117,7 +1117,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config("about text updated")
         await interaction.response.send_message("✅ About text saved.", ephemeral=True)
 
-    @config.command(name="timezone", description="Owner: IANA timezone for schedules, e.g. America/Chicago")
+    @config.command(name="timezone", description="Owner: IANA timezone for schedules, e.g. America/Los_Angeles")
     async def cfg_tz(interaction: discord.Interaction, timezone: str):
         reg = await need(interaction)
         if not reg:
@@ -1130,7 +1130,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         try:
             ZoneInfo(timezone)
         except Exception:  # noqa: BLE001
-            await interaction.response.send_message("❌ Unknown timezone (use IANA names like America/Chicago).", ephemeral=True)
+            await interaction.response.send_message("❌ Unknown timezone (use IANA names like America/Los_Angeles).", ephemeral=True)
             return
         reg.config.timezone = timezone
         reg.save_config(f"timezone → {timezone}")

@@ -4,7 +4,6 @@ No state is changed here — answers point at commands; officers' change request
 configops."""
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -74,7 +73,7 @@ def system_prompt(tree) -> str:
 def guild_state(reg: Registry, rs, user_id: int, is_officer: bool) -> str:
     cfg = reg.config
     ch = lambda i: f"<#{i}>" if i else "not set"  # noqa: E731
-    lines = [f"## Guild: {cfg.name} · game profile {cfg.game_profile} · timezone {cfg.timezone} · now {datetime.now().strftime('%a %Y-%m-%d %H:%M')}",
+    lines = [f"## Guild: {cfg.name} · game profile {cfg.game_profile} · timezone {cfg.timezone} · now {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} (all times below are guild time)",
              f"channels: registration {ch(cfg.registration_channel_id)}, signup {ch(cfg.signup_channel_id)}, roster {ch(cfg.roster_channel_id)}, analytics {ch(cfg.analytics_channel_id)}, ops {ch(cfg.ops_channel_id)}, applications {ch(cfg.applications_channel_id)}",
              f"officer roles: {', '.join(cfg.officer_roles) or 'none (Manage Server counts)'} · members {len(reg.members)} · mains {sum(1 for m in reg.members.values() if m.main)}"]
     for t in cfg.rosters:
@@ -85,7 +84,7 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool) -> str:
         for ev in rs.live():
             ins = ev.by_status("in")
             asks = [f"{a.display_name} ({a.kind}: {a.answer or 'waiting'})" for a in ev.fill_asks]
-            lines.append(f"live raid {ev.key}: state {ev.state}, starts {ev.starts_at[:16]}, {len(ins)} in / {len(ev.by_status('tentative'))} tentative / {len(ev.by_status('sub'))} sub / {len(ev.by_status('out'))} out, health posted {ev.health_posted}, fill {ev.fill_state}"
+            lines.append(f"live raid {ev.key}: state {ev.state}, starts {reg.local(ev.starts_at, '%Y-%m-%d %H:%M')}, {len(ins)} in / {len(ev.by_status('tentative'))} tentative / {len(ev.by_status('sub'))} sub / {len(ev.by_status('out'))} out, health posted {ev.health_posted}, fill {ev.fill_state}"
                          + (f", asks: {'; '.join(asks[-6:])}" if asks else "") + (f", recent log: {' | '.join(ev.log[-4:])}" if ev.log else ""))
     m = reg.members.get(user_id)
     if m:

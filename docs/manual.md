@@ -77,7 +77,7 @@ standing teams: the Rosters page on the website shows, per raid, the tentative p
 runs for the current window with their sheets. A standing roster (a fixed team on a weekly schedule) is
 still possible but optional.
 
-A **roster** is a named run with a size, a schedule ("Tue 19:30" server time), an instance, and cutoffs. A character
+A **roster** is a named run with a size, a schedule ("Tue 19:30" in the guild's timezone — US Pacific), an instance, and cutoffs. A character
 can be on the 20-man and a 10-man as long as the times don't overlap; each raid has its own lockout (weekly for now)
 and a member is only ever in one raid per time slot. 10-mans are expected to be rebuilt each lockout from
 availability, signups and who needs what.
@@ -169,6 +169,10 @@ cards, because WoW: Forever has not published totem scoping yet.
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
 `signup-channel`, `applications-channel`, `officer-role`, `timezone`, and one `/gm config roster` per
 team (key, size, schedule, instance, soft/hard cutoffs, open days, open_dm, autofill).
+
+**Times.** The guild's timezone is US Pacific (`America/Los_Angeles`, the default). Every schedule, cutoff,
+lockout window, page clock and "asked/starts at" stamp the bot shows is in that timezone; only Discord's own
+`<t:…>` timestamps render in each viewer's local time.
 
 ## 9. Loot (when loot tables exist)
 

@@ -66,10 +66,10 @@ def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico, rs=None) -> tu
     levels = [h["headcount_level"]] + [r["level"] for r in h["roles"] if r["need"]]
     worst = "red" if "red" in levels else ("amber" if "amber" in levels else "green")
     colour = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]
-    start = ev.start
+    start = ev.start.astimezone(reg.tz)  # card text is guild time; the embed's <t:> stamps render per viewer
     soft = start - timedelta(hours=rc.team_setting(team, "cutoff_soft_hours"))
     hard = start - timedelta(hours=rc.team_setting(team, "cutoff_hard_hours"))
-    png = render.health_png(f"Roster health · {team.get('name', ev.team)} · {ev.key}", f"{start.strftime('%a %b %d %H:%M')} server · locks {hard.strftime('%a %H:%M')}", h["headcount"], h["roles"], h["buffs"], h["unresponsive"], footer="tiles: have / need · amber = tentative/sub could cover · badges: party buffs from signed players")
+    png = render.health_png(f"Roster health · {team.get('name', ev.team)} · {ev.key}", f"{start.strftime('%a %b %d %H:%M %Z')} · locks {hard.strftime('%a %H:%M')}", h["headcount"], h["roles"], h["buffs"], h["unresponsive"], footer="tiles: have / need · amber = tentative/sub could cover · badges: party buffs from signed players")
     file = discord.File(BytesIO(png), filename="health.png")
     n, size, tent, subs = h["headcount"]
     e = discord.Embed(colour=colour, description=f"{LEVEL_DOT[worst]} **{n}/{size}** in · nudge <t:{int(soft.timestamp())}:R> · lock <t:{int(hard.timestamp())}:R>")

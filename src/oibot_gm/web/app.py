@@ -110,8 +110,23 @@ def create_app(bot) -> FastAPI:
     def csrf_token(v: Viewer) -> str:
         return signer.dumps({"csrf": v.uid})
 
+    def guild_reg():
+        return next(iter(bot.registries.by_discord.values()), None)  # single-guild deployment
+
+    def local(value, fmt: str = "%a %d %b %H:%M") -> str:
+        """Jinja filter: an ISO string (UTC audit stamp or raid start) or aware datetime → guild time."""
+        reg = guild_reg()
+        try:
+            return reg.local(value, fmt) if reg else str(value)[:16]
+        except (TypeError, ValueError):
+            return str(value)
+
+    templates.env.filters["local"] = local
+
     def page(request: Request, name: str, v: Viewer | None, **ctx) -> HTMLResponse:
-        return templates.TemplateResponse(request, name, {"v": v, "now": datetime.now().strftime("%a %d %b %H:%M"), "csrf": csrf_token(v) if v else "",
+        reg = v.reg if v else guild_reg()
+        now = reg.now_local().strftime("%a %d %b %H:%M %Z") if reg else datetime.now().strftime("%a %d %b %H:%M")  # guild time, labelled
+        return templates.TemplateResponse(request, name, {"v": v, "now": now, "csrf": csrf_token(v) if v else "",
                                                           "ok": request.query_params.get("ok"), "err": request.query_params.get("err"), **ctx})
 
     async def form(request: Request, officer: bool = False) -> tuple[Viewer, dict]:
@@ -269,7 +284,7 @@ def create_app(bot) -> FastAPI:
         roles = reg.roles_of(v.member) if v.member else (None, [])
         classes = {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()}
         class_icons = {c: icon_url("class", c) for c in reg.profile.classes}
-        return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=datetime.now().date().isoformat(), classes=classes,
+        return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=reg.now_local().date().isoformat(), classes=classes,
                     rosters=reg.config.rosters or [{"key": "main", "name": "main"}], class_icons=class_icons, spec_role=lambda c: reg.profile.spec(c.cls, c.spec).role, off_role=lambda c: (reg.profile.spec(c.cls, c.offspec).role if c.offspec else None),
                     week=(v.member.week if v.member else []), tz=reg.config.timezone, placement_asks=reg.open_placement_asks(v.uid),
                     raid_windows=[{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")])
@@ -591,7 +606,8 @@ def create_app(bot) -> FastAPI:
         reg = v.reg
         rs = bot.raids.store(reg)
         ps = bot.proposals(reg)
-        now = datetime.now().astimezone()
+        z = reg.tz
+        now = reg.now_local()
         events = sorted(rs.events.values(), key=lambda e: e.starts_at, reverse=True)
 
         summary_cache = bot.__dict__.setdefault("_run_summaries", {})
@@ -629,9 +645,9 @@ def create_app(bot) -> FastAPI:
             ws, we = reg.lockout_window(rid, now)
             fo = reg.first_open(rid)
             out.append({"id": rid, "eff": rd, "current": current, "past": past, "open": [p for p in props if p.state in ("proposed", "draft")], "history": [p for p in props if p.state not in ("proposed", "draft")][:4],
-                        "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")], "window": (ws, we), "opened": bool(fo and fo <= now), "first_open": fo, "run_summaries": run_summaries})
+                        "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")], "window": (ws.astimezone(z), we.astimezone(z)), "opened": bool(fo and fo <= now), "first_open": fo.astimezone(z) if fo else None, "run_summaries": run_summaries})
         orphans = [ev_row(e) for e in events if e.instance not in reg.profile.raids][:6]
-        return page(request, "rosters.html", v, raids=out, orphans=orphans)
+        return page(request, "rosters.html", v, raids=out, orphans=orphans, tz=reg.config.timezone)
 
     @app.get("/raids", response_class=HTMLResponse)
     async def raids(request: Request):
@@ -749,7 +765,7 @@ def create_app(bot) -> FastAPI:
                     raise HTTPException(404)
                 tt = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
                 h = rc.health_data(reg, ev, tt)
-                return render.health_png(f"Roster health · {tt.get('name', ev.team)} · {ev.key}", ev.start.strftime("%a %b %d %H:%M"), h["headcount"], h["roles"], h["buffs"], h["unresponsive"])
+                return render.health_png(f"Roster health · {tt.get('name', ev.team)} · {ev.key}", reg.local(ev.start, "%a %b %d %H:%M %Z"), h["headcount"], h["roles"], h["buffs"], h["unresponsive"])
             raise HTTPException(404)
 
         return Response(await cached_png(f"{kind}:{key}", build), media_type="image/png")

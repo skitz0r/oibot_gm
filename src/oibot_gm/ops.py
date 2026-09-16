@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import traceback
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import discord
 
@@ -16,7 +17,7 @@ class Ops:
         self.recent: list[tuple[str, str, str]] = []  # (time, level, text) ring for /gm status
 
     async def emit(self, cfg, level: str, text: str, exc: BaseException | None = None) -> None:
-        stamp = datetime.now().strftime("%H:%M")
+        stamp = datetime.now(ZoneInfo(getattr(cfg, "timezone", "UTC"))).strftime("%H:%M")  # guild time
         line = f"{LEVEL_ICON.get(level, '•')} `{stamp}` {text}"
         self.recent = (self.recent + [(stamp, level, text)])[-30:]
         print(f"[ops:{level}] {text}" + (f"\n{traceback.format_exception(exc)[-1].strip()}" if exc else ""))

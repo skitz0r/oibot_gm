@@ -128,7 +128,7 @@ class GuildConfig(BaseModel):
     registration_message_id: Optional[int] = None
     analytics_channel_id: Optional[int] = None  # officer: live pool-readiness cards (edited on every change) + change log
     analytics_message_ids: dict[str, int] = Field(default_factory=dict)  # roster key -> card message id
-    timezone: str = "America/Chicago"  # server time for schedules
+    timezone: str = "America/Los_Angeles"  # guild time: every schedule, window and displayed clock uses it
     auto_propose_hour: int = 12  # guild-local hour when the planner runs for raids with auto-propose on
     slots: list[str] = Field(default_factory=list)  # candidate raid times members rate ('Tue 19:30'); officers pick rosters from the heat-map
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
@@ -339,6 +339,24 @@ class Registry:
         self._snap: dict[int, dict] = {}  # last saved state per member, for diff lines
         self.config = self.load_config()
         self.reload()
+
+    # ---- guild time
+    @property
+    def tz(self):
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(self.config.timezone)
+
+    def now_local(self) -> datetime:
+        """Aware 'now' in the guild's timezone: use it for anything shown to people or compared with a schedule."""
+        return datetime.now(self.tz)
+
+    def local(self, value, fmt: str = "%a %d %b %H:%M") -> str:
+        """Render an aware datetime or ISO string (UTC audit stamps, raid starts, windows) in guild time."""
+        t = datetime.fromisoformat(str(value)) if not isinstance(value, datetime) else value
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=self.tz)
+        return t.astimezone(self.tz).strftime(fmt)
 
     # ---- persistence
     def load_config(self) -> GuildConfig:

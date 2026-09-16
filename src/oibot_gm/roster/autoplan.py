@@ -169,7 +169,7 @@ def plan(reg: Registry, rs, instance: str, start: datetime | None = None) -> Pro
     ws, we = reg.lockout_window(instance, earliest)
     if we - earliest < timedelta(hours=float(rd.get("duration_hours", 3)) + 12):
         ws, we = reg.lockout_window(instance, we + timedelta(minutes=1))  # too little of this window left: plan the next one
-    window_start, window_end = max(ws, earliest), we
+    window_start, window_end = max(ws, earliest).astimezone(z), we.astimezone(z)  # anchor may carry a fixed offset; proposals are stored in guild time
     members = eligible_pool(reg, rs, instance, window_start, window_end)
     problems: list[str] = []
     if not members:

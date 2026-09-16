@@ -8,7 +8,6 @@ Registry commits drive both through Registry.listeners; refreshes are debounced 
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from io import BytesIO
 
 import discord
@@ -22,8 +21,8 @@ DEBOUNCE_S = 5.0  # a burst of registrations re-posts the cards once
 BANK_KEY = "_bank"  # analytics_message_ids slot for the character bank card
 
 
-def _stamp() -> str:
-    return datetime.now().strftime("%a %b %d %H:%M")
+def _stamp(reg: Registry) -> str:
+    return reg.now_local().strftime("%a %b %d %H:%M")
 
 
 def groups_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.File]:
@@ -39,7 +38,7 @@ def groups_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discor
     open_slots = int(roster.get("size") or 20) - len(result.selected)
     png = render.groups_png(reg.profile, players, result, cov, rb,
                             f"Optimised groups · {roster.get('name', key)} ({roster.get('size', 20)}-man)",
-                            f"{len(result.selected)} of {len(players)} mains placed · {open_slots} open slot{'s' if open_slots != 1 else ''} · groups seeded by archetype, synergy {result.synergy_value} · updated {_stamp()}",
+                            f"{len(result.selected)} of {len(players)} mains placed · {open_slots} open slot{'s' if open_slots != 1 else ''} · groups seeded by archetype, synergy {result.synergy_value} · updated {_stamp(reg)}",
                             reg.profile.buff_assumptions(), labels)
     file = discord.File(BytesIO(png), filename=fname)
     missing_raid = [r for r in rb if not r["providers"]]
@@ -66,7 +65,7 @@ def comp_card(reg: Registry, roster: dict) -> tuple[discord.Embed, discord.File]
     ic = comp_mod.ideal_comp(reg.profile, size, players, roster.get("comp_targets") or {}, roster.get("instance"), reg)
     n_off = sum(1 for l in ic.lines if l.source == "officer")
     png = render.comp_png(ic.lines, f"Desired comp · {roster.get('name', key)} ({size}-man, {ic.groups} groups)",
-                          f"derived from the buff matrix and comp rules · {n_off} officer target(s) · updated {_stamp()}", ic.notes)
+                          f"derived from the buff matrix and comp rules · {n_off} officer target(s) · updated {_stamp(reg)}", ic.notes)
     fname = f"comp-{key}.png"
     file = discord.File(BytesIO(png), filename=fname)
     short = [l for l in ic.lines if l.level == "red"]
@@ -86,7 +85,7 @@ def bank_card(reg: Registry) -> tuple[discord.Embed, discord.File]:
     mains = sum(1 for r in rows if r["main"])
     alts = sum(len(r["alts"]) for r in rows)
     unnamed = sum(1 for r in rows if r["main"] and not r["main"]["name"])
-    png = render.bank_png(f"Character bank · {reg.config.name}", f"{len(rows)} members · {mains} mains · {alts} alts" + (f" · {unnamed} mains unnamed" if unnamed else "") + f" · updated {datetime.now().strftime('%a %b %d %H:%M')}",
+    png = render.bank_png(f"Character bank · {reg.config.name}", f"{len(rows)} members · {mains} mains · {alts} alts" + (f" · {unnamed} mains unnamed" if unnamed else "") + f" · updated {_stamp(reg)}",
                           rows, footer="sorted by role then class · grey name = planned, not yet created · rank/rosters are officer-set")
     file = discord.File(BytesIO(png), filename="bank.png")
     e = discord.Embed(colour=0x2B7A78, description=f"**{len(rows)}** members · **{mains}** mains · **{alts}** alts")
@@ -103,7 +102,7 @@ def pool_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.
     n, size, alts, on_roster = h["headcount"]
     png = render.health_png(
         f"Pool readiness · {roster.get('name', roster.get('key', 'main'))} ({size}-man)",
-        f"every planned or active main counts · updated {datetime.now().strftime('%a %b %d %H:%M')}",
+        f"every planned or active main counts · updated {_stamp(reg)}",
         h["headcount"], h["roles"], h["buffs"], h["unresponsive"],
         footer="tiles: mains by primary role / needed at this size · amber = offspec/flex/alt could cover · red = recruit",
         headcount_text=f"{n}/{size} mains · {alts} alts · {on_roster} on roster" + (f" · {h['unnamed']} unnamed" if h["unnamed"] else ""),
@@ -150,7 +149,7 @@ class PoolMixin:
         ch = self.get_channel(reg.config.analytics_channel_id)
         if not ch:
             return
-        stamp = datetime.now().strftime("%H:%M")
+        stamp = reg.now_local().strftime("%H:%M")
         try:
             await ch.send("\n".join(f"`{stamp}` {l}" for l in lines)[:1900], allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:  # noqa: BLE001

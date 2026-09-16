@@ -29,16 +29,16 @@
 <h1>Rosters</h1>
 {% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
-<p class="intro">Runs for the current lockout, per raid: tentative proposals to accept, then accepted runs with their sheets. Rules are on <a href="/raids">Raids</a>.</p>
+<p class="intro">Runs for the current lockout, per raid: tentative proposals to accept, then accepted runs with their sheets. Rules are on <a href="/raids">Raids</a>. Times are {{ tz }}.</p>
 
 {% for r in raids %}
 <div class="panel">
-  <div class="hero"><img src="/img/raid/{{ r.id }}.png" alt=""><div><h2>{{ r.eff.name }}</h2><div class="meta">{% if r.opened %}window {{ r.window[0].strftime('%a %d %b') }} → {{ r.window[1].strftime('%a %d %b') }}{% elif r.first_open %}opens {{ r.first_open.strftime('%a %d %b %Y %H:%M') }}{% else %}no opening date{% endif %} · {{ r.current|length }} run(s){% if r.open %} · <span class="warn">{{ r.open|length }} tentative</span>{% endif %}</div>
+  <div class="hero"><img src="/img/raid/{{ r.id }}.png" alt=""><div><h2>{{ r.eff.name }}</h2><div class="meta">{% if r.opened %}window {{ r.window[0].strftime('%a %d %b') }} → {{ r.window[1].strftime('%a %d %b') }}{% elif r.first_open %}opens {{ r.first_open.strftime('%a %d %b %Y %H:%M') }} {{ tz }}{% else %}no opening date{% endif %} · {{ r.current|length }} run(s){% if r.open %} · <span class="warn">{{ r.open|length }} tentative</span>{% endif %}</div>
   <form method="post" action="/admin/plan" class="row" style="margin:6px 0 0"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}"><button class="quiet">Plan the next {{ r.eff.lockout_days }} days</button></form></div></div>
 
   {% for p in r.open %}
   <div class="panel" style="border-color:{{ 'var(--accent)' if p.viable else 'var(--warn)' }}">
-    <b>{{ 'Tentative' if p.viable else 'Best effort — not viable yet' }}</b> · window {{ p.window_start[:10] }} → {{ p.window_end[:10] }} · {{ p.notes|join(' · ') }}
+    <b>{{ 'Tentative' if p.viable else 'Best effort — not viable yet' }}</b> · window {{ p.window_start|local('%a %d %b') }} → {{ p.window_end|local('%a %d %b') }} · {{ p.notes|join(' · ') }}
     {% if p.problems %}<div class="warn" style="margin-top:4px">{% for x in p.problems %}⚠ {{ x }}<br>{% endfor %}</div>{% endif %}
     <div class="stack" style="margin-top:6px">
       {% for run in p.runs %}
@@ -54,7 +54,7 @@
 
   {% for e in r.current %}
   <div class="panel">
-    <b>{{ e.team.name or e.team.key }}</b> · starts {{ e.ev.starts_at[:16] }} · {{ e.ev.state }} ·
+    <b>{{ e.team.name or e.team.key }}</b> · starts {{ e.ev.starts_at|local }} · {{ e.ev.state }} ·
     <b class="ok">{{ e.by['in']|length }}</b> in / {{ e.by['tentative']|length }} tentative / {{ e.by['sub']|length }} sub / {{ e.by['out']|length }} out
     {% if e.needs %} · {% if e.needs.headcount %}<span class="bad">short {{ e.needs.headcount }}</span>{% else %}<span class="ok">full</span>{% endif %}{% for role, n in e.needs.roles.items() %} · <span class="bad">{{ n }} {{ role }} short</span>{% endfor %}{% if e.busy %} · <span class="warn">double-booked {{ e.busy|length }}</span>{% endif %} · fill {{ e.ev.fill_state }}{% endif %}
     <div class="grid" style="margin-top:6px">
@@ -86,7 +86,7 @@
 {% if orphans %}
 <h2>Sheets not tied to a raid</h2>
 <p class="sub">These rosters have no instance — set one on <a href="/admin">Admin</a> so they inherit a raid's rules.</p>
-{% for e in orphans %}<div class="panel"><b>{{ e.ev.key }}</b> · {{ e.team.name or e.team.key }} · {{ e.ev.state }} · starts {{ e.ev.starts_at[:16] }} · in {{ e.by['in']|length }} · out {{ e.by['out']|length }}</div>{% endfor %}
+{% for e in orphans %}<div class="panel"><b>{{ e.ev.key }}</b> · {{ e.team.name or e.team.key }} · {{ e.ev.state }} · starts {{ e.ev.starts_at|local }} · in {{ e.by['in']|length }} · out {{ e.by['out']|length }}</div>{% endfor %}
 {% endif %}
 
 <style>
