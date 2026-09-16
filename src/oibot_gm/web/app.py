@@ -60,7 +60,26 @@ def create_app(bot) -> FastAPI:
         except BadSignature:
             return None
 
-    def viewer(request: Request) -> Viewer | None:
+    member_cache: dict[int, tuple[float, object]] = {}
+
+    async def guild_member(guild, uid: int):
+        """Live guild member (roles decide the tier). No members intent, so fall back to a REST fetch, cached 5 min."""
+        m = guild.get_member(uid)
+        if m is not None:
+            return m
+        hit = member_cache.get(uid)
+        if hit and time.time() - hit[0] < 300:
+            return hit[1]
+        try:
+            m = await guild.fetch_member(uid)
+        except Exception:  # noqa: BLE001 — not a member (404) or transient
+            m = None
+        member_cache[uid] = (time.time(), m)
+        return m
+
+    async def viewer(request: Request) -> Viewer | None:
+        """None = not logged in. Raises 403 for a Discord user who is not in the guild's server:
+        the server's membership and roles are the whitelist — there is no separate user list."""
         s = session(request)
         if not s and dev_user and request.client and request.client.host in ("127.0.0.1", "::1"):
             s = {"uid": int(dev_user), "name": "dev"}
@@ -71,14 +90,16 @@ def create_app(bot) -> FastAPI:
         if reg is None:
             return None
         guild = bot.get_guild(reg.config.discord_guild_id)
-        member = guild.get_member(uid) if guild else None
-        officer = bot.officiates(member, guild) if member else (reg.config.owner_discord_id == uid)
+        member = await guild_member(guild, uid) if guild else None
+        if member is None and reg.config.owner_discord_id != uid:
+            raise HTTPException(status_code=403, detail=f"Your Discord account isn't a member of the {reg.config.name} server.")
+        officer = bot.officiates(member, guild) if member else True
         owner = reg.config.owner_discord_id == uid
         name = member.display_name if member else (reg.members[uid].display_name if uid in reg.members else s.get("name", str(uid)))
         return Viewer(uid, name, reg, officer, owner)
 
-    def need(request: Request, officer: bool = False) -> Viewer:
-        v = viewer(request)
+    async def need(request: Request, officer: bool = False) -> Viewer:
+        v = await viewer(request)
         if v is None:
             raise HTTPException(status_code=307, headers={"Location": "/auth/login?next=" + request.url.path})
         if officer and not v.officer:
@@ -126,7 +147,7 @@ def create_app(bot) -> FastAPI:
     # ---- pages
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
-        v = viewer(request)
+        v = await viewer(request)
         if v is None:
             reg = next(iter(bot.registries.by_discord.values()), None)
             return page(request, "landing.html", None, guild=reg.config if reg else None)
@@ -142,13 +163,13 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/bank", response_class=HTMLResponse)
     async def bank(request: Request):
-        v = need(request, officer=True)
+        v = await need(request, officer=True)
         rows = bank_rows(v.reg)
         return page(request, "bank.html", v, rows=rows, members=v.reg.members, verification=v.reg.verification)
 
     @app.get("/rosters", response_class=HTMLResponse)
     async def rosters(request: Request):
-        v = need(request, officer=True)
+        v = await need(request, officer=True)
         reg = v.reg
         out = []
         for t in reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]:
@@ -160,7 +181,7 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/raids", response_class=HTMLResponse)
     async def raids(request: Request):
-        v = need(request, officer=True)
+        v = await need(request, officer=True)
         reg = v.reg
         rs = bot.raids.store(reg)
         out = []
@@ -172,7 +193,7 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/config", response_class=HTMLResponse)
     async def config(request: Request):
-        v = need(request, officer=True)
+        v = await need(request, officer=True)
         import yaml
 
         from ..policy import PolicyStore
@@ -183,7 +204,7 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/ops", response_class=HTMLResponse)
     async def ops(request: Request):
-        v = need(request, officer=True)
+        v = await need(request, officer=True)
         st = bot.registries.store
         prov = bot.ctx.provider
         feed = getattr(bot, "feed", None)
@@ -205,7 +226,7 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/card/bank.png")
     async def card_bank(request: Request):
-        v = need(request, officer=True)
+        v = await need(request, officer=True)
         reg = v.reg
 
         def build():
@@ -216,7 +237,7 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/card/{kind}/{key}.png")
     async def card(request: Request, kind: str, key: str):
-        v = need(request, officer=True)
+        v = await need(request, officer=True)
         reg = v.reg
         t = reg.config.roster(key) or {"key": key, "name": key, "size": 20}
 
