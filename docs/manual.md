@@ -55,12 +55,17 @@ Signing up for a raid is still done on the sheet in Discord.
   only act on exceptions.
 - **Absences**: `/me absent add start [end] [reason]`, `/me absent list`, `/me absent clear`. Absent days
   pre-fill you as Out and the bot won't ask you to fill on those days.
+- **Raid times you can make**: on the website (Me → *Raid times I can make*) rate each candidate slot the
+  officers listed as yes / maybe / no. Officers use the heat-map to decide when the 10-mans run.
 - **See everything the bot has on you**: `/me view` or the *My status* button.
 - All `/me` commands also work in a DM with the bot.
 
 ## 4. Rosters and the weekly cycle
 
-A **roster** is a named team with a size, a schedule ("Tue 19:30" server time), an instance, and cutoffs.
+A **roster** is a named run with a size, a schedule ("Tue 19:30" server time), an instance, and cutoffs. A character
+can be on the 20-man and a 10-man as long as the times don't overlap; each raid has its own lockout (weekly for now)
+and a member is only ever in one raid per time slot. 10-mans are expected to be rebuilt each lockout from
+availability, signups and who needs what.
 Officers place a member's character on a roster with `/roster add` (one character per member per
 roster). A character can be on several rosters; people not on a roster can still sign as *Sub only*.
 

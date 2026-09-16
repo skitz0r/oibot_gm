@@ -80,6 +80,19 @@
       <button>Add</button>
     </form>
   </div>
+  {% if v.reg.config.slots %}
+  <div class="panel">
+    <h3 style="margin-top:0">Raid times I can make</h3>
+    <p class="sub">Officers build the 10-man and 20-man runs from these. <b>yes</b> = count on me, <b>maybe</b> = ask, <b>no</b> = never.</p>
+    <form method="post" action="/me/slots">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% for slot in v.reg.config.slots %}{% set cur = member.slot_prefs.get(slot) if member else none %}
+      <label class="row">{{ slot }} <select name="slot_{{ loop.index0 }}"><option value="" {{ 'selected' if not cur else '' }}>—</option><option value="yes" {{ 'selected' if cur == 'yes' else '' }}>yes</option><option value="maybe" {{ 'selected' if cur == 'maybe' else '' }}>maybe</option><option value="no" {{ 'selected' if cur == 'no' else '' }}>no</option></select></label>
+      {% endfor %}
+      <button>Save</button>
+    </form>
+  </div>
+  {% endif %}
   <div class="panel">
     <h3 style="margin-top:0">Flex &amp; DMs</h3>
     <form method="post" action="/me/roles" class="row">

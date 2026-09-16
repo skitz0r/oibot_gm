@@ -1056,6 +1056,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
 
+    @config.command(name="slots", description="Owner: candidate raid times members rate yes/maybe/no, e.g. 'Tue 19:30, Thu 20:00, Sun 18:00' (blank clears)")
+    async def cfg_slots(interaction: discord.Interaction, times: str = ""):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        from . import configops
+
+        try:
+            msg = configops.apply(reg, configops.ConfigOp(op="set", path="slots", value=times), interaction.user.display_name, True)
+        except (RegistryError, ValueError) as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {msg}. Members rate them on the website (Me → Raid times) — the heat-map is on Admin.", ephemeral=True)
+
     @config.command(name="about", description="Owner: one-paragraph public blurb for the static guide ('About the guild')")
     async def cfg_about(interaction: discord.Interaction, text: str):
         reg = await need(interaction)

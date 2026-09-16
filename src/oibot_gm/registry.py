@@ -62,6 +62,7 @@ class Member(BaseModel):
     availability: dict[str, str] = Field(default_factory=dict)  # team -> in | out | sub
     absences: list[Absence] = Field(default_factory=list)
     role_prefs: dict = Field(default_factory=dict)  # {"primary": "healer", "flex": ["ranged"]}
+    slot_prefs: dict[str, str] = Field(default_factory=dict)  # 'Tue 19:30' -> yes | maybe | no
     teams: list[str] = Field(default_factory=list)  # officer-curated team membership (the default weekly roster)
     dm_opt_out: bool = False
     created_at: str = Field(default_factory=now)
@@ -118,6 +119,7 @@ class GuildConfig(BaseModel):
     analytics_channel_id: Optional[int] = None  # officer: live pool-readiness cards (edited on every change) + change log
     analytics_message_ids: dict[str, int] = Field(default_factory=dict)  # roster key -> card message id
     timezone: str = "America/Chicago"  # server time for schedules
+    slots: list[str] = Field(default_factory=list)  # candidate raid times members rate ('Tue 19:30'); officers pick rosters from the heat-map
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
     about: Optional[str] = None  # short public blurb for the static guide (owner-set)
     officer_roles: list[str] = Field(default_factory=list)
@@ -224,6 +226,8 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
         lines.append(f"{who}: absent {s}" + (f" → {e}" if e != s else ""))
     for s, e in sorted(oa - na):
         lines.append(f"{who}: absence {s} cleared")
+    if old.get("slot_prefs") != new.get("slot_prefs"):
+        lines.append(f"{who}: slots " + (", ".join(f"{k} {v}" for k, v in new.get("slot_prefs", {}).items()) or "cleared"))
     if old.get("dm_opt_out") != new.get("dm_opt_out"):
         lines.append(f"{who}: DMs {'off' if new['dm_opt_out'] else 'on'}")
     return lines
@@ -703,6 +707,34 @@ class Registry:
         return [m for m, _ in self.roster_pool(team)]
 
     # ---- availability & absences
+    def set_slot_prefs(self, discord_id: int, prefs: dict[str, str], display_name: str | None = None) -> Member:
+        """Rate the guild's candidate raid times: yes | maybe | no (unknown slots and other values are dropped)."""
+        m = self.member(discord_id, display_name, create=display_name is not None)
+        clean = {k: v for k, v in prefs.items() if k in self.config.slots and v in ("yes", "maybe", "no")}
+        if clean == m.slot_prefs:
+            return m
+        m.slot_prefs = clean
+        self.save(m, f"{m.display_name} slots: " + ", ".join(f"{k}={v}" for k, v in clean.items()))
+        return m
+
+    def slot_summary(self) -> list[dict]:
+        """Per candidate slot: who said yes/maybe/no, with role counts among the yes+maybe mains."""
+        out = []
+        for slot in self.config.slots:
+            yes, maybe, no, unset = [], [], [], []
+            roles = {r: 0 for r in ("tank", "healer", "melee", "ranged")}
+            for m in self.members.values():
+                if not m.main:
+                    continue
+                v = m.slot_prefs.get(slot)
+                {"yes": yes, "maybe": maybe, "no": no}.get(v, unset).append(m.display_name)
+                if v in ("yes", "maybe"):
+                    r = self.roles_of(m)[0]
+                    if r in roles:
+                        roles[r] += 1
+            out.append({"slot": slot, "yes": yes, "maybe": maybe, "no": no, "unset": unset, "roles": roles})
+        return out
+
     def set_availability(self, discord_id: int, team: str, value: str) -> Member:
         if value not in AVAILABILITY:
             raise RegistryError(f"Availability must be one of {', '.join(AVAILABILITY)}.")

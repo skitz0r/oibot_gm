@@ -255,6 +255,18 @@ def create_app(bot) -> FastAPI:
     async def me_absence_clear(request: Request):
         return await mutate(request, "/", lambda v, d: (v.reg.clear_absence(v.uid, d["start"]) and f"cleared absence {d['start']}"))
 
+    @app.post("/me/slots")
+    async def me_slots(request: Request):
+        def go(v, d):
+            prefs = {slot: d.get(f"slot_{i}") for i, slot in enumerate(v.reg.config.slots)}
+            v.reg.set_slot_prefs(v.uid, {k: val for k, val in prefs.items() if val}, v.name)
+            return "raid-time preferences saved"
+        return await mutate(request, "/", go)
+
+    @app.post("/admin/slots")
+    async def admin_slots(request: Request):
+        return await mutate(request, "/admin", lambda v, d: _cfg_op(v, op="set", path="slots", value=d.get("value", "")), officer=True)
+
     @app.post("/me/dm")
     async def me_dm(request: Request):
         def go(v, d):
@@ -278,7 +290,8 @@ def create_app(bot) -> FastAPI:
             placed = {t["key"]: next((c for c in chars if t["key"] in c.rosters), None) for t in rosters}
             rows.append({"m": m, "chars": chars, "main": m.main, "placed": placed, "roles": reg.roles_of(m), "verification": reg.verification(m.discord_id)})
         instances = list(reg.profile.raids)
-        return page(request, "admin.html", v, rows=rows, rosters=rosters, ranks=("trial", "raider", "core", "alt", "social"), instances=instances, owner=v.owner)
+        return page(request, "admin.html", v, rows=rows, rosters=rosters, ranks=("trial", "raider", "core", "alt", "social"), instances=instances, owner=v.owner,
+                    slots=reg.config.slots, heat=reg.slot_summary())
 
     def _cfg_op(v: Viewer, **kw):
         from .. import configops

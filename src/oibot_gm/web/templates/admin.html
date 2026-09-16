@@ -31,6 +31,31 @@
   {% endfor %}
 </table></div>
 
+<h2>Raid times</h2>
+<div class="panel">
+  <form method="post" action="/admin/slots" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Candidate slots members rate <input name="value" value="{{ slots|join(', ') }}" placeholder="Tue 19:30, Thu 20:00, Sun 18:00" size="44"></label>
+    {% if owner %}<button>Save</button>{% else %}<span class="muted">(owner sets these)</span>{% endif %}
+  </form>
+  {% if heat %}
+  <div class="tbl"><table>
+    <tr><th>Slot</th><th>Yes</th><th>Maybe</th><th>Tanks</th><th>Healers</th><th>Melee</th><th>Ranged</th><th>No</th><th>Not answered</th></tr>
+    {% for h in heat %}
+    <tr>
+      <td><b>{{ h.slot }}</b></td>
+      <td class="ok"><b>{{ h.yes|length }}</b><br><span class="muted">{{ h.yes|join(', ') }}</span></td>
+      <td class="warn"><b>{{ h.maybe|length }}</b><br><span class="muted">{{ h.maybe|join(', ') }}</span></td>
+      <td>{{ h.roles.tank }}</td><td>{{ h.roles.healer }}</td><td>{{ h.roles.melee }}</td><td>{{ h.roles.ranged }}</td>
+      <td class="muted">{{ h.no|length }}</td>
+      <td class="muted">{{ h.unset|length }}{% if h.unset %}<br><span class="muted">{{ h.unset[:8]|join(', ') }}{% if h.unset|length > 8 %}…{% endif %}</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  <p class="sub">Role counts include yes + maybe mains. A 10-man wants ≥ 2 tanks and ≥ 3 healers among them with a few spare bodies.</p>
+  {% endif %}
+</div>
+
 <h2>Rosters</h2>
 {% for t in rosters %}
 <div class="panel">

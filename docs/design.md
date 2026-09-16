@@ -367,7 +367,11 @@ FastAPI app (`web/app.py`) running inside the bot process so it sees live object
 3. **Time-slot preferences**: weekly grid (evening slots × days) per member — yes / maybe / no; officer heat-map per slot.
 4. **Auto-build rosters**: solver assigns pool mains to N roster shells (size, slot) at once — hard: slot *no*, one character per member per roster, role bounds; objective: per-roster synergy, preferred slots, keep-together, rank spread. Proposal with cards + justifications; plain-text edits; approve → placements commit.
 5. **Spec assignment and verification**: offspec/alt seats in a proposal become DM asks (fill-ask machinery: Accept / Can't); declines re-open the seat and re-solve; accepts set availability.
-6. **Steady state**: existing weekly cycle + fill engine per roster; cross-roster conflicts already enforced. Open: Forever lockout rules (10 and 20 in one week?), stable teams vs weekly re-draw.
+6. **Steady state**: existing weekly cycle + fill engine per roster; cross-roster conflicts already enforced.
+
+Rules confirmed 2026-09-16: a character may be on the 20 and a 10 if the times don't overlap; each raid has its own lockout (`raids.yaml: lockout_days`, 7 now, 10-mans may go to 3); a character runs each instance once per lockout; a member is in at most one raid per slot. 10-mans are rebuilt every lockout window from signups, availability and newly available alts, preferring characters that still need items from that raid and cycling out satisfied ones (wishlist/ledger-driven once wishlists exist; a `need` hook until then).
+
+**Phase 3 built:** `GuildConfig.slots` (owner: `/gm config slots`, plain text `set slots`, Admin page), `Member.slot_prefs` (Me page: yes/maybe/no per slot, logged), `Registry.slot_summary()` heat-map on Admin (yes/maybe/no/unanswered per slot with tank/healer/melee/ranged counts among yes+maybe mains).
 
 ## 6. Architecture
 
