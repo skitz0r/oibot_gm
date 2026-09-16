@@ -56,7 +56,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands
 frontend/              React + Mantine app (Vite). `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Bank · Admin · Ops · Config (Mantine, left rail,
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html

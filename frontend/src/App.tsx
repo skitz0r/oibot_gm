@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { AppShell, Box, Burger, Group, NavLink, Stack, Text, Title } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconAdjustments, IconChartBar, IconListDetails, IconMountain, IconTable, IconUser, IconUsers } from "@tabler/icons-react";
+import { IconChartBar, IconListDetails, IconMountain, IconTable, IconUser, IconUsers } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, type Meta } from "./api";
 import { MePage } from "./pages/Me";
 import { RostersPage } from "./pages/Rosters";
 import { RaidsPage } from "./pages/Raids";
-import { AdminPage } from "./pages/Admin";
-import { BankPage } from "./pages/Bank";
+import { MembersPage } from "./pages/Members";
 import { OpsPage } from "./pages/Ops";
 import { ConfigPage } from "./pages/Config";
 
@@ -16,8 +15,7 @@ const NAV = [{ to: "/me", label: "Me", icon: IconUser }];
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
-  { to: "/bank", label: "Bank", icon: IconUsers },
-  { to: "/admin", label: "Admin", icon: IconAdjustments },
+  { to: "/members", label: "Members", icon: IconUsers },
   { to: "/ops", label: "Ops", icon: IconChartBar },
   { to: "/config", label: "Config", icon: IconListDetails },
 ];
@@ -63,8 +61,9 @@ export default function App() {
             <Route path="/me" element={<MePage meta={meta} />} />
             <Route path="/rosters" element={officer(<RostersPage meta={meta} />)} />
             <Route path="/raids" element={officer(<RaidsPage />)} />
-            <Route path="/bank" element={officer(<BankPage meta={meta} />)} />
-            <Route path="/admin" element={officer(<AdminPage meta={meta} />)} />
+            <Route path="/members" element={officer(<MembersPage meta={meta} />)} />
+            <Route path="/bank" element={<Navigate to="/members" replace />} />
+            <Route path="/admin" element={<Navigate to="/members" replace />} />
             <Route path="/ops" element={officer(<OpsPage />)} />
             <Route path="/config" element={officer(<ConfigPage />)} />
             <Route path="*" element={<Navigate to="/me" replace />} />

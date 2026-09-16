@@ -70,6 +70,8 @@ export interface SlotHeat { slot: string; yes: string[]; maybe: string[]; no: st
 export interface Admin { rows: AdminRow[]; rosters: RosterCfg[]; ranks: string[]; instances: string[]; owner: boolean; slots: string[]; heat: SlotHeat[]; week_heat: [number, number][][]; tz: string; grid_members: number }
 export interface BuildSeat { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; reasons: string[] }
 export interface Build { token: string; status: string; notes: string[]; unplaced: [string, string][]; shells: { key: string; name: string; instance: string | null; size: number; slot: string; shortfalls: Record<string, number>; seats: BuildSeat[] }[]; adds: { name: string; character: string; roster: string }[]; removes: { name: string; roster: string }[] }
+export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; week: WeekBlock[]; asks: { roster: string; answer: string | null }[] }
+export interface Members { rows: MemberRow[]; members: number; tz: string; week_heat: [number, number][][]; grid_members: number; raid_windows: { slot: string; name: string }[] }
 export interface Bank { rows: BankRow[]; members: number }
 export interface BankRow { member: string; role: string | null; main: { cls: string; spec: string; offspec: string | null; name: string | null; status: string; rank: string; rosters: string[] } | null; alts: { cls: string; spec: string; name: string | null; status: string }[] }
 export interface Ops { head: string; push: boolean; llm: string; feed: string; up: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }

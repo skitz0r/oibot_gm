@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 OUT = Path(__file__).resolve().parents[1] / "out" / "shots"
 OUT.mkdir(parents=True, exist_ok=True)
-PAGES = ["/app/me", "/app/rosters", "/app/raids", "/app/bank", "/app/admin", "/app/ops", "/app/config"]
+PAGES = ["/app/me", "/app/rosters", "/app/raids", "/app/members", "/app/ops", "/app/config"]
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8788"
 with sync_playwright() as p:
     b = p.chromium.launch()

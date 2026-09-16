@@ -21,7 +21,7 @@ HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
 
 
-def install_api(app: FastAPI, bot, *, viewer, icon_url) -> None:
+def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def who(request: Request, officer: bool = False):
         v = await viewer(request)
         if v is None:
@@ -471,6 +471,71 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url) -> None:
         sent = await bot.send_placement_asks(v.reg, adds, v.name)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} approved a roster build: {len(done)} change(s), {sent} confirmation DM(s)")
         return {"message": f"applied {len(done)} placement change(s); asked {sent} member(s) to confirm by DM"}
+
+    # ---- members: every member's characters + availability; officers edit them like their own Me page
+    @app.get("/api/members")
+    async def members(request: Request):
+        v = await who(request, officer=True)
+        reg = v.reg
+        ms = sorted(reg.members.values(), key=lambda m: m.display_name.lower())
+        privs = await asyncio.gather(*(privilege(reg, m.discord_id) for m in ms))
+        rows = []
+        for m, p in zip(ms, privs):
+            chars = sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))
+            if not chars:
+                continue
+            rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": p,
+                         "characters": [char_json(reg, c) for c in chars], "week": list(m.week),
+                         "asks": [{"roster": a["roster"], "answer": a.get("answer")} for a in m.placement_asks[-3:] if a.get("answer") is None]})
+        return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone, "week_heat": reg.week_heat(),
+                "grid_members": sum(1 for m in reg.members.values() if m.main and m.week),
+                "raid_windows": [{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")]}
+
+    @app.post("/api/members/save")
+    async def members_save(request: Request):
+        """One save for the whole table: per member — deletes, spec/offspec, names, new characters, main, availability grid."""
+        def go(v, d):
+            reg, done = v.reg, []
+            for row in d.get("rows") or []:
+                uid = int(row["uid"])
+                m = reg.members.get(uid)
+                if not m:
+                    continue
+                for label in row.get("deletes") or []:
+                    reg.delete_character(uid, label)
+                    done.append(f"deleted {label}")
+                want_main = None
+                for c in row.get("characters") or []:
+                    cls, spec, off = (c.get("cls") or "").strip(), (c.get("spec") or "").strip(), (c.get("offspec") or "").strip() or None
+                    name, surname = (c.get("name") or "").strip(), (c.get("surname") or "").strip() or None
+                    cur = next((x for x in m.active() if x.label == (c.get("label") or "")), None)
+                    if cur is None:
+                        if not cls or not spec:
+                            continue
+                        if name:
+                            _, cur = reg.add_character(uid, m.display_name, name, cls, spec, off, bool(c.get("main")), surname=surname)
+                            done.append(f"added {cur.label} for {m.display_name}")
+                        else:
+                            _, cur = reg.set_plan(uid, m.display_name, cls, spec, off, "main" if c.get("main") else "alt")
+                            done.append(f"planned {cur.cls} {cur.spec} for {m.display_name}")
+                    else:
+                        if spec and (spec, off) != (cur.spec, cur.offspec):
+                            reg.set_spec(uid, cur.label, spec, off)
+                            done.append(f"{cur.label}: {spec}" + (f"/{off}" if off else ""))
+                        if not cur.name and name:
+                            _, cur = reg.name_character(uid, name, "main" if cur.is_main else "alt", surname=surname, label=cur.label)
+                            done.append(f"named {cur.label}")
+                    if c.get("main"):
+                        want_main = cur.label
+                m = reg.members.get(uid) or m
+                if want_main and not (m.main and m.main.label == want_main):
+                    reg.set_main(uid, want_main)
+                    done.append(f"{m.display_name}: main is {want_main}")
+                if row.get("week") is not None:
+                    mm = reg.set_week(uid, list(row["week"]), m.display_name)
+                    done.append(f"{mm.display_name}: availability {sum(r['end'] - r['start'] for r in mm.week) / 60:.0f}h/week")
+            return "; ".join(done) or "no changes"
+        return await run(request, go, officer=True)
 
     # ---- bank, ops, config (read-only)
     @app.get("/api/bank")

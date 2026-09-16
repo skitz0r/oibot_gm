@@ -59,13 +59,13 @@ def create_app(bot) -> FastAPI:
 
     member_cache: dict[int, tuple[float, object]] = {}
 
-    async def guild_member(guild, uid: int):
-        """Live guild member (roles decide the tier). No members intent, so fall back to a REST fetch, cached 5 min."""
+    async def guild_member(guild, uid: int, max_age: float = 300):
+        """Live guild member (roles decide the tier). No members intent, so fall back to a REST fetch, cached `max_age` s."""
         m = guild.get_member(uid)
         if m is not None:
             return m
         hit = member_cache.get(uid)
-        if hit and time.time() - hit[0] < 300:
+        if hit and time.time() - hit[0] < max_age:
             return hit[1]
         try:
             m = await guild.fetch_member(uid)
@@ -94,6 +94,16 @@ def create_app(bot) -> FastAPI:
         owner = reg.config.owner_discord_id == uid
         name = member.display_name if member else (reg.members[uid].display_name if uid in reg.members else s.get("name", str(uid)))
         return Viewer(uid, name, reg, officer, owner)
+
+    async def privilege(reg, uid: int, max_age: float = 60) -> str:
+        """owner | officer | member | outside — from Discord roles (Manage Server or the configured officer role), never stored."""
+        if reg.config.owner_discord_id == uid:
+            return "owner"
+        guild = bot.get_guild(reg.config.discord_guild_id)
+        m = await guild_member(guild, uid, max_age=max_age) if guild else None
+        if m is None:
+            return "outside"
+        return "officer" if bot.officiates(m, guild) else "member"
 
     async def need(request: Request, officer: bool = False) -> Viewer:
         v = await viewer(request)
@@ -226,7 +236,7 @@ p{color:#8C97A8;margin:0 0 18px}a{display:inline-block;background:#38B2A0;color:
             return HTMLResponse(LANDING.replace("{name}", reg.config.name if reg else "oibot_GM"))
         return RedirectResponse("/app/me", status_code=302)
 
-    for _old, _new in (("/admin", "/app/admin"), ("/admin/build", "/app/admin"), ("/bank", "/app/bank"), ("/rosters", "/app/rosters"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):
+    for _old, _new in (("/admin", "/app/members"), ("/admin/build", "/app/rosters"), ("/bank", "/app/members"), ("/rosters", "/app/rosters"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):
         app.add_api_route(_old, (lambda new: (lambda: RedirectResponse(new, status_code=301)))(_new), methods=["GET"])
 
     # ---- cards (PNG, rendered on demand, cached per data-repo head)
@@ -286,7 +296,7 @@ p{color:#8C97A8;margin:0 0 18px}a{display:inline-block;background:#38B2A0;color:
 
     from .api import install_api
 
-    install_api(app, bot, viewer=viewer, icon_url=icon_url)
+    install_api(app, bot, viewer=viewer, icon_url=icon_url, privilege=privilege)
     return app
 
 

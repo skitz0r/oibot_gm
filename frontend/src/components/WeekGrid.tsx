@@ -30,15 +30,15 @@ export function toBlocks(state: Level[][]): WeekBlock[] {
 const hourLabel = (h: number) => (h === 0 ? "12a" : h < 12 ? `${h}a` : h === 12 ? "12p" : `${h - 12}p`);
 
 /** Drag-to-select availability grid. Landscape (days as rows) on wide screens, transposed on phones. */
-export function WeekGrid({ value, onChange, raidWindows, tz }: { value: WeekBlock[]; onChange: (b: WeekBlock[]) => void; raidWindows: { slot: string; name: string }[]; tz: string }) {
+export function WeekGrid({ value, onChange, raidWindows, tz, readOnly, compact, landscape }: { value: WeekBlock[]; onChange?: (b: WeekBlock[]) => void; raidWindows: { slot: string; name: string }[]; tz: string; readOnly?: boolean; compact?: boolean; landscape?: boolean }) {
   const [state, setState] = useState<Level[][]>(() => toState(value));
   const [mode, setMode] = useState<"preferred" | "available" | "clear">("preferred");
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [portrait, setPortrait] = useState(window.innerWidth < 760);
+  const [portrait, setPortrait] = useState(!landscape && window.innerWidth < 760);
   const drag = useRef<{ d: number; i: number } | null>(null);
 
   useEffect(() => setState(toState(value)), [value]);
-  useEffect(() => { const f = () => setPortrait(window.innerWidth < 760); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
+  useEffect(() => { const f = () => setPortrait(!landscape && window.innerWidth < 760); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, [landscape]);
 
   const raidCells = useMemo(() => {
     const WD: Record<string, number> = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 };
@@ -56,7 +56,7 @@ export function WeekGrid({ value, onChange, raidWindows, tz }: { value: WeekBloc
     const next = state.map((r) => [...r]);
     cells.forEach((k) => { const [d, i] = k.split(":").map(Number); next[d][i] = mode === "clear" ? "" : mode; });
     setState(next);
-    onChange(toBlocks(next));
+    onChange?.(toBlocks(next));
   }
   function rect(a: { d: number; i: number }, b: { d: number; i: number }) {
     const s = new Set<string>();
@@ -68,7 +68,7 @@ export function WeekGrid({ value, onChange, raidWindows, tz }: { value: WeekBloc
     if (!el || el.dataset.d === undefined) return null;
     return { d: +el.dataset.d, i: +el.dataset.i! };
   }
-  const onDown = (ev: React.PointerEvent) => { const c = cellAt(ev); if (!c) return; drag.current = c; setSel(rect(c, c)); ev.preventDefault(); };
+  const onDown = (ev: React.PointerEvent) => { if (readOnly) return; const c = cellAt(ev); if (!c) return; drag.current = c; setSel(rect(c, c)); ev.preventDefault(); };
   const onMove = (ev: React.PointerEvent) => { if (!drag.current) return; const c = cellAt(ev); if (c) setSel(rect(drag.current, c)); };
   const onUp = () => { if (!drag.current) return; drag.current = null; if (sel.size) apply(sel); setSel(new Set()); };
 
@@ -78,7 +78,7 @@ export function WeekGrid({ value, onChange, raidWindows, tz }: { value: WeekBloc
     const bg = lv === "preferred" ? PREF : lv === "available" ? AVAIL : "var(--mantine-color-slate-6)";
     return (
       <Box key={`${d}:${i}`} data-d={d} data-i={i} title={`${DAYS[d]} ${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`}
-        style={{ height: portrait ? 12 : 24, borderRadius: 4, background: bg, cursor: "crosshair",
+        style={{ height: portrait ? 12 : compact ? 16 : 24, borderRadius: 4, background: bg, cursor: readOnly ? "default" : "crosshair",
           outline: sel.has(`${d}:${i}`) ? "2px solid var(--mantine-color-slate-0)" : undefined, outlineOffset: -2,
           boxShadow: raidCells.has(`${d}:${i}`) ? "inset 0 -3px 0 var(--mantine-color-teal-4)" : undefined }} />
     );
@@ -88,7 +88,7 @@ export function WeekGrid({ value, onChange, raidWindows, tz }: { value: WeekBloc
   return (
     <Box>
       <Group justify="space-between" mb="sm" wrap="wrap">
-        <Group gap="sm">
+        {!readOnly && <Group gap="sm">
           <SegmentedControl value={mode} onChange={(v) => setMode(v as typeof mode)} size="sm"
             data={[{ value: "preferred", label: "Preferred" }, { value: "available", label: "Available" }, { value: "clear", label: "Clear" }]}
             styles={{ indicator: { background: mode === "preferred" ? PREF : mode === "available" ? AVAIL : "var(--mantine-color-slate-5)" } }} />
@@ -96,11 +96,11 @@ export function WeekGrid({ value, onChange, raidWindows, tz }: { value: WeekBloc
             const next = state.map((r) => [...r]);
             for (let d = 0; d < 5; d++) for (let i = 36; i < 44; i++) if (!next[d][i]) next[d][i] = "available";
             for (let d = 5; d < 7; d++) for (let i = 24; i < 44; i++) if (!next[d][i]) next[d][i] = "available";
-            setState(next); onChange(toBlocks(next));
+            setState(next); onChange?.(toBlocks(next));
           }}>Seed usual times</Button>
-        </Group>
+        </Group>}
         <Group gap="md">
-          <Legend colour={PREF} label="preferred" /><Legend colour={AVAIL} label="available" /><Legend colour="var(--mantine-color-slate-6)" label="unavailable" />
+          <Legend colour={PREF} label="preferred" /><Legend colour={AVAIL} label="available" /><Legend colour="var(--mantine-color-slate-6)" label="unavailable" /><Legend colour="var(--mantine-color-slate-6)" label="scheduled raid" raid />
           <Text size="xs" c="dimmed">{tz} · {hours} h marked · {pref} h preferred</Text>
         </Group>
       </Group>
@@ -114,11 +114,11 @@ export function WeekGrid({ value, onChange, raidWindows, tz }: { value: WeekBloc
           ? DAYS.flatMap((day, d) => [lab(day, `d${d}`), ...Array.from({ length: N }, (_, i) => cell(d, i))])
           : Array.from({ length: N }, (_, i) => [lab(i % 4 === 0 ? hourLabel(i / 2) : "", `i${i}`), ...DAYS.map((_, d) => cell(d, i))]).flat()}
       </Box>
-      <Text size="xs" c="dimmed" mt={6}>Drag to select, then it's marked with the mode above. Underlines are scheduled raids; a run only counts you in when its whole window is inside your marked time.</Text>
+      {!readOnly && <Text size="xs" c="dimmed" mt={6}>Drag to select, then it's marked with the mode above. Underlines are scheduled raids; a run only counts you in when its whole window is inside your marked time.</Text>}
     </Box>
   );
 }
 
-function Legend({ colour, label }: { colour: string; label: string }) {
-  return <Group gap={6}><Box style={{ width: 12, height: 12, borderRadius: 3, background: colour }} /><Text size="xs" c="dimmed">{label}</Text></Group>;
+function Legend({ colour, label, raid }: { colour: string; label: string; raid?: boolean }) {
+  return <Group gap={6}><Box style={{ width: 12, height: 12, borderRadius: 3, background: colour, boxShadow: raid ? "inset 0 -3px 0 var(--mantine-color-teal-4)" : undefined }} /><Text size="xs" c="dimmed">{label}</Text></Group>;
 }
