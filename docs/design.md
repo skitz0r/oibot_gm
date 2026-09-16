@@ -352,6 +352,10 @@ Between the soft cutoff (health check) and the hard cutoff (lock), a roster with
 
 Two 10-mans on the same night are handled by the conflict check (a member In on roster A is never asked to fill B) and by the per-roster analytics; `/roster add` places a main on exactly one of them.
 
+### 5.17 The bot explains itself (built 2026-09-16)
+
+`docs/manual.md` is the user-facing spec, written for members and officers and kept in the code repo next to the behaviour it describes. `/ask <question>`, a DM to the bot, or an @mention outside the ops/analytics channels sends Claude (Sonnet, low effort, cached prefix) the manual, the live command tree with each command's gate, the guild's effective settings (channels, rosters with cutoffs/autofill/comp targets, live raids with fill state and log tail) and the asker's own record (characters, roles, availability, absences, their status on each live sheet). Answers name exact commands, say "not built yet" when true, and never change state. `/help` (no LLM) lists commands by tier; `/help topic:<name>` prints one manual section.
+
 ## 6. Architecture
 
 ```mermaid

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from . import nl, render
 from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, register_policy_commands
+from .discord_help import HelpMixin, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_raid import FillButton, RaidContext, RaidMixin, SignupButton, register_raid_commands
@@ -670,7 +671,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
+class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
     ico = staticmethod(ico)
 
     def __init__(self, ctx: GuildContext, test_guild: int | None):
@@ -691,6 +692,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
         register_raid_commands(self.tree, self.registries, self.ops, self)
         self.policies = PolicyContext(self.registries)
         register_policy_commands(self.tree, self.registries, self.ops, self, self.policies)
+        register_help_commands(self.tree, self.registries, self.ops, self)
         self.add_dynamic_items(SignupButton, FillButton, PlanButton, RegisterButton)
         self.tree.on_error = self._on_command_error
 
@@ -878,10 +880,23 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
         return isinstance(ref, discord.Message) and ref.author.id == self.user.id
 
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild:
+        if message.author.bot:
+            return
+        if not message.guild:  # a DM to the bot = a question about how it works
+            reg = next(iter(self.registries.by_discord.values()), None) if len(self.registries.by_discord) == 1 else next((r for r in self.registries.by_discord.values() if message.author.id in r.members), None)
+            if reg and message.content.strip():
+                async with message.channel.typing():
+                    await message.reply(await self.help_answer(reg, message.author.id, reg.config.owner_discord_id == message.author.id, message.content))
+            return
+        reg = self.registries.by_discord.get(message.guild.id)
+        # @mention anywhere else = a question about how the bot works (no state changes)
+        if reg and message.channel.id not in (reg.config.ops_channel_id, reg.config.analytics_channel_id) and self._addressed(message) and not self.event_for(message.channel.id):
+            text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
+            if text:
+                async with message.channel.typing():
+                    await message.reply(await self.help_answer(reg, message.author.id, self.officiates(message.author, message.guild), text))
             return
         # @mention in the ops or analytics channel = plain-text configuration (comp ideals live in analytics)
-        reg = self.registries.by_discord.get(message.guild.id)
         if reg and message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) and self._addressed(message):
             text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
             if text:

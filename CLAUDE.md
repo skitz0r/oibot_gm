@@ -1,6 +1,6 @@
 # oibot_GM — agent guide
 
-Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/design.md` (spec) before changing behaviour; `docs/research.md` has the data-source findings.
+Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/design.md` (spec) before changing behaviour; `docs/manual.md` is the user-facing manual the bot answers from — update it in the same commit as any behaviour change; `docs/research.md` has the data-source findings.
 
 ## Principles (do not violate)
 - **Code computes, Claude explains.** Rosters come from the CP-SAT solver, loot scores from `loot/scoring.py`. The model only judges against the policy, explains, and flags. It never edits state directly; NL requests become structured ops (`nl.py`) that code applies.
@@ -40,6 +40,8 @@ src/oibot_gm/
                        bank, and per roster: pool readiness, optimised groups (solver on the pool, totem picks, raid buffs), desired comp
                        (derived + officer targets, @mention to change) + change log; driven by Registry.listeners (diff_member), debounced
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
+  help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
+  discord_help.py      /help (no LLM, by tier), /ask, @mention outside the officer channels and DMs → help_answer
   configops.py         plain-text config: whitelisted ConfigOp schema, describe() diff, apply() via the same code paths as commands
   discord_policy.py    /policy show|edit|reload, /loot-rule, /comp-rule, /gm change, @mention in the ops channel
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks

@@ -20,6 +20,7 @@ ROUTES: dict[str, tuple[str, str]] = {
     "loot_feedback": ("claude-opus-5", "medium"),   # NL feedback on a distribution (compact digest)
     "policy_compile": ("claude-opus-5", "high"),    # prose policy -> rules/constraints (rare, must be right)
     "config_change": ("claude-sonnet-5", "medium"), # plain-text config -> typed ops (cheap, confirmed by a human)
+    "help": ("claude-sonnet-5", "low"),             # "how does X work?" from the manual + live state (cached prefix)
 }
 
 # $ per million tokens: (input, output, cache read, cache write)
