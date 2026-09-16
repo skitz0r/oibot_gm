@@ -63,6 +63,7 @@ class Member(BaseModel):
     absences: list[Absence] = Field(default_factory=list)
     role_prefs: dict = Field(default_factory=dict)  # {"primary": "healer", "flex": ["ranged"]}
     slot_prefs: dict[str, str] = Field(default_factory=dict)  # 'Tue 19:30' -> yes | maybe | no (legacy; the grid wins when set)
+    placement_asks: list[dict] = Field(default_factory=list)  # {roster, character, asked_at, answer yes|no|None, answered_at, by}
     week: list[dict] = Field(default_factory=list)  # weekly availability grid: {day 0-6 (Mon=0), start, end (minutes), level preferred|available}; times not covered = unavailable
     teams: list[str] = Field(default_factory=list)  # officer-curated team membership (the default weekly roster)
     dm_opt_out: bool = False
@@ -227,6 +228,12 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
         lines.append(f"{who}: absent {s}" + (f" → {e}" if e != s else ""))
     for s, e in sorted(oa - na):
         lines.append(f"{who}: absence {s} cleared")
+    oa_ = [(a["roster"], a.get("answer")) for a in old.get("placement_asks", [])]
+    na_ = [(a["roster"], a.get("answer")) for a in new.get("placement_asks", [])]
+    if oa_ != na_:
+        last = new.get("placement_asks", [])[-1] if new.get("placement_asks") else None
+        if last:
+            lines.append(f"{who}: placement on {last['roster']} " + ({"yes": "**confirmed**", "no": "**declined**"}.get(last.get("answer"), "asked to confirm")))
     if old.get("week") != new.get("week"):
         hours = sum((r["end"] - r["start"]) for r in new.get("week", [])) / 60
         lines.append(f"{who}: availability grid → {len(new.get('week', []))} block(s), {hours:.0f}h/week")
@@ -720,6 +727,37 @@ class Registry:
         m.slot_prefs = clean
         self.save(m, f"{m.display_name} slots: " + ", ".join(f"{k}={v}" for k, v in clean.items()))
         return m
+
+    # ---- placement confirmations (after a roster build is approved)
+    def add_placement_ask(self, discord_id: int, roster: str, character: str, by: str) -> dict:
+        m = self.member(discord_id)
+        m.placement_asks = [a for a in m.placement_asks if not (a["roster"] == roster and a.get("answer") is None)]
+        ask = {"roster": roster, "character": character, "asked_at": now(), "answer": None, "answered_at": None, "by": by}
+        m.placement_asks.append(ask)
+        m.placement_asks = m.placement_asks[-12:]
+        self.save(m, f"{m.display_name} asked to confirm {character} on {roster}")
+        return ask
+
+    def open_placement_asks(self, discord_id: int) -> list[dict]:
+        m = self.members.get(discord_id)
+        return [a for a in (m.placement_asks if m else []) if a.get("answer") is None]
+
+    def answer_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> str:
+        """Yes: keep the seat and default them In for that roster. No: give the seat back (roster_remove) and note it."""
+        m = self.member(discord_id)
+        ask = next((a for a in m.placement_asks if a["roster"] == roster and a.get("answer") is None), None)
+        if not ask:
+            raise RegistryError("Nothing to answer for that roster.")
+        ask["answer"], ask["answered_at"] = ("yes" if yes else "no"), now()
+        if yes:
+            if m.availability.get(roster) != "in":
+                m.availability[roster] = "in"
+            self.save(m, f"{m.display_name} confirmed {ask['character']} on {roster}")
+            return f"{m.display_name} confirmed {ask['character']} on {roster}"
+        self.save(m, f"{m.display_name} declined {roster}")
+        if self.on_roster(m, roster):
+            self.roster_remove(discord_id, roster, by)
+        return f"{m.display_name} can't make {roster} — seat re-opened"
 
     def set_week(self, discord_id: int, ranges: list[dict], display_name: str | None = None) -> Member:
         """Replace the weekly availability grid. Ranges are merged per day/level; anything outside them is unavailable."""

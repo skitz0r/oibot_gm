@@ -194,7 +194,7 @@ def create_app(bot) -> FastAPI:
         classes = {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()}
         return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=datetime.now().date().isoformat(), classes=classes,
                     rosters=reg.config.rosters or [{"key": "main", "name": "main"}], stored_roles=(v.member.role_prefs if v.member else {}),
-                    week=(v.member.week if v.member else []), tz=reg.config.timezone,
+                    week=(v.member.week if v.member else []), tz=reg.config.timezone, placement_asks=reg.open_placement_asks(v.uid),
                     raid_windows=[{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")])
 
     # ---- member self-service (POST → Registry, exactly what the Discord buttons call)
@@ -256,6 +256,14 @@ def create_app(bot) -> FastAPI:
     @app.post("/me/absence/clear")
     async def me_absence_clear(request: Request):
         return await mutate(request, "/", lambda v, d: (v.reg.clear_absence(v.uid, d["start"]) and f"cleared absence {d['start']}"))
+
+    @app.post("/me/placement")
+    async def me_placement(request: Request):
+        def go(v, d):
+            line = v.reg.answer_placement(v.uid, d["roster"], d.get("answer") == "yes", v.name)
+            bot.loop.create_task(bot.after_placement_answer(v.reg, v.uid, d["roster"], d.get("answer") == "yes", line))
+            return line
+        return await mutate(request, "/", go)
 
     @app.post("/me/week")
     async def me_week(request: Request):
@@ -410,13 +418,20 @@ def create_app(bot) -> FastAPI:
     async def admin_build_apply(request: Request):
         from ..roster import builder
 
-        def go(v, d):
-            hit = build_cache.pop(d.get("token", ""), None)
-            if not hit:
-                raise ValueError("That proposal expired — build again.")
-            done = builder.apply(v.reg, hit[1], v.name)
-            return f"applied {len(done)} placement change(s)"
-        return await mutate(request, "/admin", go, officer=True)
+        from ..registry import RegistryError
+
+        v, d = await form(request, officer=True)
+        hit = build_cache.pop(d.get("token", ""), None)
+        if not hit:
+            return back("/admin", err="That proposal expired — build again.")
+        try:
+            adds, _removes = builder.diff_placements(v.reg, hit[1])
+            done = await asyncio.to_thread(builder.apply, v.reg, hit[1], v.name)
+        except (RegistryError, ValueError) as e:
+            return back("/admin", err=str(e))
+        sent = await bot.send_placement_asks(v.reg, adds, v.name)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} approved a roster build: {len(done)} change(s), {sent} confirmation DM(s)")
+        return back("/admin", ok=f"applied {len(done)} placement change(s); asked {sent} member(s) to confirm by DM")
 
     @app.get("/bank", response_class=HTMLResponse)
     async def bank(request: Request):

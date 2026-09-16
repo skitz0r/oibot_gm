@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -169,6 +170,45 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill:(?P<
         await bot.after_fill_answer(reg, rs, ev, ask, line)
 
 
+class PlaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"place:(?P<roster>[A-Za-z0-9_\-]+):(?P<uid>\d+):(?P<answer>yes|no)"):
+    """Accept / decline a roster placement (DM after officers approve a build). Persistent; only the person asked can answer."""
+
+    def __init__(self, roster: str, uid: int, answer: str):
+        super().__init__(discord.ui.Button(label="Accept" if answer == "yes" else "Can't make it", style=discord.ButtonStyle.success if answer == "yes" else discord.ButtonStyle.secondary, custom_id=f"place:{roster}:{uid}:{answer}"))
+        self.roster, self.uid, self.answer = roster, uid, answer
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["roster"], int(match["uid"]), match["answer"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("That question was for someone else.", ephemeral=True)
+            return
+        reg = bot.registries.for_interaction(interaction)
+        if not reg:
+            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        try:
+            line = rc_answer = reg.answer_placement(self.uid, self.roster, self.answer == "yes", interaction.user.display_name)
+        except RegistryError as e:
+            await interaction.response.send_message(f"{e}", ephemeral=True)
+            return
+        try:
+            await interaction.response.edit_message(content=interaction.message.content + f"\n\n**→ {line}**", view=None)
+        except Exception:  # noqa: BLE001
+            await interaction.response.send_message(line, ephemeral=True)
+        await bot.after_placement_answer(reg, self.uid, self.roster, self.answer == "yes", line)
+
+
+def place_view(roster: str, uid: int) -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(PlaceButton(roster, uid, "yes"))
+    v.add_item(PlaceButton(roster, uid, "no"))
+    return v
+
+
 def fill_view(key: str, uid: int) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
     v.add_item(FillButton(key, uid, "yes"))
@@ -309,6 +349,44 @@ class RaidMixin:
         await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
         if ask.answer == "no" and ev.state == "open":
             await self.run_fill(reg, rs, ev, team, by="answer")
+
+    # ---- placement confirmations after an approved build
+    async def send_placement_asks(self, reg, adds: list[tuple[int, str, str]], by: str) -> int:
+        """DM every newly placed member: accept keeps the seat (and defaults them In), decline gives it back."""
+        from .roster.builder import shells_from_config
+
+        shells = {sh.key: sh for sh in shells_from_config(reg)}
+        sent = 0
+        for uid, character, key in adds:
+            m = reg.members.get(uid)
+            t = reg.config.roster(key) or {"key": key}
+            if not m:
+                continue
+            c = next((c for c in m.active() if c.label == character), None)
+            if m.dm_opt_out:
+                continue  # placed without asking; they opted out of DMs
+            reg.add_placement_ask(uid, key, character, by)
+            sh = shells.get(key)
+            when = f"<t:{int(sh.start.timestamp())}:F> (<t:{int(sh.start.timestamp())}:R>)" if sh else (t.get("schedule") or "time TBD")
+            what = f"**{character}**" + (f" ({c.cls} {c.spec}, {reg.profile.spec(c.cls, c.spec).role})" if c else "")
+            text = (f"**{reg.config.name}**: you're placed on **{t.get('name', key)}** for the coming raid — {when} — as {what}.\n"
+                    f"Accept to keep the seat (you'll be pre-filled In on its sheets). Can't make it and the seat goes back to the pool." + (f"\nManage it on {os.environ.get('OIBOT_WEB_URL', 'the website')}" if os.environ.get("OIBOT_WEB_URL") else ""))
+            try:
+                user = await self.fetch_user(uid)
+                await user.send(text, view=place_view(key, uid))
+                sent += 1
+            except Exception:  # noqa: BLE001
+                pass
+        if sent:
+            await self.ops.emit(reg.config, "info", f"placement confirmations sent to {sent} (build approved by {by})")
+        return sent
+
+    async def after_placement_answer(self, reg, uid: int, roster: str, yes: bool, line: str) -> None:
+        cfg = reg.config
+        ch = self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None
+        if ch:
+            await ch.send(f"{'✅' if yes else '↩️'} {line}" + ("" if yes else f" — rebuild at {os.environ.get('OIBOT_WEB_URL', 'the website')}/admin/build or `/roster build`"))
+        await self.ops.emit(cfg, "info" if yes else "warn", line)
 
     async def lock_and_propose(self, reg, rs, ev, channel) -> None:
         ev.state = "locked"

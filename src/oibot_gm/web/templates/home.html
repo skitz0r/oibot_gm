@@ -4,6 +4,13 @@
 {% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
 
+{% for a in placement_asks %}
+<div class="panel" style="border-color: var(--accent)">
+  <b>You're placed on {{ a.roster }}</b> as <b>{{ a.character }}</b> for the coming raid (asked {{ a.asked_at[:16] }}). Accept to keep the seat; decline and it goes back to the pool.
+  <form method="post" action="/me/placement" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="roster" value="{{ a.roster }}"><input type="hidden" name="answer" value="yes"><button>Accept</button></form>
+  <form method="post" action="/me/placement" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="roster" value="{{ a.roster }}"><input type="hidden" name="answer" value="no"><button class="danger">Can't make it</button></form>
+</div>
+{% endfor %}
 <h2>Characters</h2>
 {% if member and member.active() %}
 <div class="tbl"><table>

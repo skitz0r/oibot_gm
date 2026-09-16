@@ -125,7 +125,9 @@ cards, because WoW: Forever has not published totem scoping yet.
 - **Build rosters** (Admin → *Build all rosters*, or `/roster build`): proposes every roster for the coming
   window from the pool — respecting raid-time answers, lockouts, one raid per person per slot, roles and
   buffs, and keeping current placements where possible — with a reason per seat and a list of who isn't
-  seated and why. Officers approve on the site before anything changes.
+  seated and why. Officers approve on the site before anything changes. Everyone newly placed gets a DM
+  (and a card on their Me page) — **Accept** keeps the seat and pre-fills them In on that roster's sheets;
+  **Can't make it** gives the seat back and the officers rebuild.
 - `/roster overview` shows the readiness card on demand; `/roster members` lists a roster.
 
 ## 7. Officers: day-to-day commands
