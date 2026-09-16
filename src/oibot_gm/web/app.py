@@ -193,7 +193,9 @@ def create_app(bot) -> FastAPI:
         roles = reg.roles_of(v.member) if v.member else (None, [])
         classes = {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()}
         return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=datetime.now().date().isoformat(), classes=classes,
-                    rosters=reg.config.rosters or [{"key": "main", "name": "main"}], stored_roles=(v.member.role_prefs if v.member else {}))
+                    rosters=reg.config.rosters or [{"key": "main", "name": "main"}], stored_roles=(v.member.role_prefs if v.member else {}),
+                    week=(v.member.week if v.member else []), tz=reg.config.timezone,
+                    raid_windows=[{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")])
 
     # ---- member self-service (POST → Registry, exactly what the Discord buttons call)
     @app.post("/me/character/add")
@@ -255,6 +257,20 @@ def create_app(bot) -> FastAPI:
     async def me_absence_clear(request: Request):
         return await mutate(request, "/", lambda v, d: (v.reg.clear_absence(v.uid, d["start"]) and f"cleared absence {d['start']}"))
 
+    @app.post("/me/week")
+    async def me_week(request: Request):
+        import json
+
+        def go(v, d):
+            try:
+                ranges = json.loads(d.get("week") or "[]")
+            except ValueError:
+                raise ValueError("couldn't read the grid")
+            m = v.reg.set_week(v.uid, ranges, v.name)
+            hours = sum((r["end"] - r["start"]) for r in m.week) / 60
+            return f"availability saved: {hours:.0f}h/week across {len(m.week)} block(s)"
+        return await mutate(request, "/", go)
+
     @app.post("/me/slots")
     async def me_slots(request: Request):
         def go(v, d):
@@ -291,7 +307,8 @@ def create_app(bot) -> FastAPI:
             rows.append({"m": m, "chars": chars, "main": m.main, "placed": placed, "roles": reg.roles_of(m), "verification": reg.verification(m.discord_id)})
         instances = list(reg.profile.raids)
         return page(request, "admin.html", v, rows=rows, rosters=rosters, ranks=("trial", "raider", "core", "alt", "social"), instances=instances, owner=v.owner,
-                    slots=reg.config.slots, heat=reg.slot_summary())
+                    slots=reg.config.slots, heat=reg.slot_summary(), week_heat=reg.week_heat(), tz=reg.config.timezone,
+                    grid_members=sum(1 for m in reg.members.values() if m.main and m.week))
 
     def _cfg_op(v: Viewer, **kw):
         from .. import configops

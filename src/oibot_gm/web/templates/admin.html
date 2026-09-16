@@ -39,6 +39,14 @@
     <label>Candidate slots members rate <input name="value" value="{{ slots|join(', ') }}" placeholder="Tue 19:30, Thu 20:00, Sun 18:00" size="44"></label>
     {% if owner %}<button>Save</button>{% else %}<span class="muted">(owner sets these)</span>{% endif %}
   </form>
+  <h3>Availability heat-map <span class="muted">({{ grid_members }} mains with a grid · {{ tz }} · darker = more people; green tint = preferred)</span></h3>
+  <div class="hm">
+    <div class="lab"></div>{% for h in range(24) %}<div class="hr">{{ '12a' if h == 0 else (h ~ 'a' if h < 12 else ('12p' if h == 12 else (h - 12) ~ 'p')) if h % 2 == 0 else '' }}</div>{% endfor %}
+    {% for row in week_heat %}{% set d = loop.index0 %}
+    <div class="lab">{{ ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d] }}</div>
+    {% for p, a in row %}{% set n = p + a %}<div class="c" title="{{ ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d] }} {{ '%02d:%02d' % (loop.index0 // 2, 30 if loop.index0 % 2 else 0) }} — {{ p }} preferred, {{ a }} available" style="{% if n %}background: rgba({{ '46,158,107' if p >= a else '184,137,42' }}, {{ (0.15 + 0.85 * (n / (grid_members or 1)))|round(2) }});{% endif %}"></div>{% endfor %}
+    {% endfor %}
+  </div>
   {% if heat %}
   <div class="tbl"><table>
     <tr><th>Slot</th><th>Yes</th><th>Maybe</th><th>Tanks</th><th>Healers</th><th>Melee</th><th>Ranged</th><th>No</th><th>Not answered</th></tr>
@@ -103,6 +111,10 @@
 {% endif %}
 
 <style>
+  .hm { display:grid; grid-template-columns: 44px repeat(48, 1fr); gap:1px; margin:8px 0; }
+  .hm .lab { font-size:12px; color:var(--muted); display:flex; align-items:center; }
+  .hm .hr { font-size:10px; color:var(--muted); grid-column: span 2; }
+  .hm .c { height:18px; background:var(--zebra); border-radius:2px; }
   form.inline { display:inline-flex; gap:6px; align-items:center; margin:0 4px 4px 0; }
   form.row, label.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
   select, input { background:var(--zebra); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }

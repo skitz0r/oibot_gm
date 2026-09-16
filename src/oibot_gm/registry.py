@@ -62,7 +62,8 @@ class Member(BaseModel):
     availability: dict[str, str] = Field(default_factory=dict)  # team -> in | out | sub
     absences: list[Absence] = Field(default_factory=list)
     role_prefs: dict = Field(default_factory=dict)  # {"primary": "healer", "flex": ["ranged"]}
-    slot_prefs: dict[str, str] = Field(default_factory=dict)  # 'Tue 19:30' -> yes | maybe | no
+    slot_prefs: dict[str, str] = Field(default_factory=dict)  # 'Tue 19:30' -> yes | maybe | no (legacy; the grid wins when set)
+    week: list[dict] = Field(default_factory=list)  # weekly availability grid: {day 0-6 (Mon=0), start, end (minutes), level preferred|available}; times not covered = unavailable
     teams: list[str] = Field(default_factory=list)  # officer-curated team membership (the default weekly roster)
     dm_opt_out: bool = False
     created_at: str = Field(default_factory=now)
@@ -226,6 +227,9 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
         lines.append(f"{who}: absent {s}" + (f" → {e}" if e != s else ""))
     for s, e in sorted(oa - na):
         lines.append(f"{who}: absence {s} cleared")
+    if old.get("week") != new.get("week"):
+        hours = sum((r["end"] - r["start"]) for r in new.get("week", [])) / 60
+        lines.append(f"{who}: availability grid → {len(new.get('week', []))} block(s), {hours:.0f}h/week")
     if old.get("slot_prefs") != new.get("slot_prefs"):
         lines.append(f"{who}: slots " + (", ".join(f"{k} {v}" for k, v in new.get("slot_prefs", {}).items()) or "cleared"))
     if old.get("dm_opt_out") != new.get("dm_opt_out"):
@@ -717,16 +721,98 @@ class Registry:
         self.save(m, f"{m.display_name} slots: " + ", ".join(f"{k}={v}" for k, v in clean.items()))
         return m
 
+    def set_week(self, discord_id: int, ranges: list[dict], display_name: str | None = None) -> Member:
+        """Replace the weekly availability grid. Ranges are merged per day/level; anything outside them is unavailable."""
+        clean: list[dict] = []
+        for r in ranges:
+            try:
+                day, start, end, level = int(r["day"]), int(r["start"]), int(r["end"]), str(r["level"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (0 <= day <= 6 and 0 <= start < end <= 1440 and level in ("preferred", "available")):
+                continue
+            clean.append({"day": day, "start": start, "end": end, "level": level})
+        merged: list[dict] = []
+        for day in range(7):
+            for level in ("preferred", "available"):
+                spans = sorted((r["start"], r["end"]) for r in clean if r["day"] == day and r["level"] == level)
+                cur: list[int] | None = None
+                for a, b in spans:
+                    if cur and a <= cur[1]:
+                        cur[1] = max(cur[1], b)
+                    else:
+                        if cur:
+                            merged.append({"day": day, "start": cur[0], "end": cur[1], "level": level})
+                        cur = [a, b]
+                if cur:
+                    merged.append({"day": day, "start": cur[0], "end": cur[1], "level": level})
+        m = self.member(discord_id, display_name, create=display_name is not None)
+        if merged == m.week:
+            return m
+        m.week = merged
+        hours = sum((r["end"] - r["start"]) for r in merged) / 60
+        self.save(m, f"{m.display_name} availability grid: {len(merged)} block(s), {hours:.0f}h/week")
+        return m
+
+    def week_level(self, m: Member, start, hours: float) -> str | None:
+        """'preferred' if the whole raid window sits inside preferred blocks, 'available' if inside preferred+available,
+        None if uncovered; the window is in the guild timezone, Monday=0. Members without a grid return None."""
+        if not m.week:
+            return None
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+
+        z = ZoneInfo(self.config.timezone)
+        t0 = start.astimezone(z)
+        need = [(t0 + timedelta(minutes=i)) for i in range(0, int(hours * 60), 30)]
+
+        def covered(levels: tuple[str, ...]) -> bool:
+            for t in need:
+                mins = t.hour * 60 + t.minute
+                if not any(r["day"] == t.weekday() and r["start"] <= mins < r["end"] and r["level"] in levels for r in m.week):
+                    return False
+            return True
+
+        if covered(("preferred",)):
+            return "preferred"
+        if covered(("preferred", "available")):
+            return "available"
+        return None
+
+    def slot_pref(self, m: Member, start, hours: float, slot: str) -> str | None:
+        """Effective yes/maybe/no for a raid window: the grid when the member has one, else the legacy slot rating."""
+        if m.week:
+            return {"preferred": "yes", "available": "maybe", None: "no"}[self.week_level(m, start, hours)]
+        return m.slot_prefs.get(slot)
+
+    def week_heat(self) -> list[list[tuple[int, int]]]:
+        """[day][half-hour] -> (preferred count, available count) over mains, for the officer heat-map."""
+        heat = [[(0, 0) for _ in range(48)] for _ in range(7)]
+        for m in self.members.values():
+            if not m.main or not m.week:
+                continue
+            for r in m.week:
+                for i in range(r["start"] // 30, min(48, -(-r["end"] // 30))):
+                    p, a = heat[r["day"]][i]
+                    heat[r["day"]][i] = (p + 1, a) if r["level"] == "preferred" else (p, a + 1)
+        return heat
+
     def slot_summary(self) -> list[dict]:
         """Per candidate slot: who said yes/maybe/no, with role counts among the yes+maybe mains."""
         out = []
+        from .raidcycle import next_raid_time
+
         for slot in self.config.slots:
             yes, maybe, no, unset = [], [], [], []
             roles = {r: 0 for r in ("tank", "healer", "melee", "ranged")}
+            try:
+                start = next_raid_time(slot, self.config.timezone)
+            except ValueError:
+                start = None
             for m in self.members.values():
                 if not m.main:
                     continue
-                v = m.slot_prefs.get(slot)
+                v = self.slot_pref(m, start, 3.0, slot) if start else m.slot_prefs.get(slot)
                 {"yes": yes, "maybe": maybe, "no": no}.get(v, unset).append(m.display_name)
                 if v in ("yes", "maybe"):
                     r = self.roles_of(m)[0]

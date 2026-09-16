@@ -2,6 +2,6 @@
 # tables are not published yet — placeholders. Encounter ids TBD.
 # lockout_days: how often a character can run it (10-mans may move to 3; unconfirmed).
 raids:
-  - {id: barrow_deeps, name: Barrow Deeps, size: 10, lockout_days: 7, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
-  - {id: hyjal_summit_forever, name: Hyjal Summit, size: 20, lockout_days: 7, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
-  - {id: onyxias_lair, name: "Onyxia's Lair", size: 40, lockout_days: 7, wcl_zone: null, tank_needs: {count: 3, note: "TBD"}, bosses: []}
+  - {id: barrow_deeps, name: Barrow Deeps, size: 10, lockout_days: 7, duration_hours: 3, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
+  - {id: hyjal_summit_forever, name: Hyjal Summit, size: 20, lockout_days: 7, duration_hours: 3, wcl_zone: null, tank_needs: {count: 2, note: "TBD"}, bosses: []}
+  - {id: onyxias_lair, name: "Onyxia's Lair", size: 40, lockout_days: 7, duration_hours: 3, wcl_zone: null, tank_needs: {count: 3, note: "TBD"}, bosses: []}

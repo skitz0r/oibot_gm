@@ -55,8 +55,12 @@ Signing up for a raid is still done on the sheet in Discord.
   only act on exceptions.
 - **Absences**: `/me absent add start [end] [reason]`, `/me absent list`, `/me absent clear`. Absent days
   pre-fill you as Out and the bot won't ask you to fill on those days.
-- **Raid times you can make**: on the website (Me → *Raid times I can make*) rate each candidate slot the
-  officers listed as yes / maybe / no. Officers use the heat-map to decide when the 10-mans run.
+- **When you can raid**: on the website (Me → *When I can raid*) drag across a week grid and mark blocks
+  **preferred** (green) or **available** (yellow); everything unmarked is unavailable. "Seed usual raid
+  times" fills Mon–Fri 18–22 and Sat–Sun 12–22 as available to adjust. Scheduled raid windows are
+  underlined on the grid. Rosters are built from this: a raid counts as *yes* only if its whole window
+  (usually 3 h) is inside your preferred blocks, *maybe* if inside available, otherwise you're not seated.
+  Officers see a heat-map of everyone's grid to decide when the 10-mans run.
 - **See everything the bot has on you**: `/me view` or the *My status* button.
 - All `/me` commands also work in a DM with the bot.
 

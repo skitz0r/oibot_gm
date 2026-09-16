@@ -80,7 +80,20 @@
       <button>Add</button>
     </form>
   </div>
-  {% if v.reg.config.slots %}
+  <div class="panel" style="grid-column: 1 / -1">
+    <h3 style="margin-top:0">When I can raid <span class="muted">({{ tz }})</span></h3>
+    <p class="sub">Drag across the grid, then mark the selection <b class="ok">preferred</b> or <b class="warn">available</b>. Anything unmarked counts as unavailable. Rosters are built from this: a raid needs its whole window (usually 3 h) inside your marked time.</p>
+    <div class="wk-tools">
+      <button type="button" data-level="preferred" class="wk-pref">Mark preferred</button>
+      <button type="button" data-level="available" class="wk-avail">Mark available</button>
+      <button type="button" data-level="" class="wk-clear">Clear</button>
+      <button type="button" id="wk-seed" class="wk-clear">Seed usual raid times (Mon–Fri 18–22, Sat–Sun 12–22)</button>
+      <span class="muted" id="wk-summary"></span>
+    </div>
+    <div class="wk" id="wk"></div>
+    <form method="post" action="/me/week" id="wk-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="week" id="wk-json"><button>Save availability</button></form>
+  </div>
+  {% if v.reg.config.slots and not week %}
   <div class="panel">
     <h3 style="margin-top:0">Raid times I can make</h3>
     <p class="sub">Officers build the 10-man and 20-man runs from these. <b>yes</b> = count on me, <b>maybe</b> = ask, <b>no</b> = never.</p>
@@ -129,7 +142,66 @@
   button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
   td.actions { white-space:nowrap; }
 </style>
+<style>
+  .wk { display:grid; grid-template-columns: 44px repeat(48, 1fr); gap:1px; user-select:none; margin:8px 0; }
+  .wk .lab { font-size:12px; color:var(--muted); display:flex; align-items:center; }
+  .wk .hr { font-size:10px; color:var(--muted); text-align:left; grid-column: span 2; }
+  .wk .c { height:22px; background:var(--zebra); border-radius:2px; cursor:crosshair; }
+  .wk .c.available { background:#B8892A; } .wk .c.preferred { background:#2E9E6B; }
+  .wk .c.sel { outline:2px solid var(--ink); outline-offset:-2px; }
+  .wk .c.raid { box-shadow: inset 0 -3px 0 var(--accent); }
+  .wk-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .wk-tools button { font-weight:500; } .wk-pref { background:#2E9E6B !important; color:#fff !important; } .wk-avail { background:#B8892A !important; color:#fff !important; } .wk-clear { background:var(--zebra) !important; color:var(--ink) !important; border:1px solid var(--line) !important; }
+</style>
 <script>
+  // ---- weekly availability grid: 7 days × 48 half-hours, drag to select, mark, save as ranges
+  (function () {
+    const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], N = 48;
+    const state = Array.from({ length: 7 }, () => Array(N).fill(""));
+    const initial = {{ week|tojson }};
+    initial.forEach(r => { for (let i = Math.floor(r.start / 30); i < Math.ceil(r.end / 30); i++) state[r.day][i] = r.level; });
+    const raids = {{ raid_windows|tojson }};  // mark the scheduled raid windows so people see what they're rating
+    const raidCells = new Set();
+    const WD = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 };
+    raids.forEach(r => { const m = /^(\w{3})\w*\s+(\d{1,2}):(\d{2})$/.exec(r.slot.trim()); if (!m) return; const d = WD[m[1].toLowerCase()]; const s = Math.floor((+m[2] * 60 + +m[3]) / 30); for (let i = s; i < Math.min(N, s + 6); i++) raidCells.add(d + ":" + i); });
+    const grid = document.getElementById("wk"), out = document.getElementById("wk-json"), summary = document.getElementById("wk-summary");
+    let sel = new Set(), dragging = false, anchor = null;
+    function key(d, i) { return d + ":" + i; }
+    function render() {
+      grid.innerHTML = "";
+      grid.appendChild(Object.assign(document.createElement("div"), { className: "lab" }));
+      for (let h = 0; h < 24; h++) { const e = document.createElement("div"); e.className = "hr"; e.textContent = h % 2 === 0 ? (h === 0 ? "12a" : h < 12 ? h + "a" : h === 12 ? "12p" : (h - 12) + "p") : ""; grid.appendChild(e); }
+      for (let d = 0; d < 7; d++) {
+        grid.appendChild(Object.assign(document.createElement("div"), { className: "lab", textContent: DAYS[d] }));
+        for (let i = 0; i < N; i++) {
+          const c = document.createElement("div");
+          c.className = "c " + state[d][i] + (sel.has(key(d, i)) ? " sel" : "") + (raidCells.has(key(d, i)) ? " raid" : "");
+          c.dataset.d = d; c.dataset.i = i; c.title = DAYS[d] + " " + String(Math.floor(i / 2)).padStart(2, "0") + ":" + (i % 2 ? "30" : "00");
+          grid.appendChild(c);
+        }
+      }
+      const hours = state.flat().filter(Boolean).length / 2, pref = state.flat().filter(x => x === "preferred").length / 2;
+      summary.textContent = hours ? hours + "h marked (" + pref + "h preferred)" : "nothing marked yet";
+      out.value = JSON.stringify(toRanges());
+    }
+    function toRanges() {
+      const r = [];
+      for (let d = 0; d < 7; d++) { let i = 0; while (i < N) { const lv = state[d][i]; if (!lv) { i++; continue; } let j = i; while (j < N && state[d][j] === lv) j++; r.push({ day: d, start: i * 30, end: j * 30, level: lv }); i = j; } }
+      return r;
+    }
+    function cellAt(ev) { const t = document.elementFromPoint(ev.clientX, ev.clientY); return t && t.classList.contains("c") ? t : null; }
+    function selectRect(a, b) { sel = new Set(); const d0 = Math.min(a.d, b.d), d1 = Math.max(a.d, b.d), i0 = Math.min(a.i, b.i), i1 = Math.max(a.i, b.i); for (let d = d0; d <= d1; d++) for (let i = i0; i <= i1; i++) sel.add(key(d, i)); }
+    grid.addEventListener("pointerdown", ev => { const c = cellAt(ev); if (!c) return; dragging = true; anchor = { d: +c.dataset.d, i: +c.dataset.i }; selectRect(anchor, anchor); render(); ev.preventDefault(); });
+    grid.addEventListener("pointermove", ev => { if (!dragging) return; const c = cellAt(ev); if (!c) return; selectRect(anchor, { d: +c.dataset.d, i: +c.dataset.i }); render(); });
+    window.addEventListener("pointerup", () => { dragging = false; });
+    document.querySelectorAll(".wk-tools button[data-level]").forEach(b => b.addEventListener("click", () => { sel.forEach(k => { const [d, i] = k.split(":").map(Number); state[d][i] = b.dataset.level; }); sel = new Set(); render(); }));
+    document.getElementById("wk-seed").addEventListener("click", () => {
+      for (let d = 0; d < 5; d++) for (let i = 36; i < 44; i++) if (!state[d][i]) state[d][i] = "available";
+      for (let d = 5; d < 7; d++) for (let i = 24; i < 44; i++) if (!state[d][i]) state[d][i] = "available";
+      render();
+    });
+    render();
+  })();
   const CLASSES = {{ classes|tojson }};
   function fill(sel, cls, current, optional) {
     sel.innerHTML = "";

@@ -150,9 +150,10 @@ def build(reg: Registry, rs, shells: list[Shell] | None = None, need_fn=None, ti
         why = []
         for sh in shells:
             day = sh.start.date().isoformat()
-            pref = mm.slot_prefs.get(sh.slot)
+            hours = float((profile.raids.get(sh.instance or "", {}) or {}).get("duration_hours", 3))
+            pref = reg.slot_pref(mm, sh.start, hours, sh.slot)
             if pref == "no":
-                why.append(f"{sh.key}: slot no")
+                why.append(f"{sh.key}: not available then")
                 continue
             if mm.absent_on(day):
                 why.append(f"{sh.key}: absent")
