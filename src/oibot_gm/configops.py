@@ -23,7 +23,7 @@ Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <ch
   availability of <member> for <team> (in|out|sub); absence for <member> from <date> [to <date>] [reason];
   team_member: add/remove <member> [character] to/from roster <key> (curated roster; defaults to their main).
 Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
-Comp ideals (officer): comp_target: team=<roster key>, field=<slot: a role tank|healer|melee|ranged, a class "Paladin",
+Comp ideals (officer): comp_target: team=<roster key or raid id (barrow_deeps|hyjal_summit_forever|onyxias_lair)>, field=<slot: a role tank|healer|melee|ranged, a class "Paladin",
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
   reason=<optional note, the justification shown on the desired-comp card>.
   comp_target_clear (team, field) removes an officer target so the derived value applies again.
@@ -140,7 +140,7 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"team {op.team or reg.config.team_keys()[0]}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
     if op.op == "comp_groups":
         key = op.team or reg.config.team_keys()[0]
-        cur = (cfg.team(key) or {}).get("comp_groups") or []
+        cur = (cfg.team(key) or cfg.raids.get(key) or {}).get("comp_groups") or []
         return f"roster {key} group layout: {', '.join(cur) if cur else 'default'} → {op.value or 'default'}"
     if op.op == "raid_set":
         rd = reg.raid_def(op.team)
@@ -152,7 +152,7 @@ def describe(reg: Registry, op: ConfigOp) -> str:
     if op.op in ("comp_target", "comp_target_clear"):
         key = op.team or reg.config.team_keys()[0]
         slot = op.field or op.path or ""
-        cur = ((cfg.team(key) or {}).get("comp_targets") or {}).get(slot)
+        cur = ((cfg.team(key) or cfg.raids.get(key) or {}).get("comp_targets") or {}).get(slot)
         cur_s = (f"{cur.get('min', '?')}" + (f"–{cur['max']}" if cur.get("max") is not None else "")) if cur else "derived"
         if op.op == "comp_target_clear":
             return f"roster {key} comp {slot}: {cur_s} → derived"
@@ -270,8 +270,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op == "comp_groups":
         key = op.team or cfg.team_keys()[0]
         t = cfg.team(key)
+        if t is None and key in reg.profile.raids:
+            t = cfg.raids.setdefault(key, {})
         if t is None:
-            raise RegistryError(f"no roster {key}")
+            raise RegistryError(f"no roster or raid {key}")
         from .comp import label_tokens
 
         labels = [x.strip() for x in (op.value or "").replace(";", ",").split(",") if x.strip()]
@@ -287,8 +289,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op in ("comp_target", "comp_target_clear"):
         key = op.team or cfg.team_keys()[0]
         t = cfg.team(key)
+        if t is None and key in reg.profile.raids:
+            t = cfg.raids.setdefault(key, {})  # targets for the raid itself (planner runs inherit them)
         if t is None:
-            raise RegistryError(f"no roster {key}")
+            raise RegistryError(f"no roster or raid {key}")
         slot = (op.field or op.path or "").strip()
         if slot not in ("tank", "healer", "melee", "ranged"):
             cls, _, spec = slot.partition(":")

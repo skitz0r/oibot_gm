@@ -4,11 +4,10 @@
 {% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
 
-<h2>Pool → rosters</h2>
-<p><a class="btn" href="/admin/build">Build all rosters for the coming window →</a> <span class="sub">one solve over the pool: slots, lockouts, roles, buffs, rotation; you approve before anything changes</span></p>
-<p class="sub">Tick a roster to place a member's main on it (one character per member per roster). Ranks and confirmations inline. Everything commits under your name and shows in the analytics change log.</p>
+<h2>Pool</h2>
+<p class="sub">Everyone with a character: ranks and confirmations inline. Runs are planned automatically from the availability grids (see <a href="/rosters">Rosters</a>); the roster columns below only appear if you keep a standing roster.</p>
 {% if rosters %}
-<p>{% for t in rosters %}<form method="post" action="/admin/place-all" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="roster" value="{{ t.key }}"><button>Place every main on {{ t.name or t.key }}</button></form>{% endfor %}</p>
+<p><a class="btn" href="/admin/build">Build standing rosters →</a> {% for t in rosters %}<form method="post" action="/admin/place-all" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="roster" value="{{ t.key }}"><button>Place every main on {{ t.name or t.key }}</button></form>{% endfor %}</p>
 {% endif %}
 <div class="tbl"><table>
   <tr><th>Member</th><th>Main</th><th>Role</th><th>Rank</th><th>Confirmed</th>{% for t in rosters %}<th>{{ t.name or t.key }} ({{ t.size }})</th>{% endfor %}<th>Alts</th></tr>

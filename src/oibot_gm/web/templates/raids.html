@@ -3,88 +3,35 @@
 <h1>Raids</h1>
 {% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
 {% if err %}<div class="panel bad">✗ {{ err }}</div>{% endif %}
-<p class="sub">Each raid is an instance with its rules; rosters are runs of it. Rules come from the game profile with your overrides in orange. The planner proposes runs from the availability grids; officers accept here or by DM.</p>
-
+<p class="sub">The instances and their rules. Defaults come from the game profile; your overrides (orange) win. Every run of a raid — planned or standing — inherits its size, lockout cadence, duration and desired comp. Runs themselves live on <a href="/rosters">Rosters</a>.</p>
+<div class="grid">
 {% for r in raids %}
-<div class="panel">
-  <h2 style="margin-top:0">{{ r.eff.name }} <span class="sub">· {{ r.eff.size }}-player · lockout {{ r.eff.lockout_days }}d · {{ r.eff.duration_hours }}h · {{ r.rosters|length }} roster(s), {{ r.placed }} placed</span></h2>
-  {% if r.eff.notes %}<p class="sub">{{ r.eff.notes }}</p>{% endif %}
-
-  <form method="post" action="/admin/raid" class="row">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}">
-    <label>lockout days <input name="lockout_days" type="number" step="1" min="1" value="{{ r.eff.lockout_days }}" style="width:5em" class="{{ 'over' if 'lockout_days' in r.over else '' }}"></label>
-    <label>duration h <input name="duration_hours" type="number" step="0.5" min="0.5" value="{{ r.eff.duration_hours }}" style="width:5em" class="{{ 'over' if 'duration_hours' in r.over else '' }}"></label>
-    {% for role in ['tank', 'healer', 'dps'] %}{% set b = (r.eff.comp or {}).get(role, {}) %}{% set ob = (r.over.comp or {}).get(role, {}) if r.over.comp else {} %}
-    <label>{{ role }} <input name="{{ role }}_min" type="number" min="0" value="{{ b.get('min', '') }}" style="width:4em" class="{{ 'over' if 'min' in ob else '' }}">–<input name="{{ role }}_max" type="number" min="0" value="{{ b.get('max', '') }}" style="width:4em" class="{{ 'over' if 'max' in ob else '' }}"></label>
-    {% endfor %}
-    <label>notes <input name="notes" value="{{ r.eff.notes or '' }}" size="28" class="{{ 'over' if 'notes' in r.over else '' }}"></label>
-    <label><input type="checkbox" name="auto" {{ 'checked' if r.eff.auto else '' }}> auto-propose daily</label>
-    {% if owner %}<button>Save</button>{% if r.over %}<button formaction="/admin/raid/reset" class="danger" formnovalidate>Reset</button>{% endif %}{% else %}<span class="muted">(owner edits rules)</span>{% endif %}
-  </form>
-  <form method="post" action="/admin/plan" class="row"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}"><button>Plan the next {{ r.eff.lockout_days }} days now</button> <span class="muted">→ proposal to officers (DM + below)</span></form>
-
-  {% if r.proposals %}
-  <h3>Proposals</h3>
-  {% for p in r.proposals %}
-  <div class="panel" style="margin:6px 0;{% if p.state == 'proposed' %}border-color:var(--accent){% endif %}">
-    <b>{{ p.id }}</b> · <span class="{{ 'ok' if p.state == 'accepted' else 'warn' if p.state == 'proposed' else 'muted' }}">{{ p.state }}</span>{% if p.decided_by %} by {{ p.decided_by }}{% endif %} · window {{ p.window_start[:10] }} → {{ p.window_end[:10] }} · {{ p.notes|join(' · ') }}
-    <div class="grid" style="margin-top:6px">
-      {% for run in p.runs %}
-      <div><b>{{ run.name }}</b> <span class="muted">{{ run.seats|length }}/{{ run.size }}</span><br>
-        <span class="sub">{% for s in run.seats %}<span class="{{ s.cls }}">{{ s.character }}</span> ({{ s.role[0] }}){% if not loop.last %}, {% endif %}{% endfor %}</span></div>
-      {% endfor %}
-    </div>
-    {% if p.unplaced %}<p class="sub">Not seated: {% for n, why in p.unplaced[:8] %}{{ n }} — {{ why }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-    {% if p.state == 'proposed' %}
-    <form method="post" action="/admin/proposal" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="pid" value="{{ p.id }}"><input type="hidden" name="answer" value="accept"><button>Accept — open the sheets</button></form>
-    <form method="post" action="/admin/proposal" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="pid" value="{{ p.id }}"><input type="hidden" name="answer" value="reject"><button class="danger">Reject</button></form>
-    {% endif %}
+  <div class="panel">
+    <form method="post" action="/admin/raid" class="row" style="flex-direction:column;align-items:stretch">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="instance" value="{{ r.id }}">
+      <h3 style="margin:0">{{ r.eff.name }} <span class="muted">· {{ r.eff.size }}-player · <code>{{ r.id }}</code> · {{ r.runs }} run(s){% if r.open %} · <span class="warn">{{ r.open }} proposal waiting</span>{% endif %}</span></h3>
+      <div class="row">
+        <label>lockout days <input name="lockout_days" type="number" step="1" min="1" value="{{ r.eff.lockout_days }}" style="width:5em" class="{{ 'over' if 'lockout_days' in r.over else '' }}"></label>
+        <label>duration h <input name="duration_hours" type="number" step="0.5" min="0.5" value="{{ r.eff.duration_hours }}" style="width:5em" class="{{ 'over' if 'duration_hours' in r.over else '' }}"></label>
+      </div>
+      <div class="row">
+        {% for role in ['tank', 'healer', 'dps'] %}{% set b = (r.eff.comp or {}).get(role, {}) %}{% set ob = (r.over.comp or {}).get(role, {}) if r.over.comp else {} %}
+        <label>{{ role }} <input name="{{ role }}_min" type="number" min="0" value="{{ b.get('min', '') }}" style="width:4em" class="{{ 'over' if 'min' in ob else '' }}">–<input name="{{ role }}_max" type="number" min="0" value="{{ b.get('max', '') }}" style="width:4em" class="{{ 'over' if 'max' in ob else '' }}"></label>
+        {% endfor %}
+      </div>
+      <label>notes <input name="notes" value="{{ r.eff.notes or '' }}" class="{{ 'over' if 'notes' in r.over else '' }}"></label>
+      <label><input type="checkbox" name="auto" {{ 'checked' if r.eff.auto else '' }}> auto-propose runs daily (officers accept by DM or on Rosters)</label>
+      {% if owner %}<div class="row"><button>Save</button>{% if r.over %}<button formaction="/admin/raid/reset" class="danger" formnovalidate>Reset to defaults</button>{% endif %}</div>{% else %}<span class="muted">(owner edits raid rules)</span>{% endif %}
+    </form>
+    {% if r.over.comp_targets or r.over.comp_groups %}<p class="sub">Comp targets: {{ r.over.comp_targets or '—' }} · group layout: {{ (r.over.comp_groups or [])|join(', ') or 'default' }} (set in plain text in the analytics channel)</p>{% endif %}
   </div>
-  {% endfor %}
-  {% endif %}
-
-  <h3>Rosters of this raid</h3>
-  {% if r.rosters %}
-  <table><tr><th>Key</th><th>Name</th><th>Schedule</th><th>Size</th><th>Kind</th></tr>
-  {% for t in r.rosters %}<tr><td class="mono">{{ t.key }}</td><td>{{ t.name or t.key }}</td><td>{{ t.schedule or '—' }}</td><td>{{ t.size }}</td><td class="muted">{{ 'dated run' if t.ephemeral else 'standing' }}</td></tr>{% endfor %}
-  </table>
-  {% else %}<p class="sub">No roster set to this raid yet — set a roster's instance on <a href="/admin">Admin</a>, or let the planner propose runs.</p>{% endif %}
-
-  {% if r.events %}
-  <h3>Sheets</h3>
-  {% for e in r.events %}
-  <details {{ 'open' if e.needs else '' }}>
-    <summary><b>{{ e.ev.key }}</b> · {{ e.team.name or e.team.key }} · {{ e.ev.state }} · starts {{ e.ev.starts_at[:16] }}{% if e.needs %} · {% if e.needs.headcount %}<span class="bad">short {{ e.needs.headcount }}</span>{% else %}<span class="ok">headcount ok</span>{% endif %}{% for role, n in e.needs.roles.items() %} · <span class="bad">{{ n }} {{ role }} short</span>{% endfor %}{% if e.busy %} · <span class="warn">double-booked {{ e.busy|length }}</span>{% endif %}{% endif %} · fill {{ e.ev.fill_state }}</summary>
-    <div class="grid">
-      {% for status in ['in', 'tentative', 'sub', 'out'] %}
-      <div><h3>{{ status }} ({{ e.by[status]|length }})</h3>
-        <table>{% for s in e.by[status] %}<tr><td class="{{ s.cls }}">{{ s.character }}</td><td>{{ s.spec }}</td><td class="muted">{{ s.role }}</td><td class="muted">{{ s.source }}{% if s.note %} — {{ s.note }}{% endif %}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table></div>
-      {% endfor %}
-    </div>
-    {% if e.ev.fill_asks %}<h3>Fill asks</h3><table><tr><th>Who</th><th>Kind</th><th>As</th><th>For</th><th>Answer</th></tr>{% for a in e.ev.fill_asks %}<tr><td>{{ a.display_name }}</td><td>{{ a.kind }}</td><td>{{ a.character }} ({{ a.spec }}, {{ a.role }})</td><td>{{ a.reason }}</td><td class="{{ 'ok' if a.answer == 'yes' else 'bad' if a.answer == 'no' else 'warn' }}">{{ a.answer or 'waiting' }}</td></tr>{% endfor %}</table>{% endif %}
-    {% if e.ev.callouts %}<p class="sub">Callouts: {% for c in e.ev.callouts %}{{ c.display_name }} {{ c.hours_before }}h before{% if c.late %} <span class="bad">late</span>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-    <pre>{{ e.ev.log|join('\n') }}</pre>
-    {% if e.needs %}<img class="card" src="/card/health/{{ e.ev.key }}.png" alt="health card">{% endif %}
-  </details>
-  {% endfor %}
-  {% endif %}
+{% endfor %}
 </div>
-{% endfor %}
-
-{% if orphans %}
-<h2>Sheets not tied to a raid</h2>
-<p class="sub">These rosters have no instance set — pick one on <a href="/admin">Admin</a> so they inherit the raid's rules.</p>
-{% for e in orphans %}
-<div class="panel"><b>{{ e.ev.key }}</b> · {{ e.team.name or e.team.key }} · {{ e.ev.state }} · starts {{ e.ev.starts_at[:16] }} · in {{ e.by['in']|length }} · out {{ e.by['out']|length }}</div>
-{% endfor %}
-{% endif %}
 <style>
-  form.inline { display:inline-flex; gap:6px; align-items:center; margin:0 4px 4px 0; }
-  form.row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
+  form.row, .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:6px 0; }
   select, input { background:var(--zebra); color:var(--ink); border:1px solid var(--line); border-radius:5px; padding:4px 6px; font:inherit; }
   input[type=checkbox] { width:auto; } input.over { border-color: var(--warn); color: var(--warn); }
   button { background:var(--accent); color:#0B1512; border:0; border-radius:5px; padding:5px 10px; font:inherit; font-weight:600; cursor:pointer; }
   button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
-  details summary { cursor:pointer; margin:6px 0; }
 </style>
 {% endblock %}

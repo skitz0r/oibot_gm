@@ -77,7 +77,7 @@ def comp_card(reg: Registry, roster: dict) -> tuple[discord.Embed, discord.File]
     e.set_image(url=f"attachment://{fname}")
     if over:
         e.add_field(name="Over cap", value=", ".join(f"{l.key} {l.have}/{l.max}" for l in over)[:900], inline=False)
-    e.set_footer(text=f"Change the ideals in plain text: @mention me here, e.g. “{key}: we want 3 tanks”, “cap hunters at 3 because of Trueshot”, “clear the paladin target”")
+    e.set_footer(text=f"Change the ideals in plain text: @mention me here, e.g. “{key}: we want 3 tanks”, “cap hunters at 3 because of Trueshot”, “clear the paladin target”; the planner's runs inherit them")
     return e, file
 
 
@@ -138,7 +138,7 @@ class PoolMixin:
             return
         if kind == "member":
             self.loop.create_task(self.post_pool_log(reg, lines))
-        elif not any(l.startswith(("roster", "rosters", "team", "analytics")) for l in lines):
+        elif not any(l.startswith(("roster", "rosters", "team", "raid", "analytics")) for l in lines):
             return  # config commits that can't move the numbers (channels, timezone, owner)
         t = self._pool_timers.pop(reg.key, None)
         if t:
@@ -166,7 +166,7 @@ class PoolMixin:
         lock = locks.setdefault(reg.key, asyncio.Lock())
         async with lock:
             out = []
-            rosters = reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]
+            rosters = [reg.raid_shell(rid) for rid in reg.profile.raids]  # one set of cards per raid definition
             keys = [BANK_KEY]
             for r in rosters:
                 keys += [r["key"], f"comp:{r['key']}", f"groups:{r['key']}"]

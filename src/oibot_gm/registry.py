@@ -269,8 +269,9 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
     profile = reg.profile
     size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or 20)
     key = roster.get("key", "main")
+    keys = reg.run_keys(roster.get("instance")) | {key}  # placed on this roster, or on any run of the same raid
     mains = [(m, m.main) for m in reg.members.values() if m.main]
-    on_roster = [(m, c) for m, c in mains if key in c.rosters]
+    on_roster = [(m, c) for m, c in mains if keys & set(c.rosters)]
     alts = [(m, c) for m in reg.members.values() for c in m.active() if not c.is_main]
     bounds = reg.role_bounds(roster.get("instance"), size)
 
@@ -312,7 +313,7 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
             continue
         providers = [m.display_name for m, c in mains if b.provided_by(profile.spec(c.cls, c.spec))]
         buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
-    not_on_roster = [m.display_name for m, c in mains if key not in c.rosters]
+    not_on_roster = [m.display_name for m, c in mains if not (keys & set(c.rosters))]
     unnamed = sum(1 for m, c in mains if not c.name)
     hc_level = "green" if len(mains) >= size else ("amber" if len(mains) + len(alts) >= size else "red")
     return {"headcount": (len(mains), size, len(alts), len(on_roster)), "headcount_level": hc_level, "roles": roles, "buffs": buffs,
@@ -511,6 +512,17 @@ class Registry:
         out.setdefault("lockout_days", 7)
         out.setdefault("duration_hours", 3)
         return out
+
+    def raid_shell(self, instance: str) -> dict:
+        """A roster-shaped dict for a raid definition, so pool/comp/group analytics can run per raid."""
+        rd = self.raid_def(instance)
+        over = self.config.raids.get(instance, {})
+        return {"key": instance, "name": rd.get("name", instance), "size": int(rd.get("size") or 20), "instance": instance,
+                "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or []}
+
+    def run_keys(self, instance: str | None) -> set[str]:
+        """Roster keys (standing or dated runs) of an instance."""
+        return {t["key"] for t in self.config.rosters if t.get("instance") == instance}
 
     def role_bounds(self, instance: str | None, size: int) -> dict[str, dict[str, int]]:
         """tank/healer/dps {min,max} for a run: the raid's desired comp when it has one (scaled if the roster

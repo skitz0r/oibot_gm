@@ -70,6 +70,11 @@ healer / dps counts. At launch: **Barrow Deeps** (10-player, 3-day lockout guess
 real numbers are learned (`/gm config raid`, Admin → Raids, or plain text); every roster of that raid
 inherits them.
 
+Runs are normally **planned per lockout** by the bot (see the auto-planner below) rather than kept as
+standing teams: the Rosters page on the website shows, per raid, the tentative proposal and the accepted
+runs for the current window with their sheets. A standing roster (a fixed team on a weekly schedule) is
+still possible but optional.
+
 A **roster** is a named run with a size, a schedule ("Tue 19:30" server time), an instance, and cutoffs. A character
 can be on the 20-man and a 10-man as long as the times don't overlap; each raid has its own lockout (weekly for now)
 and a member is only ever in one raid per time slot. 10-mans are expected to be rebuilt each lockout from
@@ -118,11 +123,11 @@ cards, because WoW: Forever has not published totem scoping yet.
 ## 6. Analytics (officers)
 
 - **Character bank** — every member → main (class, spec/offspec, role, rank, rosters) and alts.
-- **Pool readiness** per roster — every planned/active main vs the roster size: headcount, role tiles,
+- **Pool readiness** per raid — every planned/active main vs the roster size: headcount, role tiles,
   buff coverage, who isn't placed on the roster yet.
-- **Optimised groups** per roster — the solver on the pool at full size with open slots shown, aura
+- **Optimised groups** per raid — the solver on the pool at full size with open slots shown, aura
   badges per group, totem picks, raid-wide buffs.
-- **Desired comp** per roster — derived targets per role/class/spec with a one-line reason each,
+- **Desired comp** per raid — derived targets per role/class/spec with a one-line reason each,
   have vs want, and how many could fill a slot by switching to their offspec. Officers override targets in
   plain text: "reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target",
   "groups tank, healers, melee, casters".

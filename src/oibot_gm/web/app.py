@@ -472,49 +472,52 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/rosters", response_class=HTMLResponse)
     async def rosters(request: Request):
-        v = await need(request, officer=True)
-        reg = v.reg
-        out = []
-        for t in reg.config.rosters or [{"key": "main", "name": "main", "size": 20}]:
-            h = pool_health_data(reg, t)
-            members = reg.roster_members(t["key"])
-            ic = comp_mod.ideal_comp(reg.profile, int(t.get("size") or 20), comp_mod.pool_players(reg), t.get("comp_targets") or {}, t.get("instance"), reg)
-            out.append({"t": t, "health": h, "members": members, "comp": ic})
-        return page(request, "rosters.html", v, rosters=out)
+        """Runs per raid for the current/upcoming lockout: tentative (proposals) and accepted (dated rosters + sheets)."""
+        from datetime import timedelta
 
-    @app.get("/raids", response_class=HTMLResponse)
-    async def raids(request: Request):
         v = await need(request, officer=True)
         reg = v.reg
         rs = bot.raids.store(reg)
         ps = bot.proposals(reg)
+        now = datetime.now().astimezone()
         events = sorted(rs.events.values(), key=lambda e: e.starts_at, reverse=True)
 
         def ev_row(ev):
             t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
             live = ev.state not in ("done", "cancelled")
-            return {"ev": ev, "team": t, "needs": rc.needs(reg, ev, t) if live else None, "busy": rc.conflicts(rs, ev) if live else {}, "by": {st: ev.by_status(st) for st in rc.STATUSES}}
+            return {"ev": ev, "team": t, "needs": rc.needs(reg, ev, t) if live else None, "busy": rc.conflicts(rs, ev) if live else {}, "by": {st: ev.by_status(st) for st in rc.STATUSES}, "live": live}
 
         out = []
         for rid in reg.profile.raids:
             rd = reg.raid_def(rid)
-            rosters = [t for t in reg.config.rosters if t.get("instance") == rid]
-            evs = [ev_row(e) for e in events if e.instance == rid][:8]
-            props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)[:5]
-            out.append({"id": rid, "eff": rd, "over": reg.config.raids.get(rid, {}), "rosters": rosters, "events": evs, "proposals": props,
-                        "placed": sum(len(reg.roster_members(t["key"])) for t in rosters)})
+            horizon = now + timedelta(days=int(rd.get("lockout_days", 7)) + 1)
+            evs = [ev_row(e) for e in events if e.instance == rid]
+            current = [e for e in evs if e["live"] and e["ev"].start <= horizon]
+            past = [e for e in evs if not e["live"] or e["ev"].start > horizon][:6]
+            props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)
+            out.append({"id": rid, "eff": rd, "current": current, "past": past, "open": [p for p in props if p.state == "proposed"], "history": [p for p in props if p.state != "proposed"][:4],
+                        "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")]})
         orphans = [ev_row(e) for e in events if e.instance not in reg.profile.raids][:6]
-        return page(request, "raids.html", v, raids=out, orphans=orphans, owner=v.owner, names={m.discord_id: m.display_name for m in reg.members.values()})
+        return page(request, "rosters.html", v, raids=out, orphans=orphans)
+
+    @app.get("/raids", response_class=HTMLResponse)
+    async def raids(request: Request):
+        v = await need(request, officer=True)
+        reg = v.reg
+        ps = bot.proposals(reg)
+        out = [{"id": rid, "eff": reg.raid_def(rid), "over": reg.config.raids.get(rid, {}), "runs": len(reg.run_keys(rid)),
+                "open": len(ps.open_for(rid))} for rid in reg.profile.raids]
+        return page(request, "raids.html", v, raids=out, owner=v.owner)
 
     @app.post("/admin/plan")
     async def admin_plan(request: Request):
         v, d = await form(request, officer=True)
         inst = d.get("instance", "")
         if inst not in v.reg.profile.raids:
-            return back("/raids", err="unknown raid")
+            return back("/rosters", err="unknown raid")
         line = await bot.auto_propose(v.reg, inst, by=v.name)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} ran the planner: {line}")
-        return back("/raids", ok=line)
+        return back("/rosters", ok=line)
 
     @app.post("/admin/proposal")
     async def admin_proposal(request: Request):
@@ -522,7 +525,7 @@ def create_app(bot) -> FastAPI:
         ps = bot.proposals(v.reg)
         p = ps.items.get(d.get("pid", ""))
         if not p or p.state != "proposed":
-            return back("/raids", err="that proposal is no longer open")
+            return back("/rosters", err="that proposal is no longer open")
         if d.get("answer") == "accept":
             line = await bot.accept_proposal(v.reg, p, v.name)
         else:
@@ -530,7 +533,7 @@ def create_app(bot) -> FastAPI:
             ps.save(p, f"rejected by {v.name}")
             line = f"proposal {p.id} rejected"
         await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
-        return back("/raids", ok=line)
+        return back("/rosters", ok=line)
 
     @app.get("/config", response_class=HTMLResponse)
     async def config(request: Request):
