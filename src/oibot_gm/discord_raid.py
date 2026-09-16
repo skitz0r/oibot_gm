@@ -886,8 +886,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             if sent and officer_ch:
                 await officer_ch.send(f"🧩 {ev.key}: replacement for {m.display_name} — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
 
+    async def raid_autocomplete(interaction: discord.Interaction, current: str):
+        reg = guilds.for_interaction(interaction)
+        return [app_commands.Choice(name=r, value=r) for r in (reg.profile.raids if reg else []) if current.lower() in r.lower()][:25]
+
     @raid.command(name="plan", description="Officer: auto-plan a raid's next lockout window now and DM officers the proposal")
-    @app_commands.autocomplete(raid=lambda i, c: [app_commands.Choice(name=r, value=r) for r in (guilds.for_interaction(i).profile.raids if guilds.for_interaction(i) else []) if c.lower() in r.lower()][:25])
+    @app_commands.autocomplete(raid=raid_autocomplete)
     async def raid_plan(interaction: discord.Interaction, raid: str):
         reg = await officer(interaction)
         if not reg:

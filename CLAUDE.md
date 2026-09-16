@@ -64,7 +64,7 @@ uv sync
 uv run oibot demo --no-llm      # deterministic end-to-end, writes out/report.md
 uv run oibot discord            # bot; needs DISCORD_TOKEN, DISCORD_TEST_GUILD_ID, ANTHROPIC_API_KEY in .env
 ```
-Restart the bot after code changes: `pkill -f "oibot discord"; PYTHONUNBUFFERED=1 nohup uv run oibot discord >> out/discord.log 2>&1 &`
+Before restarting: `uv run python scripts/check_commands.py` (builds the command tree offline; catches over-long descriptions and bad decorators). Restart: `pkill -f "oibot discord"; PYTHONUNBUFFERED=1 nohup uv run oibot discord >> out/discord.log 2>&1 &`
 
 ## Conventions
 - Python 3.12, `uv`, Pydantic models in `models.py` double as LLM output schemas.
