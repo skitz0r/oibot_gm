@@ -102,6 +102,72 @@ def seed_preferences(profile: GameProfile, players: list[Player], labels: list[s
     return prefs
 
 
+def players_from_seats(reg: Registry, seats: list[dict]) -> list[Player]:
+    """Proposal seats ({discord_id, display_name, character, cls, spec, role}) → solver Players (offspec from the registry)."""
+    out = []
+    for i, s in enumerate(seats):
+        m = reg.members.get(int(s["discord_id"]))
+        c = next((c for c in (m.active() if m else []) if c.label == s["character"]), None)
+        out.append(Player(signup_name=s["display_name"], pos=i + 1, status="signed", cls=s["cls"], spec=s["spec"], role=s["role"], offspec=(c.offspec if c else None),
+                          character=s["character"], map_confidence="high", unmapped=False, rank=(c.rank if c else "trial")))
+    return out
+
+
+def groups_for(reg: Registry, players: list[Player], roster: dict, time_limit_s: float = 6.0) -> tuple[RosterResult | None, cov_mod.Coverage | None, list[str]]:
+    """Groups for a fixed set of players at the roster's size (everyone selected), seeded by archetype."""
+    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or reg.profile.comp_rules["raid_size"])
+    n_groups = max(1, -(-size // reg.profile.comp_rules["group_size"]))
+    labels = archetype_groups(n_groups, roster.get("comp_groups"))
+    if not players:
+        return None, None, labels
+    raid_id = roster.get("instance") if roster.get("instance") in reg.profile.raids else next(iter(reg.profile.raids))
+    bounds = reg.role_bounds(roster.get("instance"), size)
+    have = {r: sum(1 for p in players if p.role == r or (p.offspec and reg.profile.spec(p.cls, p.offspec).role == r)) for r in ROLES}
+    role_min = {r: min(bounds[r]["min"], have[r]) for r in ("tank", "healer")}
+    opts = solver.SolveOptions(raid_size=size, role_min=role_min, prefer_group=seed_preferences(reg.profile, players, labels), prefer_weight=12,
+                               force_in=tuple(p.signup_name for p in players), time_limit_s=time_limit_s, workers=4)
+    try:
+        result = solver.solve(reg.profile, players, raid_id, opts)
+    except Exception:  # noqa: BLE001
+        return None, None, labels
+    return result, cov_mod.compute(reg.profile, players, result), labels
+
+
+def groups_summary(reg: Registry, players: list[Player], result: RosterResult | None, cov) -> dict:
+    """Everything the web needs to draw a run's groups and aura coverage without an image:
+    roles, raid-wide buffs (level + detail), per group: members (class/spec/role/name), present badges,
+    wanted-but-missing badges, totem picks; unmet buffs; scoping assumptions."""
+    profile = reg.profile
+    buffs = {b.id: b for b in profile.party_buffs()}
+    roles = {r: sum(1 for p in players if p.role == r) for r in ROLES}
+    rb = raid_buff_status(profile, players)
+    out = {"roles": roles, "raid": [{"abbr": r["abbr"], "colour": r["colour"], "name": r["name"], "ok": r["ok"], "n": len(r["providers"]), "detail": r["detail"], "status": r["status"]} for r in rb],
+           "groups": [], "unmet": [], "assumptions": profile.buff_assumptions(), "synergy": None}
+    if result is None or cov is None:
+        return out
+    by = {p.signup_name: p for p in players}
+    out["unmet"] = cov.unmet_raidwide
+    out["synergy"] = result.synergy_value
+    for gi, names in enumerate(result.groups):
+        g = cov.groups[gi]
+        present = [bid for bid in g.present if g.wanted.get(bid, 0) >= 2]
+        slot_taken = {buffs[bid].slot for bid in g.present if buffs[bid].slot}
+        missing = [bid for bid, w in sorted(g.wanted.items(), key=lambda kv: -kv[1]) if w >= 2 and bid not in g.present and not (buffs[bid].slot and buffs[bid].slot in slot_taken)]
+        out["groups"].append({
+            "n": gi + 1,
+            "members": [{"name": by[n].character or n, "member": n, "cls": by[n].cls, "spec": by[n].spec, "role": by[n].role} for n in names],
+            "present": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present],
+            "missing": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "name": buffs[b].short} for b in missing],
+            "picks": [f"{slot.split('_')[1].title()} {buffs[bid].abbr}" for slot, bid in sorted(g.picks.items()) if not slot.endswith("_cd") and g.wanted.get(bid, 0) >= 2],
+            "value": result.group_reports[gi].value if gi < len(result.group_reports) else 0,
+        })
+    return out
+
+
+def profile_buff_abbr(profile: GameProfile, bid: str) -> str:
+    return next((b.abbr for b in profile.party_buffs() if b.id == bid), bid)
+
+
 def optimize(reg: Registry, roster: dict, time_limit_s: float = 6.0) -> tuple[list[Player], RosterResult | None, cov_mod.Coverage | None, list[str]]:
     """Groups for the pool at the roster's *full* size (empty slots stay visible), seeded by archetype:
     tanks and healers together, melee with the Enhancement shaman, hunters, casters. Seeds are soft;

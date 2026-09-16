@@ -1,4 +1,30 @@
 {% extends "base.html" %}{% set active = 'rosters' %}
+{% macro groups_block(sm) %}
+{% if sm %}
+<div class="runsum">
+  <div class="row" style="margin:4px 0 8px">
+    {% for role, n in sm.roles.items() %}<span class="chip role"><img class="ico" src="/img/role/{{ role }}.png" alt=""> {{ n }} {{ role }}</span>{% endfor %}
+    {% if sm.synergy is not none %}<span class="muted">synergy {{ sm.synergy }}</span>{% endif %}
+  </div>
+  {% if sm.groups %}
+  <div class="groups">
+    {% for g in sm.groups %}
+    <div class="group">
+      <div class="gh"><b>Group {{ g.n }}</b> <span class="ok">+{{ g.value }}</span></div>
+      {% for m in g.members %}<div class="gm"><img class="ico" src="/img/role/{{ m.role }}.png" alt="{{ m.role }}" title="{{ m.role }}"><img class="ico" src="/img/class/{{ m.cls }}.png" alt=""><span class="{{ m.cls }}">{{ m.name }}</span> <span class="muted">{{ m.spec }}</span></div>{% endfor %}
+      {% for _ in range(5 - g.members|length) %}<div class="gm muted">· open</div>{% endfor %}
+      <div class="badges">{% for b in g.present %}<span class="badge" style="background:{{ b.colour }}" title="{{ b.name }} — {{ b.who }}">{{ b.abbr }}</span>{% endfor %}{% for b in g.missing %}<span class="badge miss" title="{{ b.name }} — nobody in this group brings it">{{ b.abbr }}</span>{% endfor %}</div>
+      {% if g.picks %}<div class="muted small">totems: {{ g.picks|join(' · ') }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <div class="row" style="margin-top:8px"><span class="muted small">raid-wide:</span>{% for b in sm.raid %}<span class="chip {{ b.ok }}" title="{{ b.detail }} · {{ b.status }}"><span class="badge" style="background:{{ b.colour if b.n else '#3A4351' }}">{{ b.abbr[:4] }}</span> {{ b.name }} ×{{ b.n }}</span>{% endfor %}</div>
+  {% if sm.unmet %}<div class="warn small">nobody in this run brings: {{ sm.unmet|join(', ') }}</div>{% endif %}
+  <div class="muted small">{{ sm.assumptions|join(' · ') }}</div>
+</div>
+{% endif %}
+{% endmacro %}
 {% block body %}
 <h1>Rosters</h1>
 {% if ok %}<div class="panel ok">✓ {{ ok }}</div>{% endif %}
@@ -17,7 +43,8 @@
     <div class="grid" style="margin-top:6px">
       {% for run in p.runs %}
       <div><b>{{ run.name }}</b> <span class="muted">{{ run.seats|length }}/{{ run.size }}</span>
-        <table>{% for s in run.seats %}<tr><td><img class="ico" src="/img/role/{{ s.role }}.png" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="/img/class/{{ s.cls }}.png" alt=""> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.spec }}</td></tr>{% endfor %}</table></div>
+        <table>{% for s in run.seats %}<tr><td><img class="ico" src="/img/role/{{ s.role }}.png" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="/img/class/{{ s.cls }}.png" alt=""> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.spec }}</td></tr>{% endfor %}</table>
+        {{ groups_block(r.run_summaries.get((p.id, run.key))) }}</div>
       {% endfor %}
     </div>
     {% if p.unplaced %}<p class="sub">Not seated: {% for n, why in p.unplaced[:10] %}{{ n }} — {{ why }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
@@ -37,11 +64,11 @@
         <table>{% for s in e.by[status] %}<tr><td><img class="ico" src="/img/role/{{ s.role }}.png" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="/img/class/{{ s.cls }}.png" alt=""> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.source }}{% if s.note %} — {{ s.note }}{% endif %}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table></div>
       {% endfor %}
     </div>
-    <details><summary class="muted">fill asks ({{ e.ev.fill_asks|length }}) · callouts ({{ e.ev.callouts|length }}) · log ({{ e.ev.log|length }}) · health card</summary>
+    {{ groups_block(e.summary) }}
+    <details><summary class="muted">fill asks ({{ e.ev.fill_asks|length }}) · callouts ({{ e.ev.callouts|length }}) · log ({{ e.ev.log|length }})</summary>
       {% if e.ev.fill_asks %}<table><tr><th>Who</th><th>Kind</th><th>As</th><th>For</th><th>Answer</th></tr>{% for a in e.ev.fill_asks %}<tr><td>{{ a.display_name }}</td><td>{{ a.kind }}</td><td>{{ a.character }} ({{ a.spec }}, {{ a.role }})</td><td>{{ a.reason }}</td><td class="{{ 'ok' if a.answer == 'yes' else 'bad' if a.answer == 'no' else 'warn' }}">{{ a.answer or 'waiting' }}</td></tr>{% endfor %}</table>{% endif %}
       {% if e.ev.callouts %}<p class="sub">{% for c in e.ev.callouts %}{{ c.display_name }} {{ c.hours_before }}h before{% if c.late %} <span class="bad">late</span>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
       <pre>{{ e.ev.log|join('\n') }}</pre>
-      <img class="card" src="/card/health/{{ e.ev.key }}.png" alt="health card">
     </details>
   </div>
   {% endfor %}
@@ -63,5 +90,18 @@
 {% for e in orphans %}<div class="panel"><b>{{ e.ev.key }}</b> · {{ e.team.name or e.team.key }} · {{ e.ev.state }} · starts {{ e.ev.starts_at[:16] }} · in {{ e.by['in']|length }} · out {{ e.by['out']|length }}</div>{% endfor %}
 {% endif %}
 
-<style>.ico { width:20px; height:20px; border-radius:50%; vertical-align:-5px; }</style>
+<style>
+  .ico { width:20px; height:20px; border-radius:50%; vertical-align:-5px; }
+  .small { font-size:13px; }
+  .chip { display:inline-flex; gap:6px; align-items:center; padding:2px 8px; border-radius:999px; border:1px solid var(--line); font-size:13px; }
+  .chip.green { border-color:var(--ok); } .chip.amber { border-color:var(--warn); } .chip.red { border-color:var(--bad); color:var(--bad); }
+  .badge { display:inline-block; min-width:30px; text-align:center; padding:2px 5px; border-radius:6px; font-size:11px; font-weight:700; color:#14181F; }
+  .badge.miss { background:transparent; border:2px solid var(--bad); color:var(--bad); }
+  .groups { display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:10px; }
+  .group { background:var(--zebra); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .group .gh { display:flex; justify-content:space-between; margin-bottom:4px; }
+  .group .gm { display:flex; gap:6px; align-items:center; font-size:14px; line-height:1.7; }
+  .badges { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .runsum { margin-top:8px; }
+</style>
 {% endblock %}

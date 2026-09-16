@@ -517,10 +517,25 @@ def create_app(bot) -> FastAPI:
         now = datetime.now().astimezone()
         events = sorted(rs.events.values(), key=lambda e: e.starts_at, reverse=True)
 
+        summary_cache = bot.__dict__.setdefault("_run_summaries", {})
+
+        def run_summary(cache_key: str, players, roster: dict) -> dict:
+            hit = summary_cache.get(cache_key)
+            if hit and time.time() - hit[0] < 600:
+                return hit[1]
+            result, cov, _labels = comp_mod.groups_for(reg, players, roster)
+            sm = comp_mod.groups_summary(reg, players, result, cov)
+            summary_cache[cache_key] = (time.time(), sm)
+            return sm
+
         def ev_row(ev):
             t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
             live = ev.state not in ("done", "cancelled")
-            return {"ev": ev, "team": t, "needs": rc.needs(reg, ev, t) if live else None, "busy": rc.conflicts(rs, ev) if live else {}, "by": {st: ev.by_status(st) for st in rc.STATUSES}, "live": live}
+            sm = None
+            if live:
+                players = [p for p in rc.players_for(reg, ev) if p.status == "signed"]
+                sm = run_summary(f"sheet:{ev.key}:{len(ev.signups)}:{ev.state}", players, {**(reg.raid_shell(ev.instance) if ev.instance in reg.profile.raids else {}), **t})
+            return {"ev": ev, "team": t, "needs": rc.needs(reg, ev, t) if live else None, "busy": rc.conflicts(rs, ev) if live else {}, "by": {st: ev.by_status(st) for st in rc.STATUSES}, "live": live, "summary": sm}
 
         out = []
         for rid in reg.profile.raids:
@@ -530,10 +545,15 @@ def create_app(bot) -> FastAPI:
             current = [e for e in evs if e["live"] and e["ev"].start <= horizon]
             past = [e for e in evs if not e["live"] or e["ev"].start > horizon][:6]
             props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)
+            run_summaries = {}
+            for p in props:
+                if p.state in ("proposed", "draft"):
+                    for run in p.runs:
+                        run_summaries[(p.id, run.key)] = run_summary(f"run:{p.id}:{run.key}", comp_mod.players_from_seats(reg, run.seats), {**reg.raid_shell(rid), "key": run.key, "size": run.size})
             ws, we = reg.lockout_window(rid, now)
             fo = reg.first_open(rid)
             out.append({"id": rid, "eff": rd, "current": current, "past": past, "open": [p for p in props if p.state in ("proposed", "draft")], "history": [p for p in props if p.state not in ("proposed", "draft")][:4],
-                        "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")], "window": (ws, we), "opened": bool(fo and fo <= now), "first_open": fo})
+                        "standing": [t for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")], "window": (ws, we), "opened": bool(fo and fo <= now), "first_open": fo, "run_summaries": run_summaries})
         orphans = [ev_row(e) for e in events if e.instance not in reg.profile.raids][:6]
         return page(request, "rosters.html", v, raids=out, orphans=orphans)
 
