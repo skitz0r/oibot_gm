@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% set active = 'bank' %}
+{% block body %}
+<h1>Character bank</h1>
+<p class="sub">{{ rows|length }} members with characters · {{ members|length }} members total</p>
+<div class="tbl"><table>
+  <tr><th>Member</th><th>Main</th><th>Spec</th><th>Role</th><th>Rank</th><th>Rosters</th><th>Status</th><th>Alts</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.member }}</td>
+    {% if r.main %}
+    <td class="{{ r.main.cls }}">{{ r.main.name or r.main.cls ~ ' (unnamed)' }}</td>
+    <td>{{ r.main.spec }}{% if r.main.offspec %}/{{ r.main.offspec }}{% endif %}</td>
+    <td>{{ r.role }}</td><td>{{ r.main.rank }}</td><td>{{ r.main.rosters|join(', ') or '—' }}</td><td>{{ r.main.status }}</td>
+    {% else %}<td colspan="6" class="muted">no main</td>{% endif %}
+    <td>{% for a in r.alts %}<span class="{{ a.cls }}">{{ a.name or a.cls }}</span> · {{ a.spec }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+<img class="card" src="/card/bank.png" alt="character bank card">
+{% endblock %}

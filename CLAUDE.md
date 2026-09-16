@@ -48,6 +48,8 @@ src/oibot_gm/
   discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence
   ops.py               ops feed (channel line per action; errors DM the owner)
 companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests
+  web/app.py           FastAPI dashboard served inside the bot (OIBOT_WEB_BIND); Discord OAuth2 login; officer pages bank/rosters/raids/config/ops + PNG cards;
+                       published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Read-mostly; edits must reuse the command code paths
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`

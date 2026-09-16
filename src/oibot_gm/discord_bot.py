@@ -17,6 +17,7 @@ import copy
 import json
 import os
 import re
+import time
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
@@ -1133,6 +1134,10 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
             await self.feed.start()
         else:
             print("loot feed disabled (set OIBOT_FEED_TOKEN and OIBOT_FEED_BIND)")
+        from .web.app import serve as web_serve
+
+        self.started_at = time.time()
+        self.loop.create_task(web_serve(self))
 
     async def on_ready(self):
         await self.ensure_emojis()

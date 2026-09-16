@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% set active = 'rosters' %}
+{% block body %}
+<h1>Rosters</h1>
+{% for r in rosters %}
+<div class="panel">
+  <h2 style="margin-top:0">{{ r.t.name or r.t.key }} <span class="sub">· {{ r.t.size }}-man · {{ r.t.schedule or 'no schedule' }} · {{ r.t.instance or 'no instance' }} · cutoffs {{ r.t.cutoff_soft_hours or 48 }}h / {{ r.t.cutoff_hard_hours or 24 }}h · opens {{ r.t.open_days_before or 6 }}d before · DM on open {{ 'on' if r.t.open_dm else 'off' }} · autofill {{ 'off' if r.t.autofill is defined and not r.t.autofill else 'on' }}</span></h2>
+  <p>Pool: <b>{{ r.health.mains }}</b> mains · {{ r.health.on_roster }} placed on this roster · {{ r.health.alts }} alts{% if r.health.unnamed %} · {{ r.health.unnamed }} unnamed{% endif %}
+    {% for role in r.health.roles %}{% if role.need %} · <span class="{{ 'ok' if role.level == 'green' else 'warn' if role.level == 'amber' else 'bad' }}">{{ role.role }} {{ role.have }}/{{ role.need }}</span>{% endif %}{% endfor %}</p>
+  {% if r.t.comp_targets %}<p class="sub">Officer comp targets: {{ r.t.comp_targets }}</p>{% endif %}
+  {% if r.t.comp_groups %}<p class="sub">Group layout: {{ r.t.comp_groups|join(', ') }}</p>{% endif %}
+  <h3>Placed</h3>
+  <div class="tbl"><table>
+    <tr><th>Member</th><th>Character</th><th>Spec</th><th>Rank</th></tr>
+    {% for m, c in r.members %}<tr><td>{{ m.display_name }}</td><td class="{{ c.cls }}">{{ c.label }}</td><td>{{ c.spec }}{% if c.offspec %}/{{ c.offspec }}{% endif %}</td><td>{{ c.rank }}</td></tr>{% else %}<tr><td colspan="4" class="muted">nobody placed yet — <code>/roster add</code></td></tr>{% endfor %}
+  </table></div>
+  <h3>Not on this roster</h3>
+  <p class="sub">{{ r.health.unresponsive|join(', ') or 'everyone with a main is placed' }}</p>
+  <h3>Desired comp</h3>
+  <div class="tbl"><table>
+    <tr><th>Slot</th><th>Want</th><th>Have</th><th>Why</th></tr>
+    {% for l in r.comp.lines %}<tr><td>{{ l.key }}</td><td>{{ l.want }}{% if l.max is not none and l.max != l.want %}–{{ l.max }}{% endif %}</td><td class="{{ 'ok' if l.level == 'green' else 'warn' if l.level == 'amber' else 'bad' }}">{{ l.have }}{% if l.flex %} <span class="muted">+{{ l.flex }} offspec</span>{% endif %}</td><td class="sub">{% if l.source == 'officer' %}<span class="warn">officer:</span> {% endif %}{{ l.why }}</td></tr>{% endfor %}
+  </table></div>
+  <details><summary>Cards</summary>
+    <img class="card" src="/card/pool/{{ r.t.key }}.png" alt="pool readiness">
+    <img class="card" src="/card/groups/{{ r.t.key }}.png" alt="optimised groups">
+    <img class="card" src="/card/comp/{{ r.t.key }}.png" alt="desired comp">
+  </details>
+</div>
+{% endfor %}
+{% endblock %}

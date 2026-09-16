@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}oibot_GM{% endblock %}</title>
+<style>
+  :root { --bg:#14181F; --panel:#1C222B; --ink:#E8ECF2; --muted:#98A3B5; --line:#2C3441; --ok:#3FC2B1; --warn:#E5B04A; --bad:#E5484D; --zebra:#1F2630; --accent:#3FC2B1; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  header { display:flex; gap:18px; align-items:center; padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
+  header .brand { font-weight:600; letter-spacing:.01em; }
+  header nav a { color:var(--muted); text-decoration:none; margin-right:14px; }
+  header nav a.on, header nav a:hover { color:var(--ink); }
+  header .me { margin-left:auto; color:var(--muted); font-size:13px; }
+  main { max-width:1200px; margin:0 auto; padding:20px; }
+  h1 { font-size:24px; margin:0 0 4px; } h2 { font-size:18px; margin:26px 0 8px; } h3 { font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin:18px 0 6px; }
+  .sub { color:var(--muted); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin:12px 0; }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th { text-align:left; color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.05em; padding:6px 10px; border-bottom:1px solid var(--line); }
+  td { padding:6px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  tr:nth-child(even) td { background:var(--zebra); }
+  .tbl { overflow-x:auto; }
+  .pill { display:inline-block; padding:0 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
+  .ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); } .muted { color:var(--muted); }
+  .Warrior{color:#C79C6E}.Paladin{color:#F58CBA}.Hunter{color:#ABD473}.Rogue{color:#FFF569}.Priest{color:#E6E6E6}.Shaman{color:#5C9BFF}.Mage{color:#69CCF0}.Warlock{color:#9482C9}.Druid{color:#FF7D0A}
+  img.card { max-width:100%; border-radius:8px; border:1px solid var(--line); display:block; margin:8px 0; }
+  pre { background:var(--zebra); padding:12px; border-radius:6px; overflow:auto; font-size:13px; }
+  code { background:var(--zebra); padding:1px 5px; border-radius:4px; font-size:.92em; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; }
+  a { color:var(--accent); }
+  .btn { display:inline-block; background:var(--accent); color:#0B1512; padding:8px 14px; border-radius:6px; text-decoration:none; font-weight:600; }
+  details summary { cursor:pointer; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">oibot_GM{% if v %} · {{ v.reg.config.name }}{% endif %}</span>
+  <nav>
+    <a href="/" class="{{ 'on' if active == 'home' else '' }}">Me</a>
+    {% if v and v.officer %}
+    <a href="/bank" class="{{ 'on' if active == 'bank' else '' }}">Bank</a>
+    <a href="/rosters" class="{{ 'on' if active == 'rosters' else '' }}">Rosters</a>
+    <a href="/raids" class="{{ 'on' if active == 'raids' else '' }}">Raids</a>
+    <a href="/config" class="{{ 'on' if active == 'config' else '' }}">Config</a>
+    <a href="/ops" class="{{ 'on' if active == 'ops' else '' }}">Ops</a>
+    {% endif %}
+  </nav>
+  <span class="me">{% if v %}{{ v.name }} · {{ 'owner' if v.owner else 'officer' if v.officer else 'member' }} · <a href="/auth/logout">log out</a>{% else %}<a href="/auth/login">log in with Discord</a>{% endif %} · {{ now }}</span>
+</header>
+<main>{% block body %}{% endblock %}</main>
+</body>
+</html>

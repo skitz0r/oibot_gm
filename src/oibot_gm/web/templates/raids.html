@@ -1,0 +1,35 @@
+{% extends "base.html" %}{% set active = 'raids' %}
+{% block body %}
+<h1>Raids</h1>
+{% for r in raids %}
+<div class="panel">
+  <h2 style="margin-top:0">{{ r.ev.key }} <span class="sub">· {{ r.team.name or r.team.key }} · {{ r.ev.state }} · starts {{ r.ev.starts_at[:16] }} · health posted {{ 'yes' if r.ev.health_posted else 'no' }} · fill {{ r.ev.fill_state }}</span></h2>
+  {% if r.needs %}
+  <p>{% if r.needs.headcount %}<span class="bad">short {{ r.needs.headcount }}</span>{% else %}<span class="ok">headcount ok</span>{% endif %}
+     {% for role, n in r.needs.roles.items() %} · <span class="bad">{{ n }} {{ role }} short</span>{% endfor %}
+     {% if r.busy %} · <span class="warn">double-booked: {{ r.busy|length }}</span>{% endif %}</p>
+  {% endif %}
+  <div class="grid">
+    {% for status in ['in', 'tentative', 'sub', 'out'] %}
+    <div>
+      <h3>{{ status }} ({{ r.by[status]|length }})</h3>
+      <table>{% for s in r.by[status] %}<tr><td class="{{ s.cls }}">{{ s.character }}</td><td>{{ s.spec }}</td><td class="muted">{{ s.role }}</td><td class="muted">{{ s.source }}{% if s.note %} — {{ s.note }}{% endif %}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table>
+    </div>
+    {% endfor %}
+  </div>
+  {% if r.ev.fill_asks %}
+  <h3>Fill asks</h3>
+  <table><tr><th>Who</th><th>Kind</th><th>As</th><th>For</th><th>Asked</th><th>Answer</th></tr>
+  {% for a in r.ev.fill_asks %}<tr><td>{{ a.display_name }}</td><td>{{ a.kind }}</td><td>{{ a.character }} ({{ a.spec }}, {{ a.role }})</td><td>{{ a.reason }}</td><td class="muted">{{ a.asked_at[:16] }}</td><td class="{{ 'ok' if a.answer == 'yes' else 'bad' if a.answer == 'no' else 'warn' }}">{{ a.answer or 'waiting' }}</td></tr>{% endfor %}
+  </table>
+  {% endif %}
+  {% if r.ev.callouts %}<h3>Callouts</h3><p class="sub">{% for c in r.ev.callouts %}{{ c.display_name }} {{ c.hours_before }}h before{% if c.late %} <span class="bad">late</span>{% endif %}{% if c.note %} — {{ c.note }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+  <details><summary>Log ({{ r.ev.log|length }}) · health card</summary>
+    <pre>{{ r.ev.log|join('\n') }}</pre>
+    {% if r.needs %}<img class="card" src="/card/health/{{ r.ev.key }}.png" alt="health card">{% endif %}
+  </details>
+</div>
+{% else %}
+<p class="sub">No raids yet.</p>
+{% endfor %}
+{% endblock %}

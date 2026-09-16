@@ -1,0 +1,35 @@
+{% extends "base.html" %}{% set active = 'home' %}
+{% block body %}
+<h1>{{ v.name }}</h1>
+{% if not member or not member.active() %}
+<div class="panel">You have no registered characters yet. Register in Discord: press <b>Register / plan my main</b> in the registration channel, or <code>/register</code>.</div>
+{% else %}
+<div class="grid">
+  <div class="panel">
+    <h3>Characters</h3>
+    <table>
+      <tr><th>Character</th><th>Spec</th><th>Status</th><th>Rank</th><th>Rosters</th></tr>
+      {% for c in member.active() %}
+      <tr><td class="{{ c.cls }}">{{ c.label }}{% if c.is_main %} ★{% endif %}</td><td>{{ c.spec }}{% if c.offspec %}/{{ c.offspec }}{% endif %}</td><td>{{ c.status }}{% if not c.confirmed_by %} <span class="pill">unconfirmed</span>{% endif %}</td><td>{{ c.rank }}</td><td>{{ c.rosters|join(', ') or '—' }}</td></tr>
+      {% endfor %}
+    </table>
+    <p class="sub">Roles: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} (+{{ roles[1]|join(', ') }}){% endif %} — derived from your spec/offspec.</p>
+  </div>
+  <div class="panel">
+    <h3>Availability &amp; absences</h3>
+    <p>{% for k, val in member.availability.items() %}<span class="pill">{{ k }}: {{ val }}</span> {% else %}<span class="sub">no standing availability set (<code>/me availability</code>)</span>{% endfor %}</p>
+    <p>{% for a in member.upcoming_absences(today) %}<span class="pill">{{ a.start }}{% if a.end != a.start %} → {{ a.end }}{% endif %}</span> {% else %}<span class="sub">no upcoming absences</span>{% endfor %}</p>
+  </div>
+</div>
+{% endif %}
+<h2>My sheets</h2>
+{% for r in raids %}
+<div class="panel">
+  <b>{{ r.team.name or r.team.key }}</b> · {{ r.ev.key }} · {{ r.ev.state }} · starts {{ r.ev.starts_at[:16] }}
+  — {% if r.signup %}you are <b>{{ r.signup.status }}</b> as {{ r.signup.character }} ({{ r.signup.spec }}){% if r.signup.note %} <span class="sub">— {{ r.signup.note }}</span>{% endif %}{% else %}<span class="warn">you haven't responded</span>{% endif %}
+  {% for a in r.asks %}<div class="sub">🧩 asked to {{ a.kind }} as {{ a.character }} ({{ a.spec }}) — {{ a.answer or 'waiting for your answer in DMs' }}</div>{% endfor %}
+</div>
+{% else %}
+<p class="sub">No live raids.</p>
+{% endfor %}
+{% endblock %}
