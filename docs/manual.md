@@ -34,8 +34,8 @@ Fire → ranged…); an offspec in another role counts as flexibility.
 
 **https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-the availability grid (drag to mark preferred/available, then **Save availability**) and DM opt-out on **Me**; officers get **Admin** (place members on rosters, ranks, confirmations,
-roster settings, comp targets, group layout), **Bank**, **Rosters**, **Raids**, **Config** and **Ops**. Only
+the availability grid (drag to mark preferred/available, then **Save availability**) and DM opt-out on **Me**; officers get, in the left rail, **Rosters** (tentative proposals to accept or reject, accepted runs with sheets, groups and aura coverage), **Raids** (rules per raid; the owner presses **Edit rules**), **Admin** (**Edit ranks & placements** then one save; confirmations; **Build standing rosters**;
+roster settings, comp targets, group layout), **Bank** (every member's main and alts), **Config** (read-only) and **Ops** (the bot's log). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 Signing up for a raid is still done on the sheet in Discord.
 

@@ -7,6 +7,10 @@ import { api, type Meta } from "./api";
 import { MePage } from "./pages/Me";
 import { RostersPage } from "./pages/Rosters";
 import { RaidsPage } from "./pages/Raids";
+import { AdminPage } from "./pages/Admin";
+import { BankPage } from "./pages/Bank";
+import { OpsPage } from "./pages/Ops";
+import { ConfigPage } from "./pages/Config";
 
 const NAV = [{ to: "/me", label: "Me", icon: IconUser }];
 const OFFICER = [
@@ -27,6 +31,7 @@ export default function App() {
   useEffect(() => close(), [loc.pathname, close]);
   if (!meta) return <Box p="xl"><Text c="dimmed">Loading…</Text></Box>;
 
+  const officer = (el: React.ReactElement) => (meta.viewer.officer ? el : <Navigate to="/me" replace />);
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
     <NavLink key={n.to} component={Link} to={n.to} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname.startsWith(n.to)} variant="light" color="teal" style={{ borderRadius: 7 }} />
   );
@@ -56,21 +61,16 @@ export default function App() {
         <Box maw={1180} mx="auto">
           <Routes>
             <Route path="/me" element={<MePage meta={meta} />} />
-            <Route path="/rosters" element={meta.viewer.officer ? <RostersPage meta={meta} /> : <Navigate to="/me" replace />} />
-            <Route path="/raids" element={meta.viewer.officer ? <RaidsPage /> : <Navigate to="/me" replace />} />
-            <Route path="/bank" element={<Soon name="Bank" />} />
-            <Route path="/admin" element={<Soon name="Admin" />} />
-            <Route path="/ops" element={<Soon name="Ops" />} />
-            <Route path="/config" element={<Soon name="Config" />} />
+            <Route path="/rosters" element={officer(<RostersPage meta={meta} />)} />
+            <Route path="/raids" element={officer(<RaidsPage />)} />
+            <Route path="/bank" element={officer(<BankPage meta={meta} />)} />
+            <Route path="/admin" element={officer(<AdminPage meta={meta} />)} />
+            <Route path="/ops" element={officer(<OpsPage />)} />
+            <Route path="/config" element={officer(<ConfigPage />)} />
             <Route path="*" element={<Navigate to="/me" replace />} />
           </Routes>
         </Box>
       </AppShell.Main>
     </AppShell>
   );
-}
-
-function Soon({ name }: { name: string }) {
-  const legacy: Record<string, string> = { Rosters: "/rosters", Raids: "/raids", Bank: "/bank", Admin: "/admin", Ops: "/ops", Config: "/config" };
-  return <Box><Title order={1} size="h2">{name}</Title><Text c="dimmed" mt="xs">This page is being rebuilt. The current version is still at <a href={legacy[name]} style={{ color: "var(--mantine-color-teal-4)" }}>{legacy[name]}</a>.</Text></Box>;
 }

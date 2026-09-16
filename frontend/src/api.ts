@@ -64,6 +64,16 @@ export interface RaidRule {
   overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; runs: number; open: number;
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean }
+export interface RosterCfg { key: string; name?: string; size?: number; schedule?: string; instance?: string; cutoff_soft_hours?: number; cutoff_hard_hours?: number; open_days_before?: number; open_dm?: boolean; autofill?: boolean; ephemeral?: boolean; comp_targets?: Record<string, { min?: number; max?: number | null; note?: string }>; comp_groups?: string[] }
+export interface AdminRow { uid: string; display_name: string; verification: string; main: Character | null; alts: Character[]; role: string | null; flex: string[]; placed: Record<string, string | null>; asks: { roster: string; answer: string | null }[] }
+export interface SlotHeat { slot: string; yes: string[]; maybe: string[]; no: string[]; unset: string[]; roles: Record<string, number> }
+export interface Admin { rows: AdminRow[]; rosters: RosterCfg[]; ranks: string[]; instances: string[]; owner: boolean; slots: string[]; heat: SlotHeat[]; week_heat: [number, number][][]; tz: string; grid_members: number }
+export interface BuildSeat { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; reasons: string[] }
+export interface Build { token: string; status: string; notes: string[]; unplaced: [string, string][]; shells: { key: string; name: string; instance: string | null; size: number; slot: string; shortfalls: Record<string, number>; seats: BuildSeat[] }[]; adds: { name: string; character: string; roster: string }[]; removes: { name: string; roster: string }[] }
+export interface Bank { rows: BankRow[]; members: number }
+export interface BankRow { member: string; role: string | null; main: { cls: string; spec: string; offspec: string | null; name: string | null; status: string; rank: string; rosters: string[] } | null; alts: { cls: string; spec: string; name: string | null; status: string }[] }
+export interface Ops { head: string; push: boolean; llm: string; feed: string; up: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
+export interface Config { yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }> }
 export interface Me {
   display_name: string; registered: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
   week: WeekBlock[]; absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[]; raid_windows: { slot: string; name: string }[];

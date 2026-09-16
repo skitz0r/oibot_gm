@@ -2,17 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { ActionIcon, Badge, Box, Button, Card, Group, Select, Stack, Switch, Table, Text, TextInput, Title, Tooltip, Modal } from "@mantine/core";
 import css from "./me.module.css";
 import { DateInput } from "@mantine/dates";
-import { notifications } from "@mantine/notifications";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { api, type Character, type Me, type Meta, type WeekBlock } from "../api";
 import { GameIcon } from "../components/Icons";
 import { WeekGrid } from "../components/WeekGrid";
 import { CLASS_COLOURS } from "../theme";
+import { CardHeader, fail, ok } from "../components/Page";
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; slot: "main" | "alt"; isNew?: boolean };
 
-const ok = (message: string) => notifications.show({ message, color: "teal" });
-const fail = (e: unknown) => notifications.show({ message: (e as Error).message || "Something went wrong", color: "red" });
 
 export function MePage({ meta }: { meta: Meta }) {
   const [me, setMe] = useState<Me | null>(null);
@@ -188,15 +186,6 @@ export function MePage({ meta }: { meta: Meta }) {
 
 function SpecCell({ meta, cls, spec, role }: { meta: Meta; cls: string; spec: string; role: string }) {
   return <Group gap={8} wrap="nowrap"><GameIcon meta={meta} kind="spec" id={`${cls}:${spec}`} title={`${spec} (${role})`} /><Text size="sm">{spec}</Text><Text size="xs" c="dimmed">{role}</Text></Group>;
-}
-
-export function CardHeader({ title, hint, action }: { title: string; hint?: string; action?: React.ReactNode }) {
-  return (
-    <Group justify="space-between" px="md" py="sm" style={{ borderBottom: "1px solid var(--mantine-color-slate-5)" }}>
-      <Group gap="sm"><Title order={2} size="h5">{title}</Title>{hint && <Text size="xs" c="dimmed">{hint}</Text>}</Group>
-      {action}
-    </Group>
-  );
 }
 
 function AbsenceModal({ opened, onClose, onSaved }: { opened: boolean; onClose: () => void; onSaved: () => void }) {

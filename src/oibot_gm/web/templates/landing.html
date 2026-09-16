@@ -1,9 +1,0 @@
-{% extends "base.html" %}{% set active = 'home' %}
-{% block body %}
-<h1>{{ guild.name if guild else 'oibot_GM' }}</h1>
-<p class="sub">The guild's raid administration: registration, sheets, rosters, groups, loot council.</p>
-<div class="panel">
-  <p>Log in with Discord to see your characters, your sheets and — for officers — the roster tools.</p>
-  <a class="btn" href="/auth/login">Log in with Discord</a>
-</div>
-{% endblock %}

@@ -6,6 +6,7 @@ a header a cross-site form cannot set — and the session cookie is SameSite, so
 from __future__ import annotations
 
 import asyncio
+import secrets
 import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -14,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from .. import comp as comp_mod, raidcycle as rc
-from ..registry import RegistryError
+from ..registry import RegistryError, bank_rows
 
 HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
@@ -317,6 +318,187 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url) -> None:
                 raise ValueError("Owner only.")
             return v.reg.clear_raid_override(d["instance"], v.name)
         return await run(request, go, officer=True)
+
+    # ---- admin: pool, ranks, confirmations, placements, raid times, standing rosters (officers; owner for settings)
+    def cfg_op(v, **kw) -> str:
+        from .. import configops
+
+        return configops.apply(v.reg, configops.ConfigOp(**kw), v.name, v.owner, None)
+
+    RANKS = ("trial", "raider", "core", "alt", "social")
+
+    @app.get("/api/admin")
+    async def admin(request: Request):
+        v = await who(request, officer=True)
+        reg = v.reg
+        rosters = reg.config.rosters or []
+        rows = []
+        for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower()):
+            chars = m.active()
+            if not chars:
+                continue
+            primary, flex = reg.roles_of(m)
+            rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id),
+                         "main": char_json(reg, m.main) if m.main else None, "alts": [char_json(reg, c) for c in chars if not c.is_main],
+                         "role": primary, "flex": list(flex), "placed": {t["key"]: next((c.label for c in chars if t["key"] in c.rosters), None) for t in rosters},
+                         "asks": [{"roster": a["roster"], "answer": a.get("answer")} for a in m.placement_asks[-3:]]})
+        return {"rows": rows, "rosters": [dict(t) for t in rosters], "ranks": list(RANKS), "instances": list(reg.profile.raids), "owner": v.owner,
+                "slots": list(reg.config.slots), "heat": reg.slot_summary(), "week_heat": reg.week_heat(), "tz": reg.config.timezone,
+                "grid_members": sum(1 for m in reg.members.values() if m.main and m.week)}
+
+    @app.post("/api/admin/members")
+    async def admin_members(request: Request):
+        """One save for the pool table: ranks and roster placements per member."""
+        def go(v, d):
+            reg, done = v.reg, []
+            for row in d.get("rows") or []:
+                uid = int(row["uid"])
+                m = reg.members.get(uid)
+                if not m or not m.main:
+                    continue
+                rank = row.get("rank")
+                if rank and rank in RANKS and rank != m.main.rank:
+                    reg.set_rank(m.main.label, rank, v.name)
+                    done.append(f"{m.main.label} → {rank}")
+                for key, want in (row.get("placed") or {}).items():
+                    cur = next((c for c in m.active() if key in c.rosters), None)
+                    if want and not cur:
+                        _, c = reg.roster_add(uid, key, v.name, None)
+                        done.append(f"{m.display_name} ({c.label}) → {key}")
+                    elif not want and cur:
+                        reg.roster_remove(uid, key, v.name)
+                        done.append(f"{m.display_name} removed from {key}")
+            return "; ".join(done) or "no changes"
+        return await run(request, go, officer=True)
+
+    @app.post("/api/admin/confirm")
+    async def admin_confirm(request: Request):
+        return await run(request, lambda v, d: f"confirmed {v.reg.confirm(d['label'], v.name)[1].label}", officer=True)
+
+    @app.post("/api/admin/place-all")
+    async def admin_place_all(request: Request):
+        def go(v, d):
+            key, n = d["roster"], 0
+            for m in list(v.reg.members.values()):
+                if m.main and not v.reg.on_roster(m, key):
+                    v.reg.roster_add(m.discord_id, key, v.name)
+                    n += 1
+            return f"placed {n} main(s) on {key}"
+        return await run(request, go, officer=True)
+
+    @app.post("/api/admin/slots")
+    async def admin_slots(request: Request):
+        return await run(request, lambda v, d: cfg_op(v, op="set", path="slots", value=d.get("value", "")), officer=True)
+
+    @app.post("/api/admin/roster/settings")
+    async def admin_roster_settings(request: Request):
+        def go(v, d):
+            key = (d.get("key") or "").strip()
+            if not key:
+                raise ValueError("A roster needs a key.")
+            done = []
+            if not v.reg.config.roster(key):
+                cfg_op(v, op="team_add", team=key)
+                done.append("created")
+            for f in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "name"):
+                if f in d and d[f] not in (None,) and str(d[f]) != str((v.reg.config.roster(key) or {}).get(f, "")):
+                    if f == "instance" and not d[f]:
+                        continue
+                    cfg_op(v, op="team_set", team=key, field=f, value=str(d[f]))
+                    done.append(f)
+            for f in ("open_dm", "autofill"):
+                if f in d:
+                    cur = (v.reg.config.roster(key) or {}).get(f, f == "autofill")
+                    if bool(d[f]) != bool(cur):
+                        cfg_op(v, op="team_set", team=key, field=f, value="true" if d[f] else "false")
+                        done.append(f)
+            return f"roster {key}: " + (", ".join(done) or "no changes")
+        return await run(request, go, officer=True)
+
+    @app.post("/api/admin/roster/remove")
+    async def admin_roster_remove(request: Request):
+        return await run(request, lambda v, d: cfg_op(v, op="team_remove", team=d["key"]), officer=True)
+
+    @app.post("/api/admin/comp/target")
+    async def admin_comp_target(request: Request):
+        return await run(request, lambda v, d: cfg_op(v, op="comp_target", team=d["key"], field=d["slot"], value=d["value"], reason=d.get("reason") or None), officer=True)
+
+    @app.post("/api/admin/comp/target/clear")
+    async def admin_comp_target_clear(request: Request):
+        return await run(request, lambda v, d: cfg_op(v, op="comp_target_clear", team=d["key"], field=d["slot"]), officer=True)
+
+    @app.post("/api/admin/comp/groups")
+    async def admin_comp_groups(request: Request):
+        return await run(request, lambda v, d: cfg_op(v, op="comp_groups", team=d["key"], value=d.get("value", "")), officer=True)
+
+    # ---- standing-roster builder: propose, then approve → placements + confirmation DMs
+    build_cache: dict[str, tuple[float, object]] = {}
+
+    @app.post("/api/admin/build")
+    async def admin_build(request: Request):
+        from ..roster import builder
+
+        v, _ = await body(request, officer=True)
+        reg = v.reg
+        shells = builder.shells_from_config(reg)
+        if not shells:
+            return JSONResponse({"error": "No roster has a schedule yet — set one under standing rosters (e.g. Tue 19:30)."}, status_code=400)
+        result = await asyncio.to_thread(builder.build, reg, bot.raids.store(reg), shells)
+        token = secrets.token_hex(8)
+        build_cache[token] = (time.time(), result)
+        for k in [k for k, (t, _) in build_cache.items() if time.time() - t > 1800]:
+            del build_cache[k]
+        adds, removes = builder.diff_placements(reg, result)
+        names = {m.discord_id: m.display_name for m in reg.members.values()}
+        return {"token": token, "status": result.status, "notes": list(result.notes), "unplaced": [list(x) for x in result.unplaced],
+                "shells": [{"key": sh.key, "name": sh.name, "instance": sh.instance, "size": sh.size, "slot": sh.slot, "shortfalls": dict(result.shortfalls.get(sh.key) or {}),
+                            "seats": [{"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "role": s.role, "reasons": list(s.reasons)} for s in result.rosters.get(sh.key, [])]} for sh in shells],
+                "adds": [{"name": names.get(d, str(d)), "character": c, "roster": k} for d, c, k in adds], "removes": [{"name": names.get(d, str(d)), "roster": k} for d, k in removes]}
+
+    @app.post("/api/admin/build/apply")
+    async def admin_build_apply(request: Request):
+        from ..roster import builder
+
+        v, d = await body(request, officer=True)
+        hit = build_cache.pop(d.get("token", ""), None)
+        if not hit:
+            return JSONResponse({"error": "That proposal expired — build again."}, status_code=400)
+        try:
+            adds, _removes = builder.diff_placements(v.reg, hit[1])
+            done = await asyncio.to_thread(builder.apply, v.reg, hit[1], v.name)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        sent = await bot.send_placement_asks(v.reg, adds, v.name)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} approved a roster build: {len(done)} change(s), {sent} confirmation DM(s)")
+        return {"message": f"applied {len(done)} placement change(s); asked {sent} member(s) to confirm by DM"}
+
+    # ---- bank, ops, config (read-only)
+    @app.get("/api/bank")
+    async def bank(request: Request):
+        v = await who(request, officer=True)
+        return {"rows": bank_rows(v.reg), "members": len(v.reg.members)}
+
+    @app.get("/api/ops")
+    async def ops(request: Request):
+        v = await who(request, officer=True)
+        st, prov, feed = bot.registries.store, bot.ctx.provider, getattr(bot, "feed", None)
+        precedents = st.read_jsonl(Path(v.reg.key) / "precedents.jsonl")[-50:]
+        ledger = st.read_jsonl(Path(v.reg.key) / "ledger.jsonl")[-100:]
+        return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed.status() if feed else "disabled",
+                "up": int(time.time() - bot.started_at) if hasattr(bot, "started_at") else 0,
+                "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent)],
+                "precedents": list(reversed(precedents)), "ledger": list(reversed(ledger))}
+
+    @app.get("/api/config")
+    async def config(request: Request):
+        v = await who(request, officer=True)
+        import yaml
+
+        from ..policy import PolicyStore
+
+        ps = PolicyStore(bot.registries.store, v.reg.key)
+        return {"yaml": yaml.safe_dump(v.reg.config.model_dump(), sort_keys=False),
+                "docs": {d: {"text": ps.read(d), "compiled": bool(ps.compiled(d)), "summary": ((ps.compiled(d) or {}).get("summary") if isinstance(ps.compiled(d), dict) else None)} for d in ("loot", "comp", "persona")}}
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

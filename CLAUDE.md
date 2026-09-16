@@ -51,11 +51,13 @@ src/oibot_gm/
   discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence
   ops.py               ops feed (channel line per action; errors DM the owner)
 companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests
-  web/app.py           FastAPI dashboard served inside the bot (OIBOT_WEB_BIND); Discord OAuth2 login; legacy Jinja pages (being replaced) + PNG cards for Discord;
-                       published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Edits must reuse the command code paths
-  web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF)
+  web/app.py           FastAPI served inside the bot (OIBOT_WEB_BIND): Discord OAuth2, landing page, icon/emblem/card images, old URLs → /app redirects;
+                       published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg)
+  web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
+                       Mutations reuse Registry/configops exactly like the Discord commands
 frontend/              React + Mantine app (Vite). `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (done) · Rosters/Raids/Bank/Admin/Ops/Config still Jinja
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Bank · Admin · Ops · Config (Mantine, left rail,
+                       tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`
