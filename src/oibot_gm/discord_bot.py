@@ -694,6 +694,25 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
         self.policies = PolicyContext(self.registries)
         register_policy_commands(self.tree, self.registries, self.ops, self, self.policies)
         register_help_commands(self.tree, self.registries, self.ops, self)
+        self._check_descriptions()
+
+    def _check_descriptions(self) -> None:
+        """Discord rejects the whole sync when one description exceeds 100 chars; fail here with the name instead."""
+        bad = []
+
+        def walk(cmd, path=""):
+            name = f"{path} {cmd.name}".strip()
+            subs = getattr(cmd, "commands", None)
+            if subs:
+                for c in subs:
+                    walk(c, name)
+            elif len(cmd.description or "") > 100:
+                bad.append(f"/{name} ({len(cmd.description)})")
+
+        for c in self.tree.get_commands():
+            walk(c)
+        if bad:
+            raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
         self.add_dynamic_items(SignupButton, FillButton, PlaceButton, PlanButton, RegisterButton, GuideSelect)
         self.tree.on_error = self._on_command_error
 

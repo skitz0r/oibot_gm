@@ -1055,7 +1055,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
 
-    @config.command(name="raid", description="Owner: a raid's rules — lockout days, duration, tank/healer/dps min–max, notes (blank = profile default)")
+    @config.command(name="raid", description="Owner: raid rules — lockout days, duration, tank/healer/dps min-max, notes")
     @app_commands.autocomplete(raid=instance_autocomplete)
     async def cfg_raid(interaction: discord.Interaction, raid: str, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, reset: bool = False):
         reg = await need(interaction)
