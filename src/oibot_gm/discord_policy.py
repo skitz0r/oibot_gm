@@ -82,10 +82,15 @@ class ConfigConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Apply", style=discord.ButtonStyle.success)
     async def apply(self, interaction: discord.Interaction, _: discord.ui.Button):
+        # the presser's rights decide, not the requester's: the diff can be a public message in the ops channel
+        if not is_officer(interaction, self.reg):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        owner = is_owner(interaction, self.reg)
         done, refused = [], []
         for op in self.req.ops:
             try:
-                done.append(configops.apply(self.reg, op, interaction.user.display_name, self.owner, self.ps))
+                done.append(configops.apply(self.reg, op, interaction.user.display_name, owner, self.ps))
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001
                 refused.append(f"{configops.describe(self.reg, op)} — {e}")
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
@@ -95,6 +100,9 @@ class ConfigConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not is_officer(interaction, self.reg):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
         await interaction.response.edit_message(content="Cancelled.", view=None, embed=None)
         self.stop()
 

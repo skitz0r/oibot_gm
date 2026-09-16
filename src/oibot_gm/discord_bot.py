@@ -586,6 +586,8 @@ class RosterView(discord.ui.View):
 
     @discord.ui.button(label="Accept roster", style=discord.ButtonStyle.success)
     async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self.bot.gate(interaction):
+            return
         await self.bot.accept_roster(self.ev, interaction)
 
 
@@ -614,6 +616,8 @@ class DropsSelect(discord.ui.Select):
         super().__init__(placeholder=f"What dropped from {boss}?"[:150], options=opts, min_values=0, max_values=len(opts))
 
     async def callback(self, interaction: discord.Interaction):
+        if not await self.bot.gate(interaction):
+            return
         keep = [i for i in self.ev.drops.get(self.boss, []) if i in self.ev.distributed]  # never un-award via the menu
         self.ev.drops[self.boss] = sorted(set(keep) | {int(v) for v in self.values}, key=lambda i: [it.id for it in self.items].index(i))
         self.ev.save()
@@ -629,6 +633,8 @@ class DistributeView(discord.ui.View):
 
     @discord.ui.button(label="Distribute selected drops", style=discord.ButtonStyle.primary)
     async def go(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self.bot.gate(interaction):
+            return
         await self.bot.distribute(self.ev, interaction)
 
 
@@ -641,6 +647,8 @@ class ConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Confirm awards", style=discord.ButtonStyle.success, row=1)
     async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self.bot.gate(interaction):
+            return
         if not self.ev.proposals:
             await interaction.response.send_message("Nothing pending.", ephemeral=True)
             return
@@ -651,6 +659,8 @@ class ConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Discard", style=discord.ButtonStyle.secondary, row=1)
     async def discard(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await self.bot.gate(interaction):
+            return
         self.ev.proposals = []
         self.ev.pending_drops = []
         self.ev.save()
@@ -839,6 +849,24 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
         await interaction.response.send_message(embed=e)
 
     # ---- chat handlers
+    def officiates(self, user, guild) -> bool:
+        """Officer check for buttons and chat: the guild's registry rules if configured, else Manage Server."""
+        reg = self.registries.by_discord.get(guild.id) if guild else None
+        if reg and reg.config.owner_discord_id == user.id:
+            return True
+        if not isinstance(user, discord.Member):
+            return False
+        if user.guild_permissions.manage_guild:
+            return True
+        return bool(reg and any(r.name in reg.config.officer_roles for r in user.roles))
+
+    async def gate(self, interaction: discord.Interaction) -> bool:
+        """Refuse non-officers on decision buttons; returns True when the press may proceed."""
+        if self.officiates(interaction.user, interaction.guild):
+            return True
+        await interaction.response.send_message("Officers only.", ephemeral=True)
+        return False
+
     def _addressed(self, message: discord.Message) -> bool:
         """@user mention, a mention of the bot's own (integration) role, or a reply to one of the bot's messages."""
         if self.user in message.mentions:
@@ -866,6 +894,8 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
         ev = self.event_for(message.channel.id)
         if not ev or not self.ctx.provider:
             return
+        if not self.officiates(message.author, message.guild):
+            return  # members may chat in the roster/loot channels; only officers steer the bot
         if ev.state == "roster_proposed" and message.channel.id == ev.channel_id and ev.roster:
             async with message.channel.typing():
                 try:
@@ -928,7 +958,16 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, discord.Client):
 
     # ---- commands
     def _register(self):
-        mock = app_commands.Group(name="mock", description="Mock event: signup → roster → raid → loot council (shadow data)")
+        bot = self
+
+        class MockGroup(app_commands.Group):
+            async def interaction_check(self, interaction: discord.Interaction) -> bool:  # officers only: it spends LLM budget
+                if bot.officiates(interaction.user, interaction.guild):
+                    return True
+                await interaction.response.send_message("Officers only.", ephemeral=True)
+                return False
+
+        mock = MockGroup(name="mock", description="Officer: mock event on shadow data — signup → roster → raid → loot council")
         raid_choices = [app_commands.Choice(name=r["name"], value=rid) for rid, r in self.ctx.profile.raids.items()]
 
         @mock.command(name="signup", description="Seed a mock signup sheet for this channel")

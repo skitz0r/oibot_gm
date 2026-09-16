@@ -901,6 +901,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg.config.owner_discord_id and not is_owner(interaction, reg):
             await interaction.response.send_message("Only the current owner can transfer ownership.", ephemeral=True)
             return
+        if not reg.config.owner_discord_id:  # first claim: only the server owner or someone with Manage Server
+            m = interaction.user if isinstance(interaction.user, discord.Member) else None
+            if not (m and interaction.guild and (interaction.guild.owner_id == m.id or m.guild_permissions.manage_guild)):
+                await interaction.response.send_message("Nobody owns this guild yet; the Discord server owner (or someone with Manage Server) claims it first.", ephemeral=True)
+                return
         target = user or interaction.user
         reg.config.owner_discord_id = target.id
         reg.save_config(f"owner → {target.display_name}")
