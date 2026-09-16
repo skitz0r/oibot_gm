@@ -1056,7 +1056,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
 
-    @config.command(name="slots", description="Owner: candidate raid times members rate yes/maybe/no, e.g. 'Tue 19:30, Thu 20:00, Sun 18:00' (blank clears)")
+    @config.command(name="slots", description="Owner: candidate raid times members rate, e.g. 'Tue 19:30, Thu 20:00' (blank clears)")
     async def cfg_slots(interaction: discord.Interaction, times: str = ""):
         reg = await need(interaction)
         if not reg:
