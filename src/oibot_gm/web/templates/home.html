@@ -12,63 +12,52 @@
 </div>
 {% endfor %}
 <h2>Characters</h2>
-{% if member and member.active() %}
-<div class="tbl"><table>
-  <tr><th>Character</th><th>Spec / offspec</th><th>Status</th><th>Rank</th><th>Rosters</th><th></th></tr>
-  {% for c in member.active() %}
+<div class="tbl"><table class="chars">
+  <tr><th>Character</th><th>Spec / offspec</th><th>Can also play</th><th>Status</th><th>Rank</th><th>Rosters</th><th></th></tr>
+  {% if member %}{% for c in member.active() %}
   <tr>
-    <td class="{{ c.cls }}"><b>{{ c.label }}</b>{% if c.is_main %} ★ main{% endif %}<br><span class="muted">{{ c.cls }}</span></td>
+    <td class="who"><img class="ico" src="/img/class/{{ c.cls }}.png" alt="{{ c.cls }}"><div><b class="{{ c.cls }}">{{ c.label }}</b>{% if c.is_main %} <span class="pill">main</span>{% endif %}<br><span class="muted">{{ c.cls }}</span></div></td>
     <td>
       <form method="post" action="/me/character/spec" class="inline">
         <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}">
+        <img class="ico sm" src="/img/role/{{ spec_role(c) }}.png" alt="{{ spec_role(c) }}" title="{{ spec_role(c) }}">
         <select name="spec" data-cls="{{ c.cls }}" data-current="{{ c.spec }}"></select>
+        {% if off_role(c) %}<img class="ico sm" src="/img/role/{{ off_role(c) }}.png" alt="{{ off_role(c) }}" title="offspec: {{ off_role(c) }}">{% endif %}
         <select name="offspec" data-cls="{{ c.cls }}" data-current="{{ c.offspec or '' }}" data-optional="1"></select>
-        <button>Save</button>
+        <button class="quiet">Save</button>
       </form>
     </td>
-    <td>{{ c.status }}{% if c.name and not c.confirmed_by %}<br><span class="pill">awaiting officer confirmation</span>{% endif %}
-      {% if not c.name %}<form method="post" action="/me/character/name" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="slot" value="{{ 'main' if c.is_main else 'alt' }}"><input name="name" placeholder="name at launch" maxlength="12" size="12"><button>Name it</button></form>{% endif %}</td>
+    <td>
+      <form method="post" action="/me/character/flex" class="inline flex">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}">
+        {% set own = [spec_role(c), off_role(c)] %}
+        {% for r in ['tank', 'healer', 'melee', 'ranged'] %}{% if r not in own %}<label title="{{ r }}"><input type="checkbox" name="flex_{{ r }}" {{ 'checked' if r in c.flex else '' }}><img class="ico sm" src="/img/role/{{ r }}.png" alt="{{ r }}"></label>{% endif %}{% endfor %}
+        <button class="quiet">Save</button>
+      </form>
+    </td>
+    <td>{{ c.status }}{% if c.name and not c.confirmed_by %}<br><span class="pill">awaiting confirmation</span>{% endif %}
+      {% if not c.name %}<form method="post" action="/me/character/name" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="slot" value="{{ 'main' if c.is_main else 'alt' }}"><input name="name" placeholder="name at launch" maxlength="12" size="11"><button class="quiet">Name</button></form>{% endif %}</td>
     <td>{{ c.rank }}</td>
     <td>{{ c.rosters|join(', ') or '—' }}</td>
     <td class="actions">
-      {% if not c.is_main %}<form method="post" action="/me/character/main" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button>Make main</button></form>{% endif %}
+      {% if not c.is_main %}<form method="post" action="/me/character/main" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button class="quiet">Make main</button></form>{% endif %}
       <form method="post" action="/me/character/retire" class="inline" onsubmit="return confirm('Retire {{ c.label }}? History is kept; you can register it again later.')"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="label" value="{{ c.label }}"><button class="danger">Retire</button></form>
     </td>
   </tr>
-  {% endfor %}
+  {% endfor %}{% endif %}
+  <tr class="add">
+    <form method="post" action="/me/character/add" id="add-form"><input type="hidden" name="csrf" value="{{ csrf }}"></form>
+    <td class="who"><img class="ico dim" id="add-ico" src="/img/class/Warrior.png" alt=""><div>
+      <input form="add-form" name="name" maxlength="12" size="11" placeholder="name (blank = planned)"><br>
+      <select form="add-form" name="cls" id="add-cls">{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select>
+      <select form="add-form" name="slot"><option value="main" {{ '' if member and member.main else 'selected' }}>main</option><option value="alt" {{ 'selected' if member and member.main else '' }}>alt</option></select></div></td>
+    <td><select form="add-form" name="spec" id="add-spec"></select> <select form="add-form" name="offspec" id="add-off"></select></td>
+    <td class="muted">set after adding</td>
+    <td class="muted" colspan="3">new character</td>
+    <td class="actions"><button form="add-form">Add</button></td>
+  </tr>
 </table></div>
-<p class="sub">Role: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} · flex {{ roles[1]|join(', ') }}{% endif %} <span class="muted">(from your spec and offspec)</span></p>
-{% else %}
-<p class="sub">No characters yet — add your main below. Leave the name blank if the character doesn't exist yet.</p>
-{% endif %}
-
-<div class="grid">
-<div class="panel">
-  <h3 style="margin-top:0">Add a character</h3>
-  <form method="post" action="/me/character/add" class="row">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label>Slot <select name="slot"><option value="main" {{ '' if member and member.main else 'selected' }}>main</option><option value="alt" {{ 'selected' if member and member.main else '' }}>alt</option></select></label>
-    <label>Class <select name="cls" id="add-cls">{% for c in classes %}<option>{{ c }}</option>{% endfor %}</select></label>
-    <label>Spec <select name="spec" id="add-spec"></select></label>
-    <label>Offspec <select name="offspec" id="add-off"></select></label>
-    <label>Name <input name="name" maxlength="12" size="12" placeholder="blank = planned"></label>
-    <button>Add</button>
-  </form>
-</div>
-  <div class="panel">
-    <h3 style="margin-top:0">Absences</h3>
-    {% if member %}{% for a in member.upcoming_absences(today) %}
-    <form method="post" action="/me/absence/clear" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="start" value="{{ a.start }}"><span class="pill">{{ a.start }}{% if a.end != a.start %} → {{ a.end }}{% endif %}</span> <button>clear</button></form>
-    {% else %}<p class="sub">none upcoming</p>{% endfor %}{% endif %}
-    <form method="post" action="/me/absence/add" class="row">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <label>From <input type="date" name="start" required></label>
-      <label>To <input type="date" name="end"></label>
-      <label>Reason <input name="reason" placeholder="officers only" size="16"></label>
-      <button>Add</button>
-    </form>
-  </div>
-</div>
+<p class="sub">Role: <b>{{ roles[0] or '?' }}</b>{% if roles[1] %} · flex {{ roles[1]|join(', ') }}{% endif %} <span class="muted">— from your main's spec, offspec and "can also play"</span></p>
 
 <div class="panel">
     <h3 style="margin-top:0">When I can raid <span class="muted">· {{ tz }}</span></h3>
@@ -86,13 +75,18 @@
 
 <div class="grid">
   <div class="panel">
-    <h3 style="margin-top:0">Flex roles</h3>
-    <form method="post" action="/me/roles" class="row">
+    <h3 style="margin-top:0">Absences</h3>
+    <p class="sub">Days you're away override the grid; you won't be seated or asked.</p>
+    {% if member %}{% for a in member.upcoming_absences(today) %}
+    <form method="post" action="/me/absence/clear" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="start" value="{{ a.start }}"><span class="pill">{{ a.start }}{% if a.end != a.start %} → {{ a.end }}{% endif %}</span> <button class="quiet">clear</button></form>
+    {% else %}<p class="muted">none upcoming</p>{% endfor %}{% endif %}
+    <form method="post" action="/me/absence/add" class="row">
       <input type="hidden" name="csrf" value="{{ csrf }}">
-      {% for r in ['tank', 'healer', 'melee', 'ranged'] %}{% if r != roles[0] %}<label><input type="checkbox" name="flex_{{ r }}" {{ 'checked' if r in roles[1] else '' }}> {{ r }}</label>{% endif %}{% endfor %}
-      <button class="quiet">Save</button>
+      <label>From <input type="date" name="start" required></label>
+      <label>To <input type="date" name="end"></label>
+      <label>Reason <input name="reason" placeholder="officers only" size="14"></label>
+      <button>Add</button>
     </form>
-    <p class="sub">Roles you'd play besides your spec.</p>
   </div>
   <div class="panel">
     <h3 style="margin-top:0">Direct messages</h3>
@@ -118,6 +112,11 @@
 
 <style>
   td.actions { white-space:nowrap; }
+  .ico { width:28px; height:28px; border-radius:50%; vertical-align:middle; } .ico.sm { width:20px; height:20px; } .ico.dim { opacity:.5; }
+  td.who { display:flex; gap:10px; align-items:center; }
+  form.flex label { margin-right:2px; cursor:pointer; } form.flex label input { display:none; } form.flex label img { opacity:.25; border:2px solid transparent; border-radius:50%; }
+  form.flex label input:checked + img { opacity:1; border-color:var(--accent); }
+  tr.add td { background:transparent !important; border-top:1px dashed var(--line); }
   .wk-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
   .wk-pref { background:#2E9E6B !important; color:#fff !important; } .wk-avail { background:#B8892A !important; color:#fff !important; }
 </style>
@@ -190,7 +189,7 @@
   }
   document.querySelectorAll("select[data-cls]").forEach(s => fill(s, s.dataset.cls, s.dataset.current, !!s.dataset.optional));
   const addCls = document.getElementById("add-cls"), addSpec = document.getElementById("add-spec"), addOff = document.getElementById("add-off");
-  function refreshAdd() { fill(addSpec, addCls.value, "", false); fill(addOff, addCls.value, "", true); }
+  function refreshAdd() { fill(addSpec, addCls.value, "", false); fill(addOff, addCls.value, "", true); document.getElementById("add-ico").src = "/img/class/" + addCls.value + ".png"; }
   addCls.addEventListener("change", refreshAdd); refreshAdd();
 </script>
 {% endblock %}

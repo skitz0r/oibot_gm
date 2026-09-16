@@ -17,7 +17,7 @@
     <div class="grid" style="margin-top:6px">
       {% for run in p.runs %}
       <div><b>{{ run.name }}</b> <span class="muted">{{ run.seats|length }}/{{ run.size }}</span>
-        <table>{% for s in run.seats %}<tr><td class="muted">{{ s.role }}</td><td class="{{ s.cls }}">{{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.spec }}</td></tr>{% endfor %}</table></div>
+        <table>{% for s in run.seats %}<tr><td><img class="ico" src="/img/role/{{ s.role }}.png" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="/img/class/{{ s.cls }}.png" alt=""> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.spec }}</td></tr>{% endfor %}</table></div>
       {% endfor %}
     </div>
     {% if p.unplaced %}<p class="sub">Not seated: {% for n, why in p.unplaced[:10] %}{{ n }} — {{ why }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
@@ -34,7 +34,7 @@
     <div class="grid" style="margin-top:6px">
       {% for status in ['in', 'tentative', 'sub', 'out'] %}
       <div><h3>{{ status }} ({{ e.by[status]|length }})</h3>
-        <table>{% for s in e.by[status] %}<tr><td class="muted">{{ s.role }}</td><td class="{{ s.cls }}">{{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.source }}{% if s.note %} — {{ s.note }}{% endif %}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table></div>
+        <table>{% for s in e.by[status] %}<tr><td><img class="ico" src="/img/role/{{ s.role }}.png" alt="{{ s.role }}" title="{{ s.role }}"></td><td class="{{ s.cls }}"><img class="ico" src="/img/class/{{ s.cls }}.png" alt=""> {{ s.character }}</td><td>{{ s.display_name }}</td><td class="muted">{{ s.source }}{% if s.note %} — {{ s.note }}{% endif %}</td></tr>{% else %}<tr><td class="muted">—</td></tr>{% endfor %}</table></div>
       {% endfor %}
     </div>
     <details><summary class="muted">fill asks ({{ e.ev.fill_asks|length }}) · callouts ({{ e.ev.callouts|length }}) · log ({{ e.ev.log|length }}) · health card</summary>
@@ -63,4 +63,5 @@
 {% for e in orphans %}<div class="panel"><b>{{ e.ev.key }}</b> · {{ e.team.name or e.team.key }} · {{ e.ev.state }} · starts {{ e.ev.starts_at[:16] }} · in {{ e.by['in']|length }} · out {{ e.by['out']|length }}</div>{% endfor %}
 {% endif %}
 
+<style>.ico { width:20px; height:20px; border-radius:50%; vertical-align:-5px; }</style>
 {% endblock %}

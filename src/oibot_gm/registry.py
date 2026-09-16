@@ -33,6 +33,7 @@ class RegisteredCharacter(BaseModel):
     rank: str = "trial"
     status: str = "active"  # planned | active | retired
     rosters: list[str] = Field(default_factory=list)  # officer-curated roster membership, per character
+    flex: list[str] = Field(default_factory=list)  # extra roles this character can play besides its spec/offspec
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[str] = None
     created_at: str = Field(default_factory=now)
@@ -181,8 +182,6 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
         lines = [f"➕ **{who}** joined the pool"]
         for c in new["characters"]:
             lines.append(f"➕ {who}: {'main' if c['is_main'] else 'alt'} {_clabel(c)} · {c['cls']} {c['spec']}" + (f"/{c['offspec']}" if c.get("offspec") else "") + f" · {c['status']}")
-        if new.get("role_prefs", {}).get("primary"):
-            lines.append(f"{who}: roles {_roles_text(new['role_prefs'])}")
         return lines
     lines: list[str] = []
     if old["display_name"] != who:
@@ -214,13 +213,13 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
             ch.append("roster −" + ", −".join(removed))
         if not o.get("confirmed_by") and c.get("confirmed_by"):
             ch.append(f"confirmed by {c['confirmed_by']}")
+        if sorted(o.get("flex", [])) != sorted(c.get("flex", [])):
+            ch.append("flex " + (", ".join(c.get("flex", [])) or "none"))
         if ch:
             lines.append(f"{who} · {_clabel(o)}: " + " · ".join(ch))
     for k, o in oc.items():
         if k not in nc:
             lines.append(f"➖ {who}: {_clabel(o)} removed")
-    if old.get("role_prefs") != new.get("role_prefs"):
-        lines.append(f"{who}: roles {_roles_text(old.get('role_prefs', {}))} → **{_roles_text(new.get('role_prefs', {}))}**")
     for team in sorted(set(old.get("availability", {})) | set(new.get("availability", {}))):
         a, b = old.get("availability", {}).get(team), new.get("availability", {}).get(team)
         if a != b:
@@ -358,6 +357,12 @@ class Registry:
         if d.exists():
             for f in d.glob("*.json"):
                 m = Member.model_validate_json(f.read_text())
+                if m.role_prefs.get("flex") and m.main:  # flex used to live on the member; it belongs to the character
+                    for r in m.role_prefs["flex"]:
+                        if r not in m.main.flex:
+                            m.main.flex.append(r)
+                    m.role_prefs = {}
+                    self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
                 if m.teams and m.main:  # pre-roster files kept membership on the member
                     for k in m.teams:
                         if k not in m.main.rosters:
@@ -471,13 +476,29 @@ class Registry:
         self.save(m, f"{display_name} plans {slot}: {cls} {spec}{'/' + offspec if offspec else ''}")
         return m, c
 
+    def set_flex(self, discord_id: int, label: str, roles: list[str]) -> RegisteredCharacter:
+        """Extra roles a character can play (besides the roles its spec/offspec already imply)."""
+        valid = ("tank", "healer", "melee", "ranged")
+        if any(r not in valid for r in roles):
+            raise RegistryError(f"Roles are {', '.join(valid)}.")
+        m = self.member(discord_id)
+        c = next((c for c in m.active() if (c.name or c.label).lower() == label.strip().lower()), None)
+        if not c:
+            raise RegistryError(f"You have no active character named {label}.")
+        own = {self.profile.spec(c.cls, c.spec).role} | ({self.profile.spec(c.cls, c.offspec).role} if c.offspec else set())
+        new = sorted({r for r in roles} - own)
+        if new == c.flex:
+            return c
+        c.flex, c.updated_at = new, now()
+        self.save(m, f"{m.display_name}: {c.label} flex {', '.join(new) or 'none'}")
+        return c
+
     def set_roles(self, discord_id: int, display_name: str, primary: str, flex: list[str]) -> Member:
-        roles = ("tank", "healer", "melee", "ranged")
-        if primary not in roles or any(f not in roles for f in flex):
-            raise RegistryError(f"Roles are {', '.join(roles)}.")
+        """Legacy /me plan roles: the primary is ignored (it follows the spec); flex goes on the main."""
         m = self.member(discord_id, display_name, create=True)
-        m.role_prefs = {"primary": primary, "flex": sorted({f for f in flex if f != primary})}
-        self.save(m, f"{display_name} roles: {primary}" + (f" (+{', '.join(m.role_prefs['flex'])})" if m.role_prefs["flex"] else ""))
+        if not m.main:
+            raise RegistryError("Plan or register a main first.")
+        self.set_flex(discord_id, m.main.label, [f for f in flex if f != primary] + ([primary] if primary else []))
         return m
 
     def name_character(self, discord_id: int, name: str, slot: str = "main") -> tuple[Member, RegisteredCharacter]:
@@ -641,10 +662,8 @@ class Registry:
         """(primary, flex). Primary always follows the main's current spec — a stored preference from an earlier
         plan must not linger after a re-spec. Stored preferences (/me plan roles) and the offspec's role are flex."""
         main = m.main
-        primary = self.profile.spec(main.cls, main.spec).role if main else m.role_prefs.get("primary")
-        flex = set(m.role_prefs.get("flex", []))
-        if m.role_prefs.get("primary"):
-            flex.add(m.role_prefs["primary"])
+        primary = self.profile.spec(main.cls, main.spec).role if main else None
+        flex = set(main.flex) if main else set()
         if main and main.offspec:
             try:
                 r = self.profile.spec(main.cls, main.offspec).role

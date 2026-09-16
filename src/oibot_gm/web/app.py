@@ -185,6 +185,26 @@ def create_app(bot) -> FastAPI:
             thumb_cache[key] = await asyncio.to_thread(render.raid_thumb_png, rid, rd.get("name", rid), int(rd.get("size") or 0), int(rd.get("lockout_days") or 7))
         return Response(thumb_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
+    badge_cache: dict[str, bytes] = {}
+
+    @app.get("/img/class/{cls}.png")
+    async def class_icon(cls: str):
+        if cls not in render.CLASS:
+            raise HTTPException(404)
+        key = f"class:{cls}"
+        if key not in badge_cache:
+            badge_cache[key] = render.class_badge_png(cls, 64)
+        return Response(badge_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.get("/img/role/{role}.png")
+    async def role_icon(role: str):
+        if role not in render.ROLE_COLOUR:
+            raise HTTPException(404)
+        key = f"role:{role}"
+        if key not in badge_cache:
+            badge_cache[key] = render.role_badge_png(role, 64)
+        return Response(badge_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get("/healthz")
     async def healthz():
         return {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(bot.registries.by_discord)}
@@ -206,7 +226,7 @@ def create_app(bot) -> FastAPI:
         roles = reg.roles_of(v.member) if v.member else (None, [])
         classes = {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()}
         return page(request, "home.html", v, member=v.member, roles=roles, raids=mine, today=datetime.now().date().isoformat(), classes=classes,
-                    rosters=reg.config.rosters or [{"key": "main", "name": "main"}], stored_roles=(v.member.role_prefs if v.member else {}),
+                    rosters=reg.config.rosters or [{"key": "main", "name": "main"}], spec_role=lambda c: reg.profile.spec(c.cls, c.spec).role, off_role=lambda c: (reg.profile.spec(c.cls, c.offspec).role if c.offspec else None),
                     week=(v.member.week if v.member else []), tz=reg.config.timezone, placement_asks=reg.open_placement_asks(v.uid),
                     raid_windows=[{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")])
 
@@ -241,14 +261,12 @@ def create_app(bot) -> FastAPI:
     async def me_name(request: Request):
         return await mutate(request, "/", lambda v, d: f"named your {d.get('slot', 'main')} {v.reg.name_character(v.uid, d['name'], d.get('slot') or 'main')[1].label} — pending confirmation")
 
-    @app.post("/me/roles")
-    async def me_roles(request: Request):
+    @app.post("/me/character/flex")
+    async def me_flex(request: Request):
         def go(v, d):
-            m = v.reg.members.get(v.uid)
-            primary = v.reg.roles_of(m)[0] if m else "melee"
-            flex = [r for r in ("tank", "healer", "melee", "ranged") if d.get(f"flex_{r}") and r != primary]
-            v.reg.set_roles(v.uid, v.name, primary, flex)
-            return "flex roles: " + (", ".join(flex) or "none")
+            roles = [r for r in ("tank", "healer", "melee", "ranged") if d.get(f"flex_{r}")]
+            c = v.reg.set_flex(v.uid, d["label"], roles)
+            return f"{c.label}: flex " + (", ".join(c.flex) or "none")
         return await mutate(request, "/", go)
 
     @app.post("/me/availability")
