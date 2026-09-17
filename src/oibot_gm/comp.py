@@ -148,6 +148,8 @@ def groups_summary(reg: Registry, players: list[Player], result: RosterResult | 
     by = {p.signup_name: p for p in players}
     out["unmet"] = cov.unmet_raidwide
     out["synergy"] = result.synergy_value
+    seated = [profile.spec(p.cls, p.spec) for p in result.selected]
+    in_run = {bid for bid, b in buffs.items() if any(b.provided_by(sp) for sp in seated)}
     for gi, names in enumerate(result.groups):
         g = cov.groups[gi]
         present = [bid for bid in g.present if g.wanted.get(bid, 0) > 0]
@@ -157,7 +159,7 @@ def groups_summary(reg: Registry, players: list[Player], result: RosterResult | 
             "n": gi + 1,
             "members": [{"name": by[n].character or n, "member": n, "cls": by[n].cls, "spec": by[n].spec, "role": by[n].role} for n in names],
             "present": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present],
-            "missing": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short} for b in missing],
+            "missing": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "in_run": b in in_run} for b in missing],
             "picks": [f"{slot.split('_')[1].title()} {buffs[bid].abbr}" for slot, bid in sorted(g.picks.items()) if not slot.endswith("_cd") and g.wanted.get(bid, 0) > 0],
             "value": result.group_reports[gi].value if gi < len(result.group_reports) else 0,
         })

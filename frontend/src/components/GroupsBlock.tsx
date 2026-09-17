@@ -74,7 +74,6 @@ export function RaidWide({ sm }: { sm: GroupSummary }) {
           </Tooltip>
         ))}
       </Group>
-      {sm.unmet.length > 0 && <Text size="xs" c="yellow" mt={6}>nobody in this run brings: {sm.unmet.join(", ")}</Text>}
     </Box>
   );
 }
