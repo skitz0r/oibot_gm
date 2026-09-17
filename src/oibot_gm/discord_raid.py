@@ -91,6 +91,74 @@ def sheet_embed(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.Emb
     return e
 
 
+def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui.LayoutView:
+    """The sheet as a Discord layout message: header with the raid emblem, class lines with real icons, bench and
+    no-thanks member rows, one timeline line, the buttons — edited in place on every answer."""
+    ui = discord.ui
+    start = ev.start
+    unix = int(start.timestamp())
+    ins, subs, outs = (ev.by_status(s) for s in ("in", "sub", "out"))
+    rd = reg.raid_def(ev.instance)
+    size = int(team.get("size") or rd.get("size") or 20)
+    test = bool(team.get("test"))
+    counts = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer", "melee", "ranged")}
+    locked = ev.state != "open" and bool(ev.all_rosters)
+    runs = max(1, len(ev.all_rosters)) if locked else max(1, len(ins) // size) if size else 1
+    head = f"## {'🧪 ' if test else ''}{rd.get('name', ev.instance or 'raid')}\n<t:{unix}:F> · <t:{unix}:R>\n"
+    if locked:
+        conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)}
+        head += f"🔒 **{len(ev.seated())}** seated" + (f" in {runs} rosters" if runs > 1 else "") + f" · ✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
+    else:
+        head += f"**{len(ins)}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + "  " + "   ".join(f"{ico('role', r)} {n}" for r, n in counts.items())
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    header: ui.Item = ui.Section(ui.TextDisplay(head), accessory=ui.Thumbnail(media=f"{web}/img/raid/{ev.instance}.png")) if web.startswith("https") and ev.instance else ui.TextDisplay(head)
+    parts: list = [header, ui.Separator()]
+    if locked:
+        mark = {"yes": "✅", "no": "❌", "expired": "⌛", None: "⏳"}
+        for i, r in enumerate(ev.all_rosters):
+            lines = []
+            for gi, g in enumerate(r.groups):
+                members = [next((p for p in r.selected if p.signup_name == n), None) for n in g]
+                if any(members):
+                    lines.append(f"**Group {gi + 1}** — " + " · ".join(f"{mark.get(conf.get(p.signup_name), '')}{ico('role', p.role)}{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for p in members if p))
+            if lines:
+                parts.append(ui.TextDisplay((f"### Roster {i + 1}\n" if len(ev.all_rosters) > 1 else "") + "\n".join(lines)))
+        bench = ev.all_rosters[0].benched
+        pending = [n for n, a in conf.items() if a is None]
+        tail = []
+        if bench:
+            tail.append("**Bench** " + " · ".join(p.signup_name for p in bench))
+        if pending:
+            tail.append("**Waiting on** " + ", ".join(pending[:15]))
+        if tail:
+            parts += [ui.Separator(), ui.TextDisplay("\n".join(tail))]
+    else:
+        by_cls: dict[str, list] = {}
+        for sg in ins:
+            by_cls.setdefault(sg.cls, []).append(sg)
+        if by_cls:
+            lines = [f"{ico('class', cls)} **{cls}** {len(ss)} — " + " · ".join(f"{ico('role', sg.role)}{ico('spec', f'{sg.cls}:{sg.spec}')} {sg.character}" for sg in ss) for cls, ss in sorted(by_cls.items(), key=lambda kv: -len(kv[1]))]
+            parts.append(ui.TextDisplay("\n".join(lines)[:3900]))
+        else:
+            parts.append(ui.TextDisplay("-# Nobody has joined yet."))
+        rows = []
+        if subs:
+            rows.append("**Bench** " + " · ".join(sg.display_name for sg in subs))
+        if outs:
+            rows.append("**No thanks** " + " · ".join(sg.display_name + (" ⚑" if sg.source == "callout" else "") for sg in outs))
+        if rows:
+            parts += [ui.Separator(), ui.TextDisplay("\n".join(rows))]
+    _soft, hard, confirm = run_times(reg, ev, team)
+    parts.append(ui.Separator())
+    parts.append(ui.TextDisplay((f"🔒 locks <t:{int(hard.timestamp())}:R> · " if ev.state == "open" else "") + f"✓ confirm by <t:{int(confirm.timestamp())}:t>"))
+    if ev.state == "open":
+        parts.append(ui.ActionRow(*[SignupButton(ev.key, st) for st in rc.STATUSES]))
+    parts.append(ui.TextDisplay("-# " + ("test run · " if test else "") + ("Join = I'm coming · Bench = call me if you need me" if ev.state == "open" else "seated members confirm by DM · No thanks / `/raid out` frees a seat")))
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=0x8C97A8 if test else TEAL))
+    return view
+
+
 def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico, rs=None) -> tuple[discord.Embed, discord.File]:
     """Image card + a one-line embed. Numbers are in the image; the embed carries the level and the next timers."""
     h = rc.health_data(reg, ev, team)
@@ -152,7 +220,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
             await interaction.response.send_message("The roster is locked. If you were seated you'll have a confirmation DM; otherwise press **No thanks** or `/raid out` to be taken off.", ephemeral=True)
             return
         chars = m.active()
-        if len(chars) > 1 and self.status in ("in", "sub"):
+        if len(chars) > 1 and self.status == "in":
             # one press per character: no default to second-guess
             view = discord.ui.View(timeout=120)
             for c in chars[:5]:
@@ -312,13 +380,13 @@ class RaidMixin:
             ch = self.get_channel(ev.channel_id)
             try:
                 msg = await ch.fetch_message(ev.message_id)
-                await msg.edit(embed=sheet_embed(reg, ev, team, self.ico), view=sheet_view(ev.key) if ev.state == "open" else None)
+                await msg.edit(view=sheet_layout(reg, ev, team, self.ico))
             except Exception as e:  # noqa: BLE001
                 print(f"sheet refresh failed: {e}")
 
     async def post_sheet(self, reg, rs, ev, channel) -> None:
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-        msg = await channel.send(embed=sheet_embed(reg, ev, team, self.ico), view=sheet_view(ev.key))
+        msg = await channel.send(view=sheet_layout(reg, ev, team, self.ico))
         ev.channel_id, ev.message_id = channel.id, msg.id
         rs.save(ev, "sheet posted")
         if rc.team_setting(team, "open_dm"):
@@ -747,7 +815,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if not ev:
             await interaction.response.send_message("No live sheet.", ephemeral=True)
             return
-        await interaction.response.send_message(embed=sheet_embed(reg, ev, t, bot.ico), view=sheet_view(ev.key) if ev.state == "open" else None)
+        await interaction.response.send_message(view=sheet_layout(reg, ev, t, bot.ico))
         msg = await interaction.original_response()
         ev.channel_id, ev.message_id = msg.channel.id, msg.id
         rs.save(ev, "sheet re-posted")

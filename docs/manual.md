@@ -24,6 +24,10 @@ fill in: you answer each run's sheet when it is posted, and you post absences fo
 - **#register (registration channel)** — read-only; the pinned card has three buttons: *Register / plan my
   main*, *Add an alt*, *My status*. Anyone can press them.
 - **Signup channel** — one sheet per run with **Join / Bench / No thanks** buttons (Bench = call me if you need me).
+  The sheet is a card: raid emblem, date and countdown, joined count and role counts, joiners grouped by class with
+  real class/spec/role icons, Bench and No thanks as member rows, lock and confirm times; it updates in place on
+  every answer. Join asks which character when you have more than one; Bench and No thanks are your answer as a
+  person, so they don't.
 - **Absences channel** — a pinned card with *I'll be away*; each absence is announced there (no reason shown).
 - **Roster channel (officers)** — health cards, roster proposals, fill progress (🧩 lines).
 - **Analytics channel (officers)** — the character bank, and per roster: pool readiness, optimised

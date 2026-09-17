@@ -174,14 +174,14 @@ function SeatLine({ meta, s, right, mark }: { meta: Meta; s: Seat | Signup; righ
   );
 }
 
-function ChipRow({ label, items, meta, menu }: { label: string; items: Signup[]; meta: Meta; menu: (s: Signup) => React.ReactNode }) {
+function ChipRow({ label, items, menu }: { label: string; items: Signup[]; meta: Meta; menu: (s: Signup) => React.ReactNode }) {
   return (
     <Group gap="xs" mt={8} align="center">
       <Eyebrow>{label}</Eyebrow>
       {items.length === 0 && <Text size="sm" c="dimmed">—</Text>}
       {items.map((s) => (
-        <Group key={s.uid} gap={4} wrap="nowrap" px={6} py={2} style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 7, background: "var(--mantine-color-slate-6)" }}>
-          <SeatLine meta={meta} s={s} />{menu(s)}
+        <Group key={s.uid} gap={4} wrap="nowrap" px={8} py={2} style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 7, background: "var(--mantine-color-slate-6)" }}>
+          <Text size="sm">{s.display_name}</Text>{menu(s)}
         </Group>
       ))}
     </Group>

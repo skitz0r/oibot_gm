@@ -39,7 +39,8 @@ src/oibot_gm/
                        slot_starts/open_run (ephemeral roster per run), Join/Bench/No thanks (in/sub/out), propose() at lock (weights, pins,
                        role min/max, splits into several rosters per slot), confirmations (placement asks on the run key), free_seat/seat_player/
                        expire_confirmations, fill engine (benched joiners + Bench first → pool → offspec → alt). No LLM. Member.week is legacy, unused.
-  discord_raid.py      sheets with persistent buttons, lock_run → roster cards + Confirm/Can't DMs (PlaceButton), drop_seated, after_absence, /raid …,
+  discord_raid.py      sheet_layout (Discord layout components: container/section/thumbnail/text/separators/buttons, real icons as app emojis
+                       via discord_bot.ensure_icon_emojis → ico()), persistent buttons, lock_run → roster cards + Confirm/Can't DMs (PlaceButton), drop_seated, after_absence, /raid …,
                        scheduler loop (open on cadence → health → fill → lock → expire → close) (RaidMixin on the client)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with the character

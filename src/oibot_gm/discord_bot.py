@@ -61,9 +61,15 @@ TEAL = 0x2B7A78
 ROLE_ICON = {"tank": "🛡", "healer": "✚", "melee": "⚔", "ranged": "🏹"}
 # Filled at startup with application emojis (class_<name>, role_<name>); falls back to text.
 EMOJI: dict[str, str] = {}
+ICON_EMOJI: dict[str, str] = {}  # Blizzard icon file name -> "<:name:id>" (real class/spec/role/buff art as app emojis)
+ICON_NAMES: dict[str, dict[str, str]] = {"class": {}, "role": {}, "spec": {}, "buff": {}}  # kind -> key -> icon file name
 
 
 def ico(kind: str, key: str) -> str:
+    """Emoji for a class / role / spec ('Class:Spec') / buff id: the real icon when uploaded, else the generated badge."""
+    name = ICON_NAMES.get(kind, {}).get(key)
+    if name and name in ICON_EMOJI:
+        return ICON_EMOJI[name]
     return EMOJI.get(f"{kind}_{key.lower()}", ROLE_ICON.get(key, "") if kind == "role" else "")
 
 
@@ -790,6 +796,48 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
                     continue
             EMOJI[name] = str(em)
         print(f"emojis ready: {len(EMOJI)}")
+        await self.ensure_icon_emojis(existing)
+
+    async def ensure_icon_emojis(self, existing: dict) -> None:
+        """The profile's Blizzard icons (classes, roles, specs, buff art) as app emojis so sheets and cards show real art."""
+        import httpx
+
+        icon_dir = Path(__file__).resolve().parents[2] / "out" / "icons"
+        icon_dir.mkdir(parents=True, exist_ok=True)
+        wanted: dict[str, str] = {}
+        for reg in list(self.registries.by_discord.values()):
+            ic = reg.profile.icons
+            for kind, key_map in (("class", ic.get("classes", {})), ("role", ic.get("roles", {})), ("spec", ic.get("specs", {}))):
+                for key, name in key_map.items():
+                    ICON_NAMES[kind][key] = name
+                    wanted[name] = name
+            for b in reg.profile.buffs:
+                if b.art:
+                    ICON_NAMES["buff"][b.id] = b.art
+                    wanted[b.art] = b.art
+        n_new = 0
+        async with httpx.AsyncClient(timeout=10) as hc:
+            for name in wanted:
+                ename = ("ic_" + name)[:32]
+                em = existing.get(ename)
+                if em is None:
+                    f = icon_dir / f"{name}.jpg"
+                    if not f.exists():
+                        try:
+                            r = await hc.get(f"https://render.worldofwarcraft.com/us/icons/56/{name}.jpg")
+                            if r.status_code != 200:
+                                continue
+                            f.write_bytes(r.content)
+                        except httpx.HTTPError:
+                            continue
+                    try:
+                        em = await self.create_application_emoji(name=ename, image=f.read_bytes())
+                        n_new += 1
+                    except Exception as e:  # noqa: BLE001
+                        print(f"icon emoji {ename}: {e}")
+                        continue
+                ICON_EMOJI[name] = str(em)
+        print(f"icon emojis ready: {len(ICON_EMOJI)} ({n_new} uploaded)")
 
     async def distribute(self, ev: MockEvent, interaction: discord.Interaction):
         ctx = self.loot_ctx(ev)
