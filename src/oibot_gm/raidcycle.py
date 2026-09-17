@@ -78,6 +78,7 @@ class RaidEvent(BaseModel):
     signups: dict[str, Signup] = Field(default_factory=dict)  # discord_id -> signup
     pins: dict[str, str] = Field(default_factory=dict)  # discord_id -> "in" | "out": officer decisions the solver must honour
     layout: Optional[list[list[str]]] = None  # the officers' board before lock: groups (across rosters) of signup display names
+    split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     rosters: list[RosterResult] = Field(default_factory=list)  # after lock: one or more rosters for this slot (roster = rosters[0])
     locked_at: Optional[str] = None
     confirm_by: Optional[str] = None  # ISO: unanswered confirmations expire here
@@ -557,14 +558,24 @@ def _capable(players: list[Player], role: str, reg: Registry) -> int:
     return n
 
 
-def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> tuple[list[Player], RosterResult]:
-    """Roster(s) for a sheet from its signups: weights + officer pins, the raid's role bounds, the comp policy.
-    When more Join signups remain than a full run needs (with its tank/healer minimums), the solver runs again
-    on the remainder — up to MAX_ROSTERS_PER_SLOT rosters for one slot."""
+def how_many_rosters(reg: Registry, players: list[Player], size: int, rb: dict) -> int:
+    """How many full runs the Join answers support: bodies, and tank/healer minimums per run."""
+    signed = [p for p in players if p.status == "signed"]
+    n = min(MAX_ROSTERS_PER_SLOT, len(signed) // size)
+    for role in ("tank", "healer"):
+        if rb[role]["min"]:
+            n = min(n, _capable(signed, role, reg) // rb[role]["min"])
+    return max(1, n)
+
+
+def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = 12, whatif: bool = True) -> tuple[list[Player], list[RosterResult], int]:
+    """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
+    the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective."""
     players = players_for(reg, ev)
     raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
+    rd = reg.raid_def(raid_id)
     team = reg.config.team(ev.team) or {}
-    size = int(team.get("size") or reg.raid_def(raid_id).get("size") or reg.profile.comp_rules["raid_size"])
+    size = int(team.get("size") or rd.get("size") or reg.profile.comp_rules["raid_size"])
     rb = reg.role_bounds(raid_id, size)
     from .policy import PolicyStore
 
@@ -572,45 +583,45 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
     names = {p.character: p.signup_name for p in players} | {p.signup_name: p.signup_name for p in players}
     resolve = lambda n: names.get(n) or next((v for k, v in names.items() if k.lower() == n.lower()), None)  # noqa: E731
     by_uid = {str(sg.discord_id): sg.display_name for sg in ev.signups.values()}
-    pin_in = tuple(by_uid[u] for u, v in ev.pins.items() if v == "in" and u in by_uid)
-    pin_out = tuple(by_uid[u] for u, v in ev.pins.items() if v == "out" and u in by_uid)
-    bonus = seat_bonus(reg, rs, ev, players)
-    n_groups = groups_per_roster(reg, size)
+    pin_in = [by_uid[u] for u, v in ev.pins.items() if v == "in" and u in by_uid]
+    pin_out = [by_uid[u] for u, v in ev.pins.items() if v == "out" and u in by_uid]
+    k = groups_per_roster(reg, size)
     layout = [[n for n in g if n in names] for g in (ev.layout or [])]
-    boards = [layout[i:i + n_groups] for i in range(0, len(layout), n_groups)] if layout else []
-    placed_all = {n for g in layout for n in g}
-    rosters: list[RosterResult] = []
-    remaining = players
-    while remaining:
-        i = len(rosters)
-        board = boards[i] if i < len(boards) else []
-        mine = {n: gi for gi, g in enumerate(board) for n in g}
-        elsewhere = {n for n in placed_all if n not in mine}
-        pool_names = {p.signup_name for p in remaining}
-        opts = solver.SolveOptions(
-            time_limit_s=12,
-            raid_size=size,
-            keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
-            keep_apart=tuple((resolve(a), resolve(b)) for a, b in cc["keep_apart"] if resolve(a) and resolve(b)),
-            force_in=tuple(x for x in list(pin_in) + list(mine) + [resolve(n) for n in cc["never_bench"]] if x and x in pool_names and x not in pin_out and x not in elsewhere),
-            force_out=tuple(x for x in list(pin_out) + list(elsewhere) + [resolve(n) for n in cc["always_bench"]] if x and x in pool_names and x not in mine),
-            pins={n: gi for n, gi in mine.items() if n in pool_names} or None,
-            prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
-            role_min=cc["role_min"] or {r: rb[r]["min"] for r in ("tank", "healer") if rb[r]["min"]} or None,
-            role_max={r: rb[r]["max"] for r in ("tank", "healer") if rb[r].get("max")},
-            bonus=bonus,
-        )
-        result = solver.solve(reg.profile, remaining, raid_id, opts)
-        result = explain.annotate(reg.profile, remaining, raid_id, result, whatif=len(remaining) <= 30)
-        rosters.append(result)
-        chosen = {p.signup_name for p in result.selected}
-        remaining = [p for p in remaining if p.signup_name not in chosen and p.status == "signed" and p.signup_name not in pin_out]
-        if len(rosters) >= MAX_ROSTERS_PER_SLOT:
-            break
-        if i + 1 < len(boards) and any(boards[i + 1]):
-            continue  # the officers laid out another roster; seat it too
-        if len(remaining) < size or any(_capable(remaining, role, reg) < rb[role]["min"] for role in ("tank", "healer")):
-            break
+    placed = {n: gi for gi, g in enumerate(layout) for n in g}
+    n_rosters = max(how_many_rosters(reg, players, size, rb), -(-len(layout) // k) if any(layout) else 1)
+    strategy = strategy or ev.split_strategy or rd.get("split_policy") or "balanced"
+    bonus = seat_bonus(reg, rs, ev, players)
+    roster_bonus = None
+    if strategy == "rotation":
+        w = int(rd["weights"].get("sat_out", 2))
+        lockout = int(rd["lockout_days"])
+        prev = [e for e in rs.events.values() if e.instance == ev.instance and e.key != ev.key and e.state == "done" and ev.start - timedelta(days=lockout) <= e.start < ev.start]
+        seated_first = {p.signup_name for e in prev for p in (e.all_rosters[0].selected if e.all_rosters else [])}
+        signed_prev = {sg.display_name for e in prev for sg in e.signups.values() if sg.status == "in"}
+        roster_bonus = {0: {p.signup_name: 3 * w for p in players if p.signup_name in signed_prev and p.signup_name not in seated_first}}
+    pool = {p.signup_name for p in players}
+    opts = solver.SolveOptions(
+        time_limit_s=time_limit, raid_size=size,
+        keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
+        keep_apart=tuple((resolve(a), resolve(b)) for a, b in cc["keep_apart"] if resolve(a) and resolve(b)),
+        force_in=tuple(x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out),
+        force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] if x and x in pool and x not in placed),
+        pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
+        prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
+        role_min=cc["role_min"] or {r: rb[r]["min"] for r in ("tank", "healer") if rb[r]["min"]} or None,
+        role_max={r: rb[r]["max"] for r in ("tank", "healer") if rb[r].get("max")},
+        bonus=bonus,
+    )
+    rosters = solver.solve_rosters(reg.profile, players, raid_id, opts, rosters=n_rosters, strategy=strategy, roster_bonus=roster_bonus, avoid=avoid)
+    # bench what-ifs re-solve the model per benched player: only worth it for a single roster at lock, never for previews
+    rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=whatif and n_rosters == 1 and len(players) <= 30) for r in rosters]
+    return players, rosters, n_rosters
+
+
+def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> tuple[list[Player], RosterResult]:
+    """Roster(s) for a sheet from its signups: one joint solve over as many runs as the Join answers support,
+    weights + officer pins + the officers' board, the raid's role bounds, the comp policy, the run's split strategy."""
+    players, rosters, _ = _solve_run(reg, rs, ev)
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
     ev.rosters, ev.roster = rosters, rosters[0]
@@ -619,6 +630,18 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
         ev.log.append("proposed " + " + ".join(str(len(r.selected)) for r in rosters) + f" in / {len(rosters[0].benched)} bench")
         rs.save(ev, "proposed")
     return players, rosters[0]
+
+
+def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None) -> tuple[list[list[str]], list[RosterResult]]:
+    """A split under `strategy` for the modal: the layout (flat groups) and the rosters, nothing saved.
+    `avoid` = earlier previews (flat groups) the answer must differ from."""
+    k = groups_per_roster(reg, int((reg.config.team(ev.team) or {}).get("size") or reg.raid_def(ev.instance).get("size") or 20))
+    prev = [{n: gi // k for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
+    trial = ev.model_copy(deep=True)
+    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=8, whatif=False)
+    seated = {p.signup_name for r in rosters for p in r.selected}
+    rosters[0].benched = [p for p in players if p.signup_name not in seated]
+    return [list(g) for r in rosters for g in r.groups], rosters
 
 
 # ---------------------------------------------------------------- the officers' board (bank + groups) before and after lock

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from ortools.sat.python import cp_model
 
-from ..models import GroupReport, Player, RosterResult
+from ..models import GroupReport, Player, RosterResult, SpecInfo
 from ..profiles import Buff, GameProfile
 
 SCALE = 10  # buff values are floats; CP-SAT wants ints
@@ -44,13 +44,28 @@ def scaled_role_bounds(rules: dict, raid_size: int) -> dict[str, dict[str, int]]
 
 
 def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: SolveOptions = SolveOptions()) -> RosterResult:
+    """One roster (the common case): select who raids and lay them out in groups."""
+    return solve_rosters(profile, players, raid_id, opts, rosters=1)[0]
+
+
+STRATEGIES = ("balanced", "first", "rotation")
+
+
+def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opts: SolveOptions = SolveOptions(), rosters: int = 1,
+                  strategy: str = "balanced", roster_bonus: dict[int, dict[str, int]] | None = None, avoid: list[dict[str, int]] | None = None, min_changes: int = 4) -> list[RosterResult]:
+    """`rosters` runs of `raid_size` from one pool of signups, solved jointly. Groups are flat across rosters
+    (roster r owns groups r*k … r*k+k-1; pins/prefer_group use that numbering). Strategy shapes the objective:
+    balanced — total synergy minus the gap between rosters (and a smaller gap on seat quality: rank/main/etc.);
+    first — roster 1's synergy and seat weights count double; rotation — balanced plus `roster_bonus[0]`
+    (e.g. sat-out points) for landing in roster 1. `avoid` = earlier roster assignments (name → roster) the answer
+    must differ from by at least `min_changes` people."""
     rules = profile.comp_rules
     raid = profile.raids[raid_id]
     gsize = rules["group_size"]
     target = opts.raid_size or rules["raid_size"]
-    n_groups = max(1, -(-target // gsize))  # ceil
-    raid_size = min(target, len(players))
-    role_bounds = {k: dict(v) for k, v in (scaled_role_bounds(rules, target) if opts.raid_size else rules["roles"]).items()}
+    k = max(1, -(-target // gsize))  # groups per roster
+    n_groups = k * rosters
+    role_bounds = {kk: dict(v) for kk, v in (scaled_role_bounds(rules, target) if opts.raid_size else rules["roles"]).items()}
     for role, n in (opts.role_min or {}).items():
         role_bounds.setdefault(role, {"min": 0, "max": target})["min"] = n
         role_bounds[role]["max"] = max(role_bounds[role]["max"], n)
@@ -58,10 +73,13 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         role_bounds.setdefault(role, {"min": 0, "max": target})["max"] = max(n, role_bounds[role]["min"])
     specs = {p.signup_name: profile.spec(p.cls, p.spec) for p in players}
     sel = rules["selection"]
+    seats_total = min(target * rosters, len(players))
 
     m = cp_model.CpModel()
     x = {p.signup_name: m.NewBoolVar(f"x_{p.signup_name}") for p in players}
     y = {(p.signup_name, g): m.NewBoolVar(f"y_{p.signup_name}_{g}") for p in players for g in range(n_groups)}
+    groups_of = lambda r: range(r * k, (r + 1) * k)  # noqa: E731
+    xr = {(p.signup_name, r): sum(y[p.signup_name, g] for g in groups_of(r)) for p in players for r in range(rosters)}
 
     # offspec switch: o[p] = 1 means p raids as their offspec (different role); only when the roster needs it
     off_specs: dict[str, SpecInfo] = {}
@@ -78,17 +96,19 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
                     o[p.signup_name] = m.NewBoolVar(f"o_{p.signup_name}")
                     m.Add(o[p.signup_name] <= x[p.signup_name])
 
-    def role_expr(role: str):
+    def role_expr(role: str, r: int | None = None):
+        """Players raiding as `role` (offspec switches counted), over the whole pool or one roster."""
         terms = []
         for p in players:
             n = p.signup_name
+            seat = x[n] if r is None else xr[n, r]
             if n in o:
                 if p.role == role:
-                    terms.append(x[n] - o[n])
+                    terms.append(seat - (o[n] if r is None else m_and(m, o[n], xr[n, r], f"osw_{n}_{r}_{role}")))
                 if off_specs[n].role == role:
-                    terms.append(o[n])
+                    terms.append(o[n] if r is None else m_and(m, o[n], xr[n, r], f"osw2_{n}_{r}_{role}"))
             elif p.role == role:
-                terms.append(x[n])
+                terms.append(seat)
         return terms
 
     # per-group role expressions (for the healer/tank caps)
@@ -96,7 +116,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         terms = []
         for p in players:
             n = p.signup_name
-            if n in o:
+            if n in off_specs:
                 if p.role == role:
                     terms.append(y[n, g])  # upper bound; switching away only lowers it
                 elif off_specs[n].role == role:
@@ -105,19 +125,24 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
                 terms.append(y[n, g])
         return terms
 
-    m.Add(sum(x.values()) == raid_size)
+    m.Add(sum(x.values()) == seats_total)
     for p in players:
         m.Add(sum(y[p.signup_name, g] for g in range(n_groups)) == x[p.signup_name])
+    for r in range(rosters):
+        m.Add(sum(xr[p.signup_name, r] for p in players) <= target)
+        if len(players) >= target * rosters:
+            m.Add(sum(xr[p.signup_name, r] for p in players) == target)
     for g in range(n_groups):
         m.Add(sum(y[p.signup_name, g] for p in players) <= gsize)
         m.Add(sum(group_role_expr("healer", g)) <= rules["grouping"]["healer_max_per_group"])
         m.Add(sum(group_role_expr("tank", g)) <= rules["grouping"]["tank_max_per_group"])
     for role, bounds in role_bounds.items():
-        have = role_expr(role)
         capable = sum(1 for p in players if p.role == role or (p.signup_name in off_specs and off_specs[p.signup_name].role == role))
-        if have:
-            m.Add(sum(have) >= min(bounds["min"], capable))
-            m.Add(sum(have) <= bounds["max"])
+        for r in range(rosters):
+            have = role_expr(role, r if rosters > 1 else None)
+            if have:
+                m.Add(sum(have) >= min(bounds["min"], capable // rosters if rosters > 1 else capable))
+                m.Add(sum(have) <= bounds["max"])
     for name in opts.force_in:
         m.Add(x[name] == 1)
     for name in opts.force_out:
@@ -131,19 +156,31 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
             for g in range(n_groups):
                 m.Add(y[a, g] + y[b, g] <= 1)
     for name, g in (opts.pins or {}).items():
-        if name in x:
+        if name in x and 0 <= g < n_groups:
             m.Add(x[name] == 1)
             m.Add(y[name, g] == 1)
+    for prev in avoid or []:
+        same = [xr[n, r] for n, r in prev.items() if n in x and 0 <= r < rosters]
+        if same:
+            m.Add(sum(same) <= max(0, len(same) - min_changes))
 
-    # --- objective: selection terms ---
+    # --- objective: selection terms (seat quality: signed, attendance, per-player bonus) ---
     terms = []
+    quality: dict[int, list] = {r: [] for r in range(rosters)}  # per roster, for the balanced quality gap
     for p in players:
         v = sel["signed_bonus"] if p.status == "signed" else -sel["bench_penalty"]
         v += int(round(sel["attendance_weight"] * p.attendance))
         if p.unmapped:
             v -= sel["unknown_character_penalty"]
         v += int((opts.bonus or {}).get(p.signup_name, 0))
-        terms.append(v * SCALE * x[p.signup_name])
+        if rosters == 1:
+            terms.append(v * SCALE * x[p.signup_name])
+        else:
+            for r in range(rosters):
+                w = 2 if (strategy == "first" and r == 0) else 1
+                extra = int((roster_bonus or {}).get(r, {}).get(p.signup_name, 0))
+                terms.append((v * w + extra) * SCALE * xr[p.signup_name, r])
+                quality[r].append(max(0, v) * xr[p.signup_name, r])
 
     # --- objective: soft group preferences from standing instructions ---
     for name, g1 in (opts.prefer_group or {}).items():
@@ -153,7 +190,6 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         terms.append(-opts.offspec_penalty * SCALE * o[n])
 
     # --- objective: party buff synergy (a switched player provides/benefits as their offspec) ---
-    # presence-in-spec variables: ym[p,g] = in group g as main spec, yo[p,g] = in group g as offspec
     ym: dict[tuple[str, int], cp_model.IntVar] = {}
     yo: dict[tuple[str, int], cp_model.IntVar] = {}
     for p in players:
@@ -177,6 +213,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         return out
 
     synergy_terms = []
+    roster_syn: dict[int, list] = {r: [] for r in range(rosters)}
     slot_provs: dict[tuple[str, int], list] = {}  # (slot, g) -> prov vars of the buffs sharing that slot
     # raid-wide buffs anyone signed can cast are assumed present: a party buff of the same family only adds what it beats
     raid_cover = [rb for rb in profile.raid_buffs() if any(rb.provided_by(specs[p.signup_name]) or (p.signup_name in off_specs and rb.provided_by(off_specs[p.signup_name])) for p in players)]
@@ -184,6 +221,12 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
     def net_benefit(b, s) -> float:
         base = b.benefit(s)
         return max(0.0, base - max([rb.benefit(s) for rb in raid_cover if rb.family_id == b.family_id] or [0.0]))
+
+    def add_syn(g: int, val: int, var) -> None:
+        r = g // k
+        w = 2 if (rosters > 1 and strategy == "first" and r == 0) else 1
+        synergy_terms.append(val * w * var)
+        roster_syn[r].append(val * var)
 
     fam_terms: dict[tuple[int, str, str, str], list] = {}  # (g, player, spec, family) -> z vars: one buff per family counts
     for b in profile.party_buffs():
@@ -205,7 +248,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
                         z = m.NewBoolVar(f"z_{b.id}_{g}_{q.signup_name}_{s.spec}")
                         m.Add(z <= prov)
                         m.Add(z <= v)
-                        synergy_terms.append(val * z)
+                        add_syn(g, val, z)
                         fam_terms.setdefault((g, q.signup_name, s.spec, b.family_id), []).append(z)
             else:  # stack: every provider adds for every other member
                 for p in players:
@@ -222,7 +265,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
                                 w = m.NewBoolVar(f"w_{b.id}_{g}_{p.signup_name}_{ps.spec}_{q.signup_name}_{qs.spec}")
                                 m.Add(w <= pv)
                                 m.Add(w <= qv)
-                                synergy_terms.append(val * w)
+                                add_syn(g, val, w)
 
     # stacking families: a player counts at most one buff per family (the solver keeps the strongest)
     for zs in fam_terms.values():
@@ -235,12 +278,29 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         m.Add(sum(prov for prov, _ in entries) <= sum(provider_vars.values()))
 
     # symmetry breaking: the first signed player anchors group 0 (unless pins or seeds fix the numbering)
-    if not opts.pins and not opts.prefer_group:
+    if not opts.pins and not opts.prefer_group and rosters == 1:
         first = next((p for p in players if p.status == "signed" and p.signup_name not in opts.force_out), None)
         if first:
             m.Add(y[first.signup_name, 0] == x[first.signup_name])
 
-    m.Maximize(sum(terms) + sum(synergy_terms))
+    # --- balance between rosters (balanced / rotation): pay for the synergy gap and, less, the seat-quality gap ---
+    balance_terms = []
+    if rosters > 1 and strategy in ("balanced", "rotation"):
+        big = SCALE * 100 * len(players) * 20
+        syn_r = [m.NewIntVar(0, big, f"syn_r{r}") for r in range(rosters)]
+        qual_r = [m.NewIntVar(0, big, f"qual_r{r}") for r in range(rosters)]
+        for r in range(rosters):
+            m.Add(syn_r[r] == sum(roster_syn[r]))
+            m.Add(qual_r[r] == sum(quality[r]))
+        gap, qgap = m.NewIntVar(0, big, "syn_gap"), m.NewIntVar(0, big, "qual_gap")
+        for a in range(rosters):
+            for b in range(rosters):
+                if a != b:
+                    m.Add(gap >= syn_r[a] - syn_r[b])
+                    m.Add(qgap >= qual_r[a] - qual_r[b])
+        balance_terms = [-gap, -(SCALE // 2) * qgap]
+
+    m.Maximize(sum(terms) + sum(synergy_terms) + sum(balance_terms))
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = opts.time_limit_s
     solver.parameters.num_workers = opts.workers
@@ -256,29 +316,34 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
             switches[n] = off_specs[n].spec
             p.offspec, p.spec, p.role = p.spec, off_specs[n].spec, off_specs[n].role
             specs[n] = off_specs[n]
-    selected = [p for p in players if solver.Value(x[p.signup_name])]
-    benched = [p for p in players if not solver.Value(x[p.signup_name])]
-    groups: list[list[str]] = [[] for _ in range(n_groups)]
-    for p in selected:
-        for g in range(n_groups):
-            if solver.Value(y[p.signup_name, g]):
-                groups[g].append(p.signup_name)
-    reports, syn_total = group_reports(profile, players, groups)
-    counts: dict[str, int] = {}
-    for p in selected:
-        counts[p.role] = counts.get(p.role, 0) + 1
-    return RosterResult(
-        selected=selected,
-        benched=benched,
-        groups=groups,
-        group_reports=reports,
-        objective=int(solver.ObjectiveValue()) // SCALE,
-        synergy_value=syn_total,
-        role_counts=counts,
-        advisories=[],
-        spec_switches=switches,
-        solver_status=solver.StatusName(status),
-    )
+    all_groups: list[list[str]] = [[] for _ in range(n_groups)]
+    for p in players:
+        if solver.Value(x[p.signup_name]):
+            for g in range(n_groups):
+                if solver.Value(y[p.signup_name, g]):
+                    all_groups[g].append(p.signup_name)
+    seated_all = {n for g in all_groups for n in g}
+    results = []
+    for r in range(rosters):
+        groups = all_groups[r * k:(r + 1) * k]
+        names = {n for g in groups for n in g}
+        selected = [p for p in players if p.signup_name in names]
+        reports, syn_total = group_reports(profile, players, groups)
+        counts: dict[str, int] = {}
+        for p in selected:
+            counts[p.role] = counts.get(p.role, 0) + 1
+        results.append(RosterResult(selected=selected, benched=[p for p in players if p.signup_name not in seated_all] if r == 0 else [], groups=groups, group_reports=reports,
+                                    objective=int(solver.ObjectiveValue()) // SCALE, synergy_value=syn_total, role_counts=counts, advisories=[], spec_switches=switches, solver_status=solver.StatusName(status)))
+    return results
+
+
+def m_and(m: cp_model.CpModel, a, b, name: str):
+    """Bool var = a AND b (b may be a linear sum of bools that is at most 1)."""
+    v = m.NewBoolVar(name)
+    m.Add(v <= a)
+    m.Add(v <= b)
+    m.Add(v >= a + b - 1)
+    return v
 
 
 def rebuild(profile: GameProfile, players: list[Player], groups: list[list[str]], base: RosterResult) -> RosterResult:

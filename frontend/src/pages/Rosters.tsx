@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Accordion, ActionIcon, Badge, Box, Button, Card, Group, Menu, Stack, Tabs, Text, TextInput, Tooltip } from "@mantine/core";
-import { IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconRefresh, IconSparkles, IconUserOff } from "@tabler/icons-react";
-import { api, type Board, type GroupSummary, type Meta, type RaidRuns, type Rosters, type Seat, type Sheet, type Signup } from "../api";
+import { Accordion, ActionIcon, Badge, Box, Button, Card, Group, Menu, Modal, Stack, Tabs, Text, TextInput, Tooltip } from "@mantine/core";
+import { IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconRefresh, IconScale, IconSparkles, IconUserOff } from "@tabler/icons-react";
+import { api, type Board, type BoardRoster, type GroupSummary, type Meta, type RaidRuns, type Rosters, type Seat, type Sheet, type Signup, type SplitPreview } from "../api";
+import { SPLIT_BLURB, SPLIT_LABEL } from "./Raids";
 import { GameIcon } from "../components/Icons";
 import { RaidWide } from "../components/GroupsBlock";
 import { RaidHeader } from "../components/RaidHeader";
@@ -198,6 +199,8 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
   const drag = useRef<Drag | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const canSplit = !locked && (e.split?.runs || 1) > 1;
 
   const layout = () => board.rosters.map((r) => r.groups.map((g) => g.map((s) => s.display_name)));
 
@@ -252,9 +255,10 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
   return (
     <Box mt="lg">
       <Group justify="space-between" wrap="wrap" mb="xs">
-        <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
+        <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{canSplit && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
         {!locked && (
           <Group gap="xs">
+            {canSplit && <Button size="xs" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>Propose splits</Button>}
             <Button size="xs" variant="default" leftSection={<IconSparkles size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
             <Button size="xs" variant="default" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={() => commit(board.rosters.map((r) => r.groups.map(() => [])))}>Clear</Button>
           </Group>
@@ -272,7 +276,7 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
         <Stack gap="md" style={{ minWidth: 0 }}>
           {board.rosters.map((r, ri) => (
             <Box key={r.n}>
-              {board.rosters.length > 1 && <Group gap="sm" mb={4}><Text size="sm" fw={700}>Roster {r.n}</Text><Text size="xs" c="dimmed">{r.seated} seated</Text></Group>}
+              {board.rosters.length > 1 && <RosterHeader meta={meta} r={r} />}
               <Box className={css.groups}>
                 {r.groups.map((g, gi) => {
                   const sm = groupSummary(r.summary, gi);
@@ -308,9 +312,98 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
           ))}
         </Stack>
       </Box>
+      {canSplit && <SplitModal e={e} meta={meta} opened={splitOpen} onClose={() => setSplitOpen(false)} onUse={async (layout, strategy) => { await api.post(`/api/run/${e.key}/strategy`, { strategy }).catch(fail); await commit(layout.map(() => []).length ? chunk(layout, board.n_groups) : []); }} />}
       <Text size="xs" c="dimmed" mt={6}>Coloured = present in that group · greyed with a red edge = wanted here and the provider sits in another group · plain grey = nobody in the run brings it · teal edge = covered by a raid-wide buff of the same family · totems one per element.</Text>
     </Box>
   );
+}
+
+export function RosterHeader({ meta, r, title }: { meta: Meta; r: BoardRoster; title?: string }) {
+  const counts = { tank: 0, healer: 0, melee: 0, ranged: 0 } as Record<string, number>;
+  r.groups.flat().forEach((s) => { counts[s.role] = (counts[s.role] || 0) + 1; });
+  return (
+    <Group justify="space-between" mb={4} wrap="wrap">
+      <Group gap="sm"><Text size="sm" fw={700}>{title || `Roster ${r.n}`}</Text>{r.synergy !== null && r.synergy !== undefined && <Text size="xs" c="dimmed">synergy {r.synergy}</Text>}</Group>
+      <Group gap="md">{Object.entries(counts).map(([role, k]) => <Group key={role} gap={4} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={16} title={role} /><Text size="xs" style={{ fontVariantNumeric: "tabular-nums" }}>{k}</Text></Group>)}</Group>
+    </Group>
+  );
+}
+
+/** Read-only rendering of a board (the split preview): the same groups, badges and raid-wide row as the builder. */
+function BoardPreview({ meta, board }: { meta: Meta; board: Board }) {
+  return (
+    <Stack gap="md">
+      {board.rosters.map((r) => (
+        <Box key={r.n}>
+          <RosterHeader meta={meta} r={r} />
+          <Box className={css.groups}>
+            {r.groups.map((g, gi) => {
+              const sm = r.summary.groups[gi];
+              return (
+                <Box key={gi} p="sm" style={{ background: "var(--mantine-color-slate-6)", border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8, minWidth: 0 }}>
+                  <Group justify="space-between" mb={4}><Text size="sm" fw={700}>Group {gi + 1}</Text><Text size="xs" c="dimmed">{g.length}/{board.group_size}</Text></Group>
+                  {g.map((s) => <SeatLine key={s.display_name} meta={meta} s={s} />)}
+                  {sm && (
+                    <>
+                      <Group gap={4} mt={8}>{sm.present.map((a) => <Aura key={a.abbr} a={a} who={a.who} />)}{sm.missing.map((a) => <Aura key={`m${a.abbr}`} a={a} missing />)}</Group>
+                      {sm.picks.length > 0 && <Text size="xs" c="dimmed" mt={4}>totems: {sm.picks.join(" · ")}</Text>}
+                    </>
+                  )}
+                </Box>
+              );
+            })}
+          </Box>
+          <RaidWide sm={r.summary} />
+        </Box>
+      ))}
+      {board.bank.length > 0 && <Text size="xs" c="dimmed">Bench: {board.bank.map((b) => b.character).join(", ")}</Text>}
+    </Stack>
+  );
+}
+
+/** Propose splits: pick a philosophy, check one preview in the builder's own layout, seed the board. */
+function SplitModal({ e, meta, opened, onClose, onUse }: { e: Sheet; meta: Meta; opened: boolean; onClose: () => void; onUse: (layout: string[][], strategy: string) => Promise<void> }) {
+  const [strategy, setStrategy] = useState(e.split?.strategy || "balanced");
+  const [preview, setPreview] = useState<SplitPreview | null>(null);
+  const [seen, setSeen] = useState<string[][][]>([]);
+  const [busy, setBusy] = useState(false);
+  const [using, setUsing] = useState(false);
+  async function run(st: string, avoid: string[][][]) {
+    setBusy(true);
+    try { const r = await api.post<SplitPreview>(`/api/run/${e.key}/split`, { strategy: st, avoid }); setPreview(r); setSeen([...avoid, r.layout]); } catch (err) { fail(err); } finally { setBusy(false); }
+  }
+  useEffect(() => { if (opened) { setPreview(null); setSeen([]); run(strategy, []); } /* eslint-disable-line react-hooks/exhaustive-deps */ }, [opened]);
+  const pick = (st: string) => { setStrategy(st); setSeen([]); run(st, []); };
+  return (
+    <Modal opened={opened} onClose={onClose} title={`Propose splits · ${e.when}`} size="xl">
+      <Stack gap="md">
+        <Group gap="xs" wrap="wrap">
+          {(["balanced", "first", "rotation"] as const).map((st) => (
+            <Box key={st} onClick={() => !busy && pick(st)} p="sm" style={{ flex: "1 1 180px", cursor: "pointer", border: `1px solid ${strategy === st ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, background: strategy === st ? "rgba(56,178,160,.08)" : undefined, borderRadius: 8 }}>
+              <Text size="sm" fw={700}>{SPLIT_LABEL[st]}</Text><Text size="xs" c="dimmed">{SPLIT_BLURB[st]}</Text>
+            </Box>
+          ))}
+          <Tooltip label="needs wishlists and loot tables — not yet"><Box p="sm" style={{ flex: "1 1 180px", border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8, opacity: 0.4 }}><Text size="sm" fw={700}>Loot quality</Text><Text size="xs" c="dimmed">seat people where the drops they need go uncontested</Text></Box></Tooltip>
+        </Group>
+        <Group justify="space-between" wrap="wrap">
+          <Text size="xs" c="dimmed">{busy ? "solving…" : preview ? <>Preview of <b>{SPLIT_LABEL[preview.strategy]}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : ""}</Text>
+          {preview && !busy && <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={12} />} onClick={() => run(strategy, seen)}>another split like this</Button>}
+        </Group>
+        {preview && !busy && <BoardPreview meta={meta} board={preview.board} />}
+        {busy && <Text size="sm" c="dimmed" ta="center" py="xl">The solver is working on it…</Text>}
+        <Group justify="flex-end" gap="sm">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button disabled={!preview || busy} loading={using} onClick={async () => { if (!preview) return; setUsing(true); try { await onUse(preview.layout, preview.strategy); onClose(); } finally { setUsing(false); } }}>Use this split on the board</Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+function chunk(flat: string[][], n: number): string[][][] {
+  const out: string[][][] = [];
+  for (let i = 0; i < flat.length; i += n) out.push(flat.slice(i, i + n));
+  return out;
 }
 
 function Aura({ a, missing, who }: { a: { abbr: string; colour: string; art: string | null; name: string; in_run?: boolean; covered?: boolean }; missing?: boolean; who?: string }) {

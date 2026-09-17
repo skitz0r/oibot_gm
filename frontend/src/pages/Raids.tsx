@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Badge, Box, Button, Card, Group, NumberInput, Stack, TagsInput, Text, TextInput } from "@mantine/core";
+import { Badge, Box, Button, Card, Group, NumberInput, Select, Stack, TagsInput, Text, TextInput } from "@mantine/core";
 import { IconPencil } from "@tabler/icons-react";
 import { api, type RaidRule, type Raids } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
@@ -13,14 +13,14 @@ export function RaidsPage() {
   return (
     <Stack gap="lg">
       <PageTitle title="Raids" intro={`Each raid's rules: run slots and cadence (signup opens, lock, confirmation deadline), first opening, lockout, desired comp, and how the solver weighs seats. Amber marks an override of the game defaults. Times are ${data.tz}.`} />
-      {data.raids.map((r) => <RuleCard key={r.id} r={r} owner={data.owner} weightKeys={data.weight_keys} onSaved={load} />)}
+      {data.raids.map((r) => <RuleCard key={r.id} r={r} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} onSaved={load} />)}
     </Stack>
   );
 }
 
-type Draft = { slots: string[]; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
+type Draft = { slots: string[]; split_policy: string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
 
-function RuleCard({ r, owner, weightKeys, onSaved }: { r: RaidRule; owner: boolean; weightKeys: string[]; onSaved: () => void }) {
+function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; owner: boolean; weightKeys: string[]; policies: string[]; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [d, setD] = useState<Draft>(() => toDraft(r));
   const [busy, setBusy] = useState(false);
@@ -50,6 +50,7 @@ function RuleCard({ r, owner, weightKeys, onSaved }: { r: RaidRule; owner: boole
               <Fact label="signup opens" value={`${r.signup_lead_hours} h before`} c={oc("signup_lead_hours")} />
               <Fact label="locks" value={`${r.lock_hours_before} h before`} c={oc("lock_hours_before")} />
               <Fact label="confirm by" value={`${r.confirm_hours_before} h before`} c={oc("confirm_hours_before")} />
+              <Fact label="split policy" value={SPLIT_LABEL[r.split_policy] || r.split_policy} c={oc("split_policy")} />
             </Group>
             <Group gap="xl" wrap="wrap">
               <Fact label="first opens" value={r.first_open_local ? r.first_open_local.replace("T", " ") : "—"} c={oc("first_open")} />
@@ -67,6 +68,7 @@ function RuleCard({ r, owner, weightKeys, onSaved }: { r: RaidRule; owner: boole
               <NumberInput label="signup opens (h before)" min={1} value={d.signup_lead_hours} onChange={(v) => setD({ ...d, signup_lead_hours: v })} w={190} />
               <NumberInput label="locks (h before)" min={0} value={d.lock_hours_before} onChange={(v) => setD({ ...d, lock_hours_before: v })} w={150} />
               <NumberInput label="confirm by (h before)" min={0} value={d.confirm_hours_before} onChange={(v) => setD({ ...d, confirm_hours_before: v })} w={170} />
+              <Select label="split policy" description="when more join than one run seats" data={policies.map((p) => ({ value: p, label: SPLIT_LABEL[p] || p }))} value={d.split_policy} onChange={(v) => setD({ ...d, split_policy: v || d.split_policy })} w={200} />
             </Group>
             <Group gap="md" wrap="wrap" align="flex-end">
               <TextInput label="first opens" description="guild time" type="datetime-local" value={d.first_open} onChange={(e) => setD({ ...d, first_open: e.currentTarget.value })} w={230} />
@@ -101,10 +103,12 @@ function RuleCard({ r, owner, weightKeys, onSaved }: { r: RaidRule; owner: boole
   );
 }
 
+export const SPLIT_LABEL: Record<string, string> = { balanced: "Balanced", first: "Raid one first", rotation: "Rotation" };
+export const SPLIT_BLURB: Record<string, string> = { balanced: "both runs equal: synergy, tanks, healers and seat quality spread evenly", first: "roster 1 gets the best synergy and seat weights; roster 2 is the rest", rotation: "whoever sat out or was in the weaker run last window moves up" };
 const WEIGHT_HINT: Record<string, string> = { rank: "core > raider > trial", main: "main over alt", sat_out: "benched last window", signup_order: "earlier signup" };
 
 function toDraft(r: RaidRule): Draft {
-  return { slots: r.slots, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, weights: { ...r.weights },
+  return { slots: r.slots, split_policy: r.split_policy, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, weights: { ...r.weights },
     first_open: r.first_open_local, lockout_days: r.lockout_days, duration_hours: r.duration_hours, notes: r.notes,
     comp: Object.fromEntries(["tank", "healer", "dps"].map((role) => [role, { min: r.comp[role]?.min ?? "", max: r.comp[role]?.max ?? "" }])) };
 }

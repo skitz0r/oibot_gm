@@ -26,7 +26,7 @@ Comp ideals (officer): comp_target: team=<roster key or raid id (barrow_deeps|hy
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
   reason=<optional note, the justification shown on the desired-comp card>.
   comp_target_clear (team, field) removes an officer target so the derived value applies again.
-  raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<slots (comma list of 'Tue 19:30' run times)|signup_lead_hours|lock_hours_before|confirm_hours_before|weight_rank|weight_main|weight_sat_out|weight_signup_order|lockout_days|duration_hours|first_open (ISO datetime, when the instance first opens)|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
+  raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<slots (comma list of 'Tue 19:30' run times)|split_policy (balanced|first|rotation: how a slot with more joiners than one run seats is split at the scheduled lock)|signup_lead_hours|lock_hours_before|confirm_hours_before|weight_rank|weight_main|weight_sat_out|weight_signup_order|lockout_days|duration_hours|first_open (ISO datetime, when the instance first opens)|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
   raid_reset (owner): team=<raid id> — drop the guild's overrides for that raid.
   aura_set (owner): what the guild learns about a buff. team=<buff id, e.g. fortitude|blood_pact|windfury_totem|sanctity_aura>,
     field=<scope (party|raid)|family (a family id or another buff's id: "X and Y don't stack" = set the weaker one's family to the other's id; 'own' = stands alone)|strength (number, 1 = full)|status (confirmed|reported|assumed)|note>, value.

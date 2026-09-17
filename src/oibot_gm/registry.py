@@ -179,6 +179,7 @@ class RegistryError(ValueError):
 
 RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1}
 RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before")
+SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
 _SLOT_RE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)$", re.I)
 
 
@@ -600,6 +601,7 @@ class Registry:
         out.setdefault("signup_lead_hours", 120)
         out.setdefault("lock_hours_before", 24)
         out.setdefault("confirm_hours_before", 6)
+        out.setdefault("split_policy", "balanced")
         out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
         return out
 
@@ -683,6 +685,10 @@ class Registry:
                 raise RegistryError("lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
             if eff["signup_lead_hours"] <= eff["lock_hours_before"]:
                 raise RegistryError("signups must open before they lock (signup_lead_hours > lock_hours_before)")
+        elif field == "split_policy":
+            if value not in SPLIT_POLICIES:
+                raise RegistryError(f"split_policy must be one of {', '.join(SPLIT_POLICIES)}")
+            over["split_policy"] = value
         elif field.startswith("weight_") and field[7:] in RAID_WEIGHT_DEFAULTS:
             try:
                 n = int(value)

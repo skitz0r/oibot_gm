@@ -258,6 +258,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "absences": absences, "double_booked": [reg.members[u].display_name for u in busy if u in reg.members],
                 "needs": rc.needs(reg, ev, t) if live else None,
                 "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout),
+                "split": {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
+                          "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), int(t.get("size") or 20), reg.role_bounds(ev.instance, int(t.get("size") or 20))) if live else 1},
                 "confirmations": conf_rows,
                 "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer} for a in ev.fill_asks],
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
@@ -314,6 +316,38 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         added, removed = await asyncio.to_thread(rc.apply_layout_locked, v.reg, rs, ev, groups)
         await bot.after_board_change(v.reg, rs, ev, t, added, removed, v.name)
         return {**board_reply(v.reg, ev), "message": (f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "") or "groups updated"}
+
+    @app.post("/api/run/{key}/split")
+    async def run_split(request: Request, key: str):
+        """Preview a split under a strategy (nothing saved): the modal's step 2. `avoid` = previous previews to differ from."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        if ev.state != "open":
+            return JSONResponse({"error": "already locked"}, status_code=400)
+        strategy = d.get("strategy") or ev.split_strategy or v.reg.raid_def(ev.instance)["split_policy"]
+        from ..registry import SPLIT_POLICIES
+
+        if strategy not in SPLIT_POLICIES:
+            return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
+        try:
+            layout, rosters = await asyncio.to_thread(rc.split_preview, v.reg, rs, ev, strategy, d.get("avoid") or None)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"solver: {e}"}, status_code=400)
+        syn = [r.synergy_value for r in rosters]
+        return {"strategy": strategy, "layout": layout, "board": board_json(v.reg, ev, rosters, []), "synergy": syn, "total": sum(syn), "gap": (max(syn) - min(syn)) if syn else 0}
+
+    @app.post("/api/run/{key}/strategy")
+    async def run_strategy(request: Request, key: str):
+        """Remember the split philosophy on the run (Auto-fill and the scheduled lock use it)."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        from ..registry import SPLIT_POLICIES
+
+        if d.get("strategy") not in SPLIT_POLICIES:
+            return JSONResponse({"error": "unknown strategy"}, status_code=400)
+        ev.split_strategy = d["strategy"]
+        rs.save(ev, f"split strategy {d['strategy']}")
+        return {"message": f"split strategy: {d['strategy']}"}
 
     @app.post("/api/run/{key}/autofill")
     async def run_autofill(request: Request, key: str):
@@ -443,12 +477,14 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
                         "slots": list(eff["slots"]), "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
-                        "weights": dict(eff["weights"]), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
+                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local(ws, "%a %d %b %H:%M"), reg.local(we, "%a %d %b %H:%M")], "live": sum(1 for e in rs.live() if e.instance == rid)})
-        return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS)}
+        from ..registry import SPLIT_POLICIES
+
+        return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES)}
 
     @app.post("/api/admin/raid")
     async def admin_raid(request: Request):
@@ -463,7 +499,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
                 if parse_slots(want) != list(cur["slots"]):
                     done.append(v.reg.set_raid_override(inst, "slots", want, v.name))
-            for f in RAID_HOURS_FIELDS + ("lockout_days", "duration_hours", "notes"):
+            for f in RAID_HOURS_FIELDS + ("lockout_days", "duration_hours", "notes", "split_policy"):
                 val = d.get(f)
                 if val not in (None, "") and str(val) != str(cur.get(f, "")):
                     done.append(v.reg.set_raid_override(inst, f, str(val), v.name))

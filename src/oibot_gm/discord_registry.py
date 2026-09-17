@@ -1082,8 +1082,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="raid", description="Owner: raid rules — slots, signup/lock/confirm hours, lockout, duration, comp, weights")
     @app_commands.autocomplete(raid=instance_autocomplete)
-    @app_commands.describe(slots="recurring run times, e.g. 'Tue 19:30, Thu 20:00' ('none' clears)", signup_lead_hours="sheet opens this many hours before the slot", lock_hours_before="roster locks this many hours before", confirm_hours_before="unanswered confirmations expire this many hours before", weights="rank=3 main=2 sat_out=2 signup_order=1")
-    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
+    @app_commands.choices(split_policy=[app_commands.Choice(name=x, value=x) for x in ("balanced", "first", "rotation")])
+    @app_commands.describe(slots="recurring run times, e.g. 'Tue 19:30, Thu 20:00' ('none' clears)", split_policy="how to split when more join than one run seats", signup_lead_hours="sheet opens this many hours before the slot", lock_hours_before="roster locks this many hours before", confirm_hours_before="unanswered confirmations expire this many hours before", weights="rank=3 main=2 sat_out=2 signup_order=1")
+    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, split_policy: app_commands.Choice[str] | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -1097,7 +1098,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 msg = []
                 if slots is not None:
                     msg.append(reg.set_raid_override(raid, "slots", "" if slots.strip().lower() in ("none", "clear", "-") else slots, interaction.user.display_name))
-                for field, val in (("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
+                for field, val in (("split_policy", split_policy.value if split_policy else None), ("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
                     if val is not None:
                         msg.append(reg.set_raid_override(raid, field, val, interaction.user.display_name))
                 for part in (weights or "").replace(",", " ").split():
@@ -1116,7 +1117,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         comp = rd.get("comp") or {}
         fo = reg.first_open(raid)
         eff = (f"**{rd.get('name', raid)}** · {rd.get('size')}-player · slots {', '.join(rd['slots']) or 'none'} · opens {rd['signup_lead_hours']}h before · locks {rd['lock_hours_before']}h before · confirm by {rd['confirm_hours_before']}h before"
-               f" · lockout {rd['lockout_days']}d" + (f" from <t:{int(fo.timestamp())}:f>" if fo else "") + f" · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items()) + " · weights " + " ".join(f"{k}={v}" for k, v in rd['weights'].items()))
+               f" · split {rd['split_policy']} · lockout {rd['lockout_days']}d" + (f" from <t:{int(fo.timestamp())}:f>" if fo else "") + f" · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items()) + " · weights " + " ".join(f"{k}={v}" for k, v in rd['weights'].items()))
         await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff + (f"\n{rd['notes']}" if rd.get("notes") else ""), ephemeral=True)
 
     @config.command(name="about", description="Owner: one-paragraph public blurb for the static guide ('About the guild')")

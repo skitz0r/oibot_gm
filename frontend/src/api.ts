@@ -56,6 +56,7 @@ export interface Sheet {
   timeline?: { nudge: string; lock: string; confirm: string };
   signups?: Signup[]; not_answered?: Seat[]; absences?: { display_name: string; start: string; end: string; reason: string | null; signed: boolean }[]; double_booked?: string[];
   needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean;
+  split?: { strategy: string; policy: string; runs: number };
   confirmations?: Confirmation[];
   fill_asks?: { display_name: string; kind: string; character: string; spec: string; role: string; reason: string; answer: string | null }[];
   callouts?: { display_name: string; hours_before: number; late: boolean }[]; log?: string[];
@@ -67,10 +68,11 @@ export interface RaidRuns {
 export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; tz: string }
 export interface RaidRule {
   id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; comp: Record<string, { min?: number; max?: number }>;
-  slots: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; weights: Record<string, number>;
+  slots: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; weights: Record<string, number>; split_policy: string;
   overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; live: number;
 }
-export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[] }
+export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[] }
+export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number }
 export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: { roster: string; answer: string | null }[] }
 export interface Members { rows: MemberRow[]; members: number; tz: string }
 export interface Ops { head: string; push: boolean; llm: string; feed: string; up: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
