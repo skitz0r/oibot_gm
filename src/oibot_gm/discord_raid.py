@@ -153,15 +153,17 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
             return
         chars = m.active()
         if len(chars) > 1 and self.status in ("in", "sub"):
+            # one press per character: no default to second-guess
             view = discord.ui.View(timeout=120)
-            sel = discord.ui.Select(placeholder="Which character?", options=[discord.SelectOption(label=f"{c.label} · {c.cls} {c.spec}" + (" · main" if c.is_main else ""), value=c.label, default=c.is_main) for c in chars[:25]])
+            for c in chars[:5]:
+                btn = discord.ui.Button(label=f"{c.label} · {c.cls} {c.spec}"[:80], style=discord.ButtonStyle.success if c.is_main else discord.ButtonStyle.secondary, emoji=bot.ico("class", c.cls) or None)
 
-            async def pick(i: discord.Interaction):
-                await bot.apply_signup(i, reg, rs, ev, m, sel.values[0], self.status)
+                async def pick(i: discord.Interaction, label=c.label):
+                    await bot.apply_signup(i, reg, rs, ev, m, label, self.status)
 
-            sel.callback = pick
-            view.add_item(sel)
-            await interaction.response.send_message("Which character?", view=view, ephemeral=True)
+                btn.callback = pick
+                view.add_item(btn)
+            await interaction.response.send_message(f"**{rc.LABELS[self.status]}** as which character?", view=view, ephemeral=True)
             return
         await bot.apply_signup(interaction, reg, rs, ev, m, None, self.status)
 
