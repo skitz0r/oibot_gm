@@ -1084,7 +1084,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @app_commands.autocomplete(raid=instance_autocomplete)
     @app_commands.choices(split_policy=[app_commands.Choice(name=x, value=x) for x in ("balanced", "first", "rotation")])
     @app_commands.describe(slots="recurring run times, e.g. 'Tue 19:30, Thu 20:00' ('none' clears)", split_policy="how to split when more join than one run seats", signup_lead_hours="sheet opens this many hours before the slot", lock_hours_before="roster locks this many hours before", confirm_hours_before="unanswered confirmations expire this many hours before", weights="rank=3 main=2 sat_out=2 signup_order=1")
-    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, split_policy: app_commands.Choice[str] | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
+    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, split_policy: app_commands.Choice[str] | None = None, nudge: bool | None = None, nudge_hours_before: float | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -1098,7 +1098,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 msg = []
                 if slots is not None:
                     msg.append(reg.set_raid_override(raid, "slots", "" if slots.strip().lower() in ("none", "clear", "-") else slots, interaction.user.display_name))
-                for field, val in (("split_policy", split_policy.value if split_policy else None), ("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
+                for field, val in (("split_policy", split_policy.value if split_policy else None), ("nudge", nudge), ("nudge_hours_before", nudge_hours_before), ("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
                     if val is not None:
                         msg.append(reg.set_raid_override(raid, field, val, interaction.user.display_name))
                 for part in (weights or "").replace(",", " ").split():
@@ -1250,11 +1250,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.defer(ephemeral=True)
         start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
         rs = interaction.client.raids.store(reg)
-        ev = rc.open_run(reg, rs, raid, start, by=interaction.user.display_name, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": dm_open})
+        ev = rc.open_run(reg, rs, raid, start, by=interaction.user.display_name, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": dm_open, "test_by": interaction.user.id})
         channel = interaction.client.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else interaction.channel
         if not ev.message_id:
             await interaction.client.post_sheet(reg, rs, ev, channel)
-        await interaction.followup.send(f"🧪 Test run {ev.key} open in {channel.mention}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before. Next: `/gm test answer` and watch the roster channel for the puppets' DMs.", ephemeral=True)
+        await interaction.followup.send(f"🧪 Test run {ev.key} open in {channel.mention}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before. Next: `/gm test answer`; the puppets' DMs arrive in *your* DMs with their name on them.", ephemeral=True)
         await ops.emit(reg.config, "warn", f"test bench: {interaction.user.display_name} opened test run {ev.key} (lock in {start_in - lock_in} min)")
 
     @test.command(name="answer", description="Officer: test members answer a sheet — a random mix (join/bench/out counts) or one member")

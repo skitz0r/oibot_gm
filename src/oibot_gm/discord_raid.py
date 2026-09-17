@@ -106,7 +106,7 @@ def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico, rs=None) -> tu
     e.set_image(url="attachment://health.png")
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
-        e.add_field(name="Missing buffs", value=" ".join(f"{ico('buff', b['id'])}" for b in missing) + "\n" + ", ".join(b["name"] for b in missing)[:900], inline=False)
+        e.add_field(name="Nobody brings", value=" ".join(f"{ico('buff', b['id'])}" for b in missing)[:900], inline=False)
     if rs is not None:
         busy = rc.conflicts(rs, ev)
         double = [f"{reg.members[u].display_name} ({k})" for u, k in busy.items() if u in reg.members and str(u) in ev.signups and ev.signups[str(u)].status == "in"]
@@ -269,11 +269,13 @@ class RaidMixin:
         """DM a member — or, for a test member, post the same message (and buttons) in the roster channel so an
         officer can answer on their behalf. Returns True when something was delivered."""
         if getattr(m, "test", False):
-            ch = self.officer_channel(reg)
-            if not ch:
+            # a puppet's DM goes to whoever is running the test (else the owner), with the puppet's name on it
+            tester = next((t.get("test_by") for t in reg.config.rosters if t.get("test") and t.get("test_by")), None) or reg.config.owner_discord_id
+            if not tester:
                 return False
             try:
-                await ch.send(f"🧪 **DM → {m.display_name}**\n{text}", view=view, allowed_mentions=discord.AllowedMentions.none())
+                user = await self.fetch_user(int(tester))
+                await user.send(f"🧪 **{m.display_name}** would get:\n{text}", view=view)
                 return True
             except Exception:  # noqa: BLE001
                 return False
@@ -337,8 +339,9 @@ class RaidMixin:
 
     async def post_health(self, reg, rs, ev, channel, nudge: bool) -> None:
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-        embed, file = await asyncio.to_thread(health_card, reg, ev, team, self.ico, rs)
-        await channel.send(embed=embed, file=file)
+        if channel is not None:
+            embed, file = await asyncio.to_thread(health_card, reg, ev, team, self.ico, rs)
+            await channel.send(embed=embed, file=file)
         if nudge and rc.team_setting(team, "reminders") != "none":
             targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
             unix = int(ev.start.timestamp())
@@ -455,8 +458,9 @@ class RaidMixin:
 
     # ---- lock → roster(s) → confirmations
     def officer_channel(self, reg, ev=None):
+        """Where officer-facing posts go: the roster channel, else the ops channel, else nowhere (never the public sheet channel)."""
         cfg = reg.config
-        return (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(ev.channel_id) if ev and ev.channel_id else None) or (self.get_channel(cfg.signup_channel_id) if cfg.signup_channel_id else None)
+        return (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(cfg.ops_channel_id) if cfg.ops_channel_id else None)
 
     async def lock_run(self, reg, rs, ev, by: str = "scheduler") -> str:
         """Lock the sheet, build the roster(s) from the signups (pins honoured), show them on the sheet and in the
@@ -649,17 +653,19 @@ class RaidMixin:
                 if ev.state != "open" and ev.all_rosters:
                     gone = rc.expire_confirmations(reg, rs, ev)
                     if gone:
-                        await officer_ch.send(f"⌛ {ev.key}: no confirmation from {', '.join(gone)} — seats freed")
+                        if officer_ch:
+                            await officer_ch.send(f"⌛ {ev.key}: no confirmation from {', '.join(gone)} — seats freed")
                         await self.refresh_sheet(reg, ev)
                         await self.ops.emit(cfg, "warn", f"{ev.key}: confirmations expired for {len(gone)}")
                 if rc.team_setting(team, "autofill") and ev.fill_state in ("idle", "asking") and (ev.health_posted or ev.state != "open"):
                     sent, nd = await self.run_fill(reg, rs, ev, team)
-                    if sent:
+                    if sent and officer_ch:
                         await officer_ch.send(f"🧩 {ev.key}: short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()) + " — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
                     elif ev.fill_state == "exhausted" and "fill exhausted" not in ev.log:
                         ev.log.append("fill exhausted")
                         rs.save(ev, "fill exhausted")
-                        await officer_ch.send(f"🧩 {ev.key}: nobody left to ask — short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()))
+                        if officer_ch:
+                            await officer_ch.send(f"🧩 {ev.key}: nobody left to ask — short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()))
                 if ev.state in ("locked", "proposed", "accepted") and now >= ev.start + timedelta(hours=6):
                     ev.state = "done"
                     rs.save(ev, "done")

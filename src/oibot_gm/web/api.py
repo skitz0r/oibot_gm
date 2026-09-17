@@ -477,7 +477,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
                         "slots": list(eff["slots"]), "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
-                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
+                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
@@ -503,6 +503,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 val = d.get(f)
                 if val not in (None, "") and str(val) != str(cur.get(f, "")):
                     done.append(v.reg.set_raid_override(inst, f, str(val), v.name))
+            if "nudge" in d and d["nudge"] is not None and bool(d["nudge"]) != bool(cur.get("nudge", True)):
+                done.append(v.reg.set_raid_override(inst, "nudge", "true" if d["nudge"] else "false", v.name))
             for k, val in (d.get("weights") or {}).items():
                 if k in RAID_WEIGHT_DEFAULTS and val not in (None, "") and int(val) != int(cur["weights"].get(k, 0)):
                     done.append(v.reg.set_raid_override(inst, f"weight_{k}", str(val), v.name))

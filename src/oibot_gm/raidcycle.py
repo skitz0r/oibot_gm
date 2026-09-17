@@ -182,9 +182,11 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
     c = cutoffs or {}
     t = {"key": key, "name": f"{rd.get('name', instance)} {start.strftime('%a %d %b %H:%M')}", "size": int(rd.get("size") or 20), "schedule": start.strftime("%a %H:%M"), "instance": instance,
-         "cutoff_soft_hours": c.get("soft", max(lock, min(48, lead / 2))), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24, "reminders": "dm", "open_dm": bool(c.get("open_dm", False)), "autofill": True, "ephemeral": True}
+         "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
+         "reminders": "dm" if c.get("nudge", rd.get("nudge", True)) else "none", "open_dm": bool(c.get("open_dm", False)), "autofill": True, "ephemeral": True}
     if cutoffs:
         t["test"] = True
+        t["test_by"] = c.get("test_by")
     reg.config.rosters.append(t)
     reg.save_config(f"run {key} ({t['name']}) created by {by}", notify=False)
     return t
@@ -365,7 +367,7 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
     pool_ids = {m.discord_id for m, _ in reg.roster_pool(team["key"])}
     subs = [(m, c) for s in benched_joiners + ev.by_status("sub") if (m := reg.members.get(s.discord_id)) and (c := next((c for c in m.active() if c.label == s.character), m.main))]
     unresponsive = [(m, c) for m, c in reg.roster_pool(team["key"]) if str(m.discord_id) not in ev.signups and c]
-    others = sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups and m.availability.get(team["key"]) != "out"], key=lambda mc: _rank_key(reg, mc[0]))
+    others = [] if team.get("test") else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups and m.availability.get(team["key"]) != "out"], key=lambda mc: _rank_key(reg, mc[0]))
     tiers = [("sub", subs), ("pool", unresponsive), ("other_roster", others)]
 
     # 1. role gaps
