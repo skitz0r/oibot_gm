@@ -593,14 +593,14 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v = await who(request, officer=True)
         reg = v.reg
         ms = sorted(reg.members.values(), key=lambda m: m.display_name.lower())
-        privs = await asyncio.gather(*(privilege(reg, m.discord_id) for m in ms))
+        privs = await asyncio.gather(*(privilege(reg, m.discord_id) if not m.test else asyncio.sleep(0, "test") for m in ms))
         today = reg.now_local().date().isoformat()
         rows = []
         for m, p in zip(ms, privs):
             chars = sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))
             if not chars:
                 continue
-            rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": p,
+            rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else p,
                          "characters": [char_json(reg, c) for c in chars], "absences": [absence_json(a) for a in m.upcoming_absences(today)],
                          "asks": [{"roster": a["roster"], "answer": a.get("answer")} for a in m.placement_asks[-3:] if a.get("answer") is None]})
         return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone}
@@ -683,11 +683,44 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v = await who(request, officer=True)
         import yaml
 
+        from ..discord_pool import CHANNEL_KINDS
         from ..policy import PolicyStore
 
-        ps = PolicyStore(bot.registries.store, v.reg.key)
-        return {"yaml": yaml.safe_dump(v.reg.config.model_dump(), sort_keys=False),
-                "docs": {d: {"text": ps.read(d), "compiled": bool(ps.compiled(d)), "summary": ((ps.compiled(d) or {}).get("summary") if isinstance(ps.compiled(d), dict) else None)} for d in ("loot", "comp", "persona")}}
+        reg, cfg = v.reg, v.reg.config
+        ps = PolicyStore(bot.registries.store, reg.key)
+        chans = {c["id"]: c["name"] for c in bot.guild_channels(reg)}
+        return {"yaml": yaml.safe_dump(cfg.model_dump(), sort_keys=False),
+                "docs": {d: {"text": ps.read(d), "compiled": bool(ps.compiled(d)), "summary": ((ps.compiled(d) or {}).get("summary") if isinstance(ps.compiled(d), dict) else None)} for d in ("loot", "comp", "persona")},
+                "channels": {k: {"id": str(getattr(cfg, attr)) if getattr(cfg, attr) else None, "name": chans.get(str(getattr(cfg, attr)))} for k, attr in CHANNEL_KINDS.items()},
+                "guild_channels": bot.guild_channels(reg), "guild_roles": bot.guild_roles(reg),
+                "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": list(cfg.officer_roles), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None},
+                "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner}
+
+    @app.post("/api/admin/config")
+    async def admin_config(request: Request):
+        """Owner: one setting at a time — channel:<kind> (channel id or null), timezone, ask_audience, about, officer_roles (list)."""
+        v, d = await body(request, officer=True)
+        if not v.owner:
+            return JSONResponse({"error": "Owner only."}, status_code=403)
+        field, value = d.get("field") or "", d.get("value")
+        try:
+            if field.startswith("channel:"):
+                msg = await bot.set_channel(v.reg, field[8:], int(value) if value else None, v.name)
+            elif field == "officer_roles":
+                roles = [str(r) for r in (value or []) if str(r).strip()]
+                v.reg.config.officer_roles = sorted(set(roles))
+                v.reg.save_config(f"officer roles: {v.reg.config.officer_roles} (by {v.name})")
+                msg = "officer roles: " + (", ".join(v.reg.config.officer_roles) or "(none; Manage Server only)")
+            elif field in ("timezone", "ask_audience", "about"):
+                from .. import configops
+
+                msg = await asyncio.to_thread(configops.apply, v.reg, configops.ConfigOp(op="set", path=field, value=str(value or "")), v.name, True)
+            else:
+                return JSONResponse({"error": f"unknown setting {field}"}, status_code=400)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        return {"message": msg}
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

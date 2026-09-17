@@ -51,7 +51,7 @@ def sheet_embed(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.Emb
     counts = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer", "melee", "ranged")}
     rd = reg.raid_def(ev.instance)
     size = int(team.get("size") or rd.get("size") or 20)
-    e = discord.Embed(title=f"{rd.get('name', ev.instance or 'raid')} · <t:{unix}:D>", colour=TEAL,
+    e = discord.Embed(title=f"{'🧪 TEST · ' if team.get('test') else ''}{rd.get('name', ev.instance or 'raid')} · <t:{unix}:D>", colour=0x8C97A8 if team.get("test") else TEAL,
                       description=f"<t:{unix}:t> server (<t:{unix}:R>) · **{len(ins)}** joined / {size} · {len(subs)} bench · " + " · ".join(f"{ico('role', r)} {n}" for r, n in counts.items()))
     if ev.state == "open" or not ev.all_rosters:
         by_cls: dict[str, list[str]] = {}
@@ -174,10 +174,10 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill:(?P<
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
-        if interaction.user.id != self.uid:
+        reg = bot.registries.for_interaction(interaction)
+        if not await bot.may_answer_for(interaction, reg, self.uid):
             await interaction.response.send_message("That question was for someone else.", ephemeral=True)
             return
-        reg = bot.registries.for_interaction(interaction)
         rs = bot.raids.store(reg) if reg else None
         ev = rs.events.get(self.key) if rs else None
         if not ev or ev.state in ("done", "cancelled"):
@@ -208,12 +208,12 @@ class PlaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"place:(?
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
-        if interaction.user.id != self.uid:
-            await interaction.response.send_message("That question was for someone else.", ephemeral=True)
-            return
         reg = bot.registries.for_interaction(interaction)
         if not reg:
             await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        if not await bot.may_answer_for(interaction, reg, self.uid):
+            await interaction.response.send_message("That question was for someone else.", ephemeral=True)
             return
         try:
             line = reg.answer_placement(self.uid, self.roster, self.answer == "yes", interaction.user.display_name)
@@ -252,6 +252,32 @@ def sheet_view(key: str) -> discord.ui.View:
 
 class RaidMixin:
     """Methods the bot needs; mixed into OibotGM."""
+
+    async def may_answer_for(self, interaction: discord.Interaction, reg, uid: int) -> bool:
+        """The person asked — or an officer answering for a test member (the test bench's puppets)."""
+        if interaction.user.id == uid:
+            return True
+        m = reg.members.get(uid) if reg else None
+        return bool(m and getattr(m, "test", False) and await self.is_officer_anywhere(reg, interaction.user.id))
+
+    async def send_member_dm(self, reg, m, text: str, view=None) -> bool:
+        """DM a member — or, for a test member, post the same message (and buttons) in the roster channel so an
+        officer can answer on their behalf. Returns True when something was delivered."""
+        if getattr(m, "test", False):
+            ch = self.officer_channel(reg)
+            if not ch:
+                return False
+            try:
+                await ch.send(f"🧪 **DM → {m.display_name}**\n{text}", view=view, allowed_mentions=discord.AllowedMentions.none())
+                return True
+            except Exception:  # noqa: BLE001
+                return False
+        try:
+            user = await self.fetch_user(m.discord_id)
+            await user.send(text, view=view)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     async def apply_signup(self, interaction: discord.Interaction, reg, rs, ev, m, character, status):
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
@@ -298,12 +324,8 @@ class RaidMixin:
                 continue
             s = ev.signups.get(str(m.discord_id))
             status = f"You're pre-filled as **{rc.LABELS.get(s.status, s.status)}** on {s.character}" if s else "You haven't answered yet"
-            try:
-                user = await self.fetch_user(m.discord_id)
-                await user.send(f"**{reg.config.name} · {team.get('name', ev.team)}** <t:{unix}:F> (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else ""), view=sheet_view(ev.key))
+            if await self.send_member_dm(reg, m, f"**{reg.config.name} · {team.get('name', ev.team)}** <t:{unix}:F> (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else ""), sheet_view(ev.key)):
                 sent += 1
-            except Exception:  # noqa: BLE001
-                pass
         ev.log.append(f"open DMs sent to {sent}")
         rs.save(ev, f"open DMs {sent}")
         return sent
@@ -316,12 +338,8 @@ class RaidMixin:
             targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
             unix = int(ev.start.timestamp())
             for m in targets:
-                try:
-                    user = await self.fetch_user(m.discord_id)
-                    await user.send(f"{reg.config.name}: the **{team.get('name', ev.team)}** sheet for <t:{unix}:F> is still waiting for you — Join, Bench or No thanks in <#{ev.channel_id}>.")
+                if await self.send_member_dm(reg, m, f"{reg.config.name}: the **{team.get('name', ev.team)}** sheet for <t:{unix}:F> is still waiting for you — Join, Bench or No thanks in <#{ev.channel_id}>."):
                     ev.nudged.append(m.discord_id)
-                except Exception:  # noqa: BLE001
-                    pass
             if targets:
                 rs.save(ev, f"nudged {len(targets)}")
         ev.health_posted = True
@@ -349,12 +367,11 @@ class RaidMixin:
                 "alt": f"could you bring your alt **{ask.character}** ({ask.spec}) instead?",
             }[ask.kind]
             text = f"**{name}** <t:{unix}:F> (<t:{unix}:R>) is {ask.reason} — {what}" + (f"\nSheet: <#{ev.channel_id}>" if ev.channel_id else "")
-            try:
-                user = await self.fetch_user(ask.discord_id)
-                await user.send(text, view=fill_view(ev.key, ask.discord_id))
+            m = reg.members.get(ask.discord_id)
+            if m and await self.send_member_dm(reg, m, text, fill_view(ev.key, ask.discord_id)):
                 ev.fill_asks.append(ask)
                 sent.append(ask)
-            except Exception:  # noqa: BLE001
+            else:
                 ask.answer, ask.answered_at = "expired", rc.now()
                 ev.fill_asks.append(ask)
         if sent:
@@ -487,12 +504,7 @@ class RaidMixin:
         rd = reg.raid_def(ev.instance)
         text = (f"**{reg.config.name} · {rd.get('name', ev.instance)}** <t:{unix}:F> (<t:{unix}:R>): you're seated" + (f" in roster {roster_i + 1}" if len(ev.all_rosters) > 1 else "") +
                 f", group {group_i + 1}, as **{sg.character}** ({sg.spec}, {sg.role}).\nConfirm to keep the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:f> counts as out.")
-        try:
-            user = await self.fetch_user(m.discord_id)
-            await user.send(text, view=place_view(ev.team, m.discord_id))
-            return True
-        except Exception:  # noqa: BLE001
-            return False
+        return await self.send_member_dm(reg, m, text, place_view(ev.team, m.discord_id))
 
     async def send_confirmations(self, reg, rs, ev, team, by: str) -> int:
         sent = 0

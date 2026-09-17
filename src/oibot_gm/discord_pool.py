@@ -136,6 +136,8 @@ class PoolMixin:
     def _pool_changed(self, reg: Registry, kind: str, lines: list[str]) -> None:
         if not reg.config.analytics_channel_id:
             return
+        if reg.test_members() and not any("test bench" in l for l in lines):
+            return  # the test bench is running: keep the analytics cards honest until /gm test clear
         if kind == "member":
             self.loop.create_task(self.post_pool_log(reg, lines))
         elif not any(l.startswith(("roster", "rosters", "team", "raid", "analytics", "aura")) for l in lines):
@@ -342,3 +344,74 @@ class AbsencesMixin:
                 pass
         await self.refresh_absences_card(reg)
         await self.ops.emit(reg.config, "info", f"{m.display_name} absent {span}" + (f" — {a.reason}" if a.reason else "") + (f" (by {by})" if by != m.display_name else "") + (f" · sheets: {', '.join(touched)}" if touched else ""))
+
+
+# ---------------------------------------------------------------- setup from the web + test bench
+
+CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_id", "signup": "signup_channel_id", "roster": "roster_channel_id",
+                 "registration": "registration_channel_id", "analytics": "analytics_channel_id", "absences": "absences_channel_id"}
+
+
+class SetupMixin:
+    async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str) -> str:
+        """The web's version of /gm config <kind>-channel: sets the id and does what the command does (post the
+        registration or absences card, refresh the analytics cards)."""
+        attr = CHANNEL_KINDS.get(kind)
+        if not attr:
+            raise ValueError(f"unknown channel kind {kind}")
+        ch = self.get_channel(channel_id) if channel_id else None
+        if channel_id and (ch is None or not isinstance(ch, discord.TextChannel)):
+            raise ValueError("that channel isn't a text channel I can see")
+        if not ch:
+            setattr(reg.config, attr, None)
+            if kind == "registration":
+                reg.config.registration_message_id = None
+            if kind == "absences":
+                reg.config.absences_message_id = None
+            if kind == "analytics":
+                reg.config.analytics_message_ids = {}
+            reg.save_config(f"{kind} channel cleared (by {by})")
+            return f"{kind} channel cleared"
+        if kind == "registration":
+            note = await self.post_registration_card(reg, ch, by)
+            return f"registration card posted in #{ch.name}" + (f" · {note}" if note else "")
+        if kind == "absences":
+            await self.post_absences_card(reg, ch, by)
+            return f"absence card posted in #{ch.name}"
+        if kind == "analytics":
+            if reg.config.analytics_channel_id != ch.id:
+                reg.config.analytics_channel_id, reg.config.analytics_message_ids = ch.id, {}
+                reg.save_config(f"analytics channel → #{ch.name} (by {by})", notify=False)
+            msgs = await self.refresh_pool(reg)
+            return f"{len(msgs)} analytics card(s) posted in #{ch.name}"
+        setattr(reg.config, attr, ch.id)
+        reg.save_config(f"{kind} channel → #{ch.name} (by {by})")
+        return f"{kind} channel → #{ch.name}"
+
+    def guild_channels(self, reg: Registry) -> list[dict]:
+        g = self.get_guild(reg.config.discord_guild_id)
+        if not g:
+            return []
+        return [{"id": str(c.id), "name": c.name, "category": c.category.name if c.category else None} for c in sorted(g.text_channels, key=lambda c: (c.category.position if c.category else -1, c.position))]
+
+    def guild_roles(self, reg: Registry) -> list[str]:
+        g = self.get_guild(reg.config.discord_guild_id)
+        return [r.name for r in sorted(g.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if g else []
+
+    async def test_bench_clear(self, reg: Registry, by: str) -> str:
+        """Cancel test runs, remove test members and their run rosters."""
+        from . import raidcycle as rc  # noqa: F401
+
+        rs = self.raids.store(reg)
+        cancelled = []
+        for ev in rs.live():
+            t = reg.config.roster(ev.team) or {}
+            if t.get("test"):
+                ev.state = "cancelled"
+                ev.log.append(f"test bench cleared by {by}")
+                rs.save(ev, "cancelled (test)")
+                await self.refresh_sheet(reg, ev)
+                cancelled.append(ev.key)
+        gone = await asyncio.to_thread(reg.clear_test_members, by)
+        await self.cleanup_ephemeral(reg, rs)
+        return f"{gone} test member(s) removed, {len(cancelled)} test run(s) cancelled" + (f" ({', '.join(cancelled)})" if cancelled else "")

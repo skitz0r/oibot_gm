@@ -7,7 +7,7 @@ import { GameIcon } from "../components/Icons";
 import { PageTitle, fail, ok } from "../components/Page";
 import { CLASS_COLOURS } from "../theme";
 
-const PRIV: Record<string, string> = { owner: "yellow", officer: "teal", member: "gray", outside: "red" };
+const PRIV: Record<string, string> = { owner: "yellow", officer: "teal", member: "gray", outside: "red", test: "violet" };
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; main: boolean; named: boolean; isNew?: boolean };
 type MemberDraft = { characters: Draft[]; deletes: string[] };

@@ -34,7 +34,7 @@ from .discord_policy import PolicyContext, handle_change, register_policy_comman
 from .discord_help import GuideSelect, HelpMixin, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
-from .discord_pool import AbsenceButton, AbsencesMixin
+from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
 from .discord_raid import FillButton, PlaceButton, RaidContext, RaidMixin, SignupButton, register_raid_commands
 from .discord_registry import Guilds, PlanButton, RegisterButton, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
@@ -673,7 +673,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, HelpMixin, discord.Client):
+class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, discord.Client):
     ico = staticmethod(ico)
 
     def __init__(self, ctx: GuildContext, test_guild: int | None):

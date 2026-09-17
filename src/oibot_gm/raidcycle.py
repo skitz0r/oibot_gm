@@ -171,23 +171,27 @@ def slot_starts(reg: Registry, instance: str, now: datetime, horizon_hours: floa
     return sorted(out, key=lambda x: x[1])
 
 
-def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler") -> dict:
-    """The ephemeral roster that carries one run's settings (size, cutoffs from the raid's cadence); created once."""
+def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None) -> dict:
+    """The ephemeral roster that carries one run's settings (size, cutoffs from the raid's cadence); created once.
+    `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test runs compress it to minutes)."""
     key = run_key(instance, start)
     t = reg.config.roster(key)
     if t:
         return t
     rd = reg.raid_def(instance)
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
+    c = cutoffs or {}
     t = {"key": key, "name": f"{rd.get('name', instance)} {start.strftime('%a %d %b %H:%M')}", "size": int(rd.get("size") or 20), "schedule": start.strftime("%a %H:%M"), "instance": instance,
-         "cutoff_soft_hours": max(lock, min(48, lead / 2)), "cutoff_hard_hours": lock, "confirm_hours": confirm, "open_days_before": lead / 24, "reminders": "dm", "open_dm": False, "autofill": True, "ephemeral": True}
+         "cutoff_soft_hours": c.get("soft", max(lock, min(48, lead / 2))), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24, "reminders": "dm", "open_dm": bool(c.get("open_dm", False)), "autofill": True, "ephemeral": True}
+    if cutoffs:
+        t["test"] = True
     reg.config.rosters.append(t)
     reg.save_config(f"run {key} ({t['name']}) created by {by}", notify=False)
     return t
 
 
-def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler") -> "RaidEvent":
-    return open_event(reg, rs, ensure_run(reg, instance, start, by), start)
+def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None) -> "RaidEvent":
+    return open_event(reg, rs, ensure_run(reg, instance, start, by, cutoffs), start)
 
 
 # ---------------------------------------------------------------- events on the store

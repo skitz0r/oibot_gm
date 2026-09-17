@@ -174,7 +174,9 @@ returns to the game defaults.
 
 `/gm config owner` (first claim needs the Discord server owner or Manage Server), then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
-`signup-channel`, `absences-channel`, `applications-channel`, `officer-role`, `timezone`, and per raid
+`signup-channel`, `absences-channel`, `applications-channel`, `officer-role`, `timezone` — or all of these on
+the site's **Config** page (channel pickers per function, officer roles, timezone, who may ask the bot,
+the about text; changing a channel posts its card the same way the command does) — and per raid
 `/gm config raid raid:<id> slots:'Tue 19:30, Thu 20:00' signup_lead_hours: lock_hours_before: confirm_hours_before:`
 (also weights, first_open, lockout, duration, comp, notes). Nothing opens until a raid has slots.
 

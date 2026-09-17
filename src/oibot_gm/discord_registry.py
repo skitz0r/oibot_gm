@@ -1208,6 +1208,109 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.add_field(name="Recent ops", value="\n".join(f"`{t}` {LEVEL[l]} {x}"[:120] for t, l, x in ops.recent[-8:])[:1000], inline=False)
         await interaction.response.send_message(embed=e, ephemeral=True)
 
+    # ---------------- /gm test: seed puppet members and rehearse the whole cycle in Discord within the hour
+    test = app_commands.Group(name="test", description="Officers: test bench — seed fake members, open a compressed run, answer for them", parent=gm)
+
+    async def live_run_autocomplete(interaction: discord.Interaction, current: str):
+        reg = guilds.for_interaction(interaction)
+        live = interaction.client.raids.store(reg).live() if reg else []
+        return [app_commands.Choice(name=f"{e.team} · {e.state}"[:100], value=e.team) for e in live if current.lower() in e.team.lower()][:25]
+
+    async def test_member_autocomplete(interaction: discord.Interaction, current: str):
+        reg = guilds.for_interaction(interaction)
+        return [app_commands.Choice(name=m.display_name, value=str(m.discord_id)) for m in (reg.test_members() if reg else []) if current.lower() in m.display_name.lower()][:25]
+
+    @test.command(name="seed", description="Officer: create N test members (fake Discord ids, realistic classes, ranks); idempotent")
+    async def test_seed(interaction: discord.Interaction, count: int = 20):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        await interaction.response.defer(ephemeral=True)
+        made = await asyncio.to_thread(reg.seed_test_members, count, interaction.user.display_name)
+        total = len(reg.test_members())
+        await interaction.followup.send(f"🧪 {len(made)} test member(s) created, {total} in total: " + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30]) + "\nAnalytics cards pause until `/gm test clear`.", ephemeral=True)
+        await ops.emit(reg.config, "warn", f"test bench: {len(made)} test members seeded by {interaction.user.display_name} ({total} total)")
+
+    @test.command(name="run", description="Officer: open a compressed test run now (minutes until start, lock and confirm deadlines in minutes)")
+    @app_commands.autocomplete(raid=instance_autocomplete)
+    @app_commands.describe(start_in="minutes until the run starts", lock_in="minutes before start the roster locks", confirm_in="minutes before start confirmations expire", nudge_in="minutes before start the nudge goes out", dm_open="DM everyone (puppets in the roster channel) when the sheet opens")
+    async def test_run(interaction: discord.Interaction, raid: str, start_in: int = 40, lock_in: int = 25, confirm_in: int = 15, nudge_in: int = 32, dm_open: bool = False):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        if raid not in reg.profile.raids:
+            await interaction.response.send_message(f"Unknown raid. Options: {', '.join(reg.profile.raids)}", ephemeral=True)
+            return
+        if not (start_in > lock_in > confirm_in >= 0) or nudge_in <= lock_in:
+            await interaction.response.send_message("Need start_in > nudge_in > lock_in > confirm_in ≥ 0 (all minutes).", ephemeral=True)
+            return
+        from datetime import timedelta
+        from . import raidcycle as rc
+
+        await interaction.response.defer(ephemeral=True)
+        start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
+        rs = interaction.client.raids.store(reg)
+        ev = rc.open_run(reg, rs, raid, start, by=interaction.user.display_name, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": dm_open})
+        channel = interaction.client.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else interaction.channel
+        if not ev.message_id:
+            await interaction.client.post_sheet(reg, rs, ev, channel)
+        await interaction.followup.send(f"🧪 Test run {ev.key} open in {channel.mention}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before. Next: `/gm test answer` and watch the roster channel for the puppets' DMs.", ephemeral=True)
+        await ops.emit(reg.config, "warn", f"test bench: {interaction.user.display_name} opened test run {ev.key} (lock in {start_in - lock_in} min)")
+
+    @test.command(name="answer", description="Officer: test members answer a sheet — a random mix (join/bench/out counts) or one member")
+    @app_commands.autocomplete(run=live_run_autocomplete, member=test_member_autocomplete)
+    @app_commands.choices(status=[app_commands.Choice(name=n, value=v) for v, n in (("in", "Join"), ("sub", "Bench"), ("out", "No thanks"))])
+    async def test_answer(interaction: discord.Interaction, run: str | None = None, join: int = 0, bench: int = 0, out: int = 0, member: str | None = None, status: app_commands.Choice[str] | None = None):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        import random
+
+        from . import raidcycle as rc
+
+        rs = interaction.client.raids.store(reg)
+        ev = rs.for_team(run) if run else next(iter(rs.live()), None)
+        if not ev:
+            await interaction.response.send_message("No live run.", ephemeral=True)
+            return
+        team = reg.config.roster(ev.team) or {"key": ev.team, "size": 20}
+        await interaction.response.defer(ephemeral=True)
+        done = []
+        if member and status:
+            m = reg.members.get(int(member))
+            if not m or not m.test:
+                await interaction.followup.send("Pick a test member.", ephemeral=True)
+                return
+            if ev.state != "open" and status.value == "out" and ev.seat_of(m.display_name):
+                await interaction.client.drop_seated(reg, rs, ev, team, m, "callout (test)", None)
+                done.append(f"{m.display_name} called out")
+            else:
+                s = rc.set_signup(reg, rs, ev, m, None, status.value, source="test")
+                done.append(f"{m.display_name} {rc.LABELS[s.status]}")
+        else:
+            pool = [m for m in reg.test_members() if str(m.discord_id) not in ev.signups]
+            random.shuffle(pool)
+            for st, n in (("in", join), ("sub", bench), ("out", out)):
+                for _ in range(n):
+                    if not pool:
+                        break
+                    m = pool.pop()
+                    rc.set_signup(reg, rs, ev, m, None, st, source="test")
+                    done.append(f"{m.display_name} {rc.LABELS[st]}")
+        await interaction.client.refresh_sheet(reg, ev)
+        await interaction.followup.send(("🧪 " + "; ".join(done)) if done else "Nobody left to answer (seed more, or they've all answered).", ephemeral=True)
+        await ops.emit(reg.config, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {interaction.user.display_name}")
+
+    @test.command(name="clear", description="Officer: end the test — cancel test runs, remove every test member and their placements")
+    async def test_clear(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if not reg:
+            return
+        await interaction.response.defer(ephemeral=True)
+        line = await interaction.client.test_bench_clear(reg, interaction.user.display_name)
+        await interaction.followup.send(f"🧪 {line}", ephemeral=True)
+        await ops.emit(reg.config, "warn", f"test bench: {line} (by {interaction.user.display_name})")
+
     tree.add_command(gm)
     # exported for other command modules
     register_commands.member_char_autocomplete = member_char_autocomplete  # type: ignore[attr-defined]

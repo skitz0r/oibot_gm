@@ -75,6 +75,7 @@ class Member(BaseModel):
     week: list[dict] = Field(default_factory=list)  # weekly availability grid: {day 0-6 (Mon=0), start, end (minutes), level preferred|available}; times not covered = unavailable
     teams: list[str] = Field(default_factory=list)  # officer-curated team membership (the default weekly roster)
     dm_opt_out: bool = False
+    test: bool = False  # seeded by /gm test: the bot puppets them (DMs go to the roster channel; officers answer for them)
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
 
@@ -738,6 +739,53 @@ class Registry:
             raise RegistryError(f"unknown raid field {field}")
         self.save_config(f"raid {instance} {field} → {value} (by {by})")
         return f"{instance}: {field} = {value}"
+
+    # ---- test bench: fake members the bot puppets so the whole cycle can be rehearsed in Discord
+    TEST_BASE = 900_000_000_000_000_000  # fake Discord ids start here (far above any real snowflake in use)
+    TEST_NAMES = ["Ashvane", "Brightmoor", "Cinderfall", "Duskbane", "Emberlyn", "Fenwick", "Glimmer", "Hollowell", "Ironbell", "Juniper", "Kestrel", "Lorath", "Marrow", "Nightsong", "Oakenshield", "Pemberly", "Quillon", "Rookwood", "Sablewind", "Thornfield", "Umbra", "Valeria", "Wrenna", "Xanthe", "Yarrow", "Zephyrine", "Alderic", "Briarwood", "Coalbrook", "Dunmore"]
+    TEST_MIX = [("Warrior", "Protection", "core"), ("Druid", "Guardian", "raider"), ("Paladin", "Holy", "raider"), ("Priest", "Holy", "trial"), ("Shaman", "Restoration", "trial"), ("Druid", "Restoration", "trial"), ("Priest", "Discipline", "core"),
+                ("Rogue", "Combat", "core"), ("Warrior", "Fury", "raider"), ("Shaman", "Enhancement", "raider"), ("Paladin", "Retribution", "trial"), ("Druid", "Feral", "trial"), ("Hunter", "Marksmanship", "raider"), ("Hunter", "BeastMastery", "trial"),
+                ("Mage", "Fire", "core"), ("Warlock", "Destruction", "raider"), ("Shaman", "Elemental", "trial"), ("Druid", "Balance", "trial"), ("Priest", "Shadow", "raider"), ("Mage", "Frost", "trial"), ("Warlock", "Affliction", "trial"), ("Rogue", "Assassination", "trial"), ("Warrior", "Protection", "trial"), ("Paladin", "Protection", "raider"), ("Priest", "Holy", "trial"), ("Mage", "Arcane", "trial"), ("Hunter", "Survival", "trial"), ("Warlock", "Demonology", "trial"), ("Rogue", "Subtlety", "trial"), ("Shaman", "Restoration", "raider")]
+
+    def test_members(self) -> list[Member]:
+        return [m for m in self.members.values() if m.test]
+
+    def seed_test_members(self, count: int, by: str) -> list[Member]:
+        """Create `count` test members with a realistic class/spec/rank mix (idempotent: existing ones are kept)."""
+        count = max(1, min(count, len(self.TEST_NAMES)))
+        made = []
+        for i in range(count):
+            uid = self.TEST_BASE + i
+            if uid in self.members:
+                continue
+            name = self.TEST_NAMES[i]
+            cls, spec, rank = self.TEST_MIX[i % len(self.TEST_MIX)]
+            if spec not in self.profile.classes.get(cls, {}):
+                spec = next(iter(self.profile.classes[cls]))
+            m, c = self.add_character(uid, name, name, cls, spec, None, True)
+            m.test = True
+            c.rank = rank
+            c.confirmed_by = by
+            self.save(m, f"test member {name} seeded (by {by})")
+            made.append(m)
+        return made
+
+    def clear_test_members(self, by: str) -> int:
+        """Remove every test member (their placements go with them)."""
+        gone = 0
+        for m in list(self.members.values()):
+            if not m.test:
+                continue
+            path = self.store.root / self.key / "members" / f"{m.discord_id}.json"
+            del self.members[m.discord_id]
+            self._snap.pop(m.discord_id, None)
+            if path.exists():
+                path.unlink()
+                self.store.commit(f"{self.key}: test member {m.display_name} removed (by {by})")
+            gone += 1
+        if gone:
+            self._notify("member", [f"test bench: {gone} test members removed (by {by})"])
+        return gone
 
     # ---- auras: what the guild learns about the game's buffs (stacking families, scope, who benefits)
     BUFF_SCOPES = ("party", "raid", "class", "self")

@@ -44,7 +44,9 @@ src/oibot_gm/
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with the character
                        bank, and per raid: pool readiness, optimised groups, desired comp + change log (Registry.listeners, debounced);
-                       absences channel (AbsencesMixin: card + "I'll be away" modal → announce_absence → sheets updated)
+                       absences channel (AbsencesMixin: card + "I'll be away" modal → announce_absence → sheets updated);
+                       SetupMixin: set_channel (web Config page), guild_channels/roles, test_bench_clear. Test bench: Member.test puppets, /gm test …,
+                       RaidMixin.send_member_dm routes puppet DMs to the roster channel and may_answer_for lets officers press their buttons
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
   discord_help.py      /help (no LLM, by tier), /ask, @mention outside the officer channels and DMs → help_answer
