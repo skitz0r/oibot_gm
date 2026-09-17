@@ -1,0 +1,4 @@
+.board { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 62em) { .board { grid-template-columns: minmax(200px, 230px) minmax(0, 1fr); } }
+.groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+@media (max-width: 30em) { .groups { grid-template-columns: minmax(0, 1fr); } }

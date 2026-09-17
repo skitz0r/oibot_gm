@@ -468,41 +468,63 @@ class RaidMixin:
             await sig.send(f"🔒 **{team.get('name', ev.team)}** is locked: {sum(len(r.selected) for r in ev.all_rosters)} seated in {len(ev.all_rosters)} roster(s). Seated members: confirm in your DMs.")
         return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)"
 
-    async def send_confirmations(self, reg, rs, ev, team, by: str) -> int:
+    async def confirm_one(self, reg, ev, sg, roster_i: int, group_i: int, by: str) -> bool:
+        """Seat one signup on the run's roster and ask them to confirm by DM (auto-confirmed when DMs are off)."""
+        m = reg.members.get(sg.discord_id)
+        if not m:
+            return False
+        try:
+            reg.roster_add(m.discord_id, ev.team, by, sg.character)
+        except Exception:  # noqa: BLE001
+            pass
+        ask = reg.add_placement_ask(m.discord_id, ev.team, sg.character, by)
+        if m.dm_opt_out:
+            ask["answer"], ask["answered_at"] = "yes", rc.now()
+            reg.save(m, f"{m.display_name} auto-confirmed {ev.team} (DMs off)")
+            return False
         unix = int(ev.start.timestamp())
         confirm = datetime.fromisoformat(ev.confirm_by) if ev.confirm_by else ev.start
-        sent = 0
         rd = reg.raid_def(ev.instance)
+        text = (f"**{reg.config.name} · {rd.get('name', ev.instance)}** <t:{unix}:F> (<t:{unix}:R>): you're seated" + (f" in roster {roster_i + 1}" if len(ev.all_rosters) > 1 else "") +
+                f", group {group_i + 1}, as **{sg.character}** ({sg.spec}, {sg.role}).\nConfirm to keep the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:f> counts as out.")
+        try:
+            user = await self.fetch_user(m.discord_id)
+            await user.send(text, view=place_view(ev.team, m.discord_id))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    async def send_confirmations(self, reg, rs, ev, team, by: str) -> int:
+        sent = 0
         for i, r in enumerate(ev.all_rosters):
             for gi, g in enumerate(r.groups):
                 for n in g:
-                    p = next((x for x in r.selected if x.signup_name == n), None)
                     sg = next((s for s in ev.signups.values() if s.display_name == n), None)
-                    if not p or not sg:
-                        continue
-                    m = reg.members.get(sg.discord_id)
-                    if not m:
-                        continue
-                    try:
-                        reg.roster_add(m.discord_id, ev.team, by, sg.character)
-                    except Exception:  # noqa: BLE001
-                        pass
-                    ask = reg.add_placement_ask(m.discord_id, ev.team, sg.character, by)
-                    if m.dm_opt_out:
-                        ask["answer"], ask["answered_at"] = "yes", rc.now()
-                        reg.save(m, f"{m.display_name} auto-confirmed {ev.team} (DMs off)")
-                        continue
-                    text = (f"**{reg.config.name} · {rd.get('name', ev.instance)}** <t:{unix}:F> (<t:{unix}:R>): you're seated" + (f" in roster {i + 1}" if len(ev.all_rosters) > 1 else "") +
-                            f", group {gi + 1}, as **{sg.character}** ({sg.spec}, {p.role}).\nConfirm to keep the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:f> counts as out.")
-                    try:
-                        user = await self.fetch_user(m.discord_id)
-                        await user.send(text, view=place_view(ev.team, m.discord_id))
+                    if sg and await self.confirm_one(reg, ev, sg, i, gi, by):
                         sent += 1
-                    except Exception:  # noqa: BLE001
-                        pass
         ev.log.append(f"confirmation DMs sent to {sent}")
         rs.save(ev, f"confirmations {sent}")
         return sent
+
+    async def after_board_change(self, reg, rs, ev, team, added, removed: list[str], by: str) -> None:
+        """Officer edits on a locked board: substitutions get a confirmation DM, removals free the seat and ask the bench."""
+        for sg in added:
+            seat = ev.seat_of(sg.display_name)
+            gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if sg.display_name in g), 0) if seat else 0
+            await self.confirm_one(reg, ev, sg, seat[0] if seat else 0, gi, by)
+        for name in removed:
+            m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
+            if m and reg.on_roster(m, ev.team):
+                reg.roster_remove(m.discord_id, ev.team, by)
+        ch = self.officer_channel(reg, ev)
+        if ch and (added or removed):
+            await ch.send(f"✏️ {ev.key} board by {by}: " + (f"in {', '.join(s.display_name for s in added)} (asked to confirm)" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
+        await self.refresh_sheet(reg, ev)
+        if removed and rc.team_setting(team, "autofill"):
+            sent, nd = await self.run_fill(reg, rs, ev, team, by=by)
+            if sent and ch:
+                await ch.send(f"🧩 {ev.key}: asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+        await self.ops.emit(reg.config, "info", f"[web] {by} edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""))
 
     async def after_placement_answer(self, reg, uid: int, roster: str, yes: bool, line: str) -> None:
         cfg = reg.config

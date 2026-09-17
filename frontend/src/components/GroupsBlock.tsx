@@ -19,8 +19,9 @@ function AuraBadge({ a, missing, who }: { a: Aura; missing?: boolean; who?: stri
 }
 
 /** A run's groups with per-group aura coverage and raid-wide buff status. */
-export function GroupsBlock({ meta, sm }: { meta: Meta; sm: GroupSummary | null }) {
+export function GroupsBlock({ meta, sm, raidOnly }: { meta: Meta; sm: GroupSummary | null; raidOnly?: boolean }) {
   if (!sm) return null;
+  if (raidOnly) return <RaidWide sm={sm} />;
   return (
     <Box mt="sm">
       <Group gap="xs" mb="sm">
@@ -52,20 +53,28 @@ export function GroupsBlock({ meta, sm }: { meta: Meta; sm: GroupSummary | null 
           ))}
         </SimpleGrid>
       )}
-      <Group gap="xs" mt="sm">
-        <Text size="xs" c="dimmed">raid-wide:</Text>
+      <RaidWide sm={sm} />
+    </Box>
+  );
+}
+
+/** Raid-wide cast buffs as icons only: coloured when someone brings it, greyed with a red edge when nobody does. */
+export function RaidWide({ sm }: { sm: GroupSummary }) {
+  return (
+    <Box mt="sm">
+      <Group gap={4} align="center">
+        <Text size="xs" c="dimmed" mr={4}>raid-wide</Text>
         {sm.raid.map((b) => (
-          <Tooltip key={b.abbr} label={`${b.detail} · ${b.status}`}>
-            <Group gap={6} px={8} py={2} style={{ border: `1px solid ${OK[b.ok] || "var(--mantine-color-slate-5)"}`, borderRadius: 999, color: b.ok === "red" ? OK.red : undefined }}>
-              {b.art ? <Box component="img" src={`/img/icon/${b.art}.jpg`} alt="" style={{ width: 18, height: 18, borderRadius: 4, opacity: b.n ? 1 : 0.35, filter: b.n ? undefined : "grayscale(1)" }} />
-                : <Box style={{ minWidth: 26, textAlign: "center", padding: "1px 4px", borderRadius: 5, fontSize: 10, fontWeight: 700, color: "#14181F", background: b.n ? b.colour : "#3A4351" }}>{b.abbr.slice(0, 4)}</Box>}
-              <Text size="xs">{b.name} ×{b.n}</Text>
-            </Group>
+          <Tooltip key={b.abbr} label={`${b.name} ×${b.n} · ${b.detail} · ${b.status}`}>
+            {b.art ? (
+              <Box component="img" src={`/img/icon/${b.art}.jpg`} alt={b.abbr} style={{ width: 26, height: 26, borderRadius: 5, border: `2px solid ${b.n ? (OK[b.ok] || "transparent") : "var(--mantine-color-red-5)"}`, opacity: b.n ? 1 : 0.35, filter: b.n ? undefined : "grayscale(1)" }} />
+            ) : (
+              <Box style={{ minWidth: 30, textAlign: "center", padding: "2px 5px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: b.n ? "#14181F" : "var(--mantine-color-red-5)", background: b.n ? b.colour : "transparent", border: b.n ? undefined : "2px solid var(--mantine-color-red-5)" }}>{b.abbr}</Box>
+            )}
           </Tooltip>
         ))}
       </Group>
       {sm.unmet.length > 0 && <Text size="xs" c="yellow" mt={6}>nobody in this run brings: {sm.unmet.join(", ")}</Text>}
-      <Text size="xs" c="dimmed" mt={4}>{sm.assumptions.join(" · ")}</Text>
     </Box>
   );
 }

@@ -81,13 +81,21 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 2. **Nudge** — halfway to lock the officer channel gets a health card (headcount, tank/healer tiles with
    who could cover via offspec/alt, buff coverage, non-responders, double-booked members) and
    non-responders are nudged once by DM.
-3. **Officers shape the roster** (Rosters page, before lock): see every answer, build the **draft** the
-   solver would seat, **pin** someone to the roster or **keep them on the bench**, set anyone's answer,
-   swap characters. More Join answers than a raid needs → the solver builds a second (third…) roster for
-   the same slot while a full run with its tank/healer minimums is possible; the rest are bench.
-4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the draft becomes
+3. **Officers shape the roster** (Rosters page, before lock): the sheet shows every answer by class, Bench
+   and No thanks rows, absences that day, and the **board** — a bank of everyone who joined and the groups
+   of the run. Drag names from the bank into groups, between groups, or back to the bank; dropping on
+   someone swaps them. Every group shows its auras as you go (coloured = present, greyed with a red edge =
+   someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs
+   update too. **Auto-fill** lets the solver seat whoever is left in the bank around what you placed;
+   **Clear** empties the board. Whatever is on the board when the sheet locks is the roster, with the solver
+   filling any empty seats. More Join answers than a raid needs → a second (third…) roster for the same
+   slot appears on the board while a full run with its tank/healer minimums is possible.
+4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet shows groups and a confirmation tally; the officer channel gets the roster
    cards. Every seated member gets a DM: **Confirm** / **Can't make it**. The Me page shows the same ask.
+   After lock the board stays editable: moving people between groups changes nothing else; dragging
+   someone in from the bank is a substitution (they get the confirmation DM); dragging someone out frees
+   the seat and the bench is asked.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out and their seat is freed.
 6. **Fill** — whenever a seat frees (decline, callout, absence, missed confirmation), if `autofill` is on,

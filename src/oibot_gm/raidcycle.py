@@ -77,6 +77,7 @@ class RaidEvent(BaseModel):
     state: str = "open"  # open | locked | proposed | accepted | done | cancelled
     signups: dict[str, Signup] = Field(default_factory=dict)  # discord_id -> signup
     pins: dict[str, str] = Field(default_factory=dict)  # discord_id -> "in" | "out": officer decisions the solver must honour
+    layout: Optional[list[list[str]]] = None  # the officers' board before lock: groups (across rosters) of signup display names
     rosters: list[RosterResult] = Field(default_factory=list)  # after lock: one or more rosters for this slot (roster = rosters[0])
     locked_at: Optional[str] = None
     confirm_by: Optional[str] = None  # ISO: unanswered confirmations expire here
@@ -574,17 +575,26 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
     pin_in = tuple(by_uid[u] for u, v in ev.pins.items() if v == "in" and u in by_uid)
     pin_out = tuple(by_uid[u] for u, v in ev.pins.items() if v == "out" and u in by_uid)
     bonus = seat_bonus(reg, rs, ev, players)
+    n_groups = groups_per_roster(reg, size)
+    layout = [[n for n in g if n in names] for g in (ev.layout or [])]
+    boards = [layout[i:i + n_groups] for i in range(0, len(layout), n_groups)] if layout else []
+    placed_all = {n for g in layout for n in g}
     rosters: list[RosterResult] = []
     remaining = players
     while remaining:
+        i = len(rosters)
+        board = boards[i] if i < len(boards) else []
+        mine = {n: gi for gi, g in enumerate(board) for n in g}
+        elsewhere = {n for n in placed_all if n not in mine}
         pool_names = {p.signup_name for p in remaining}
         opts = solver.SolveOptions(
             time_limit_s=12,
             raid_size=size,
             keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
             keep_apart=tuple((resolve(a), resolve(b)) for a, b in cc["keep_apart"] if resolve(a) and resolve(b)),
-            force_in=tuple(x for x in list(pin_in) + [resolve(n) for n in cc["never_bench"]] if x and x in pool_names and x not in pin_out),
-            force_out=tuple(x for x in list(pin_out) + [resolve(n) for n in cc["always_bench"]] if x and x in pool_names),
+            force_in=tuple(x for x in list(pin_in) + list(mine) + [resolve(n) for n in cc["never_bench"]] if x and x in pool_names and x not in pin_out and x not in elsewhere),
+            force_out=tuple(x for x in list(pin_out) + list(elsewhere) + [resolve(n) for n in cc["always_bench"]] if x and x in pool_names and x not in mine),
+            pins={n: gi for n, gi in mine.items() if n in pool_names} or None,
             prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
             role_min=cc["role_min"] or {r: rb[r]["min"] for r in ("tank", "healer") if rb[r]["min"]} or None,
             role_max={r: rb[r]["max"] for r in ("tank", "healer") if rb[r].get("max")},
@@ -595,9 +605,11 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
         rosters.append(result)
         chosen = {p.signup_name for p in result.selected}
         remaining = [p for p in remaining if p.signup_name not in chosen and p.status == "signed" and p.signup_name not in pin_out]
-        if len(rosters) >= MAX_ROSTERS_PER_SLOT or len(remaining) < size:
+        if len(rosters) >= MAX_ROSTERS_PER_SLOT:
             break
-        if any(_capable(remaining, role, reg) < rb[role]["min"] for role in ("tank", "healer")):
+        if i + 1 < len(boards) and any(boards[i + 1]):
+            continue  # the officers laid out another roster; seat it too
+        if len(remaining) < size or any(_capable(remaining, role, reg) < rb[role]["min"] for role in ("tank", "healer")):
             break
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
@@ -607,6 +619,76 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
         ev.log.append("proposed " + " + ".join(str(len(r.selected)) for r in rosters) + f" in / {len(rosters[0].benched)} bench")
         rs.save(ev, "proposed")
     return players, rosters[0]
+
+
+# ---------------------------------------------------------------- the officers' board (bank + groups) before and after lock
+
+def groups_per_roster(reg: Registry, size: int) -> int:
+    return max(1, -(-size // int(reg.profile.comp_rules["group_size"])))
+
+
+def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: int) -> list[RosterResult]:
+    """RosterResults straight from a layout (no solver): one per `groups_per_roster` groups. Unplaced joiners are bench."""
+    players = {p.signup_name: p for p in players_for(reg, ev)}
+    n = groups_per_roster(reg, size)
+    boards = [layout[i:i + n] for i in range(0, max(len(layout), n), n)] or [[[] for _ in range(n)]]
+    placed = {m for g in layout for m in g}
+    out = []
+    for b in boards:
+        groups = [[m for m in g if m in players] for g in b] + [[] for _ in range(n - len(b))]
+        selected = [players[m] for g in groups for m in g]
+        counts = {r: sum(1 for p in selected if p.role == r) for r in ("tank", "healer", "melee", "ranged")}
+        out.append(RosterResult(selected=selected, benched=[], groups=groups, group_reports=[], objective=0, synergy_value=0, role_counts=counts, advisories=[]))
+    if out:
+        out[0].benched = [p for m, p in players.items() if m not in placed and p.status == "signed"]
+    return out
+
+
+def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[list[str]]:
+    """Solver fills whatever the officers left empty (their placements are fixed) and returns the full layout."""
+    trial = ev.model_copy(deep=True)
+    propose(reg, rs, trial, save=False)
+    return [list(g) for r in trial.all_rosters for g in r.groups]
+
+
+def apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]]) -> tuple[list[Signup], list[str]]:
+    """After lock the board is the roster: group moves are free; someone dragged in from the bench is a substitution
+    (returned so the caller asks them to confirm); someone dragged out has their seat freed."""
+    team = reg.config.team(ev.team) or {}
+    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+    n = groups_per_roster(reg, size)
+    before = {p.signup_name for p in ev.seated()}
+    after = {m for g in layout for m in g}
+    removed = [m for m in before if m not in after]
+    for m in removed:
+        free_seat(reg, rs, ev, m, "moved to bench")
+    players = {p.signup_name: p for p in players_for(reg, ev)}
+    added: list[Signup] = []
+    for i in range(max(len(ev.all_rosters), -(-len(layout) // n))):
+        groups = [[m for m in g if m in players] for g in layout[i * n:(i + 1) * n]] + [[] for _ in range(n - len(layout[i * n:(i + 1) * n]))]
+        if i >= len(ev.rosters):
+            ev.rosters.append(RosterResult(selected=[], benched=[], groups=groups, group_reports=[], objective=0, synergy_value=0, role_counts={}, advisories=[]))
+        r = ev.rosters[i]
+        r.groups = groups
+        want = [m for g in groups for m in g]
+        keep = {p.signup_name: p for p in r.selected if p.signup_name in want}
+        for m in want:
+            if m not in keep:
+                sg = next((s for s in ev.signups.values() if s.display_name == m), None)
+                if sg and m not in before:
+                    added.append(sg)
+                keep[m] = players[m]
+        r.selected = [keep[m] for m in want]
+        r.role_counts = {role: sum(1 for p in r.selected if p.role == role) for role in ("tank", "healer", "melee", "ranged")}
+    ev.rosters = [r for r in ev.rosters if r.selected or r is ev.rosters[0]]
+    ev.roster = ev.rosters[0]
+    seated = {p.signup_name for p in ev.seated()}
+    ev.rosters[0].benched = [p for m, p in players.items() if m not in seated and p.status == "signed"]
+    for sg in added:
+        sg.status, sg.source, sg.updated_at = "in", "officer", now()
+    ev.log.append("board: " + (f"+{', '.join(s.display_name for s in added)} " if added else "") + (f"-{', '.join(removed)}" if removed else "") or "board: groups moved")
+    rs.save(ev, "board updated")
+    return added, removed
 
 
 # ---------------------------------------------------------------- after lock: confirmations and freed seats

@@ -6,7 +6,6 @@ same Registry / raidcycle functions the Discord commands call. CSRF: every POST 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -94,7 +93,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             team = reg.config.team(ev.team) or {"key": ev.team}
             rd = reg.raid_def(team.get("instance")) if team.get("instance") else {}
             seat = ev.seat_of(m.display_name) if m and ev.state != "open" else None
-            sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": reg.local(ev.starts_at, "%a %d %b %H:%M"), "state": ev.state,
+            sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "state": ev.state,
                            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
                            "seated": bool(seat), "roster": (seat[0] + 1) if seat else None})
         primary, flex = reg.roles_of(m) if m else (None, [])
@@ -183,12 +182,25 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return f"DMs {'off' if m.dm_opt_out else 'on'}"
         return await run(request, go)
 
-    # ---- runs: the officer panel (sheets per raid, draft rosters, pins, lock, confirmations)
-    draft_cache: dict[str, tuple[str, dict]] = {}  # event key -> (signature, summary)
+    # ---- runs: the officer panel (sheets per raid, the board, lock, confirmations)
+    def t12(reg, value) -> str:
+        """'Wed 09 Dec 4:00 PM' in guild time (12-hour clock everywhere the site shows a run time)."""
+        return reg.local(value, "%a %d %b ") + clock12(reg, value)
 
-    def signature(ev) -> str:
-        raw = "|".join(sorted(f"{k}:{s.status}:{s.character}:{s.spec}" for k, s in ev.signups.items())) + "#" + "|".join(sorted(f"{k}={v}" for k, v in ev.pins.items()))
-        return hashlib.sha1(raw.encode()).hexdigest()[:12]
+    def clock12(reg, value) -> str:
+        t = reg.local(value, "%I:%M %p")
+        return t[1:] if t.startswith("0") else t
+
+    def rel(reg, value) -> str:
+        t = datetime.fromisoformat(str(value)) if not isinstance(value, datetime) else value
+        secs = (t - reg.now_local()).total_seconds()
+        if secs < -3600:
+            return "started"
+        if secs < 3600:
+            return f"in {max(1, int(secs // 60))} min"
+        if secs < 48 * 3600:
+            return f"in {int(secs // 3600)} h"
+        return f"in {int(secs // 86400)} days"
 
     def signup_json(s, pins: dict) -> dict:
         return {"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "offspec": s.offspec, "role": s.role, "status": s.status,
@@ -201,15 +213,24 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         except Exception:  # noqa: BLE001
             return comp_mod.groups_summary(reg, r.selected, None, None)
 
-    def rosters_json(reg, rosters, conf_rows) -> list[dict]:
+    def seat_json(p, conf: dict, uids: dict) -> dict:
+        c = conf.get(p.signup_name) or {}
+        return {"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role, "uid": c.get("uid") or uids.get(p.signup_name), "answer": c.get("answer")}
+
+    def board_json(reg, ev, rosters, conf_rows) -> dict:
+        """The bank + groups the officers drag on: one entry per roster, groups of seats, aura summary per roster."""
         conf = {c["display_name"]: c for c in conf_rows}
-        out = []
+        uids = {s.display_name: str(s.discord_id) for s in ev.signups.values()}
+        team = reg.config.team(ev.team) or {}
+        size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+        boards = []
         for i, r in enumerate(rosters):
-            out.append({"n": i + 1, "size": len(r.selected), "synergy": r.synergy_value, "advisories": list(r.advisories[:6]),
-                        "seats": [{"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role, "uid": (conf.get(p.signup_name) or {}).get("uid"),
-                                   "answer": (conf.get(p.signup_name) or {}).get("answer")} for p in r.selected],
-                        "summary": roster_summary(reg, r)})
-        return out
+            by = {p.signup_name: p for p in r.selected}
+            boards.append({"n": i + 1, "seated": len(r.selected), "synergy": r.synergy_value or None, "advisories": list(r.advisories[:6]),
+                           "groups": [[seat_json(by[m], conf, uids) for m in g if m in by] for g in r.groups], "summary": roster_summary(reg, r)})
+        bench = rosters[0].benched if rosters else []
+        return {"n_groups": rc.groups_per_roster(reg, size), "group_size": int(reg.profile.comp_rules["group_size"]), "size": size,
+                "bank": [seat_json(p, conf, uids) for p in bench], "rosters": boards}
 
     def ev_json(reg, rs, ev, full: bool = True) -> dict:
         t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
@@ -217,7 +238,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         rd = reg.raid_def(ev.instance)
         day = ev.start.astimezone(reg.tz).date().isoformat()
         base = {"key": ev.key, "run": ev.team, "name": t.get("name") or t["key"], "size": int(t.get("size") or 20), "instance": ev.instance, "raid": rd.get("name", ev.instance),
-                "starts_at": ev.starts_at, "when": reg.local(ev.starts_at, "%a %d %b %H:%M"), "state": ev.state, "live": live, "fill_state": ev.fill_state,
+                "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "rel": rel(reg, ev.start), "state": ev.state, "live": live, "fill_state": ev.fill_state,
                 "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "seated": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters)}
         if not full:
             return base
@@ -225,21 +246,18 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
         soft, hard, confirm = run_times(reg, ev, t)
         conf_rows = rc.confirmations(reg, ev) if ev.all_rosters else []
-        draft = draft_cache.get(ev.key)
-        sig = signature(ev)
+        board_rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], int(t.get("size") or 20))
         absences = [{"display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "signed": str(m.discord_id) in ev.signups}
                     for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
         busy = rc.conflicts(rs, ev) if live else {}
         return {**base,
-                "timeline": {"nudge": reg.local(soft, "%a %d %b %H:%M"), "lock": reg.local(hard, "%a %d %b %H:%M"), "confirm": reg.local(confirm, "%a %d %b %H:%M")},
+                "timeline": {"nudge": t12(reg, soft), "lock": t12(reg, hard), "confirm": clock12(reg, confirm) if confirm.date() == ev.start.astimezone(reg.tz).date() else t12(reg, confirm)},
                 "signups": [signup_json(s, ev.pins) for s in sorted(ev.signups.values(), key=lambda s: (rc.STATUSES.index(s.status) if s.status in rc.STATUSES else 9, s.updated_at))],
                 "not_answered": [{"uid": str(m.discord_id), "display_name": m.display_name, "character": m.main.label, "cls": m.main.cls, "spec": m.main.spec, "role": reg.profile.spec(m.main.cls, m.main.spec).role}
                                  for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups] if live else [],
                 "absences": absences, "double_booked": [reg.members[u].display_name for u in busy if u in reg.members],
                 "needs": rc.needs(reg, ev, t) if live else None,
-                "draft": (draft[1] if draft and draft[0] == sig else None) if ev.state == "open" else None, "draft_stale": bool(draft and draft[0] != sig) if ev.state == "open" else False,
-                "rosters": rosters_json(reg, ev.all_rosters, conf_rows) if ev.all_rosters else [],
-                "bench": [{"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role} for p in (ev.all_rosters[0].benched if ev.all_rosters else [])],
+                "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout),
                 "confirmations": conf_rows,
                 "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer} for a in ev.fill_asks],
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
@@ -255,7 +273,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             live = [ev_json(reg, rs, e) for e in evs if e.state not in ("done", "cancelled")]
             past = [ev_json(reg, rs, e, full=False) for e in reversed(evs) if e.state in ("done", "cancelled")][:8]
             fo = reg.first_open(rid)
-            upcoming = [{"slot": slot, "start": reg.local(start, "%a %d %b %H:%M"), "opens": reg.local(start - timedelta(hours=float(rd["signup_lead_hours"])), "%a %d %b %H:%M")}
+            upcoming = [{"slot": slot, "start": t12(reg, start), "opens": t12(reg, start - timedelta(hours=float(rd["signup_lead_hours"])))}
                         for slot, start in rc.slot_starts(reg, rid, now, 24 * 21) if f"{rc.run_key(rid, start)}-{start.date().isoformat()}" not in rs.events][:6]
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "lockout_days": int(rd["lockout_days"]),
                         "opened": bool(fo and fo <= now), "first_open": reg.local(fo, "%a %d %b %Y %H:%M") if fo else None,
@@ -275,25 +293,42 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             raise HTTPException(404, "that run is closed")
         return rs, ev, (reg.config.team(ev.team) or {"key": ev.team, "size": 20})
 
-    @app.post("/api/run/{key}/draft")
-    async def run_draft(request: Request, key: str):
-        """Solve the roster(s) from the current signups without saving — the officer's preview before lock."""
+    def board_reply(reg, ev):
+        t = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
+        rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], int(t.get("size") or 20))
+        return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else []), "needs": rc.needs(reg, ev, t)}
+
+    @app.post("/api/run/{key}/layout")
+    async def run_layout(request: Request, key: str):
+        """The board after a drag: before lock it is saved as the layout the lock will use; after lock it is the roster
+        (group moves are free, someone dragged in from the bench is asked to confirm, someone dragged out is freed)."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        groups = [[str(n) for n in g] for g in (d.get("groups") or [])]
+        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        groups = [[n for n in g if n in names] for g in groups]
+        if ev.state == "open":
+            ev.layout = groups if any(groups) else None
+            rs.save(ev, "board")
+            return board_reply(v.reg, ev)
+        added, removed = await asyncio.to_thread(rc.apply_layout_locked, v.reg, rs, ev, groups)
+        await bot.after_board_change(v.reg, rs, ev, t, added, removed, v.name)
+        return {**board_reply(v.reg, ev), "message": (f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "") or "groups updated"}
+
+    @app.post("/api/run/{key}/autofill")
+    async def run_autofill(request: Request, key: str):
         v, _ = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
-            return JSONResponse({"error": "already locked"}, status_code=400)
-        sig = signature(ev)
-        hit = draft_cache.get(key)
-        if hit and hit[0] == sig:
-            return {"draft": hit[1]}
-        trial = ev.model_copy(deep=True)
+            return JSONResponse({"error": "already locked — move people on the board instead"}, status_code=400)
         try:
-            await asyncio.to_thread(rc.propose, v.reg, rs, trial, False)
+            layout = await asyncio.to_thread(rc.autofill, v.reg, rs, ev)
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": f"solver: {e}"}, status_code=400)
-        d = {"rosters": rosters_json(v.reg, trial.all_rosters, []), "bench": [{"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role} for p in trial.all_rosters[0].benched], "at": time.time()}
-        draft_cache[key] = (sig, d)
-        return {"draft": d}
+        ev.layout = layout
+        ev.log.append(f"{v.name}: auto-filled the board")
+        rs.save(ev, "board auto-filled")
+        return board_reply(v.reg, ev)
 
     @app.post("/api/run/{key}/pin")
     async def run_pin(request: Request, key: str):

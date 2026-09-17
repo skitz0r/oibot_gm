@@ -47,16 +47,16 @@ export interface GroupSummary {
 }
 export interface Signup { uid: string; display_name: string; character: string; cls: string; spec: string; offspec: string | null; role: string; status: string; label: string; source: string; note: string | null; pin: "in" | "out" | null }
 export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null }
-export interface RosterOut { n: number; size: number; synergy: number; advisories: string[]; seats: Seat[]; summary: GroupSummary }
-export interface Draft { rosters: RosterOut[]; bench: Seat[]; at: number }
+export interface BoardRoster { n: number; seated: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary }
+export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[] }
 export interface Confirmation { uid: string | null; display_name: string; character: string; cls: string; spec: string; role: string; roster: number; answer: string | null; asked_at: string | null }
 export interface Sheet {
-  key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; state: string; live: boolean; fill_state: string;
+  key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; live: boolean; fill_state: string;
   counts: Record<string, number>; seated: number; n_rosters: number;
   timeline?: { nudge: string; lock: string; confirm: string };
   signups?: Signup[]; not_answered?: Seat[]; absences?: { display_name: string; start: string; end: string; reason: string | null; signed: boolean }[]; double_booked?: string[];
-  needs?: { headcount: number; roles: Record<string, number>; size: number } | null; draft?: Draft | null; draft_stale?: boolean;
-  rosters?: RosterOut[]; bench?: Seat[]; confirmations?: Confirmation[];
+  needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean;
+  confirmations?: Confirmation[];
   fill_asks?: { display_name: string; kind: string; character: string; spec: string; role: string; reason: string; answer: string | null }[];
   callouts?: { display_name: string; hours_before: number; late: boolean }[]; log?: string[];
 }
