@@ -1,13 +1,14 @@
 """JSON API for the React front end (frontend/ → static/app, served at /app).
 
 Same identity as the HTML pages (session cookie, guild membership as the whitelist). Mutations go through the
-same Registry functions the Discord commands call. CSRF: every POST must carry `X-Requested-With: oibot` —
-a header a cross-site form cannot set — and the session cookie is SameSite, so no per-form token is needed."""
+same Registry / raidcycle functions the Discord commands call. CSRF: every POST must carry
+`X-Requested-With: oibot` — a header a cross-site form cannot set — and the session cookie is SameSite."""
 from __future__ import annotations
 
 import asyncio
-import secrets
+import hashlib
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -15,7 +16,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from .. import comp as comp_mod, raidcycle as rc
-from ..registry import RegistryError, bank_rows
+from ..registry import RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, RegistryError
+from ..roster import coverage as cov_mod
 
 HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
@@ -69,6 +71,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             "icons": {k: dict(reg.profile.icons.get(k, {})) for k in ("classes", "roles", "specs")},
             "raids": [{"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "lockout_days": int(reg.raid_def(rid).get("lockout_days", 7))} for rid, rd in reg.profile.raids.items()],
             "viewer": {"uid": str(v.uid), "name": v.name, "officer": v.officer, "owner": v.owner},
+            "labels": dict(rc.LABELS),
         }
 
     def char_json(reg, c) -> dict:
@@ -76,6 +79,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         off = reg.profile.spec(c.cls, c.offspec).role if c.offspec else None
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
                 "status": c.status, "rank": c.rank, "rosters": list(c.rosters), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off}
+
+    def absence_json(a) -> dict:
+        return {"start": a.start, "end": a.end, "reason": a.reason}
 
     @app.get("/api/me")
     async def me(request: Request):
@@ -87,20 +93,20 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             s = ev.signups.get(str(v.uid))
             team = reg.config.team(ev.team) or {"key": ev.team}
             rd = reg.raid_def(team.get("instance")) if team.get("instance") else {}
+            seat = ev.seat_of(m.display_name) if m and ev.state != "open" else None
             sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": reg.local(ev.starts_at, "%a %d %b %H:%M"), "state": ev.state,
-                           "status": s.status if s else None, "character": s.character if s else None, "note": s.note if s else None})
+                           "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
+                           "seated": bool(seat), "roster": (seat[0] + 1) if seat else None})
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {
             "display_name": m.display_name if m else v.name, "registered": m is not None,
             "characters": [char_json(reg, c) for c in (m.active() if m else [])],
             "roles": {"primary": primary, "flex": list(flex)},
-            "week": list(m.week) if m else [],
-            "absences": [{"start": a.start, "end": a.end, "reason": a.reason} for a in (m.upcoming_absences(today) if m else [])],
+            "absences": [absence_json(a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
             "sheets": sheets,
             "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at")} for a in reg.open_placement_asks(v.uid)],
-            "raid_windows": [{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")],
         }
 
     # ---- member self-service
@@ -143,17 +149,15 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def me_delete(request: Request):
         return await run(request, lambda v, d: f"deleted {v.reg.delete_character(v.uid, d['label']).label}")
 
-    @app.post("/api/me/week")
-    async def me_week(request: Request):
-        def go(v, d):
-            m = v.reg.set_week(v.uid, list(d.get("week") or []), v.name)
-            hours = sum((r["end"] - r["start"]) for r in m.week) / 60
-            return f"availability saved: {hours:.0f}h/week across {len(m.week)} block(s)"
-        return await run(request, go)
-
     @app.post("/api/me/absence")
     async def me_absence(request: Request):
-        return await run(request, lambda v, d: f"absent {v.reg.add_absence(v.uid, d['start'], d.get('end') or None, d.get('reason') or None, v.name, v.name)[1].start}")
+        v, d = await body(request)
+        try:
+            m, a = await asyncio.to_thread(v.reg.add_absence, v.uid, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, v.name)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.announce_absence(v.reg, m, a, v.name)
+        return {"message": f"away {a.start}" + (f" → {a.end}" if a.end != a.start else "")}
 
     @app.post("/api/me/absence/clear")
     async def me_absence_clear(request: Request):
@@ -161,12 +165,14 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/me/placement")
     async def me_placement(request: Request):
-        def go(v, d):
-            yes = d.get("answer") == "yes"
-            line = v.reg.answer_placement(v.uid, d["roster"], yes, v.name)
-            bot.loop.create_task(bot.after_placement_answer(v.reg, v.uid, d["roster"], yes, line))
-            return line
-        return await run(request, go)
+        v, d = await body(request)
+        yes = d.get("answer") == "yes"
+        try:
+            line = await asyncio.to_thread(v.reg.answer_placement, v.uid, d["roster"], yes, v.name)
+        except (RegistryError, ValueError, KeyError) as e:
+            return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
+        await bot.after_placement_answer(v.reg, v.uid, d["roster"], yes, line)
+        return {"message": line}
 
     @app.post("/api/me/dm")
     async def me_dm(request: Request):
@@ -177,63 +183,84 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return f"DMs {'off' if m.dm_opt_out else 'on'}"
         return await run(request, go)
 
-    # ---- rosters: runs per raid (officers)
-    summary_cache = bot.__dict__.setdefault("_run_summaries", {})
+    # ---- runs: the officer panel (sheets per raid, draft rosters, pins, lock, confirmations)
+    draft_cache: dict[str, tuple[str, dict]] = {}  # event key -> (signature, summary)
 
-    def run_summary(reg, cache_key: str, players, roster: dict) -> dict:
-        hit = summary_cache.get(cache_key)
-        if hit and time.time() - hit[0] < 600:
-            return hit[1]
-        result, cov, _labels = comp_mod.groups_for(reg, players, roster)
-        sm = comp_mod.groups_summary(reg, players, result, cov)
-        summary_cache[cache_key] = (time.time(), sm)
-        return sm
+    def signature(ev) -> str:
+        raw = "|".join(sorted(f"{k}:{s.status}:{s.character}:{s.spec}" for k, s in ev.signups.items())) + "#" + "|".join(sorted(f"{k}={v}" for k, v in ev.pins.items()))
+        return hashlib.sha1(raw.encode()).hexdigest()[:12]
 
-    def signup_json(s) -> dict:
-        return {"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "role": s.role, "status": s.status, "source": s.source, "note": s.note}
+    def signup_json(s, pins: dict) -> dict:
+        return {"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "offspec": s.offspec, "role": s.role, "status": s.status,
+                "label": rc.LABELS.get(s.status, s.status), "source": s.source, "note": s.note, "pin": pins.get(str(s.discord_id))}
+
+    def roster_summary(reg, r) -> dict:
+        try:
+            cov = cov_mod.compute(reg.profile, r.selected, r)
+            return comp_mod.groups_summary(reg, r.selected, r, cov)
+        except Exception:  # noqa: BLE001
+            return comp_mod.groups_summary(reg, r.selected, None, None)
+
+    def rosters_json(reg, rosters, conf_rows) -> list[dict]:
+        conf = {c["display_name"]: c for c in conf_rows}
+        out = []
+        for i, r in enumerate(rosters):
+            out.append({"n": i + 1, "size": len(r.selected), "synergy": r.synergy_value, "advisories": list(r.advisories[:6]),
+                        "seats": [{"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role, "uid": (conf.get(p.signup_name) or {}).get("uid"),
+                                   "answer": (conf.get(p.signup_name) or {}).get("answer")} for p in r.selected],
+                        "summary": roster_summary(reg, r)})
+        return out
+
+    def ev_json(reg, rs, ev, full: bool = True) -> dict:
+        t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
+        live = ev.state not in ("done", "cancelled")
+        rd = reg.raid_def(ev.instance)
+        day = ev.start.astimezone(reg.tz).date().isoformat()
+        base = {"key": ev.key, "run": ev.team, "name": t.get("name") or t["key"], "size": int(t.get("size") or 20), "instance": ev.instance, "raid": rd.get("name", ev.instance),
+                "starts_at": ev.starts_at, "when": reg.local(ev.starts_at, "%a %d %b %H:%M"), "state": ev.state, "live": live, "fill_state": ev.fill_state,
+                "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "seated": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters)}
+        if not full:
+            return base
+        from ..discord_raid import run_times
+
+        soft, hard, confirm = run_times(reg, ev, t)
+        conf_rows = rc.confirmations(reg, ev) if ev.all_rosters else []
+        draft = draft_cache.get(ev.key)
+        sig = signature(ev)
+        absences = [{"display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "signed": str(m.discord_id) in ev.signups}
+                    for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
+        busy = rc.conflicts(rs, ev) if live else {}
+        return {**base,
+                "timeline": {"nudge": reg.local(soft, "%a %d %b %H:%M"), "lock": reg.local(hard, "%a %d %b %H:%M"), "confirm": reg.local(confirm, "%a %d %b %H:%M")},
+                "signups": [signup_json(s, ev.pins) for s in sorted(ev.signups.values(), key=lambda s: (rc.STATUSES.index(s.status) if s.status in rc.STATUSES else 9, s.updated_at))],
+                "not_answered": [{"uid": str(m.discord_id), "display_name": m.display_name, "character": m.main.label, "cls": m.main.cls, "spec": m.main.spec, "role": reg.profile.spec(m.main.cls, m.main.spec).role}
+                                 for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups] if live else [],
+                "absences": absences, "double_booked": [reg.members[u].display_name for u in busy if u in reg.members],
+                "needs": rc.needs(reg, ev, t) if live else None,
+                "draft": (draft[1] if draft and draft[0] == sig else None) if ev.state == "open" else None, "draft_stale": bool(draft and draft[0] != sig) if ev.state == "open" else False,
+                "rosters": rosters_json(reg, ev.all_rosters, conf_rows) if ev.all_rosters else [],
+                "bench": [{"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role} for p in (ev.all_rosters[0].benched if ev.all_rosters else [])],
+                "confirmations": conf_rows,
+                "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer} for a in ev.fill_asks],
+                "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
 
     def rosters_data(reg) -> dict:
-        rs, ps = bot.raids.store(reg), bot.proposals(reg)
+        rs = bot.raids.store(reg)
         now = reg.now_local()
-        events = sorted(rs.events.values(), key=lambda e: e.starts_at, reverse=True)
-
-        def ev_json(ev) -> dict:
-            t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
-            live = ev.state not in ("done", "cancelled")
-            sm, needs, busy = None, None, {}
-            if live:
-                players = [p for p in rc.players_for(reg, ev) if p.status == "signed"]
-                sm = run_summary(reg, f"sheet:{ev.key}:{len(ev.signups)}:{ev.state}", players, {**(reg.raid_shell(ev.instance) if ev.instance in reg.profile.raids else {}), **t})
-                needs, busy = rc.needs(reg, ev, t), rc.conflicts(rs, ev)
-            return {"key": ev.key, "name": t.get("name") or t["key"], "roster": t["key"], "size": int(t.get("size") or 20), "instance": ev.instance,
-                    "starts_at": ev.starts_at, "when": reg.local(ev.starts_at, "%a %d %b %H:%M"), "state": ev.state, "live": live, "fill_state": ev.fill_state,
-                    "by": {st: [signup_json(s) for s in ev.by_status(st)] for st in rc.STATUSES},
-                    "needs": needs, "double_booked": len(busy), "summary": sm,
-                    "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer} for a in ev.fill_asks],
-                    "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
-
-        def prop_json(p, rid: str) -> dict:
-            runs = []
-            for run in p.runs:
-                sm = run_summary(reg, f"run:{p.id}:{run.key}", comp_mod.players_from_seats(reg, run.seats), {**reg.raid_shell(rid), "key": run.key, "size": run.size}) if p.state in ("proposed", "draft") else None
-                runs.append({"key": run.key, "name": run.name, "size": run.size, "starts_at": run.starts_at, "when": reg.local(run.starts_at, "%a %d %b %H:%M"), "slot": run.slot, "seats": len(run.seats),
-                             "shortfalls": dict(run.shortfalls), "summary": sm})
-            return {"id": p.id, "state": p.state, "viable": p.viable, "problems": list(p.problems), "notes": list(p.notes), "unplaced": [list(x) for x in p.unplaced[:12]],
-                    "window": [reg.local(p.window_start, "%a %d %b"), reg.local(p.window_end, "%a %d %b")], "decided_by": p.decided_by, "created_at": p.created_at, "runs": runs}
-
+        events = sorted(rs.events.values(), key=lambda e: e.starts_at)
         out = []
         for rid in reg.profile.raids:
             rd = reg.raid_def(rid)
-            evs = [ev_json(e) for e in events if e.instance == rid]
-            props = sorted([p for p in ps.items.values() if p.instance == rid], key=lambda p: p.created_at, reverse=True)
-            ws, we = reg.lockout_window(rid, now)
+            evs = [e for e in events if e.instance == rid]
+            live = [ev_json(reg, rs, e) for e in evs if e.state not in ("done", "cancelled")]
+            past = [ev_json(reg, rs, e, full=False) for e in reversed(evs) if e.state in ("done", "cancelled")][:8]
             fo = reg.first_open(rid)
-            out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "lockout_days": int(rd["lockout_days"]), "duration_hours": rd["duration_hours"],
-                        "opened": bool(fo and fo <= now), "window": [reg.local(ws, "%a %d %b"), reg.local(we, "%a %d %b")], "first_open": reg.local(fo, "%a %d %b %Y %H:%M") if fo else None,
-                        "current": sorted([e for e in evs if e["live"]], key=lambda e: e["starts_at"]), "past": [e for e in evs if not e["live"]][:6],
-                        "open": [prop_json(p, rid) for p in props if p.state in ("proposed", "draft")], "history": [prop_json(p, rid) for p in props if p.state not in ("proposed", "draft")][:4],
-                        "standing": [{"key": t["key"], "name": t.get("name"), "schedule": t.get("schedule")} for t in reg.config.rosters if t.get("instance") == rid and not t.get("ephemeral")]})
-        orphans = [ev_json(e) for e in events if e.instance not in reg.profile.raids][:6]
+            upcoming = [{"slot": slot, "start": reg.local(start, "%a %d %b %H:%M"), "opens": reg.local(start - timedelta(hours=float(rd["signup_lead_hours"])), "%a %d %b %H:%M")}
+                        for slot, start in rc.slot_starts(reg, rid, now, 24 * 21) if f"{rc.run_key(rid, start)}-{start.date().isoformat()}" not in rs.events][:6]
+            out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "lockout_days": int(rd["lockout_days"]),
+                        "opened": bool(fo and fo <= now), "first_open": reg.local(fo, "%a %d %b %Y %H:%M") if fo else None,
+                        "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "upcoming": upcoming})
+        orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
         return {"raids": out, "orphans": orphans, "tz": reg.config.timezone}
 
     @app.get("/api/rosters")
@@ -241,50 +268,152 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v = await who(request, officer=True)
         return await asyncio.to_thread(rosters_data, v.reg)
 
-    @app.post("/api/admin/plan")
-    async def admin_plan(request: Request):
-        v, d = await body(request, officer=True)
-        inst = d.get("instance", "")
-        if inst not in v.reg.profile.raids:
-            return JSONResponse({"error": "unknown raid"}, status_code=400)
-        line = await bot.auto_propose(v.reg, inst, by=v.name)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} ran the planner: {line}")
-        return {"message": line}
+    def live_event(reg, key: str):
+        rs = bot.raids.store(reg)
+        ev = rs.events.get(key)
+        if not ev or ev.state in ("done", "cancelled"):
+            raise HTTPException(404, "that run is closed")
+        return rs, ev, (reg.config.team(ev.team) or {"key": ev.team, "size": 20})
 
-    @app.post("/api/admin/proposal")
-    async def admin_proposal(request: Request):
+    @app.post("/api/run/{key}/draft")
+    async def run_draft(request: Request, key: str):
+        """Solve the roster(s) from the current signups without saving — the officer's preview before lock."""
+        v, _ = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        if ev.state != "open":
+            return JSONResponse({"error": "already locked"}, status_code=400)
+        sig = signature(ev)
+        hit = draft_cache.get(key)
+        if hit and hit[0] == sig:
+            return {"draft": hit[1]}
+        trial = ev.model_copy(deep=True)
+        try:
+            await asyncio.to_thread(rc.propose, v.reg, rs, trial, False)
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"solver: {e}"}, status_code=400)
+        d = {"rosters": rosters_json(v.reg, trial.all_rosters, []), "bench": [{"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role} for p in trial.all_rosters[0].benched], "at": time.time()}
+        draft_cache[key] = (sig, d)
+        return {"draft": d}
+
+    @app.post("/api/run/{key}/pin")
+    async def run_pin(request: Request, key: str):
         v, d = await body(request, officer=True)
-        ps = bot.proposals(v.reg)
-        p = ps.items.get(d.get("pid", ""))
-        if not p or p.state not in ("proposed", "draft"):
-            return JSONResponse({"error": "that proposal is no longer open"}, status_code=400)
-        if d.get("answer") == "accept":
-            line = await bot.accept_proposal(v.reg, p, v.name)
+        rs, ev, t = live_event(v.reg, key)
+        uid, pin = str(d.get("uid") or ""), d.get("pin")
+        if pin not in ("in", "out", None):
+            return JSONResponse({"error": "pin must be in, out or null"}, status_code=400)
+        if pin:
+            ev.pins[uid] = pin
         else:
-            p.state, p.decided_by, p.decided_at = "rejected", v.name, rc.now()
-            ps.save(p, f"rejected by {v.name}")
-            line = f"proposal {p.id} rejected"
+            ev.pins.pop(uid, None)
+        name = ev.signups[uid].display_name if uid in ev.signups else uid
+        ev.log.append(f"{v.name}: {name} {'pinned ' + pin if pin else 'unpinned'}")
+        rs.save(ev, f"pin {name} {pin}")
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {ev.key} {name} {'pinned ' + pin if pin else 'unpinned'}")
+        return {"message": f"{name}: {'pinned ' + pin if pin else 'unpinned'}"}
+
+    @app.post("/api/run/{key}/set")
+    async def run_set(request: Request, key: str):
+        """Officer sets someone's answer (join / bench / out) or swaps their character."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        m = v.reg.members.get(int(d.get("uid") or 0))
+        status = d.get("status")
+        if not m or status not in rc.STATUSES:
+            return JSONResponse({"error": "unknown member or status"}, status_code=400)
+        if ev.state != "open" and status == "out" and ev.seat_of(m.display_name):
+            await bot.drop_seated(v.reg, rs, ev, t, m, "officer", None)
+            return {"message": f"{m.display_name} taken off the roster; filling the seat"}
+        try:
+            s = await asyncio.to_thread(rc.set_signup, v.reg, rs, ev, m, d.get("character") or None, status, "officer")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if ev.state != "open" and status == "in" and not ev.seat_of(m.display_name):
+            rc.seat_player(v.reg, ev, s)
+            rs.save(ev, f"{m.display_name} seated by {v.name}")
+        await bot.refresh_sheet(v.reg, ev)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {ev.key} {m.display_name} {status} as {s.character}")
+        return {"message": f"{m.display_name}: {s.character} {rc.LABELS[status]}"}
+
+    @app.post("/api/run/{key}/lock")
+    async def run_lock(request: Request, key: str):
+        v, _ = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        if ev.state != "open":
+            return JSONResponse({"error": "already locked"}, status_code=400)
+        line = await bot.lock_run(v.reg, rs, ev, by=v.name)
         await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
         return {"message": line}
+
+    @app.post("/api/run/{key}/fill")
+    async def run_fill(request: Request, key: str):
+        v, _ = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name)
+        return {"message": ("asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent)) if sent else ("nothing to fill" if not (nd["headcount"] or nd["roles"]) else "nobody left to ask")}
+
+    @app.post("/api/run/{key}/cancel")
+    async def run_cancel(request: Request, key: str):
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        ev.state = "cancelled"
+        ev.log.append(f"cancelled by {v.name}: {d.get('reason') or ''}")
+        rs.save(ev, "cancelled")
+        await bot.refresh_sheet(v.reg, ev)
+        await bot.ops.emit(v.reg.config, "warn", f"[web] {v.name} cancelled {ev.key}")
+        return {"message": f"cancelled {ev.key}"}
+
+    @app.post("/api/raid/{rid}/open")
+    async def raid_open(request: Request, rid: str):
+        """Open a sheet now: the raid's next slot, or a one-off 'YYYY-MM-DD HH:MM' in guild time."""
+        v, d = await body(request, officer=True)
+        reg = v.reg
+        if rid not in reg.profile.raids:
+            return JSONResponse({"error": "unknown raid"}, status_code=400)
+        now = reg.now_local()
+        when = (d.get("when") or "").strip()
+        try:
+            if when:
+                start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=ZoneInfo(reg.config.timezone))
+            else:
+                nxt = rc.slot_starts(reg, rid, now, 24 * 21)
+                if not nxt:
+                    return JSONResponse({"error": "no slots configured for this raid (or none before it opens) — pass a date and time"}, status_code=400)
+                start = nxt[0][1]
+        except ValueError:
+            return JSONResponse({"error": "time looks like 2026-12-10 19:30"}, status_code=400)
+        rs = bot.raids.store(reg)
+        ev = rc.open_run(reg, rs, rid, start, by=v.name)
+        ch = bot.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
+        if not ev.message_id and ch:
+            await bot.post_sheet(reg, rs, ev, ch)
+        await bot.ops.emit(reg.config, "info", f"[web] {v.name} opened {ev.key}")
+        return {"message": f"opened {ev.key}" + ("" if ch else " (no signup channel set — sheet not posted)")}
+
+    @app.post("/api/admin/confirm")
+    async def admin_confirm(request: Request):
+        return await run(request, lambda v, d: f"confirmed {v.reg.confirm(d['label'], v.name)[1].label}", officer=True)
 
     # ---- raids: rules per raid (officers read, owner edits)
     @app.get("/api/raids")
     async def raids(request: Request):
         v = await who(request, officer=True)
-        reg, ps = v.reg, bot.proposals(v.reg)
+        reg = v.reg
         z = ZoneInfo(reg.config.timezone)
         now = reg.now_local()
+        rs = bot.raids.store(reg)
         out = []
         for rid in reg.profile.raids:
             eff, over, fo = reg.raid_def(rid), reg.config.raids.get(rid, {}), reg.first_open(rid)
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
-                        "notes": eff.get("notes") or "", "auto": bool(eff.get("auto")), "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
-                        "overridden": sorted(k for k in over if k not in ("comp",)) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb],
+                        "slots": list(eff["slots"]), "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
+                        "weights": dict(eff["weights"]), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
+                        "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
-                        "window": [reg.local(ws, "%a %d %b %H:%M"), reg.local(we, "%a %d %b %H:%M")], "runs": len(reg.run_keys(rid)), "open": len(ps.open_for(rid))})
-        return {"raids": out, "tz": reg.config.timezone, "owner": v.owner}
+                        "window": [reg.local(ws, "%a %d %b %H:%M"), reg.local(we, "%a %d %b %H:%M")], "live": sum(1 for e in rs.live() if e.instance == rid)})
+        return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS)}
 
     @app.post("/api/admin/raid")
     async def admin_raid(request: Request):
@@ -293,16 +422,23 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 raise ValueError("Owner only.")
             inst = d["instance"]
             cur, done = v.reg.raid_def(inst), []
-            for f in ("lockout_days", "duration_hours", "notes"):
+            if "slots" in d:
+                want = d["slots"] if isinstance(d["slots"], list) else str(d["slots"])
+                from ..registry import parse_slots
+
+                if parse_slots(want) != list(cur["slots"]):
+                    done.append(v.reg.set_raid_override(inst, "slots", want, v.name))
+            for f in RAID_HOURS_FIELDS + ("lockout_days", "duration_hours", "notes"):
                 val = d.get(f)
                 if val not in (None, "") and str(val) != str(cur.get(f, "")):
                     done.append(v.reg.set_raid_override(inst, f, str(val), v.name))
+            for k, val in (d.get("weights") or {}).items():
+                if k in RAID_WEIGHT_DEFAULTS and val not in (None, "") and int(val) != int(cur["weights"].get(k, 0)):
+                    done.append(v.reg.set_raid_override(inst, f"weight_{k}", str(val), v.name))
             fo = d.get("first_open") or ""
             cur_fo = v.reg.first_open(inst)
             if fo and (cur_fo is None or fo[:16] != cur_fo.astimezone(ZoneInfo(v.reg.config.timezone)).strftime("%Y-%m-%dT%H:%M")):
                 done.append(v.reg.set_raid_override(inst, "first_open", fo, v.name))
-            if "auto" in d and bool(d["auto"]) != bool(cur.get("auto")):
-                done.append(v.reg.set_raid_override(inst, "auto", "true" if d["auto"] else "false", v.name))
             for role in ("tank", "healer", "dps"):
                 for bound in ("min", "max"):
                     val = (d.get("comp") or {}).get(role, {}).get(bound)
@@ -319,181 +455,27 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return v.reg.clear_raid_override(d["instance"], v.name)
         return await run(request, go, officer=True)
 
-    # ---- admin: pool, ranks, confirmations, placements, raid times, standing rosters (officers; owner for settings)
-    def cfg_op(v, **kw) -> str:
-        from .. import configops
-
-        return configops.apply(v.reg, configops.ConfigOp(**kw), v.name, v.owner, None)
-
-    RANKS = ("trial", "raider", "core", "alt", "social")
-
-    @app.get("/api/admin")
-    async def admin(request: Request):
-        v = await who(request, officer=True)
-        reg = v.reg
-        rosters = reg.config.rosters or []
-        rows = []
-        for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower()):
-            chars = m.active()
-            if not chars:
-                continue
-            primary, flex = reg.roles_of(m)
-            rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id),
-                         "main": char_json(reg, m.main) if m.main else None, "alts": [char_json(reg, c) for c in chars if not c.is_main],
-                         "role": primary, "flex": list(flex), "placed": {t["key"]: next((c.label for c in chars if t["key"] in c.rosters), None) for t in rosters},
-                         "asks": [{"roster": a["roster"], "answer": a.get("answer")} for a in m.placement_asks[-3:]]})
-        return {"rows": rows, "rosters": [dict(t) for t in rosters], "ranks": list(RANKS), "instances": list(reg.profile.raids), "owner": v.owner,
-                "slots": list(reg.config.slots), "heat": reg.slot_summary(), "week_heat": reg.week_heat(), "tz": reg.config.timezone,
-                "grid_members": sum(1 for m in reg.members.values() if m.main and m.week)}
-
-    @app.post("/api/admin/members")
-    async def admin_members(request: Request):
-        """One save for the pool table: ranks and roster placements per member."""
-        def go(v, d):
-            reg, done = v.reg, []
-            for row in d.get("rows") or []:
-                uid = int(row["uid"])
-                m = reg.members.get(uid)
-                if not m or not m.main:
-                    continue
-                rank = row.get("rank")
-                if rank and rank in RANKS and rank != m.main.rank:
-                    reg.set_rank(m.main.label, rank, v.name)
-                    done.append(f"{m.main.label} → {rank}")
-                for key, want in (row.get("placed") or {}).items():
-                    cur = next((c for c in m.active() if key in c.rosters), None)
-                    if want and not cur:
-                        _, c = reg.roster_add(uid, key, v.name, None)
-                        done.append(f"{m.display_name} ({c.label}) → {key}")
-                    elif not want and cur:
-                        reg.roster_remove(uid, key, v.name)
-                        done.append(f"{m.display_name} removed from {key}")
-            return "; ".join(done) or "no changes"
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/confirm")
-    async def admin_confirm(request: Request):
-        return await run(request, lambda v, d: f"confirmed {v.reg.confirm(d['label'], v.name)[1].label}", officer=True)
-
-    @app.post("/api/admin/place-all")
-    async def admin_place_all(request: Request):
-        def go(v, d):
-            key, n = d["roster"], 0
-            for m in list(v.reg.members.values()):
-                if m.main and not v.reg.on_roster(m, key):
-                    v.reg.roster_add(m.discord_id, key, v.name)
-                    n += 1
-            return f"placed {n} main(s) on {key}"
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/slots")
-    async def admin_slots(request: Request):
-        return await run(request, lambda v, d: cfg_op(v, op="set", path="slots", value=d.get("value", "")), officer=True)
-
-    @app.post("/api/admin/roster/settings")
-    async def admin_roster_settings(request: Request):
-        def go(v, d):
-            key = (d.get("key") or "").strip()
-            if not key:
-                raise ValueError("A roster needs a key.")
-            done = []
-            if not v.reg.config.roster(key):
-                cfg_op(v, op="team_add", team=key)
-                done.append("created")
-            for f in ("size", "schedule", "instance", "cutoff_soft_hours", "cutoff_hard_hours", "open_days_before", "name"):
-                if f in d and d[f] not in (None,) and str(d[f]) != str((v.reg.config.roster(key) or {}).get(f, "")):
-                    if f == "instance" and not d[f]:
-                        continue
-                    cfg_op(v, op="team_set", team=key, field=f, value=str(d[f]))
-                    done.append(f)
-            for f in ("open_dm", "autofill"):
-                if f in d:
-                    cur = (v.reg.config.roster(key) or {}).get(f, f == "autofill")
-                    if bool(d[f]) != bool(cur):
-                        cfg_op(v, op="team_set", team=key, field=f, value="true" if d[f] else "false")
-                        done.append(f)
-            return f"roster {key}: " + (", ".join(done) or "no changes")
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/roster/remove")
-    async def admin_roster_remove(request: Request):
-        return await run(request, lambda v, d: cfg_op(v, op="team_remove", team=d["key"]), officer=True)
-
-    @app.post("/api/admin/comp/target")
-    async def admin_comp_target(request: Request):
-        return await run(request, lambda v, d: cfg_op(v, op="comp_target", team=d["key"], field=d["slot"], value=d["value"], reason=d.get("reason") or None), officer=True)
-
-    @app.post("/api/admin/comp/target/clear")
-    async def admin_comp_target_clear(request: Request):
-        return await run(request, lambda v, d: cfg_op(v, op="comp_target_clear", team=d["key"], field=d["slot"]), officer=True)
-
-    @app.post("/api/admin/comp/groups")
-    async def admin_comp_groups(request: Request):
-        return await run(request, lambda v, d: cfg_op(v, op="comp_groups", team=d["key"], value=d.get("value", "")), officer=True)
-
-    # ---- standing-roster builder: propose, then approve → placements + confirmation DMs
-    build_cache: dict[str, tuple[float, object]] = {}
-
-    @app.post("/api/admin/build")
-    async def admin_build(request: Request):
-        from ..roster import builder
-
-        v, _ = await body(request, officer=True)
-        reg = v.reg
-        shells = builder.shells_from_config(reg)
-        if not shells:
-            return JSONResponse({"error": "No roster has a schedule yet — set one under standing rosters (e.g. Tue 19:30)."}, status_code=400)
-        result = await asyncio.to_thread(builder.build, reg, bot.raids.store(reg), shells)
-        token = secrets.token_hex(8)
-        build_cache[token] = (time.time(), result)
-        for k in [k for k, (t, _) in build_cache.items() if time.time() - t > 1800]:
-            del build_cache[k]
-        adds, removes = builder.diff_placements(reg, result)
-        names = {m.discord_id: m.display_name for m in reg.members.values()}
-        return {"token": token, "status": result.status, "notes": list(result.notes), "unplaced": [list(x) for x in result.unplaced],
-                "shells": [{"key": sh.key, "name": sh.name, "instance": sh.instance, "size": sh.size, "slot": sh.slot, "shortfalls": dict(result.shortfalls.get(sh.key) or {}),
-                            "seats": [{"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "role": s.role, "reasons": list(s.reasons)} for s in result.rosters.get(sh.key, [])]} for sh in shells],
-                "adds": [{"name": names.get(d, str(d)), "character": c, "roster": k} for d, c, k in adds], "removes": [{"name": names.get(d, str(d)), "roster": k} for d, k in removes]}
-
-    @app.post("/api/admin/build/apply")
-    async def admin_build_apply(request: Request):
-        from ..roster import builder
-
-        v, d = await body(request, officer=True)
-        hit = build_cache.pop(d.get("token", ""), None)
-        if not hit:
-            return JSONResponse({"error": "That proposal expired — build again."}, status_code=400)
-        try:
-            adds, _removes = builder.diff_placements(v.reg, hit[1])
-            done = await asyncio.to_thread(builder.apply, v.reg, hit[1], v.name)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        sent = await bot.send_placement_asks(v.reg, adds, v.name)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} approved a roster build: {len(done)} change(s), {sent} confirmation DM(s)")
-        return {"message": f"applied {len(done)} placement change(s); asked {sent} member(s) to confirm by DM"}
-
-    # ---- members: every member's characters + availability; officers edit them like their own Me page
+    # ---- members: every member's characters and absences; officers edit them like their own Me page
     @app.get("/api/members")
     async def members(request: Request):
         v = await who(request, officer=True)
         reg = v.reg
         ms = sorted(reg.members.values(), key=lambda m: m.display_name.lower())
         privs = await asyncio.gather(*(privilege(reg, m.discord_id) for m in ms))
+        today = reg.now_local().date().isoformat()
         rows = []
         for m, p in zip(ms, privs):
             chars = sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))
             if not chars:
                 continue
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": p,
-                         "characters": [char_json(reg, c) for c in chars], "week": list(m.week),
+                         "characters": [char_json(reg, c) for c in chars], "absences": [absence_json(a) for a in m.upcoming_absences(today)],
                          "asks": [{"roster": a["roster"], "answer": a.get("answer")} for a in m.placement_asks[-3:] if a.get("answer") is None]})
-        return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone, "week_heat": reg.week_heat(),
-                "grid_members": sum(1 for m in reg.members.values() if m.main and m.week),
-                "raid_windows": [{"slot": t["schedule"], "name": t.get("name", t["key"])} for t in reg.config.rosters if t.get("schedule")]}
+        return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone}
 
     @app.post("/api/members/save")
     async def members_save(request: Request):
-        """One save for the whole table: per member — deletes, spec/offspec, names, new characters, main, availability grid."""
+        """One save for the whole table: per member — deletes, spec/offspec, names, new characters, main."""
         def go(v, d):
             reg, done = v.reg, []
             for row in d.get("rows") or []:
@@ -531,18 +513,28 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 if want_main and not (m.main and m.main.label == want_main):
                     reg.set_main(uid, want_main)
                     done.append(f"{m.display_name}: main is {want_main}")
-                if row.get("week") is not None:
-                    mm = reg.set_week(uid, list(row["week"]), m.display_name)
-                    done.append(f"{mm.display_name}: availability {sum(r['end'] - r['start'] for r in mm.week) / 60:.0f}h/week")
             return "; ".join(done) or "no changes"
         return await run(request, go, officer=True)
 
-    # ---- bank, ops, config (read-only)
-    @app.get("/api/bank")
-    async def bank(request: Request):
-        v = await who(request, officer=True)
-        return {"rows": bank_rows(v.reg), "members": len(v.reg.members)}
+    @app.post("/api/members/absence")
+    async def members_absence(request: Request):
+        """Officer records an absence for someone (same ripple as the member doing it)."""
+        v, d = await body(request, officer=True)
+        m0 = v.reg.members.get(int(d.get("uid") or 0))
+        if not m0:
+            return JSONResponse({"error": "unknown member"}, status_code=400)
+        try:
+            m, a = await asyncio.to_thread(v.reg.add_absence, m0.discord_id, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, m0.display_name)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.announce_absence(v.reg, m, a, v.name)
+        return {"message": f"{m.display_name} away {a.start}" + (f" → {a.end}" if a.end != a.start else "")}
 
+    @app.post("/api/members/absence/clear")
+    async def members_absence_clear(request: Request):
+        return await run(request, lambda v, d: (v.reg.clear_absence(int(d["uid"]), d["start"]) and f"cleared absence {d['start']}"), officer=True)
+
+    # ---- ops, config (read-only)
     @app.get("/api/ops")
     async def ops(request: Request):
         v = await who(request, officer=True)

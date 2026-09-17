@@ -395,6 +395,18 @@ Rules confirmed 2026-09-16: a character may be on the 20 and a 10 if the times d
 
 **Phase 3 built:** `GuildConfig.slots` (owner: `/gm config slots`, plain text `set slots`, Admin page), `Member.slot_prefs` (Me page: yes/maybe/no per slot, logged), `Registry.slot_summary()` heat-map on Admin (yes/maybe/no/unanswered per slot with tank/healer/melee/ranged counts among yes+maybe mains).
 
+### 5.20 Signup-driven cycle (decided 2026-09-16, replaces the availability grid and the auto-planner)
+
+Members never fill in standing availability. The unit of work is a **run**: one sheet per raid **slot** per lockout window, posted in Discord on cadence. Officers shape the roster on the site before lock; after lock every rostered member confirms by DM.
+
+- **Raid config** (`raids.yaml` defaults, guild overrides via `/gm config raid`, the Raids page, or plain text `raid_set`): `slots` (recurring times, e.g. `Tue 19:30`), `signup_lead_hours` (sheet opens this long before the slot; default 120, Barrow Deeps 48), `lock_hours_before` (24), `confirm_hours_before` (6), `weights` (seat-selection bonuses: `rank`, `main`, `sat_out`, `signup_order`). Slots before `first_open` never open.
+- **Sheet** (`RaidEvent`, key `<abbr>-<MMDD>-<HHMM>`, an ephemeral roster of the same key): buttons **Join / Bench / No thanks** (statuses `in` / `sub` / `out`; `tentative` is gone — confirmation covers "probably"). "Sign as…" picks an alt or offspec. Absences pre-fill Out. One nudge by DM to non-responders.
+- **Pre-lock, on the site** (Rosters page): live signups, a draft roster the solver rebuilds from them (pins honoured), officer actions: pin in, bench, swap character, set someone's status, lock early. A slot with more Join signups than the raid size becomes several rosters (solver runs again on the remainder while a full run with its tank/healer minimums is possible).
+- **Lock** at `lock_hours_before` (or early by an officer): the last draft becomes the roster(s); the sheet is edited to show them; every rostered member gets a **Confirm / Can't make it** DM (`PlaceButton` on the run's roster key). The Me page mirrors the ask.
+- **Confirmation deadline** at `confirm_hours_before`: unanswered = out (seat freed, signup marked `no-confirm`). Declines and callouts free the seat immediately; the **fill engine** asks Bench first, then the rest of its order, and a yes puts the person straight into the freed seat.
+- **Absences**: a dedicated channel with one card (button *I'll be away* → modal start / end / reason). The bot posts a public line without the reason, pre-fills Out on every overlapping sheet (open or locked: rostered members are removed and fill runs), and the Rosters page shows overlapping absences beside each sheet. Same form on the Me page and `/me absent`.
+- **Removed**: `Member.week` UI, heat-map, `roster/autoplan.py`, `roster/builder.py`, proposals, standing rosters as a scheduling concept (the `rosters[]` config now only holds ephemeral runs), candidate-slot polls.
+
 ## 6. Architecture
 
 ```mermaid

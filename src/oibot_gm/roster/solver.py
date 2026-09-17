@@ -27,6 +27,8 @@ class SolveOptions:
     prefer_group: dict[str, int] | None = None  # signup_name -> 1-based group, soft (bonus if honoured)
     prefer_weight: int = 15
     role_min: dict[str, int] | None = None  # role -> minimum, overrides the profile/scaled bounds
+    role_max: dict[str, int] | None = None  # role -> maximum (e.g. the raid's desired comp)
+    bonus: dict[str, int] | None = None  # signup_name -> extra selection value (rank, main, sat-out, signup order)
     allow_offspec: bool = True  # let the solver switch players to their offspec to meet role minimums
     offspec_penalty: int = 8  # objective cost per switch
     time_limit_s: float = 20.0
@@ -52,6 +54,8 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
     for role, n in (opts.role_min or {}).items():
         role_bounds.setdefault(role, {"min": 0, "max": target})["min"] = n
         role_bounds[role]["max"] = max(role_bounds[role]["max"], n)
+    for role, n in (opts.role_max or {}).items():
+        role_bounds.setdefault(role, {"min": 0, "max": target})["max"] = max(n, role_bounds[role]["min"])
     specs = {p.signup_name: profile.spec(p.cls, p.spec) for p in players}
     sel = rules["selection"]
 
@@ -138,6 +142,7 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
         v += int(round(sel["attendance_weight"] * p.attendance))
         if p.unmapped:
             v -= sel["unknown_character_penalty"]
+        v += int((opts.bonus or {}).get(p.signup_name, 0))
         terms.append(v * SCALE * x[p.signup_name])
 
     # --- objective: soft group preferences from standing instructions ---

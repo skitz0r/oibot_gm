@@ -250,7 +250,7 @@ def registration_card(reg: Registry) -> discord.Embed:
     e = discord.Embed(title=f"{reg.config.name} · character registration", colour=0x2B7A78,
                       description="**Register / plan my main** — class, spec, roles, and your character's name if it exists (leave it blank before launch).\n"
                                   "**Add an alt** — same flow for an alt.\n**My status** — what the bot has for you.\n\n"
-                                  "Keyboard route: `/me plan …`, `/me char …`, `/me view`. Availability and absences: `/me availability`, `/me absent add`.")
+                                  "Keyboard route: `/me plan …`, `/me char …`, `/me view`. Away for a while? `/me absent add` or the card in the absences channel.")
     e.set_footer(text="Your Discord account is your identity; character names can be added later with /me char name.")
     return e
 
@@ -353,7 +353,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await ops.emit(reg.config, "info", f"**{m.display_name}** registered {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ''}) — pending confirmation")
 
     # ---------------- /plan (pre-launch: what are you going to play?)
-    me = app_commands.Group(name="me", description="Your plan, characters, availability and absences")
+    me = app_commands.Group(name="me", description="Your plan, characters and absences")
     plan = app_commands.Group(name="plan", description="Pre-launch: what you're planning to play (no character name needed)", parent=me)
 
     @plan.command(name="main", description="What you plan to main")
@@ -485,22 +485,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     team_autocomplete = roster_autocomplete
 
-    @me.command(name="availability", description="Your standing default for a roster's raids: in, out, or sub-only")
-    @app_commands.autocomplete(roster=roster_autocomplete)
-    @app_commands.choices(value=[app_commands.Choice(name=v, value=v) for v in ("in", "out", "sub")])
-    async def availability(interaction: discord.Interaction, value: app_commands.Choice[str], roster: str | None = None):
-        reg = await need(interaction)
-        if not reg:
-            return
-        team = roster or reg.config.roster_keys()[0]
-        try:
-            m = reg.set_availability(interaction.user.id, team, value.value)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {team}: **{value.value}** (sheets for this team will start with you {value.value}).", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} availability {team}={value.value}")
-
     absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)", parent=me)
 
     @absent.command(name="add", description="Register an absence: one day or a range")
@@ -516,7 +500,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         span = a.start + (f" → {a.end}" if a.end != a.start else "")
         await interaction.response.send_message(f"✅ Absent {span}. You'll be left off sheets for those dates.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} absent {span}" + (f" — {a.reason}" if a.reason else ""))
+        await interaction.client.announce_absence(reg, m, a, interaction.user.display_name)
 
     @absent.command(name="list", description="Your upcoming absences")
     async def absent_list(interaction: discord.Interaction):
@@ -636,7 +620,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         else:
             await ops.emit(reg.config, "warn", f"application from {a.display_name} ({a.name}, {a.cls} {a.spec}) — no applications/ops channel configured; use /roster applicants")
 
-    @me.command(name="view", description="Your plan, characters, availability and upcoming absences")
+    @me.command(name="view", description="Your plan, characters and upcoming absences")
     async def me(interaction: discord.Interaction):
         reg = await need(interaction)
         if not reg:
@@ -847,14 +831,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
         await interaction.response.send_message("\n".join(lines)[:1900] or f"No absences in the next {days} days.", ephemeral=True)
 
-    @roster.command(name="availability", description="Standing availability counts per roster")
-    async def roster_availability(interaction: discord.Interaction):
-        reg = await officer(interaction)
-        if not reg:
-            return
-        s = reg.availability_summary()
-        await interaction.response.send_message("\n".join(f"**{t}**: in {v['in']} · sub {v['sub']} · out {v['out']} · unset {v['unset']}" for t, v in s.items()), ephemeral=True)
-
     @roster.command(name="absent", description="Record an absence on a member's behalf")
     async def roster_absent(interaction: discord.Interaction, member: discord.User, start: str, end: str | None = None, reason: str | None = None):
         reg = await officer(interaction)
@@ -866,7 +842,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ {m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else ""), ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} recorded {m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else ""))
+        await interaction.client.announce_absence(reg, m, a, interaction.user.display_name)
 
     @roster.command(name="applicants", description="Open applications")
     async def roster_applicants(interaction: discord.Interaction):
@@ -1031,6 +1007,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.followup.send(f"✅ {len(msgs)} analytics card(s) posted in {channel.mention}; they re-post at the bottom after every registry change, with a change-log line above.", ephemeral=True)
         await ops.emit(reg.config, "info", f"analytics channel → #{channel.name} (by {interaction.user.display_name})")
 
+    @config.command(name="absences-channel", description="Owner: public channel with the 'I'll be away' card; the bot posts one line per absence there")
+    async def cfg_absences_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await interaction.client.post_absences_card(reg, channel, interaction.user.display_name)
+        except discord.Forbidden:
+            await interaction.followup.send(f"❌ I can't post in {channel.mention} (need View Channel, Send Messages, Embed Links there).", ephemeral=True)
+            return
+        await interaction.followup.send(f"✅ Absence card posted and pinned in {channel.mention}. Members press *I'll be away*; each absence is announced there (reasons stay officer-only) and pre-fills Out on the sheets it overlaps.", ephemeral=True)
+        await ops.emit(reg.config, "info", f"absences channel → #{channel.name} (by {interaction.user.display_name})")
+
     @config.command(name="signup-channel", description="Owner: where raid sheets are posted")
     async def cfg_signup(interaction: discord.Interaction, channel: discord.TextChannel):
         reg = await need(interaction)
@@ -1056,9 +1049,10 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
 
-    @config.command(name="raid", description="Owner: raid rules — lockout days, duration, tank/healer/dps min-max, notes")
+    @config.command(name="raid", description="Owner: raid rules — slots, signup/lock/confirm hours, lockout, duration, comp, weights")
     @app_commands.autocomplete(raid=instance_autocomplete)
-    async def cfg_raid(interaction: discord.Interaction, raid: str, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, auto: bool | None = None, first_open: str | None = None, reset: bool = False):
+    @app_commands.describe(slots="recurring run times, e.g. 'Tue 19:30, Thu 20:00' ('none' clears)", signup_lead_hours="sheet opens this many hours before the slot", lock_hours_before="roster locks this many hours before", confirm_hours_before="unanswered confirmations expire this many hours before", weights="rank=3 main=2 sat_out=2 signup_order=1")
+    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -1070,9 +1064,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 msg = [reg.clear_raid_override(raid, interaction.user.display_name)]
             else:
                 msg = []
-                for field, val in (("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("auto", auto), ("first_open", first_open)):
+                if slots is not None:
+                    msg.append(reg.set_raid_override(raid, "slots", "" if slots.strip().lower() in ("none", "clear", "-") else slots, interaction.user.display_name))
+                for field, val in (("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
                     if val is not None:
                         msg.append(reg.set_raid_override(raid, field, val, interaction.user.display_name))
+                for part in (weights or "").replace(",", " ").split():
+                    k, _, v = part.partition("=")
+                    msg.append(reg.set_raid_override(raid, f"weight_{k.strip()}", v.strip(), interaction.user.display_name))
                 for role, val in (("tank", tanks), ("healer", healers), ("dps", dps)):
                     if val:
                         lo, _, hi = val.replace("–", "-").partition("-")
@@ -1085,25 +1084,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         rd = reg.raid_def(raid)
         comp = rd.get("comp") or {}
         fo = reg.first_open(raid)
-        eff = f"**{rd.get('name', raid)}** · {rd.get('size')}-player · lockout {rd['lockout_days']}d" + (f" from <t:{int(fo.timestamp())}:f>" if fo else "") + f" · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items())
+        eff = (f"**{rd.get('name', raid)}** · {rd.get('size')}-player · slots {', '.join(rd['slots']) or 'none'} · opens {rd['signup_lead_hours']}h before · locks {rd['lock_hours_before']}h before · confirm by {rd['confirm_hours_before']}h before"
+               f" · lockout {rd['lockout_days']}d" + (f" from <t:{int(fo.timestamp())}:f>" if fo else "") + f" · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items()) + " · weights " + " ".join(f"{k}={v}" for k, v in rd['weights'].items()))
         await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff + (f"\n{rd['notes']}" if rd.get("notes") else ""), ephemeral=True)
-
-    @config.command(name="slots", description="Owner: candidate raid times members rate, e.g. 'Tue 19:30, Thu 20:00' (blank clears)")
-    async def cfg_slots(interaction: discord.Interaction, times: str = ""):
-        reg = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        from . import configops
-
-        try:
-            msg = configops.apply(reg, configops.ConfigOp(op="set", path="slots", value=times), interaction.user.display_name, True)
-        except (RegistryError, ValueError) as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {msg}. Members rate them on the website (Me → Raid times) — the heat-map is on Admin.", ephemeral=True)
 
     @config.command(name="about", description="Owner: one-paragraph public blurb for the static guide ('About the guild')")
     async def cfg_about(interaction: discord.Interaction, text: str):
@@ -1148,29 +1131,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
         await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
 
-    @roster.command(name="build", description="Officer: propose every roster for the coming lockout window from the pool (approve on the site)")
-    async def roster_build(interaction: discord.Interaction):
-        reg = await officer(interaction)
-        if not reg:
-            return
-        from .roster import builder
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        shells = builder.shells_from_config(reg)
-        if not shells:
-            await interaction.followup.send("No roster has a schedule yet — `/gm config roster key:main schedule:'Tue 19:30'` first.", ephemeral=True)
-            return
-        res = await asyncio.to_thread(builder.build, reg, interaction.client.raids.store(reg), shells)
-        adds, removes = builder.diff_placements(reg, res)
-        e = discord.Embed(title="Proposed rosters · coming window", colour=0x2B7A78, description=" · ".join(res.notes)[:1000])
-        for sh in shells:
-            seats = res.rosters.get(sh.key, [])
-            lines = [f"{ico('role', s.role)} {ico('class', s.cls)} **{s.character}** ({s.display_name}) · {', '.join(s.reasons[:2])}" for s in seats]
-            e.add_field(name=f"{sh.name} · {sh.slot} · {len(seats)}/{sh.size}" + ("".join(f" · short {n} {r}" for r, n in res.shortfalls.get(sh.key, {}).items())), value="\n".join(lines)[:1000] or "nobody", inline=False)
-        if res.unplaced:
-            e.add_field(name=f"Not seated ({len(res.unplaced)})", value="; ".join(f"{n} — {w}" for n, w in res.unplaced[:8])[:1000], inline=False)
-        e.set_footer(text=f"{len(adds)} placements to add, {len(removes)} to remove vs today · approve at {os.environ.get('OIBOT_WEB_URL', 'the website')}/admin/build")
-        await interaction.followup.send(embed=e, ephemeral=True)
     async def roster_regcard(interaction: discord.Interaction):
         reg = await officer(interaction)
         if not reg:

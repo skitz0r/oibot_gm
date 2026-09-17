@@ -20,9 +20,7 @@ fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg,
 src/oibot_gm/
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
-  roster/              solver.py (CP-SAT select+group, pins/forces), explain.py (advisories), coverage.py (slot-aware),
-                       builder.py (CP-SAT: seat the pool into every roster shell for a lockout window; diff/apply placements),
-                       autoplan.py (windows from availability grids → runs → Proposal; officers accept by DM → ephemeral rosters + sheets)
+  roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score), recommend.py (Claude structured output + fallback)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
@@ -30,18 +28,21 @@ src/oibot_gm/
   lootctx.py           RegistryLootContext: a registered guild's ledger/precedents/wishlists/compiled policy for the loot pipeline; bot.loot_ctx(session) picks mock vs real
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member)
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
-                       /me view|plan main|alt|roles|char …|availability|absent … (members);
-                       /roster overview|poll|registration-card|add|remove|members|list|confirm|rank|set-main|absences|availability|absent|applicants|applicant (officers);
+                       /me view|plan main|alt|roles|char …|absent … (members);
+                       /roster overview|poll|registration-card|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers);
                        Rosters are first-class: config `rosters[]` (key/size/schedule/instance/cutoffs), membership lives on characters (`RegisteredCharacter.rosters`),
                        raids are opened for a roster, officer posts go to `roster_channel_id`. Internal helpers still say "team" (aliases) — don't rename them casually.
                        /gm status|config …(owner: ops/applications/registration/analytics/roster/signup channels, roster, officer-role, timezone)|change|policy …|rule loot|comp; /raid … (discord_raid.py); /mock … (demo)
-  raidcycle.py         weekly cycle: RaidEvent, schedule math, prefill, health check, players_for → solver, no LLM;
-                       fill engine (needs → fill_candidates → fill_batch → apply_fill_answer; conflicts across rosters)
-  discord_raid.py      sheets with persistent DynamicItem buttons, /raid (incl. /raid fill), FillButton DMs, scheduler loop (RaidMixin on the client)
+  raidcycle.py         signup-driven cycle (design.md §5.20): raid slots + cadence (raid_def: slots, signup_lead/lock/confirm hours, weights) →
+                       slot_starts/open_run (ephemeral roster per run), Join/Bench/No thanks (in/sub/out), propose() at lock (weights, pins,
+                       role min/max, splits into several rosters per slot), confirmations (placement asks on the run key), free_seat/seat_player/
+                       expire_confirmations, fill engine (benched joiners + Bench first → pool → offspec → alt). No LLM. Member.week is legacy, unused.
+  discord_raid.py      sheets with persistent buttons, lock_run → roster cards + Confirm/Can't DMs (PlaceButton), drop_seated, after_absence, /raid …,
+                       scheduler loop (open on cadence → health → fill → lock → expire → close) (RaidMixin on the client)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with the character
-                       bank, and per roster: pool readiness, optimised groups (solver on the pool, totem picks, raid buffs), desired comp
-                       (derived + officer targets, @mention to change) + change log; driven by Registry.listeners (diff_member), debounced
+                       bank, and per raid: pool readiness, optimised groups, desired comp + change log (Registry.listeners, debounced);
+                       absences channel (AbsencesMixin: card + "I'll be away" modal → announce_absence → sheets updated)
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
   discord_help.py      /help (no LLM, by tier), /ask, @mention outside the officer channels and DMs → help_answer

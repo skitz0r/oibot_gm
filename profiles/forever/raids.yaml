@@ -9,6 +9,10 @@
 # duration_hours: expected run length; availability grids are checked for the whole window.
 # comp:           desired role counts for a full run — {min, max} per role; the solver, health check and
 #                 desired-comp card use these instead of the generic comp_rules when present.
+# slots:          recurring run times ('Tue 19:30', guild timezone); one sheet per slot per lockout window.
+# signup_lead_hours / lock_hours_before / confirm_hours_before: the run's cadence — sheet opens, roster locks,
+#                 confirmations expire, each measured back from the slot's start.
+# weights:        seat-selection bonuses at lock (rank, main over alt, sat out last window, signup order).
 # bosses / loot:  not published; discovered in game after unlock.
 raids:
   - id: barrow_deeps
@@ -17,6 +21,11 @@ raids:
     lockout_days: 3
     first_open: "2026-12-09T15:00:00-08:00"
     duration_hours: 2.5
+    slots: []
+    signup_lead_hours: 48
+    lock_hours_before: 24
+    confirm_hours_before: 6
+    weights: {rank: 3, main: 2, sat_out: 2, signup_order: 1}
     wcl_zone: null
     comp: {tank: {min: 2, max: 2}, healer: {min: 2, max: 3}, dps: {min: 5, max: 6}}
     tank_needs: {count: 2, note: "guess: two tanks for a 10-player instance until encounters are known"}
@@ -28,6 +37,11 @@ raids:
     lockout_days: 7
     first_open: "2026-12-09T15:00:00-08:00"
     duration_hours: 3
+    slots: []
+    signup_lead_hours: 120
+    lock_hours_before: 24
+    confirm_hours_before: 6
+    weights: {rank: 3, main: 2, sat_out: 2, signup_order: 1}
     wcl_zone: null
     comp: {tank: {min: 2, max: 3}, healer: {min: 5, max: 6}, dps: {min: 11, max: 13}}
     tank_needs: {count: 2, note: "guess: 2–3 tanks; adjust once fights are known"}
@@ -39,6 +53,11 @@ raids:
     lockout_days: 5
     first_open: "2026-12-09T15:00:00-08:00"
     duration_hours: 1.5
+    slots: []
+    signup_lead_hours: 96
+    lock_hours_before: 24
+    confirm_hours_before: 6
+    weights: {rank: 3, main: 2, sat_out: 2, signup_order: 1}
     wcl_zone: null
     comp: {tank: {min: 3, max: 4}, healer: {min: 8, max: 10}, dps: {min: 26, max: 29}}
     tank_needs: {count: 3, note: "Classic Onyxia: main tank plus off-tanks for the whelps/phase 3 fears"}

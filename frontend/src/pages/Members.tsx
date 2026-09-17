@@ -1,36 +1,26 @@
 import { Fragment, useEffect, useState } from "react";
-import { ActionIcon, Badge, Box, Button, Card, Group, Radio, Select, Stack, Table, Text, TextInput, Tooltip, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Badge, Box, Button, Card, Group, Modal, Radio, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
+import { DateInput } from "@mantine/dates";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
-import { api, type Character, type MemberRow, type Members as MembersData, type Meta, type WeekBlock } from "../api";
+import { api, type Character, type MemberRow, type Members as MembersData, type Meta } from "../api";
 import { GameIcon } from "../components/Icons";
-import { HeatMap } from "../components/HeatMap";
-import { CardHeader, PageTitle, fail, ok } from "../components/Page";
-import { WeekGrid } from "../components/WeekGrid";
+import { PageTitle, fail, ok } from "../components/Page";
 import { CLASS_COLOURS } from "../theme";
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const PREF = "#2E9E6B", AVAIL = "#B8892A", NONE = "var(--mantine-color-slate-6)";
 const PRIV: Record<string, string> = { owner: "yellow", officer: "teal", member: "gray", outside: "red" };
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; main: boolean; named: boolean; isNew?: boolean };
-type MemberDraft = { characters: Draft[]; deletes: string[]; week?: WeekBlock[] };
-
-function daySummary(week: WeekBlock[]) {
-  const days = Array.from({ length: 7 }, () => "" as "" | "preferred" | "available");
-  week.forEach((b) => { if (b.level === "preferred" || !days[b.day]) days[b.day] = b.level; });
-  return { days, hours: week.reduce((s, b) => s + (b.end - b.start), 0) / 60 };
-}
+type MemberDraft = { characters: Draft[]; deletes: string[] };
 
 export function MembersPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<MembersData | null>(null);
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [absFor, setAbsFor] = useState<MemberRow | null>(null);
   const [drafts, setDrafts] = useState<Record<string, MemberDraft> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const load = () => api.get<MembersData>("/api/members").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
 
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));
-  const toggle = (uid: string) => setOpen((o) => { const n = new Set(o); if (n.has(uid)) n.delete(uid); else n.add(uid); return n; });
 
   function startEdit() {
     if (!data) return;
@@ -52,7 +42,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
     if (!drafts) return;
     setBusy("save");
     try {
-      const rows = Object.entries(drafts).map(([uid, d]) => ({ uid, characters: d.characters, deletes: d.deletes, week: d.week ?? null }));
+      const rows = Object.entries(drafts).map(([uid, d]) => ({ uid, characters: d.characters, deletes: d.deletes }));
       const r = await api.post<{ message: string }>("/api/members/save", { rows });
       ok(r.message); setDrafts(null); await load();
     } catch (e) { fail(e); } finally { setBusy(null); }
@@ -70,7 +60,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const editing = drafts !== null;
   return (
     <Stack gap="lg">
-      <PageTitle title="Members" intro={`${data.rows.length} members with characters · ${data.members} in the registry · owner and officer badges come from Discord roles`}
+      <PageTitle title="Members" intro={`${data.rows.length} members with characters · ${data.members} in the registry · owner and officer badges come from Discord roles · absences pre-fill No thanks on the sheets they overlap`}
         right={!editing ? <Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit members</Button> : null} />
       <Card>
         <Table.ScrollContainer minWidth={900}>
@@ -81,21 +71,21 @@ export function MembersPage({ meta }: { meta: Meta }) {
             <Table.Tbody>
               {data.rows.map((r) => {
                 const d = drafts?.[r.uid];
-                const week = d?.week ?? r.week;
-                const { days, hours } = daySummary(week);
                 const chars = d ? d.characters : r.characters;
-                const span = chars.length + (editing ? 1 : 0) + (open.has(r.uid) ? 1 : 0);
+                const span = chars.length + (editing ? 1 : 0);
                 const memberCell = (
                   <Table.Td rowSpan={span} style={{ verticalAlign: "top", borderRight: "1px solid var(--mantine-color-slate-5)", background: "var(--mantine-color-slate-7)" }}>
                     <Group gap={8} wrap="nowrap"><Text fw={700} truncate>{r.display_name}</Text><Badge size="xs" variant="outline" color={PRIV[r.privilege] || "gray"}>{r.privilege}</Badge></Group>
                     <Text size="xs" c="dimmed">{r.verification}</Text>
                     {r.asks.map((a) => <Badge key={a.roster} size="xs" variant="light" color="yellow" mt={4}>confirm {a.roster}?</Badge>)}
-                    <Tooltip label={open.has(r.uid) ? "hide the week" : "show the full week"}>
-                      <UnstyledButton aria-label={`${open.has(r.uid) ? "hide" : "show"} the week of ${r.display_name}`} onClick={() => toggle(r.uid)} mt={8} px={4} py={3} style={{ display: "flex", gap: 3, alignItems: "center", borderRadius: 6, border: `1px solid ${open.has(r.uid) ? "var(--mantine-color-slate-5)" : "transparent"}`, background: open.has(r.uid) ? "var(--mantine-color-slate-6)" : undefined, whiteSpace: "nowrap" }}>
-                        {days.map((lv, i) => <Box key={i} title={DAYS[i]} style={{ width: 13, height: 13, borderRadius: 3, background: lv === "preferred" ? PREF : lv === "available" ? AVAIL : NONE }} />)}
-                        <Text size="xs" c="dimmed" ml={6}>{hours ? `${hours} h` : "no grid yet"}{d?.week ? " · edited" : ""}</Text>
-                      </UnstyledButton>
-                    </Tooltip>
+                    <Group gap={4} mt={6} wrap="wrap">
+                      {r.absences.map((a) => (
+                        <Tooltip key={a.start} label={a.reason ? `${a.reason} · click to clear` : "click to clear"}>
+                          <Badge size="xs" variant="outline" color="gray" style={{ cursor: "pointer" }} onClick={() => confirm(`Clear ${r.display_name}'s absence from ${a.start}?`) && act(`ca${r.uid}${a.start}`, "/api/members/absence/clear", { uid: r.uid, start: a.start })}>away {a.start}{a.end !== a.start ? ` → ${a.end}` : ""} ×</Badge>
+                        </Tooltip>
+                      ))}
+                      <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setAbsFor(r)}>+ away</Button>
+                    </Group>
                   </Table.Td>
                 );
                 return (
@@ -114,14 +104,6 @@ export function MembersPage({ meta }: { meta: Meta }) {
                         <Table.Td /><Table.Td colSpan={5}><Button size="xs" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => upd(r.uid, { characters: [...(d?.characters ?? []), { label: null, cls: "", spec: "", offspec: null, name: "", surname: "", main: chars.length === 0, named: false, isNew: true }] })}>Add a character for {r.display_name}</Button></Table.Td>
                       </Table.Tr>
                     )}
-                    {open.has(r.uid) && (
-                      <Table.Tr>
-                        <Table.Td colSpan={6} style={{ background: "var(--mantine-color-slate-7)" }}>
-                          <Group gap="md" mb="xs" wrap="wrap"><Text size="sm" fw={600}>{r.display_name} · when they can raid</Text>{!editing && <Text size="xs" c="dimmed">read-only · press Edit members to change it</Text>}</Group>
-                          <WeekGrid value={week} onChange={editing ? (w) => upd(r.uid, { week: w }) : undefined} readOnly={!editing} compact landscape raidWindows={data.raid_windows} tz={data.tz} />
-                        </Table.Td>
-                      </Table.Tr>
-                    )}
                   </Fragment>
                 );
               })}
@@ -130,17 +112,32 @@ export function MembersPage({ meta }: { meta: Meta }) {
         </Table.ScrollContainer>
         {editing && (
           <Group p="sm" px="md" justify="flex-end" gap="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)", background: "var(--mantine-color-slate-6)" }}>
-            <Text size="sm" c="dimmed" mr="auto">Names, specs, mains, adds, deletes and availability apply on save · click a member's day squares to edit their week</Text>
+            <Text size="sm" c="dimmed" mr="auto">Names, specs, mains, adds and deletes apply on save</Text>
             <Button variant="default" size="sm" onClick={() => setDrafts(null)}>Cancel</Button>
             <Button size="sm" loading={busy === "save"} onClick={save}>Save changes</Button>
           </Group>
         )}
       </Card>
-      <Card>
-        <CardHeader title="Everyone's availability" hint={`${data.grid_members} of ${data.rows.length} mains have a grid · ${data.tz} · darker = more people, green = mostly preferred`} />
-        <Box p="md"><HeatMap heat={data.week_heat} n={data.grid_members} /></Box>
-      </Card>
+      <AbsenceModal r={absFor} onClose={() => setAbsFor(null)} onSaved={() => { setAbsFor(null); load(); }} />
     </Stack>
+  );
+}
+
+function AbsenceModal({ r, onClose, onSaved }: { r: MemberRow | null; onClose: () => void; onSaved: () => void }) {
+  const [start, setStart] = useState<Date | null>(null);
+  const [end, setEnd] = useState<Date | null>(null);
+  const [reason, setReason] = useState("");
+  const iso = (d: Date | null) => (d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` : null);
+  return (
+    <Modal opened={!!r} onClose={onClose} title={r ? `${r.display_name} is away` : ""} centered>
+      <Stack>
+        <DateInput label="From" value={start} onChange={(v) => setStart(v ? new Date(v) : null)} required />
+        <DateInput label="To" value={end} onChange={(v) => setEnd(v ? new Date(v) : null)} description="leave empty for a single day" />
+        <TextInput label="Reason" description="officers only" value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
+        <Text size="xs" c="dimmed">Sheets on those days get No thanks for them; if they're already seated the seat is handed back and the bench is asked.</Text>
+        <Group justify="flex-end"><Button variant="default" onClick={onClose}>Cancel</Button><Button disabled={!start} onClick={() => r && api.post<{ message: string }>("/api/members/absence", { uid: r.uid, start: iso(start), end: iso(end), reason }).then((x) => { ok(x.message); onSaved(); setStart(null); setEnd(null); setReason(""); }).catch(fail)}>Add</Button></Group>
+      </Stack>
+    </Modal>
   );
 }
 

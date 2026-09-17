@@ -128,9 +128,11 @@ class GuildConfig(BaseModel):
     registration_message_id: Optional[int] = None
     analytics_channel_id: Optional[int] = None  # officer: live pool-readiness cards (edited on every change) + change log
     analytics_message_ids: dict[str, int] = Field(default_factory=dict)  # roster key -> card message id
+    absences_channel_id: Optional[int] = None  # public: 'I'll be away' card + one line per absence (reason stays officer-only)
+    absences_message_id: Optional[int] = None
     timezone: str = "America/Los_Angeles"  # guild time: every schedule, window and displayed clock uses it
     auto_propose_hour: int = 12  # guild-local hour when the planner runs for raids with auto-propose on
-    slots: list[str] = Field(default_factory=list)  # candidate raid times members rate ('Tue 19:30'); officers pick rosters from the heat-map
+    slots: list[str] = Field(default_factory=list)  # legacy candidate-slot poll (unused since the signup-driven cycle)
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
     about: Optional[str] = None  # short public blurb for the static guide (owner-set)
     officer_roles: list[str] = Field(default_factory=list)
@@ -170,6 +172,28 @@ class GuildConfig(BaseModel):
 
 class RegistryError(ValueError):
     pass
+
+
+RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1}
+RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before")
+_SLOT_RE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)$", re.I)
+
+
+def parse_slots(text) -> list[str]:
+    """'Tue 19:30, Thu 20:00' (or a list) → normalised ['Tue 19:30', 'Thu 20:00']; raises RegistryError on junk."""
+    raw = text if isinstance(text, list) else [x for x in str(text or "").replace(";", ",").split(",")]
+    out = []
+    for x in raw:
+        x = str(x).strip()
+        if not x:
+            continue
+        m = _SLOT_RE.match(x)
+        if not m:
+            raise RegistryError(f"slot {x!r} should look like 'Tue 19:30'")
+        out.append(f"{m.group(1)[:3].title()} {int(m.group(2)):02d}:{m.group(3)}")
+    if len(set(out)) != len(out):
+        raise RegistryError("a slot is listed twice")
+    return out
 
 
 def _clabel(c: dict) -> str:
@@ -557,10 +581,17 @@ class Registry:
                 for r, b in (v or {}).items():
                     comp[r] = {**comp.get(r, {}), **b}
                 out["comp"] = comp
+            elif k == "weights":
+                out["weights"] = {**(base.get("weights") or {}), **(v or {})}
             else:
                 out[k] = v
         out.setdefault("lockout_days", 7)
         out.setdefault("duration_hours", 3)
+        out.setdefault("slots", [])
+        out.setdefault("signup_lead_hours", 120)
+        out.setdefault("lock_hours_before", 24)
+        out.setdefault("confirm_hours_before", 6)
+        out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
         return out
 
     def raid_shell(self, instance: str) -> dict:
@@ -622,11 +653,36 @@ class Registry:
         return {"tank": b["tank"], "healer": b["healer"], "dps": {"min": 0, "max": size}}
 
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
-        """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max."""
+        """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max
+        | slots | signup_lead_hours | lock_hours_before | confirm_hours_before | weight_rank/main/sat_out/signup_order."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         over = self.config.raids.setdefault(instance, {})
-        if field in ("lockout_days", "duration_hours"):
+        if field == "slots":
+            over["slots"] = parse_slots(value)
+            value = ", ".join(over["slots"]) or "none"
+        elif field in RAID_HOURS_FIELDS:
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                raise RegistryError(f"{field} must be a number of hours")
+            if num < 0:
+                raise RegistryError(f"{field} can't be negative")
+            over[field] = int(num) if num == int(num) else num
+            eff = self.raid_def(instance)
+            if eff["lock_hours_before"] < eff["confirm_hours_before"]:
+                raise RegistryError("lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
+            if eff["signup_lead_hours"] <= eff["lock_hours_before"]:
+                raise RegistryError("signups must open before they lock (signup_lead_hours > lock_hours_before)")
+        elif field.startswith("weight_") and field[7:] in RAID_WEIGHT_DEFAULTS:
+            try:
+                n = int(value)
+            except (TypeError, ValueError):
+                raise RegistryError(f"{field} must be a whole number")
+            if n < 0:
+                raise RegistryError(f"{field} can't be negative")
+            over.setdefault("weights", {})[field[7:]] = n
+        elif field in ("lockout_days", "duration_hours"):
             try:
                 num = float(value)
             except (TypeError, ValueError):

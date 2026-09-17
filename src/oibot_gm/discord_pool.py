@@ -8,6 +8,7 @@ Registry commits drive both through Registry.listeners; refreshes are debounced 
 from __future__ import annotations
 
 import asyncio
+import re
 from io import BytesIO
 
 import discord
@@ -231,3 +232,113 @@ class PoolMixin:
         reg.config.registration_channel_id, reg.config.registration_message_id = ch.id, msg.id
         reg.save_config(f"registration channel → #{ch.name}", notify=False)
         return " · ".join(notes)
+
+
+# ---------------------------------------------------------------- absences channel
+
+class AbsenceModal(discord.ui.Modal, title="I'll be away"):
+    start = discord.ui.TextInput(label="From (YYYY-MM-DD)", placeholder="2026-12-24", min_length=10, max_length=10)
+    end = discord.ui.TextInput(label="To (YYYY-MM-DD, blank = one day)", required=False, max_length=10)
+    reason = discord.ui.TextInput(label="Reason (officers only, optional)", required=False, max_length=120)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        bot = interaction.client
+        reg = bot.registries.for_interaction(interaction)
+        if not reg:
+            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        from .registry import RegistryError
+
+        try:
+            m, a = reg.add_absence(interaction.user.id, str(self.start.value).strip(), str(self.end.value).strip() or None, str(self.reason.value).strip() or None, interaction.user.display_name, display_name=interaction.user.display_name)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        span = a.start + (f" → {a.end}" if a.end != a.start else "")
+        await interaction.response.send_message(f"✅ Away {span}. Sheets on those days will have you as No thanks; if you're already seated, the seat is handed back.", ephemeral=True)
+        await bot.announce_absence(reg, m, a, interaction.user.display_name)
+
+
+class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs:(?P<action>new|mine)"):
+    def __init__(self, action: str):
+        label, style = ("I'll be away", discord.ButtonStyle.primary) if action == "new" else ("My absences", discord.ButtonStyle.secondary)
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"abs:{action}"))
+        self.action = action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["action"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        reg = bot.registries.for_interaction(interaction)
+        if not reg:
+            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        if self.action == "new":
+            await interaction.response.send_modal(AbsenceModal())
+            return
+        m = reg.members.get(interaction.user.id)
+        today = reg.now_local().date().isoformat()
+        ups = m.upcoming_absences(today) if m else []
+        await interaction.response.send_message("\n".join(f"• {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") for a in ups) or "No upcoming absences. Clear one with `/me absent clear`.", ephemeral=True)
+
+
+def absences_card(reg: Registry) -> discord.Embed:
+    today = reg.now_local().date().isoformat()
+    rows = sorted(((m, a) for m in reg.members.values() for a in m.absences if a.end >= today), key=lambda x: x[1].start)
+    e = discord.Embed(title=f"{reg.config.name} · away", colour=0x2B7A78,
+                      description="Going to miss some days? Press **I'll be away**. Sheets on those days have you as *No thanks* automatically, and if you were already seated the seat is handed back. Reasons stay with the officers.")
+    if rows:
+        e.add_field(name="Upcoming", value="\n".join(f"**{m.display_name}** · {a.start}" + (f" → {a.end}" if a.end != a.start else "") for m, a in rows[:25])[:1000], inline=False)
+    e.set_footer(text="Also: /me absent add · the Me page on the website")
+    return e
+
+
+def absences_view() -> discord.ui.View:
+    v = discord.ui.View(timeout=None)
+    v.add_item(AbsenceButton("new"))
+    v.add_item(AbsenceButton("mine"))
+    return v
+
+
+class AbsencesMixin:
+    async def post_absences_card(self, reg: Registry, ch: discord.TextChannel, by: str) -> None:
+        if reg.config.absences_channel_id and reg.config.absences_message_id:
+            old = self.get_channel(reg.config.absences_channel_id)
+            if old:
+                try:
+                    await (await old.fetch_message(reg.config.absences_message_id)).delete()
+                except Exception:  # noqa: BLE001
+                    pass
+        msg = await ch.send(embed=absences_card(reg), view=absences_view())
+        try:
+            await msg.pin()
+        except Exception:  # noqa: BLE001
+            pass
+        reg.config.absences_channel_id, reg.config.absences_message_id = ch.id, msg.id
+        reg.save_config(f"absences channel → #{ch.name} (by {by})", notify=False)
+
+    async def refresh_absences_card(self, reg: Registry) -> None:
+        if not (reg.config.absences_channel_id and reg.config.absences_message_id):
+            return
+        ch = self.get_channel(reg.config.absences_channel_id)
+        if not ch:
+            return
+        try:
+            await (await ch.fetch_message(reg.config.absences_message_id)).edit(embed=absences_card(reg), view=absences_view())
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def announce_absence(self, reg: Registry, m, a, by: str) -> None:
+        """Public line (no reason), sheets updated, card refreshed, ops line with the reason."""
+        span = a.start + (f" → {a.end}" if a.end != a.start else "")
+        touched = await self.after_absence(reg, m, a.start, a.end, by)
+        ch = self.get_channel(reg.config.absences_channel_id) if reg.config.absences_channel_id else None
+        if ch:
+            try:
+                await ch.send(f"🛫 **{m.display_name}** is away {span}" + (f" · off {len(touched)} sheet(s)" if touched else ""), allowed_mentions=discord.AllowedMentions.none())
+            except Exception:  # noqa: BLE001
+                pass
+        await self.refresh_absences_card(reg)
+        await self.ops.emit(reg.config, "info", f"{m.display_name} absent {span}" + (f" — {a.reason}" if a.reason else "") + (f" (by {by})" if by != m.display_name else "") + (f" · sheets: {', '.join(touched)}" if touched else ""))

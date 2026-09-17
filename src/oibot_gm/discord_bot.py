@@ -34,7 +34,8 @@ from .discord_policy import PolicyContext, handle_change, register_policy_comman
 from .discord_help import GuideSelect, HelpMixin, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
-from .discord_raid import FillButton, PlaceButton, ProposalButton, RaidContext, RaidMixin, SignupButton, register_raid_commands
+from .discord_pool import AbsenceButton, AbsencesMixin
+from .discord_raid import FillButton, PlaceButton, RaidContext, RaidMixin, SignupButton, register_raid_commands
 from .discord_registry import Guilds, PlanButton, RegisterButton, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
@@ -672,7 +673,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
+class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, HelpMixin, discord.Client):
     ico = staticmethod(ico)
 
     def __init__(self, ctx: GuildContext, test_guild: int | None):
@@ -713,7 +714,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, HelpMixin, discord.Client):
             walk(c)
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
-        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, ProposalButton, PlanButton, RegisterButton, GuideSelect)
+        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, PlanButton, RegisterButton, GuideSelect, AbsenceButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):

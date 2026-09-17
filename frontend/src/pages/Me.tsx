@@ -3,9 +3,8 @@ import { ActionIcon, Badge, Box, Button, Card, Group, Select, Stack, Switch, Tab
 import css from "./me.module.css";
 import { DateInput } from "@mantine/dates";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
-import { api, type Character, type Me, type Meta, type WeekBlock } from "../api";
+import { api, type Character, type Me, type Meta } from "../api";
 import { GameIcon } from "../components/Icons";
-import { WeekGrid } from "../components/WeekGrid";
 import { CLASS_COLOURS } from "../theme";
 import { CardHeader, fail, ok } from "../components/Page";
 
@@ -16,7 +15,6 @@ export function MePage({ meta }: { meta: Meta }) {
   const [me, setMe] = useState<Me | null>(null);
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [week, setWeek] = useState<WeekBlock[] | null>(null);
   const [absOpen, setAbsOpen] = useState(false);
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
@@ -39,15 +37,14 @@ export function MePage({ meta }: { meta: Meta }) {
     if (!confirm(`Delete ${c.label}? It is removed from every roster.`)) return;
     try { const r = await api.post<{ message: string }>("/api/me/character/delete", { label: c.label }); ok(r.message); load(); } catch (e) { fail(e); }
   }
-  async function saveWeek() { if (!week) return; try { const r = await api.post<{ message: string }>("/api/me/week", { week }); ok(r.message); setWeek(null); load(); } catch (e) { fail(e); } }
   async function setDm(on: boolean) { try { await api.post("/api/me/dm", { on }); ok(on ? "DMs on" : "DMs off"); load(); } catch (e) { fail(e); } }
   async function clearAbs(start: string) { try { await api.post("/api/me/absence/clear", { start }); ok("absence cleared"); load(); } catch (e) { fail(e); } }
 
   const summary = useMemo(() => {
     if (!me) return "";
     const n = me.characters.length;
-    const sheet = me.sheets.find((s) => s.status === "in");
-    return [`${n} character${n === 1 ? "" : "s"}`, me.roles.primary || null, sheet ? `${sheet.raid} · ${sheet.when} — you're in` : null].filter(Boolean).join(" · ");
+    const sheet = me.sheets.find((s) => s.seated) || me.sheets.find((s) => s.status === "in");
+    return [`${n} character${n === 1 ? "" : "s"}`, me.roles.primary || null, sheet ? `${sheet.raid} · ${sheet.when} — ${sheet.seated ? "you're seated" : "joined"}` : null].filter(Boolean).join(" · ");
   }, [me]);
 
   if (!me) return <Text c="dimmed">Loading…</Text>;
@@ -61,9 +58,9 @@ export function MePage({ meta }: { meta: Meta }) {
       {me.asks.map((a) => (
         <Card key={a.roster} style={{ borderColor: "var(--mantine-color-teal-4)" }}>
           <Group p="md" justify="space-between">
-            <Text>You're placed on <b>{a.roster}</b> as <b>{a.character}</b> — accept to keep the seat, or hand it back.</Text>
+            <Text>You're seated on <b>{a.roster}</b> as <b>{a.character}</b> — confirm to keep the seat, or hand it back.</Text>
             <Group gap="xs">
-              <Button size="xs" onClick={() => api.post("/api/me/placement", { roster: a.roster, answer: "yes" }).then(load).catch(fail)}>Accept</Button>
+              <Button size="xs" onClick={() => api.post("/api/me/placement", { roster: a.roster, answer: "yes" }).then(load).catch(fail)}>Confirm</Button>
               <Button size="xs" variant="default" onClick={() => api.post("/api/me/placement", { roster: a.roster, answer: "no" }).then(load).catch(fail)}>Can't make it</Button>
             </Group>
           </Group>
@@ -132,16 +129,6 @@ export function MePage({ meta }: { meta: Meta }) {
             )}
           </Card>
 
-          <Card>
-            <CardHeader title="When I can raid" hint={`${meta.tz}`} />
-            <Box p="md">
-              <WeekGrid value={week ?? me.week} onChange={setWeek} raidWindows={me.raid_windows} tz={meta.tz} />
-              <Group mt="sm" gap="sm">
-                <Button size="sm" disabled={!week} onClick={saveWeek}>Save availability</Button>
-                {week && <Button size="sm" variant="default" onClick={() => setWeek(null)}>Discard</Button>}
-              </Group>
-            </Box>
-          </Card>
         </Stack>
 
         <Stack gap="lg" style={{ minWidth: 0 }}>
@@ -152,10 +139,10 @@ export function MePage({ meta }: { meta: Meta }) {
               {me.sheets.map((s) => (
                 <Group key={s.key} justify="space-between" wrap="nowrap">
                   <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}</Text><Text size="xs" c="dimmed">{s.when}{s.character ? ` · ${s.character}` : ""}</Text></Box>
-                  <Badge variant="light" color={s.status === "in" ? "teal" : s.status === "out" ? "red" : "gray"}>{s.status || "not answered"}</Badge>
+                  <Badge variant="light" color={s.seated ? "teal" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.seated ? `seated${s.roster && s.roster > 1 ? ` · roster ${s.roster}` : ""}` : s.label || "not answered"}</Badge>
                 </Group>
               ))}
-              {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer on the sheet in Discord — In / Tentative / Sub / Out.</Text>}
+              {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer on the sheet in Discord — Join / Bench / No thanks. Once the roster locks you confirm by DM.</Text>}
             </Stack>
           </Card>
           <Card>

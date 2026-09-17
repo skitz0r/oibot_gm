@@ -14,7 +14,6 @@ SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never gue
 Guild (owner only): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
   roster_channel (officer channel for overviews/proposals), officer_role add/remove (role name),
   ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb),
-  slots (comma-separated candidate raid times members rate, e.g. 'Tue 19:30, Thu 20:00, Sun 18:00').
 Rosters (owner only; the ops are still named team_*): team <key> size (10|20|25|40), schedule ('Tue 19:30'),
   instance (raid id), cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders (dm|channel|none),
   open_dm (true|false: DM everyone when the sheet opens), autofill (true|false: between the soft and hard cutoffs the bot DMs
@@ -27,7 +26,7 @@ Comp ideals (officer): comp_target: team=<roster key or raid id (barrow_deeps|hy
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
   reason=<optional note, the justification shown on the desired-comp card>.
   comp_target_clear (team, field) removes an officer target so the derived value applies again.
-  raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<lockout_days|duration_hours|first_open (ISO datetime, when the instance first opens; windows = first_open + k×lockout)|notes|auto|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value (auto: true|false = plan runs daily and DM officers).
+  raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<slots (comma list of 'Tue 19:30' run times)|signup_lead_hours|lock_hours_before|confirm_hours_before|weight_rank|weight_main|weight_sat_out|weight_signup_order|lockout_days|duration_hours|first_open (ISO datetime, when the instance first opens)|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
   raid_reset (owner): team=<raid id> — drop the guild's overrides for that raid.
   comp_groups: team=<roster key>, value=<comma-separated group labels in order, e.g. "tank, healers, melee, casters">
   — the archetype layout the group optimiser seeds (labels may combine: "tank/heal", "melee+ranged"); empty value = default layout.
@@ -38,7 +37,7 @@ class ConfigOp(BaseModel):
     # Keep this schema small: the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset")
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|ask_audience|about|slots")
+    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|ask_audience|about")
     team: Optional[str] = Field(default=None, description="team key for team_* ops, availability and comp_target*")
     field: Optional[str] = Field(default=None, description="team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders; comp_target*: the slot (role, Class or Class:Spec)")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits; comp_target: 'min', 'min-max' or '-max')")
