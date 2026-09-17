@@ -138,7 +138,7 @@ class PoolMixin:
             return
         if kind == "member":
             self.loop.create_task(self.post_pool_log(reg, lines))
-        elif not any(l.startswith(("roster", "rosters", "team", "raid", "analytics")) for l in lines):
+        elif not any(l.startswith(("roster", "rosters", "team", "raid", "analytics", "aura")) for l in lines):
             return  # config commits that can't move the numbers (channels, timezone, owner)
         t = self._pool_timers.pop(reg.key, None)
         if t:

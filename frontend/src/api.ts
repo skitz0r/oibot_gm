@@ -39,7 +39,7 @@ export interface Character { label: string; name: string | null; surname: string
 export interface Absence { start: string; end: string; reason: string | null }
 export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; seated: boolean; roster: number | null }
 export interface PlacementAsk { roster: string; character: string; asked_at: string }
-export interface Aura { abbr: string; colour: string; art: string | null; name: string; who?: string; in_run?: boolean }
+export interface Aura { abbr: string; colour: string; art: string | null; name: string; who?: string; in_run?: boolean; covered?: boolean }
 export interface GroupSummary {
   roles: Record<string, number>; synergy: number | null; unmet: string[]; assumptions: string[];
   raid: { abbr: string; colour: string; art?: string | null; name: string; ok: string; n: number; detail: string; status: string }[];

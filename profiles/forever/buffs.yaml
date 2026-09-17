@@ -13,12 +13,12 @@
 # stacking: unique | stack
 # slot:     one provider can only bring one buff per slot at a time (shaman totems by element).
 #           Coverage and the solver pick the best totem per element for each group.
-# value:    points per beneficiary by spec attribute (all | physical | spell | mana | melee | ranged |
-#           healer | tank | spec:<Name>).
 # choices:  raid-scope only; a list of things each provider fills one of, in priority order (blessings).
+# family:   stacking family (see the bottom of this file); strength: multiplier on the family's value (default 1).
 buffs:
   # ---------------------------------------------------------------- shaman totems (party, static radius)
   - id: windfury_totem
+    family: windfury_totem
     icon: {abbr: WF, colour: "#5C9BFF", art: spell_nature_windfury}
     name: Windfury Totem
     providers: [Shaman:*]
@@ -27,10 +27,10 @@ buffs:
     stacking: unique
     slot: shaman_air
     status: assumed
-    value: {melee: 10, tank: 3, "spec:Enhancement": 2, "spec:Feral": 4}
     note: Air totem. Vanilla party-wide; Forever scope not published.
 
   - id: grace_of_air
+    family: grace_of_air
     icon: {abbr: GoA, colour: "#9FD8F5", art: spell_nature_invisibilitytotem}
     name: Grace of Air Totem
     providers: [Shaman:*]
@@ -39,10 +39,10 @@ buffs:
     stacking: unique
     slot: shaman_air
     status: assumed
-    value: {ranged: 5, "spec:Feral": 3, "spec:Combat": 2, "spec:Assassination": 2, "spec:Subtlety": 2}
     note: Air totem (agility). Wins the air slot in hunter/rogue groups without warriors.
 
   - id: tranquil_air
+    family: tranquil_air
     icon: {abbr: TqA, colour: "#B7E4F2", art: spell_nature_brilliance}
     name: Tranquil Air Totem
     providers: [Shaman:*]
@@ -51,10 +51,10 @@ buffs:
     stacking: unique
     slot: shaman_air
     status: assumed
-    value: {"spec:Shadow": 3, "spec:Fire": 2, "spec:Frost": 2, "spec:Arcane": 2, "spec:Destruction": 2, "spec:Affliction": 2, "spec:Demonology": 2, "spec:Balance": 2}
     note: Air totem (threat). Only wins the slot in a pure caster group.
 
   - id: strength_of_earth
+    family: strength_of_earth
     icon: {abbr: SoE, colour: "#B0855B", art: spell_nature_earthbindtotem}
     name: Strength of Earth Totem
     providers: [Shaman:*]
@@ -63,10 +63,10 @@ buffs:
     stacking: unique
     slot: shaman_earth
     status: assumed
-    value: {melee: 5, tank: 3}
     note: Earth totem.
 
   - id: stoneskin
+    family: stoneskin
     icon: {abbr: SS, colour: "#8D8D8D", art: spell_nature_stoneskintotem}
     name: Stoneskin Totem
     providers: [Shaman:*]
@@ -75,10 +75,10 @@ buffs:
     stacking: unique
     slot: shaman_earth
     status: assumed
-    value: {tank: 2}
     note: Earth totem; loses to Strength of Earth unless the group is all casters/healers.
 
   - id: mana_spring
+    family: mana_spring
     icon: {abbr: MSp, colour: "#4FB3E8", art: spell_nature_manaregentotem}
     name: Mana Spring Totem
     providers: [Shaman:*]
@@ -87,10 +87,10 @@ buffs:
     stacking: unique
     slot: shaman_water
     status: assumed
-    value: {mana: 3, healer: 4}
     note: Water totem.
 
   - id: mana_tide
+    family: mana_tide
     icon: {abbr: MT, colour: "#2F8FD6", art: spell_frost_summonwaterelemental}
     name: Mana Tide Totem
     providers: [Shaman:Restoration]
@@ -99,10 +99,10 @@ buffs:
     stacking: unique
     slot: shaman_water_cd
     status: assumed
-    value: {healer: 5, mana: 2}
     note: Restoration talent (Vanilla). Cooldown totem, so it does not compete with Mana Spring for the slot.
 
   - id: healing_stream
+    family: healing_stream
     icon: {abbr: HSt, colour: "#7FD3C8", art: inv_spear_04}
     name: Healing Stream Totem
     providers: [Shaman:*]
@@ -111,10 +111,10 @@ buffs:
     stacking: unique
     slot: shaman_water
     status: assumed
-    value: {tank: 2, melee: 1}
     note: Water totem; usually loses the slot to Mana Spring.
 
   - id: fire_resistance
+    family: fire_resistance
     icon: {abbr: FR, colour: "#E06A3A", art: spell_fireresistancetotem_01}
     name: Fire Resistance Totem
     providers: [Shaman:*]
@@ -123,11 +123,11 @@ buffs:
     stacking: unique
     slot: shaman_fire
     status: assumed
-    value: {tank: 1}
     note: Fire slot placeholder; encounter-specific (Onyxia). Not a grouping driver.
 
   # ---------------------------------------------------------------- other party auras
   - id: trueshot_aura
+    family: trueshot_aura
     icon: {abbr: TA, colour: "#8FBF5A", art: ability_trueshot}
     name: Trueshot Aura (+30 ranged AP)
     providers: [Hunter:Marksmanship]
@@ -135,10 +135,10 @@ buffs:
     kind: aura
     stacking: unique
     status: confirmed
-    value: {ranged: 3, "spec:Elemental": 0, "spec:Balance": 0, "spec:Shadow": 0, "spec:Fire": 0, "spec:Frost": 0, "spec:Arcane": 0, "spec:Affliction": 0, "spec:Destruction": 0, "spec:Demonology": 0}
     note: "Beta capture: 'Increases the Ranged Attack Power of party members within 45 yards by 30' (MM row 4). Ranged-only now."
 
   - id: leader_of_the_pack
+    family: leader_of_the_pack
     icon: {abbr: LotP, colour: "#FF7D0A", art: spell_nature_unyeildingstamina}
     name: Leader of the Pack (3% crit)
     providers: [Druid:Feral, Druid:Guardian]
@@ -146,10 +146,10 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {physical: 4, tank: 2}
     note: Vanilla Feral talent; party-wide. Not in the Forever druid captures either way.
 
   - id: moonkin_aura
+    family: moonkin_aura
     icon: {abbr: MA, colour: "#D7A6FF", art: spell_nature_moonglow}
     name: Moonkin Aura (3% spell crit)
     providers: [Druid:Balance]
@@ -157,10 +157,10 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {spell: 4}
     note: Vanilla Balance talent; party-wide.
 
   - id: battle_shout
+    family: battle_shout
     icon: {abbr: BS, colour: "#C79C6E", art: ability_warrior_battleshout}
     name: Battle Shout
     providers: [Warrior:*]
@@ -168,10 +168,10 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {physical: 4, tank: 2}
     note: Vanilla party-wide, 2 min. Fury warriors keep it up.
 
   - id: blood_pact
+    family: blood_pact
     icon: {abbr: BP, colour: "#9482C9", art: spell_shadow_bloodboil}
     name: Blood Pact (imp)
     providers: [Warlock:*]
@@ -179,10 +179,10 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {all: 1, tank: 2}
     note: Vanilla party-wide, needs an imp out. Demonic Sacrifice locks won't have one.
 
   - id: sanctity_aura
+    family: sanctity_aura
     icon: {abbr: SA, colour: "#F58CBA", art: spell_holy_mindvision}
     name: Sanctity Aura (10% holy)
     providers: [Paladin:Retribution]
@@ -190,10 +190,10 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {"spec:Retribution": 0, "spec:Protection": 2, "spec:Holy": 1, all: 0}
     note: Vanilla Ret talent; party-wide. One paladin aura at a time (Devotion/Retribution/Concentration/Sanctity).
 
   - id: vampiric_embrace
+    family: vampiric_embrace
     icon: {abbr: VE, colour: "#B39DDB", art: spell_shadow_unsummonbuilding}
     name: Vampiric Embrace (party heal)
     providers: [Priest:Shadow]
@@ -201,11 +201,11 @@ buffs:
     kind: aura
     stacking: unique
     status: reported
-    value: {melee: 1, ranged: 1, tank: 1}
     note: Beta capture says the debuff is 30 s with a cooldown; small party heal. Not a mana battery like TBC's Vampiric Touch.
 
   # ---------------------------------------------------------------- raid-wide cast buffs (coverage = enough providers)
   - id: fortitude
+    family: fortitude
     icon: {abbr: Fort, colour: "#E6E6E6", art: spell_holy_wordfortitude}
     name: "Power Word: Fortitude"
     providers: [Priest:*]
@@ -213,10 +213,10 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {all: 3}
     note: Prayer of Fortitude covers the raid; 1 priest is enough, 2 is comfortable.
 
   - id: divine_spirit
+    family: divine_spirit
     icon: {abbr: Spirit, colour: "#C9D6FF", art: spell_holy_divinespirit}
     name: Divine Spirit
     providers: [Priest:*]
@@ -224,10 +224,10 @@ buffs:
     kind: aura
     stacking: unique
     status: confirmed
-    value: {mana: 2, healer: 3}
     note: "Blizzard deep dive: Divine Spirit is baseline (was a Discipline talent), so any priest brings it."
 
   - id: shadow_protection
+    family: shadow_protection
     icon: {abbr: SP, colour: "#7E6AA8", art: spell_shadow_antishadow}
     name: Shadow Protection
     providers: [Priest:*]
@@ -235,9 +235,9 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {all: 1}
 
   - id: mark_of_the_wild
+    family: mark_of_the_wild
     icon: {abbr: MotW, colour: "#FF7D0A", art: spell_nature_regeneration}
     name: Mark of the Wild (improved)
     providers: [Druid:*]
@@ -245,10 +245,10 @@ buffs:
     kind: aura
     stacking: unique
     status: confirmed
-    value: {all: 3}
     note: "Blizzard deep dive: Improved Mark of the Wild is baseline; Gift of the Wild covers the raid."
 
   - id: arcane_intellect
+    family: arcane_intellect
     icon: {abbr: AI, colour: "#69CCF0", art: spell_holy_magicalsentry}
     name: Arcane Intellect
     providers: [Mage:*]
@@ -256,10 +256,10 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    value: {mana: 3, healer: 2}
     note: Arcane Brilliance covers the raid.
 
   - id: blessings
+    family: blessings
     icon: {abbr: Bless, colour: "#F58CBA", art: spell_magic_greaterblessingofkings}
     name: Paladin Blessings
     providers: [Paladin:*]
@@ -269,7 +269,6 @@ buffs:
     status: reported
     choices: [Kings, Might, Wisdom, Salvation, Light, Sanctuary]
     wanted: 4
-    value: {all: 3}
     note: >-
       Each paladin keeps one Greater Blessing on the raid; blessings reported to last 1 h in Forever and
       Kings is baseline (no talent tax). Priority order above is the classic default — Kings first, then Might
@@ -277,10 +276,108 @@ buffs:
 
   # ---------------------------------------------------------------- log signals that must not drive grouping
   - id: windfury_attack
+    family: windfury_attack
     name: Windfury Attack
     providers: []
     scope: party
     kind: proc
     stacking: unique
+    status: assumed
+
+# ---------------------------------------------------------------- stacking families
+# Buffs in one family don't stack on a target: the strongest present one counts (strength × the family's value).
+# `value` = who benefits and how much (all | physical | spell | mana | melee | ranged | healer | tank | spec:<Name>).
+# Guilds override any of this in guild.yaml (`families:` / `buffs:`) as Forever facts come in; the Auras page edits it.
+families:
+  - id: windfury_totem
+    name: Windfury (melee haste)
+    status: assumed
+    value: {melee: 10, tank: 3, "spec:Enhancement": 2, "spec:Feral": 4}
+  - id: grace_of_air
+    name: Agility
+    status: assumed
+    value: {ranged: 5, "spec:Feral": 3, "spec:Combat": 2, "spec:Assassination": 2, "spec:Subtlety": 2}
+  - id: tranquil_air
+    name: Threat reduction
+    status: assumed
+    value: {"spec:Shadow": 3, "spec:Fire": 2, "spec:Frost": 2, "spec:Arcane": 2, "spec:Destruction": 2, "spec:Affliction": 2, "spec:Demonology": 2, "spec:Balance": 2}
+  - id: strength_of_earth
+    name: Strength
+    status: assumed
+    value: {melee: 5, tank: 3}
+  - id: stoneskin
+    name: Physical damage reduction
+    status: assumed
+    value: {tank: 2}
+  - id: mana_spring
+    name: Mana regen
+    status: assumed
+    value: {mana: 3, healer: 4}
+  - id: mana_tide
+    name: Mana burst
+    status: assumed
+    value: {healer: 5, mana: 2}
+  - id: healing_stream
+    name: Health regen
+    status: assumed
+    value: {tank: 2, melee: 1}
+  - id: fire_resistance
+    name: Fire Resistance Totem
+    status: assumed
+    value: {tank: 1}
+  - id: trueshot_aura
+    name: Ranged attack power
+    status: confirmed
+    value: {ranged: 3, "spec:Elemental": 0, "spec:Balance": 0, "spec:Shadow": 0, "spec:Fire": 0, "spec:Frost": 0, "spec:Arcane": 0, "spec:Affliction": 0, "spec:Destruction": 0, "spec:Demonology": 0}
+  - id: leader_of_the_pack
+    name: Melee crit
+    status: assumed
+    value: {physical: 4, tank: 2}
+  - id: moonkin_aura
+    name: Spell crit
+    status: assumed
+    value: {spell: 4}
+  - id: battle_shout
+    name: Attack power
+    status: assumed
+    value: {physical: 4, tank: 2}
+  - id: blood_pact
+    name: Stamina (Blood Pact)
+    status: assumed
+    value: {all: 1, tank: 2}
+  - id: sanctity_aura
+    name: Holy damage
+    status: assumed
+    value: {"spec:Retribution": 0, "spec:Protection": 2, "spec:Holy": 1, all: 0}
+  - id: vampiric_embrace
+    name: Party heal
+    status: reported
+    value: {melee: 1, ranged: 1, tank: 1}
+  - id: fortitude
+    name: Stamina (Fortitude)
+    status: assumed
+    value: {all: 3}
+  - id: divine_spirit
+    name: Spirit
+    status: confirmed
+    value: {mana: 2, healer: 3}
+  - id: shadow_protection
+    name: Shadow resistance
+    status: assumed
+    value: {all: 1}
+  - id: mark_of_the_wild
+    name: All stats
+    status: confirmed
+    value: {all: 3}
+  - id: arcane_intellect
+    name: Intellect
+    status: assumed
+    value: {mana: 3, healer: 2}
+  - id: blessings
+    name: Blessings
+    status: reported
+    value: {all: 3}
+  - id: windfury_attack
+    name: Windfury Attack
     status: assumed
     value: {}

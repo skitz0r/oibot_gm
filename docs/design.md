@@ -407,6 +407,10 @@ Members never fill in standing availability. The unit of work is a **run**: one 
 - **Absences**: a dedicated channel with one card (button *I'll be away* → modal start / end / reason). The bot posts a public line without the reason, pre-fills Out on every overlapping sheet (open or locked: rostered members are removed and fill runs), and the Rosters page shows overlapping absences beside each sheet. Same form on the Me page and `/me absent`.
 - **Removed**: `Member.week` UI, heat-map, `roster/autoplan.py`, `roster/builder.py`, proposals, standing rosters as a scheduling concept (the `rosters[]` config now only holds ephemeral runs), candidate-slot polls.
 
+### 5.21 Aura configurator: stacking families and beneficiaries (built 2026-09-17)
+
+`profiles/<game>/buffs.yaml` gained `families:` — a stacking family has a name, a `value` map (who benefits: all | physical | spell | mana | melee | ranged | healer | tank | spec:<Name>), a status and a note; each buff points at one (`family:`; default: a family of its own) and carries a `strength` multiplier. `Buff.benefit(spec)` = family value × strength (a buff's own `value` map still wins when present). **Provider slots** (one totem per element per shaman) stay a separate concept. Guild facts live in `guild.yaml: buffs` / `families` and are merged by `GameProfile.with_overrides` into `Registry.profile` (`base_profile` keeps the defaults; `refresh_profile` runs on every config save), so a change reaches the solver, coverage, cards and board immediately. **Coverage** is family-aware: per player only the strongest present buff of a family counts, and a raid-wide buff anyone seated casts covers the family in every group — a party buff it beats is `covered` (shown with a teal edge), not missing. **Solver**: per player, group and family at most one buff term counts; party terms are reduced by any raid-wide family-mate a signed player can cast. Surfaces: the Auras page (`/api/auras`, `/api/admin/aura`, `/api/admin/family`, `/api/admin/aura/reset`), plain text (`aura_set`, `family_set`, `aura_reset`), `/gm config aura`.
+
 ## 6. Architecture
 
 ```mermaid

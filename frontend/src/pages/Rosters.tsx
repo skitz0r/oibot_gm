@@ -308,18 +308,18 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
           ))}
         </Stack>
       </Box>
-      <Text size="xs" c="dimmed" mt={6}>Coloured = present in that group · greyed with a red edge = wanted here and the provider sits in another group · plain grey = nobody in the run brings it · totems one per element.</Text>
+      <Text size="xs" c="dimmed" mt={6}>Coloured = present in that group · greyed with a red edge = wanted here and the provider sits in another group · plain grey = nobody in the run brings it · teal edge = covered by a raid-wide buff of the same family · totems one per element.</Text>
     </Box>
   );
 }
 
-function Aura({ a, missing, who }: { a: { abbr: string; colour: string; art: string | null; name: string; in_run?: boolean }; missing?: boolean; who?: string }) {
+function Aura({ a, missing, who }: { a: { abbr: string; colour: string; art: string | null; name: string; in_run?: boolean; covered?: boolean }; missing?: boolean; who?: string }) {
   const fixable = missing && a.in_run;  // a provider is seated in another group: regrouping can fix it
   const tip = `${a.name}${missing ? (fixable ? " — wanted here; the provider is in another group" : " — wanted here; nobody in this run brings it") : who ? ` — ${who}` : ""}`;
-  const edge = fixable ? "var(--mantine-color-red-5)" : "transparent";
+  const edge = fixable ? "var(--mantine-color-red-5)" : a.covered ? "var(--mantine-color-teal-4)" : "transparent";
   return (
     <Tooltip label={tip}>
-      {a.art ? <Box component="img" src={`/img/icon/${a.art}.jpg`} alt={a.abbr} style={{ width: 26, height: 26, borderRadius: 5, border: `2px solid ${edge}`, opacity: missing ? 0.35 : 1, filter: missing ? "grayscale(1)" : undefined }} />
+      {a.art ? <Box component="img" src={`/img/icon/${a.art}.jpg`} alt={a.abbr} style={{ width: 26, height: 26, borderRadius: 5, border: `2px solid ${edge}`, opacity: missing ? 0.35 : a.covered ? 0.75 : 1, filter: missing ? "grayscale(1)" : undefined }} />
         : <Box style={{ minWidth: 30, textAlign: "center", padding: "2px 5px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: missing ? (fixable ? "var(--mantine-color-red-5)" : "var(--mantine-color-slate-3)") : "#14181F", background: missing ? "transparent" : a.colour, border: `2px solid ${missing ? (fixable ? "var(--mantine-color-red-5)" : "var(--mantine-color-slate-5)") : "transparent"}` }}>{a.abbr}</Box>}
     </Tooltip>
   );

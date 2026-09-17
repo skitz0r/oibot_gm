@@ -154,11 +154,13 @@ def groups_summary(reg: Registry, players: list[Player], result: RosterResult | 
         g = cov.groups[gi]
         present = [bid for bid in g.present if g.wanted.get(bid, 0) > 0]
         slot_taken = {buffs[bid].slot for bid in g.present if buffs[bid].slot}
-        missing = [bid for bid, w in sorted(g.wanted.items(), key=lambda kv: -kv[1]) if w > 0 and bid not in g.present and not (buffs[bid].slot and buffs[bid].slot in slot_taken)]
+        missing = [bid for bid, w in sorted(g.wanted.items(), key=lambda kv: -kv[1]) if w > 0 and bid not in g.present and bid not in g.covered and not (buffs[bid].slot and buffs[bid].slot in slot_taken)]
+        all_buffs = {b.id: b for b in profile.buffs}
         out["groups"].append({
             "n": gi + 1,
             "members": [{"name": by[n].character or n, "member": n, "cls": by[n].cls, "spec": by[n].spec, "role": by[n].role} for n in names],
-            "present": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present],
+            "present": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present]
+                       + [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": f"covered by {all_buffs[c].short}" if c in all_buffs else "covered", "covered": True} for b, c in g.covered.items() if g.wanted.get(b, 0) > 0],
             "missing": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "in_run": b in in_run} for b in missing],
             "picks": [f"{slot.split('_')[1].title()} {buffs[bid].abbr}" for slot, bid in sorted(g.picks.items()) if not slot.endswith("_cd") and g.wanted.get(bid, 0) > 0],
             "value": result.group_reports[gi].value if gi < len(result.group_reports) else 0,

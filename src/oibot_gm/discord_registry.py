@@ -1007,6 +1007,37 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.followup.send(f"✅ {len(msgs)} analytics card(s) posted in {channel.mention}; they re-post at the bottom after every registry change, with a change-log line above.", ephemeral=True)
         await ops.emit(reg.config, "info", f"analytics channel → #{channel.name} (by {interaction.user.display_name})")
 
+    async def buff_autocomplete(interaction: discord.Interaction, current: str):
+        reg = guilds.for_interaction(interaction)
+        return [app_commands.Choice(name=f"{b.short} ({b.id})"[:100], value=b.id) for b in (reg.profile.buffs if reg else []) if current.lower() in b.id or current.lower() in b.short.lower()][:25]
+
+    @config.command(name="aura", description="Owner: what we know about a buff — scope, stacking family, strength, status, who benefits")
+    @app_commands.autocomplete(buff=buff_autocomplete)
+    @app_commands.describe(buff="buff id", scope="party or raid", family="family id or another buff's id (don't stack); 'own' = stands alone", strength="1 = the family's full value", status="confirmed / reported / assumed", benefits="who benefits from the buff's FAMILY, e.g. 'all: 3, mana: 2' (keys: all physical spell mana melee ranged healer tank spec:Name)")
+    @app_commands.choices(scope=[app_commands.Choice(name=x, value=x) for x in ("party", "raid")], status=[app_commands.Choice(name=x, value=x) for x in ("confirmed", "reported", "assumed")])
+    async def cfg_aura(interaction: discord.Interaction, buff: str, scope: app_commands.Choice[str] | None = None, family: str | None = None, strength: float | None = None, status: app_commands.Choice[str] | None = None, benefits: str | None = None, note: str | None = None, reset: bool = False):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        try:
+            msg = [reg.clear_aura_overrides(interaction.user.display_name, buff)] if reset else []
+            if not reset:
+                for f, val in (("scope", scope.value if scope else None), ("family", family), ("strength", strength), ("status", status.value if status else None), ("note", note)):
+                    if val is not None:
+                        msg.append(reg.set_buff_override(buff, f, val, interaction.user.display_name))
+                if benefits is not None:
+                    msg.append(reg.set_family_override(reg.buff(buff).family_id, "value", benefits, interaction.user.display_name))
+            b = reg.buff(buff)
+            fam = reg.profile.families[b.family_id]
+            eff = f"**{b.short}** · {b.scope} · family **{fam.name}** ({b.family_id}) ×{b.strength:g} · {b.status} · benefits: " + (", ".join(f"{k} {v:g}" for k, v in fam.value.items()) or "nobody")
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff, ephemeral=True)
+
     @config.command(name="absences-channel", description="Owner: public channel with the 'I'll be away' card; the bot posts one line per absence there")
     async def cfg_absences_channel(interaction: discord.Interaction, channel: discord.TextChannel):
         reg = await need(interaction)

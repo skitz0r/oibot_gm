@@ -490,6 +490,65 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return v.reg.clear_raid_override(d["instance"], v.name)
         return await run(request, go, officer=True)
 
+    # ---- auras: the buff matrix with the guild's learned facts (owner edits; officers read)
+    @app.get("/api/auras")
+    async def auras(request: Request):
+        v = await who(request, officer=True)
+        reg = v.reg
+        prof, base = reg.profile, reg.base_profile
+        specs = [{"cls": c, "spec": sp, "role": a.get("role"), "key": f"spec:{sp}"} for c, ss in prof.classes.items() for sp, a in ss.items()]
+        fams = []
+        for fid, f in prof.families.items():
+            over = reg.config.families.get(fid, {})
+            fams.append({"id": fid, "name": f.name, "value": dict(f.value), "status": f.status, "note": f.note, "overridden": sorted(over), "declared": fid in base.families or fid in reg.config.families,
+                         "buffs": [b.id for b in prof.buffs if b.family_id == fid]})
+        buffs = []
+        for b in prof.buffs:
+            over = reg.config.buffs.get(b.id, {})
+            buffs.append({"id": b.id, "name": b.short, "abbr": b.abbr, "colour": b.colour, "art": b.art, "providers": list(b.providers), "scope": b.scope, "kind": b.kind, "slot": b.slot,
+                          "family": b.family_id, "strength": b.strength, "status": b.status, "note": b.note, "overridden": sorted(over), "choices": list(b.choices)})
+        return {"families": fams, "buffs": buffs, "value_keys": list(reg.VALUE_KEYS), "specs": specs, "scopes": list(reg.BUFF_SCOPES), "statuses": list(reg.STATUSES), "owner": v.owner}
+
+    @app.post("/api/admin/aura")
+    async def admin_aura(request: Request):
+        """One buff: any of scope / family / strength / status / note (only fields present in the body change)."""
+        def go(v, d):
+            if not v.owner:
+                raise ValueError("Owner only.")
+            bid, done = d["id"], []
+            cur = v.reg.buff(bid)
+            for f in ("scope", "family", "strength", "status", "note"):
+                if f in d and d[f] is not None and str(d[f]) != str(getattr(cur, "family_id" if f == "family" else f)):
+                    done.append(v.reg.set_buff_override(bid, f, d[f], v.name))
+            return "; ".join(done) or f"{bid}: no changes"
+        return await run(request, go, officer=True)
+
+    @app.post("/api/admin/family")
+    async def admin_family(request: Request):
+        """One family: name / status / note / value (whole beneficiary map)."""
+        def go(v, d):
+            if not v.owner:
+                raise ValueError("Owner only.")
+            fid, done = d["id"], []
+            cur = v.reg.profile.families.get(fid)
+            for f in ("name", "status", "note"):
+                if f in d and d[f] is not None and (cur is None or str(d[f]) != str(getattr(cur, f))):
+                    done.append(v.reg.set_family_override(fid, f, d[f], v.name))
+            if "value" in d and d["value"] is not None:
+                want = {k: float(x) for k, x in d["value"].items() if x not in (None, "", 0, "0")}
+                if cur is None or want != {k: float(x) for k, x in cur.value.items()}:
+                    done.append(v.reg.set_family_override(fid, "value", want, v.name))
+            return "; ".join(done) or f"{fid}: no changes"
+        return await run(request, go, officer=True)
+
+    @app.post("/api/admin/aura/reset")
+    async def admin_aura_reset(request: Request):
+        def go(v, d):
+            if not v.owner:
+                raise ValueError("Owner only.")
+            return v.reg.clear_aura_overrides(v.name, d.get("id") or None)
+        return await run(request, go, officer=True)
+
     # ---- members: every member's characters and absences; officers edit them like their own Me page
     @app.get("/api/members")
     async def members(request: Request):

@@ -128,6 +128,16 @@ counted on the whole raid.
 Every buff assumption carries a status — confirmed, reported, or assumed from Vanilla — printed on the
 cards, because WoW: Forever has not published totem scoping yet.
 
+**Auras page (officers read, the owner edits).** As the guild learns how Forever's buffs really behave, the
+owner records it here and the solver, the cards and the roster board follow. Each buff has a **scope**
+(party or raid), a **stacking family**, a **strength** and a status; each family says which buffs don't
+stack (the strongest present one counts) and **who benefits** from it, as points per role, damage type,
+mana user, or a specific spec. Examples: put Blood Pact into Fortitude's family if they turn out not to
+stack; set Sanctity Aura to raid if it reaches the whole raid; set "only mana users" on Intellect. Plain
+text works too ("fortitude and blood pact don't stack", "sanctity aura is raid-wide", "hunters don't
+benefit from blood pact"), as does `/gm config aura`. Amber on the page marks a guild override; *Reset*
+returns to the game defaults.
+
 ## 6. Analytics (officers)
 
 - **Character bank** — every member → main (class, spec/offspec, role, rank, rosters) and alts.

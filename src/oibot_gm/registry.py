@@ -140,6 +140,9 @@ class GuildConfig(BaseModel):
     rosters: list[dict] = Field(default_factory=list)
     # raids: guild overrides per instance id over profiles/<game>/raids.yaml: {lockout_days, duration_hours, comp: {tank/healer/dps: {min,max}}, notes}
     raids: dict[str, dict] = Field(default_factory=dict)
+    # auras: what the guild has learned about Forever's buffs, over profiles/<game>/buffs.yaml
+    buffs: dict[str, dict] = Field(default_factory=dict)  # buff id -> {scope, family, strength, status, note}
+    families: dict[str, dict] = Field(default_factory=dict)  # family id -> {name, value: {key: points}, status, note}
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -356,13 +359,18 @@ class Registry:
     def __init__(self, store: GitStore, guild_key: str, profile: GameProfile):
         self.store = store
         self.key = guild_key
+        self.base_profile = profile  # the game version's defaults; self.profile carries the guild's aura overrides
         self.profile = profile
         self.members: dict[int, Member] = {}
         # change listeners: fn(kind: "member"|"config", lines: list[str]); called synchronously after each commit
         self.listeners: list = []
         self._snap: dict[int, dict] = {}  # last saved state per member, for diff lines
         self.config = self.load_config()
+        self.refresh_profile()
         self.reload()
+
+    def refresh_profile(self) -> None:
+        self.profile = self.base_profile.with_overrides(self.config.buffs, self.config.families)
 
     # ---- guild time
     @property
@@ -388,6 +396,7 @@ class Registry:
         return GuildConfig(**yaml.safe_load(p.read_text()))
 
     def save_config(self, message: str, notify: bool = True) -> None:
+        self.refresh_profile()
         p = Path(self.key) / "guild.yaml"
         self.store.write_text(p, "# oibot_GM guild config — edit via /gm config or by PR.\n" + yaml.safe_dump(self.config.model_dump(), sort_keys=False))
         self.store.commit(f"{self.key}: {message}")
@@ -723,6 +732,121 @@ class Registry:
             raise RegistryError(f"unknown raid field {field}")
         self.save_config(f"raid {instance} {field} → {value} (by {by})")
         return f"{instance}: {field} = {value}"
+
+    # ---- auras: what the guild learns about the game's buffs (stacking families, scope, who benefits)
+    BUFF_SCOPES = ("party", "raid", "class", "self")
+    STATUSES = ("confirmed", "reported", "assumed")
+    VALUE_KEYS = ("all", "physical", "spell", "mana", "melee", "ranged", "healer", "tank")
+
+    def buff(self, bid: str):
+        b = next((x for x in self.profile.buffs if x.id == bid), None)
+        if b is None:
+            raise RegistryError(f"unknown buff {bid}; known: {', '.join(x.id for x in self.profile.buffs)}")
+        return b
+
+    def _value_key(self, key: str) -> str:
+        k = key.strip()
+        if k in self.VALUE_KEYS:
+            return k
+        if k.lower().startswith("spec:"):
+            spec = k[5:].strip()
+            for cls, specs in self.profile.classes.items():
+                for sname in specs:
+                    if sname.lower() == spec.lower():
+                        return f"spec:{sname}"
+            raise RegistryError(f"unknown spec {spec}")
+        raise RegistryError(f"benefit key {key!r} must be one of {', '.join(self.VALUE_KEYS)} or spec:<Name>")
+
+    def set_buff_override(self, bid: str, field: str, value, by: str) -> str:
+        """scope | family (a family id, another buff's id, or 'own' to stand alone) | strength | status | note."""
+        self.buff(bid)
+        over = self.config.buffs.setdefault(bid, {})
+        if field == "scope":
+            if value not in self.BUFF_SCOPES:
+                raise RegistryError(f"scope must be one of {', '.join(self.BUFF_SCOPES)}")
+            over["scope"] = value
+        elif field == "family":
+            fid = str(value or "").strip().lower().replace(" ", "_")
+            if fid in ("", "own", "none", "self"):
+                over["family"] = bid
+            else:
+                if fid not in self.profile.families and fid not in {x.id for x in self.profile.buffs}:
+                    raise RegistryError(f"unknown family {fid}; known: {', '.join(sorted(self.profile.families))} — or create it first")
+                over["family"] = fid
+        elif field == "strength":
+            try:
+                n = float(value)
+            except (TypeError, ValueError):
+                raise RegistryError("strength must be a number (1 = the family's full value)")
+            if n < 0:
+                raise RegistryError("strength can't be negative")
+            over["strength"] = n
+        elif field == "status":
+            if value not in self.STATUSES:
+                raise RegistryError(f"status must be one of {', '.join(self.STATUSES)}")
+            over["status"] = value
+        elif field == "note":
+            over["note"] = str(value or "").strip()
+        else:
+            raise RegistryError(f"unknown buff field {field}")
+        self.save_config(f"aura {bid} {field} → {value} (by {by})")
+        return f"{bid}: {field} = {value}"
+
+    def set_family_override(self, fid: str, field: str, value, by: str) -> str:
+        """name | status | note | value (whole map as 'all: 3, mana: 2') | value:<key> (one entry; 0 or blank removes it)."""
+        fid = str(fid or "").strip().lower().replace(" ", "_")
+        if not fid:
+            raise RegistryError("which family?")
+        over = self.config.families.setdefault(fid, {})
+        if fid not in self.profile.families and "name" not in over and field != "name":
+            over["name"] = fid.replace("_", " ").title()
+        if field == "name":
+            over["name"] = str(value or "").strip() or fid
+        elif field == "status":
+            if value not in self.STATUSES:
+                raise RegistryError(f"status must be one of {', '.join(self.STATUSES)}")
+            over["status"] = value
+        elif field == "note":
+            over["note"] = str(value or "").strip()
+        elif field == "value":
+            cur = dict(self.profile.families[fid].value) if fid in self.profile.families else {}
+            new: dict[str, float] = {}
+            raw = value if isinstance(value, dict) else {kv.partition(":")[0]: kv.partition(":")[2] for kv in str(value or "").replace(";", ",").split(",") if kv.strip()}
+            for k, v in raw.items():
+                try:
+                    n = float(v)
+                except (TypeError, ValueError):
+                    raise RegistryError(f"{k}: {v!r} isn't a number")
+                if n > 0:
+                    new[self._value_key(str(k))] = n
+            over["value"] = new
+            _ = cur
+        elif field.startswith("value:"):
+            key = self._value_key(field[6:])
+            cur = dict(over.get("value") or (self.profile.families[fid].value if fid in self.profile.families else {}))
+            try:
+                n = float(value) if value not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                raise RegistryError(f"{key}: {value!r} isn't a number")
+            if n > 0:
+                cur[key] = n
+            else:
+                cur.pop(key, None)
+            over["value"] = cur
+        else:
+            raise RegistryError(f"unknown family field {field}")
+        self.save_config(f"aura family {fid} {field} → {value} (by {by})")
+        return f"family {fid}: {field} = {value}"
+
+    def clear_aura_overrides(self, by: str, bid: str | None = None) -> str:
+        if bid:
+            self.config.buffs.pop(bid, None)
+            self.config.families.pop(bid, None)
+            self.save_config(f"aura {bid} overrides cleared (by {by})")
+            return f"{bid}: back to the game defaults"
+        self.config.buffs, self.config.families = {}, {}
+        self.save_config(f"aura overrides cleared (by {by})")
+        return "auras: back to the game defaults"
 
     def clear_raid_override(self, instance: str, by: str) -> str:
         self.config.raids.pop(instance, None)

@@ -28,6 +28,11 @@ Comp ideals (officer): comp_target: team=<roster key or raid id (barrow_deeps|hy
   comp_target_clear (team, field) removes an officer target so the derived value applies again.
   raid_set (owner): team=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<slots (comma list of 'Tue 19:30' run times)|signup_lead_hours|lock_hours_before|confirm_hours_before|weight_rank|weight_main|weight_sat_out|weight_signup_order|lockout_days|duration_hours|first_open (ISO datetime, when the instance first opens)|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
   raid_reset (owner): team=<raid id> — drop the guild's overrides for that raid.
+  aura_set (owner): what the guild learns about a buff. team=<buff id, e.g. fortitude|blood_pact|windfury_totem|sanctity_aura>,
+    field=<scope (party|raid)|family (a family id or another buff's id: "X and Y don't stack" = set the weaker one's family to the other's id; 'own' = stands alone)|strength (number, 1 = full)|status (confirmed|reported|assumed)|note>, value.
+  family_set (owner): who benefits from a stacking family and how much. team=<family id, e.g. fortitude|arcane_intellect|stamina (new ids are created)>,
+    field=<name|status|note|value (whole map: "all: 3, mana: 2")|value:<all|physical|spell|mana|melee|ranged|healer|tank|spec:Name> (one entry; 0 removes it)>, value.
+  aura_reset (owner): team=<buff or family id, blank = everything> — back to the game defaults.
   comp_groups: team=<roster key>, value=<comma-separated group labels in order, e.g. "tank, healers, melee, casters">
   — the archetype layout the group optimiser seeds (labels may combine: "tank/heal", "melee+ranged"); empty value = default layout.
 """
@@ -36,7 +41,7 @@ Comp ideals (officer): comp_target: team=<roster key or raid id (barrow_deeps|hy
 class ConfigOp(BaseModel):
     # Keep this schema small: the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset")
+    op: str = Field(description="one of: set, team_set, team_add, team_remove, team_member, role_add, role_remove, rank, confirm, set_main, availability, absence, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|ask_audience|about")
     team: Optional[str] = Field(default=None, description="team key for team_* ops, availability and comp_target*")
     field: Optional[str] = Field(default=None, description="team_set: size|schedule|instance|cutoff_soft_hours|cutoff_hard_hours|open_days_before|reminders; comp_target*: the slot (role, Class or Class:Spec)")
@@ -75,7 +80,7 @@ def parse(provider: Provider, reg: Registry, text: str) -> ConfigRequest:
     return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg) + "\n\n## Request\n" + text, ConfigRequest)
 
 
-OWNER_OPS = {"set", "team_set", "team_add", "team_remove", "role_add", "role_remove", "raid_set", "raid_reset"}
+OWNER_OPS = {"set", "team_set", "team_add", "team_remove", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset"}
 
 
 def _member(reg: Registry, ref: str | None):
@@ -146,6 +151,16 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         f = op.field or ""
         cur = rd.get(f) if f in ("lockout_days", "duration_hours", "notes") else ((rd.get("comp") or {}).get(f.split("_")[0], {}) or {}).get(f.split("_")[-1]) if "_" in f else "?"
         return f"raid {op.team} {f}: {cur if cur is not None else '—'} → {op.value}"
+    if op.op == "aura_set":
+        b = next((x for x in reg.profile.buffs if x.id == op.team), None)
+        cur = (getattr(b, "family_id" if op.field == "family" else (op.field or ""), "?") if b else "?")
+        return f"aura {op.team}: {op.field} {cur} → {op.value}"
+    if op.op == "family_set":
+        f = reg.profile.families.get(op.team or "")
+        cur = (f.value if op.field == "value" else getattr(f, (op.field or "").split(":")[0], "?")) if f else "(new family)"
+        return f"family {op.team}: {op.field} {cur} → {op.value}"
+    if op.op == "aura_reset":
+        return f"auras: drop overrides for {op.team or 'everything'}"
     if op.op == "raid_reset":
         return f"raid {op.team}: overrides {cfg.raids.get(op.team or '', {}) or 'none'} → profile defaults"
     if op.op in ("comp_target", "comp_target_clear"):
@@ -266,6 +281,12 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         return reg.set_raid_override(op.team or "", op.field or "", op.value, by)
     if op.op == "raid_reset":
         return reg.clear_raid_override(op.team or "", by)
+    if op.op == "aura_set":
+        return reg.set_buff_override(op.team or "", op.field or "", op.value, by)
+    if op.op == "family_set":
+        return reg.set_family_override(op.team or "", op.field or "", op.value, by)
+    if op.op == "aura_reset":
+        return reg.clear_aura_overrides(by, op.team or None)
     if op.op == "comp_groups":
         key = op.team or cfg.team_keys()[0]
         t = cfg.team(key)

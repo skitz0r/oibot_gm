@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AppShell, Box, Burger, Group, NavLink, Stack, Text, Title } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconListDetails, IconMountain, IconTable, IconUser, IconUsers } from "@tabler/icons-react";
+import { IconChartBar, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, type Meta } from "./api";
 import { MePage } from "./pages/Me";
@@ -10,12 +10,14 @@ import { RaidsPage } from "./pages/Raids";
 import { MembersPage } from "./pages/Members";
 import { OpsPage } from "./pages/Ops";
 import { ConfigPage } from "./pages/Config";
+import { AurasPage } from "./pages/Auras";
 
 const NAV = [{ to: "/me", label: "Me", icon: IconUser }];
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
   { to: "/members", label: "Members", icon: IconUsers },
+  { to: "/auras", label: "Auras", icon: IconSparkles },
   { to: "/ops", label: "Ops", icon: IconChartBar },
   { to: "/config", label: "Config", icon: IconListDetails },
 ];
@@ -64,6 +66,7 @@ export default function App() {
             <Route path="/members" element={officer(<MembersPage meta={meta} />)} />
             <Route path="/bank" element={<Navigate to="/members" replace />} />
             <Route path="/admin" element={<Navigate to="/members" replace />} />
+            <Route path="/auras" element={officer(<AurasPage />)} />
             <Route path="/ops" element={officer(<OpsPage />)} />
             <Route path="/config" element={officer(<ConfigPage />)} />
             <Route path="*" element={<Navigate to="/me" replace />} />

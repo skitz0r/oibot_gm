@@ -178,6 +178,14 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
 
     synergy_terms = []
     slot_provs: dict[tuple[str, int], list] = {}  # (slot, g) -> prov vars of the buffs sharing that slot
+    # raid-wide buffs anyone signed can cast are assumed present: a party buff of the same family only adds what it beats
+    raid_cover = [rb for rb in profile.raid_buffs() if any(rb.provided_by(specs[p.signup_name]) or (p.signup_name in off_specs and rb.provided_by(off_specs[p.signup_name])) for p in players)]
+
+    def net_benefit(b, s) -> float:
+        base = b.benefit(s)
+        return max(0.0, base - max([rb.benefit(s) for rb in raid_cover if rb.family_id == b.family_id] or [0.0]))
+
+    fam_terms: dict[tuple[int, str, str, str], list] = {}  # (g, player, spec, family) -> z vars: one buff per family counts
     for b in profile.party_buffs():
         any_provider = any(b.provided_by(specs[p.signup_name]) or (p.signup_name in off_specs and b.provided_by(off_specs[p.signup_name])) for p in players)
         if not any_provider:
@@ -191,13 +199,14 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
                     slot_provs.setdefault((b.slot, g), []).append((prov, prov_vars))
                 for q in players:
                     for v, s in presence_terms(q, g, b):
-                        val = int(round(b.benefit(s) * SCALE))
+                        val = int(round(net_benefit(b, s) * SCALE))
                         if val <= 0:
                             continue
                         z = m.NewBoolVar(f"z_{b.id}_{g}_{q.signup_name}_{s.spec}")
                         m.Add(z <= prov)
                         m.Add(z <= v)
                         synergy_terms.append(val * z)
+                        fam_terms.setdefault((g, q.signup_name, s.spec, b.family_id), []).append(z)
             else:  # stack: every provider adds for every other member
                 for p in players:
                     for pv, ps in presence_terms(p, g, b):
@@ -207,13 +216,18 @@ def solve(profile: GameProfile, players: list[Player], raid_id: str, opts: Solve
                             if q is p:
                                 continue
                             for qv, qs in presence_terms(q, g, b):
-                                val = int(round(b.benefit(qs) * SCALE))
+                                val = int(round(net_benefit(b, qs) * SCALE))
                                 if val <= 0:
                                     continue
                                 w = m.NewBoolVar(f"w_{b.id}_{g}_{p.signup_name}_{ps.spec}_{q.signup_name}_{qs.spec}")
                                 m.Add(w <= pv)
                                 m.Add(w <= qv)
                                 synergy_terms.append(val * w)
+
+    # stacking families: a player counts at most one buff per family (the solver keeps the strongest)
+    for zs in fam_terms.values():
+        if len(zs) > 1:
+            m.Add(sum(zs) <= 1)
 
     # slot exclusivity: a group with k shamans gets at most k totems of the same element
     for (_slot, g), entries in slot_provs.items():

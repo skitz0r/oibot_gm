@@ -15,7 +15,8 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
 ## Layout
 ```
 profiles/tbc/          GameProfile YAML (buffs.yaml drives both the solver and WCL party inference)
-profiles/forever/      Classic-era buff matrix: `slot` = mutually exclusive totems per element, `scope: raid` = cast buffs, `status` = evidence level
+profiles/forever/      Classic-era buff matrix: `slot` = one totem per element per shaman, `scope: raid` = cast buffs, `status` = evidence level,
+                       `families:` = stacking families with the beneficiary map (buffs point at one; guild overrides in guild.yaml buffs/families → Registry.profile)
 fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg, gitignored): REAL (BisCouncil ledger, WCL attendance/roster) + MOCK (tiers, wishlists, policy, ranks)
 src/oibot_gm/
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
