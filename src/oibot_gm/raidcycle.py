@@ -266,7 +266,8 @@ def _signup(reg: Registry, m: Member, c: RegisteredCharacter, status: str, sourc
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None) -> Signup:
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}")
-    c = next((c for c in m.active() if (c.name or c.label).lower() == (character or "").lower()), None) if character else m.main
+    want = (character or "").strip().lower()
+    c = (next((c for c in m.active() if c.label.lower() == want), None) or next((c for c in m.active() if (c.name or "").lower() == want), None)) if want else m.main
     if not c:
         raise ValueError("no such active character")
     team = reg.config.team(ev.team) or {"key": ev.team}

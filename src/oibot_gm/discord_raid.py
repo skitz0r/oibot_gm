@@ -51,38 +51,43 @@ def sheet_embed(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.Emb
     counts = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer", "melee", "ranged")}
     rd = reg.raid_def(ev.instance)
     size = int(team.get("size") or rd.get("size") or 20)
-    e = discord.Embed(title=f"{'🧪 TEST · ' if team.get('test') else ''}{rd.get('name', ev.instance or 'raid')} · <t:{unix}:D>", colour=0x8C97A8 if team.get("test") else TEAL,
-                      description=f"<t:{unix}:t> server (<t:{unix}:R>) · **{len(ins)}** joined / {size} · {len(subs)} bench · " + " · ".join(f"{ico('role', r)} {n}" for r, n in counts.items()))
+    test = bool(team.get("test"))
+    e = discord.Embed(title=f"{'🧪 ' if test else ''}{rd.get('name', ev.instance or 'raid')}", colour=0x8C97A8 if test else TEAL)
+    roles = "  ".join(f"{ico('role', r)} {n}" for r, n in counts.items() if n)
     if ev.state == "open" or not ev.all_rosters:
+        e.description = f"**<t:{unix}:F>** · <t:{unix}:R>\n**{len(ins)}** / {size} joined" + (f" · {len(subs)} bench" if subs else "") + (f"\n{roles}" if roles else "")
         by_cls: dict[str, list[str]] = {}
         for s in ins:
-            by_cls.setdefault(s.cls, []).append(f"{ico('role', s.role)} **{s.character}** · {s.spec}")
-        for cls, lines in sorted(by_cls.items()):
-            e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
+            by_cls.setdefault(s.cls, []).append(f"{ico('role', s.role)} {ico('spec', f'{s.cls}:{s.spec}') or ''} **{s.character}**".replace("  ", " "))
+        for cls, lines in sorted(by_cls.items(), key=lambda kv: -len(kv[1])):
+            e.add_field(name=f"{ico('class', cls)} {cls} · {len(lines)}", value="\n".join(lines)[:1000], inline=True)
         if subs:
-            e.add_field(name=f"Bench ({len(subs)})", value=", ".join(f"{s.character} ({s.spec})" for s in subs)[:1000], inline=False)
+            e.add_field(name=f"Bench · {len(subs)}", value=" · ".join(s.character for s in subs)[:1000], inline=False)
     else:
         conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)}
         mark = {"yes": "✅", "no": "❌", "expired": "⌛", None: "⏳"}
+        seated = ev.seated()
+        e.description = f"**<t:{unix}:F>** · <t:{unix}:R>\n🔒 **{len(seated)}** seated" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f" · ✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
         for i, r in enumerate(ev.all_rosters):
             for gi, g in enumerate(r.groups):
                 members = [next((p for p in r.selected if p.signup_name == n), None) for n in g]
-                lines = [f"{mark.get(conf.get(p.signup_name), '')}{ico('role', p.role)} **{p.character or p.signup_name}** · {p.spec}" for p in members if p]
+                lines = [f"{mark.get(conf.get(p.signup_name), '')} {ico('role', p.role)} **{p.character or p.signup_name}**" for p in members if p]
                 if lines:
-                    e.add_field(name=(f"Roster {i + 1} · " if len(ev.all_rosters) > 1 else "") + f"Group {gi + 1}", value="\n".join(lines)[:1000], inline=True)
+                    e.add_field(name=(f"R{i + 1} · " if len(ev.all_rosters) > 1 else "") + f"Group {gi + 1}", value="\n".join(lines)[:1000], inline=True)
         bench = ev.all_rosters[0].benched
         if bench:
-            e.add_field(name=f"Bench ({len(bench)})", value=", ".join(p.character or p.signup_name for p in bench)[:1000], inline=False)
+            e.add_field(name=f"Bench · {len(bench)}", value=" · ".join(p.character or p.signup_name for p in bench)[:1000], inline=False)
         pending = [n for n, a in conf.items() if a is None]
-        e.add_field(name="Confirmations", value=f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {len(pending)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}" + (f"\nwaiting on: {', '.join(pending[:12])}" if pending else ""), inline=False)
+        if pending:
+            e.add_field(name="Waiting on", value=", ".join(pending[:15])[:1000], inline=False)
     if outs:
-        e.add_field(name=f"Out ({len(outs)})", value=", ".join(s.character + (" ⚑" if s.source == "callout" else "") for s in outs)[:1000], inline=False)
-    soft, hard, confirm = run_times(reg, ev, team)
+        e.add_field(name=f"No thanks · {len(outs)}", value=" · ".join(s.character + (" ⚑" if s.source == "callout" else "") for s in outs)[:1000], inline=False)
+    _soft, hard, confirm = run_times(reg, ev, team)
     if ev.state == "open":
-        e.add_field(name="Timeline", value=f"nudges <t:{int(soft.timestamp())}:R> · roster locks <t:{int(hard.timestamp())}:R> · confirm by <t:{int(confirm.timestamp())}:R> · raid <t:{unix}:R>", inline=False)
+        e.add_field(name="\u200b", value=f"🔒 locks <t:{int(hard.timestamp())}:R> · ✓ confirm by <t:{int(confirm.timestamp())}:t>", inline=False)
     else:
-        e.add_field(name="Timeline", value=f"locked · confirm by <t:{int(confirm.timestamp())}:R> · raid <t:{unix}:R>", inline=False)
-    e.set_footer(text=f"{ev.key} · {ev.state} · Join = I'm coming · Bench = call me if you need me · buttons use your main; pick an alt from the menu")
+        e.add_field(name="\u200b", value=f"✓ confirm by <t:{int(confirm.timestamp())}:t>", inline=False)
+    e.set_footer(text=("test run · " if test else "") + "Join = I'm coming · Bench = call me if you need me · you pick the character after pressing")
     return e
 
 
@@ -149,7 +154,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
         chars = m.active()
         if len(chars) > 1 and self.status in ("in", "sub"):
             view = discord.ui.View(timeout=120)
-            sel = discord.ui.Select(placeholder="Which character?", options=[discord.SelectOption(label=f"{c.label} · {c.cls} {c.spec}", value=c.name or c.label, default=c.is_main) for c in chars[:25]])
+            sel = discord.ui.Select(placeholder="Which character?", options=[discord.SelectOption(label=f"{c.label} · {c.cls} {c.spec}" + (" · main" if c.is_main else ""), value=c.label, default=c.is_main) for c in chars[:25]])
 
             async def pick(i: discord.Interaction):
                 await bot.apply_signup(i, reg, rs, ev, m, sel.values[0], self.status)
