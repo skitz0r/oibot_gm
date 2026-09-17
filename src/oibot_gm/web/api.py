@@ -504,6 +504,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                          "buffs": [b.id for b in prof.buffs if b.family_id == fid]})
         buffs = []
         for b in prof.buffs:
+            if b.kind != "aura" or not b.providers:
+                continue  # procs and placeholders don't take part in grouping
             over = reg.config.buffs.get(b.id, {})
             buffs.append({"id": b.id, "name": b.short, "abbr": b.abbr, "colour": b.colour, "art": b.art, "providers": list(b.providers), "scope": b.scope, "kind": b.kind, "slot": b.slot,
                           "family": b.family_id, "strength": b.strength, "status": b.status, "note": b.note, "overridden": sorted(over), "choices": list(b.choices)})
@@ -535,7 +537,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 if f in d and d[f] is not None and (cur is None or str(d[f]) != str(getattr(cur, f))):
                     done.append(v.reg.set_family_override(fid, f, d[f], v.name))
             if "value" in d and d["value"] is not None:
-                want = {k: float(x) for k, x in d["value"].items() if x not in (None, "", 0, "0")}
+                want = {k: float(x) for k, x in d["value"].items() if x not in (None, "")}
                 if cur is None or want != {k: float(x) for k, x in cur.value.items()}:
                     done.append(v.reg.set_family_override(fid, "value", want, v.name))
             return "; ".join(done) or f"{fid}: no changes"

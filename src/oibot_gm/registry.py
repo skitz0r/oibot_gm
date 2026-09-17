@@ -817,8 +817,9 @@ class Registry:
                     n = float(v)
                 except (TypeError, ValueError):
                     raise RegistryError(f"{k}: {v!r} isn't a number")
-                if n > 0:
-                    new[self._value_key(str(k))] = n
+                if n < 0:
+                    raise RegistryError(f"{k}: can't be negative")
+                new[self._value_key(str(k))] = n  # an explicit 0 on a spec key means "this spec gets nothing"
             over["value"] = new
             _ = cur
         elif field.startswith("value:"):
