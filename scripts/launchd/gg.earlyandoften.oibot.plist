@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- oibot_GM Discord bot as a per-user launchd agent (gui domain): starts at login, restarts when it exits.
+    <!-- oibot_GM Discord bot as a per-user launchd agent (gui domain): starts at login (auto-login after a power cut), restarts when it exits. An agent, not a daemon: data pushes need the login keychain.
          Install/restart/stop: see README.md next to this file. Secrets stay in the repo's .env (read by the bot). -->
     <key>Label</key>
     <string>gg.earlyandoften.oibot</string>

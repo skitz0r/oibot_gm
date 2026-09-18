@@ -94,7 +94,7 @@ uv sync
 uv run oibot demo --no-llm      # deterministic end-to-end, writes out/report.md
 uv run oibot discord            # bot; needs DISCORD_TOKEN, DISCORD_TEST_GUILD_ID, ANTHROPIC_API_KEY in .env
 ```
-After touching `frontend/`: `cd frontend && npm run build` (commit the bundle). Before restarting: `uv run python scripts/check_commands.py` (builds the command tree offline and runs the fast tests; `uv run pytest -q` runs all, incl. the slow solver tests) and `uv run python scripts/check_bundle.py` (fails when frontend/ and the committed bundle disagree). Supervision: `scripts/launchd/README.md` (KeepAlive plist; the bot pushes pending data commits on shutdown). Restart: `pkill -f "oibot discord"; PYTHONUNBUFFERED=1 nohup uv run oibot discord >> out/discord.log 2>&1 &`
+After touching `frontend/`: `cd frontend && npm run build` (commit the bundle). Before restarting: `uv run python scripts/check_commands.py` (builds the command tree offline and runs the fast tests; `uv run pytest -q` runs all, incl. the slow solver tests) and `uv run python scripts/check_bundle.py` (fails when frontend/ and the committed bundle disagree). Supervision: `scripts/launchd/README.md` (installed LaunchAgent; power-cut recovery = autorestart + auto-login; the bot pushes pending data commits on shutdown). Restart: `launchctl kickstart -k gui/$(id -u)/gg.earlyandoften.oibot` (the bot runs as a LaunchAgent with KeepAlive — never start a second copy with nohup; logs in out/oibot.log and out/launchd.log).
 
 ## Conventions
 - Python 3.12, `uv`, Pydantic models in `models.py` double as LLM output schemas.
