@@ -685,7 +685,8 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
     def __init__(self, ctx: GuildContext, test_guild: int | None):
         intents = discord.Intents.default()
         intents.message_content = True  # channel chat → roster changes / loot feedback
-        super().__init__(intents=intents)
+        # member text and names are data: never let them ping @everyone / roles through the bot
+        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.ctx = ctx
         self.tree = app_commands.CommandTree(self)
         self.test_guild = test_guild

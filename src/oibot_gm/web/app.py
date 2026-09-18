@@ -44,7 +44,9 @@ def create_app(bot) -> FastAPI:
     signer = URLSafeSerializer(os.environ.get("OIBOT_WEB_SECRET") or secrets.token_hex(32), salt="session")
     _, public_url = web_config()
     client_id, client_secret = os.environ.get("DISCORD_CLIENT_ID"), os.environ.get("DISCORD_CLIENT_SECRET")
-    dev_user = os.environ.get("OIBOT_WEB_DEV_USER")
+    # Dev login (no Discord OAuth) only when explicitly switched on AND the site is not public: never behind the tunnel.
+    _bind, _url = web_config()
+    dev_user = os.environ.get("OIBOT_WEB_DEV_USER") if os.environ.get("OIBOT_WEB_DEV") == "1" and not _url.startswith("https") else None
     card_cache: dict[str, tuple[float, str, bytes]] = {}  # key -> (time, data head, png)
 
     # ---- identity
@@ -309,7 +311,8 @@ async def serve(bot) -> None:
     import uvicorn
 
     host, _, port = bind.rpartition(":")
-    config = uvicorn.Config(create_app(bot), host=host or "127.0.0.1", port=int(port), log_level="warning", proxy_headers=True, forwarded_allow_ips="*")
+    # Trust X-Forwarded-* only from the local cloudflared, never from arbitrary clients
+    config = uvicorn.Config(create_app(bot), host=host or "127.0.0.1", port=int(port), log_level="warning", proxy_headers=True, forwarded_allow_ips=os.environ.get("OIBOT_WEB_PROXY_IPS", "127.0.0.1"))
     server = uvicorn.Server(config)
     print(f"web dashboard on http://{bind} (public {url})")
     await server.serve()

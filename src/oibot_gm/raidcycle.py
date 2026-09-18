@@ -101,6 +101,8 @@ class RaidEvent(BaseModel):
     nudged: list[int] = Field(default_factory=list)
     fill_asks: list[FillAsk] = Field(default_factory=list)
     fill_state: str = "idle"  # idle | asking | filled | exhausted
+    lock_error: Optional[str] = None  # the last failed lock attempt (sheet stays open); cleared on success
+    lock_tried_at: Optional[str] = None
     log: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=now)
 
@@ -734,6 +736,16 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
         ev.log.append("proposed " + " + ".join(str(len(r.selected)) for r in rosters) + f" in / {len(rosters[0].benched)} bench")
         rs.save(ev, "proposed")
     return players, rosters[0]
+
+
+def solver_error_text(e: Exception) -> str:
+    """A sentence an officer can act on instead of the solver's status word."""
+    msg = str(e)
+    if "INFEASIBLE" in msg or "no roster found" in msg:
+        return "no roster satisfies the rules: check the raid's tank/healer minimums against who joined, pins that overfill a group, and keep-apart pairs"
+    if "UNKNOWN" in msg or "time" in msg.lower():
+        return "the solver ran out of time before finding a roster; try again or reduce pins"
+    return f"the solver failed: {msg}"
 
 
 def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None) -> tuple[list[list[str]], list[RosterResult]]:

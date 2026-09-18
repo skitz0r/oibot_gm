@@ -412,6 +412,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if ev.state != "open":
             return JSONResponse({"error": "already locked"}, status_code=400)
         line = await bot.lock_run(v.reg, rs, ev, by=v.name)
+        if ev.lock_error:
+            return JSONResponse({"error": line}, status_code=409)
         await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
         return {"message": line}
 

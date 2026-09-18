@@ -441,9 +441,13 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
                 await interaction.response.send_message("Already locked.", ephemeral=True)
                 return
             await interaction.response.defer(ephemeral=True, thinking=True)
-            line = await bot.lock_run(reg, rs, ev, by=by)
+            try:
+                line = await bot.lock_run(reg, rs, ev, by=by)
+            except Exception as e:  # noqa: BLE001
+                line = f"lock failed: {e}"
             await interaction.followup.send(line, ephemeral=True)
-            await bot.ops.emit(reg.config, "info", line)
+            if not ev.lock_error:
+                await bot.ops.emit(reg.config, "info", line)
             return
         if self.action == "cancel":
             view = discord.ui.View(timeout=60)
@@ -893,14 +897,27 @@ class RaidMixin:
         """Lock the sheet, build the roster(s) from the signups (pins honoured), show them on the sheet and in the
         officer channel, and DM every seated member for confirmation."""
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-        ev.state = "locked"
-        ev.locked_at = rc.now()
+        # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
+        # mid-way) leaves the sheet open rather than a locked run with no roster
+        trial = ev.model_copy(deep=True)
+        ev.lock_tried_at = rc.now()
+        try:
+            await asyncio.to_thread(rc.propose, reg, rs, trial, False)
+        except Exception as e:  # noqa: BLE001 — solver infeasible / timed out
+            why = rc.solver_error_text(e)
+            first = ev.lock_error != why
+            ev.lock_error = why
+            ev.log.append(f"lock ({by}) failed: {why}")
+            rs.save(ev, "lock failed")
+            if first:
+                await self.post_run_update(reg, ev, f"⚠️ lock by {by} failed — {why}. The sheet stays open; fix the board or the raid rules and lock again.")
+            await self.ops.emit(reg.config, "warn", f"{ev.key}: lock failed — {why}")
+            return f"{ev.key}: lock failed — {why}"
         _, _, confirm = run_times(reg, ev, team)
-        ev.confirm_by = confirm.isoformat()
+        ev.rosters, ev.roster, ev.log = trial.rosters, trial.roster, trial.log
+        ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat(), None
+        ev.log.append(f"locked by {by}")
         rs.save(ev, f"locked by {by}")
-        players, result = await asyncio.to_thread(rc.propose, reg, rs, ev)
-        ev.state = "locked"
-        rs.save(ev, "roster set")
         await self.refresh_sheet(reg, ev)
         ch = self.officer_channel(reg, ev)
         if ch:
@@ -1064,9 +1081,17 @@ class RaidMixin:
                 if ev.state == "open" and not ev.health_posted and now >= soft:
                     await self.post_health(reg, rs, ev, officer_ch, nudge=True)
                     await self.ops.emit(cfg, "info", f"{ev.key}: health check posted, nudged {len(ev.nudged)}")
+                if ev.state == "locked" and not ev.all_rosters:  # a lock that never finished (old code path / crash): back to open, retry below
+                    ev.state, ev.locked_at, ev.confirm_by = "open", None, None
+                    rs.save(ev, "lock recovered")
+                    await self.ops.emit(cfg, "warn", f"{ev.key}: locked without a roster — reopened, retrying the lock")
                 if ev.state == "open" and now >= hard:
+                    tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
+                    if ev.lock_error and tried and now - tried < timedelta(minutes=15):
+                        continue  # failed recently; give the officers time to fix the board before trying again
                     line = await self.lock_run(reg, rs, ev)
-                    await self.ops.emit(cfg, "info", line)
+                    if not ev.lock_error:
+                        await self.ops.emit(cfg, "info", line)
                     continue
                 if ev.state != "open" and ev.all_rosters:
                     gone = rc.expire_confirmations(reg, rs, ev)
