@@ -20,6 +20,7 @@ from oibot_gm.store import GitStore
 ROOT = Path(__file__).resolve().parents[1]
 GUILD = "demo"  # the fixture guild's key: data lives under <data>/demo (the demo fixtures + a guild.yaml written here)
 OWNER = 100_000_000_000_000_001
+OFFICER_ROLE = 200_000_000_000_000_001  # the fixture guild's officer role id (officer roles are stored by id, not name)
 TEST_MEMBERS = 16  # 2 tanks, 5 healers, 9 dps from Registry.TEST_MIX
 
 
@@ -35,7 +36,7 @@ def data_root(tmp_path: Path) -> Path:
     shutil.copytree(ROOT / "fixtures" / "demo", root / GUILD)
     (root / GUILD / "guild.yaml").write_text(yaml.safe_dump({
         "key": GUILD, "name": "Demo Guild", "game_profile": "forever", "discord_guild_id": 1, "owner_discord_id": OWNER,
-        "timezone": "America/Los_Angeles", "officer_roles": ["officer"],
+        "timezone": "America/Los_Angeles", "officer_role_ids": [OFFICER_ROLE],
     }, sort_keys=False))
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)

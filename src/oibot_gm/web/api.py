@@ -6,6 +6,7 @@ same Registry / raidcycle functions the Discord commands call. CSRF: every POST 
 from __future__ import annotations
 
 import asyncio
+import logging
 import contextlib
 import inspect
 import time
@@ -18,7 +19,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from .. import comp as comp_mod, discord_raid as dr, raidcycle as rc, render
+from .. import comp as comp_mod, raid_views as dr, raidcycle as rc, render
 from ..registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 
@@ -84,6 +85,9 @@ def need_owner(v) -> None:
         raise HTTPException(403, "Owner only.")
 
 
+log = logging.getLogger(__name__)
+
+
 def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     solver_locks: dict[str, asyncio.Lock] = {}  # one per run key: two officers can't solve the same run at once (S4)
 
@@ -103,6 +107,18 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if officer and not v.officer:
             raise HTTPException(403, "Officers only.")
         return v
+
+    @app.middleware("http")
+    async def request_log(request: Request, call_next):
+        """Every mutation on the API is logged (who, what, status) — the file is the audit trail next to the ops feed."""
+        response = await call_next(request)
+        if request.method != "GET" and request.url.path.startswith("/api/"):
+            try:
+                v = await viewer(request)
+            except Exception:  # noqa: BLE001 — not logged in / not a member: still worth a line
+                v = None
+            log.info("api %s %s uid=%s status=%s", request.method, request.url.path, getattr(v, "uid", None), response.status_code)
+        return response
 
     async def body(request: Request, officer: bool = False):
         if request.headers.get("x-requested-with") != "oibot":
@@ -342,7 +358,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters)}
         if not full:
             return base
-        from ..discord_raid import run_times
+        from ..raid_views import run_times
 
         soft, hard, confirm = run_times(reg, ev, t)
         conf_rows = rc.confirmations(reg, ev) if ev.all_rosters else []
@@ -800,16 +816,23 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         reg, cfg = v.reg, v.reg.config
         ps = PolicyStore(bot.registries.store, reg.key)
         chans = {c["id"]: c["name"] for c in bot.guild_channels(reg)}
+        guild = bot.get_guild(cfg.discord_guild_id)
+        if guild is not None:
+            await asyncio.to_thread(reg.resolve_officer_roles, guild)  # legacy names → ids (no-op once migrated); refreshes the name cache
+        # officer roles by id (ids as strings: JS numbers can't hold a snowflake); the pickable roles likewise
+        guild_roles = [{"id": str(r.id), "name": r.name} for r in sorted(guild.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if guild else []
+        officer_roles = [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.officer_role_ids]
         return {"yaml": yaml.safe_dump(cfg.model_dump(), sort_keys=False),
                 "docs": {d: {"text": ps.read(d), "compiled": bool(ps.compiled(d)), "summary": ((ps.compiled(d) or {}).get("summary") if isinstance(ps.compiled(d), dict) else None)} for d in ("loot", "comp", "persona")},
                 "channels": {k: {"id": str(getattr(cfg, attr)) if getattr(cfg, attr) else None, "name": chans.get(str(getattr(cfg, attr)))} for k, attr in CHANNEL_KINDS.items()},
-                "guild_channels": bot.guild_channels(reg), "guild_roles": bot.guild_roles(reg),
-                "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": list(cfg.officer_roles), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None},
+                "guild_channels": bot.guild_channels(reg), "guild_roles": guild_roles,
+                "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles,
+                             "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None},
                 "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner}
 
     @app.post("/api/admin/config")
     async def admin_config(request: Request):
-        """Owner: one setting at a time — channel:<kind> (channel id or null), timezone, ask_audience, about, officer_roles (list)."""
+        """Owner: one setting at a time — channel:<kind> (channel id or null), timezone, ask_audience, about, officer_roles (list of role ids)."""
         v, d = await body(request, officer=True)
         need_owner(v)
         field, value = d.get("field") or "", d.get("value")
@@ -817,17 +840,17 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             if field.startswith("channel:"):
                 msg = await bot.set_channel(v.reg, field[8:], as_int(value, "channel id") if value else None, v.name)
             elif field == "officer_roles":
-                # the editor sends the whole list (by role NAME, as /gm config officer-role does); apply it as the
+                # the editor sends the whole list of role IDS (as /gm config officer-role stores them); applied as the
                 # command's role_add / role_remove ops so the same code path and audit lines are used
                 from .. import configops
 
-                want = {str(r).strip() for r in (value or []) if str(r).strip()}
-                have = set(v.reg.config.officer_roles)
-                for name in sorted(have - want):
-                    await asyncio.to_thread(configops.apply, v.reg, configops.ConfigOp(op="role_remove", value=name), v.name, True)
-                for name in sorted(want - have):
-                    await asyncio.to_thread(configops.apply, v.reg, configops.ConfigOp(op="role_add", value=name), v.name, True)
-                msg = ("officer roles: " if want != have else "officer roles unchanged: ") + (", ".join(v.reg.config.officer_roles) or "(none; Manage Server only)")
+                want = {as_int(r, "role id") for r in (value or []) if str(r).strip()}
+                have = set(v.reg.config.officer_role_ids)
+                for rid in sorted(have - want):
+                    await configops.apply_async(v.reg, configops.ConfigOp(op="role_remove", value=str(rid)), v.name, True, bot=bot)
+                for rid in sorted(want - have):
+                    await configops.apply_async(v.reg, configops.ConfigOp(op="role_add", value=str(rid)), v.name, True, bot=bot)
+                msg = ("officer roles: " if want != have else "officer roles unchanged: ") + (", ".join(bot.officer_role_names(v.reg)) or "(none; Manage Server only)")
             elif field in ("timezone", "ask_audience", "about"):
                 from .. import configops
 

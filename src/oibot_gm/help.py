@@ -77,7 +77,7 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool) -> str:
     ch = lambda i: f"<#{i}>" if i else "not set"  # noqa: E731
     lines = [f"## Guild: {cfg.name} · game profile {cfg.game_profile} · timezone {cfg.timezone} · now {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} (all times below are guild time)",
              f"channels: registration {ch(cfg.registration_channel_id)}, signup {ch(cfg.signup_channel_id)}, roster {ch(cfg.roster_channel_id)}, analytics {ch(cfg.analytics_channel_id)}, ops {ch(cfg.ops_channel_id)}, applications {ch(cfg.applications_channel_id)}",
-             f"officer roles: {', '.join(cfg.officer_roles) or 'none (Manage Server counts)'} · members {len(reg.members)} · mains {sum(1 for m in reg.members.values() if m.main)}"]
+             f"officer roles: {', '.join(reg.officer_role_names()) or 'none (Manage Server counts)'} · members {len(reg.members)} · mains {sum(1 for m in reg.members.values() if m.main)}"]
     for rid in reg.profile.raids:
         rd = reg.raid_def(rid)
         over = cfg.raids.get(rid, {}) if cfg.raids else {}

@@ -35,7 +35,10 @@ from .discord_help import GuideSelect, HelpMixin, guide_intro, guide_view, regis
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
-from .discord_raid import FillButton, PlaceButton, RaidContext, RaidMixin, RunButton, SignupButton, register_raid_commands
+from .discord_raid import RaidContext, RaidMixin
+from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton
+from .raid_commands import register_raid_commands
+from .raid_scheduler import RaidSchedulerMixin
 from .discord_registry import Guilds, RegisterButton, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
@@ -681,7 +684,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, discord.Client):
+class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, discord.Client):
     ico = staticmethod(ico)
 
     async def close(self) -> None:
@@ -957,7 +960,8 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
 
     # ---- chat handlers
     def officiates(self, user, guild) -> bool:
-        """Officer check for buttons and chat: the guild's registry rules if configured, else Manage Server."""
+        """Officer check for buttons and chat: owner, Manage Server, or one of the configured officer roles (matched by
+        role id — `GuildConfig.officer_by_roles`; legacy names only until `resolve_officer_roles` has run)."""
         reg = self.registries.by_discord.get(guild.id) if guild else None
         if reg and reg.config.owner_discord_id == user.id:
             return True
@@ -965,7 +969,47 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
             return False
         if user.guild_permissions.manage_guild:
             return True
-        return bool(reg and any(r.name in reg.config.officer_roles for r in user.roles))
+        return bool(reg and reg.config.officer_by_roles(user.roles))
+
+    def officer_role_names(self, reg) -> list[str]:
+        """The configured officer roles as names (resolved against the live guild when it is available)."""
+        g = self.get_guild(reg.config.discord_guild_id)
+        return reg.resolve_officer_roles(g) if g else reg.officer_role_names()
+
+    async def resolve_officer_roles(self, reg=None) -> None:
+        """Turn legacy officer role names into role ids against the live guild (one commit) and refresh the name cache;
+        on ready and whenever a role is edited so a rename never drops an officer."""
+        for r in ([reg] if reg else list(self.registries.by_discord.values())):
+            g = self.get_guild(r.config.discord_guild_id)
+            if not g:
+                continue
+            before = list(r.config.officer_roles)
+            try:
+                names = await asyncio.to_thread(r.resolve_officer_roles, g)
+            except Exception:  # noqa: BLE001 — a failed commit must not stop the bot from starting
+                import logging
+
+                logging.getLogger(__name__).exception("officer role resolution failed for %s", r.key)
+                continue
+            if before and before != r.config.officer_roles:
+                await self.ops.emit(r.config, "info", f"officer roles now stored by role id: {', '.join(names) or '(none)'}")
+            if r.config.officer_roles:
+                await self.ops.emit(r.config, "warn", f"officer role name(s) not found in the server: {', '.join(r.config.officer_roles)} — re-add with /gm config officer-role")
+
+    async def on_guild_role_update(self, before, after):
+        reg = self.registries.by_discord.get(after.guild.id)
+        if reg:
+            await self.resolve_officer_roles(reg)
+
+    async def on_guild_role_delete(self, role):
+        reg = self.registries.by_discord.get(role.guild.id)
+        if reg:
+            await self.resolve_officer_roles(reg)
+
+    async def on_guild_role_create(self, role):
+        reg = self.registries.by_discord.get(role.guild.id)
+        if reg and reg.config.officer_roles:  # a legacy name may now resolve
+            await self.resolve_officer_roles(reg)
 
     async def gate(self, interaction: discord.Interaction) -> bool:
         """Refuse non-officers on decision buttons; returns True when the press may proceed."""
@@ -1015,7 +1059,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
             if text:
                 member = message.author
                 owner = reg.config.owner_discord_id == member.id
-                officer = owner or (isinstance(member, discord.Member) and (member.guild_permissions.manage_guild or any(r.name in reg.config.officer_roles for r in member.roles)))
+                officer = self.officiates(member, message.guild)
                 async with message.channel.typing():
                     await handle_change(message, reg, self.policies.store(reg), self.ctx.provider, self.ops, text, owner, officer)
             return
@@ -1245,6 +1289,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
 
     async def on_ready(self):
         await self.ensure_emojis()
+        await self.resolve_officer_roles()  # legacy officer role names → ids, name cache for display
         st = _store()
         regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.registries.by_discord.values())
         print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")

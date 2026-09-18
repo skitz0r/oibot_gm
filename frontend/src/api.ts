@@ -85,6 +85,8 @@ export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }
 export interface Ops { head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
+/** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
+export interface RoleRef { id: string; name: string }
 export interface Config { yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }> }
 export interface Me {
   display_name: string; registered: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };

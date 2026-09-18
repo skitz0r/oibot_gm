@@ -55,7 +55,7 @@ def guide_text(reg, key: str) -> str:
             if not slots:
                 lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — no run times yet")
                 continue
-            starts = rc.slot_starts(reg, rid, now, 24 * 14)
+            starts = rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS)
             nxt = starts[0][1] if starts else None
             lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — {', '.join(slots)} {cfg.timezone}"
                          + (f" · next <t:{int(nxt.timestamp())}:F> (<t:{int(nxt.timestamp())}:R>); its sheet opens {rd['signup_lead_hours']:g} h before" if nxt else " · nothing in the next two weeks"))
@@ -70,7 +70,7 @@ def guide_text(reg, key: str) -> str:
     if key == "apply":
         return "**Applying**\nUse `/apply` with your character, spec, logs link and a few words about you. Officers review it on a card and you'll get a DM with the decision. Accepted applicants are registered as trial."
     if key == "contact":
-        officers = ", ".join(f"@{r}" for r in cfg.officer_roles) or "anyone with Manage Server"
+        officers = ", ".join(f"@{r}" for r in reg.officer_role_names()) or "anyone with Manage Server"
         owner = f"<@{cfg.owner_discord_id}>" if cfg.owner_discord_id else "not set"
         return f"**Who to contact**\nOfficers: {officers}. Owner: {owner}." + (f"\nOps channel: <#{cfg.ops_channel_id}>" if cfg.ops_channel_id else "")
     return "Pick a topic."

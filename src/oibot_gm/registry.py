@@ -141,7 +141,11 @@ class GuildConfig(BaseModel):
     slots: list[str] = Field(default_factory=list)  # legacy candidate-slot poll (unused since the signup-driven cycle)
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
     about: Optional[str] = None  # short public blurb for the static guide (owner-set)
-    officer_roles: list[str] = Field(default_factory=list)
+    # officer roles are Discord role IDS (a rename keeps them; a same-named role made by someone with Manage Roles does not count).
+    # `officer_roles` (names) is the legacy field: migrated to ids once by Registry.resolve_officer_roles when the bot sees the guild;
+    # until then, and only while no id is configured, names still match so nobody is locked out on the first start after the upgrade.
+    officer_role_ids: list[int] = Field(default_factory=list)
+    officer_roles: list[str] = Field(default_factory=list)  # legacy names; empty once resolved (unresolvable names stay, for the ops warning)
     # rosters: {key, name, size, schedule: "Tue 19:30", instance, cutoff_soft_hours, cutoff_hard_hours, open_days_before, reminders, open_dm}
     rosters: list[dict] = Field(default_factory=list)
     # raids: guild overrides per instance id over profiles/<game>/raids.yaml: {lockout_days, duration_hours, comp: {tank/healer/dps: {min,max}}, notes}
@@ -155,6 +159,22 @@ class GuildConfig(BaseModel):
             data["rosters"] = data.pop("raid_teams")  # pre-roster config files
         data.pop("raid_teams", None)
         super().__init__(**data)
+
+    # ---- officer roles
+    def officer_by_roles(self, roles) -> bool:
+        """Does this set of Discord roles (objects with .id and .name) carry officer rights? Ids decide; the legacy
+        names are consulted only while no id has been configured yet (first start before resolve_officer_roles ran)."""
+        if self.officer_role_ids:
+            ids = set(self.officer_role_ids)
+            return any(getattr(r, "id", None) in ids for r in roles)
+        if self.officer_roles:
+            names = set(self.officer_roles)
+            return any(getattr(r, "name", None) in names for r in roles)
+        return False
+
+    def officer_roles_pending(self) -> list[str]:
+        """Legacy names not yet turned into ids (the bot resolves them against the guild's roles on ready)."""
+        return list(self.officer_roles)
 
     # canonical names
     def roster_keys(self) -> list[str]:
@@ -379,9 +399,79 @@ class Registry:
         # change listeners: fn(kind: "member"|"config", lines: list[str]); called synchronously after each commit
         self.listeners: list = []
         self._snap: dict[int, dict] = {}  # last saved state per member, for diff lines
+        self.role_names: dict[int, str] = {}  # Discord role id -> name, cached by resolve_officer_roles (display + name lookups off the bot thread)
         self.config = self.load_config()
         self.refresh_profile()
         self.reload()
+
+    # ---- officer roles (ids are the truth; see GuildConfig.officer_by_roles)
+    def cache_roles(self, guild) -> None:
+        """Remember the guild's role names by id (any object with `.roles` of `.id`/`.name`, i.e. a discord.Guild or a test double)."""
+        roles = getattr(guild, "roles", None) or []
+        self.role_names = {int(r.id): str(r.name) for r in roles}
+
+    def resolve_officer_roles(self, guild) -> list[str]:
+        """Migrate legacy officer role names to ids against the guild's roles (one commit), refresh the name cache,
+        and return the configured officer role names. Called by the bot on ready and whenever roles are edited.
+        Names that match no role stay in `officer_roles` (nothing is dropped silently); they no longer grant anything
+        once at least one id is configured."""
+        self.cache_roles(guild)
+        cfg = self.config
+        if cfg.officer_roles:
+            by_name = {name: rid for rid, name in self.role_names.items()}
+            resolved = {name: by_name[name] for name in cfg.officer_roles if name in by_name}
+            if resolved:
+                ids = list(cfg.officer_role_ids)
+                for name, rid in resolved.items():
+                    if rid not in ids:
+                        ids.append(rid)
+                cfg.officer_role_ids = ids
+                cfg.officer_roles = [n for n in cfg.officer_roles if n not in resolved]
+                self.save_config("officer roles: " + ", ".join(f"{n} → role id {resolved[n]}" for n in resolved) + (f" (unresolved: {cfg.officer_roles})" if cfg.officer_roles else ""))
+            if cfg.officer_roles:
+                log.warning("%s: officer role names not found in the guild: %s", self.key, cfg.officer_roles)
+        return self.officer_role_names()
+
+    def officer_role_names(self) -> list[str]:
+        """Officer roles for display: names from the cache (a stale id shows as `role:<id>`), then any unresolved legacy names."""
+        names = [self.role_names.get(rid, f"role:{rid}") for rid in self.config.officer_role_ids]
+        return names + [n for n in self.config.officer_roles if n not in names]
+
+    def role_id_for(self, value) -> int | None:
+        """A role reference — id, `<@&id>` mention, or a name known to the cache — as an id; None when unknown."""
+        s = str(value or "").strip()
+        if not s:
+            return None
+        digits = s[3:-1] if s.startswith("<@&") and s.endswith(">") else s
+        if digits.isdigit():
+            return int(digits)
+        low = s.lstrip("@").lower()
+        return next((rid for rid, name in self.role_names.items() if name.lower() == low), None)
+
+    def set_officer_role(self, value, add: bool, by: str) -> str:
+        """Add or remove one officer role by id, mention, or name. A name the cache can't resolve (no bot yet) is parked in
+        the legacy list, granting nothing until the bot resolves it on its next ready/role event. Returns the one-line result."""
+        cfg = self.config
+        rid = self.role_id_for(value)
+        name = str(value or "").strip().lstrip("@")
+        if rid is not None:
+            ids = [i for i in cfg.officer_role_ids if i != rid]
+            if add:
+                ids.append(rid)
+            cfg.officer_role_ids = ids
+            cfg.officer_roles = [n for n in cfg.officer_roles if n != name and n != self.role_names.get(rid)]
+            shown = self.role_names.get(rid, f"role:{rid}")
+        elif name:
+            if add:
+                if name not in cfg.officer_roles:
+                    cfg.officer_roles.append(name)
+            else:
+                cfg.officer_roles = [n for n in cfg.officer_roles if n != name]
+            shown = f"{name} (by name; resolved to a role id when the bot next sees the server)"
+        else:
+            raise RegistryError("officer role: give a role mention, id or name")
+        self.save_config(f"officer roles {'+' if add else '−'} {shown} (by {by})")
+        return f"officer roles = {', '.join(self.officer_role_names()) or '(none; Manage Server only)'}"
 
     def refresh_profile(self) -> None:
         self.profile = self.base_profile.with_overrides(self.config.buffs, self.config.families)

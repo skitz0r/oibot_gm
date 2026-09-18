@@ -2,6 +2,7 @@
 over a whitelisted schema; code renders the diff and applies after confirmation."""
 from __future__ import annotations
 
+import asyncio
 from typing import Literal, Optional
 
 import yaml
@@ -15,7 +16,7 @@ SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never gue
 Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
   roster_channel (officer channel for health cards and roster proposals), registration_channel (public card with the
   Register / Add an alt / My status buttons), analytics_channel (bank + per-raid readiness cards), absences_channel
-  (the "I'll be away" card), officer_role add/remove (role_add/role_remove with the role name),
+  (the "I'll be away" card), officer_role add/remove (role_add/role_remove: value = the role mention <@&id>, id or name; stored by id),
   ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb).
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
@@ -52,7 +53,7 @@ class ConfigOp(BaseModel):
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|ask_audience|about")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, comp_target*, comp_groups), run key (team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
     field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; comp_target*: the slot (role, Class or Class:Spec)")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear)")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear)")
     member: Optional[str] = Field(default=None, description="member display name or mention <@id>")
     character: Optional[str] = None
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social")
@@ -160,7 +161,9 @@ def describe(reg: Registry, op: ConfigOp) -> str:
                **{p: (getattr(cfg, f"{p}_id", None) and f"<#{getattr(cfg, f'{p}_id')}>") for p in CHANNEL_PATHS}}.get(op.path or "", "?")
         return f"{op.path}: {cur or '—'} → {op.value}"
     if op.op in ("role_add", "role_remove"):
-        return f"officer roles {cfg.officer_roles} {'+' if op.op == 'role_add' else '−'} {op.value}"
+        rid = reg.role_id_for(op.value)
+        target = reg.role_names.get(rid, f"role:{rid}") if rid is not None else f"{(op.value or '').strip().lstrip('@')} (by name: takes effect once the bot resolves it to a role id)"
+        return f"officer roles {reg.officer_role_names()} {'+' if op.op == 'role_add' else '−'} {target}"
     if op.op == "rank":
         hit = reg.find(op.character or "")
         return f"{op.character}: rank {hit[1].rank if hit else '?'} → {op.rank or op.value}"
@@ -258,11 +261,9 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         reg.save_config(f"{op.path} → {op.value} (by {by})")
         return f"{op.path} = {op.value}"
     if op.op in ("role_add", "role_remove"):
-        roles = set(cfg.officer_roles)
-        (roles.add if op.op == "role_add" else roles.discard)(op.value or "")
-        cfg.officer_roles = sorted(roles)
-        reg.save_config(f"officer roles {cfg.officer_roles} (by {by})")
-        return f"officer roles = {cfg.officer_roles}"
+        # stored by role id: a mention/id applies at once; a name resolves through the registry's role cache (filled by
+        # the bot), otherwise it is parked in the legacy list and resolved on the bot's next ready / role event
+        return reg.set_officer_role(op.value, op.op == "role_add", by)
     if op.op == "rank":
         rank = op.rank or op.value or ""
         reg.set_rank(op.character or "", rank, by)
@@ -388,5 +389,9 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
         m, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
         await bot.announce_absence(reg, m, a, by)
         return f"{m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else "")
+    if bot is not None and op.op in ("role_add", "role_remove"):
+        guild = bot.get_guild(reg.config.discord_guild_id)
+        if guild is not None:
+            await asyncio.to_thread(reg.resolve_officer_roles, guild)  # role names → ids against the live guild before the op
     raids = bot.raids.store(reg) if bot is not None and getattr(bot, "raids", None) is not None else None  # the live events, not a fresh read
     return apply(reg, op, by, is_owner, policy_store, raids=raids)

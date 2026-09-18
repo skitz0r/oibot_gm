@@ -216,6 +216,14 @@ The same settings are on the Raids page and in plain text (`raid_set`). Comp bou
 spellings: `tanks:'2-3'` on the command ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
 plain text (same for healers and dps).
 
+**Officer roles.** `/gm config officer-role role:@Officers` (add; `remove:true` to take one away), the Config page's
+role picker, or in plain text ("make @Council officers"). The bot remembers the *role itself* (its Discord id), not
+its name: renaming the role keeps its officers, and a new role someone creates with the same name grants nothing.
+Manage Server always counts as officer; the owner is set separately. Configs from before this change listed roles
+by name — the bot converts them to ids the first time it sees the server (one commit in the data repo) and, until
+then, the names still work so nobody is locked out; a name it can't find in the server is shown on the Config page
+and in the ops channel so it can be re-added by picking the role.
+
 Per-raid switches: `nudge` [on] — DM mains who haven't answered, once, at `nudge_hours_before`; `autofill`
 [on] — after lock the bot fills released seats by DM on its own; `open_dm` [off] — DM every main when a sheet
 opens; `fill_ask_hours` [4] — how long a fill DM waits before silence counts as no.

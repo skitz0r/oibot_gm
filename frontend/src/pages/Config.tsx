@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Badge, Box, Button, Card, Code, Group, MultiSelect, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
-import { api } from "../api";
+import { api, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
-  channels: Record<string, { id: string | null; name: string | null }>; guild_channels: { id: string; name: string; category: string | null }[]; guild_roles: string[];
-  settings: { timezone: string; ask_audience: string; about: string; officer_roles: string[]; owner_id: string | null };
+  channels: Record<string, { id: string | null; name: string | null }>; guild_channels: { id: string; name: string; category: string | null }[]; guild_roles: RoleRef[];
+  /** officer_roles: by role id (renames are safe); officer_roles_pending: legacy names the bot could not match to a role */
+  settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null };
   test_bench: { members: number; runs: string[] }; owner: boolean;
 }
 
@@ -32,6 +33,9 @@ export function ConfigPage() {
     try { const r = await api.post<{ message: string }>("/api/admin/config", { field, value }); ok(r.message); await load(); } catch (e) { fail(e); } finally { setBusy(null); }
   }
   const channelOptions = [{ value: "", label: "— not set —" }, ...data.guild_channels.map((c) => ({ value: c.id, label: `#${c.name}${c.category ? ` · ${c.category}` : ""}` }))];
+  // values are role ids, labels the current names; a configured role the server no longer has stays selectable so it can be removed
+  const known = new Set(data.guild_roles.map((r) => r.id));
+  const roleOptions = [...data.guild_roles.map((r) => ({ value: r.id, label: r.name })), ...data.settings.officer_roles.filter((r) => !known.has(r.id)).map((r) => ({ value: r.id, label: `${r.name} (deleted role)` }))];
   return (
     <Stack gap="lg">
       <PageTitle title="Configuration" intro={ro ? "Read-only for officers; the owner edits here, with /gm config, or in plain text via /gm change or an @mention in the ops channel." : "Each function of the bot lives in a channel. Changing a channel does what the slash command does: the registration and absence cards are posted, the analytics cards re-post."} />
@@ -51,7 +55,8 @@ export function ConfigPage() {
       <Card>
         <CardHeader title="Settings" />
         <Stack gap="sm" p="md">
-          <MultiSelect label="Officer roles" description="Discord roles that count as officer (Manage Server always does)" data={data.guild_roles} value={data.settings.officer_roles} onChange={(v) => set("officer_roles", v)} disabled={ro || busy === "officer_roles"} searchable w={420} />
+          <MultiSelect label="Officer roles" description="Discord roles that count as officer (Manage Server always does); picked by role, so renaming a role keeps its officers" data={roleOptions} value={data.settings.officer_roles.map((r) => r.id)} onChange={(v) => set("officer_roles", v)} disabled={ro || busy === "officer_roles"} searchable w={420} />
+          {data.settings.officer_roles_pending.length > 0 && <Text size="xs" c="orange">Not found in the server (from an older config, by name): {data.settings.officer_roles_pending.join(", ")} — pick the role above to re-add it.</Text>}
           <Group gap="md" wrap="wrap" align="flex-end">
             <TextInput label="Timezone" description="IANA name; every schedule and clock on the site" defaultValue={data.settings.timezone} disabled={ro} w={260} onBlur={(e) => e.currentTarget.value !== data.settings.timezone && set("timezone", e.currentTarget.value)} />
             <Select label="Who may ask the bot questions" description="/ask, DMs, @mentions; others get the static guide" data={["officers", "confirmed", "registered", "everyone"]} value={data.settings.ask_audience} onChange={(v) => v && v !== data.settings.ask_audience && set("ask_audience", v)} disabled={ro} w={260} />

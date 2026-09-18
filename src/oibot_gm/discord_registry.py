@@ -60,7 +60,7 @@ def is_officer(interaction: discord.Interaction, reg: Registry) -> bool:
         return False
     if m.guild_permissions.manage_guild:
         return True
-    return any(r.name in reg.config.officer_roles for r in m.roles)
+    return reg.config.officer_by_roles(m.roles)  # by role id (legacy names only until the bot resolved them)
 
 
 def is_owner(interaction: discord.Interaction, reg: Registry) -> bool:
@@ -879,12 +879,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not is_owner(interaction, reg):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
-        roles = set(reg.config.officer_roles)
-        (roles.discard if remove else roles.add)(role.name)
-        reg.config.officer_roles = sorted(roles)
-        reg.save_config(f"officer roles: {reg.config.officer_roles}")
-        await interaction.response.send_message(f"✅ Officer roles: {', '.join(reg.config.officer_roles) or '(none; Manage Server only)'}", ephemeral=True)
-        await ops.emit(reg.config, "warn", f"officer roles now {reg.config.officer_roles} (by {interaction.user.display_name})")
+        # stored by role id: a rename keeps the officers, a same-named role someone else creates grants nothing
+        if interaction.guild:
+            await asyncio.to_thread(reg.resolve_officer_roles, interaction.guild)  # legacy names → ids first, and the name cache for the reply
+        await asyncio.to_thread(reg.set_officer_role, role.id, not remove, interaction.user.display_name)
+        names = ", ".join(reg.officer_role_names()) or "(none; Manage Server only)"
+        await interaction.response.send_message(f"✅ Officer roles: {names}", ephemeral=True)
+        await ops.emit(reg.config, "warn", f"officer roles now {names} (by {interaction.user.display_name})")
 
     @config.command(name="roster-channel", description="Owner: private channel for roster overviews, proposals and officer health cards")
     async def cfg_roster_channel(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -1116,7 +1117,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.add_field(name="Bot", value=f"up {up // 3600}h{(up % 3600) // 60}m · profile {reg.profile.name}", inline=True)
         e.add_field(name="Data repo", value=f"{st.root.name} @ {st.head()} · push {'on' if st.push_enabled else 'off'}", inline=True)
         e.add_field(name="Registry", value=f"{len(reg.members)} members · {len(chars)} characters · {len(reg.pending())} unconfirmed", inline=True)
-        e.add_field(name="Config", value=f"owner {'<@%d>' % reg.config.owner_discord_id if reg.config.owner_discord_id else '—'} · ops {'<#%d>' % reg.config.ops_channel_id if reg.config.ops_channel_id else '—'} · officer roles {', '.join(reg.config.officer_roles) or '—'}", inline=False)
+        e.add_field(name="Config", value=f"owner {'<@%d>' % reg.config.owner_discord_id if reg.config.owner_discord_id else '—'} · ops {'<#%d>' % reg.config.ops_channel_id if reg.config.ops_channel_id else '—'} · officer roles {', '.join(reg.officer_role_names()) or '—'}", inline=False)
         e.add_field(name="LLM", value=provider.summary()[:1000] if provider else "off", inline=False)
         feed = getattr(interaction.client, "feed", None)
         e.add_field(name="Loot feed", value=(feed.status() if feed else "disabled (OIBOT_FEED_TOKEN unset)")[:500], inline=False)
