@@ -671,7 +671,7 @@ def how_many_rosters(reg: Registry, players: list[Player], size: int, rb: dict) 
     return max(1, n)
 
 
-def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = 12, whatif: bool = True) -> tuple[list[Player], list[RosterResult], int]:
+def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = 12, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
     the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective."""
     players = players_for(reg, ev)
@@ -715,7 +715,8 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         role_max={r: rb[r]["max"] for r in ("tank", "healer") if rb[r].get("max")},
         bonus=bonus,
     )
-    rosters = solver.solve_rosters(reg.profile, players, raid_id, opts, rosters=n_rosters, strategy=strategy, roster_bonus=roster_bonus, avoid=avoid)
+    # "another one": for a split the rosters must differ, for a single run the groups must
+    rosters = solver.solve_rosters(reg.profile, players, raid_id, opts, rosters=n_rosters, strategy=strategy, roster_bonus=roster_bonus, avoid=avoid if n_rosters > 1 else None, avoid_groups=avoid_groups if n_rosters == 1 else None)
     # bench what-ifs re-solve the model per benched player: only worth it for a single roster at lock, never for previews
     rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=whatif and n_rosters == 1 and len(players) <= 30) for r in rosters]
     return players, rosters, n_rosters
@@ -740,8 +741,9 @@ def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, av
     `avoid` = earlier previews (flat groups) the answer must differ from."""
     k = groups_per_roster(reg, int((reg.config.team(ev.team) or {}).get("size") or reg.raid_def(ev.instance).get("size") or 20))
     prev = [{n: gi // k for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
+    prev_g = [{n: gi for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     trial = ev.model_copy(deep=True)
-    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=8, whatif=False)
+    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=8, whatif=False, avoid_groups=prev_g)
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
     return [list(g) for r in rosters for g in r.groups], rosters

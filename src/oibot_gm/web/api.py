@@ -213,14 +213,15 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         except Exception:  # noqa: BLE001
             return comp_mod.groups_summary(reg, r.selected, None, None)
 
-    def seat_json(p, conf: dict, uids: dict) -> dict:
+    def seat_json(p, conf: dict, uids: dict, signed: dict | None = None) -> dict:
         c = conf.get(p.signup_name) or {}
-        return {"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role, "uid": c.get("uid") or uids.get(p.signup_name), "answer": c.get("answer")}
+        return {"display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role, "uid": c.get("uid") or uids.get(p.signup_name), "answer": c.get("answer"), "signed_at": (signed or {}).get(p.signup_name)}
 
     def board_json(reg, ev, rosters, conf_rows) -> dict:
         """The bank + groups the officers drag on: one entry per roster, groups of seats, aura summary per roster."""
         conf = {c["display_name"]: c for c in conf_rows}
         uids = {s.display_name: str(s.discord_id) for s in ev.signups.values()}
+        signed = {s.display_name: s.updated_at for s in ev.signups.values()}  # when they answered; the bank sorts on it
         team = reg.config.team(ev.team) or {}
         size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
         boards = []
@@ -230,7 +231,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                            "groups": [[seat_json(by[m], conf, uids) for m in g if m in by] for g in r.groups], "summary": roster_summary(reg, r)})
         bench = rosters[0].benched if rosters else []
         return {"n_groups": rc.groups_per_roster(reg, size), "group_size": int(reg.profile.comp_rules["group_size"]), "size": size,
-                "bank": [seat_json(p, conf, uids) for p in bench], "rosters": boards}
+                "bank": [seat_json(p, conf, uids, signed) for p in bench], "rosters": boards}
 
     def ev_json(reg, rs, ev, full: bool = True) -> dict:
         t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
@@ -319,7 +320,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/run/{key}/split")
     async def run_split(request: Request, key: str):
-        """Preview a split under a strategy (nothing saved): the modal's step 2. `avoid` = previous previews to differ from."""
+        """Preview a fresh layout (nothing saved): one roster, or a split under a strategy. `avoid` = previous previews to differ from."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":

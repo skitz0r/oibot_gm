@@ -90,11 +90,14 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    of the run. Drag names from the bank into groups, between groups, or back to the bank; dropping on
    someone swaps them. Every group shows its auras as you go (coloured = present, greyed with a red edge =
    someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs
-   update too. **Auto-fill** lets the solver seat whoever is left in the bank around what you placed;
-   **Clear** empties the board. Whatever is on the board when the sheet locks is the roster, with the solver
-   filling any empty seats. More Join answers than a raid needs → the board shows a second (third…) roster
-   for the same slot while a full run with its tank/healer minimums is possible, and **Propose splits**
-   appears: pick a philosophy — **Balanced** (both runs equal in synergy, tanks, healers and seat quality),
+   update too. The bank sorts by **signup** (who answered first), **spec** or **role** (tanks, healers,
+   melee, ranged); the choice sticks in your browser. **Auto-fill** lets the solver seat whoever is left
+   in the bank around what you placed; **Propose roster** shows the solver's own layout for the run (your
+   placements kept), with *another layout* for a different one, and *Use this layout on the board* seeds
+   the builder; **Clear** empties the board. Whatever is on the board when the sheet locks is the roster,
+   with the solver filling any empty seats. More Join answers than a raid needs → the board shows a second
+   (third…) roster for the same slot while a full run with its tank/healer minimums is possible, and the
+   button becomes **Propose splits**: pick a philosophy — **Balanced** (both runs equal in synergy, tanks, healers and seat quality),
    **Raid one first** (roster 1 gets the best, roster 2 the rest), **Rotation** (whoever sat out or was in
    the weaker run last window moves up) — check the one preview, press *another split like this* if it
    doesn't feel right, and *Use this split on the board*. The solver seats both runs in one go, so a shaman

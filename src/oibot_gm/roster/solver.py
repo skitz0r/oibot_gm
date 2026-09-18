@@ -52,13 +52,14 @@ STRATEGIES = ("balanced", "first", "rotation")
 
 
 def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opts: SolveOptions = SolveOptions(), rosters: int = 1,
-                  strategy: str = "balanced", roster_bonus: dict[int, dict[str, int]] | None = None, avoid: list[dict[str, int]] | None = None, min_changes: int = 4) -> list[RosterResult]:
+                  strategy: str = "balanced", roster_bonus: dict[int, dict[str, int]] | None = None, avoid: list[dict[str, int]] | None = None, min_changes: int = 4, avoid_groups: list[dict[str, int]] | None = None) -> list[RosterResult]:
     """`rosters` runs of `raid_size` from one pool of signups, solved jointly. Groups are flat across rosters
     (roster r owns groups r*k … r*k+k-1; pins/prefer_group use that numbering). Strategy shapes the objective:
     balanced — total synergy minus the gap between rosters (and a smaller gap on seat quality: rank/main/etc.);
     first — roster 1's synergy and seat weights count double; rotation — balanced plus `roster_bonus[0]`
     (e.g. sat-out points) for landing in roster 1. `avoid` = earlier roster assignments (name → roster) the answer
-    must differ from by at least `min_changes` people."""
+    must differ from by at least `min_changes` people; `avoid_groups` the same at group level (name → group index) for
+    a single-roster "another layout". Pinned players can't move, so they never count towards the difference."""
     rules = profile.comp_rules
     raid = profile.raids[raid_id]
     gsize = rules["group_size"]
@@ -159,8 +160,13 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
         if name in x and 0 <= g < n_groups:
             m.Add(x[name] == 1)
             m.Add(y[name, g] == 1)
+    pinned = set((opts.pins or {}).keys())
     for prev in avoid or []:
-        same = [xr[n, r] for n, r in prev.items() if n in x and 0 <= r < rosters]
+        same = [xr[n, r] for n, r in prev.items() if n in x and n not in pinned and 0 <= r < rosters]
+        if same:
+            m.Add(sum(same) <= max(0, len(same) - min_changes))
+    for prev in avoid_groups or []:
+        same = [y[n, g] for n, g in prev.items() if n in x and n not in pinned and 0 <= g < n_groups]
         if same:
             m.Add(sum(same) <= max(0, len(same) - min_changes))
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Accordion, ActionIcon, Badge, Box, Button, Card, Group, Menu, Modal, Stack, Tabs, Text, TextInput, Tooltip } from "@mantine/core";
+import { Accordion, ActionIcon, Badge, Box, Button, Card, Group, Menu, Modal, SegmentedControl, Stack, Tabs, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconRefresh, IconScale, IconSparkles, IconUserOff } from "@tabler/icons-react";
 import { api, type Board, type BoardRoster, type GroupSummary, type Meta, type RaidRuns, type Rosters, type Seat, type Sheet, type Signup, type SplitPreview } from "../api";
 import { SPLIT_BLURB, SPLIT_LABEL } from "./Raids";
@@ -206,7 +206,11 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
   const [over, setOver] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
-  const canSplit = !locked && (e.split?.runs || 1) > 1;
+  const multi = (e.split?.runs || 1) > 1;
+  const canSplit = !locked;  // Propose works for one roster too; the philosophy picker only matters for splits
+  const [bankSort, setBankSort] = useState<BankSort>(() => { try { return (localStorage.getItem("oibot.bankSort") as BankSort) || "signup"; } catch { return "signup"; } });
+  const pickSort = (v: string) => { setBankSort(v as BankSort); try { localStorage.setItem("oibot.bankSort", v); } catch { /* per-viewer convenience only */ } };
+  const bank = sortBank(board.bank, bankSort);
 
   const layout = () => board.rosters.map((r) => r.groups.map((g) => g.map((s) => s.display_name)));
 
@@ -261,10 +265,10 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
   return (
     <Box mt="lg">
       <Group justify="space-between" wrap="wrap" mb="xs">
-        <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{canSplit && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
+        <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
         {!locked && (
           <Group gap="xs">
-            {canSplit && <Button size="xs" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>Propose splits</Button>}
+            {canSplit && <Button size="xs" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>{multi ? "Propose splits" : "Propose roster"}</Button>}
             <Button size="xs" variant="default" leftSection={<IconSparkles size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
             <Button size="xs" variant="default" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={() => commit(board.rosters.map((r) => r.groups.map(() => [])))}>Clear</Button>
           </Group>
@@ -272,10 +276,13 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
       </Group>
       <Box className={css.board}>
         <Box>
-          <Eyebrow>Bank · {board.bank.length} unplaced</Eyebrow>
+          <Group justify="space-between" gap="xs" wrap="wrap">
+            <Eyebrow>Bank · {board.bank.length} unplaced</Eyebrow>
+            <SegmentedControl size="xs" value={bankSort} onChange={pickSort} data={[{ value: "signup", label: "signup" }, { value: "spec", label: "spec" }, { value: "role", label: "role" }]} />
+          </Group>
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
             {board.bank.length === 0 && <Text size="xs" c="dimmed">everyone who joined is placed</Text>}
-            {board.bank.map((s) => chip(s, null))}
+            {bank.map((s) => chip(s, null))}
           </Stack>
           <Text size="xs" c="dimmed" mt={6}>Drag into a group. Drag a placed name back here to bench them. Dropping on someone swaps.</Text>
         </Box>
@@ -318,7 +325,7 @@ function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
           ))}
         </Stack>
       </Box>
-      {canSplit && <SplitModal e={e} meta={meta} opened={splitOpen} onClose={() => setSplitOpen(false)} onUse={async (layout, strategy) => { await api.post(`/api/run/${e.key}/strategy`, { strategy }).catch(fail); await commit(layout.map(() => []).length ? chunk(layout, board.n_groups) : []); }} />}
+      {canSplit && <SplitModal e={e} meta={meta} multi={multi} opened={splitOpen} onClose={() => setSplitOpen(false)} onUse={async (layout, strategy) => { await api.post(`/api/run/${e.key}/strategy`, { strategy }).catch(fail); await commit(layout.map(() => []).length ? chunk(layout, board.n_groups) : []); }} />}
       <Text size="xs" c="dimmed" mt={6}>Coloured = present in that group · greyed with a red edge = wanted here and the provider sits in another group · plain grey = nobody in the run brings it · teal edge = covered by a raid-wide buff of the same family · totems one per element.</Text>
     </Box>
   );
@@ -367,8 +374,18 @@ function BoardPreview({ meta, board }: { meta: Meta; board: Board }) {
   );
 }
 
-/** Propose splits: pick a philosophy, check one preview in the builder's own layout, seed the board. */
-function SplitModal({ e, meta, opened, onClose, onUse }: { e: Sheet; meta: Meta; opened: boolean; onClose: () => void; onUse: (layout: string[][], strategy: string) => Promise<void> }) {
+type BankSort = "signup" | "spec" | "role";
+const ROLE_ORDER: Record<string, number> = { tank: 0, healer: 1, melee: 2, ranged: 3 };
+/** The bank in the order the officer asked for: who answered first, by class + spec, or by role (tanks, healers, melee, ranged). */
+function sortBank(bank: Seat[], by: BankSort): Seat[] {
+  const rows = [...bank];
+  if (by === "signup") return rows.sort((a, b) => (a.signed_at || "").localeCompare(b.signed_at || "") || a.character.localeCompare(b.character));
+  if (by === "spec") return rows.sort((a, b) => a.cls.localeCompare(b.cls) || a.spec.localeCompare(b.spec) || a.character.localeCompare(b.character));
+  return rows.sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9) || a.cls.localeCompare(b.cls) || a.character.localeCompare(b.character));
+}
+
+/** Propose: for one roster a fresh layout from the solver; for a split, pick a philosophy first. One preview in the builder's own layout, then seed the board. */
+function SplitModal({ e, meta, multi, opened, onClose, onUse }: { e: Sheet; meta: Meta; multi: boolean; opened: boolean; onClose: () => void; onUse: (layout: string[][], strategy: string) => Promise<void> }) {
   const [strategy, setStrategy] = useState(e.split?.strategy || "balanced");
   const [preview, setPreview] = useState<SplitPreview | null>(null);
   const [seen, setSeen] = useState<string[][][]>([]);
@@ -381,25 +398,25 @@ function SplitModal({ e, meta, opened, onClose, onUse }: { e: Sheet; meta: Meta;
   useEffect(() => { if (opened) { setPreview(null); setSeen([]); run(strategy, []); } /* eslint-disable-line react-hooks/exhaustive-deps */ }, [opened]);
   const pick = (st: string) => { setStrategy(st); setSeen([]); run(st, []); };
   return (
-    <Modal opened={opened} onClose={onClose} title={`Propose splits · ${e.when}`} size="xl">
+    <Modal opened={opened} onClose={onClose} title={`${multi ? "Propose splits" : "Propose roster"} · ${e.when}`} size="xl">
       <Stack gap="md">
-        <Group gap="xs" wrap="wrap">
+        {multi && <Group gap="xs" wrap="wrap">
           {(["balanced", "first", "rotation"] as const).map((st) => (
             <Box key={st} onClick={() => !busy && pick(st)} p="sm" style={{ flex: "1 1 180px", cursor: "pointer", border: `1px solid ${strategy === st ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, background: strategy === st ? "rgba(56,178,160,.08)" : undefined, borderRadius: 8 }}>
               <Text size="sm" fw={700}>{SPLIT_LABEL[st]}</Text><Text size="xs" c="dimmed">{SPLIT_BLURB[st]}</Text>
             </Box>
           ))}
           <Tooltip label="needs wishlists and loot tables — not yet"><Box p="sm" style={{ flex: "1 1 180px", border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8, opacity: 0.4 }}><Text size="sm" fw={700}>Loot quality</Text><Text size="xs" c="dimmed">seat people where the drops they need go uncontested</Text></Box></Tooltip>
-        </Group>
+        </Group>}
         <Group justify="space-between" wrap="wrap">
-          <Text size="xs" c="dimmed">{busy ? "solving…" : preview ? <>Preview of <b>{SPLIT_LABEL[preview.strategy]}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : ""}</Text>
-          {preview && !busy && <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={12} />} onClick={() => run(strategy, seen)}>another split like this</Button>}
+          <Text size="xs" c="dimmed">{busy ? "solving…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy]}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : <>Solver's pick · synergy {preview.total} · your own placements on the board are kept</>) : ""}</Text>
+          {preview && !busy && <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={12} />} onClick={() => run(strategy, seen)}>{multi ? "another split like this" : "another layout"}</Button>}
         </Group>
         {preview && !busy && <BoardPreview meta={meta} board={preview.board} />}
         {busy && <Text size="sm" c="dimmed" ta="center" py="xl">The solver is working on it…</Text>}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>
-          <Button disabled={!preview || busy} loading={using} onClick={async () => { if (!preview) return; setUsing(true); try { await onUse(preview.layout, preview.strategy); onClose(); } finally { setUsing(false); } }}>Use this split on the board</Button>
+          <Button disabled={!preview || busy} loading={using} onClick={async () => { if (!preview) return; setUsing(true); try { await onUse(preview.layout, preview.strategy); onClose(); } finally { setUsing(false); } }}>{multi ? "Use this split on the board" : "Use this layout on the board"}</Button>
         </Group>
       </Stack>
     </Modal>

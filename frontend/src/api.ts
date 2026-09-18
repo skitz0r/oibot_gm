@@ -46,7 +46,7 @@ export interface GroupSummary {
   groups: { n: number; members: { name: string; member: string; cls: string; spec: string; role: string }[]; present: Aura[]; missing: Aura[]; picks: string[]; value: number }[];
 }
 export interface Signup { uid: string; display_name: string; character: string; cls: string; spec: string; offspec: string | null; role: string; status: string; label: string; source: string; note: string | null; pin: "in" | "out" | null }
-export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null }
+export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null; signed_at?: string | null }
 export interface BoardRoster { n: number; seated: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary }
 export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[] }
 export interface Confirmation { uid: string | null; display_name: string; character: string; cls: string; spec: string; role: string; roster: number; answer: string | null; asked_at: string | null }
