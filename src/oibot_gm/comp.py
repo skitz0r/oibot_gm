@@ -141,7 +141,7 @@ def groups_summary(reg: Registry, players: list[Player], result: RosterResult | 
     buffs = {b.id: b for b in profile.party_buffs()}
     roles = {r: sum(1 for p in players if p.role == r) for r in ROLES}
     rb = raid_buff_status(profile, players)
-    out = {"roles": roles, "raid": [{"abbr": r["abbr"], "colour": r["colour"], "art": r.get("art"), "name": r["name"], "ok": r["ok"], "n": len(r["providers"]), "detail": r["detail"], "status": r["status"]} for r in rb],
+    out = {"roles": roles, "raid": [{"id": r["id"], "abbr": r["abbr"], "colour": r["colour"], "art": r.get("art"), "name": r["name"], "ok": r["ok"], "n": len(r["providers"]), "detail": r["detail"], "status": r["status"]} for r in rb],
            "groups": [], "unmet": [], "assumptions": profile.buff_assumptions(), "synergy": None}
     if result is None or cov is None:
         return out
@@ -159,9 +159,9 @@ def groups_summary(reg: Registry, players: list[Player], result: RosterResult | 
         out["groups"].append({
             "n": gi + 1,
             "members": [{"name": by[n].character or n, "member": n, "cls": by[n].cls, "spec": by[n].spec, "role": by[n].role} for n in names],
-            "present": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present]
-                       + [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": f"covered by {all_buffs[c].short}" if c in all_buffs else "covered", "covered": True} for b, c in g.covered.items() if g.wanted.get(b, 0) > 0],
-            "missing": [{"abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "in_run": b in in_run} for b in missing],
+            "present": [{"id": b, "abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": ", ".join(g.present[b][:2])} for b in present]
+                       + [{"id": b, "abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "who": f"covered by {all_buffs[c].short}" if c in all_buffs else "covered", "covered": True} for b, c in g.covered.items() if g.wanted.get(b, 0) > 0],
+            "missing": [{"id": b, "abbr": buffs[b].abbr, "colour": buffs[b].colour, "art": buffs[b].art, "name": buffs[b].short, "in_run": b in in_run} for b in missing],
             "picks": [f"{slot.split('_')[1].title()} {buffs[bid].abbr}" for slot, bid in sorted(g.picks.items()) if not slot.endswith("_cd") and g.wanted.get(bid, 0) > 0],
             "value": result.group_reports[gi].value if gi < len(result.group_reports) else 0,
         })

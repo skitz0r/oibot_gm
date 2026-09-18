@@ -37,8 +37,7 @@ export function GroupsBlock({ meta, sm, raidOnly }: { meta: Meta; sm: GroupSumma
               <Group justify="space-between" mb={4}><Text size="sm" fw={700}>Group {g.n}</Text><Text size="xs" c="green">+{g.value}</Text></Group>
               {g.members.map((m) => (
                 <Group key={m.member} gap={6} wrap="nowrap" style={{ lineHeight: 1.7 }}>
-                  <GameIcon meta={meta} kind="role" id={m.role} size={18} title={m.role} />
-                  <GameIcon meta={meta} kind="spec" id={`${m.cls}:${m.spec}`} size={18} title={`${m.cls} ${m.spec}`} />
+                  <GameIcon meta={meta} kind="spec" id={`${m.cls}:${m.spec}`} size={18} title={`${m.cls} ${m.spec} · ${m.role}`} />
                   <Text size="sm" c={CLASS_COLOURS[m.cls]} truncate>{m.name}</Text>
                   <Text size="xs" c="dimmed" style={{ flex: "none" }}>{m.spec}</Text>
                 </Group>

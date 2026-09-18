@@ -79,6 +79,9 @@ class RaidEvent(BaseModel):
     pins: dict[str, str] = Field(default_factory=dict)  # discord_id -> "in" | "out": officer decisions the solver must honour
     layout: Optional[list[list[str]]] = None  # the officers' board before lock: groups (across rosters) of signup display names
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
+    cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
+    cards_channel_id: Optional[int] = None
+    updates_thread_id: Optional[int] = None  # thread under the officer card with fill / confirmation updates
     rosters: list[RosterResult] = Field(default_factory=list)  # after lock: one or more rosters for this slot (roster = rosters[0])
     locked_at: Optional[str] = None
     confirm_by: Optional[str] = None  # ISO: unanswered confirmations expire here

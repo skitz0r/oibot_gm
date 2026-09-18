@@ -17,6 +17,12 @@ export function RostersPage({ meta }: { meta: Meta }) {
   const [busy, setBusy] = useState<string | null>(null);
   const load = () => api.get<Rosters>("/api/rosters").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  // deep link from Discord cards: /app/rosters#run-<key> scrolls to that run once it has rendered
+  useEffect(() => {
+    if (!data || !window.location.hash.startsWith("#run-")) return;
+    const t = setTimeout(() => document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "start" }), 150);
+    return () => clearTimeout(t);
+  }, [data]);
 
   async function act(key: string, path: string, payload?: unknown) {
     setBusy(key);
@@ -45,7 +51,8 @@ type OnBoard = (key: string, board: Board, needs?: Sheet["needs"]) => void;
 function RaidCard({ r, meta, busy, onAct, onBoard }: { r: RaidRuns; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard }) {
   const [when, setWhen] = useState("");
   const metaLine = [r.slots.length ? `slots ${r.slots.join(", ")}` : "no slots set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
-  const first = r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
+  const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
+  const first = r.locked.some((e) => e.key === target) ? "locked" : r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
   return (
     <Card>
       <RaidHeader id={r.id} name={r.name} meta={metaLine} right={
@@ -112,7 +119,7 @@ function SheetCard({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; bu
   );
 
   return (
-    <Box p="md" style={{ border: `1px solid ${locked ? "var(--mantine-color-yellow-5)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8 }}>
+    <Box id={`run-${e.key}`} p="md" style={{ border: `1px solid ${locked ? "var(--mantine-color-yellow-5)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, scrollMarginTop: 16 }}>
       <Group justify="space-between" wrap="wrap" align="flex-start">
         <Box>
           <Group gap="sm"><Text size="lg" fw={700}>{e.when}</Text>{locked && <Badge variant="light" color="yellow">locked</Badge>}</Group>
@@ -165,8 +172,7 @@ function SeatLine({ meta, s, right, mark }: { meta: Meta; s: Seat | Signup; righ
   return (
     <Group gap={6} wrap="nowrap" style={{ lineHeight: 1.8, minWidth: 0 }}>
       {mark !== undefined && <Tooltip label={a ? a.label : "waiting for confirmation"}><Text span size="xs" style={{ width: 14, textAlign: "center", color: a ? a.colour : "var(--mantine-color-slate-3)" }}>{a ? a.mark : "⏳"}</Text></Tooltip>}
-      <GameIcon meta={meta} kind="role" id={s.role} size={16} title={s.role} />
-      <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={16} title={`${s.cls} ${s.spec}`} />
+      <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={18} title={`${s.cls} ${s.spec} · ${s.role}`} />
       <Text size="sm" fw={600} c={CLASS_COLOURS[s.cls]} truncate>{s.character}</Text>
       <Text size="xs" c="dimmed" truncate>{s.display_name}</Text>
       {right}

@@ -112,8 +112,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    the bot DMs the next best people: joiners the solver benched and *Bench* answers first → mains not on
    the sheet → offspec switches → alts of the needed role. It asks the shortfall + 1 at a time, never more
    than 3 outstanding, and never asks someone who is In on another raid within 4 hours, absent, or opted
-   out of DMs. A yes goes straight into the freed seat. Officers can run or preview a batch with
-   `/raid fill` or *Ask the bench* on the Rosters page.
+   out of DMs. A yes goes straight into the freed seat. Officers can run a batch by hand: **Fill seats** on
+   the health or lock card in the roster channel shows exactly what is short, who is still being waited on
+   and who would be DMed now, then *Send N asks* or *Cancel*; `/raid fill` and the Rosters page do the same.
+   Every ask, answer, freed seat, confirmation and expiry is logged as one line in the run's **updates
+   thread** under its card, so officers can follow a run without reading DMs.
 7. **Raid** — `/raid loot` opens the loot council thread (when loot tables exist for the game version).
 8. **Close** — 6 h after start the sheet closes.
 

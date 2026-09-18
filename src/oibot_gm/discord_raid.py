@@ -120,7 +120,7 @@ def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui
             for gi, g in enumerate(r.groups):
                 members = [next((p for p in r.selected if p.signup_name == n), None) for n in g]
                 if any(members):
-                    lines.append(f"**Group {gi + 1}** — " + " · ".join(f"{mark.get(conf.get(p.signup_name), '')}{ico('role', p.role)}{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for p in members if p))
+                    lines.append(f"**Group {gi + 1}** — " + " · ".join(f"{mark.get(conf.get(p.signup_name), '')}{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for p in members if p))
             if lines:
                 parts.append(ui.TextDisplay((f"### Roster {i + 1}\n" if len(ev.all_rosters) > 1 else "") + "\n".join(lines)))
         bench = ev.all_rosters[0].benched
@@ -137,7 +137,7 @@ def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui
         for sg in ins:
             by_cls.setdefault(sg.cls, []).append(sg)
         if by_cls:
-            lines = [f"{ico('class', cls)} **{cls}** {len(ss)} — " + " · ".join(f"{ico('role', sg.role)}{ico('spec', f'{sg.cls}:{sg.spec}')} {sg.character}" for sg in ss) for cls, ss in sorted(by_cls.items(), key=lambda kv: -len(kv[1]))]
+            lines = [f"{ico('class', cls)} **{cls}** {len(ss)} — " + " · ".join(f"{ico('spec', f'{sg.cls}:{sg.spec}')} {sg.character}" for sg in ss) for cls, ss in sorted(by_cls.items(), key=lambda kv: -len(kv[1]))]
             parts.append(ui.TextDisplay("\n".join(lines)[:3900]))
         else:
             parts.append(ui.TextDisplay("-# Nobody has joined yet."))
@@ -157,6 +157,267 @@ def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0x8C97A8 if test else TEAL))
     return view
+
+
+def board_url(ev: rc.RaidEvent) -> str | None:
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    return f"{web}/app/rosters#run-{ev.key}" if web.startswith("http") else None
+
+
+def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
+    """Section with the raid emblem: title, run time with countdown, then `lines`."""
+    ui = discord.ui
+    unix = int(ev.start.timestamp())
+    text = f"## {title}\n<t:{unix}:F> · <t:{unix}:R>" + ("\n" + "\n".join(lines) if lines else "")
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    if web.startswith("https") and ev.instance:
+        return ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=f"{web}/img/raid/{ev.instance}.png"))
+    return ui.TextDisplay(text)
+
+
+def _role_counts(ico, players) -> str:
+    counts = {r: sum(1 for p in players if p.role == r) for r in ("tank", "healer", "melee", "ranged")}
+    return "   ".join(f"{ico('role', r)} {n}" for r, n in counts.items())
+
+
+def _group_summaries(reg: Registry, r) -> list[dict]:
+    """Per-group present/missing auras for a locked roster (same coverage code as the site)."""
+    from . import comp as comp_mod
+    from .roster import coverage as cov_mod
+
+    try:
+        cov = cov_mod.compute(reg.profile, r.selected, r)
+        return comp_mod.groups_summary(reg, r.selected, r, cov)["groups"]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _aura_line(ico, g: dict | None) -> str:
+    if not g:
+        return ""
+    present = " ".join(ico("buff", a["id"]) for a in g["present"] if ico("buff", a["id"]))
+    missing = " ".join(ico("buff", a["id"]) for a in g["missing"][:6] if ico("buff", a["id"]))
+    return (present + (f"  ⚠ {missing}" if missing else "")).strip()
+
+
+def _group_block(reg: Registry, ico, r, gi: int, marks: dict | None = None, summaries: list[dict] | None = None, title: str | None = None) -> str:
+    """One group as the web board shows it: heading, one member per line (spec icon + name), its auras under it."""
+    members = [next((p for p in r.selected if p.signup_name == n), None) for n in r.groups[gi]]
+    lines = [f"**{title or f'Group {gi + 1}'}**"]
+    for p in members:
+        if p:
+            mark = (marks or {}).get(p.signup_name)
+            lines.append(f"{(mark + ' ') if mark else ''}{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}")
+    aura = _aura_line(ico, summaries[gi] if summaries and gi < len(summaries) else None)
+    if aura:
+        lines.append("-# " + aura)
+    return "\n".join(lines)
+
+
+MARK = {"yes": "✅", "no": "❌", "expired": "⌛", None: "⏳"}
+
+
+def run_actions_row(ev: rc.RaidEvent, locked: bool):
+    ui = discord.ui
+    items = []
+    url = board_url(ev)
+    if url:
+        items.append(ui.Button(label="Open the board", style=discord.ButtonStyle.link, url=url))
+    items.append(RunButton(ev.key, "fill"))
+    items.append(RunButton(ev.key, "cancel" if locked else "lock"))
+    return ui.ActionRow(*items)
+
+
+def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> discord.ui.LayoutView:
+    """The health check as a card: joined vs size, role have/need with the short role marked, who could cover,
+    nobody-brings icons, no-answer count, double-booked; officer buttons."""
+    ui = discord.ui
+    h = rc.health_data(reg, ev, team)
+    n, size, _t, subs = h["headcount"]
+    players = rc.players_for(reg, ev)
+    runs = rc.how_many_rosters(reg, players, size, reg.role_bounds(ev.instance, size))
+    roles = []
+    for r in h["roles"]:
+        have, need = r["have"], r["need"]
+        roles.append(f"{ico('role', r['role'])} " + (f"**{have}**/{need * max(1, runs)}" if need and have < need * max(1, runs) else f"{have}" + (f"/{need * max(1, runs)}" if need else "")))
+    head = _header(reg, ev, f"Roster health · {reg.raid_def(ev.instance).get('name', ev.instance)}", [f"**{n}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + (f" · {subs} bench" if subs else "") + "   " + "   ".join(roles)])
+    body = []
+    short = [f"{r['need'] * max(1, runs) - r['have']} {r['role']}" for r in h["roles"] if r["need"] and r["have"] < r["need"] * max(1, runs)]
+    if short:
+        hints = [r["hint"] for r in h["roles"] if r["need"] and r["have"] < r["need"] * max(1, runs) and r["hint"]]
+        body.append(f"**Short** {', '.join(short)}" + (f" · -# {' · '.join(hints)}" if hints else ""))
+    missing = [b for b in h["buffs"] if not b["providers"]]
+    if missing:
+        body.append("**Nobody brings** " + " ".join(ico("buff", b["id"]) for b in missing if ico("buff", b["id"])))
+    if h["unresponsive"]:
+        body.append(f"**No answer** {len(h['unresponsive'])}" + (" · nudged" if ev.nudged else ""))
+    busy = rc.conflicts(rs, ev) if rs is not None else {}
+    double = [reg.members[u].display_name for u in busy if u in reg.members and str(u) in ev.signups and ev.signups[str(u)].status == "in"]
+    if double:
+        body.append("**Double-booked** " + ", ".join(double))
+    _soft, hard, confirm = run_times(reg, ev, team)
+    parts = [head, ui.Separator()] + ([ui.TextDisplay("\n".join(body)), ui.Separator()] if body else [])
+    parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R> · ✓ confirm by <t:{int(confirm.timestamp())}:t>"))
+    parts.append(run_actions_row(ev, locked=False))
+    worst = "red" if short else "amber" if missing or h["unresponsive"] else "green"
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour={"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]))
+    return view
+
+
+def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> discord.ui.LayoutView:
+    """One locked roster as a card: groups with confirmation marks and auras, raid-wide row, bench, waiting-on, buttons."""
+    ui = discord.ui
+    r = ev.all_rosters[i]
+    conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev) if c["roster"] == i + 1}
+    marks = {n: MARK.get(a) for n, a in conf.items()}
+    tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
+    rd = reg.raid_def(ev.instance)
+    head = _header(reg, ev, f"🔒 {rd.get('name', ev.instance)}" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else ""),
+                   [f"**{len(r.selected)}** seated" + (f" · synergy {r.synergy_value}" if r.synergy_value else "") + "   " + _role_counts(ico, r.selected), tally])
+    summaries = _group_summaries(reg, r)
+    parts = [head, ui.Separator()]
+    for gi in range(len(r.groups)):
+        if r.groups[gi]:
+            parts.append(ui.TextDisplay(_group_block(reg, ico, r, gi, marks, summaries)))
+    from . import comp as comp_mod
+
+    rb = comp_mod.raid_buff_status(reg.profile, r.selected)
+    raidwide = " ".join(ico("buff", b["id"]) for b in rb if b["providers"] and ico("buff", b["id"]))
+    raidmiss = " ".join(ico("buff", b["id"]) for b in rb if not b["providers"] and ico("buff", b["id"]))
+    tail = [f"**Raid-wide** {raidwide}" + (f"  ⚠ {raidmiss}" if raidmiss else "")]
+    if i == 0 and r.benched:
+        tail.append("**Bench** " + " · ".join(p.signup_name for p in r.benched))
+    pending = [n for n, a in conf.items() if a is None]
+    if pending:
+        tail.append("**Waiting on** " + ", ".join(pending[:15]))
+    _soft, _hard, confirm = run_times(reg, ev, team)
+    tail.append(f"-# ✓ confirm by <t:{int(confirm.timestamp())}:t> · unanswered then counts as out")
+    parts += [ui.Separator(), ui.TextDisplay("\n".join(tail)), run_actions_row(ev, locked=True)]
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=TEAL))
+    return view
+
+
+def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int, gi: int, uid: int) -> discord.ui.LayoutView:
+    """Confirmation DM: your seat, the group you'd be in (the board's layout), the deadline, Confirm / Can't make it."""
+    ui = discord.ui
+    r = ev.all_rosters[i]
+    rd = reg.raid_def(ev.instance)
+    head = _header(reg, ev, f"You're seated · {rd.get('name', ev.instance)}", [f"{ico('spec', f'{sg.cls}:{sg.spec}')} **{sg.character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"])
+    _s, _h, confirm = run_times(reg, ev, team)
+    parts = [head, ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"Group {gi + 1}")), ui.Separator(),
+             ui.TextDisplay(f"-# Confirm keeps the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:t> counts as out."),
+             ui.ActionRow(PlaceButton(ev.team, uid, "yes"), PlaceButton(ev.team, uid, "no"))]
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=TEAL))
+    return view
+
+
+def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discord.ui.LayoutView:
+    """Fill DM: what opened, the seat offered (character + spec), the group they'd join, Yes / Can't."""
+    ui = discord.ui
+    rd = reg.raid_def(ev.instance)
+    what = {"sub": "you're on the bench", "pool": "you haven't answered the sheet", "other_roster": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec", "alt": f"you could bring your alt"}[ask.kind]
+    c = reg.find(ask.character)
+    cls = c[1].cls if c else ""
+    head = _header(reg, ev, f"A seat opened · {rd.get('name', ev.instance)}", [f"{ask.reason} — {what}", f"Come as {ico('spec', f'{cls}:{ask.spec}') if cls else ''} **{ask.character}** ({ask.spec})"])
+    parts = [head]
+    if ev.all_rosters:
+        for i, r in enumerate(ev.all_rosters):
+            gi = next((k for k, g in enumerate(r.groups) if len(g) < int(reg.profile.comp_rules["group_size"])), None)
+            if gi is not None:
+                parts += [ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"You'd join Group {gi + 1}" + (f" of Roster {i + 1}" if len(ev.all_rosters) > 1 else "")))]
+                break
+    parts += [ui.Separator(), ui.TextDisplay("-# Yes puts you straight in the seat. No answer and the next person is asked."), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=0xE0A448))
+    return view
+
+
+class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel)"):
+    """Officer buttons on the health and lock cards: Fill seats (with a preview + confirm), Lock now, Cancel run."""
+    LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger)}
+
+    def __init__(self, key: str, action: str):
+        label, style = self.LABELS[action]
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"runact:{key}:{action}"))
+        self.key, self.action = key, action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["key"], match["action"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        reg = bot.registries.for_interaction(interaction)
+        if not reg or not await bot.is_officer_anywhere(reg, interaction.user.id):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        rs = bot.raids.store(reg)
+        ev = rs.events.get(self.key)
+        if not ev or ev.state in ("done", "cancelled"):
+            await interaction.response.send_message("That run is closed.", ephemeral=True)
+            return
+        team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
+        by = interaction.user.display_name
+        if self.action == "fill":
+            nd = rc.needs(reg, ev, team)
+            if not nd["headcount"] and not nd["roles"]:
+                await interaction.response.send_message("Nothing to fill — every seat is taken.", ephemeral=True)
+                return
+            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team)
+            outstanding = [a for a in ev.fill_asks if a.open]
+            gaps = (f"{nd['headcount']} seat{'s' if nd['headcount'] != 1 else ''}" if nd["headcount"] else "") + "".join(f", {n} {r}" for r, n in nd["roles"].items())
+            lines = [f"**Short:** {gaps.strip(', ')}"]
+            if outstanding:
+                lines.append(f"**Already asked, waiting:** {', '.join(a.display_name for a in outstanding)}")
+            if batch:
+                lines.append("**Will DM now:** " + "; ".join(f"{a.display_name} — {a.kind.replace('_', ' ')}, as {a.character} ({a.role})" for a in batch))
+                lines.append("-# Each gets Yes / Can't this time. A yes takes the seat at once; a no asks the next person. Never more than 3 questions out at a time. Answers post in this run's thread.")
+            else:
+                lines.append("**Nobody to ask right now** — either the 3 outstanding questions already cover it, or everyone eligible has been asked.")
+            view = discord.ui.View(timeout=120)
+            go = discord.ui.Button(label=f"Send {len(batch)} ask{'s' if len(batch) != 1 else ''}", style=discord.ButtonStyle.success, disabled=not batch)
+            no = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+
+            async def send(i: discord.Interaction):
+                await i.response.edit_message(content="Sending…", view=None)
+                sent, nd2 = await bot.run_fill(reg, rs, ev, team, by=by)
+                await i.edit_original_response(content=("Asked " + ", ".join(a.display_name for a in sent)) if sent else "Nobody could be asked.")
+
+            async def cancel(i: discord.Interaction):
+                await i.response.edit_message(content="Cancelled — nothing sent.", view=None)
+
+            go.callback, no.callback = send, cancel
+            view.add_item(go); view.add_item(no)
+            await interaction.response.send_message("\n".join(lines), view=view, ephemeral=True)
+            return
+        if self.action == "lock":
+            if ev.state != "open":
+                await interaction.response.send_message("Already locked.", ephemeral=True)
+                return
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            line = await bot.lock_run(reg, rs, ev, by=by)
+            await interaction.followup.send(line, ephemeral=True)
+            await bot.ops.emit(reg.config, "info", line)
+            return
+        if self.action == "cancel":
+            view = discord.ui.View(timeout=60)
+            yes = discord.ui.Button(label="Cancel the run", style=discord.ButtonStyle.danger)
+
+            async def do(i: discord.Interaction):
+                ev.state = "cancelled"
+                ev.log.append(f"cancelled by {by}")
+                rs.save(ev, "cancelled")
+                await bot.refresh_sheet(reg, ev)
+                await bot.post_run_update(reg, ev, f"🛑 run cancelled by {by}")
+                await i.response.edit_message(content=f"Cancelled {ev.key}.", view=None)
+                await bot.ops.emit(reg.config, "warn", f"{by} cancelled {ev.key}")
+
+            yes.callback = do
+            view.add_item(yes)
+            await interaction.response.send_message(f"Cancel **{team.get('name', ev.team)}**? Seated members are not told automatically.", view=view, ephemeral=True)
 
 
 def health_card(reg: Registry, ev: rc.RaidEvent, team: dict, ico, rs=None) -> tuple[discord.Embed, discord.File]:
@@ -335,26 +596,68 @@ class RaidMixin:
         m = reg.members.get(uid) if reg else None
         return bool(m and getattr(m, "test", False) and await self.is_officer_anywhere(reg, interaction.user.id))
 
-    async def send_member_dm(self, reg, m, text: str, view=None) -> bool:
-        """DM a member — or, for a test member, post the same message (and buttons) in the roster channel so an
-        officer can answer on their behalf. Returns True when something was delivered."""
+    async def send_member_dm(self, reg, m, text: str | None = None, view=None) -> bool:
+        """DM a member — text + buttons, or a layout card (`view` a LayoutView, `text` None). For a test member the same
+        goes to whoever is running the test, with the puppet's name in front. Returns True when delivered."""
+        target, prefix = m.discord_id, None
         if getattr(m, "test", False):
-            # a puppet's DM goes to whoever is running the test (else the owner), with the puppet's name on it
             tester = next((t.get("test_by") for t in reg.config.rosters if t.get("test") and t.get("test_by")), None) or reg.config.owner_discord_id
             if not tester:
                 return False
-            try:
-                user = await self.fetch_user(int(tester))
-                await user.send(f"🧪 **{m.display_name}** would get:\n{text}", view=view)
-                return True
-            except Exception:  # noqa: BLE001
-                return False
+            target, prefix = int(tester), f"🧪 **{m.display_name}** would get:"
         try:
-            user = await self.fetch_user(m.discord_id)
-            await user.send(text, view=view)
+            user = await self.fetch_user(target)
+            if isinstance(view, discord.ui.LayoutView):
+                if prefix:
+                    await user.send(prefix)
+                await user.send(view=view)
+            else:
+                await user.send((prefix + "\n" + (text or "")) if prefix else (text or ""), view=view)
             return True
         except Exception:  # noqa: BLE001
             return False
+
+    # ---- officer cards + the run's updates thread
+    async def post_run_update(self, reg, ev, text: str) -> None:
+        """One line in the run's thread (under its health or lock card; created on first use); falls back to the officer channel."""
+        ch = self.officer_channel(reg, ev)
+        thread = self.get_channel(ev.updates_thread_id) if ev.updates_thread_id else None
+        if thread is None and ev.cards and ch:
+            mid = ev.cards.get("lock:0") or ev.cards.get("health")
+            try:
+                msg = await ch.fetch_message(mid)
+                thread = await msg.create_thread(name=f"{(reg.config.team(ev.team) or {}).get('name', ev.team)} · updates"[:100])
+                ev.updates_thread_id = thread.id
+                rs = self.raids.store(reg)
+                rs.save(ev, "updates thread")
+            except Exception:  # noqa: BLE001
+                thread = None
+        try:
+            await (thread or ch).send(text, allowed_mentions=discord.AllowedMentions.none())
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def refresh_cards(self, reg, ev) -> None:
+        """Re-render the run's officer cards in place after anything that changes seats or confirmations."""
+        if not ev.cards or not ev.cards_channel_id:
+            return
+        ch = self.get_channel(ev.cards_channel_id)
+        if not ch:
+            return
+        team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
+        rs = self.raids.store(reg)
+        for key, mid in list(ev.cards.items()):
+            try:
+                msg = await ch.fetch_message(mid)
+                if key == "health":
+                    if ev.state == "open":
+                        await msg.edit(view=health_layout(reg, rs, ev, team, self.ico))
+                elif key.startswith("lock:"):
+                    i = int(key[5:])
+                    if i < len(ev.all_rosters):
+                        await msg.edit(view=lock_layout(reg, ev, team, self.ico, i))
+            except Exception as e:  # noqa: BLE001
+                print(f"card refresh failed ({key}): {e}")
 
     async def apply_signup(self, interaction: discord.Interaction, reg, rs, ev, m, character, status):
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
@@ -410,8 +713,11 @@ class RaidMixin:
     async def post_health(self, reg, rs, ev, channel, nudge: bool) -> None:
         team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
         if channel is not None:
-            embed, file = await asyncio.to_thread(health_card, reg, ev, team, self.ico, rs)
-            await channel.send(embed=embed, file=file)
+            try:
+                msg = await channel.send(view=health_layout(reg, rs, ev, team, self.ico))
+                ev.cards["health"], ev.cards_channel_id = msg.id, channel.id
+            except Exception as e:  # noqa: BLE001
+                print(f"health card failed: {e}")
         if nudge and rc.team_setting(team, "reminders") != "none":
             targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
             unix = int(ev.start.timestamp())
@@ -444,9 +750,8 @@ class RaidMixin:
                 "offspec": f"would you play **{ask.spec}** on {ask.character} instead of your main spec?",
                 "alt": f"could you bring your alt **{ask.character}** ({ask.spec}) instead?",
             }[ask.kind]
-            text = f"**{name}** <t:{unix}:F> (<t:{unix}:R>) is {ask.reason} — {what}" + (f"\nSheet: <#{ev.channel_id}>" if ev.channel_id else "")
             m = reg.members.get(ask.discord_id)
-            if m and await self.send_member_dm(reg, m, text, fill_view(ev.key, ask.discord_id)):
+            if m and await self.send_member_dm(reg, m, None, fill_layout(reg, ev, team, self.ico, ask)):
                 ev.fill_asks.append(ask)
                 sent.append(ask)
             else:
@@ -468,8 +773,8 @@ class RaidMixin:
         officer_ch = self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else (self.get_channel(ev.channel_id) if ev.channel_id else None)
         nd = rc.needs(reg, ev, team)
         still = (f"still short {nd['headcount']}" if nd["headcount"] else "") + ("".join(f", {n} {r}" for r, n in nd["roles"].items()))
-        if officer_ch:
-            await officer_ch.send(f"🧩 {ev.key}: {line}" + (f" · {still.strip(', ')}" if still else " · **gaps filled**"))
+        await self.post_run_update(reg, ev, f"🧩 {line}" + (f" · {still.strip(', ')}" if still else " · **gaps filled**"))
+        await self.refresh_cards(reg, ev)
         await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
         if ask.answer == "yes" and ev.state != "open":
             m = reg.members.get(ask.discord_id)
@@ -548,16 +853,12 @@ class RaidMixin:
         ch = self.officer_channel(reg, ev)
         if ch:
             for i, r in enumerate(ev.all_rosters):
-                png = await asyncio.to_thread(render.roster_png, reg.profile, players, r, f"{team.get('name', ev.team)}" + (f" · roster {i + 1}" if len(ev.all_rosters) > 1 else ""), f"{len(r.selected)} seated · synergy {r.synergy_value}")
-                e = discord.Embed(title=f"🔒 Locked · {team.get('name', ev.team)}" + (f" · roster {i + 1}" if len(ev.all_rosters) > 1 else ""), colour=TEAL,
-                                  description=f"{len(r.selected)} seated · " + " · ".join(f"{self.ico('role', k)} {v}" for k, v in r.role_counts.items()) + f" · synergy **{r.synergy_value}**")
-                e.set_image(url="attachment://roster.png")
-                if i == 0 and r.benched:
-                    e.add_field(name="Bench", value=", ".join(f"{self.ico('class', p.cls)} {p.character or p.signup_name}" for p in r.benched) or "nobody", inline=False)
-                if r.advisories:
-                    e.add_field(name="Advisories", value="\n".join(a[:120] for a in r.advisories[:6])[:1000], inline=False)
-                e.set_footer(text=f"confirmations by DM · unanswered expire <t:{int(confirm.timestamp())}:R> · adjust on {os.environ.get('OIBOT_WEB_URL', 'the website')}/app/rosters")
-                await ch.send(embed=e, file=discord.File(BytesIO(png), filename="roster.png"))
+                try:
+                    msg = await ch.send(view=lock_layout(reg, ev, team, self.ico, i))
+                    ev.cards[f"lock:{i}"], ev.cards_channel_id = msg.id, ch.id
+                except Exception as e:  # noqa: BLE001
+                    print(f"lock card failed: {e}")
+            rs.save(ev, "lock cards")
         sent = await self.send_confirmations(reg, rs, ev, team, by)
         sig = self.get_channel(ev.channel_id) if ev.channel_id else None
         if sig and sig is not ch:
@@ -578,12 +879,8 @@ class RaidMixin:
             ask["answer"], ask["answered_at"] = "yes", rc.now()
             reg.save(m, f"{m.display_name} auto-confirmed {ev.team} (DMs off)")
             return False
-        unix = int(ev.start.timestamp())
-        confirm = datetime.fromisoformat(ev.confirm_by) if ev.confirm_by else ev.start
-        rd = reg.raid_def(ev.instance)
-        text = (f"**{reg.config.name} · {rd.get('name', ev.instance)}** <t:{unix}:F> (<t:{unix}:R>): you're seated" + (f" in roster {roster_i + 1}" if len(ev.all_rosters) > 1 else "") +
-                f", group {group_i + 1}, as **{sg.character}** ({sg.spec}, {sg.role}).\nConfirm to keep the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:f> counts as out.")
-        return await self.send_member_dm(reg, m, text, place_view(ev.team, m.discord_id))
+        team = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
+        return await self.send_member_dm(reg, m, None, confirm_layout(reg, ev, team, self.ico, sg, roster_i, group_i, m.discord_id))
 
     async def send_confirmations(self, reg, rs, ev, team, by: str) -> int:
         sent = 0
@@ -607,44 +904,43 @@ class RaidMixin:
             m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
             if m and reg.on_roster(m, ev.team):
                 reg.roster_remove(m.discord_id, ev.team, by)
-        ch = self.officer_channel(reg, ev)
-        if ch and (added or removed):
-            await ch.send(f"✏️ {ev.key} board by {by}: " + (f"in {', '.join(s.display_name for s in added)} (asked to confirm)" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
+        if added or removed:
+            await self.post_run_update(reg, ev, f"✏️ board by {by}: " + (f"in {', '.join(s.display_name for s in added)} (asked to confirm)" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
         await self.refresh_sheet(reg, ev)
+        await self.refresh_cards(reg, ev)
         if removed and rc.team_setting(team, "autofill"):
             sent, nd = await self.run_fill(reg, rs, ev, team, by=by)
-            if sent and ch:
-                await ch.send(f"🧩 {ev.key}: asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+            if sent:
+                await self.post_run_update(reg, ev, "🧩 asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
         await self.ops.emit(reg.config, "info", f"[web] {by} edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""))
 
     async def after_placement_answer(self, reg, uid: int, roster: str, yes: bool, line: str) -> None:
         cfg = reg.config
         rs = self.raids.store(reg)
         ev = next((e for e in rs.live() if e.team == roster), None)
-        ch = self.officer_channel(reg, ev)
         m = reg.members.get(uid)
         if ev and m and not yes:
             team = cfg.team(ev.team) or {"key": ev.team, "size": 20}
             await self.drop_seated(reg, rs, ev, team, m, "declined", None, announce=False)
-        if ch:
-            await ch.send(f"{'✅' if yes else '↩️'} {line}")
-        await self.ops.emit(cfg, "info" if yes else "warn", line)
         if ev:
+            await self.post_run_update(reg, ev, f"{'✅' if yes else '↩️'} {line}")
             await self.refresh_sheet(reg, ev)
+            await self.refresh_cards(reg, ev)
+        await self.ops.emit(cfg, "info" if yes else "warn", line)
 
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True) -> None:
         """A seated member is out after lock: free the seat, post it, ask the bench to fill."""
         rc.free_seat(reg, rs, ev, m.display_name, why)
         if reg.on_roster(m, ev.team):
             reg.roster_remove(m.discord_id, ev.team, why)
-        ch = self.officer_channel(reg, ev)
-        if ch and announce:
-            await ch.send(f"↩️ {m.display_name} is out of {ev.key} ({why}{f': {note}' if note else ''}) — seat freed")
+        if announce:
+            await self.post_run_update(reg, ev, f"↩️ {m.display_name} is out ({why}{f': {note}' if note else ''}) — seat freed")
         await self.refresh_sheet(reg, ev)
+        await self.refresh_cards(reg, ev)
         if rc.team_setting(team, "autofill"):
             sent, nd = await self.run_fill(reg, rs, ev, team, by=why)
-            if sent and ch:
-                await ch.send(f"🧩 {ev.key}: replacement for {m.display_name} — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+            if sent:
+                await self.post_run_update(reg, ev, f"🧩 replacement for {m.display_name} — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
 
     # ---- absences ripple into sheets
     async def after_absence(self, reg, m, start: str, end: str, by: str) -> list[str]:
@@ -723,19 +1019,18 @@ class RaidMixin:
                 if ev.state != "open" and ev.all_rosters:
                     gone = rc.expire_confirmations(reg, rs, ev)
                     if gone:
-                        if officer_ch:
-                            await officer_ch.send(f"⌛ {ev.key}: no confirmation from {', '.join(gone)} — seats freed")
+                        await self.post_run_update(reg, ev, f"⌛ no confirmation from {', '.join(gone)} — seats freed")
                         await self.refresh_sheet(reg, ev)
+                        await self.refresh_cards(reg, ev)
                         await self.ops.emit(cfg, "warn", f"{ev.key}: confirmations expired for {len(gone)}")
                 if rc.team_setting(team, "autofill") and ev.fill_state in ("idle", "asking") and (ev.health_posted or ev.state != "open"):
                     sent, nd = await self.run_fill(reg, rs, ev, team)
-                    if sent and officer_ch:
-                        await officer_ch.send(f"🧩 {ev.key}: short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()) + " — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+                    if sent:
+                        await self.post_run_update(reg, ev, f"🧩 short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()) + " — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
                     elif ev.fill_state == "exhausted" and "fill exhausted" not in ev.log:
                         ev.log.append("fill exhausted")
                         rs.save(ev, "fill exhausted")
-                        if officer_ch:
-                            await officer_ch.send(f"🧩 {ev.key}: nobody left to ask — short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()))
+                        await self.post_run_update(reg, ev, f"🧩 nobody left to ask — short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()))
                 if ev.state in ("locked", "proposed", "accepted") and now >= ev.start + timedelta(hours=6):
                     ev.state = "done"
                     rs.save(ev, "done")
