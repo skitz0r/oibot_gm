@@ -534,22 +534,34 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     # ---- live updates: one event stream per open page; a run save anywhere (site, Discord, scheduler) wakes them
     subscribers: set[asyncio.Queue] = set()
 
-    def run_saved(guild_key: str, run_key: str) -> None:
+    def publish(topic: str) -> None:
+        """topic: `run:<key>` | `member` | `config` | `ops`. Safe from worker threads."""
         def fan_out():
             for q in list(subscribers):
                 if q.qsize() < 50:
-                    q.put_nowait(run_key)
+                    q.put_nowait(topic)
         try:
-            bot.loop.call_soon_threadsafe(fan_out)  # saves also happen in worker threads
+            bot.loop.call_soon_threadsafe(fan_out)
         except Exception:  # noqa: BLE001 — loop not running yet / shutting down
             pass
 
-    if run_saved.__name__ not in {getattr(f, "__name__", "") for f in rc.RUN_LISTENERS}:
-        rc.RUN_LISTENERS.append(run_saved)
+    def run_saved(guild_key: str, run_key: str) -> None:
+        publish(f"run:{run_key}")
+
+    def reg_saved(reg, kind: str, lines) -> None:
+        publish(kind)
+
+    def ops_line() -> None:
+        publish("ops")
+
+    from .. import ops as ops_mod, registry as registry_mod
+
+    for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line)):
+        hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
 
     @app.get("/api/events")
     async def events(request: Request):
-        """Server-sent events: `data: <run key>` whenever a run changes. Pages reload their data on it."""
+        """Server-sent events: `data: run:<key> | member | config | ops` whenever that changes. Pages reload on the topics they show."""
         from fastapi.responses import StreamingResponse
 
         await who(request)

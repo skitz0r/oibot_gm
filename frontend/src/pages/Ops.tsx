@@ -4,6 +4,7 @@ import { IconRefresh } from "@tabler/icons-react";
 import { api, type Ops as OpsData } from "../api";
 import { CardHeader, Eyebrow, PageTitle, fail } from "../components/Page";
 import { usePoll } from "../hooks/usePoll";
+import { useLive } from "../hooks/useLive";
 
 const LEVEL: Record<string, string> = { error: "red", warn: "yellow", info: "teal" };
 
@@ -15,6 +16,7 @@ export function OpsPage() {
   const load = () => api.get<OpsData>("/api/ops").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   usePoll(load);
+  useLive(load, ["ops"]);
   async function refresh() { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const up = uptime(data.up);

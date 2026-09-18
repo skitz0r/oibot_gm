@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useState } from "react";
+import { useRef, Fragment, useEffect, useState } from "react";
 import { ActionIcon, Badge, Button, Card, Group, Modal, Radio, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
+import { useLive } from "../hooks/useLive";
 import { api, type AbsenceCleared, type Character, type MemberRow, type Members as MembersData, type Meta } from "../api";
 import { GameIcon } from "../components/Icons";
 import { CharacterCell, SpecCell } from "../components/Cells";
@@ -20,8 +21,10 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const [drafts, setDrafts] = useState<Record<string, MemberDraft> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [ask, confirmDialog] = useConfirm();
+  const draftsRef = useRef<unknown>(null);
   const load = () => api.get<MembersData>("/api/members").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  useLive(() => { if (draftsRef.current === null) load(); }, ["member", "run:"]);  // never under an edit in progress
 
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));
 
@@ -74,6 +77,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
 
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const editing = drafts !== null;
+  draftsRef.current = drafts;
   return (
     <Stack gap="lg">
       <PageTitle title="Members" intro={`${data.rows.length} members with characters · ${data.members} in the registry · owner and officer badges come from Discord roles · absences pre-fill No thanks on the sheets they overlap`}

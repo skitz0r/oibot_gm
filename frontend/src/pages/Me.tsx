@@ -10,6 +10,7 @@ import { classColour } from "../theme";
 import { CardHeader, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { usePoll } from "../hooks/usePoll";
+import { useLive } from "../hooks/useLive";
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; slot: "main" | "alt"; isNew?: boolean };
 
@@ -24,6 +25,7 @@ export function MePage({ meta }: { meta: Meta }) {
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
   usePoll(() => { if (!editing) load(); });
+  useLive(() => { if (!editing) load(); }, ["run:", "member"]);
   async function refresh() { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }
 
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));

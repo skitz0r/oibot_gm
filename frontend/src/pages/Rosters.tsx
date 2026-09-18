@@ -16,7 +16,7 @@ export function RostersPage({ meta }: { meta: Meta }) {
   const load = (): Promise<void> => api.get<Rosters>("/api/rosters").then(setData).catch((e) => { fail(e); });
   useEffect(() => { load(); }, []);
   usePoll(load);
-  useLive(load);  // a save anywhere (another officer, Discord, the scheduler) refreshes this page within a second
+  useLive(load, ["run:", "member"]);  // a save anywhere (another officer, Discord, the scheduler) refreshes this page within a second
   // deep link from Discord cards: /app/rosters#run-<key> scrolls to that run once it has rendered
   useEffect(() => {
     if (!data || !window.location.hash.startsWith("#run-")) return;

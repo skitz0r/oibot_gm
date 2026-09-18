@@ -203,6 +203,7 @@ class RegistryError(ValueError):
     pass
 
 
+SAVE_LISTENERS: list = []  # process-wide fn(reg, kind: "member"|"config", lines) after every commit (the web's event stream)
 RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1}
 RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before", "nudge_hours_before", "fill_ask_hours")
 RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm")  # true/false raid settings (command + API layers parse them the same way)
@@ -508,7 +509,7 @@ class Registry:
             self._notify("config", [message])
 
     def _notify(self, kind: str, lines: list[str]) -> None:
-        for fn in self.listeners:
+        for fn in list(self.listeners) + list(SAVE_LISTENERS):
             try:
                 fn(self, kind, lines)
             except Exception:  # noqa: BLE001

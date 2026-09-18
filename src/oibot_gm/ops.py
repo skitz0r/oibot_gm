@@ -17,6 +17,9 @@ LOG_LEVEL = {"info": logging.INFO, "warn": logging.WARNING, "error": logging.ERR
 RECENT_LINES = 30  # ring kept for /gm status
 
 
+LISTENERS: list = []  # fn() after every emitted line (the web's event stream)
+
+
 class Ops:
     def __init__(self, client: discord.Client):
         self.client = client
@@ -26,6 +29,11 @@ class Ops:
         stamp = datetime.now(ZoneInfo(getattr(cfg, "timezone", "UTC"))).strftime("%I:%M %p").lstrip("0")  # guild time
         line = f"{LEVEL_ICON.get(level, '•')} `{stamp}` {text}"
         self.recent = (self.recent + [(stamp, level, text)])[-RECENT_LINES:]
+        for fn in list(LISTENERS):
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 — a listener must never break the feed
+                log.exception("ops listener failed")
         log.log(LOG_LEVEL.get(level, logging.INFO), "[%s] %s", getattr(cfg, "key", "?"), text, exc_info=exc)
         if cfg.ops_channel_id:
             ch = self.client.get_channel(cfg.ops_channel_id)
