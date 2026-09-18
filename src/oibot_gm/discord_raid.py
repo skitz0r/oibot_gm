@@ -107,7 +107,7 @@ def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui
     head = f"## {'🧪 ' if test else ''}{rd.get('name', ev.instance or 'raid')}\n<t:{unix}:F> · <t:{unix}:R>\n"
     if locked:
         conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)}
-        head += f"🔒 **{len(ev.seated())}** seated" + (f" in {runs} rosters" if runs > 1 else "") + f" · ✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
+        head += f"🔒 **{len(ev.seated())}** rostered" + (f" in {runs} rosters" if runs > 1 else "") + f" · ✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
     else:
         head += f"**{len(ins)}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + "  " + "   ".join(f"{ico('role', r)} {n}" for r, n in counts.items())
     web = os.environ.get("OIBOT_WEB_URL", "")
@@ -153,7 +153,7 @@ def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui
     parts.append(ui.TextDisplay((f"🔒 locks <t:{int(hard.timestamp())}:R> · " if ev.state == "open" else "") + f"✓ confirm by <t:{int(confirm.timestamp())}:t>"))
     if ev.state == "open":
         parts.append(ui.ActionRow(*[SignupButton(ev.key, st) for st in rc.STATUSES]))
-    parts.append(ui.TextDisplay("-# " + ("test run · " if test else "") + ("Join = I'm coming · Bench = call me if you need me" if ev.state == "open" else "seated members confirm by DM · No thanks / `/raid out` frees a seat")))
+    parts.append(ui.TextDisplay("-# " + ("test run · " if test else "") + ("Join = I'm coming · Bench = call me if you need me" if ev.state == "open" else "rostered members confirm by DM · No thanks / `/raid out` frees a seat")))
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0x8C97A8 if test else TEAL))
     return view
@@ -192,15 +192,19 @@ def _group_summaries(reg: Registry, r) -> list[dict]:
         return []
 
 
-def _aura_line(ico, g: dict | None) -> str:
+def _aura_line(ico, g: dict | None, show_missing: bool = True) -> str:
+    """Group buffs as emojis. Discord can't grey an emoji, so the two sets are labelled instead of tinted."""
     if not g:
         return ""
     present = " ".join(ico("buff", a["id"]) for a in g["present"] if ico("buff", a["id"]))
-    missing = " ".join(ico("buff", a["id"]) for a in g["missing"][:6] if ico("buff", a["id"]))
-    return (present + (f"  ⚠ {missing}" if missing else "")).strip()
+    missing = " ".join(ico("buff", a["id"]) for a in g["missing"][:6] if ico("buff", a["id"])) if show_missing else ""
+    out = f"buffs {present}" if present else ""
+    if missing:
+        out += ("  ·  " if out else "") + f"missing {missing}"
+    return out
 
 
-def _group_block(reg: Registry, ico, r, gi: int, marks: dict | None = None, summaries: list[dict] | None = None, title: str | None = None, me: str | None = None) -> str:
+def _group_block(reg: Registry, ico, r, gi: int, marks: dict | None = None, summaries: list[dict] | None = None, title: str | None = None, me: str | None = None, show_missing: bool = True) -> str:
     """One group as the web board shows it: heading, one member per line (spec icon + name), its auras under it.
     `me` = the reader's signup name: their line is bold with a pointer."""
     members = [next((p for p in r.selected if p.signup_name == n), None) for n in r.groups[gi]]
@@ -210,10 +214,22 @@ def _group_block(reg: Registry, ico, r, gi: int, marks: dict | None = None, summ
             mark = (marks or {}).get(p.signup_name)
             name = p.character or p.signup_name
             lines.append(f"{(mark + ' ') if mark else ''}{ico('spec', f'{p.cls}:{p.spec}')} " + (f"**{name}** ◀" if p.signup_name == me else name))
-    aura = _aura_line(ico, summaries[gi] if summaries and gi < len(summaries) else None)
+    aura = _aura_line(ico, summaries[gi] if summaries and gi < len(summaries) else None, show_missing)
     if aura:
         lines.append("-# " + aura)
     return "\n".join(lines)
+
+
+def _raidwide_line(reg: Registry, ico, r, show_missing: bool = True) -> str:
+    from . import comp as comp_mod
+
+    rb = comp_mod.raid_buff_status(reg.profile, r.selected)
+    have = " ".join(ico("buff", b["id"]) for b in rb if b["providers"] and ico("buff", b["id"]))
+    miss = " ".join(ico("buff", b["id"]) for b in rb if not b["providers"] and ico("buff", b["id"])) if show_missing else ""
+    out = f"raid-wide {have}" if have else ""
+    if miss:
+        out += ("  ·  " if out else "") + f"missing {miss}"
+    return out
 
 
 MARK = {"yes": "✅", "no": "❌", "expired": "⌛", None: "⏳"}
@@ -276,18 +292,13 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> dis
     tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
     rd = reg.raid_def(ev.instance)
     head = _header(reg, ev, f"🔒 {rd.get('name', ev.instance)}" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else ""),
-                   [f"**{len(r.selected)}** seated" + (f" · synergy {r.synergy_value}" if r.synergy_value else "") + "   " + _role_counts(ico, r.selected), tally])
+                   [f"**{len(r.selected)}** rostered" + (f" · synergy {r.synergy_value}" if r.synergy_value else "") + "   " + _role_counts(ico, r.selected), tally])
     summaries = _group_summaries(reg, r)
     parts = [head, ui.Separator()]
     for gi in range(len(r.groups)):
         if r.groups[gi]:
             parts.append(ui.TextDisplay(_group_block(reg, ico, r, gi, marks, summaries)))
-    from . import comp as comp_mod
-
-    rb = comp_mod.raid_buff_status(reg.profile, r.selected)
-    raidwide = " ".join(ico("buff", b["id"]) for b in rb if b["providers"] and ico("buff", b["id"]))
-    raidmiss = " ".join(ico("buff", b["id"]) for b in rb if not b["providers"] and ico("buff", b["id"]))
-    tail = [f"**Raid-wide** {raidwide}" + (f"  ⚠ {raidmiss}" if raidmiss else "")]
+    tail = ["-# " + _raidwide_line(reg, ico, r)]
     if i == 0 and r.benched:
         tail.append("**Bench** " + " · ".join(p.signup_name for p in r.benched))
     pending = [n for n, a in conf.items() if a is None]
@@ -306,13 +317,16 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     ui = discord.ui
     r = ev.all_rosters[i]
     rd = reg.raid_def(ev.instance)
-    head = _header(reg, ev, f"You're seated · {rd.get('name', ev.instance)}", [f"{ico('spec', f'{sg.cls}:{sg.spec}')} **{sg.character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"])
+    head = _header(reg, ev, f"You're rostered · {rd.get('name', ev.instance)}", [f"{ico('spec', f'{sg.cls}:{sg.spec}')} **{sg.character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"])
     _s, _h, confirm = run_times(reg, ev, team)
     summaries = _group_summaries(reg, r)
     parts = [head, ui.Separator()]
-    for k in range(len(r.groups)):  # the whole roster, group by group; the reader's own line is bold
+    for k in range(len(r.groups)):  # the whole roster, group by group; the reader's own line is bold; buffs the group has
         if r.groups[k]:
-            parts.append(ui.TextDisplay(_group_block(reg, ico, r, k, None, summaries, me=sg.display_name)))
+            parts.append(ui.TextDisplay(_group_block(reg, ico, r, k, None, summaries, me=sg.display_name, show_missing=False)))
+    rw = _raidwide_line(reg, ico, r, show_missing=False)
+    if rw:
+        parts.append(ui.TextDisplay("-# " + rw))
     parts += [ui.Separator(),
              ui.TextDisplay(f"-# Confirm keeps the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:t> counts as out."),
              ui.ActionRow(PlaceButton(ev.team, uid, "yes"), PlaceButton(ev.team, uid, "no"))]
@@ -334,7 +348,7 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
         for i, r in enumerate(ev.all_rosters):
             gi = next((k for k, g in enumerate(r.groups) if len(g) < int(reg.profile.comp_rules["group_size"])), None)
             if gi is not None:
-                parts += [ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"You'd join Group {gi + 1}" + (f" of Roster {i + 1}" if len(ev.all_rosters) > 1 else "")))]
+                parts += [ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"You'd join Group {gi + 1}" + (f" of Roster {i + 1}" if len(ev.all_rosters) > 1 else ""), show_missing=False))]
                 break
     parts += [ui.Separator(), ui.TextDisplay("-# Yes puts you straight in the seat. No answer and the next person is asked."), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
     view = ui.LayoutView(timeout=None)
@@ -485,7 +499,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
             await interaction.response.send_message("Register a character first: `/register`.", ephemeral=True)
             return
         if ev.state != "open" and self.status != "out":
-            await interaction.response.send_message("The roster is locked. If you were seated you'll have a confirmation DM; otherwise press **No thanks** or `/raid out` to be taken off.", ephemeral=True)
+            await interaction.response.send_message("The roster is locked. If you were rostered you'll have a confirmation DM; otherwise press **No thanks** or `/raid out` to be taken off.", ephemeral=True)
             return
         chars = m.active()
         if len(chars) > 1 and self.status == "in":
@@ -869,7 +883,7 @@ class RaidMixin:
         sent = await self.send_confirmations(reg, rs, ev, team, by)
         sig = self.get_channel(ev.channel_id) if ev.channel_id else None
         if sig and sig is not ch:
-            await sig.send(f"🔒 **{team.get('name', ev.team)}** is locked: {sum(len(r.selected) for r in ev.all_rosters)} seated in {len(ev.all_rosters)} roster(s). Seated members: confirm in your DMs.")
+            await sig.send(f"🔒 **{team.get('name', ev.team)}** is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered in {len(ev.all_rosters)} roster(s). Rostered members: confirm in your DMs.")
         return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)"
 
     async def confirm_one(self, reg, ev, sg, roster_i: int, group_i: int, by: str) -> bool:
