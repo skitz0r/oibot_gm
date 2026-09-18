@@ -1,6 +1,7 @@
 // Thin JSON client. The session cookie carries identity; the header marks requests as ours (CSRF guard on the server).
 export class ApiError extends Error {
   status: number;
+  body?: unknown;  // the server's JSON on a refusal (a stale board write carries the current board)
   constructor(status: number, message: string) {
     super(message);
     this.status = status;
@@ -19,7 +20,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     throw new ApiError(401, "login required");
   }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ApiError(r.status, (data as { error?: string }).error || r.statusText);
+  if (!r.ok) { const err = new ApiError(r.status, (data as { error?: string }).error || r.statusText); err.body = data; throw err; }
   return data as T;
 }
 
@@ -59,7 +60,7 @@ export interface Sheet {
   counts: Record<string, number>; rostered: number; n_rosters: number;
   timeline?: { nudge: string; lock: string; confirm: string };
   signups?: Signup[]; not_answered?: Seat[]; absences?: { display_name: string; start: string; end: string; reason: string | null; signed: boolean }[]; double_booked?: string[];
-  needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean;
+  needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean; rev?: string;
   split?: { strategy: string; policy: string; runs: number };
   confirmations?: Confirmation[];
   fill_asks?: { display_name: string; kind: string; character: string; spec: string; role: string; reason: string; answer: string | null }[];

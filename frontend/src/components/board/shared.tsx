@@ -4,7 +4,9 @@ import { GameIcon } from "../Icons";
 import { classColour } from "../../theme";
 
 export type Act = (k: string, p: string, b?: unknown) => Promise<void>;
-export type OnBoard = (key: string, board: Board, needs?: Sheet["needs"]) => void;
+export type OnBoard = (key: string, board: Board, needs?: Sheet["needs"], rev?: string) => void;
+/** Shared between the board and the page: a refresh must not re-render the board under a drag in progress. */
+export const live = { dragging: false };
 
 export const ANSWER: Record<string, { mark: string; colour: string; label: string }> = { yes: { mark: "✓", colour: "var(--mantine-color-teal-4)", label: "confirmed" }, no: { mark: "✗", colour: "var(--mantine-color-red-5)", label: "can't make it" }, expired: { mark: "⌛", colour: "var(--mantine-color-slate-3)", label: "no answer" } };
 

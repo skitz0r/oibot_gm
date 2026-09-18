@@ -257,3 +257,23 @@ def test_stdio_initialize_and_list_tools():
     name, tools = asyncio.run(asyncio.wait_for(go(), 60))
     assert name == "oibot_gm"
     assert {"guild_overview", "list_runs", "get_run", "set_answer", "lock_run", "plain_change", "test_bench"} <= set(tools)
+
+
+def test_board_moves_merge_and_stale_whole_board_write_is_refused(client, reg, rs):
+    """Two officers on one board: single moves merge; a whole-board write from an old view is refused with the current board."""
+    ev = open_test_run(reg, rs)
+    members = reg.test_members()[:6]
+    join(reg, rs, ev, members)
+    a, b, c = (m.display_name for m in members[:3])
+    seen = client.get(f"/api/run/{ev.key}", headers=bearer()).json()["rev"]  # officer B loads the empty board
+    r = client.post(f"/api/run/{ev.key}/move", json={"member": a, "to": {"r": 0, "g": 0, "i": 0}}, headers=bearer())
+    assert r.status_code == 200 and r.json()["rev"] != seen
+    r = client.post(f"/api/run/{ev.key}/move", json={"member": b, "to": {"r": 0, "g": 1, "i": 0}}, headers=bearer())  # B's drag, made on the stale view
+    groups = [[s["display_name"] for s in g] for g in r.json()["board"]["rosters"][0]["groups"]]
+    assert groups[0] == [a] and groups[1] == [b]  # A's placement survived
+    r = client.post(f"/api/run/{ev.key}/layout", json={"groups": [[c]], "rev": seen}, headers=bearer())  # B presses Clear/Use split on the old view
+    assert r.status_code == 409 and "board" in r.json() and "changed" in r.json()["error"]
+    r = client.post(f"/api/run/{ev.key}/layout", json={"groups": [[c]], "rev": r.json()["rev"]}, headers=bearer())
+    assert r.status_code == 200
+    r = client.post(f"/api/run/{ev.key}/move", json={"member": "Nobody", "to": None}, headers=bearer())
+    assert r.status_code == 409 and "board" in r.json()

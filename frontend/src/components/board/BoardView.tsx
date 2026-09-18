@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Box, Button, Group, SegmentedControl, Stack, Text } from "@mantine/core";
 import { IconRefresh, IconScale, IconSparkles } from "@tabler/icons-react";
 import { api, type Board, type GroupSummary, type Meta, type Seat, type Sheet } from "../../api";
@@ -6,7 +6,7 @@ import { SPLIT_LABEL } from "../../pages/Raids";
 import { RaidWide } from "../GroupsBlock";
 import { Eyebrow, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
-import { Aura, RosterHeader, SeatLine, chunk, sortBank, type Act, type BankSort, type OnBoard } from "./shared";
+import { Aura, RosterHeader, SeatLine, chunk, sortBank, live, type Act, type BankSort, type OnBoard } from "./shared";
 import { SplitModal } from "./SplitModal";
 import css from "../../pages/rosters.module.css";
 
@@ -32,14 +32,24 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
 
   const layout = () => board.rosters.map((r) => r.groups.map((g) => g.map((s) => s.display_name)));
 
-  async function commit(groups: string[][][]) {
+  type Reply = { board: Board; needs: Sheet["needs"]; rev?: string; message?: string };
+  /** Any board write. A refusal (someone else got there first, group full) still carries the current board: show it. */
+  async function send(path: string, payload: unknown) {
     setSaving(true);
     try {
-      const r = await api.post<{ board: Board; needs: Sheet["needs"]; message?: string }>(`/api/run/${e.key}/layout`, { groups: groups.flat() });
-      onBoard(e.key, r.board, r.needs);
+      const r = await api.post<Reply>(`/api/run/${e.key}/${path}`, payload);
+      onBoard(e.key, r.board, r.needs, r.rev);
       if (r.message) ok(r.message);
-    } catch (err) { fail(err); } finally { setSaving(false); }
+    } catch (err) {
+      const b = (err as { body?: Partial<Reply> }).body;
+      if (b?.board) onBoard(e.key, b.board, b.needs, b.rev);
+      fail(err);
+    } finally { setSaving(false); }
   }
+  /** Whole-board writes (Clear, Use this split) are tied to the board this officer was looking at. */
+  const commit = (groups: string[][][]) => send("layout", { groups: groups.flat(), rev: e.rev });
+  /** A drag is sent as one move and applied server-side to the board as it is now, so two officers merge. */
+  const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to });
 
   async function clear() {
     if (placed > 0 && !(await ask({ title: "Clear the board?", message: `${placed} placement${placed === 1 ? "" : "s"} go back to the bank. Nobody is told — nothing has been sent before lock.`, confirmLabel: "Clear", color: "red" }))) return;
@@ -54,7 +64,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
     if (target === "bank") {
       if (!d.from) return;
       if (locked && !(await ask({ title: `Take ${d.name} off the roster?`, message: `${d.name} is told their seat was released and the bench is asked to fill it.`, confirmLabel: "Release the seat", color: "red" }))) return;
-      commit(L); return;
+      move(d.name, null); return;
     }
     const g = L[target.r][target.g];
     const displaced = g[target.i];
@@ -70,9 +80,10 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
       g.splice(Math.min(target.i, g.length), 0, d.name);
       if (locked && !d.from && !(await ask({ title: `Roster ${d.name}?`, message: `${d.name} gets a confirmation DM; the seat is theirs once they say yes.`, confirmLabel: "Ask them" }))) return;
     }
-    commit(L);
+    move(d.name, target);
   }
-  const onDragStart = (name: string, from: Drag["from"]) => (ev: React.DragEvent) => { drag.current = { name, from }; ev.dataTransfer.effectAllowed = "move"; };
+  const onDragStart = (name: string, from: Drag["from"]) => (ev: React.DragEvent) => { drag.current = { name, from }; ev.dataTransfer.effectAllowed = "move"; live.dragging = true; };
+  useEffect(() => { const end = () => { live.dragging = false; }; window.addEventListener("dragend", end); window.addEventListener("drop", end); return () => { window.removeEventListener("dragend", end); window.removeEventListener("drop", end); }; }, []);
   const zone = (id: string, onDrop: () => void) => ({
     onDragOver: (ev: React.DragEvent) => { ev.preventDefault(); if (over !== id) setOver(id); },
     onDragLeave: () => setOver((o) => (o === id ? null : o)),

@@ -3,6 +3,7 @@ health check, lock → roster(s) from the signups (weights + officer pins), conf
 No LLM anywhere in this module."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Optional
@@ -17,12 +18,15 @@ from .registry import DEFAULT_RAID_SIZE, RAID_DEFAULTS, Member, Registry, Regist
 from .roster import explain, solver
 from .store import GitStore
 
+log = logging.getLogger(__name__)
+
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 STATUSES = ("in", "sub", "out")  # Join / Bench / No thanks (legacy "tentative" is read as "in")
 LABELS = {"in": "Join", "sub": "Bench", "out": "No thanks"}
 STATES = ("open", "locked", "done", "cancelled")
 LEGACY_STATES = {"proposed": "locked", "accepted": "locked"}  # pre-2026-09 files
 MAX_ROSTERS_PER_SLOT = 4
+RUN_LISTENERS: list = []  # callables (guild_key, run_key) told after every RaidStore.save
 TEAM_DEFAULTS = {"cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm", "open_dm": False, "autofill": True}
 FILL_OVERASK = 1  # ask one more person than the shortfall per batch
 FILL_MAX_OPEN = 3  # never more than this many unanswered asks per event
@@ -271,6 +275,11 @@ class RaidStore:
         self.store.write_text(ev.rel_path(self.key), ev.model_dump_json(indent=1))
         self.events[ev.key] = ev
         self.store.commit(f"{self.key}: raid {ev.key}: {message}")
+        for fn in list(RUN_LISTENERS):  # e.g. the web's event stream; may be called from a worker thread
+            try:
+                fn(self.key, ev.key)
+            except Exception:  # noqa: BLE001 — a listener must never break a save
+                log.exception("run listener failed")
 
     def live(self) -> list[RaidEvent]:
         return sorted([e for e in self.events.values() if e.state not in ("done", "cancelled")], key=lambda e: e.starts_at)
@@ -832,6 +841,59 @@ def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, av
 
 def groups_per_roster(reg: Registry, size: int) -> int:
     return max(1, -(-size // int(reg.profile.comp_rules["group_size"])))
+
+
+def board_layout(reg: Registry, ev: RaidEvent) -> list[list[str]]:
+    """The board as it stands, flat groups across rosters: the locked roster(s), else the officers' layout.
+    Always padded to whole rosters so (roster, group) addresses are stable."""
+    n = groups_per_roster(reg, run_size(reg, ev))
+    if ev.state != "open" and ev.all_rosters:
+        flat = [list(g) for r in ev.all_rosters for g in (list(r.groups) + [[] for _ in range(n - len(r.groups))])[:max(n, len(r.groups))]]
+    else:
+        flat = [list(g) for g in (ev.layout or [])]
+    want = max(n, -(-len(flat) // n) * n)
+    return flat + [[] for _ in range(want - len(flat))]
+
+
+def board_rev(reg: Registry, ev: RaidEvent) -> str:
+    """A fingerprint of the board (groups + pins + state). A whole-board write carrying an older one is stale."""
+    import hashlib
+    import json
+
+    blob = json.dumps([ev.state, board_layout(reg, ev), sorted(ev.pins.items())], sort_keys=True)
+    return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+
+def apply_move(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int] | None) -> list[list[str]]:
+    """One drag applied to the CURRENT board (so concurrent officers merge instead of overwriting each other):
+    `to` = (flat group index, position) or None for the bank. Dropping on someone swaps (they take the mover's old
+    place, or go to the bank when the mover came from it). Raises ValueError when the group is full or the name
+    is not a joiner. Returns the new flat layout; the caller saves it the way a whole-board write would be."""
+    if signup_by_name(ev, name) is None or signup_by_name(ev, name).status != "in":
+        raise ValueError(f"{name} hasn't joined this run")
+    layout = board_layout(reg, ev)
+    gsize = int(reg.profile.comp_rules["group_size"])
+    origin = next(((gi, g.index(name)) for gi, g in enumerate(layout) if name in g), None)
+    if origin:
+        layout[origin[0]].remove(name)
+    if to is None:
+        return layout
+    gi, pos = to
+    while gi >= len(layout):
+        layout.append([])
+    g = layout[gi]
+    if origin and origin[0] == gi and pos > origin[1]:
+        pos -= 1  # the list got shorter when the mover left it
+    if 0 <= pos < len(g) and (not origin or origin[0] != gi):  # dropped on someone in another group: swap
+        other = g[pos]
+        g[pos] = name
+        if origin:
+            layout[origin[0]].insert(min(origin[1], len(layout[origin[0]])), other)
+        return layout
+    if len(g) >= gsize:
+        raise ValueError(f"group {gi % groups_per_roster(reg, run_size(reg, ev)) + 1} is full")
+    g.insert(max(0, min(pos, len(g))), name)
+    return layout
 
 
 def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: int) -> list[RosterResult]:

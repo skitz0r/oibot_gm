@@ -7,6 +7,7 @@ import { Eyebrow, PageTitle, fail, ok } from "../components/Page";
 import { SheetCard } from "../components/board/SheetCard";
 import { runName, type Act, type OnBoard } from "../components/board/shared";
 import { usePoll } from "../hooks/usePoll";
+import { useLive } from "../hooks/useLive";
 
 export function RostersPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Rosters | null>(null);
@@ -15,6 +16,7 @@ export function RostersPage({ meta }: { meta: Meta }) {
   const load = (): Promise<void> => api.get<Rosters>("/api/rosters").then(setData).catch((e) => { fail(e); });
   useEffect(() => { load(); }, []);
   usePoll(load);
+  useLive(load);  // a save anywhere (another officer, Discord, the scheduler) refreshes this page within a second
   // deep link from Discord cards: /app/rosters#run-<key> scrolls to that run once it has rendered
   useEffect(() => {
     if (!data || !window.location.hash.startsWith("#run-")) return;
@@ -27,8 +29,8 @@ export function RostersPage({ meta }: { meta: Meta }) {
     try { const r = await api.post<{ message: string }>(path, payload ?? {}); ok(r.message); await load(); } catch (e) { fail(e); } finally { setBusy(null); }
   }
   /** Board edits answer with the new board; patch it into the sheet without a full reload. */
-  function patchBoard(key: string, board: Board, needs?: Sheet["needs"]) {
-    setData((d) => d && { ...d, raids: d.raids.map((r) => ({ ...r, open: r.open.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs, has_layout: true } : e)), locked: r.locked.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs } : e)) })) });
+  function patchBoard(key: string, board: Board, needs?: Sheet["needs"], rev?: string) {
+    setData((d) => d && { ...d, raids: d.raids.map((r) => ({ ...r, open: r.open.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs, rev: rev ?? e.rev, has_layout: true } : e)), locked: r.locked.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs, rev: rev ?? e.rev } : e)) })) });
   }
   async function refresh() { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }
 

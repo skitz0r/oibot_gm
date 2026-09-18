@@ -424,7 +424,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                                  for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups] if live else [],
                 "absences": absences, "double_booked": [reg.members[u].display_name for u in busy if u in reg.members],
                 "needs": rc.needs(reg, ev, t) if live else None,
-                "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout),
+                "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
                 "split": {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
                           "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), rc.run_size(reg, ev), reg.role_bounds(ev.instance, rc.run_size(reg, ev))) if live else 1},
                 "confirmations": conf_rows,
@@ -479,7 +479,28 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     def board_reply(reg, ev):
         t = rc.run_team(reg, ev)
         rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], rc.run_size(reg, ev))
-        return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else []), "needs": rc.needs(reg, ev, t)}
+        return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else []), "needs": rc.needs(reg, ev, t), "rev": rc.board_rev(reg, ev)}
+
+    board_locks: dict[str, asyncio.Lock] = {}
+
+    def board_lock(key: str) -> asyncio.Lock:
+        """One writer at a time per run's board: concurrent officers queue here (short), they never overwrite each other."""
+        return board_locks.setdefault(key, asyncio.Lock())
+
+    async def save_board(v, rs, ev, t, groups: list[list[str]]):
+        """The one way a board is written (whole-board or after a single move)."""
+        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        groups = [[n for n in g if n in names] for g in groups]
+        if ev.state == "open":
+            ev.layout = groups if any(groups) else None
+            await asyncio.to_thread(rs.save, ev, f"board ({v.name})")
+            return board_reply(v.reg, ev)
+        added, removed = await asyncio.to_thread(rc.apply_layout_locked, v.reg, rs, ev, groups)
+        await bot.after_board_change(v.reg, rs, ev, t, added, removed, v.name)
+        return {**board_reply(v.reg, ev), "message": (f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "") or "groups updated"}
+
+    def stale(v, ev):
+        return JSONResponse({"error": "Someone else changed this board a moment ago — it has been reloaded; check it and try again.", **board_reply(v.reg, ev)}, status_code=409)
 
     @app.post("/api/run/{key}/layout")
     async def run_layout(request: Request, key: str):
@@ -488,15 +509,66 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         groups = [[str(n) for n in g] for g in (d.get("groups") or [])]
-        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
-        groups = [[n for n in g if n in names] for g in groups]
-        if ev.state == "open":
-            ev.layout = groups if any(groups) else None
-            rs.save(ev, "board")
-            return board_reply(v.reg, ev)
-        added, removed = await asyncio.to_thread(rc.apply_layout_locked, v.reg, rs, ev, groups)
-        await bot.after_board_change(v.reg, rs, ev, t, added, removed, v.name)
-        return {**board_reply(v.reg, ev), "message": (f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "") or "groups updated"}
+        async with board_lock(key):
+            # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
+            if d.get("rev") and d["rev"] != rc.board_rev(v.reg, ev):
+                return stale(v, ev)
+            return await save_board(v, rs, ev, t, groups)
+
+    @app.post("/api/run/{key}/move")
+    async def run_move(request: Request, key: str):
+        """One drag, applied to the board as it is NOW: {member, to: {r, g, i} | null (= bank)}. Two officers dragging
+        at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat freed)."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        name, to = str(d.get("member") or ""), d.get("to")
+        async with board_lock(key):
+            n = rc.groups_per_roster(v.reg, rc.run_size(v.reg, ev))
+            try:
+                target = None if not to else (as_int(to.get("r"), "to.r") * n + as_int(to.get("g"), "to.g"), as_int(to.get("i", 99), "to.i"))
+                groups = rc.apply_move(v.reg, ev, name, target)
+            except ValueError as e:
+                return JSONResponse({"error": str(e)[:1].upper() + str(e)[1:], **board_reply(v.reg, ev)}, status_code=409)
+            return await save_board(v, rs, ev, t, groups)
+
+    # ---- live updates: one event stream per open page; a run save anywhere (site, Discord, scheduler) wakes them
+    subscribers: set[asyncio.Queue] = set()
+
+    def run_saved(guild_key: str, run_key: str) -> None:
+        def fan_out():
+            for q in list(subscribers):
+                if q.qsize() < 50:
+                    q.put_nowait(run_key)
+        try:
+            bot.loop.call_soon_threadsafe(fan_out)  # saves also happen in worker threads
+        except Exception:  # noqa: BLE001 — loop not running yet / shutting down
+            pass
+
+    if run_saved.__name__ not in {getattr(f, "__name__", "") for f in rc.RUN_LISTENERS}:
+        rc.RUN_LISTENERS.append(run_saved)
+
+    @app.get("/api/events")
+    async def events(request: Request):
+        """Server-sent events: `data: <run key>` whenever a run changes. Pages reload their data on it."""
+        from fastapi.responses import StreamingResponse
+
+        await who(request)
+        q: asyncio.Queue = asyncio.Queue()
+        subscribers.add(q)
+
+        async def stream():
+            try:
+                yield "retry: 3000\n\n"
+                while not await request.is_disconnected():
+                    try:
+                        key = await asyncio.wait_for(q.get(), timeout=20)
+                        yield f"data: {key}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"  # keeps the tunnel from idling the connection out
+            finally:
+                subscribers.discard(q)
+
+        return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.post("/api/run/{key}/split")
     async def run_split(request: Request, key: str):

@@ -101,7 +101,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    of the run. Drag names from the bank into groups, between groups, or back to the bank; dropping on
    someone swaps them. Every group shows its auras as you go (coloured = present, greyed with a red edge =
    someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs
-   update too. The bank sorts by **signup** (who answered first), **spec** or **role** (tanks, healers,
+   update too. The board is **shared**: every officer sees the same one, a change anywhere (another officer, a
+   new Join in Discord, the scheduler) reaches open pages within a second, and two officers can drag at the same
+   time — each drag is applied to the board as it is, so nothing is overwritten. Only whole-board actions (*Clear*,
+   *Use this split/layout*) are refused if someone changed the board since you looked; the page shows the current
+   board and you press again. The bank sorts by **signup** (who answered first), **spec** or **role** (tanks, healers,
    melee, ranged); the choice sticks in your browser. On a joiner's menu, **Pin to roster** guarantees a seat and
    **Keep on bench** keeps them off this run; pins are per run and the solver honours them at lock (plain text
    works too: "pin Xanthe to roster", "keep Jon on the bench", "clear the pin for Xanthe"). **Propose
