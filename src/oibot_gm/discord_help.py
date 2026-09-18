@@ -11,11 +11,11 @@ from . import help as help_mod
 from .discord_registry import Guilds, is_officer
 from .ops import Ops
 
-TEAL = 0x2B7A78
+from .constants import TEAL  # noqa: E402
 TOPICS = {
-    "register": "## 3", "characters": "## 3", "availability": "## 3", "absences": "## 3",
-    "rosters": "## 4", "sheets": "## 4", "fill": "## 4", "cycle": "## 4", "groups": "## 5", "analytics": "## 6",
-    "officers": "## 7", "setup": "## 8", "loot": "## 9", "data": "## 10", "limits": "## 11", "channels": "## 2",
+    "register": "## 3", "characters": "## 3", "absences": "## 3",
+    "rosters": "## 4", "sheets": "## 4", "fill": "## 4", "cycle": "## 4", "runs": "## 4", "groups": "## 5", "analytics": "## 6",
+    "officers": "## 7", "setup": "## 8", "test": "## 8a", "loot": "## 9", "data": "## 10", "limits": "## 11", "channels": "## 2", "website": "## 2a",
 }
 
 
@@ -30,9 +30,9 @@ def manual_section(marker: str) -> str:
 
 GUIDE_OPTIONS = [
     ("about", "About the guild", "who we are, what we raid, how big"),
-    ("schedule", "Raid schedule", "rosters and their next raid times"),
+    ("schedule", "Raid schedule", "raids, their run times and the next sheet"),
     ("register", "How to register", "the registration card and what happens next"),
-    ("signups", "How signups work", "sheets, cutoffs, callouts, fill DMs"),
+    ("signups", "How signups work", "sheets, lock and confirmation, fill DMs"),
     ("apply", "How to apply", "joining as a recruit"),
     ("contact", "Who to contact", "officers and the owner"),
 ]
@@ -42,25 +42,29 @@ def guide_text(reg, key: str) -> str:
     """Static answers for people who may not ask free-form questions: config + manual excerpts, no LLM."""
     cfg = reg.config
     if key == "about":
-        rosters = ", ".join(f"{t.get('name', t['key'])} ({t.get('size')}-man{', ' + t['schedule'] if t.get('schedule') else ''})" for t in cfg.rosters) or "no rosters configured yet"
-        return f"**{cfg.name}**\n{cfg.about or 'A WoW: Forever raiding guild.'}\n\nRosters: {rosters}.\nMembers registered: {len(reg.members)}."
+        raids = ", ".join(f"{rd.get('name', rid)} ({rd.get('size')}-player{', ' + ' / '.join(rd['slots']) if rd.get('slots') else ''})" for rid in reg.profile.raids for rd in [reg.raid_def(rid)]) or "no raids configured yet"
+        return f"**{cfg.name}**\n{cfg.about or 'A WoW: Forever raiding guild.'}\n\nRaids: {raids}.\nMembers registered: {len(reg.members)}."
     if key == "schedule":
         from . import raidcycle as rc
 
         lines = []
-        for t in cfg.rosters:
-            if t.get("schedule"):
-                try:
-                    nxt = rc.next_raid_time(t["schedule"], cfg.timezone)
-                    lines.append(f"• **{t.get('name', t['key'])}** ({t.get('size')}-man) — {t['schedule']} {cfg.timezone} · next <t:{int(nxt.timestamp())}:F> (<t:{int(nxt.timestamp())}:R>)")
-                except ValueError:
-                    lines.append(f"• **{t.get('name', t['key'])}** — {t['schedule']}")
-            else:
-                lines.append(f"• **{t.get('name', t['key'])}** ({t.get('size')}-man) — no schedule yet")
-        return "**Raid schedule**\n" + ("\n".join(lines) or "Nothing scheduled yet.")
+        now = reg.now_local()
+        for rid in reg.profile.raids:
+            rd = reg.raid_def(rid)
+            slots = rd.get("slots") or []
+            if not slots:
+                lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — no run times yet")
+                continue
+            starts = rc.slot_starts(reg, rid, now, 24 * 14)
+            nxt = starts[0][1] if starts else None
+            lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — {', '.join(slots)} {cfg.timezone}"
+                         + (f" · next <t:{int(nxt.timestamp())}:F> (<t:{int(nxt.timestamp())}:R>); its sheet opens {rd['signup_lead_hours']:g} h before" if nxt else " · nothing in the next two weeks"))
+        where = f" in <#{cfg.signup_channel_id}>" if cfg.signup_channel_id else ""
+        return "**Raid schedule**\n" + ("\n".join(lines) or "Nothing scheduled yet.") + f"\nEach run gets its own sheet{where}: answer Join / Bench / No thanks there."
     if key == "register":
         where = f"<#{cfg.registration_channel_id}>" if cfg.registration_channel_id else "the registration card an officer posts"
-        return f"**How to register**\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters and places you on a roster.\n4. `/me view` shows what the bot has on you; `/me availability` sets your default for raids."
+        sheets = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "the signup channel"
+        return f"**How to register**\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each run's sheet in {sheets} (Join / Bench / No thanks). `/me view` shows what the bot has on you."
     if key == "signups":
         return manual_section("## 4")[:1900] or "See `/help topic:sheets`."
     if key == "apply":
@@ -104,7 +108,7 @@ def guide_intro(reg) -> str:
 
 def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: Ops, bot) -> None:
     @tree.command(name="help", description="What the bot does and which commands you can use (no AI)")
-    @app_commands.describe(topic="register, characters, availability, rosters, sheets, fill, groups, analytics, officers, setup, loot, limits")
+    @app_commands.describe(topic="register, characters, absences, runs, sheets, fill, groups, analytics, officers, setup, test, loot, limits")
     async def help_cmd(interaction: discord.Interaction, topic: str | None = None):
         reg = guilds.for_interaction(interaction)
         officer = bool(reg and is_officer(interaction, reg))
@@ -125,12 +129,12 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             if path.startswith("/mock"):
                 continue
             tiers.setdefault(who, []).append(f"`{path}` — {desc}")
-        e = discord.Embed(title="oibot_GM — what I do", colour=TEAL, description="I run registration, the weekly sheets, roster health, groups, gap-filling by DM, and (later) the loot council. Ask me anything in plain words with `/ask`, or @mention me. `/help topic:<name>` shows one part of the manual.")
+        e = discord.Embed(title="oibot_GM — what I do", colour=TEAL, description="I run registration, one sheet per raid run, roster health, groups, filling freed seats by DM after lock, and (later) the loot council. Ask me anything in plain words with `/ask`, or @mention me. `/help topic:<name>` shows one part of the manual.")
         e.add_field(name="Everyone", value="\n".join(tiers["member"])[:1024], inline=False)
         if officer:
             e.add_field(name="Officers", value="\n".join(tiers["officer"])[:1024], inline=False)
             e.add_field(name="Owner", value="\n".join(tiers["owner"])[:1024], inline=False)
-        e.set_footer(text="Buttons: #register card (Register / Add an alt / My status) · sheets (In / Tentative / Sub / Out) · fill DMs (Yes / Can't)")
+        e.set_footer(text="Buttons: #register card (Register / Add an alt / My status) · sheets (Join / Bench / No thanks; locked: Can't make it) · DMs (Confirm / Can't make it, fill: Yes / Can't)")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @tree.command(name="ask", description="Ask the bot how something works or what to do next (it answers from its own manual and your record)")

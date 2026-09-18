@@ -6,23 +6,95 @@ same Registry / raidcycle functions the Discord commands call. CSRF: every POST 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional, TypeVar
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ValidationError
 
-from .. import comp as comp_mod, discord_raid as dr, raidcycle as rc
-from ..registry import RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, RegistryError
+from .. import comp as comp_mod, discord_raid as dr, raidcycle as rc, render
+from ..registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 
 HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
+STARTED = time.time()  # fallback when the bot has no start stamp
+from ..constants import ROLES  # noqa: E402 — the order role counts are shown in
+
+M = TypeVar("M", bound=BaseModel)
+
+
+# ---- request bodies (S8): the few POSTs that need a field use a model; a missing/bad field is a 400, not a 500
+class LabelBody(BaseModel):
+    label: str
+
+
+class StartBody(BaseModel):
+    start: str
+
+
+class UidStartBody(BaseModel):
+    uid: int
+    start: str
+
+
+class PlacementBody(BaseModel):
+    roster: str
+    answer: Optional[str] = None
+
+
+class StrategyBody(BaseModel):
+    strategy: str
+
+
+class InstanceBody(BaseModel):
+    instance: str
+
+
+class IdBody(BaseModel):
+    id: str
+
+
+def parse(d: dict, model: type[M]) -> M:
+    """Validate a JSON body against a model; a ValidationError becomes a 400 naming the field."""
+    try:
+        return model.model_validate(d)
+    except ValidationError as e:
+        first = e.errors()[0] if e.errors() else {}
+        loc = ".".join(str(x) for x in first.get("loc", ())) or "body"
+        raise HTTPException(400, f"{loc}: {first.get('msg', 'invalid')}")
+
+
+def as_int(value, what: str = "id") -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{what} must be a number")
+
+
+def need_owner(v) -> None:
+    """Owner-only endpoints: 403 for everyone else (officers included)."""
+    if not v.owner:
+        raise HTTPException(403, "Owner only.")
 
 
 def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
+    solver_locks: dict[str, asyncio.Lock] = {}  # one per run key: two officers can't solve the same run at once (S4)
+
+    @contextlib.asynccontextmanager
+    async def solving(key: str):
+        """Hold the run's solver lock for the block; a second caller gets a 409 instead of queueing."""
+        lock = solver_locks.setdefault(key, asyncio.Lock())
+        if lock.locked():
+            raise HTTPException(409, "the solver is already working on this run — try again in a moment")
+        async with lock:
+            yield
+
     async def who(request: Request, officer: bool = False):
         v = await viewer(request)
         if v is None:
@@ -64,6 +136,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def meta(request: Request):
         v = await who(request)
         reg = v.reg
+        grouping = reg.profile.comp_rules.get("grouping") or {}
         return {
             "guild": reg.config.name, "tz": reg.config.timezone,
             "classes": {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()},
@@ -71,7 +144,21 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             "raids": [{"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "lockout_days": int(reg.raid_def(rid).get("lockout_days", 7))} for rid, rd in reg.profile.raids.items()],
             "viewer": {"uid": str(v.uid), "name": v.name, "officer": v.officer, "owner": v.owner},
             "labels": dict(rc.LABELS),
+            # the vocabulary the pages used to hard-code (C3): answer statuses in order, split philosophies, role order,
+            # per-group role caps from the profile, class colours from render.py (tuned for dark surfaces)
+            "statuses": list(rc.STATUSES), "split_policies": list(SPLIT_POLICIES), "roles": list(ROLES),
+            "group_caps": {"tank": int(grouping.get("tank_max_per_group", 2)), "healer": int(grouping.get("healer_max_per_group", 3))},
+            "class_colours": dict(render.CLASS),
+            "started_at": float(getattr(bot, "started_at", STARTED)),
         }
+
+    def run_label(reg, rs, team_key: str) -> dict:
+        """Placement asks are keyed by the run's roster key; people see the raid name and the start time instead (B3)."""
+        evs = sorted((e for e in rs.live() if e.team == team_key), key=lambda e: e.starts_at)
+        if not evs:
+            return {"raid": team_key, "when": "", "key": None}
+        ev = evs[0]
+        return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else team_key, "when": t12(reg, ev.starts_at), "key": ev.key}
 
     def char_json(reg, c) -> dict:
         role = reg.profile.spec(c.cls, c.spec).role
@@ -95,7 +182,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             seat = ev.seat_of(m.display_name) if m and ev.state != "open" else None
             sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "state": ev.state,
                            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
-                           "seated": bool(seat), "roster": (seat[0] + 1) if seat else None})
+                           "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None})
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {
@@ -105,7 +192,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             "absences": [absence_json(a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
             "sheets": sheets,
-            "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at")} for a in reg.open_placement_asks(v.uid)],
+            "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at"), **run_label(reg, rs, a["roster"])} for a in reg.open_placement_asks(v.uid)],
         }
 
     # ---- member self-service
@@ -142,11 +229,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/me/main")
     async def me_main(request: Request):
-        return await run(request, lambda v, d: f"main is now {v.reg.set_main(v.uid, d['label'])[1].label}")
+        return await run(request, lambda v, d: f"main is now {v.reg.set_main(v.uid, parse(d, LabelBody).label)[1].label}")
 
     @app.post("/api/me/character/delete")
     async def me_delete(request: Request):
-        return await run(request, lambda v, d: f"deleted {v.reg.delete_character(v.uid, d['label']).label}")
+        return await run(request, lambda v, d: f"deleted {v.reg.delete_character(v.uid, parse(d, LabelBody).label).label}")
 
     @app.post("/api/me/absence")
     async def me_absence(request: Request):
@@ -160,17 +247,22 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/me/absence/clear")
     async def me_absence_clear(request: Request):
-        return await run(request, lambda v, d: (v.reg.clear_absence(v.uid, d["start"]) and f"cleared absence {d['start']}"))
+        def go(v, d):
+            b = parse(d, StartBody)
+            v.reg.clear_absence(v.uid, b.start)
+            return f"cleared absence {b.start}"
+        return await run(request, go)
 
     @app.post("/api/me/placement")
     async def me_placement(request: Request):
         v, d = await body(request)
-        yes = d.get("answer") == "yes"
+        b = parse(d, PlacementBody)
+        yes = b.answer == "yes"
         try:
-            line = await asyncio.to_thread(v.reg.answer_placement, v.uid, d["roster"], yes, v.name)
+            line = await asyncio.to_thread(v.reg.answer_placement, v.uid, b.roster, yes, v.name)
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
-        await bot.after_placement_answer(v.reg, v.uid, d["roster"], yes, line)
+        await bot.after_placement_answer(v.reg, v.uid, b.roster, yes, line)
         return {"message": line}
 
     @app.post("/api/me/dm")
@@ -227,7 +319,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         boards = []
         for i, r in enumerate(rosters):
             by = {p.signup_name: p for p in r.selected}
-            boards.append({"n": i + 1, "seated": len(r.selected), "synergy": r.synergy_value or None, "advisories": list(r.advisories[:6]),
+            boards.append({"n": i + 1, "rostered": len(r.selected), "synergy": r.synergy_value or None, "advisories": list(r.advisories[:6]),
                            "groups": [[seat_json(by[m], conf, uids) for m in g if m in by] for g in r.groups], "summary": roster_summary(reg, r)})
         bench = rosters[0].benched if rosters else []
         return {"n_groups": rc.groups_per_roster(reg, size), "group_size": int(reg.profile.comp_rules["group_size"]), "size": size,
@@ -238,16 +330,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         live = ev.state not in ("done", "cancelled")
         rd = reg.raid_def(ev.instance)
         day = ev.start.astimezone(reg.tz).date().isoformat()
-        base = {"key": ev.key, "run": ev.team, "name": t.get("name") or t["key"], "size": int(t.get("size") or 20), "instance": ev.instance, "raid": rd.get("name", ev.instance),
+        base = {"key": ev.key, "run": ev.team, "name": t.get("name") or t["key"], "size": rc.run_size(reg, ev), "instance": ev.instance, "raid": rd.get("name", ev.instance),
                 "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "rel": rel(reg, ev.start), "state": ev.state, "live": live, "fill_state": ev.fill_state,
-                "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "seated": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters)}
+                "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters)}
         if not full:
             return base
         from ..discord_raid import run_times
 
         soft, hard, confirm = run_times(reg, ev, t)
         conf_rows = rc.confirmations(reg, ev) if ev.all_rosters else []
-        board_rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], int(t.get("size") or 20))
+        board_rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], rc.run_size(reg, ev))
         absences = [{"display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "signed": str(m.discord_id) in ev.signups}
                     for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
         busy = rc.conflicts(rs, ev) if live else {}
@@ -260,7 +352,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "needs": rc.needs(reg, ev, t) if live else None,
                 "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout),
                 "split": {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
-                          "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), int(t.get("size") or 20), reg.role_bounds(ev.instance, int(t.get("size") or 20))) if live else 1},
+                          "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), rc.run_size(reg, ev), reg.role_bounds(ev.instance, rc.run_size(reg, ev))) if live else 1},
                 "confirmations": conf_rows,
                 "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer, "expires_at": a.expires_at, "pair": a.pair} for a in ev.fill_asks],
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
@@ -277,7 +369,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             past = [ev_json(reg, rs, e, full=False) for e in reversed(evs) if e.state in ("done", "cancelled")][:8]
             fo = reg.first_open(rid)
             upcoming = [{"slot": slot, "start": t12(reg, start), "opens": t12(reg, start - timedelta(hours=float(rd["signup_lead_hours"])))}
-                        for slot, start in rc.slot_starts(reg, rid, now, 24 * 21) if f"{rc.run_key(rid, start)}-{start.date().isoformat()}" not in rs.events][:6]
+                        for slot, start in rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if f"{rc.run_key(rid, start)}-{start.date().isoformat()}" not in rs.events][:6]
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "lockout_days": int(rd["lockout_days"]),
                         "opened": bool(fo and fo <= now), "first_open": reg.local(fo, "%a %d %b %Y %H:%M") if fo else None,
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "upcoming": upcoming})
@@ -294,11 +386,17 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         ev = rs.events.get(key)
         if not ev or ev.state in ("done", "cancelled"):
             raise HTTPException(404, "that run is closed")
-        return rs, ev, (reg.config.team(ev.team) or {"key": ev.team, "size": 20})
+        return rs, ev, (rc.run_team(reg, ev))
+
+    def solver_text(e: Exception) -> str:
+        """A RuntimeError from the solver as one sentence an officer can act on (H2)."""
+        fn = getattr(rc, "solver_error_text", None)
+        s = fn(e) if fn else ("no roster satisfies the rules: check the raid's tank/healer minimums against who joined, pins that overfill a group, and keep-apart pairs" if ("INFEASIBLE" in str(e) or "no roster found" in str(e)) else f"the solver failed: {e}")
+        return s[:1].upper() + s[1:]
 
     def board_reply(reg, ev):
-        t = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-        rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], int(t.get("size") or 20))
+        t = rc.run_team(reg, ev)
+        rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], rc.run_size(reg, ev))
         return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else []), "needs": rc.needs(reg, ev, t)}
 
     @app.post("/api/run/{key}/layout")
@@ -326,14 +424,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if ev.state != "open":
             return JSONResponse({"error": "already locked"}, status_code=400)
         strategy = d.get("strategy") or ev.split_strategy or v.reg.raid_def(ev.instance)["split_policy"]
-        from ..registry import SPLIT_POLICIES
-
         if strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
-        try:
-            layout, rosters = await asyncio.to_thread(rc.split_preview, v.reg, rs, ev, strategy, d.get("avoid") or None)
-        except Exception as e:  # noqa: BLE001
-            return JSONResponse({"error": f"solver: {e}"}, status_code=400)
+        avoid = d.get("avoid") if isinstance(d.get("avoid"), list) else None
+        async with solving(key):
+            try:
+                layout, rosters = await asyncio.to_thread(rc.split_preview, v.reg, rs, ev, strategy, avoid or None)
+            except RuntimeError as e:
+                return JSONResponse({"error": solver_text(e)}, status_code=409)
+            except Exception as e:  # noqa: BLE001
+                return JSONResponse({"error": f"solver: {e}"}, status_code=400)
         syn = [r.synergy_value for r in rosters]
         return {"strategy": strategy, "layout": layout, "board": board_json(v.reg, ev, rosters, []), "synergy": syn, "total": sum(syn), "gap": (max(syn) - min(syn)) if syn else 0}
 
@@ -342,13 +442,13 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         """Remember the split philosophy on the run (Auto-fill and the scheduled lock use it)."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        from ..registry import SPLIT_POLICIES
-
-        if d.get("strategy") not in SPLIT_POLICIES:
+        b = parse(d, StrategyBody)
+        if b.strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": "unknown strategy"}, status_code=400)
-        ev.split_strategy = d["strategy"]
-        rs.save(ev, f"split strategy {d['strategy']}")
-        return {"message": f"split strategy: {d['strategy']}"}
+        async with solving(key):
+            ev.split_strategy = b.strategy
+            rs.save(ev, f"split strategy {b.strategy}")
+        return {"message": f"split strategy: {b.strategy}"}
 
     @app.post("/api/run/{key}/autofill")
     async def run_autofill(request: Request, key: str):
@@ -356,13 +456,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
             return JSONResponse({"error": "already locked — move people on the board instead"}, status_code=400)
-        try:
-            layout = await asyncio.to_thread(rc.autofill, v.reg, rs, ev)
-        except Exception as e:  # noqa: BLE001
-            return JSONResponse({"error": f"solver: {e}"}, status_code=400)
-        ev.layout = layout
-        ev.log.append(f"{v.name}: auto-filled the board")
-        rs.save(ev, "board auto-filled")
+        async with solving(key):
+            try:
+                layout = await asyncio.to_thread(rc.autofill, v.reg, rs, ev)
+            except RuntimeError as e:
+                return JSONResponse({"error": solver_text(e)}, status_code=409)
+            except Exception as e:  # noqa: BLE001
+                return JSONResponse({"error": f"solver: {e}"}, status_code=400)
+            ev.layout = layout
+            ev.log.append(f"{v.name}: auto-filled the board")
+            rs.save(ev, "board auto-filled")
         return board_reply(v.reg, ev)
 
     @app.post("/api/run/{key}/pin")
@@ -387,7 +490,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         """Officer sets someone's answer (join / bench / out) or swaps their character."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        m = v.reg.members.get(int(d.get("uid") or 0))
+        m = v.reg.members.get(as_int(d.get("uid"), "uid"))
         status = d.get("status")
         if not m or status not in rc.STATUSES:
             return JSONResponse({"error": "unknown member or status"}, status_code=400)
@@ -400,7 +503,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return JSONResponse({"error": str(e)}, status_code=400)
         if ev.state != "open" and status == "in" and not ev.seat_of(m.display_name):
             rc.seat_player(v.reg, ev, s)
-            rs.save(ev, f"{m.display_name} seated by {v.name}")
+            rs.save(ev, f"{m.display_name} rostered by {v.name}")
         await bot.refresh_sheet(v.reg, ev)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {ev.key} {m.display_name} {status} as {s.character}")
         return {"message": f"{m.display_name}: {s.character} {rc.LABELS[status]}"}
@@ -411,16 +514,37 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
             return JSONResponse({"error": "already locked"}, status_code=400)
-        line = await bot.lock_run(v.reg, rs, ev, by=v.name)
+        async with solving(key):
+            try:
+                line = await bot.lock_run(v.reg, rs, ev, by=v.name)
+            except RuntimeError as e:  # lock_run catches the solver itself; this is the belt to its braces
+                return JSONResponse({"error": solver_text(e)}, status_code=409)
         if ev.lock_error:
-            return JSONResponse({"error": line}, status_code=409)
+            return JSONResponse({"error": solver_text(RuntimeError(ev.lock_error))}, status_code=409)
         await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
         return {"message": line}
+
+    def ask_json(reg, a) -> dict:
+        found = reg.find(a.character)
+        return {"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "cls": found[1].cls if found else None, "role": a.role, "reason": a.reason, "pair": a.pair}
+
+    @app.post("/api/run/{key}/fill/preview")
+    async def run_fill_preview(request: Request, key: str):
+        """What Fill seats would send, without sending: the shortfall, who is still being waited on, and the next batch (D2)."""
+        v, _ = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        if ev.state == "open":
+            return JSONResponse({"error": "the fill engine works after lock — before that, shape the board"}, status_code=400)
+        nd = rc.needs(v.reg, ev, t)
+        batch = await asyncio.to_thread(rc.fill_batch, v.reg, rs, ev, t) if (nd["headcount"] or nd["roles"]) else []
+        return {"short": nd, "waiting": [a.display_name for a in ev.fill_asks if a.open], "batch": [ask_json(v.reg, a) for a in batch]}
 
     @app.post("/api/run/{key}/fill")
     async def run_fill(request: Request, key: str):
         v, _ = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
+        if ev.state == "open":
+            return JSONResponse({"error": "the fill engine works after lock — before that, shape the board"}, status_code=400)
         sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name)
         if sent:
             await bot.post_run_update(v.reg, ev, "🧩 " + "\n🧩 ".join(dr.ask_line(v.reg, bot.ico, a) for a in sent))
@@ -430,12 +554,13 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def run_cancel(request: Request, key: str):
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
+        label = f"{v.reg.raid_def(ev.instance).get('name', ev.instance)} · {t12(v.reg, ev.starts_at)}"
         ev.state = "cancelled"
         ev.log.append(f"cancelled by {v.name}: {d.get('reason') or ''}")
         rs.save(ev, "cancelled")
         await bot.refresh_sheet(v.reg, ev)
         await bot.ops.emit(v.reg.config, "warn", f"[web] {v.name} cancelled {ev.key}")
-        return {"message": f"cancelled {ev.key}"}
+        return {"message": f"cancelled {label} — rostered members are not told automatically; say so in the channel"}
 
     @app.post("/api/raid/{rid}/open")
     async def raid_open(request: Request, rid: str):
@@ -450,7 +575,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             if when:
                 start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=ZoneInfo(reg.config.timezone))
             else:
-                nxt = rc.slot_starts(reg, rid, now, 24 * 21)
+                nxt = rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS)
                 if not nxt:
                     return JSONResponse({"error": "no slots configured for this raid (or none before it opens) — pass a date and time"}, status_code=400)
                 start = nxt[0][1]
@@ -466,7 +591,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/admin/confirm")
     async def admin_confirm(request: Request):
-        return await run(request, lambda v, d: f"confirmed {v.reg.confirm(d['label'], v.name)[1].label}", officer=True)
+        return await run(request, lambda v, d: f"confirmed {v.reg.confirm(parse(d, LabelBody).label, v.name)[1].label}", officer=True)
 
     # ---- raids: rules per raid (officers read, owner edits)
     @app.get("/api/raids")
@@ -482,21 +607,18 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
                         "slots": list(eff["slots"]), "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
-                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
+                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "autofill": bool(eff.get("autofill", True)), "open_dm": bool(eff.get("open_dm", False)), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local(ws, "%a %d %b %H:%M"), reg.local(we, "%a %d %b %H:%M")], "live": sum(1 for e in rs.live() if e.instance == rid)})
-        from ..registry import SPLIT_POLICIES
-
         return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES)}
 
     @app.post("/api/admin/raid")
     async def admin_raid(request: Request):
         def go(v, d):
-            if not v.owner:
-                raise ValueError("Owner only.")
-            inst = d["instance"]
+            need_owner(v)
+            inst = parse(d, InstanceBody).instance
             cur, done = v.reg.raid_def(inst), []
             if "slots" in d:
                 want = d["slots"] if isinstance(d["slots"], list) else str(d["slots"])
@@ -504,14 +626,14 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
                 if parse_slots(want) != list(cur["slots"]):
                     done.append(v.reg.set_raid_override(inst, "slots", want, v.name))
-            for f in RAID_HOURS_FIELDS + ("lockout_days", "duration_hours", "notes", "split_policy"):
+            for f in RAID_HOURS_FIELDS + RAID_BOOL_FIELDS + ("lockout_days", "duration_hours", "notes", "split_policy"):
                 val = d.get(f)
                 if val not in (None, "") and str(val) != str(cur.get(f, "")):
                     done.append(v.reg.set_raid_override(inst, f, str(val), v.name))
             if "nudge" in d and d["nudge"] is not None and bool(d["nudge"]) != bool(cur.get("nudge", True)):
                 done.append(v.reg.set_raid_override(inst, "nudge", "true" if d["nudge"] else "false", v.name))
             for k, val in (d.get("weights") or {}).items():
-                if k in RAID_WEIGHT_DEFAULTS and val not in (None, "") and int(val) != int(cur["weights"].get(k, 0)):
+                if k in RAID_WEIGHT_DEFAULTS and val not in (None, "") and as_int(val, f"weight {k}") != int(cur["weights"].get(k, 0)):
                     done.append(v.reg.set_raid_override(inst, f"weight_{k}", str(val), v.name))
             fo = d.get("first_open") or ""
             cur_fo = v.reg.first_open(inst)
@@ -528,9 +650,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     @app.post("/api/admin/raid/reset")
     async def admin_raid_reset(request: Request):
         def go(v, d):
-            if not v.owner:
-                raise ValueError("Owner only.")
-            return v.reg.clear_raid_override(d["instance"], v.name)
+            need_owner(v)
+            return v.reg.clear_raid_override(parse(d, InstanceBody).instance, v.name)
         return await run(request, go, officer=True)
 
     # ---- auras: the buff matrix with the guild's learned facts (owner edits; officers read)
@@ -558,9 +679,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def admin_aura(request: Request):
         """One buff: any of scope / family / strength / status / note (only fields present in the body change)."""
         def go(v, d):
-            if not v.owner:
-                raise ValueError("Owner only.")
-            bid, done = d["id"], []
+            need_owner(v)
+            bid, done = parse(d, IdBody).id, []
             cur = v.reg.buff(bid)
             for f in ("scope", "family", "strength", "status", "note"):
                 if f in d and d[f] is not None and str(d[f]) != str(getattr(cur, "family_id" if f == "family" else f)):
@@ -572,15 +692,19 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def admin_family(request: Request):
         """One family: name / status / note / value (whole beneficiary map)."""
         def go(v, d):
-            if not v.owner:
-                raise ValueError("Owner only.")
-            fid, done = d["id"], []
+            need_owner(v)
+            fid, done = parse(d, IdBody).id, []
             cur = v.reg.profile.families.get(fid)
             for f in ("name", "status", "note"):
                 if f in d and d[f] is not None and (cur is None or str(d[f]) != str(getattr(cur, f))):
                     done.append(v.reg.set_family_override(fid, f, d[f], v.name))
             if "value" in d and d["value"] is not None:
-                want = {k: float(x) for k, x in d["value"].items() if x not in (None, "")}
+                if not isinstance(d["value"], dict):
+                    raise HTTPException(400, "value must be a map of beneficiary → number")
+                try:
+                    want = {k: float(x) for k, x in d["value"].items() if x not in (None, "")}
+                except (TypeError, ValueError):
+                    raise HTTPException(400, "value entries must be numbers")
                 if cur is None or want != {k: float(x) for k, x in cur.value.items()}:
                     done.append(v.reg.set_family_override(fid, "value", want, v.name))
             return "; ".join(done) or f"{fid}: no changes"
@@ -589,8 +713,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     @app.post("/api/admin/aura/reset")
     async def admin_aura_reset(request: Request):
         def go(v, d):
-            if not v.owner:
-                raise ValueError("Owner only.")
+            need_owner(v)
             return v.reg.clear_aura_overrides(v.name, d.get("id") or None)
         return await run(request, go, officer=True)
 
@@ -602,6 +725,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         ms = sorted(reg.members.values(), key=lambda m: m.display_name.lower())
         privs = await asyncio.gather(*(privilege(reg, m.discord_id) if not m.test else asyncio.sleep(0, "test") for m in ms))
         today = reg.now_local().date().isoformat()
+        rs = bot.raids.store(reg)
         rows = []
         for m, p in zip(ms, privs):
             chars = sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))
@@ -609,7 +733,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 continue
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else p,
                          "characters": [char_json(reg, c) for c in chars], "absences": [absence_json(a) for a in m.upcoming_absences(today)],
-                         "asks": [{"roster": a["roster"], "answer": a.get("answer")} for a in m.placement_asks[-3:] if a.get("answer") is None]})
+                         "asks": [{"roster": a["roster"], "answer": a.get("answer"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-3:] if a.get("answer") is None]})
         return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone}
 
     @app.post("/api/members/save")
@@ -618,7 +742,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         def go(v, d):
             reg, done = v.reg, []
             for row in d.get("rows") or []:
-                uid = int(row["uid"])
+                if not isinstance(row, dict):
+                    raise HTTPException(400, "rows must be objects")
+                uid = as_int(row.get("uid"), "uid")
                 m = reg.members.get(uid)
                 if not m:
                     continue
@@ -659,7 +785,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def members_absence(request: Request):
         """Officer records an absence for someone (same ripple as the member doing it)."""
         v, d = await body(request, officer=True)
-        m0 = v.reg.members.get(int(d.get("uid") or 0))
+        m0 = v.reg.members.get(as_int(d.get("uid"), "uid"))
         if not m0:
             return JSONResponse({"error": "unknown member"}, status_code=400)
         try:
@@ -671,7 +797,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/members/absence/clear")
     async def members_absence_clear(request: Request):
-        return await run(request, lambda v, d: (v.reg.clear_absence(int(d["uid"]), d["start"]) and f"cleared absence {d['start']}"), officer=True)
+        def go(v, d):
+            b = parse(d, UidStartBody)
+            v.reg.clear_absence(b.uid, b.start)
+            return f"cleared absence {b.start}"
+        return await run(request, go, officer=True)
 
     # ---- ops, config (read-only)
     @app.get("/api/ops")
@@ -680,8 +810,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         st, prov, feed = bot.registries.store, bot.ctx.provider, getattr(bot, "feed", None)
         precedents = st.read_jsonl(Path(v.reg.key) / "precedents.jsonl")[-50:]
         ledger = st.read_jsonl(Path(v.reg.key) / "ledger.jsonl")[-100:]
+        started = float(getattr(bot, "started_at", STARTED))
         return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed.status() if feed else "disabled",
-                "up": int(time.time() - bot.started_at) if hasattr(bot, "started_at") else 0,
+                "up": int(time.time() - started), "started_at": started,
                 "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent)],
                 "precedents": list(reversed(precedents)), "ledger": list(reversed(ledger))}
 
@@ -707,12 +838,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def admin_config(request: Request):
         """Owner: one setting at a time — channel:<kind> (channel id or null), timezone, ask_audience, about, officer_roles (list)."""
         v, d = await body(request, officer=True)
-        if not v.owner:
-            return JSONResponse({"error": "Owner only."}, status_code=403)
+        need_owner(v)
         field, value = d.get("field") or "", d.get("value")
         try:
             if field.startswith("channel:"):
-                msg = await bot.set_channel(v.reg, field[8:], int(value) if value else None, v.name)
+                msg = await bot.set_channel(v.reg, field[8:], as_int(value, "channel id") if value else None, v.name)
             elif field == "officer_roles":
                 roles = [str(r) for r in (value or []) if str(r).strip()]
                 v.reg.config.officer_roles = sorted(set(roles))
@@ -721,7 +851,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             elif field in ("timezone", "ask_audience", "about"):
                 from .. import configops
 
-                msg = await asyncio.to_thread(configops.apply, v.reg, configops.ConfigOp(op="set", path=field, value=str(value or "")), v.name, True)
+                msg = await configops.apply_async(v.reg, configops.ConfigOp(op="set", path=field, value=str(value or "")), v.name, True, bot=bot)
             else:
                 return JSONResponse({"error": f"unknown setting {field}"}, status_code=400)
         except (RegistryError, ValueError) as e:

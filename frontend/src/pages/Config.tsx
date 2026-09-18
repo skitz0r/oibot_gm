@@ -14,7 +14,7 @@ const CHANNELS: { kind: string; label: string; hint: string }[] = [
   { kind: "registration", label: "Registration", hint: "public, read-only: the registration card with its buttons" },
   { kind: "signup", label: "Signups", hint: "public: one sheet per run (Join / Bench / No thanks)" },
   { kind: "absences", label: "Absences", hint: "public: the I'll be away card; one line per absence" },
-  { kind: "roster", label: "Roster (officers)", hint: "health cards, lock cards, fill progress, puppet DMs during tests" },
+  { kind: "roster", label: "Roster (officers)", hint: "health cards, lock cards, fill progress" },
   { kind: "analytics", label: "Analytics (officers)", hint: "character bank, readiness, groups and desired comp cards + change log" },
   { kind: "applications", label: "Applications (officers)", hint: "review cards for /apply (defaults to ops)" },
   { kind: "ops", label: "Ops (officers)", hint: "one line per action the bot takes; plain-text config by @mention" },
@@ -64,7 +64,7 @@ export function ConfigPage() {
       <Card>
         <CardHeader title="Test bench" hint="rehearse the whole cycle in Discord with puppet members" action={data.test_bench.members > 0 ? <Badge color="yellow" variant="light">{data.test_bench.members} test members · {data.test_bench.runs.length} test run{data.test_bench.runs.length === 1 ? "" : "s"}</Badge> : <Badge color="gray" variant="outline">idle</Badge>} />
         <Box p="md">
-          <Text size="sm">In Discord: <Code>/gm test seed count:20</Code>, then <Code>/gm test run raid:barrow_deeps start_in:40 lock_in:25 confirm_in:15</Code>, then <Code>/gm test answer join:16 bench:3 out:1</Code>. Sign up yourself on the sheet too. The puppets' DMs appear in the roster channel with the real buttons; officers press them on their behalf. Lock, drag the board and propose splits here. <Code>/gm test clear</Code> removes everything.</Text>
+          <Text size="sm">In Discord: <Code>/gm test seed count:20</Code>, then <Code>/gm test run raid:barrow_deeps start_in:40 lock_in:25 confirm_in:15</Code>, then <Code>/gm test answer join:16 bench:3 out:1</Code>. Sign up yourself on the sheet too. The puppets' DMs (confirmations, fill asks) arrive in your own DMs with the real buttons, addressed per puppet; officers can also answer for them with <Code>/gm test answer</Code>. Lock, drag the board and propose splits here. <Code>/gm test clear</Code> removes everything.</Text>
           {data.test_bench.members > 0 && <Text size="xs" c="dimmed" mt="xs">While test members exist the analytics cards don't re-post.</Text>}
         </Box>
       </Card>

@@ -184,16 +184,26 @@ def create_app(bot) -> FastAPI:
             return f"/img/icon/{name}.jpg"
         return f"/img/{kind}/{key}.png" if kind in ("class", "role") else "/img/role/melee.png"
 
+    icon_miss: dict[str, float] = {}  # names the CDN answered 404 for → when that answer expires (1 h): scanners can't drive upstream fetches
+    ICON_MISS_TTL = 3600
+
     @app.get("/img/icon/{name}.jpg")
     async def cdn_icon(name: str):
         if not re.fullmatch(r"[a-z0-9_]{3,64}", name):
             raise HTTPException(404)
         f = ICON_DIR / f"{name}.jpg"
         if not f.exists():
+            now = time.time()
+            if icon_miss.get(name, 0) > now:
+                raise HTTPException(404)
             try:
                 async with httpx.AsyncClient(timeout=10) as hc:
                     r = await hc.get(ICON_CDN.format(name=name))
                 if r.status_code != 200 or not r.headers.get("content-type", "").startswith("image/"):
+                    if len(icon_miss) > 2000:  # keep the negative cache bounded; drop what has expired
+                        for k in [k for k, t in icon_miss.items() if t <= now]:
+                            icon_miss.pop(k, None)
+                    icon_miss[name] = now + ICON_MISS_TTL
                     raise HTTPException(404)
                 f.write_bytes(r.content)
             except httpx.HTTPError:

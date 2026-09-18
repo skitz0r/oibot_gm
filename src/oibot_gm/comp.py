@@ -10,12 +10,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .constants import ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import Member, Registry, RegisteredCharacter
+from .registry import Registry
 from .roster import coverage as cov_mod, solver
 
-ROLES = ("tank", "healer", "melee", "ranged")
+def roster_size(reg: Registry, roster: dict) -> int:
+    """A roster dict's size: its own, else its raid's, else the game's default raid size."""
+    return int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or reg.profile.comp_rules["raid_size"])
 
 
 # ---------------------------------------------------------------- pool → players → groups
@@ -115,7 +118,7 @@ def players_from_seats(reg: Registry, seats: list[dict]) -> list[Player]:
 
 def groups_for(reg: Registry, players: list[Player], roster: dict, time_limit_s: float = 6.0) -> tuple[RosterResult | None, cov_mod.Coverage | None, list[str]]:
     """Groups for a fixed set of players at the roster's size (everyone selected), seeded by archetype."""
-    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or reg.profile.comp_rules["raid_size"])
+    size = roster_size(reg, roster)
     n_groups = max(1, -(-size // reg.profile.comp_rules["group_size"]))
     labels = archetype_groups(n_groups, roster.get("comp_groups"))
     if not players:
@@ -177,7 +180,7 @@ def optimize(reg: Registry, roster: dict, time_limit_s: float = 6.0) -> tuple[li
     tanks and healers together, melee with the Enhancement shaman, hunters, casters. Seeds are soft;
     buff synergy can still move someone. Returns (players, result, coverage, group labels)."""
     players = pool_players(reg)
-    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or reg.profile.comp_rules["raid_size"])
+    size = roster_size(reg, roster)
     n_groups = max(1, -(-size // reg.profile.comp_rules["group_size"]))
     labels = archetype_groups(n_groups, roster.get("comp_groups"))
     if not players:

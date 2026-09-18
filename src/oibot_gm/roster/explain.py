@@ -5,12 +5,24 @@ Advisories are one-liners prefixed with a level dot (🔴/🟡/🟢) so cards an
 tables can render them as rows; the long explanations go to `details`."""
 from __future__ import annotations
 
+from ..constants import RANK_ORDER
 from ..models import Player, RosterResult
 from ..profiles import GameProfile
 from .solver import SolveOptions, solve
 
+# bench what-ifs re-solve the whole model once per benched player: keep the total bounded
+WHATIF_MAX_BENCH = 3  # only the highest-ranked / earliest-signed benched players get a number
+WHATIF_TIME_LIMIT_S = 2.0  # per re-solve
+WHATIF_MAX_ROSTERS = 3  # skip entirely for bigger splits …
+WHATIF_MAX_PLAYERS = 30  # … or bigger sheets
 
-def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: RosterResult, whatif: bool = True) -> RosterResult:
+
+def whatif_allowed(n_rosters: int, n_players: int) -> bool:
+    return n_rosters <= WHATIF_MAX_ROSTERS and n_players <= WHATIF_MAX_PLAYERS
+
+
+def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: RosterResult, whatif: bool = True,
+             whatif_limit: int = WHATIF_MAX_BENCH, whatif_time_s: float = WHATIF_TIME_LIMIT_S) -> RosterResult:
     raid = profile.raids[raid_id]
     adv: list[str] = []
     details: list[str] = []
@@ -34,17 +46,15 @@ def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: 
     alts = [p for p in result.selected if p.attendance_family and p.character != p.attendance_family]
     if alts:
         adv.append("🟢 On an alt · " + ", ".join(f"{p.signup_name} ({p.character}, main {p.attendance_family})" for p in alts[:4]))
-    tent = [p for p in result.selected if p.note == "tentative"]
-    if tent:
-        adv.append(f"🟡 Tentative in roster ×{len(tent)} · " + ", ".join(p.signup_name for p in tent[:5]))
     if result.spec_switches:
         adv.append("🟡 Offspec to fill roles · " + ", ".join(f"{n} → {s}" for n, s in result.spec_switches.items()))
         details.append("Offspec switches satisfy role minimums the signed specs couldn't; each costs a small objective penalty so they're only used when needed.")
 
     whatif_map: dict[str, int] = {}
-    for p in (result.benched if whatif else []):
+    candidates = sorted(result.benched, key=lambda p: (RANK_ORDER.get(p.rank, 9), p.pos))[:max(0, whatif_limit)] if whatif else []
+    for p in candidates:
         try:
-            alt = solve(profile, players, raid_id, SolveOptions(force_in=(p.signup_name,), time_limit_s=8))
+            alt = solve(profile, players, raid_id, SolveOptions(force_in=(p.signup_name,), time_limit_s=whatif_time_s))
             whatif_map[p.signup_name] = alt.objective - result.objective
         except RuntimeError:
             whatif_map[p.signup_name] = -9999

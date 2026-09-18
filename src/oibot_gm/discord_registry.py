@@ -66,7 +66,7 @@ def is_owner(interaction: discord.Interaction, reg: Registry) -> bool:
     return reg.config.owner_discord_id is not None and interaction.user.id == reg.config.owner_discord_id
 
 
-ROLES = ("tank", "healer", "melee", "ranged")
+from .constants import ROLES, TEAL  # noqa: E402
 ROLE_CHOICES = [app_commands.Choice(name=r, value=r) for r in ROLES]
 
 
@@ -80,59 +80,6 @@ def char_line(ico, c) -> str:
     if not c.confirmed_by and c.status != "planned":
         flags.append("unconfirmed")
     return f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · _{', '.join(flags)}_"
-
-
-class PlanButton(discord.ui.DynamicItem[discord.ui.Button], template=r"plan:(?P<cls>[A-Za-z]+)"):
-    """Poll button: pick a class → ephemeral spec select → role select. Survives restarts."""
-
-    def __init__(self, cls: str, ico=None):
-        emoji = None
-        if ico:
-            raw = ico("class", cls)
-            try:
-                emoji = discord.PartialEmoji.from_str(raw) if raw else None
-            except Exception:  # noqa: BLE001
-                emoji = None
-        super().__init__(discord.ui.Button(label=cls, style=discord.ButtonStyle.secondary, custom_id=f"plan:{cls}", emoji=emoji))
-        self.cls = cls
-
-    @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match, /):
-        return cls(match["cls"])
-
-    async def callback(self, interaction: discord.Interaction):
-        bot = interaction.client
-        reg = bot.registries.for_interaction(interaction)
-        if not reg:
-            await interaction.response.send_message("Not configured here.", ephemeral=True)
-            return
-        specs = list(reg.profile.classes.get(self.cls, {}))
-        view = discord.ui.View(timeout=300)
-        spec_sel = discord.ui.Select(placeholder=f"{self.cls}: which spec?", options=[discord.SelectOption(label=s, value=s, description=reg.profile.spec(self.cls, s).role) for s in specs])
-        role_sel = discord.ui.Select(placeholder="Roles you're happy to play (first = primary)", min_values=1, max_values=4, options=[discord.SelectOption(label=r, value=r) for r in ROLES])
-        state: dict = {}
-
-        async def on_spec(i: discord.Interaction):
-            state["spec"] = spec_sel.values[0]
-            await i.response.defer()
-
-        async def on_roles(i: discord.Interaction):
-            spec = state.get("spec") or specs[0]
-            roles = list(role_sel.values)
-            primary = reg.profile.spec(self.cls, spec).role if reg.profile.spec(self.cls, spec).role in roles else roles[0]
-            try:
-                m, c = reg.set_plan(i.user.id, i.user.display_name, self.cls, spec, None, "main")
-                reg.set_roles(i.user.id, i.user.display_name, primary, [r for r in roles if r != primary])
-            except RegistryError as e:
-                await i.response.send_message(f"❌ {e}", ephemeral=True)
-                return
-            await i.response.edit_message(content=f"✅ Planned main **{self.cls} {spec}**, roles: {primary}" + (f" (+{', '.join(r for r in roles if r != primary)})" if len(roles) > 1 else "") + ". Change any time with `/plan …`.", view=None)
-            await bot.ops.emit(reg.config, "info", f"{m.display_name} plans to main {self.cls} {spec} · roles {roles}")
-
-        spec_sel.callback, role_sel.callback = on_spec, on_roles
-        view.add_item(spec_sel)
-        view.add_item(role_sel)
-        await interaction.response.send_message(f"**{self.cls}** — pick the spec, then the roles you'd play (the first one you pick is your primary):", view=view, ephemeral=True)
 
 
 class NameModal(discord.ui.Modal):
@@ -247,8 +194,8 @@ def _emoji(raw: str):
 
 
 def registration_card(reg: Registry) -> discord.Embed:
-    e = discord.Embed(title=f"{reg.config.name} · character registration", colour=0x2B7A78,
-                      description="**Register / plan my main** — class, spec, roles, and your character's name if it exists (leave it blank before launch).\n"
+    e = discord.Embed(title=f"{reg.config.name} · character registration", colour=TEAL,
+                      description="**Register / plan my main** — class, spec, optional offspec, and the name if the character exists (leave it blank before launch; your role follows the spec).\n"
                                   "**Add an alt** — same flow for an alt.\n**My status** — what the bot has for you.\n\n"
                                   "Keyboard route: `/me plan …`, `/me char …`, `/me view`. Away for a while? `/me absent add` or the card in the absences channel.")
     e.set_footer(text="Your Discord account is your identity; character names can be added later with /me char name.")
@@ -369,7 +316,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.response.send_message(f"✅ Planned main: {char_line(ico, c)}. Set your role preferences with `/me plan roles` (or the poll buttons).", ephemeral=True)
+        await interaction.response.send_message(f"✅ Planned main: {char_line(ico, c)}. Your role follows the spec; extra roles you'd play: `/me plan roles`.", ephemeral=True)
         await ops.emit(reg.config, "info", f"{m.display_name} plans to main {c.cls} {c.spec}")
 
     @plan.command(name="alt", description="What you plan to play as an alt")
@@ -395,9 +342,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not reg:
             return
         flex = [f.value for f in (flex1, flex2, flex3) if f]
-        m = reg.set_roles(interaction.user.id, interaction.user.display_name, primary.value, flex)
-        await interaction.response.send_message(f"✅ Roles: **{primary.value}**" + (f", also {', '.join(m.role_prefs['flex'])}" if m.role_prefs["flex"] else ""), ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} roles: {primary.value}" + (f" (+{', '.join(m.role_prefs['flex'])})" if m.role_prefs["flex"] else ""))
+        try:
+            m = reg.set_roles(interaction.user.id, interaction.user.display_name, primary.value, flex)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        main_role, flex_now = reg.roles_of(m)  # primary always follows the main's spec; the rest is flex on the main
+        await interaction.response.send_message(f"✅ Roles: **{main_role or primary.value}**" + (f", also {', '.join(flex_now)}" if flex_now else ""), ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} roles: {main_role or primary.value}" + (f" (+{', '.join(flex_now)})" if flex_now else ""))
 
 
     # ---------------- /char
@@ -478,7 +430,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message("\n".join(char_line(ico, c) for c in m.active()), ephemeral=True)
 
 
-    # ---------------- /availability, /me absent, /me
+    # ---------------- /me absent, /me
     async def roster_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
         return [app_commands.Choice(name=t, value=t) for t in (reg.config.roster_keys() if reg else []) if current.lower() in t.lower()][:25]
@@ -528,11 +480,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     # ---------------- /apply (recruitment intake)
     def application_embed(reg: Registry, a) -> discord.Embed:
-        e = discord.Embed(title=f"Application · {a.name}", colour=0x2B7A78, description=f"{ico('class', a.cls)} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''} · from **{a.display_name}** (<@{a.discord_id}>)")
+        e = discord.Embed(title=f"Application · {a.name}", colour=TEAL, description=f"{ico('class', a.cls)} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''} · from **{a.display_name}** (<@{a.discord_id}>)")
         if a.logs_url:
             e.add_field(name="Logs", value=a.logs_url[:200], inline=False)
-        if a.availability:
-            e.add_field(name="Availability", value=a.availability[:300], inline=False)
+        if a.availability:  # the applicant's free-text raid times (Applicant field, not a member setting)
+            e.add_field(name="When they can raid", value=a.availability[:300], inline=False)
         if a.about:
             e.add_field(name="About", value=a.about[:600], inline=False)
         e.set_footer(text=f"status: {a.status}" + (f" · {a.decided_by}: {a.decision_note or ''}" if a.decided_by else " · officers: Accept / Decline below, or /roster applicant"))
@@ -597,16 +549,16 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_modal(DeclineModal(self.reg, self.discord_id))
 
     @tree.command(name="apply", description="Apply to join the guild")
-    @app_commands.describe(name="Character name", class_="Class", spec="Main spec", offspec="Offspec (optional)", logs="Warcraft Logs / armory link (optional)", availability="When you can raid (optional)", about="Anything else (optional)")
+    @app_commands.describe(name="Character name", class_="Class", spec="Main spec", offspec="Offspec (optional)", logs="Warcraft Logs / armory link (optional)", raid_times="When you can raid (optional)", about="Anything else (optional)")
     @app_commands.rename(class_="class")
     @app_commands.choices(class_=CLASS_CHOICES)
     @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def apply(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None, logs: str | None = None, availability: str | None = None, about: str | None = None):
+    async def apply(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None, logs: str | None = None, raid_times: str | None = None, about: str | None = None):
         reg = await need(interaction)
         if not reg:
             return
         try:
-            a = reg.apply(interaction.user.id, interaction.user.display_name, name, class_.value, spec, offspec, logs, availability, about)
+            a = reg.apply(interaction.user.id, interaction.user.display_name, name, class_.value, spec, offspec, logs, raid_times, about)
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
@@ -630,17 +582,17 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
             return
         today = reg.now_local().date().isoformat()
-        e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=0x2B7A78)
+        e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=TEAL)
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
         rosters = sorted({k for c in m.active() for k in c.rosters})
         if rosters:
             e.add_field(name="Rosters", value=", ".join(f"{k} ({next(c.label for c in m.active() if k in c.rosters)})" for k in rosters), inline=True)
         primary, flex = reg.roles_of(m)
         e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me plan roles` to add more", inline=True)
-        e.add_field(name="Availability", value=", ".join(f"{t}: {m.availability.get(t, 'unset')}" for t in reg.config.team_keys()), inline=True)
+        e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(f"{a.start}" + (f" → {a.end}" if a.end != a.start else "") for a in ups) or "none", inline=True)
-        e.set_footer(text="Attendance and loot history appear here once the raid ledger is live.")
+        e.set_footer(text="Sheets: answer each run in the signup channel (Join / Bench / No thanks). Attendance and loot history appear here once the raid ledger is live.")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     tree.add_command(me)
@@ -664,7 +616,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not chars:
             await interaction.response.send_message("Nobody has registered yet.", ephemeral=True)
             return
-        e = discord.Embed(title=f"{reg.config.name} · {len(chars)} characters · {len(reg.members)} members", colour=0x2B7A78)
+        e = discord.Embed(title=f"{reg.config.name} · {len(chars)} characters · {len(reg.members)} members", colour=TEAL)
         by_cls: dict[str, list[str]] = {}
         for m, c in chars:
             by_cls.setdefault(c.cls, []).append(f"{'★ ' if c.is_main else ''}{c.label} · {c.spec} · {c.rank}{' ⏳' if not c.confirmed_by else ''} · {m.display_name}")
@@ -723,19 +675,19 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {m.display_name}'s main → {c.label}")
 
     @roster.command(name="overview", description="Who is planning to play what: classes, roles, flexibility, buff coverage")
-    @app_commands.describe(size="raid size to check against (default: first team's size or 20)")
+    @app_commands.describe(size="raid size to check against (default: the first raid's size or 20)")
     async def roster_plan(interaction: discord.Interaction, size: int | None = None):
         reg = await need(interaction)
         if not reg:
             return
         s = reg.plan_summary()
         if not s["mains"]:
-            await interaction.response.send_message("Nobody has planned a main yet — post the poll with `/roster poll` or use `/me plan main`.", ephemeral=True)
+            await interaction.response.send_message("Nobody has planned a main yet — point people at the registration card (`/gm config registration-channel`) or `/me plan main`.", ephemeral=True)
             return
         team = reg.config.rosters[0] if reg.config.rosters else {}
         n = size or int(team.get("size") or reg.raid_def(team.get("instance")).get("size") or 20)
         bounds = reg.role_bounds(team.get("instance"), n)
-        e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=0x2B7A78)
+        e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=TEAL)
         for cls, lines in sorted(s["by_class"].items(), key=lambda kv: -len(kv[1])):
             e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
         role_lines = []
@@ -812,7 +764,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             role = reg.roles_of(m)[0] or reg.profile.spec(c.cls, c.spec).role
             by_role.setdefault(role, []).append(f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · {m.display_name}")
         cfg = reg.config.roster(key) or {}
-        e = discord.Embed(title=f"Roster {key} · {len(members)}/{cfg.get('size', '?')} · {cfg.get('schedule') or 'no schedule'}", colour=0x2B7A78)
+        e = discord.Embed(title=f"Roster {key} · {len(members)}/{cfg.get('size', '?')} · {cfg.get('schedule') or 'no schedule'}", colour=TEAL)
         for r in ROLES:
             if by_role.get(r):
                 e.add_field(name=f"{ico('role', r)} {r} ({len(by_role[r])})", value="\n".join(by_role[r])[:1000], inline=True)
@@ -927,36 +879,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"officer roles: {reg.config.officer_roles}")
         await interaction.response.send_message(f"✅ Officer roles: {', '.join(reg.config.officer_roles) or '(none; Manage Server only)'}", ephemeral=True)
         await ops.emit(reg.config, "warn", f"officer roles now {reg.config.officer_roles} (by {interaction.user.display_name})")
-
-    @config.command(name="roster", description="Owner: add/update a roster (size, schedule like 'Tue 19:30', instance, cutoffs)")
-    @app_commands.describe(key="short id, e.g. main", size="10 / 20 / 25 / 40", schedule="'Tue 19:30' in the guild's timezone", instance="raid from the game profile", soft_cutoff="hours before raid: health check + nudges", hard_cutoff="hours before raid: lock + propose", open_days="days before the raid to open the sheet")
-    @app_commands.autocomplete(instance=instance_autocomplete)
-    async def cfg_team(interaction: discord.Interaction, key: str, size: int = 20, schedule: str = "", instance: str | None = None, soft_cutoff: int = 48, hard_cutoff: int = 24, open_days: int = 6, open_dm: bool = False, autofill: bool = True, remove: bool = False):
-        reg = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        key = key.strip().lower()
-        if schedule:
-            from .raidcycle import parse_schedule
-
-            try:
-                parse_schedule(schedule)
-            except ValueError as e:
-                await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-                return
-        if instance and instance not in reg.profile.raids:
-            await interaction.response.send_message(f"❌ Unknown instance. Options: {', '.join(reg.profile.raids)}", ephemeral=True)
-            return
-        teams = [t for t in reg.config.raid_teams if t["key"] != key]
-        if not remove:
-            teams.append({"key": key, "name": key, "size": size, "schedule": schedule, "instance": instance, "cutoff_soft_hours": soft_cutoff, "cutoff_hard_hours": hard_cutoff, "open_days_before": open_days, "reminders": "dm", "open_dm": open_dm, "autofill": autofill})
-        reg.config.raid_teams = teams
-        reg.save_config(f"rosters: {[t['key'] for t in teams]}")
-        await interaction.response.send_message("✅ Rosters: " + (", ".join(f"{t['key']} ({t['size']}, {t['schedule'] or 'no schedule'}, lock {t.get('cutoff_hard_hours', 24)}h)" for t in teams) or "none (default 'main')"), ephemeral=True)
-        await ops.emit(reg.config, "info", f"rosters now {[t['key'] for t in teams]} (by {interaction.user.display_name})")
 
     @config.command(name="roster-channel", description="Owner: private channel for roster overviews, proposals and officer health cards")
     async def cfg_roster_channel(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -1083,8 +1005,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @config.command(name="raid", description="Owner: raid rules — slots, signup/lock/confirm hours, lockout, duration, comp, weights")
     @app_commands.autocomplete(raid=instance_autocomplete)
     @app_commands.choices(split_policy=[app_commands.Choice(name=x, value=x) for x in ("balanced", "first", "rotation")])
-    @app_commands.describe(slots="recurring run times, e.g. 'Tue 19:30, Thu 20:00' ('none' clears)", split_policy="how to split when more join than one run seats", signup_lead_hours="sheet opens this many hours before the slot", lock_hours_before="roster locks this many hours before", confirm_hours_before="unanswered confirmations expire this many hours before", fill_ask_hours="a fill DM with no answer counts as no after this many hours", weights="rank=3 main=2 sat_out=2 signup_order=1")
-    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, split_policy: app_commands.Choice[str] | None = None, nudge: bool | None = None, nudge_hours_before: float | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, fill_ask_hours: float | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
+    @app_commands.describe(slots="recurring run times, e.g. 'Tue 19:30, Thu 20:00' ('none' clears)", split_policy="how to split when more join than one run seats", signup_lead_hours="sheet opens this many hours before the slot", lock_hours_before="roster locks this many hours before", confirm_hours_before="unanswered confirmations expire this many hours before", fill_ask_hours="a fill DM with no answer counts as no after this many hours", autofill="ask replacements automatically after lock", open_dm="DM every raider when the sheet opens", weights="rank=3 main=2 sat_out=2 signup_order=1")
+    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, split_policy: app_commands.Choice[str] | None = None, nudge: bool | None = None, nudge_hours_before: float | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, fill_ask_hours: float | None = None, autofill: bool | None = None, open_dm: bool | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
         reg = await need(interaction)
         if not reg:
             return
@@ -1098,7 +1020,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 msg = []
                 if slots is not None:
                     msg.append(reg.set_raid_override(raid, "slots", "" if slots.strip().lower() in ("none", "clear", "-") else slots, interaction.user.display_name))
-                for field, val in (("split_policy", split_policy.value if split_policy else None), ("nudge", nudge), ("nudge_hours_before", nudge_hours_before), ("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("fill_ask_hours", fill_ask_hours), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
+                for field, val in (("split_policy", split_policy.value if split_policy else None), ("nudge", nudge), ("nudge_hours_before", nudge_hours_before), ("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("fill_ask_hours", fill_ask_hours), ("autofill", autofill), ("open_dm", open_dm), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
                     if val is not None:
                         msg.append(reg.set_raid_override(raid, field, val, interaction.user.display_name))
                 for part in (weights or "").replace(",", " ").split():
@@ -1175,18 +1097,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             pass
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} posted the registration card in #{getattr(interaction.channel, 'name', '?')}")
 
-    @roster.command(name="poll", description="Officer: post the 'what are you planning to play?' poll with class buttons")
-    async def gm_plan_poll(interaction: discord.Interaction):
-        reg = await officer(interaction)
-        if not reg:
-            return
-        e = discord.Embed(title="What are you planning to play?", colour=0x2B7A78, description="Pick your **main's class** below, then the spec and your role preferences. No character name needed — that comes at launch (`/me char name`). Alts and changes: `/plan alt`, `/me plan main`, `/me plan roles`. See where the guild stands with `/roster overview`.")
-        view = discord.ui.View(timeout=None)
-        for cls in ("Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid"):
-            view.add_item(PlanButton(cls, ico))
-        await interaction.response.send_message(embed=e, view=view)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} posted the plan poll")
-
     @gm.command(name="status", description="Bot health: data repo, registry, spend, recent ops")
     async def gm_status(interaction: discord.Interaction):
         reg = await officer(interaction)
@@ -1196,7 +1106,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         up = int(time.time() - STARTED)
         provider = getattr(interaction.client, "ctx", None) and interaction.client.ctx.provider
         chars = reg.all_characters()
-        e = discord.Embed(title=f"oibot_GM status · {reg.config.name}", colour=0x2B7A78)
+        e = discord.Embed(title=f"oibot_GM status · {reg.config.name}", colour=TEAL)
         e.add_field(name="Bot", value=f"up {up // 3600}h{(up % 3600) // 60}m · profile {reg.profile.name}", inline=True)
         e.add_field(name="Data repo", value=f"{st.root.name} @ {st.head()} · push {'on' if st.push_enabled else 'off'}", inline=True)
         e.add_field(name="Registry", value=f"{len(reg.members)} members · {len(chars)} characters · {len(reg.pending())} unconfirmed", inline=True)
@@ -1233,7 +1143,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @test.command(name="run", description="Officer: open a compressed test run now (minutes until start, lock and confirm deadlines in minutes)")
     @app_commands.autocomplete(raid=instance_autocomplete)
-    @app_commands.describe(start_in="minutes until the run starts", lock_in="minutes before start the roster locks", confirm_in="minutes before start confirmations expire", nudge_in="minutes before start the nudge goes out", dm_open="DM everyone (puppets in the roster channel) when the sheet opens")
+    @app_commands.describe(start_in="minutes until the run starts", lock_in="minutes before start the roster locks", confirm_in="minutes before start confirmations expire", nudge_in="minutes before start the nudge goes out", dm_open="DM everyone when the sheet opens (the puppets' DMs come to you)")
     async def test_run(interaction: discord.Interaction, raid: str, start_in: int = 40, lock_in: int = 25, confirm_in: int = 15, nudge_in: int = 32, dm_open: bool = False):
         reg = await officer(interaction)
         if not reg:

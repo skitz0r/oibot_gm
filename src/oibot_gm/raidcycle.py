@@ -5,25 +5,33 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import Member, Registry, RegisteredCharacter, now
+from .registry import DEFAULT_RAID_SIZE, RAID_DEFAULTS, Member, Registry, RegisteredCharacter, now
 from .roster import explain, solver
 from .store import GitStore
 
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 STATUSES = ("in", "sub", "out")  # Join / Bench / No thanks (legacy "tentative" is read as "in")
 LABELS = {"in": "Join", "sub": "Bench", "out": "No thanks"}
+STATES = ("open", "locked", "done", "cancelled")
+LEGACY_STATES = {"proposed": "locked", "accepted": "locked"}  # pre-2026-09 files
 MAX_ROSTERS_PER_SLOT = 4
 TEAM_DEFAULTS = {"cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm", "open_dm": False, "autofill": True}
-RANK_ORDER = {"core": 0, "raider": 1, "trial": 2, "social": 3, "alt": 4}
 FILL_OVERASK = 1  # ask one more person than the shortfall per batch
 FILL_MAX_OPEN = 3  # never more than this many unanswered asks per event
+FILL_ASK_HOURS_DEFAULT = RAID_DEFAULTS["fill_ask_hours"]
+CONFLICT_WINDOW_HOURS = 4.0  # two runs closer than this count as the same night
+OPEN_HORIZON_DAYS = 21  # how far ahead "upcoming runs" lists look
+CLOSE_AFTER_HOURS = 3  # a run is closed this long after its scheduled end (start + duration)
+SOLVE_TIME_LIMIT_S = 12.0  # the lock solve
+PREVIEW_TIME_LIMIT_S = 8.0  # split previews in the modal
 
 
 class Signup(BaseModel):
@@ -34,7 +42,7 @@ class Signup(BaseModel):
     spec: str
     offspec: Optional[str] = None
     role: str
-    status: str  # in | tentative | out | sub
+    status: str  # in | sub | out (STATUSES; "tentative" in old files reads as "in")
     source: str = "member"  # member | prefill | officer | callout | absence
     note: Optional[str] = None
     updated_at: str = Field(default_factory=now)
@@ -77,11 +85,13 @@ class FillAsk(BaseModel):
 
 
 class RaidEvent(BaseModel):
+    model_config = ConfigDict(extra="ignore")  # older files carry a `roster` key (folded into `rosters` below)
+
     key: str  # <run roster key>-<YYYY-MM-DD>
     team: str  # roster key; for cadence runs an ephemeral roster named like the run (bd-1209-1930)
     instance: Optional[str] = None
     starts_at: str  # ISO with offset
-    state: str = "open"  # open | locked | proposed | accepted | done | cancelled
+    state: Literal["open", "locked", "done", "cancelled"] = "open"
     signups: dict[str, Signup] = Field(default_factory=dict)  # discord_id -> signup
     pins: dict[str, str] = Field(default_factory=dict)  # discord_id -> "in" | "out": officer decisions the solver must honour
     layout: Optional[list[list[str]]] = None  # the officers' board before lock: groups (across rosters) of signup display names
@@ -96,7 +106,6 @@ class RaidEvent(BaseModel):
     channel_id: Optional[int] = None
     message_id: Optional[int] = None
     thread_id: Optional[int] = None
-    roster: Optional[RosterResult] = None
     health_posted: bool = False
     nudged: list[int] = Field(default_factory=list)
     fill_asks: list[FillAsk] = Field(default_factory=list)
@@ -106,16 +115,38 @@ class RaidEvent(BaseModel):
     log: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=now)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy(cls, data):
+        """Old files: `state: proposed|accepted` → locked; a lone `roster` → rosters[0]; signup `tentative` → in."""
+        if isinstance(data, dict):
+            data = dict(data)
+            if data.get("state") in LEGACY_STATES:
+                data["state"] = LEGACY_STATES[data["state"]]
+            legacy = data.pop("roster", None)
+            if legacy and not data.get("rosters"):
+                data["rosters"] = [legacy]
+            for sg in (data.get("signups") or {}).values():
+                if isinstance(sg, dict) and sg.get("status") == "tentative":
+                    sg["status"] = "in"
+        return data
+
     @property
     def start(self) -> datetime:
         return datetime.fromisoformat(self.starts_at)
+
+    @property
+    def roster(self) -> Optional[RosterResult]:
+        """The first (or only) roster; rosters[] is the source of truth."""
+        return self.rosters[0] if self.rosters else None
+
 
     def by_status(self, status: str) -> list[Signup]:
         return sorted([s for s in self.signups.values() if s.status == status], key=lambda s: s.updated_at)
 
     @property
     def all_rosters(self) -> list[RosterResult]:
-        return self.rosters or ([self.roster] if self.roster else [])
+        return self.rosters  # kept for older call sites; the same list, not a copy
 
     def seated(self) -> list[Player]:
         return [p for r in self.all_rosters for p in r.selected]
@@ -158,6 +189,22 @@ def team_setting(team: dict, key: str):
     return team.get(key, TEAM_DEFAULTS.get(key))
 
 
+def run_team(reg: Registry, ev: "RaidEvent") -> dict:
+    """The roster dict a run belongs to; a bare stand-in when the ephemeral roster is gone (cleanup, old files)."""
+    return reg.config.team(ev.team) or {"key": ev.team, "size": int(reg.raid_def(ev.instance).get("size") or DEFAULT_RAID_SIZE)}
+
+
+def run_size(reg: Registry, ev: "RaidEvent") -> int:
+    """Seats per roster for a run: the roster's size, else the raid's, else DEFAULT_RAID_SIZE."""
+    team = reg.config.team(ev.team) or {}
+    return int(team.get("size") or reg.raid_def(ev.instance).get("size") or DEFAULT_RAID_SIZE)
+
+
+def run_close_at(reg: Registry, ev: "RaidEvent") -> datetime:
+    """When the scheduler marks a locked run done: start + the raid's duration + CLOSE_AFTER_HOURS."""
+    return ev.start + timedelta(hours=float(reg.raid_def(ev.instance).get("duration_hours") or RAID_DEFAULTS["duration_hours"]) + CLOSE_AFTER_HOURS)
+
+
 def abbr(instance: str) -> str:
     return "".join(w[0] for w in instance.split("_"))[:4]
 
@@ -193,9 +240,9 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     rd = reg.raid_def(instance)
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
     c = cutoffs or {}
-    t = {"key": key, "name": f"{rd.get('name', instance)} {start.strftime('%a %d %b %H:%M')}", "size": int(rd.get("size") or 20), "schedule": start.strftime("%a %H:%M"), "instance": instance,
+    t = {"key": key, "name": f"{rd.get('name', instance)} {start.strftime('%a %d %b %H:%M')}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
          "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
-         "reminders": "dm" if c.get("nudge", rd.get("nudge", True)) else "none", "open_dm": bool(c.get("open_dm", False)), "autofill": True, "ephemeral": True}
+         "reminders": "dm" if c.get("nudge", rd["nudge"]) else "none", "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True}
     if cutoffs:
         t["test"] = True
         t["test_by"] = c.get("test_by")
@@ -217,10 +264,7 @@ class RaidStore:
         d = store.root / guild_key / "raids"
         if d.exists():
             for f in d.glob("*.json"):
-                ev = RaidEvent.model_validate_json(f.read_text())
-                for sg in ev.signups.values():
-                    if sg.status == "tentative":  # pre-Join/Bench sheets
-                        sg.status = "in"
+                ev = RaidEvent.model_validate_json(f.read_text())  # legacy states / roster / tentative normalised by the model
                 self.events[ev.key] = ev
 
     def save(self, ev: RaidEvent, message: str) -> None:
@@ -252,24 +296,18 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
 
 
 def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
-    """Standing availability + absences seed the sheet so people act on exceptions."""
+    """Absences (and curated roster membership) seed the sheet so people act on exceptions."""
     day = ev.start.date().isoformat()
     explicit = bool(reg.roster_members(team["key"]))
     for m, main in reg.roster_pool(team["key"]):
         if not main:
             continue
-        absence = m.absent_on(day)
-        avail = m.availability.get(team["key"])
-        if absence:
+        if m.absent_on(day):
             status, source = "out", "absence"
-        elif avail == "in" or (explicit and avail is None):
-            status, source = "in", "prefill"  # team members default in
-        elif avail == "sub":
-            status, source = "sub", "prefill"
-        elif avail == "out":
-            status, source = "out", "prefill"
+        elif explicit:
+            status, source = "in", "prefill"  # members of a curated roster default in
         else:
-            continue  # unset, no explicit team: they must respond
+            continue  # open pool: they must respond
         ev.signups[str(m.discord_id)] = _signup(reg, m, main, status, source)
 
 
@@ -284,7 +322,7 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     c = (next((c for c in m.active() if c.label.lower() == want), None) or next((c for c in m.active() if (c.name or "").lower() == want), None)) if want else m.main
     if not c:
         raise ValueError("no such active character")
-    team = reg.config.team(ev.team) or {"key": ev.team}
+    team = run_team(reg, ev)
     if status == "in" and reg.roster_members(team["key"]) and not reg.on_roster(m, team["key"]) and source == "member":
         status, note = "sub", "not on this roster; subs are picked when needed"
     s = _signup(reg, m, c, status, source, note)
@@ -313,8 +351,8 @@ def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, 
 
 # ---------------------------------------------------------------- filling gaps
 
-def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = 4.0) -> dict[int, str]:
-    """discord_id -> other raid key, for people In/Tentative on another live raid within the window."""
+def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = CONFLICT_WINDOW_HOURS) -> dict[int, str]:
+    """discord_id -> other raid key, for people In on another live raid within the window."""
     out: dict[int, str] = {}
     for other in rs.live():
         if other.key == ev.key:
@@ -322,7 +360,7 @@ def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = 4.0) -> dict[i
         if abs((other.start - ev.start).total_seconds()) > window_hours * 3600:
             continue
         for s in other.signups.values():
-            if s.status in ("in", "tentative"):
+            if s.status == "in":
                 out[s.discord_id] = other.key
     return out
 
@@ -330,7 +368,7 @@ def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = 4.0) -> dict[i
 def needs(reg: Registry, ev: RaidEvent, team: dict) -> dict:
     """What the sheet is short: headcount and per-role minimums. Before lock: Join signups vs the raid size.
     After lock: freed seats across the locked roster(s)."""
-    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+    size = run_size(reg, ev)
     if ev.state != "open" and ev.all_rosters:
         bounds = reg.role_bounds(ev.instance, size)
         seated = ev.seated()
@@ -342,7 +380,7 @@ def needs(reg: Registry, ev: RaidEvent, team: dict) -> dict:
                 role_short[role] = bounds[role]["min"] * n - have
         return {"headcount": max(0, size * n - len(seated)), "roles": role_short, "size": size}
     h = health_data(reg, ev, team)
-    n_in, size, _tent, _subs = h["headcount"]
+    n_in, size, _legacy, _subs = h["headcount"]
     role_short = {r["role"]: r["need"] - r["have"] for r in h["roles"] if r["need"] and r["have"] < r["need"]}
     return {"headcount": max(0, size - n_in), "roles": role_short, "size": size}
 
@@ -355,13 +393,13 @@ def _rank_key(reg: Registry, m: Member) -> tuple:
 def ask_deadline(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> datetime:
     """When an unanswered fill ask counts as no: `fill_ask_hours` after it was sent, never past the run start."""
     at = at or datetime.now(ev.start.tzinfo)
-    hours = float(reg.raid_def(ev.instance).get("fill_ask_hours") or 4)
+    hours = float(reg.raid_def(ev.instance).get("fill_ask_hours") or FILL_ASK_HOURS_DEFAULT)
     return min(at + timedelta(hours=hours), ev.start)
 
 
 def would_short(reg: Registry, ev: RaidEvent, team: dict, role: str) -> bool:
     """Would losing one `role` player (a Join before lock, a seated player after) drop that role under its minimum?"""
-    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+    size = run_size(reg, ev)
     n = len(ev.all_rosters) or 1
     bounds = reg.role_bounds(ev.instance, size)
     players = ev.seated() if ev.state != "open" and ev.all_rosters else ev.by_status("in")
@@ -400,7 +438,7 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
     # bench tier: joiners the solver left off, then Bench answers — never someone already seated (the solver may seat a Bench answer)
     subs = [(m, c) for s in benched_joiners + ev.by_status("sub") if s.display_name not in seated_names and (m := reg.members.get(s.discord_id)) and (c := next((c for c in m.active() if c.label == s.character), m.main))]
     unresponsive = [(m, c) for m, c in reg.roster_pool(team["key"]) if str(m.discord_id) not in ev.signups and c]
-    others = [] if team.get("test") else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups and m.availability.get(team["key"]) != "out"], key=lambda mc: _rank_key(reg, mc[0]))
+    others = [] if team.get("test") else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups], key=lambda mc: _rank_key(reg, mc[0]))
     tiers = [("sub", subs), ("pool", unresponsive), ("other_roster", others)]
 
     def first_of(role: str, skip: int | None = None):
@@ -512,11 +550,13 @@ def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[
             a.answer, a.answered_at = "expired", now()
             expired.append(a)
             ev.log.append(f"fill: no answer from {a.display_name} in time")
-    for a in expired:
-        other = release_partner(reg, rs, ev, a)
-        if other:
-            released.append(other)
-    if expired:
+    if not expired:
+        return expired, released
+    with rs.store.batch(f"{rs.key}: raid {ev.key}: fill expired {len(expired)}"):
+        for a in expired:
+            other = release_partner(reg, rs, ev, a)
+            if other:
+                released.append(other)
         rs.save(ev, f"fill expired {len(expired)}")
     return expired, released
 
@@ -551,21 +591,15 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
 def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
     """Structured health check: headcount, per-role tiles, per-buff providers, non-responders."""
     profile = reg.profile
-    ins, tent, subs = ev.by_status("in"), ev.by_status("tentative"), ev.by_status("sub")
-    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+    ins, subs = ev.by_status("in"), ev.by_status("sub")
+    size = run_size(reg, ev)
     bounds = reg.role_bounds(ev.instance, size)
-    counts = {r: sum(1 for s in ins if s.role == r) for r in ("tank", "healer", "melee", "ranged")}
-    flex = {r: sum(1 for s in tent + subs if s.role == r) for r in counts}
-    need = {
-        "tank": bounds["tank"]["min"],
-        "healer": bounds["healer"]["min"],
-        "melee": 0,
-        "ranged": 0,
-    }
+    counts = {r: sum(1 for s in ins if s.role == r) for r in ROLES}
+    need = {"tank": bounds["tank"]["min"], "healer": bounds["healer"]["min"], "melee": 0, "ranged": 0}
     roles = []
-    for r in ("tank", "healer", "melee", "ranged"):
+    for r in ROLES:
         have, n = counts[r], need[r]
-        cover = {"offspec": [], "flex": [], "alt": [], "tent/sub": []}
+        cover = {"offspec": [], "flex": [], "alt": [], "sub": []}
         if n and have < n:
             for sg in ins:
                 m = reg.members.get(sg.discord_id)
@@ -575,7 +609,7 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
                     cover["flex"].append(sg.display_name)
                 elif m and any(c.status in ("active", "planned") and not c.is_main and profile.spec(c.cls, c.spec).role == r for c in m.characters) and sg.role != r:
                     cover["alt"].append(sg.display_name)
-            cover["tent/sub"] = [sg.display_name for sg in tent + subs if sg.role == r]
+            cover["sub"] = [sg.display_name for sg in subs if sg.role == r]
         coverable = sum(len(v) for v in cover.values())
         level = "green" if not n or have >= n else ("amber" if have + coverable >= n else "red")
         hint = " · ".join(f"+{len(v)} {k}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
@@ -588,15 +622,16 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
         providers = [s.display_name for s in ins if b.provided_by(profile.spec(s.cls, s.spec))]
         buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
     unresp = [m.display_name for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups]
-    hc_level = "green" if len(ins) >= size else ("amber" if len(ins) + len(tent) >= size else "red")
-    return {"headcount": (len(ins), size, len(tent), len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp}
+    hc_level = "green" if len(ins) >= size else ("amber" if len(ins) + len(subs) >= size else "red")
+    # headcount keeps its 4-tuple shape for render.health_png / discord_raid: (in, size, 0 [was tentative], sub)
+    return {"headcount": (len(ins), size, 0, len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp}
 
 
 def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
     """[(level, line)] text form of health_data, for logs and ops lines."""
     h = health_data(reg, ev, team)
-    n, size, tent, subs = h["headcount"]
-    out = [(h["headcount_level"], f"Headcount {n}/{size} in, {tent} tentative, {subs} sub")]
+    n, size, _legacy, subs = h["headcount"]
+    out = [(h["headcount_level"], f"Headcount {n}/{size} in, {subs} sub")]
     for r in h["roles"]:
         if r["need"]:
             out.append((r["level"], f"{r['role'].title()}s {r['have']}/{r['need']}" + (f" · {r['hint']}" if r["hint"] else "")))
@@ -625,7 +660,7 @@ def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
             alt = next((c for c in (m.active() if m else []) if not c.is_main and reg.profile.spec(c.cls, c.spec).role == "tank"), None)
             if alt:
                 tank_alt = f"{alt.label} ({alt.cls} {alt.spec})"
-        players.append(Player(signup_name=s.display_name, pos=i + 1, status="signed" if s.status in ("in", "tentative") else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, note="tentative" if s.status == "tentative" else None, rank=rank, tank_capable_main=tank_alt))
+        players.append(Player(signup_name=s.display_name, pos=i + 1, status="signed" if s.status == "in" else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, rank=rank, tank_capable_main=tank_alt))
     return players
 
 
@@ -673,14 +708,13 @@ def how_many_rosters(reg: Registry, players: list[Player], size: int, rb: dict) 
     return max(1, n)
 
 
-def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = 12, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
+def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
     the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective."""
     players = players_for(reg, ev)
     raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
     rd = reg.raid_def(raid_id)
-    team = reg.config.team(ev.team) or {}
-    size = int(team.get("size") or rd.get("size") or reg.profile.comp_rules["raid_size"])
+    size = run_size(reg, ev)
     rb = reg.role_bounds(raid_id, size)
     from .policy import PolicyStore
 
@@ -719,8 +753,10 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     )
     # "another one": for a split the rosters must differ, for a single run the groups must
     rosters = solver.solve_rosters(reg.profile, players, raid_id, opts, rosters=n_rosters, strategy=strategy, roster_bonus=roster_bonus, avoid=avoid if n_rosters > 1 else None, avoid_groups=avoid_groups if n_rosters == 1 else None)
-    # bench what-ifs re-solve the model per benched player: only worth it for a single roster at lock, never for previews
-    rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=whatif and n_rosters == 1 and len(players) <= 30) for r in rosters]
+    # bench what-ifs re-solve the model per benched player (the bench hangs off rosters[0]): capped by explain.WHATIF_*,
+    # only at lock (never for previews), skipped for big splits / sheets
+    do_whatif = whatif and explain.whatif_allowed(n_rosters, len(players))
+    rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=do_whatif and i == 0) for i, r in enumerate(rosters)]
     return players, rosters, n_rosters
 
 
@@ -730,9 +766,8 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
     players, rosters, _ = _solve_run(reg, rs, ev)
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
-    ev.rosters, ev.roster = rosters, rosters[0]
-    if save:
-        ev.state = "proposed" if ev.state in ("open", "locked", "proposed") else ev.state
+    ev.rosters = rosters
+    if save:  # the state is the caller's (lock_run sets "locked"); a proposal on its own just stores the rosters
         ev.log.append("proposed " + " + ".join(str(len(r.selected)) for r in rosters) + f" in / {len(rosters[0].benched)} bench")
         rs.save(ev, "proposed")
     return players, rosters[0]
@@ -751,11 +786,11 @@ def solver_error_text(e: Exception) -> str:
 def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None) -> tuple[list[list[str]], list[RosterResult]]:
     """A split under `strategy` for the modal: the layout (flat groups) and the rosters, nothing saved.
     `avoid` = earlier previews (flat groups) the answer must differ from."""
-    k = groups_per_roster(reg, int((reg.config.team(ev.team) or {}).get("size") or reg.raid_def(ev.instance).get("size") or 20))
+    k = groups_per_roster(reg, run_size(reg, ev))
     prev = [{n: gi // k for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     prev_g = [{n: gi for gi, g in enumerate(lay) for n in g} for lay in (avoid or [])]
     trial = ev.model_copy(deep=True)
-    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=8, whatif=False, avoid_groups=prev_g)
+    players, rosters, _ = _solve_run(reg, rs, trial, strategy=strategy, avoid=prev, time_limit=PREVIEW_TIME_LIMIT_S, whatif=False, avoid_groups=prev_g)
     seated = {p.signup_name for r in rosters for p in r.selected}
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
     return [list(g) for r in rosters for g in r.groups], rosters
@@ -777,7 +812,7 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
     for b in boards:
         groups = [[m for m in g if m in players] for g in b] + [[] for _ in range(n - len(b))]
         selected = [players[m] for g in groups for m in g]
-        counts = {r: sum(1 for p in selected if p.role == r) for r in ("tank", "healer", "melee", "ranged")}
+        counts = {r: sum(1 for p in selected if p.role == r) for r in ROLES}
         out.append(RosterResult(selected=selected, benched=[], groups=groups, group_reports=[], objective=0, synergy_value=0, role_counts=counts, advisories=[]))
     if out:
         out[0].benched = [p for m, p in players.items() if m not in placed and p.status == "signed"]
@@ -793,10 +828,13 @@ def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[list[str]]:
 
 def apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]]) -> tuple[list[Signup], list[str]]:
     """After lock the board is the roster: group moves are free; someone dragged in from the bench is a substitution
-    (returned so the caller asks them to confirm); someone dragged out has their seat freed."""
-    team = reg.config.team(ev.team) or {}
-    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
-    n = groups_per_roster(reg, size)
+    (returned so the caller asks them to confirm); someone dragged out has their seat freed. One commit."""
+    with rs.store.batch(f"{rs.key}: raid {ev.key}: board updated"):
+        return _apply_layout_locked(reg, rs, ev, layout)
+
+
+def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]]) -> tuple[list[Signup], list[str]]:
+    n = groups_per_roster(reg, run_size(reg, ev))
     before = {p.signup_name for p in ev.seated()}
     after = {m for g in layout for m in g}
     removed = [m for m in before if m not in after]
@@ -819,9 +857,8 @@ def apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: lis
                     added.append(sg)
                 keep[m] = players[m]
         r.selected = [keep[m] for m in want]
-        r.role_counts = {role: sum(1 for p in r.selected if p.role == role) for role in ("tank", "healer", "melee", "ranged")}
+        r.role_counts = {role: sum(1 for p in r.selected if p.role == role) for role in ROLES}
     ev.rosters = [r for r in ev.rosters if r.selected or r is ev.rosters[0]]
-    ev.roster = ev.rosters[0]
     seated = {p.signup_name for p in ev.seated()}
     ev.rosters[0].benched = [p for m, p in players.items() if m not in seated and p.status == "signed"]
     for sg in added:
@@ -867,8 +904,7 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, display_name: str, wh
 
 def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
     """Put a signup into the first roster with a free seat (after a fill yes or an officer add). Returns the roster index."""
-    team = reg.config.team(ev.team) or {}
-    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+    size = run_size(reg, ev)
     found = reg.find(sg.character)
     p = Player(signup_name=sg.display_name, pos=len(ev.signups), status="signed", cls=sg.cls, spec=sg.spec, role=sg.role, offspec=sg.offspec, character=sg.character, rank=found[1].rank if found else "unknown")
     for i, r in enumerate(ev.all_rosters):
@@ -886,19 +922,20 @@ def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
 
 
 def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[str]:
-    """Past confirm_by: unanswered confirmations count as out and their seats open."""
+    """Past confirm_by: unanswered confirmations count as out and their seats open. One commit for the lot."""
     if not ev.confirm_by or datetime.fromisoformat(ev.confirm_by) > datetime.now(ev.start.tzinfo):
         return []
     gone = []
-    for row in confirmations(reg, ev):
-        if row["answer"] is None and row["uid"]:
-            m = reg.members.get(int(row["uid"]))
-            ask = next((a for a in reversed(m.placement_asks) if a["roster"] == ev.team and a.get("answer") is None), None) if m else None
-            if ask:
-                ask["answer"], ask["answered_at"] = "expired", now()
-                reg.save(m, f"{m.display_name} didn't confirm {ev.team} in time")
-            if reg.on_roster(m, ev.team) if m else False:
-                reg.roster_remove(m.discord_id, ev.team, "no-confirm")
-            free_seat(reg, rs, ev, row["display_name"], "no-confirm")
-            gone.append(row["display_name"])
+    with rs.store.batch(f"{rs.key}: raid {ev.key}: confirmations expired"):
+        for row in confirmations(reg, ev):
+            if row["answer"] is None and row["uid"]:
+                m = reg.members.get(int(row["uid"]))
+                ask = next((a for a in reversed(m.placement_asks) if a["roster"] == ev.team and a.get("answer") is None), None) if m else None
+                if ask:
+                    ask["answer"], ask["answered_at"] = "expired", now()
+                    reg.save(m, f"{m.display_name} didn't confirm {ev.team} in time")
+                if reg.on_roster(m, ev.team) if m else False:
+                    reg.roster_remove(m.discord_id, ev.team, "no-confirm")
+                free_seat(reg, rs, ev, row["display_name"], "no-confirm")
+                gone.append(row["display_name"])
     return gone

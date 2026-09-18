@@ -17,13 +17,14 @@ from . import comp as comp_mod, render
 from .discord_registry import registration_card, registration_view
 from .registry import Registry, bank_rows, pool_health_data
 
-LEVEL_DOT = {"green": "🟢", "amber": "🟡", "red": "🔴"}
+from .constants import LEVEL_DOT, TEAL  # noqa: E402
 DEBOUNCE_S = 5.0  # a burst of registrations re-posts the cards once
 BANK_KEY = "_bank"  # analytics_message_ids slot for the character bank card
 
 
 def _stamp(reg: Registry) -> str:
-    return reg.now_local().strftime("%a %b %d %H:%M")
+    """Guild-time 12-hour stamp for text baked into a card image (Discord can't render <t:…> there)."""
+    return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", reg.local(reg.now_local(), "%a %b %d %I:%M %p"))
 
 
 def groups_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.File]:
@@ -89,7 +90,7 @@ def bank_card(reg: Registry) -> tuple[discord.Embed, discord.File]:
     png = render.bank_png(f"Character bank · {reg.config.name}", f"{len(rows)} members · {mains} mains · {alts} alts" + (f" · {unnamed} mains unnamed" if unnamed else "") + f" · updated {_stamp(reg)}",
                           rows, footer="sorted by role then class · grey name = planned, not yet created · rank/rosters are officer-set")
     file = discord.File(BytesIO(png), filename="bank.png")
-    e = discord.Embed(colour=0x2B7A78, description=f"**{len(rows)}** members · **{mains}** mains · **{alts}** alts")
+    e = discord.Embed(colour=TEAL, description=f"**{len(rows)}** members · **{mains}** mains · **{alts}** alts")
     e.set_image(url="attachment://bank.png")
     e.set_footer(text="Kept current by the bot")
     return e, file
@@ -152,9 +153,9 @@ class PoolMixin:
         ch = self.get_channel(reg.config.analytics_channel_id)
         if not ch:
             return
-        stamp = reg.now_local().strftime("%H:%M")
+        stamp = f"<t:{int(reg.now_local().timestamp())}:t>"
         try:
-            await ch.send("\n".join(f"`{stamp}` {l}" for l in lines)[:1900], allowed_mentions=discord.AllowedMentions.none())
+            await ch.send("\n".join(f"{stamp} {l}" for l in lines)[:1900], allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"analytics log post failed: {e}")
 
@@ -257,7 +258,7 @@ class AbsenceModal(discord.ui.Modal, title="I'll be away"):
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         span = a.start + (f" → {a.end}" if a.end != a.start else "")
-        await interaction.response.send_message(f"✅ Away {span}. Sheets on those days will have you as No thanks; if you're already seated, the seat is handed back.", ephemeral=True)
+        await interaction.response.send_message(f"✅ Away {span}. Sheets on those days will have you as No thanks; if you're already rostered, the seat is handed back.", ephemeral=True)
         await bot.announce_absence(reg, m, a, interaction.user.display_name)
 
 
@@ -289,8 +290,8 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs:(?
 def absences_card(reg: Registry) -> discord.Embed:
     today = reg.now_local().date().isoformat()
     rows = sorted(((m, a) for m in reg.members.values() for a in m.absences if a.end >= today), key=lambda x: x[1].start)
-    e = discord.Embed(title=f"{reg.config.name} · away", colour=0x2B7A78,
-                      description="Going to miss some days? Press **I'll be away**. Sheets on those days have you as *No thanks* automatically, and if you were already seated the seat is handed back. Reasons stay with the officers.")
+    e = discord.Embed(title=f"{reg.config.name} · away", colour=TEAL,
+                      description="Going to miss some days? Press **I'll be away**. Sheets on those days have you as *No thanks* automatically, and if you were already rostered the seat is handed back. Reasons stay with the officers.")
     if rows:
         e.add_field(name="Upcoming", value="\n".join(f"**{m.display_name}** · {a.start}" + (f" → {a.end}" if a.end != a.start else "") for m, a in rows[:25])[:1000], inline=False)
     e.set_footer(text="Also: /me absent add · the Me page on the website")

@@ -12,7 +12,7 @@ from .discord_registry import Guilds, is_officer, is_owner
 from .ops import Ops
 from .registry import Registry, RegistryError
 
-TEAL = 0x2B7A78
+from .constants import TEAL  # noqa: E402
 
 
 class PolicyContext:
@@ -90,7 +90,7 @@ class ConfigConfirmView(discord.ui.View):
         done, refused = [], []
         for op in self.req.ops:
             try:
-                done.append(configops.apply(self.reg, op, interaction.user.display_name, owner, self.ps))
+                done.append(await configops.apply_async(self.reg, op, interaction.user.display_name, owner, self.ps, bot=interaction.client))
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001
                 refused.append(f"{configops.describe(self.reg, op)} — {e}")
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
@@ -122,7 +122,8 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if provider is None:
         await send("Plain-text config needs the LLM; use `/gm config …` commands.", ephemeral=True)
         return
-    req = await asyncio.to_thread(configops.parse, provider, reg, text)
+    author = interaction_or_message.author if is_msg else interaction_or_message.user
+    req = await asyncio.to_thread(configops.parse, provider, reg, text, author.display_name)
     if req.kind == "ignore":
         return
     if req.kind == "question" or req.questions:

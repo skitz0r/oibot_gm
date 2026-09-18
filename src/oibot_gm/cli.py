@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import json
+import logging
+import logging.handlers
+import os
 from datetime import date
 from pathlib import Path
 
@@ -26,12 +29,31 @@ from .roster import coverage as cov_mod, explain, solver
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 console = Console()
 ROOT = Path(__file__).resolve().parents[2]
+LOG_FILE = ROOT / "out" / "oibot.log"
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUPS = 5
+NOISY_LOGGERS = ("discord", "httpx", "httpcore", "websockets", "aiohttp")  # third-party chatter stays at WARNING
+
+
+def setup_logging(level: int = logging.INFO) -> None:
+    """Root logger → out/oibot.log (rotating, 5 MB × 5) and stderr. Idempotent."""
+    root = logging.getLogger()
+    if getattr(root, "_oibot_configured", False):
+        return
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    fh = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS, encoding="utf-8")
+    fh.setFormatter(fmt)
+    sh = logging.StreamHandler()
+    sh.setFormatter(fmt)
+    logging.basicConfig(level=level, handlers=[fh, sh], force=True)
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+    root._oibot_configured = True  # type: ignore[attr-defined]
 
 
 def default_guild() -> Path:
     """OIBOT_GUILD_DIR, else the private data repo's guild dir, else the anonymized demo fixtures."""
-    import os
-
     from .store import resolve_data_root
 
     env = os.environ.get("OIBOT_GUILD_DIR")
@@ -42,6 +64,11 @@ def default_guild() -> Path:
 
 
 GUILD = default_guild()
+
+
+@app.callback()
+def main() -> None:
+    setup_logging()
 
 
 def _load(guild_dir: Path, signup_file: str):
@@ -277,9 +304,16 @@ def items_lookup(ids: list[int], namespace: str = "static-classic-us", region: s
 def discord(guild: Path = GUILD, signup: str = "signup_2026-09-15.yaml"):
     """Run the Discord bot (mock raid / loot council demo)."""
     load_dotenv(ROOT / ".env")
+    from .store import is_fixture_root
+
+    guild_dir = (ROOT / guild).resolve()
+    if is_fixture_root(ROOT, guild_dir.parent) and os.environ.get("OIBOT_ALLOW_FIXTURE_STORE") != "1":
+        console.print(f"[red]refusing to start:[/] the data store would be {guild_dir.parent} — the demo fixtures inside the code repo, not a guild data repo.\n"
+                      "Real guild state lives in the sibling `oibot_gm-data` checkout (or OIBOT_DATA_DIR / OIBOT_GUILD_DIR). Set OIBOT_ALLOW_FIXTURE_STORE=1 to run on the fixtures deliberately.")
+        raise typer.Exit(code=2)
     from . import discord_bot
 
-    discord_bot.run(ROOT / guild, signup)
+    discord_bot.run(guild_dir, signup)
 
 
 @app.command()

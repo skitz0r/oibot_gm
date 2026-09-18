@@ -1,11 +1,12 @@
 import { Fragment, useEffect, useState } from "react";
-import { ActionIcon, Badge, Box, Button, Card, Group, Modal, Radio, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Modal, Radio, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { api, type Character, type MemberRow, type Members as MembersData, type Meta } from "../api";
 import { GameIcon } from "../components/Icons";
+import { CharacterCell, SpecCell } from "../components/Cells";
 import { PageTitle, fail, ok } from "../components/Page";
-import { CLASS_COLOURS } from "../theme";
+import { classColour } from "../theme";
 
 const PRIV: Record<string, string> = { owner: "yellow", officer: "teal", member: "gray", outside: "red", test: "violet" };
 
@@ -77,7 +78,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
                   <Table.Td rowSpan={span} style={{ verticalAlign: "top", borderRight: "1px solid var(--mantine-color-slate-5)", background: "var(--mantine-color-slate-7)" }}>
                     <Group gap={8} wrap="nowrap"><Text fw={700} truncate>{r.display_name}</Text><Badge size="xs" variant="outline" color={PRIV[r.privilege] || "gray"}>{r.privilege}</Badge></Group>
                     <Text size="xs" c="dimmed">{r.verification}</Text>
-                    {r.asks.map((a) => <Badge key={a.roster} size="xs" variant="light" color="yellow" mt={4}>confirm {a.roster}?</Badge>)}
+                    {r.asks.map((a) => <Badge key={a.roster} size="xs" variant="light" color="yellow" mt={4}>confirm {a.raid}{a.when ? ` · ${a.when}` : ""}?</Badge>)}
                     <Group gap={4} mt={6} wrap="wrap">
                       {r.absences.map((a) => (
                         <Tooltip key={a.start} label={a.reason ? `${a.reason} · click to clear` : "click to clear"}>
@@ -134,7 +135,7 @@ function AbsenceModal({ r, onClose, onSaved }: { r: MemberRow | null; onClose: (
         <DateInput label="From" value={start} onChange={(v) => setStart(v ? new Date(v) : null)} required />
         <DateInput label="To" value={end} onChange={(v) => setEnd(v ? new Date(v) : null)} description="leave empty for a single day" />
         <TextInput label="Reason" description="officers only" value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
-        <Text size="xs" c="dimmed">Sheets on those days get No thanks for them; if they're already seated the seat is handed back and the bench is asked.</Text>
+        <Text size="xs" c="dimmed">Sheets on those days get No thanks for them; if they're already rostered the seat is handed back and the bench is asked.</Text>
         <Group justify="flex-end"><Button variant="default" onClick={onClose}>Cancel</Button><Button disabled={!start} onClick={() => r && api.post<{ message: string }>("/api/members/absence", { uid: r.uid, start: iso(start), end: iso(end), reason }).then((x) => { ok(x.message); onSaved(); setStart(null); setEnd(null); setReason(""); }).catch(fail)}>Add</Button></Group>
       </Stack>
     </Modal>
@@ -145,7 +146,7 @@ function ViewRow({ meta, c, busy, onConfirm, onDelete }: { meta: Meta; c: Charac
   return (
     <>
       <Table.Td style={{ textAlign: "center" }}>{c.is_main ? <Tooltip label="main"><IconCrown size={18} color="var(--mantine-color-yellow-5)" /></Tooltip> : <Text size="xs" c="dimmed" tt="uppercase" style={{ letterSpacing: ".06em" }}>alt</Text>}</Table.Td>
-      <Table.Td><Group gap="sm" wrap="nowrap"><GameIcon meta={meta} kind="class" id={c.cls} size={30} /><Box style={{ minWidth: 0 }}><Text fw={600} c={CLASS_COLOURS[c.cls]} truncate>{c.label}</Text><Text size="xs" c="dimmed">{c.cls}</Text></Box></Group></Table.Td>
+      <Table.Td><CharacterCell meta={meta} cls={c.cls} label={c.label} /></Table.Td>
       <Table.Td><SpecCell meta={meta} cls={c.cls} spec={c.spec} role={c.role} /></Table.Td>
       <Table.Td>{c.offspec ? <SpecCell meta={meta} cls={c.cls} spec={c.offspec} role={c.off_role || ""} /> : <Text c="dimmed">—</Text>}</Table.Td>
       <Table.Td>{!c.name ? <Badge variant="outline" color="gray">planned</Badge> : c.confirmed ? <Badge variant="light" color="teal">confirmed</Badge> : <Button size="xs" loading={busy === `c${c.label}`} onClick={onConfirm}>Confirm</Button>}</Table.Td>
@@ -162,7 +163,7 @@ function EditRow({ meta, d, uid, specsOf, onChange, onRemove }: { meta: Meta; d:
         <Stack gap={6}>
           {d.isNew
             ? <Select size="sm" placeholder="Class" value={d.cls || null} data={Object.keys(meta.classes)} onChange={(v) => onChange({ cls: v || "", spec: v ? Object.keys(meta.classes[v])[0] : "", offspec: null })} />
-            : <Group gap="sm" wrap="nowrap"><GameIcon meta={meta} kind="class" id={d.cls} size={30} /><Text fw={600} c={CLASS_COLOURS[d.cls]} truncate>{d.label}</Text></Group>}
+            : <Group gap="sm" wrap="nowrap"><GameIcon meta={meta} kind="class" id={d.cls} size={30} title={d.cls} /><Text fw={600} c={classColour(meta, d.cls)} truncate>{d.label}</Text></Group>}
           {(d.isNew || !d.named) && (
             <Group gap={6} wrap="nowrap" grow><TextInput size="sm" placeholder="First" maxLength={12} value={d.name} onChange={(e) => onChange({ name: e.currentTarget.value })} /><TextInput size="sm" placeholder="Last" maxLength={12} value={d.surname} onChange={(e) => onChange({ surname: e.currentTarget.value })} /></Group>
           )}
@@ -174,8 +175,4 @@ function EditRow({ meta, d, uid, specsOf, onChange, onRemove }: { meta: Meta; d:
       <Table.Td><Tooltip label={d.isNew ? "discard" : "delete on save"}><ActionIcon variant="subtle" color="red" onClick={onRemove}><IconTrash size={17} /></ActionIcon></Tooltip></Table.Td>
     </>
   );
-}
-
-function SpecCell({ meta, cls, spec, role }: { meta: Meta; cls: string; spec: string; role: string }) {
-  return <Group gap={8} wrap="nowrap"><GameIcon meta={meta} kind="spec" id={`${cls}:${spec}`} title={`${spec} (${role})`} /><Text size="sm">{spec}</Text><Text size="xs" c="dimmed">{role}</Text></Group>;
 }

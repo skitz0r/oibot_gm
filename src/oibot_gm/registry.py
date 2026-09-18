@@ -5,19 +5,27 @@ Characters belong to exactly one member; one of them is the main. Officers
 confirm characters and set ranks. Every change is a store commit."""
 from __future__ import annotations
 
+import json
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from .constants import ROLES
 from .profiles import GameProfile
 from .store import GitStore
 
+log = logging.getLogger(__name__)
+
 RANKS = ("trial", "raider", "core", "alt", "social")
 NAME_RE = re.compile(r"^[A-Za-zÀ-ÿ]{2,12}$")
+PLACEMENT_ASK_HISTORY = 12  # placement asks kept per member
+MAX_ABSENCE_DAYS = 120
+DEFAULT_RAID_SIZE = 20  # when neither the roster nor the raid says
 
 
 def now() -> str:
@@ -60,20 +68,17 @@ class Absence(BaseModel):
     created_at: str = Field(default_factory=now)
 
 
-AVAILABILITY = ("in", "out", "sub")
-
-
 class Member(BaseModel):
+    """Legacy keys in old member files (availability, role_prefs, slot_prefs, week, teams) are ignored on load;
+    `reload()` migrates role_prefs.flex and teams onto the main character once."""
+
+    model_config = ConfigDict(extra="ignore")
+
     discord_id: int
     display_name: str
     characters: list[RegisteredCharacter] = Field(default_factory=list)
-    availability: dict[str, str] = Field(default_factory=dict)  # team -> in | out | sub
     absences: list[Absence] = Field(default_factory=list)
-    role_prefs: dict = Field(default_factory=dict)  # {"primary": "healer", "flex": ["ranged"]}
-    slot_prefs: dict[str, str] = Field(default_factory=dict)  # 'Tue 19:30' -> yes | maybe | no (legacy; the grid wins when set)
     placement_asks: list[dict] = Field(default_factory=list)  # {roster, character, asked_at, answer yes|no|None, answered_at, by}
-    week: list[dict] = Field(default_factory=list)  # weekly availability grid: {day 0-6 (Mon=0), start, end (minutes), level preferred|available}; times not covered = unavailable
-    teams: list[str] = Field(default_factory=list)  # officer-curated team membership (the default weekly roster)
     dm_opt_out: bool = False
     test: bool = False  # seeded by /gm test: the bot puppets them (DMs go to the roster channel; officers answer for them)
     created_at: str = Field(default_factory=now)
@@ -180,7 +185,23 @@ class RegistryError(ValueError):
 
 RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1}
 RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before", "nudge_hours_before", "fill_ask_hours")
+RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm")  # true/false raid settings (command + API layers parse them the same way)
+# effective defaults under profiles/<game>/raids.yaml and guild overrides (nudge_hours_before is derived: halfway between open and lock)
+RAID_DEFAULTS = {"lockout_days": 7, "duration_hours": 3, "signup_lead_hours": 120, "lock_hours_before": 24, "confirm_hours_before": 6,
+                 "split_policy": "balanced", "nudge": True, "fill_ask_hours": 4, "autofill": True, "open_dm": False}
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
+TRUE_WORDS = ("true", "yes", "on", "1")
+
+
+def parse_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in TRUE_WORDS
+
+
+def default_nudge_hours(lead_hours: float, lock_hours: float) -> float:
+    """The nudge lands halfway between signups opening and the lock, never after the lock."""
+    return max(float(lock_hours), float(lock_hours) + (float(lead_hours) - float(lock_hours)) / 2)
 _SLOT_RE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)$", re.I)
 
 
@@ -258,10 +279,6 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
     for k, o in oc.items():
         if k not in nc:
             lines.append(f"➖ {who}: {_clabel(o)} removed")
-    for team in sorted(set(old.get("availability", {})) | set(new.get("availability", {}))):
-        a, b = old.get("availability", {}).get(team), new.get("availability", {}).get(team)
-        if a != b:
-            lines.append(f"{who}: availability {team} {a or '—'} → **{b or '—'}**")
     oa = {(a["start"], a["end"]) for a in old.get("absences", [])}
     na = {(a["start"], a["end"]) for a in new.get("absences", [])}
     for s, e in sorted(na - oa):
@@ -274,11 +291,6 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
         last = new.get("placement_asks", [])[-1] if new.get("placement_asks") else None
         if last:
             lines.append(f"{who}: placement on {last['roster']} " + ({"yes": "**confirmed**", "no": "**declined**"}.get(last.get("answer"), "asked to confirm")))
-    if old.get("week") != new.get("week"):
-        hours = sum((r["end"] - r["start"]) for r in new.get("week", [])) / 60
-        lines.append(f"{who}: availability grid → {len(new.get('week', []))} block(s), {hours:.0f}h/week")
-    if old.get("slot_prefs") != new.get("slot_prefs"):
-        lines.append(f"{who}: slots " + (", ".join(f"{k} {v}" for k, v in new.get("slot_prefs", {}).items()) or "cleared"))
     if old.get("dm_opt_out") != new.get("dm_opt_out"):
         lines.append(f"{who}: DMs {'off' if new['dm_opt_out'] else 'on'}")
     return lines
@@ -296,7 +308,7 @@ def bank_rows(reg: "Registry") -> list[dict]:
         rows.append({"member": m.display_name, "role": role,
                      "main": {"cls": main.cls, "spec": main.spec, "offspec": main.offspec, "name": main.name, "status": main.status, "rank": main.rank, "rosters": list(main.rosters)} if main else None,
                      "alts": [{"cls": a.cls, "spec": a.spec, "name": a.name, "status": a.status} for a in alts]})
-    order = {"tank": 0, "healer": 1, "melee": 2, "ranged": 3}
+    order = {r: i for i, r in enumerate(ROLES)}
     return sorted(rows, key=lambda r: (r["main"] is None, order.get(r["role"], 9), r["main"]["cls"] if r["main"] else "", r["member"].lower()))
 
 
@@ -304,7 +316,7 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
     """Readiness of the *potential* pool (every planned/active main) against a roster's size, in the same
     shape as raidcycle.health_data so it renders through render.health_png. No sheet involved."""
     profile = reg.profile
-    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or 20)
+    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or DEFAULT_RAID_SIZE)
     key = roster.get("key", "main")
     keys = reg.run_keys(roster.get("instance")) | {key}  # placed on this roster, or on any run of the same raid
     mains = [(m, m.main) for m in reg.members.values() if m.main]
@@ -315,10 +327,10 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
     def role_of(m: Member, c: RegisteredCharacter) -> str:
         return reg.roles_of(m)[0] or profile.spec(c.cls, c.spec).role
 
-    counts = {r: sum(1 for m, c in mains if role_of(m, c) == r) for r in ("tank", "healer", "melee", "ranged")}
+    counts = {r: sum(1 for m, c in mains if role_of(m, c) == r) for r in ROLES}
     need = {"tank": bounds["tank"]["min"], "healer": bounds["healer"]["min"], "melee": 0, "ranged": 0}
     roles = []
-    for r in ("tank", "healer", "melee", "ranged"):
+    for r in ROLES:
         have, n = counts[r], need[r]
         cover = {"offspec": [], "flex": [], "alt": []}
         if n and have < n:
@@ -409,8 +421,8 @@ class Registry:
         for fn in self.listeners:
             try:
                 fn(self, kind, lines)
-            except Exception as e:  # noqa: BLE001
-                print(f"registry listener failed: {e}")
+            except Exception:  # noqa: BLE001
+                log.exception("registry listener failed (%s)", kind)
 
     def reload(self) -> None:
         d = self.store.root / self.key / "members"
@@ -418,18 +430,18 @@ class Registry:
         self._snap = {}
         if d.exists():
             for f in d.glob("*.json"):
-                m = Member.model_validate_json(f.read_text())
-                if m.role_prefs.get("flex") and m.main:  # flex used to live on the member; it belongs to the character
-                    for r in m.role_prefs["flex"]:
+                raw = json.loads(f.read_text())
+                m = Member.model_validate(raw)
+                # one-time migrations off retired member fields (the rewrite drops the old keys)
+                legacy_flex = (raw.get("role_prefs") or {}).get("flex") or []  # flex used to live on the member; it belongs to the character
+                legacy_teams = raw.get("teams") or []  # pre-roster files kept membership on the member
+                if m.main and (legacy_flex or legacy_teams):
+                    for r in legacy_flex:
                         if r not in m.main.flex:
                             m.main.flex.append(r)
-                    m.role_prefs = {}
-                    self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
-                if m.teams and m.main:  # pre-roster files kept membership on the member
-                    for k in m.teams:
+                    for k in legacy_teams:
                         if k not in m.main.rosters:
                             m.main.rosters.append(k)
-                    m.teams = []
                     self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
                 self.members[m.discord_id] = m
                 self._snap[m.discord_id] = m.model_dump()
@@ -540,9 +552,8 @@ class Registry:
 
     def set_flex(self, discord_id: int, label: str, roles: list[str]) -> RegisteredCharacter:
         """Extra roles a character can play (besides the roles its spec/offspec already imply)."""
-        valid = ("tank", "healer", "melee", "ranged")
-        if any(r not in valid for r in roles):
-            raise RegistryError(f"Roles are {', '.join(valid)}.")
+        if any(r not in ROLES for r in roles):
+            raise RegistryError(f"Roles are {', '.join(ROLES)}.")
         m = self.member(discord_id)
         c = next((c for c in m.active() if c.matches(label)), None)
         if not c:
@@ -596,16 +607,12 @@ class Registry:
                 out["weights"] = {**(base.get("weights") or {}), **(v or {})}
             else:
                 out[k] = v
-        out.setdefault("lockout_days", 7)
-        out.setdefault("duration_hours", 3)
         out.setdefault("slots", [])
-        out.setdefault("signup_lead_hours", 120)
-        out.setdefault("lock_hours_before", 24)
-        out.setdefault("confirm_hours_before", 6)
-        out.setdefault("split_policy", "balanced")
-        out.setdefault("nudge", True)  # DM the mains who haven't answered, once, at nudge_hours_before
-        out.setdefault("nudge_hours_before", max(float(out["lock_hours_before"]), min(48.0, float(out["signup_lead_hours"]) / 2)))
-        out.setdefault("fill_ask_hours", 4)  # a fill DM with no answer counts as no after this long (never later than the run start)
+        for k, v in RAID_DEFAULTS.items():  # nudge: DM the mains who haven't answered, once, at nudge_hours_before;
+            out.setdefault(k, v)  # fill_ask_hours: a fill DM with no answer counts as no after this long (never later than the run start)
+        out.setdefault("nudge_hours_before", default_nudge_hours(out["signup_lead_hours"], out["lock_hours_before"]))
+        for k in RAID_BOOL_FIELDS:
+            out[k] = parse_bool(out[k])
         out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
         return out
 
@@ -613,7 +620,7 @@ class Registry:
         """A roster-shaped dict for a raid definition, so pool/comp/group analytics can run per raid."""
         rd = self.raid_def(instance)
         over = self.config.raids.get(instance, {})
-        return {"key": instance, "name": rd.get("name", instance), "size": int(rd.get("size") or 20), "instance": instance,
+        return {"key": instance, "name": rd.get("name", instance), "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "instance": instance,
                 "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or []}
 
     def run_keys(self, instance: str | None) -> set[str]:
@@ -669,7 +676,8 @@ class Registry:
 
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
         """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max
-        | slots | signup_lead_hours | lock_hours_before | confirm_hours_before | weight_rank/main/sat_out/signup_order."""
+        | slots | signup_lead_hours | lock_hours_before | confirm_hours_before | nudge_hours_before | fill_ask_hours | split_policy
+        | nudge / autofill / open_dm (true|false) | weight_rank/main/sat_out/signup_order."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         over = self.config.raids.setdefault(instance, {})
@@ -689,10 +697,10 @@ class Registry:
                 raise RegistryError("lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
             if eff["signup_lead_hours"] <= eff["lock_hours_before"]:
                 raise RegistryError("signups must open before they lock (signup_lead_hours > lock_hours_before)")
-            if field == "nudge_hours_before" and not (eff["lock_hours_before"] <= num <= eff["signup_lead_hours"]):
-                raise RegistryError("the nudge must fall between signup opening and lock")
-        elif field == "nudge":
-            over["nudge"] = str(value).lower() in ("true", "yes", "on", "1")
+            if not (eff["lock_hours_before"] <= float(eff["nudge_hours_before"]) <= eff["signup_lead_hours"]):
+                raise RegistryError("the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
+        elif field in RAID_BOOL_FIELDS:
+            over[field] = parse_bool(value)
         elif field == "split_policy":
             if value not in SPLIT_POLICIES:
                 raise RegistryError(f"split_policy must be one of {', '.join(SPLIT_POLICIES)}")
@@ -761,35 +769,37 @@ class Registry:
         """Create `count` test members with a realistic class/spec/rank mix (idempotent: existing ones are kept)."""
         count = max(1, min(count, len(self.TEST_NAMES)))
         made = []
-        for i in range(count):
-            uid = self.TEST_BASE + i
-            if uid in self.members:
-                continue
-            name = self.TEST_NAMES[i]
-            cls, spec, rank = self.TEST_MIX[i % len(self.TEST_MIX)]
-            if spec not in self.profile.classes.get(cls, {}):
-                spec = next(iter(self.profile.classes[cls]))
-            m, c = self.add_character(uid, name, name, cls, spec, None, True)
-            m.test = True
-            c.rank = rank
-            c.confirmed_by = by
-            self.save(m, f"test member {name} seeded (by {by})")
-            made.append(m)
+        with self.store.batch(f"{self.key}: test bench seeded by {by}"):
+            for i in range(count):
+                uid = self.TEST_BASE + i
+                if uid in self.members:
+                    continue
+                name = self.TEST_NAMES[i]
+                cls, spec, rank = self.TEST_MIX[i % len(self.TEST_MIX)]
+                if spec not in self.profile.classes.get(cls, {}):
+                    spec = next(iter(self.profile.classes[cls]))
+                m, c = self.add_character(uid, name, name, cls, spec, None, True)
+                m.test = True
+                c.rank = rank
+                c.confirmed_by = by
+                self.save(m, f"test member {name} seeded (by {by})")
+                made.append(m)
         return made
 
     def clear_test_members(self, by: str) -> int:
-        """Remove every test member (their placements go with them)."""
+        """Remove every test member (their placements go with them): one commit for the lot."""
         gone = 0
-        for m in list(self.members.values()):
-            if not m.test:
-                continue
-            path = self.store.root / self.key / "members" / f"{m.discord_id}.json"
-            del self.members[m.discord_id]
-            self._snap.pop(m.discord_id, None)
-            if path.exists():
-                path.unlink()
-                self.store.commit(f"{self.key}: test member {m.display_name} removed (by {by})")
-            gone += 1
+        with self.store.batch(f"{self.key}: test bench cleared by {by}"):
+            for m in list(self.members.values()):
+                if not m.test:
+                    continue
+                path = self.store.root / self.key / "members" / f"{m.discord_id}.json"
+                del self.members[m.discord_id]
+                self._snap.pop(m.discord_id, None)
+                if path.exists():
+                    path.unlink()
+                    self.store.commit(f"{self.key}: test member {m.display_name} removed (by {by})")
+                gone += 1
         if gone:
             self._notify("member", [f"test bench: {gone} test members removed (by {by})"])
         return gone
@@ -949,7 +959,7 @@ class Registry:
         """Class/spec/role distribution across planned+active mains, plus flex and buff providers."""
         mains = [(m, m.main) for m in self.members.values() if m.main]
         by_cls: dict[str, list[str]] = {}
-        by_role: dict[str, int] = {r: 0 for r in ("tank", "healer", "melee", "ranged")}
+        by_role: dict[str, int] = {r: 0 for r in ROLES}
         flex: dict[str, list[str]] = {r: [] for r in by_role}
         for m, c in mains:
             by_cls.setdefault(c.cls, []).append(f"{m.display_name} · {c.spec}" + (f"/{c.offspec}" if c.offspec else ""))
@@ -1149,29 +1159,9 @@ class Registry:
     def on_roster(self, m: Member, roster: str) -> bool:
         return any(roster in c.rosters for c in m.active())
 
-    # older call sites
-    def team_add(self, discord_id: int, team: str, by: str, display_name: str | None = None) -> Member:
-        return self.roster_add(discord_id, team, by, None, display_name)[0]
-
-    def team_remove(self, discord_id: int, team: str, by: str) -> Member:
-        return self.roster_remove(discord_id, team, by)
-
-    def team_members(self, team: str) -> list[Member]:
-        return [m for m, _ in self.roster_members(team)]
-
     def team_pool(self, team: str) -> list[Member]:
+        """Members of roster_pool (older call sites in discord_raid.py / raidcycle.py)."""
         return [m for m, _ in self.roster_pool(team)]
-
-    # ---- availability & absences
-    def set_slot_prefs(self, discord_id: int, prefs: dict[str, str], display_name: str | None = None) -> Member:
-        """Rate the guild's candidate raid times: yes | maybe | no (unknown slots and other values are dropped)."""
-        m = self.member(discord_id, display_name, create=display_name is not None)
-        clean = {k: v for k, v in prefs.items() if k in self.config.slots and v in ("yes", "maybe", "no")}
-        if clean == m.slot_prefs:
-            return m
-        m.slot_prefs = clean
-        self.save(m, f"{m.display_name} slots: " + ", ".join(f"{k}={v}" for k, v in clean.items()))
-        return m
 
     # ---- placement confirmations (after a roster build is approved)
     def add_placement_ask(self, discord_id: int, roster: str, character: str, by: str) -> dict:
@@ -1179,7 +1169,7 @@ class Registry:
         m.placement_asks = [a for a in m.placement_asks if not (a["roster"] == roster and a.get("answer") is None)]
         ask = {"roster": roster, "character": character, "asked_at": now(), "answer": None, "answered_at": None, "by": by}
         m.placement_asks.append(ask)
-        m.placement_asks = m.placement_asks[-12:]
+        m.placement_asks = m.placement_asks[-PLACEMENT_ASK_HISTORY:]
         self.save(m, f"{m.display_name} asked to confirm {character} on {roster}")
         return ask
 
@@ -1188,131 +1178,19 @@ class Registry:
         return [a for a in (m.placement_asks if m else []) if a.get("answer") is None]
 
     def answer_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> str:
-        """Yes: keep the seat and default them In for that roster. No: give the seat back (roster_remove) and note it."""
+        """Yes: keep the seat. No: give the seat back (roster_remove) and note it."""
         m = self.member(discord_id)
         ask = next((a for a in m.placement_asks if a["roster"] == roster and a.get("answer") is None), None)
         if not ask:
             raise RegistryError("Nothing to answer for that roster.")
         ask["answer"], ask["answered_at"] = ("yes" if yes else "no"), now()
         if yes:
-            if m.availability.get(roster) != "in":
-                m.availability[roster] = "in"
             self.save(m, f"{m.display_name} confirmed {ask['character']} on {roster}")
             return f"{m.display_name} confirmed {ask['character']} on {roster}"
         self.save(m, f"{m.display_name} declined {roster}")
         if self.on_roster(m, roster):
             self.roster_remove(discord_id, roster, by)
         return f"{m.display_name} can't make {roster} — seat re-opened"
-
-    def set_week(self, discord_id: int, ranges: list[dict], display_name: str | None = None) -> Member:
-        """Replace the weekly availability grid. Ranges are merged per day/level; anything outside them is unavailable."""
-        clean: list[dict] = []
-        for r in ranges:
-            try:
-                day, start, end, level = int(r["day"]), int(r["start"]), int(r["end"]), str(r["level"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if not (0 <= day <= 6 and 0 <= start < end <= 1440 and level in ("preferred", "available")):
-                continue
-            clean.append({"day": day, "start": start, "end": end, "level": level})
-        merged: list[dict] = []
-        for day in range(7):
-            for level in ("preferred", "available"):
-                spans = sorted((r["start"], r["end"]) for r in clean if r["day"] == day and r["level"] == level)
-                cur: list[int] | None = None
-                for a, b in spans:
-                    if cur and a <= cur[1]:
-                        cur[1] = max(cur[1], b)
-                    else:
-                        if cur:
-                            merged.append({"day": day, "start": cur[0], "end": cur[1], "level": level})
-                        cur = [a, b]
-                if cur:
-                    merged.append({"day": day, "start": cur[0], "end": cur[1], "level": level})
-        m = self.member(discord_id, display_name, create=display_name is not None)
-        if merged == m.week:
-            return m
-        m.week = merged
-        hours = sum((r["end"] - r["start"]) for r in merged) / 60
-        self.save(m, f"{m.display_name} availability grid: {len(merged)} block(s), {hours:.0f}h/week")
-        return m
-
-    def week_level(self, m: Member, start, hours: float) -> str | None:
-        """'preferred' if the whole raid window sits inside preferred blocks, 'available' if inside preferred+available,
-        None if uncovered; the window is in the guild timezone, Monday=0. Members without a grid return None."""
-        if not m.week:
-            return None
-        from datetime import timedelta
-        from zoneinfo import ZoneInfo
-
-        z = ZoneInfo(self.config.timezone)
-        t0 = start.astimezone(z)
-        need = [(t0 + timedelta(minutes=i)) for i in range(0, int(hours * 60), 30)]
-
-        def covered(levels: tuple[str, ...]) -> bool:
-            for t in need:
-                mins = t.hour * 60 + t.minute
-                if not any(r["day"] == t.weekday() and r["start"] <= mins < r["end"] and r["level"] in levels for r in m.week):
-                    return False
-            return True
-
-        if covered(("preferred",)):
-            return "preferred"
-        if covered(("preferred", "available")):
-            return "available"
-        return None
-
-    def slot_pref(self, m: Member, start, hours: float, slot: str) -> str | None:
-        """Effective yes/maybe/no for a raid window: the grid when the member has one, else the legacy slot rating."""
-        if m.week:
-            return {"preferred": "yes", "available": "maybe", None: "no"}[self.week_level(m, start, hours)]
-        return m.slot_prefs.get(slot)
-
-    def week_heat(self) -> list[list[tuple[int, int]]]:
-        """[day][half-hour] -> (preferred count, available count) over mains, for the officer heat-map."""
-        heat = [[(0, 0) for _ in range(48)] for _ in range(7)]
-        for m in self.members.values():
-            if not m.main or not m.week:
-                continue
-            for r in m.week:
-                for i in range(r["start"] // 30, min(48, -(-r["end"] // 30))):
-                    p, a = heat[r["day"]][i]
-                    heat[r["day"]][i] = (p + 1, a) if r["level"] == "preferred" else (p, a + 1)
-        return heat
-
-    def slot_summary(self) -> list[dict]:
-        """Per candidate slot: who said yes/maybe/no, with role counts among the yes+maybe mains."""
-        out = []
-        from .raidcycle import next_raid_time
-
-        for slot in self.config.slots:
-            yes, maybe, no, unset = [], [], [], []
-            roles = {r: 0 for r in ("tank", "healer", "melee", "ranged")}
-            try:
-                start = next_raid_time(slot, self.config.timezone)
-            except ValueError:
-                start = None
-            for m in self.members.values():
-                if not m.main:
-                    continue
-                v = self.slot_pref(m, start, 3.0, slot) if start else m.slot_prefs.get(slot)
-                {"yes": yes, "maybe": maybe, "no": no}.get(v, unset).append(m.display_name)
-                if v in ("yes", "maybe"):
-                    r = self.roles_of(m)[0]
-                    if r in roles:
-                        roles[r] += 1
-            out.append({"slot": slot, "yes": yes, "maybe": maybe, "no": no, "unset": unset, "roles": roles})
-        return out
-
-    def set_availability(self, discord_id: int, team: str, value: str) -> Member:
-        if value not in AVAILABILITY:
-            raise RegistryError(f"Availability must be one of {', '.join(AVAILABILITY)}.")
-        if team not in self.config.team_keys():
-            raise RegistryError(f"Unknown team {team}. Teams: {', '.join(self.config.team_keys())}.")
-        m = self.member(discord_id)
-        m.availability[team] = value
-        self.save(m, f"{m.display_name} availability {team}={value}")
-        return m
 
     def add_absence(self, discord_id: int, start: str, end: str | None, reason: str | None, by: str, display_name: str | None = None) -> tuple[Member, Absence]:
         from datetime import date as _d
@@ -1324,8 +1202,8 @@ class Registry:
             raise RegistryError("Dates are YYYY-MM-DD.")
         if e < s:
             raise RegistryError("End is before start.")
-        if (e - s).days > 120:
-            raise RegistryError("Absences longer than 120 days: set availability to out instead.")
+        if (e - s).days > MAX_ABSENCE_DAYS:
+            raise RegistryError(f"Absences longer than {MAX_ABSENCE_DAYS} days: ask an officer to take you off the roster instead.")
         m = self.member(discord_id, display_name, create=display_name is not None)
         a = Absence(start=s.isoformat(), end=e.isoformat(), reason=(reason or "").strip() or None, by=by)
         m.absences = [x for x in m.absences if not (x.start == a.start and x.end == a.end)] + [a]
@@ -1348,12 +1226,3 @@ class Registry:
                 if a.start <= end and a.end >= start:
                     out.append((m, a))
         return sorted(out, key=lambda ma: ma[1].start)
-
-    def availability_summary(self) -> dict[str, dict[str, int]]:
-        out: dict[str, dict[str, int]] = {t: {"in": 0, "out": 0, "sub": 0, "unset": 0} for t in self.config.roster_keys()}
-        for m in self.members.values():
-            if not m.active():
-                continue
-            for t in out:
-                out[t][m.availability.get(t, "unset")] += 1
-        return out

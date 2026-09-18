@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ActionIcon, Badge, Box, Button, Card, Group, Select, Stack, Switch, Table, Text, TextInput, Title, Tooltip, Modal } from "@mantine/core";
 import css from "./me.module.css";
 import { DateInput } from "@mantine/dates";
-import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconCrown, IconPencil, IconPlus, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { api, type Character, type Me, type Meta } from "../api";
 import { GameIcon } from "../components/Icons";
-import { CLASS_COLOURS } from "../theme";
+import { CharacterCell, SpecCell } from "../components/Cells";
+import { classColour } from "../theme";
 import { CardHeader, fail, ok } from "../components/Page";
+import { usePoll } from "../hooks/usePoll";
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; slot: "main" | "alt"; isNew?: boolean };
 
@@ -16,8 +18,11 @@ export function MePage({ meta }: { meta: Meta }) {
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [absOpen, setAbsOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
+  usePoll(() => { if (!editing) load(); });
+  async function refresh() { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }
 
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));
 
@@ -43,8 +48,8 @@ export function MePage({ meta }: { meta: Meta }) {
   const summary = useMemo(() => {
     if (!me) return "";
     const n = me.characters.length;
-    const sheet = me.sheets.find((s) => s.seated) || me.sheets.find((s) => s.status === "in");
-    return [`${n} character${n === 1 ? "" : "s"}`, me.roles.primary || null, sheet ? `${sheet.raid} · ${sheet.when} — ${sheet.seated ? "you're seated" : "joined"}` : null].filter(Boolean).join(" · ");
+    const sheet = me.sheets.find((s) => s.rostered) || me.sheets.find((s) => s.status === "in");
+    return [`${n} character${n === 1 ? "" : "s"}`, me.roles.primary || null, sheet ? `${sheet.raid} · ${sheet.when} — ${sheet.rostered ? "you're rostered" : "joined"}` : null].filter(Boolean).join(" · ");
   }, [me]);
 
   if (!me) return <Text c="dimmed">Loading…</Text>;
@@ -52,13 +57,16 @@ export function MePage({ meta }: { meta: Meta }) {
     <Stack gap="lg">
       <Group justify="space-between" align="flex-start">
         <Box><Title order={1} size="h2">{me.display_name}</Title><Text c="dimmed" size="sm" mt={4}>{summary}</Text></Box>
-        {!editing && <Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit characters</Button>}
+        <Group gap="xs">
+          {!editing && <Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit characters</Button>}
+          <Tooltip label="Refresh"><ActionIcon variant="default" size="lg" aria-label="refresh" loading={refreshing} onClick={refresh}><IconRefresh size={16} /></ActionIcon></Tooltip>
+        </Group>
       </Group>
 
       {me.asks.map((a) => (
         <Card key={a.roster} style={{ borderColor: "var(--mantine-color-teal-4)" }}>
           <Group p="md" justify="space-between">
-            <Text>You're seated on <b>{a.roster}</b> as <b>{a.character}</b> — confirm to keep the seat, or hand it back.</Text>
+            <Text>You're rostered for <b>{a.raid}{a.when ? ` · ${a.when}` : ""}</b> as <b>{a.character}</b> — confirm to keep the seat, or hand it back.</Text>
             <Group gap="xs">
               <Button size="xs" onClick={() => api.post("/api/me/placement", { roster: a.roster, answer: "yes" }).then(load).catch(fail)}>Confirm</Button>
               <Button size="xs" variant="default" onClick={() => api.post("/api/me/placement", { roster: a.roster, answer: "no" }).then(load).catch(fail)}>Can't make it</Button>
@@ -82,12 +90,7 @@ export function MePage({ meta }: { meta: Meta }) {
                           ? <Tooltip label="your main"><IconCrown size={18} color="var(--mantine-color-yellow-5)" /></Tooltip>
                           : <Tooltip label={`make ${c.label} your main`}><ActionIcon variant="subtle" color="gray" onClick={() => makeMain(c)}><IconCrown size={18} opacity={0.35} /></ActionIcon></Tooltip>}
                       </Table.Td>
-                      <Table.Td>
-                        <Group gap="sm" wrap="nowrap">
-                          <GameIcon meta={meta} kind="class" id={c.cls} size={34} />
-                          <Box><Text fw={600} c={CLASS_COLOURS[c.cls]} style={{ whiteSpace: "nowrap" }}>{c.label}</Text><Text size="xs" c="dimmed">{c.cls}</Text></Box>
-                        </Group>
-                      </Table.Td>
+                      <Table.Td><CharacterCell meta={meta} cls={c.cls} label={c.label} size={34} /></Table.Td>
                       <Table.Td><SpecCell meta={meta} cls={c.cls} spec={c.spec} role={c.role} /></Table.Td>
                       <Table.Td>{c.offspec ? <SpecCell meta={meta} cls={c.cls} spec={c.offspec} role={c.off_role || ""} /> : <Text c="dimmed">—</Text>}</Table.Td>
                       <Table.Td>{!c.name ? <Badge variant="outline" color="gray">planned</Badge> : c.confirmed ? <Badge variant="light" color="teal">confirmed</Badge> : <Badge variant="light" color="yellow">unconfirmed</Badge>}</Table.Td>
@@ -101,7 +104,7 @@ export function MePage({ meta }: { meta: Meta }) {
                         <Stack gap={6}>
                           {d.isNew
                             ? <Select size="sm" placeholder="Class" value={d.cls || null} data={Object.keys(meta.classes)} onChange={(v) => upd(i, { cls: v || "", spec: v ? Object.keys(meta.classes[v])[0] : "", offspec: null })} />
-                            : <Group gap="sm" wrap="nowrap"><GameIcon meta={meta} kind="class" id={d.cls} size={34} /><Text fw={600} c={CLASS_COLOURS[d.cls]}>{d.label}</Text></Group>}
+                            : <Group gap="sm" wrap="nowrap"><GameIcon meta={meta} kind="class" id={d.cls} size={34} title={d.cls} /><Text fw={600} c={classColour(meta, d.cls)}>{d.label}</Text></Group>}
                           {(d.isNew || !me.characters.find((c) => c.label === d.label)?.name) && (
                             <Group gap={6} wrap="nowrap" grow><TextInput size="sm" placeholder="First" maxLength={12} value={d.name} onChange={(e) => upd(i, { name: e.currentTarget.value })} /><TextInput size="sm" placeholder="Last" maxLength={12} value={d.surname} onChange={(e) => upd(i, { surname: e.currentTarget.value })} /></Group>
                           )}
@@ -139,7 +142,7 @@ export function MePage({ meta }: { meta: Meta }) {
               {me.sheets.map((s) => (
                 <Group key={s.key} justify="space-between" wrap="nowrap">
                   <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}</Text><Text size="xs" c="dimmed">{s.when}{s.character ? ` · ${s.character}` : ""}</Text></Box>
-                  <Badge variant="light" color={s.seated ? "teal" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.seated ? `seated${s.roster && s.roster > 1 ? ` · roster ${s.roster}` : ""}` : s.label || "not answered"}</Badge>
+                  <Badge variant="light" color={s.rostered ? "teal" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.rostered ? `rostered${s.roster && s.roster > 1 ? ` · roster ${s.roster}` : ""}` : s.label || "not answered"}</Badge>
                 </Group>
               ))}
               {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer on the sheet in Discord — Join / Bench / No thanks. Once the roster locks you confirm by DM.</Text>}
@@ -169,10 +172,6 @@ export function MePage({ meta }: { meta: Meta }) {
   );
 
   function upd(i: number, patch: Partial<Draft>) { setDrafts(drafts.map((d, j) => (j === i ? { ...d, ...patch } : d))); }
-}
-
-function SpecCell({ meta, cls, spec, role }: { meta: Meta; cls: string; spec: string; role: string }) {
-  return <Group gap={8} wrap="nowrap"><GameIcon meta={meta} kind="spec" id={`${cls}:${spec}`} title={`${spec} (${role})`} /><Text size="sm">{spec}</Text><Text size="xs" c="dimmed">{role}</Text></Group>;
 }
 
 function AbsenceModal({ opened, onClose, onSaved }: { opened: boolean; onClose: () => void; onSaved: () => void }) {

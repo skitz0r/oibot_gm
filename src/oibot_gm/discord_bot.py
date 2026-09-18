@@ -36,7 +36,7 @@ from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
 from .discord_raid import FillButton, PlaceButton, RaidContext, RaidMixin, RunButton, SignupButton, register_raid_commands
-from .discord_registry import Guilds, PlanButton, RegisterButton, is_officer, is_owner, register_commands
+from .discord_registry import Guilds, RegisterButton, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
 from .llm.provider import Provider, get_provider
@@ -57,7 +57,7 @@ def _store() -> GitStore:
     return STORE
 
 CLASS_COLOURS = {"Warrior": 0xC79C6E, "Paladin": 0xF58CBA, "Hunter": 0xABD473, "Rogue": 0xFFF569, "Priest": 0xFFFFFF, "Shaman": 0x0070DE, "Mage": 0x69CCF0, "Warlock": 0x9482C9, "Druid": 0xFF7D0A}
-TEAL = 0x2B7A78
+from .constants import ROLES, TEAL  # noqa: E402
 ROLE_ICON = {"tank": "🛡", "healer": "✚", "melee": "⚔", "ranged": "🏹"}
 # Filled at startup with application emojis (class_<name>, role_<name>); falls back to text.
 EMOJI: dict[str, str] = {}
@@ -204,7 +204,7 @@ def signup_embed(ev: MockEvent, ctx: GuildContext) -> discord.Embed:
     active = ev.active_signups()
     signed = [p for p in active if p.status == "signed"]
     bench = [p for p in active if p.status == "bench"]
-    counts = {r: sum(1 for p in signed if p.role == r) for r in ("tank", "healer", "melee", "ranged")}
+    counts = {r: sum(1 for p in signed if p.role == r) for r in ROLES}
     e = discord.Embed(title=f"{ev.raid_name} signup · {ev.id}", colour=TEAL, description=f"{ev.date} · **{len(signed)}** signed (+{len(bench)} bench) · " + " · ".join(f"{ico('role', r)} {n}" for r, n in counts.items()))
     by_cls: dict[str, list[Player]] = {}
     for p in sorted(signed, key=lambda p: p.pos):
@@ -682,6 +682,14 @@ class ConfirmView(discord.ui.View):
 class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, discord.Client):
     ico = staticmethod(ico)
 
+    async def close(self) -> None:
+        """Shutdown: push any unpushed data-repo commits before the process goes away."""
+        try:
+            if STORE is not None:
+                await asyncio.to_thread(STORE.flush)
+        finally:
+            await super().close()
+
     def __init__(self, ctx: GuildContext, test_guild: int | None):
         intents = discord.Intents.default()
         intents.message_content = True  # channel chat → roster changes / loot feedback
@@ -721,7 +729,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
             walk(c)
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
-        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, PlanButton, RegisterButton, GuideSelect, AbsenceButton)
+        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, GuideSelect, AbsenceButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -992,7 +1000,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
         if ev.state == "roster_proposed" and message.channel.id == ev.channel_id and ev.roster:
             async with message.channel.typing():
                 try:
-                    req = await asyncio.to_thread(nl.parse_roster_request, self.ctx.provider, ev.raid_name, roster_text(ev), message.content)
+                    req = await asyncio.to_thread(nl.parse_roster_request, self.ctx.provider, ev.raid_name, roster_text(ev), message.content, message.author.display_name)
                 except Exception as e:  # noqa: BLE001
                     await message.reply(f"Couldn't parse that ({type(e).__name__}).")
                     return
@@ -1017,7 +1025,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
             ctx = self.loot_ctx(ev)
             async with message.channel.typing():
                 try:
-                    fb = await asyncio.to_thread(nl.parse_loot_feedback, ctx.provider, ctx.policy_for_llm(), proposal_text(ev), message.content)
+                    fb = await asyncio.to_thread(nl.parse_loot_feedback, ctx.provider, ctx.policy_for_llm(), proposal_text(ev), message.content, message.author.display_name)
                 except Exception as e:  # noqa: BLE001
                     await message.reply(f"Couldn't parse that ({type(e).__name__}: {str(e)[:160]}).")
                     return
@@ -1230,8 +1238,5 @@ def run(guild_dir: Path, signup_file: str) -> None:
     STORE = GitStore(guild_dir.parent)
     GUILD_KEY = guild_dir.name
     ctx = GuildContext(guild_dir, signup_file)
-    # discord.py reports view/modal callback failures through logging; keep them in the log file
-    import logging
-
-    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # logging is configured by cli.setup_logging (rotating out/oibot.log); discord.py's own handler is off
     OibotGM(ctx, test_guild).run(token, log_handler=None)
