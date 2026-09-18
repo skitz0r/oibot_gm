@@ -179,7 +179,7 @@ class RegistryError(ValueError):
 
 
 RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1}
-RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before", "nudge_hours_before")
+RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before", "nudge_hours_before", "fill_ask_hours")
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
 _SLOT_RE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+([01]?\d|2[0-3]):([0-5]\d)$", re.I)
 
@@ -605,6 +605,7 @@ class Registry:
         out.setdefault("split_policy", "balanced")
         out.setdefault("nudge", True)  # DM the mains who haven't answered, once, at nudge_hours_before
         out.setdefault("nudge_hours_before", max(float(out["lock_hours_before"]), min(48.0, float(out["signup_lead_hours"]) / 2)))
+        out.setdefault("fill_ask_hours", 4)  # a fill DM with no answer counts as no after this long (never later than the run start)
         out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
         return out
 

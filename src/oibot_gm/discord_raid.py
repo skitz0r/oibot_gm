@@ -175,6 +175,18 @@ def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
     return ui.TextDisplay(text)
 
 
+def ask_line(reg: Registry, ico, ask) -> str:
+    """One thread line per fill ask: who, what they'd play (spec icon + character), and what it covers."""
+    c = reg.find(ask.character)
+    what = (ico("spec", f"{c[1].cls}:{ask.spec}") + " " if c else "") + f"**{ask.character}**"
+    if ask.kind == "offspec":
+        return f"asked {ask.display_name} to swap to {ask.spec} on {what}"
+    if ask.kind == "alt":
+        return f"asked {ask.display_name} to swap to {what}"
+    tail = f" ({ask.reason})" if ask.reason.startswith("covering") else ""
+    return f"asked {ask.display_name} to come as {what}{tail}"
+
+
 def _role_counts(ico, players) -> str:
     counts = {r: sum(1 for p in players if p.role == r) for r in ("tank", "healer", "melee", "ranged")}
     return "   ".join(f"{ico('role', r)} {n}" for r, n in counts.items())
@@ -339,10 +351,16 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
     """Fill DM: what opened, the seat offered (character + spec), the group they'd join, Yes / Can't."""
     ui = discord.ui
     rd = reg.raid_def(ev.instance)
-    what = {"sub": "you're on the bench", "pool": "you haven't answered the sheet", "other_roster": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec", "alt": f"you could bring your alt"}[ask.kind]
+    what = {"sub": "you're on the bench", "pool": "you haven't answered the sheet", "other_roster": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec", "alt": "you could bring your alt"}[ask.kind]
     c = reg.find(ask.character)
     cls = c[1].cls if c else ""
-    head = _header(reg, ev, f"A seat opened · {rd.get('name', ev.instance)}", [f"{ask.reason} — {what}", f"Come as {ico('spec', f'{cls}:{ask.spec}') if cls else ''} **{ask.character}** ({ask.spec})"])
+    lines = [f"{ask.reason} — {what}", f"{'Swap to' if ask.swap else 'Come as'} {ico('spec', f'{cls}:{ask.spec}') if cls else ''} **{ask.character}** ({ask.spec})"]
+    partner = rc.partner_of(ev, ask)
+    if partner and ask.swap:
+        lines.append(f"{partner.display_name} is being asked to cover your {ask.vacates} seat; the swap only happens if you both say yes.")
+    elif partner:
+        lines.append(f"{partner.display_name} would swap to {partner.role} to make room; this only happens if you both say yes.")
+    head = _header(reg, ev, f"{'A swap request' if ask.swap else 'A seat opened'} · {rd.get('name', ev.instance)}", lines)
     parts = [head]
     if ev.all_rosters:
         for i, r in enumerate(ev.all_rosters):
@@ -350,7 +368,8 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
             if gi is not None:
                 parts += [ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"You'd join Group {gi + 1}" + (f" of Roster {i + 1}" if len(ev.all_rosters) > 1 else ""), show_missing=False))]
                 break
-    parts += [ui.Separator(), ui.TextDisplay("-# Yes puts you straight in the seat. No answer and the next person is asked."), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
+    deadline = f" No answer by <t:{int(datetime.fromisoformat(ask.expires_at).timestamp())}:t> counts as no." if ask.expires_at else ""
+    parts += [ui.Separator(), ui.TextDisplay(("-# Yes makes the swap at once." if ask.swap else "-# Yes puts you straight in the seat.") + " A no asks the next person." + deadline), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0xE0A448))
     return view
@@ -394,8 +413,9 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             if outstanding:
                 lines.append(f"**Already asked, waiting:** {', '.join(a.display_name for a in outstanding)}")
             if batch:
-                lines.append("**Will DM now:** " + "; ".join(f"{a.display_name} — {a.kind.replace('_', ' ')}, as {a.character} ({a.role})" for a in batch))
-                lines.append("-# Each gets Yes / Can't this time. A yes takes the seat at once; a no asks the next person. Never more than 3 questions out at a time. Answers post in this run's thread.")
+                lines.append("**Will DM now:**\n" + "\n".join("• " + ask_line(reg, bot.ico, a) + (" — tied to " + next((b.display_name for b in batch if b.discord_id == a.pair), "?") if a.pair else "") for a in batch))
+                hrs = reg.raid_def(ev.instance).get("fill_ask_hours")
+                lines.append(f"-# Each gets Yes / Can't this time. A yes takes the seat at once; a no asks the next person; no answer within {hrs:g} h counts as no. Tied asks go out together and a no from either withdraws the other. Never more than 3 questions out at a time. Answers post in this run's thread.")
             else:
                 lines.append("**Nobody to ask right now** — either the 3 outstanding questions already cover it, or everyone eligible has been asked.")
             view = discord.ui.View(timeout=120)
@@ -406,6 +426,8 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
                 await i.response.edit_message(content="Sending…", view=None)
                 sent, nd2 = await bot.run_fill(reg, rs, ev, team, by=by)
                 await i.edit_original_response(content=("Asked " + ", ".join(a.display_name for a in sent)) if sent else "Nobody could be asked.")
+                if sent:
+                    await bot.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, bot.ico, a) for a in sent))
 
             async def cancel(i: discord.Interaction):
                 await i.response.edit_message(content="Cancelled — nothing sent.", view=None)
@@ -719,13 +741,14 @@ class RaidMixin:
     async def dm_on_open(self, reg, rs, ev, team) -> int:
         """Optional per-run: DM every registered raider when the sheet opens, with the same buttons."""
         unix = int(ev.start.timestamp())
+        _soft, hard, _confirm = run_times(reg, ev, team)
         sent = 0
         for m in reg.team_pool(team["key"]):
             if not m.main or m.dm_opt_out:
                 continue
             s = ev.signups.get(str(m.discord_id))
             status = f"You're pre-filled as **{rc.LABELS.get(s.status, s.status)}** on {s.character}" if s else "You haven't answered yet"
-            if await self.send_member_dm(reg, m, f"**{reg.config.name} · {team.get('name', ev.team)}** <t:{unix}:F> (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else ""), sheet_view(ev.key)):
+            if await self.send_member_dm(reg, m, f"**{reg.config.name} · {team.get('name', ev.team)}** <t:{unix}:F> (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key)):
                 sent += 1
         ev.log.append(f"open DMs sent to {sent}")
         rs.save(ev, f"open DMs {sent}")
@@ -742,8 +765,9 @@ class RaidMixin:
         if nudge and rc.team_setting(team, "reminders") != "none":
             targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
             unix = int(ev.start.timestamp())
+            _soft, hard, _confirm = run_times(reg, ev, team)
             for m in targets:
-                if await self.send_member_dm(reg, m, f"{reg.config.name}: the **{team.get('name', ev.team)}** sheet for <t:{unix}:F> is still waiting for you — Join, Bench or No thanks in <#{ev.channel_id}>."):
+                if await self.send_member_dm(reg, m, f"{reg.config.name}: the **{team.get('name', ev.team)}** sheet for <t:{unix}:F> is still waiting for you — Join, Bench or No thanks in <#{ev.channel_id}>.\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it."):
                     ev.nudged.append(m.discord_id)
             if targets:
                 rs.save(ev, f"nudged {len(targets)}")
@@ -763,21 +787,17 @@ class RaidMixin:
         unix = int(ev.start.timestamp())
         name = f"{reg.config.name} · {team.get('name', ev.team)}"
         sent = []
+        deadline = rc.ask_deadline(reg, ev).isoformat()
+        for ask in batch:  # tied pairs sit next to each other in the batch; both are on the event before either DM goes out
+            ask.expires_at = deadline
+            ev.fill_asks.append(ask)
         for ask in batch:
-            what = {
-                "sub": f"you're on the bench — can you come as **{ask.character}** ({ask.spec})?",
-                "pool": f"you haven't answered the sheet — can you come as **{ask.character}** ({ask.spec})?",
-                "other_roster": f"could you help out on **{ask.character}** ({ask.spec})?",
-                "offspec": f"would you play **{ask.spec}** on {ask.character} instead of your main spec?",
-                "alt": f"could you bring your alt **{ask.character}** ({ask.spec}) instead?",
-            }[ask.kind]
             m = reg.members.get(ask.discord_id)
             if m and await self.send_member_dm(reg, m, None, fill_layout(reg, ev, team, self.ico, ask)):
-                ev.fill_asks.append(ask)
                 sent.append(ask)
             else:
                 ask.answer, ask.answered_at = "expired", rc.now()
-                ev.fill_asks.append(ask)
+                rc.release_partner(reg, rs, ev, ask)
         if sent:
             ev.fill_state = "asking"
             ev.log.append(f"fill ({by}): asked {', '.join(a.display_name for a in sent)}")
@@ -787,10 +807,21 @@ class RaidMixin:
             rs.save(ev, "fill: nobody left to ask")
         return sent, nd
 
+    async def withdraw_ask(self, reg, ev, ask, because: str) -> None:
+        """Tell the other half of a tied pair the question is off."""
+        m = reg.members.get(ask.discord_id)
+        if m:
+            await self.send_member_dm(reg, m, f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}. Nothing to do.")
+        await self.post_run_update(reg, ev, f"↩️ withdrew the ask to {ask.display_name} ({because})")
+
     async def after_fill_answer(self, reg, rs, ev, ask, line: str) -> None:
         await self.refresh_sheet(reg, ev)
         cfg = reg.config
         team = cfg.team(ev.team) or {"key": ev.team, "size": 20}
+        if ask.answer != "yes":
+            other = rc.release_partner(reg, rs, ev, ask)
+            if other:
+                await self.withdraw_ask(reg, ev, other, f"{ask.display_name} said no")
         officer_ch = self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else (self.get_channel(ev.channel_id) if ev.channel_id else None)
         nd = rc.needs(reg, ev, team)
         still = (f"still short {nd['headcount']}" if nd["headcount"] else "") + ("".join(f", {n} {r}" for r, n in nd["roles"].items()))
@@ -932,7 +963,7 @@ class RaidMixin:
         if removed and rc.team_setting(team, "autofill"):
             sent, nd = await self.run_fill(reg, rs, ev, team, by=by)
             if sent:
-                await self.post_run_update(reg, ev, "🧩 asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+                await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
         await self.ops.emit(reg.config, "info", f"[web] {by} edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""))
 
     async def after_placement_answer(self, reg, uid: int, roster: str, yes: bool, line: str) -> None:
@@ -961,7 +992,7 @@ class RaidMixin:
         if rc.team_setting(team, "autofill"):
             sent, nd = await self.run_fill(reg, rs, ev, team, by=why)
             if sent:
-                await self.post_run_update(reg, ev, f"🧩 replacement for {m.display_name} — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+                await self.post_run_update(reg, ev, f"🧩 replacement for {m.display_name}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
 
     # ---- absences ripple into sheets
     async def after_absence(self, reg, m, start: str, end: str, by: str) -> list[str]:
@@ -1044,10 +1075,16 @@ class RaidMixin:
                         await self.refresh_sheet(reg, ev)
                         await self.refresh_cards(reg, ev)
                         await self.ops.emit(cfg, "warn", f"{ev.key}: confirmations expired for {len(gone)}")
+                expired, released = rc.expire_fill_asks(reg, rs, ev)
+                if expired:
+                    await self.post_run_update(reg, ev, f"⌛ no answer from {', '.join(a.display_name for a in expired)} — counts as no")
+                    for a in released:
+                        await self.withdraw_ask(reg, ev, a, "the other half of the question timed out")
+                    await self.refresh_cards(reg, ev)
                 if rc.team_setting(team, "autofill") and ev.fill_state in ("idle", "asking") and (ev.health_posted or ev.state != "open"):
                     sent, nd = await self.run_fill(reg, rs, ev, team)
                     if sent:
-                        await self.post_run_update(reg, ev, f"🧩 short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()) + " — asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent))
+                        await self.post_run_update(reg, ev, f"🧩 short {nd['headcount']}" + "".join(f", {n} {r}" for r, n in nd["roles"].items()) + ":\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
                     elif ev.fill_state == "exhausted" and "fill exhausted" not in ev.log:
                         ev.log.append("fill exhausted")
                         rs.save(ev, "fill exhausted")
@@ -1304,12 +1341,14 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         busy = rc.conflicts(rs, ev)
         if preview:
             cands = await asyncio.to_thread(rc.fill_candidates, reg, rs, ev, t)
-            lines = [f"{i + 1}. {a.display_name} — {a.kind}: {a.character} ({a.spec}, {a.role}) for {a.reason}" for i, a in enumerate(cands[:15])]
+            lines = [f"{i + 1}. " + ask_line(reg, bot.ico, a) + (" — tied to " + next((b.display_name for b in cands if b.discord_id == a.pair), "?") if a.pair else "") for i, a in enumerate(cands[:15])]
             open_asks = [a for a in ev.fill_asks if a.open]
             await interaction.followup.send(f"**{ev.key}** · {gaps}" + (f" · double-booked: {', '.join(reg.members[u].display_name for u in busy if u in reg.members)}" if busy else "") + f"\nOutstanding asks: {', '.join(a.display_name for a in open_asks) or 'none'}\nWould ask next:\n" + ("\n".join(lines) or "nobody left"), ephemeral=True)
             return
         sent, nd = await bot.run_fill(reg, rs, ev, t, by=interaction.user.display_name)
-        await interaction.followup.send(f"**{ev.key}** · {gaps}\n" + ("Asked: " + ", ".join(f"{a.display_name} ({a.kind}: {a.character})" for a in sent) if sent else ("Nothing to fill." if not (nd["headcount"] or nd["roles"]) else "Nobody left to ask (or the asks outstanding already cover it).")), ephemeral=True)
+        if sent:
+            await bot.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, bot.ico, a) for a in sent))
+        await interaction.followup.send(f"**{ev.key}** · {gaps}\n" + ("Asked: " + ", ".join(ask_line(reg, bot.ico, a) for a in sent) if sent else ("Nothing to fill." if not (nd["headcount"] or nd["roles"]) else "Nobody left to ask (or the asks outstanding already cover it).")), ephemeral=True)
         await ops.emit(reg.config, "info", f"{interaction.user.display_name} ran fill for {ev.key}: asked {len(sent)}")
 
     tree.add_command(raid)

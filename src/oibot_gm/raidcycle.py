@@ -61,12 +61,19 @@ class FillAsk(BaseModel):
     spec: str
     reason: str  # "short 1 healer", "short 2"
     asked_at: str = Field(default_factory=now)
-    answer: Optional[str] = None  # yes | no | expired
+    answer: Optional[str] = None  # yes | no | expired | released (the paired ask fell through)
     answered_at: Optional[str] = None
+    expires_at: Optional[str] = None  # ISO: no answer by then counts as no
+    pair: Optional[int] = None  # discord_id of the ask this one is tied to (a swap and the backfill covering the vacated seat)
+    vacates: Optional[str] = None  # swaps: the role the person leaves
 
     @property
     def open(self) -> bool:
         return self.answer is None
+
+    @property
+    def swap(self) -> bool:
+        return self.kind in ("offspec", "alt")
 
 
 class RaidEvent(BaseModel):
@@ -343,10 +350,30 @@ def _rank_key(reg: Registry, m: Member) -> tuple:
     return (RANK_ORDER.get(c.rank if c else "trial", 9), m.created_at)
 
 
+def ask_deadline(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> datetime:
+    """When an unanswered fill ask counts as no: `fill_ask_hours` after it was sent, never past the run start."""
+    at = at or datetime.now(ev.start.tzinfo)
+    hours = float(reg.raid_def(ev.instance).get("fill_ask_hours") or 4)
+    return min(at + timedelta(hours=hours), ev.start)
+
+
+def would_short(reg: Registry, ev: RaidEvent, team: dict, role: str) -> bool:
+    """Would losing one `role` player (a Join before lock, a seated player after) drop that role under its minimum?"""
+    size = int(team.get("size") or reg.raid_def(ev.instance).get("size") or 20)
+    n = len(ev.all_rosters) or 1
+    bounds = reg.role_bounds(ev.instance, size)
+    players = ev.seated() if ev.state != "open" and ev.all_rosters else ev.by_status("in")
+    key = "dps" if role in ("melee", "ranged") else role
+    have = sum(1 for p in players if (p.role in ("melee", "ranged") if key == "dps" else p.role == role))
+    return have - 1 < int(bounds.get(key, {}).get("min") or 0) * n
+
+
 def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> list[FillAsk]:
     """Ordered list of people to ask, best first, for the sheet's current needs. Pure; nothing is sent.
-    Order: role gaps first (a sub/pool member of that role, else an In player's offspec or alt),
-    then plain headcount (subs → roster pool not on the sheet → other rosters' members free that night)."""
+    Order: role gaps first (a sub/pool member of that role, else an In player's offspec or alt — a swap is only
+    proposed when the role it vacates stays covered, or someone on the bench/pool can backfill it: then both asks
+    go out tied together, and a no from either releases the other), then plain headcount
+    (subs → roster pool not on the sheet → other rosters' members free that night)."""
     nd = needs(reg, ev, team)
     if not nd["headcount"] and not nd["roles"]:
         return []
@@ -368,10 +395,18 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
         return reg.profile.spec(c.cls, c.spec).role
 
     pool_ids = {m.discord_id for m, _ in reg.roster_pool(team["key"])}
-    subs = [(m, c) for s in benched_joiners + ev.by_status("sub") if (m := reg.members.get(s.discord_id)) and (c := next((c for c in m.active() if c.label == s.character), m.main))]
+    # bench tier: joiners the solver left off, then Bench answers — never someone already seated (the solver may seat a Bench answer)
+    subs = [(m, c) for s in benched_joiners + ev.by_status("sub") if s.display_name not in seated_names and (m := reg.members.get(s.discord_id)) and (c := next((c for c in m.active() if c.label == s.character), m.main))]
     unresponsive = [(m, c) for m, c in reg.roster_pool(team["key"]) if str(m.discord_id) not in ev.signups and c]
     others = [] if team.get("test") else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups and m.availability.get(team["key"]) != "out"], key=lambda mc: _rank_key(reg, mc[0]))
     tiers = [("sub", subs), ("pool", unresponsive), ("other_roster", others)]
+
+    def first_of(role: str, skip: int | None = None):
+        for kind, cands in tiers:
+            for m, c in cands:
+                if ok(m) and m.discord_id != skip and role_of(c) == role:
+                    return kind, m, c
+        return None
 
     # 1. role gaps
     for role, short in nd["roles"].items():
@@ -392,18 +427,31 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
             s = ev.signups.get(str(sid))
             if not m or not s or not ok(m) or s.role == role:
                 continue
+            ask = None
             if s.offspec and reg.profile.spec(s.cls, s.offspec).role == role:
-                out.append(FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="offspec", role=role, character=s.character, spec=s.offspec, reason=f"short {short} {role}"))
-                used.add(sid)
-                got += 1
+                ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="offspec", role=role, character=s.character, spec=s.offspec, reason=f"short {short} {role}", vacates=s.role)
+            else:
+                alt = next((a for a in m.active() if a.label != s.character and role_of(a) == role), None)
+                if alt:
+                    ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="alt", role=role, character=alt.label, spec=alt.spec, reason=f"short {short} {role}", vacates=s.role)
+            if not ask:
                 continue
-            alt = next((a for a in m.active() if a.label != s.character and role_of(a) == role), None)
-            if alt:
-                out.append(FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="alt", role=role, character=alt.label, spec=alt.spec, reason=f"short {short} {role}"))
+            # look ahead: does the swap open a hole where they are now? then it only goes out with a backfill tied to it
+            if would_short(reg, ev, team, s.role):
+                back = first_of(s.role, skip=sid)
+                if not back:
+                    continue
+                bk, bm, bc = back
+                ask.pair = bm.discord_id
+                out.append(ask)
+                out.append(FillAsk(discord_id=bm.discord_id, display_name=bm.display_name, kind=bk, role=s.role, character=bc.label, spec=bc.spec, reason=f"covering {m.display_name}'s {s.role} seat", pair=sid))
+                used.update({sid, bm.discord_id})
+            else:
+                out.append(ask)
                 used.add(sid)
-                got += 1
+            got += 1
     # 2. headcount (role-gap asks that bring a new body count towards it)
-    remaining = nd["headcount"] - sum(1 for a in out if a.kind in ("sub", "pool", "other_roster"))
+    remaining = nd["headcount"] - sum(1 for a in out if not a.swap and not a.pair)
     for kind, cands in tiers:
         for m, c in cands:
             if remaining <= 0:
@@ -426,6 +474,51 @@ def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> list[
     return fill_candidates(reg, rs, ev, team)[:room]
 
 
+def _reseat(ev: RaidEvent, sg: Signup) -> bool:
+    """A swap by someone already seated: update their seat in place (character, spec, role) instead of seating twice."""
+    hit = ev.seat_of(sg.display_name)
+    if not hit:
+        return False
+    p = hit[1]
+    p.cls, p.spec, p.role, p.offspec, p.character = sg.cls, sg.spec, sg.role, sg.offspec, sg.character
+    return True
+
+
+def partner_of(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
+    """The open ask tied to this one (swap ↔ backfill), if any."""
+    if ask.pair is None:
+        return None
+    return next((a for a in ev.fill_asks if a.open and a.discord_id == ask.pair and a.pair == ask.discord_id), None)
+
+
+def release_partner(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
+    """A no (or silence) on one half of a tied pair withdraws the other half. Returns the released ask."""
+    other = partner_of(ev, ask)
+    if other:
+        other.answer, other.answered_at = "released", now()
+        ev.log.append(f"fill: {other.display_name}'s ask withdrawn ({ask.display_name} said no)")
+        rs.save(ev, f"fill {other.display_name} released")
+    return other
+
+
+def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[FillAsk], list[FillAsk]]:
+    """Open asks past their deadline count as no. Returns (expired, released partners)."""
+    t = datetime.now(ev.start.tzinfo)
+    expired, released = [], []
+    for a in ev.fill_asks:
+        if a.open and a.expires_at and datetime.fromisoformat(a.expires_at) <= t:
+            a.answer, a.answered_at = "expired", now()
+            expired.append(a)
+            ev.log.append(f"fill: no answer from {a.display_name} in time")
+    for a in expired:
+        other = release_partner(reg, rs, ev, a)
+        if other:
+            released.append(other)
+    if expired:
+        rs.save(ev, f"fill expired {len(expired)}")
+    return expired, released
+
+
 def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, yes: bool) -> str:
     """Record the answer and, on yes, put the person on the sheet the way they were asked."""
     ask.answer, ask.answered_at = ("yes" if yes else "no"), now()
@@ -433,22 +526,22 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
     if not yes or not m:
         ev.log.append(f"fill: {ask.display_name} declined ({ask.kind})")
         rs.save(ev, f"fill {ask.display_name} no")
-        return f"{ask.display_name} can't ({ask.kind})"
+        return f"{ask.display_name} can't ({'swap' if ask.swap else ask.kind})"
     if ask.kind == "offspec":
         s = ev.signups[str(ask.discord_id)]
         s.spec, s.offspec, s.role, s.note, s.source, s.updated_at = ask.spec, s.spec, ask.role, f"switched to {ask.spec} at request", "fill", now()
+        _reseat(ev, s)
         ev.log.append(f"fill: {ask.display_name} switches to {ask.spec}")
         rs.save(ev, f"fill {ask.display_name} offspec")
-        return f"{ask.display_name} switches to {ask.spec} ({ask.role})"
-    character = ask.character if ask.kind == "alt" else ask.character
-    c = next((c for c in m.active() if c.label == character), m.main)
-    s = _signup(reg, m, c, "in", "fill", "filled in at request" if ask.kind != "alt" else f"on alt {c.label} at request")
+        return f"{ask.display_name} swaps to {ask.spec} ({ask.role})"
+    c = next((c for c in m.active() if c.label == ask.character), m.main)
+    s = _signup(reg, m, c, "in", "fill", "filled in at request" if ask.kind != "alt" else f"swapped to {c.label} at request")
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"fill: {ask.display_name} in as {c.label} ({ask.kind})")
-    if ev.state != "open" and ev.all_rosters:
+    if ev.state != "open" and ev.all_rosters and not _reseat(ev, s):
         seat_player(reg, ev, s)
     rs.save(ev, f"fill {ask.display_name} in")
-    return f"{ask.display_name} is in as {c.label} ({ask.role})"
+    return f"{ask.display_name} {'swaps to' if ask.kind == 'alt' else 'is in as'} {c.label} ({ask.role})"
 
 
 # ---------------------------------------------------------------- health

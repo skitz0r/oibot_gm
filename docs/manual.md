@@ -110,9 +110,14 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    counts as out and their seat is freed.
 6. **Fill** — whenever a seat frees (decline, callout, absence, missed confirmation), if `autofill` is on,
    the bot DMs the next best people: joiners the solver benched and *Bench* answers first → mains not on
-   the sheet → offspec switches → alts of the needed role. It asks the shortfall + 1 at a time, never more
+   the sheet → **swaps** (a rostered player's offspec or alt in the needed role). A swap is only proposed
+   when the seat it vacates stays covered; otherwise the bot looks ahead for a bench or pool member of that
+   role and sends both asks tied together — the swap and its backfill — and a no (or silence) from either
+   withdraws the other with a "never mind" DM. It asks the shortfall + 1 at a time, never more
    than 3 outstanding, and never asks someone who is In on another raid within 4 hours, absent, or opted
-   out of DMs. A yes goes straight into the freed seat. Officers can run a batch by hand: **Fill seats** on
+   out of DMs. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after it was
+   sent, never later than the run start; the updates thread logs the timeout and the next person is asked.
+   A yes goes straight into the freed seat (a swap changes the seat in place). Officers can run a batch by hand: **Fill seats** on
    the health or lock card in the roster channel shows exactly what is short, who is still being waited on
    and who would be DMed now, then *Send N asks* or *Cancel*; `/raid fill` and the Rosters page do the same.
    Every ask, answer, freed seat, confirmation and expiry is logged as one line in the run's **updates
@@ -184,7 +189,7 @@ returns to the game defaults.
 `signup-channel`, `absences-channel`, `applications-channel`, `officer-role`, `timezone` — or all of these on
 the site's **Config** page (channel pickers per function, officer roles, timezone, who may ask the bot,
 the about text; changing a channel posts its card the same way the command does) — and per raid
-`/gm config raid raid:<id> slots:'Tue 19:30, Thu 20:00' signup_lead_hours: lock_hours_before: confirm_hours_before:`
+`/gm config raid raid:<id> slots:'Tue 19:30, Thu 20:00' signup_lead_hours: lock_hours_before: confirm_hours_before: fill_ask_hours:`
 (also weights, first_open, lockout, duration, comp, notes). Nothing opens until a raid has slots.
 
 **Times.** The guild's timezone is US Pacific (`America/Los_Angeles`, the default). Every schedule, cutoff,

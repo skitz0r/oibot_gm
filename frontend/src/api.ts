@@ -68,7 +68,7 @@ export interface RaidRuns {
 export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; tz: string }
 export interface RaidRule {
   id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; comp: Record<string, { min?: number; max?: number }>;
-  slots: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number;
+  slots: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number;
   overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; live: number;
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[] }

@@ -18,7 +18,7 @@ export function RaidsPage() {
   );
 }
 
-type Draft = { slots: string[]; split_policy: string; nudge: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
+type Draft = { slots: string[]; split_policy: string; nudge: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; fill_ask_hours: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
 
 function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; owner: boolean; weightKeys: string[]; policies: string[]; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
@@ -51,6 +51,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
               <Fact label="nudge" value={r.nudge ? `${r.nudge_hours_before} h before` : "off"} c={over("nudge") || over("nudge_hours_before") ? "yellow" : undefined} />
               <Fact label="locks" value={`${r.lock_hours_before} h before`} c={oc("lock_hours_before")} />
               <Fact label="confirm by" value={`${r.confirm_hours_before} h before`} c={oc("confirm_hours_before")} />
+              <Fact label="fill asks" value={`${r.fill_ask_hours} h to answer`} c={oc("fill_ask_hours")} />
               <Fact label="split policy" value={SPLIT_LABEL[r.split_policy] || r.split_policy} c={oc("split_policy")} />
             </Group>
             <Group gap="xl" wrap="wrap">
@@ -71,6 +72,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
               <Switch label="nudge on" checked={d.nudge} onChange={(e) => setD({ ...d, nudge: e.currentTarget.checked })} mb={6} />
               <NumberInput label="locks (h before)" min={0} value={d.lock_hours_before} onChange={(v) => setD({ ...d, lock_hours_before: v })} w={150} />
               <NumberInput label="confirm by (h before)" min={0} value={d.confirm_hours_before} onChange={(v) => setD({ ...d, confirm_hours_before: v })} w={170} />
+              <NumberInput label="fill asks (h to answer)" description="no answer counts as no" min={0} value={d.fill_ask_hours} onChange={(v) => setD({ ...d, fill_ask_hours: v })} w={170} />
               <Select label="split policy" description="when more join than one run seats" data={policies.map((p) => ({ value: p, label: SPLIT_LABEL[p] || p }))} value={d.split_policy} onChange={(v) => setD({ ...d, split_policy: v || d.split_policy })} w={200} />
             </Group>
             <Group gap="md" wrap="wrap" align="flex-end">
@@ -111,7 +113,7 @@ export const SPLIT_BLURB: Record<string, string> = { balanced: "both runs equal:
 const WEIGHT_HINT: Record<string, string> = { rank: "core > raider > trial", main: "main over alt", sat_out: "benched last window", signup_order: "earlier signup" };
 
 function toDraft(r: RaidRule): Draft {
-  return { slots: r.slots, split_policy: r.split_policy, nudge: r.nudge, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, weights: { ...r.weights },
+  return { slots: r.slots, split_policy: r.split_policy, nudge: r.nudge, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },
     first_open: r.first_open_local, lockout_days: r.lockout_days, duration_hours: r.duration_hours, notes: r.notes,
     comp: Object.fromEntries(["tank", "healer", "dps"].map((role) => [role, { min: r.comp[role]?.min ?? "", max: r.comp[role]?.max ?? "" }])) };
 }

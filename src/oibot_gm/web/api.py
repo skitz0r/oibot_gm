@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from .. import comp as comp_mod, raidcycle as rc
+from .. import comp as comp_mod, discord_raid as dr, raidcycle as rc
 from ..registry import RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, RegistryError
 from ..roster import coverage as cov_mod
 
@@ -261,7 +261,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "split": {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
                           "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), int(t.get("size") or 20), reg.role_bounds(ev.instance, int(t.get("size") or 20))) if live else 1},
                 "confirmations": conf_rows,
-                "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer} for a in ev.fill_asks],
+                "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer, "expires_at": a.expires_at, "pair": a.pair} for a in ev.fill_asks],
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
 
     def rosters_data(reg) -> dict:
@@ -419,7 +419,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v, _ = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name)
-        return {"message": ("asked " + ", ".join(f"{a.display_name} ({a.kind})" for a in sent)) if sent else ("nothing to fill" if not (nd["headcount"] or nd["roles"]) else "nobody left to ask")}
+        if sent:
+            await bot.post_run_update(v.reg, ev, "🧩 " + "\n🧩 ".join(dr.ask_line(v.reg, bot.ico, a) for a in sent))
+        return {"message": ("asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)) if sent else ("nothing to fill" if not (nd["headcount"] or nd["roles"]) else "nobody left to ask")}
 
     @app.post("/api/run/{key}/cancel")
     async def run_cancel(request: Request, key: str):
@@ -477,7 +479,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
                         "slots": list(eff["slots"]), "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
-                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
+                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
