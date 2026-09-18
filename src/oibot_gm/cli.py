@@ -56,11 +56,19 @@ def default_guild() -> Path:
     """OIBOT_GUILD_DIR, else the private data repo's guild dir, else the anonymized demo fixtures."""
     from .store import resolve_data_root
 
+    load_dotenv(ROOT / ".env")  # OIBOT_GUILD_DIR / OIBOT_MOCK_GUILD live there; this runs at import time
     env = os.environ.get("OIBOT_GUILD_DIR")
     if env:
         return Path(env)
-    data = resolve_data_root(ROOT) / os.environ.get("OIBOT_MOCK_GUILD", "demo")  # the shadow guild used by /mock; set in .env
-    return data if data.exists() else Path("fixtures/demo")
+    root = resolve_data_root(ROOT)
+    name = os.environ.get("OIBOT_MOCK_GUILD")
+    if name and (root / name).exists():
+        return root / name
+    # no name configured: the first guild dir in the data repo that carries the mock fixture files
+    for d in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")) if root.exists() else []:
+        if (d / "provenance.md").exists():
+            return d
+    return Path("fixtures/demo")
 
 
 GUILD = default_guild()
