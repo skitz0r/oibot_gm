@@ -20,6 +20,7 @@ Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mentio
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
   team_member: add/remove <member> [character] to/from run <target=run key> (a seat on a specific run; defaults to their main).
+  pin: target=<run key>, member, value=in (must be seated at lock) | out (kept on the bench) | clear — an officer decision the lock solver honours.
 Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
 Comp ideals (officer): comp_target: target=<raid id (barrow_deeps|hyjal_summit_forever|onyxias_lair) or run key>, field=<slot: a role tank|healer|melee|ranged, a class "Paladin",
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
@@ -47,11 +48,11 @@ Not settable here (say so): standing rosters or availability (members answer eac
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|ask_audience|about")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, comp_target*, comp_groups), run key (team_member, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, comp_target*, comp_groups), run key (team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
     field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; comp_target*: the slot (role, Class or Class:Spec)")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max')")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear)")
     member: Optional[str] = Field(default=None, description="member display name or mention <@id>")
     character: Optional[str] = None
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social")
@@ -127,6 +128,30 @@ def _key(reg: Registry, op: ConfigOp) -> str:
     return op.target or next(iter(reg.profile.raids), "")
 
 
+PIN_VALUES = {"in": "in", "roster": "in", "seat": "in", "out": "out", "bench": "out", "clear": None, "none": None, "": None}
+PIN_TEXT = {"in": "pin {name} to roster", "out": "keep {name} on bench", None: "clear pin for {name}"}
+
+
+def _pin_value(value: str | None) -> str | None:
+    v = (value or "").strip().lower()
+    if v not in PIN_VALUES:
+        raise RegistryError("pin is in | out | clear")
+    return PIN_VALUES[v]
+
+
+def _live_event(reg: Registry, target: str | None, raids=None):
+    """The live sheet a run key (or event key) names. `raids` is the bot's RaidStore when there is one (so the
+    change lands on the event the scheduler holds); otherwise the store is read fresh from disk."""
+    from . import raidcycle as rc
+
+    rs = raids if raids is not None else rc.RaidStore(reg.store, reg.key)
+    key = (target or "").strip()
+    ev = rs.events.get(key) or rs.for_team(key) if key else None
+    if ev is None or ev.state not in ("open", "locked"):
+        raise RegistryError(f"no live run {key or '?'} (give the run key, e.g. bd-1209-1930)")
+    return rs, ev
+
+
 def describe(reg: Registry, op: ConfigOp) -> str:
     """Human-readable 'current → new' for the diff, without applying."""
     cfg = reg.config
@@ -149,6 +174,21 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"append to {op.doc} policy: “{op.text}”"
     if op.op == "team_member":
         return f"run {op.target or '?'}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
+    if op.op == "pin":
+        m = _member(reg, op.member)
+        name = m.display_name if m else (op.member or "?")
+        try:
+            want = _pin_value(op.value)
+        except RegistryError:
+            return f"run {op.target or '?'}: pin {name} = {op.value!r}? (in | out | clear)"
+        cur = None
+        try:
+            _, ev = _live_event(reg, op.target)
+            cur = ev.pins.get(str(m.discord_id)) if m else None
+        except RegistryError:
+            pass
+        was = {"in": "pinned to roster", "out": "kept on bench"}.get(cur, "no pin")
+        return f"run {op.target or '?'}: {PIN_TEXT[want].format(name=name)} (now: {was})"
     if op.op == "comp_groups":
         key = _key(reg, op)
         cur = (cfg.roster(key) or cfg.raids.get(key) or {}).get("comp_groups") or []
@@ -188,10 +228,11 @@ def describe(reg: Registry, op: ConfigOp) -> str:
     return str(op)
 
 
-def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None) -> str:
+def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, raids=None) -> str:
     """Apply one op through the same code paths as the slash commands. Raises RegistryError on refusal.
     Synchronous: channel kinds that post a card and absences that should be announced are completed by `apply_async`
-    when a bot is available; here they only record the setting."""
+    when a bot is available; here they only record the setting. `raids`: the bot's RaidStore for ops on live runs
+    (pin); without one the store is read from disk."""
     cfg = reg.config
     if op.op in OWNER_OPS and not is_owner:
         raise RegistryError(f"{op.op} needs the owner")
@@ -253,6 +294,20 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             return f"{m.display_name} removed from {key}"
         _, c = reg.roster_add(m.discord_id, key, by, op.character)
         return f"{m.display_name} ({c.label}) added to {key}"
+    if op.op == "pin":
+        from . import raidcycle as rc
+
+        m = _member(reg, op.member)
+        if not m:
+            raise RegistryError(f"unknown member {op.member}")
+        want = _pin_value(op.value)
+        rs, ev = _live_event(reg, op.target, raids)
+        try:
+            rc.set_pin(ev, m.display_name, want)
+        except ValueError as e:  # not on the sheet
+            raise RegistryError(str(e))
+        rs.save(ev, f"{PIN_TEXT[want].format(name=m.display_name)} (by {by})")
+        return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op == "raid_set":
         return reg.set_raid_override(op.target or "", op.field or "", op.value, by)
     if op.op == "raid_reset":
@@ -333,4 +388,5 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
         m, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
         await bot.announce_absence(reg, m, a, by)
         return f"{m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else "")
-    return apply(reg, op, by, is_owner, policy_store)
+    raids = bot.raids.store(reg) if bot is not None and getattr(bot, "raids", None) is not None else None  # the live events, not a fresh read
+    return apply(reg, op, by, is_owner, policy_store, raids=raids)

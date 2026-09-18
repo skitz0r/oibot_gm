@@ -8,6 +8,7 @@ import { GameIcon } from "../components/Icons";
 import { CharacterCell, SpecCell } from "../components/Cells";
 import { classColour } from "../theme";
 import { CardHeader, fail, ok } from "../components/Page";
+import { useConfirm } from "../components/ConfirmModal";
 import { usePoll } from "../hooks/usePoll";
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; slot: "main" | "alt"; isNew?: boolean };
@@ -19,6 +20,7 @@ export function MePage({ meta }: { meta: Meta }) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [absOpen, setAbsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
   usePoll(() => { if (!editing) load(); });
@@ -39,11 +41,16 @@ export function MePage({ meta }: { meta: Meta }) {
   }
   async function makeMain(c: Character) { try { const r = await api.post<{ message: string }>("/api/me/main", { label: c.label }); ok(r.message); load(); } catch (e) { fail(e); } }
   async function del(c: Character) {
-    if (!confirm(`Delete ${c.label}? It is removed from every roster.`)) return;
+    const rosters = c.rosters.length ? `It comes off ${c.rosters.length === 1 ? "the " + c.rosters[0] + " roster" : `${c.rosters.length} rosters`}; sheets you answered with it lose that answer.` : "Sheets you answered with it lose that answer.";
+    if (!(await ask({ title: `Delete ${c.label}?`, message: `${c.cls} ${c.spec}${c.is_main ? " — your main" : ""}. ${rosters} Officers keep the history.`, confirmLabel: "Delete", color: "red" }))) return;
     try { const r = await api.post<{ message: string }>("/api/me/character/delete", { label: c.label }); ok(r.message); load(); } catch (e) { fail(e); }
   }
   async function setDm(on: boolean) { try { await api.post("/api/me/dm", { on }); ok(on ? "DMs on" : "DMs off"); load(); } catch (e) { fail(e); } }
-  async function clearAbs(start: string) { try { await api.post("/api/me/absence/clear", { start }); ok("absence cleared"); load(); } catch (e) { fail(e); } }
+  async function clearAbs(a: Me["absences"][number]) {
+    const span = `${a.start}${a.end !== a.start ? ` → ${a.end}` : ""}`;
+    if (!(await ask({ title: "Back after all?", message: `Your absence ${span} is cleared and the sheets on those days re-open for you — your No thanks on them goes; answer them again if you can come.`, confirmLabel: "I'm back" }))) return;
+    try { const r = await api.post<{ message: string }>("/api/me/absence/clear", { start: a.start }); ok(r.message); load(); } catch (e) { fail(e); }
+  }
 
   const summary = useMemo(() => {
     if (!me) return "";
@@ -66,10 +73,13 @@ export function MePage({ meta }: { meta: Meta }) {
       {me.asks.map((a) => (
         <Card key={a.roster} style={{ borderColor: "var(--mantine-color-teal-4)" }}>
           <Group p="md" justify="space-between">
-            <Text>You're rostered for <b>{a.raid}{a.when ? ` · ${a.when}` : ""}</b> as <b>{a.character}</b> — confirm to keep the seat, or hand it back.</Text>
+            <Box style={{ minWidth: 0, flex: "1 1 320px" }}>
+              <Text>You're rostered for <b>{a.raid}{a.when ? ` · ${a.when}` : ""}</b> as <b>{a.character}</b> — confirm to keep the seat, or hand it back.</Text>
+              {(a.channel === "web" || !me.dm) && <Text size="xs" c="dimmed" mt={4}>DMs are off, so this is the only place to answer.</Text>}
+            </Box>
             <Group gap="xs">
-              <Button size="xs" onClick={() => api.post("/api/me/placement", { roster: a.roster, answer: "yes" }).then(load).catch(fail)}>Confirm</Button>
-              <Button size="xs" variant="default" onClick={() => api.post("/api/me/placement", { roster: a.roster, answer: "no" }).then(load).catch(fail)}>Can't make it</Button>
+              <Button size="xs" onClick={() => api.post<{ message: string }>("/api/me/placement", { roster: a.roster, answer: "yes" }).then((r) => { ok(r.message); load(); }).catch(fail)}>Confirm</Button>
+              <Button size="xs" variant="default" onClick={() => api.post<{ message: string }>("/api/me/placement", { roster: a.roster, answer: "no" }).then((r) => { ok(r.message); load(); }).catch(fail)}>Can't make it</Button>
             </Group>
           </Group>
         </Card>
@@ -145,7 +155,7 @@ export function MePage({ meta }: { meta: Meta }) {
                   <Badge variant="light" color={s.rostered ? "teal" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.rostered ? `rostered${s.roster && s.roster > 1 ? ` · roster ${s.roster}` : ""}` : s.label || "not answered"}</Badge>
                 </Group>
               ))}
-              {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer on the sheet in Discord — Join / Bench / No thanks. Once the roster locks you confirm by DM.</Text>}
+              {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer on the sheet in Discord — Join / Bench / No thanks. Once the roster locks you confirm {me.dm ? "by DM (or here)" : "here — your DMs are off"}.</Text>}
             </Stack>
           </Card>
           <Card>
@@ -155,7 +165,7 @@ export function MePage({ meta }: { meta: Meta }) {
               {me.absences.map((a) => (
                 <Group key={a.start} justify="space-between">
                   <Text size="sm" ff="monospace">{a.start}{a.end !== a.start ? ` → ${a.end}` : ""}</Text>
-                  <Group gap="xs">{a.reason && <Badge variant="outline" color="gray">{a.reason}</Badge>}<ActionIcon variant="subtle" color="gray" size="sm" onClick={() => clearAbs(a.start)}><IconTrash size={14} /></ActionIcon></Group>
+                  <Group gap="xs">{a.reason && <Badge variant="outline" color="gray">{a.reason}</Badge>}<Tooltip label="I'm back after all"><ActionIcon variant="subtle" color="gray" size="sm" onClick={() => clearAbs(a)}><IconTrash size={14} /></ActionIcon></Tooltip></Group>
                 </Group>
               ))}
             </Stack>
@@ -168,6 +178,7 @@ export function MePage({ meta }: { meta: Meta }) {
       </div>
 
       <AbsenceModal opened={absOpen} onClose={() => setAbsOpen(false)} onSaved={() => { setAbsOpen(false); load(); }} />
+      {confirmDialog}
     </Stack>
   );
 

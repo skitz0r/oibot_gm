@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -123,6 +124,36 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
         return {"message": msg}
 
+    async def maybe_await(value):
+        """Bot verbs are coroutines when they talk to Discord; registry verbs are plain. Callers don't care which."""
+        return await value if inspect.isawaitable(value) else value
+
+    def table_rows(rows) -> list[dict]:
+        """The character table as the registry verb takes it: one dict per row, `main` and `slot` both present
+        (the Me page sends `slot: main|alt`, the Members page sends `main: bool`)."""
+        out = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                raise HTTPException(400, "rows must be objects")
+            main = bool(row.get("main")) if "main" in row else row.get("slot") == "main"
+            out.append({**row, "main": main, "slot": "main" if main else "alt"})
+        return out
+
+    async def clear_absence(v, uid: int, start: str):
+        """Registry clears it, the bot re-opens the sheets it had answered for them; the lines say what changed."""
+        reg = v.reg
+        m = reg.members.get(uid)
+        if not m:
+            raise HTTPException(400, "unknown member")
+        try:
+            a = await asyncio.to_thread(reg.clear_absence, uid, start, v.name)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        lines = list(await maybe_await(bot.absence_cleared(reg, m, a, v.name)) or [])
+        head = f"{m.display_name} back: cleared {a.start}" + (f" → {a.end}" if a.end != a.start else "")
+        await bot.ops.emit(reg.config, "info", f"[web] {v.name}: {head}" + (" — " + "; ".join(lines) if lines else ""))
+        return {"message": "\n".join([head, *lines]), "lines": lines}
+
     @app.exception_handler(HTTPException)
     async def _json_errors(request: Request, exc: HTTPException):
         if request.url.path.startswith("/api/"):
@@ -192,39 +223,17 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             "absences": [absence_json(a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
             "sheets": sheets,
-            "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at"), **run_label(reg, rs, a["roster"])} for a in reg.open_placement_asks(v.uid)],
+            # `channel` says where the ask went: "dm" / "web" (DMs off, so the Me page is the only place to answer)
+            "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at"), "channel": a.get("channel"), **run_label(reg, rs, a["roster"])} for a in reg.open_placement_asks(v.uid)],
         }
 
     # ---- member self-service
     @app.post("/api/me/characters")
     async def me_characters(request: Request):
-        """One save for the table: spec/offspec per existing row, names for planned rows, new rows added or planned."""
+        """One save for the table (spec/offspec per existing row, names for planned rows, new rows added or planned):
+        the same registry verb the Members page and the Discord commands use."""
         def go(v, d):
-            reg, done = v.reg, []
-            m = reg.members.get(v.uid)
-            current = {c.label: c for c in (m.active() if m else [])}
-            for row in d.get("rows") or []:
-                cls, spec, off = (row.get("cls") or "").strip(), (row.get("spec") or "").strip(), (row.get("offspec") or "").strip() or None
-                name, surname = (row.get("name") or "").strip(), (row.get("surname") or "").strip() or None
-                slot = "main" if row.get("slot") == "main" else "alt"
-                c = current.get(row.get("label") or "")
-                if c is None:
-                    if not cls or not spec:
-                        continue
-                    if name:
-                        _, c = reg.add_character(v.uid, v.name, name, cls, spec, off, slot == "main", surname=surname)
-                        done.append(f"added {c.label}")
-                    else:
-                        _, c = reg.set_plan(v.uid, v.name, cls, spec, off, slot)
-                        done.append(f"planned {c.cls} {c.spec}")
-                    continue
-                if spec and (spec, off) != (c.spec, c.offspec):
-                    reg.set_spec(v.uid, c.label, spec, off)
-                    done.append(f"{c.label}: {spec}" + (f"/{off}" if off else ""))
-                if not c.name and name:
-                    _, named = reg.name_character(v.uid, name, "main" if c.is_main else "alt", surname=surname, label=c.label)
-                    done.append(f"named {named.label}")
-            return "; ".join(done) or "no changes"
+            return "; ".join(v.reg.save_character_table(v.uid, table_rows(d.get("rows")), v.name)) or "no changes"
         return await run(request, go)
 
     @app.post("/api/me/main")
@@ -247,11 +256,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/me/absence/clear")
     async def me_absence_clear(request: Request):
-        def go(v, d):
-            b = parse(d, StartBody)
-            v.reg.clear_absence(v.uid, b.start)
-            return f"cleared absence {b.start}"
-        return await run(request, go)
+        """Back early: the absence goes, and the sheets it had answered No thanks on re-open for them (the lines say which)."""
+        v, d = await body(request)
+        return await clear_absence(v, v.uid, parse(d, StartBody).start)
 
     @app.post("/api/me/placement")
     async def me_placement(request: Request):
@@ -472,41 +479,36 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def run_pin(request: Request, key: str):
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
+        """Pin someone to the roster / keep them on the bench for the lock — the same verb the board's menu uses."""
         uid, pin = str(d.get("uid") or ""), d.get("pin")
         if pin not in ("in", "out", None):
             return JSONResponse({"error": "pin must be in, out or null"}, status_code=400)
-        if pin:
-            ev.pins[uid] = pin
-        else:
-            ev.pins.pop(uid, None)
-        name = ev.signups[uid].display_name if uid in ev.signups else uid
-        ev.log.append(f"{v.name}: {name} {'pinned ' + pin if pin else 'unpinned'}")
-        rs.save(ev, f"pin {name} {pin}")
+        if uid not in ev.signups:
+            return JSONResponse({"error": "they haven't answered this sheet"}, status_code=400)
+        name = ev.signups[uid].display_name
+        try:
+            rc.set_pin(ev, name, pin)  # writes the log line; the caller saves
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        rs.save(ev, f"pin {name} {pin} by {v.name}")
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {ev.key} {name} {'pinned ' + pin if pin else 'unpinned'}")
         return {"message": f"{name}: {'pinned ' + pin if pin else 'unpinned'}"}
 
     @app.post("/api/run/{key}/set")
     async def run_set(request: Request, key: str):
-        """Officer sets someone's answer (join / bench / out) or swaps their character."""
+        """Officer sets someone's answer (Join / Bench / No thanks) or swaps their character — the board's verb, so
+        Join after lock seats them and asks them to confirm, No thanks after lock frees the seat and fills it."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         m = v.reg.members.get(as_int(d.get("uid"), "uid"))
         status = d.get("status")
         if not m or status not in rc.STATUSES:
             return JSONResponse({"error": "unknown member or status"}, status_code=400)
-        if ev.state != "open" and status == "out" and ev.seat_of(m.display_name):
-            await bot.drop_seated(v.reg, rs, ev, t, m, "officer", None)
-            return {"message": f"{m.display_name} taken off the roster; filling the seat"}
-        try:
-            s = await asyncio.to_thread(rc.set_signup, v.reg, rs, ev, m, d.get("character") or None, status, "officer")
-        except ValueError as e:
+        try:  # set_answer refreshes the sheet and cards and writes the ops line itself; its reply is Discord-flavoured
+            line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name))
+        except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        if ev.state != "open" and status == "in" and not ev.seat_of(m.display_name):
-            rc.seat_player(v.reg, ev, s)
-            rs.save(ev, f"{m.display_name} rostered by {v.name}")
-        await bot.refresh_sheet(v.reg, ev)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {ev.key} {m.display_name} {status} as {s.character}")
-        return {"message": f"{m.display_name}: {s.character} {rc.LABELS[status]}"}
+        return {"message": line.replace("**", "").removeprefix("✅ ")}
 
     @app.post("/api/run/{key}/lock")
     async def run_lock(request: Request, key: str):
@@ -552,15 +554,14 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/run/{key}/cancel")
     async def run_cancel(request: Request, key: str):
+        """Cancel the run the way /raid cancel does (sheet closed, everyone on it told); the line says what was done."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        label = f"{v.reg.raid_def(ev.instance).get('name', ev.instance)} · {t12(v.reg, ev.starts_at)}"
-        ev.state = "cancelled"
-        ev.log.append(f"cancelled by {v.name}: {d.get('reason') or ''}")
-        rs.save(ev, "cancelled")
-        await bot.refresh_sheet(v.reg, ev)
-        await bot.ops.emit(v.reg.config, "warn", f"[web] {v.name} cancelled {ev.key}")
-        return {"message": f"cancelled {label} — rostered members are not told automatically; say so in the channel"}
+        try:  # cancel_run re-renders the sheet and cards, withdraws open confirmations and writes the ops line itself
+            line = await maybe_await(bot.cancel_run(v.reg, rs, ev, v.name, (d.get("reason") or "").strip() or None))
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": line}
 
     @app.post("/api/raid/{rid}/open")
     async def raid_open(request: Request, rid: str):
@@ -582,12 +583,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         except ValueError:
             return JSONResponse({"error": "time looks like 2026-12-10 19:30"}, status_code=400)
         rs = bot.raids.store(reg)
-        ev = rc.open_run(reg, rs, rid, start, by=v.name)
-        ch = bot.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
-        if not ev.message_id and ch:
-            await bot.post_sheet(reg, rs, ev, ch)
-        await bot.ops.emit(reg.config, "info", f"[web] {v.name} opened {ev.key}")
-        return {"message": f"opened {ev.key}" + ("" if ch else " (no signup channel set — sheet not posted)")}
+        try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
+            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name))
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")}
 
     @app.post("/api/admin/confirm")
     async def admin_confirm(request: Request):
@@ -738,7 +738,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/members/save")
     async def members_save(request: Request):
-        """One save for the whole table: per member — deletes, spec/offspec, names, new characters, main."""
+        """One save for the whole table: per member — deletes, then the same table verb the Me page uses
+        (spec/offspec, names, new characters, main)."""
         def go(v, d):
             reg, done = v.reg, []
             for row in d.get("rows") or []:
@@ -748,36 +749,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 m = reg.members.get(uid)
                 if not m:
                     continue
-                for label in row.get("deletes") or []:
-                    reg.delete_character(uid, label)
-                    done.append(f"deleted {label}")
-                want_main = None
-                for c in row.get("characters") or []:
-                    cls, spec, off = (c.get("cls") or "").strip(), (c.get("spec") or "").strip(), (c.get("offspec") or "").strip() or None
-                    name, surname = (c.get("name") or "").strip(), (c.get("surname") or "").strip() or None
-                    cur = next((x for x in m.active() if x.label == (c.get("label") or "")), None)
-                    if cur is None:
-                        if not cls or not spec:
-                            continue
-                        if name:
-                            _, cur = reg.add_character(uid, m.display_name, name, cls, spec, off, bool(c.get("main")), surname=surname)
-                            done.append(f"added {cur.label} for {m.display_name}")
-                        else:
-                            _, cur = reg.set_plan(uid, m.display_name, cls, spec, off, "main" if c.get("main") else "alt")
-                            done.append(f"planned {cur.cls} {cur.spec} for {m.display_name}")
-                    else:
-                        if spec and (spec, off) != (cur.spec, cur.offspec):
-                            reg.set_spec(uid, cur.label, spec, off)
-                            done.append(f"{cur.label}: {spec}" + (f"/{off}" if off else ""))
-                        if not cur.name and name:
-                            _, cur = reg.name_character(uid, name, "main" if cur.is_main else "alt", surname=surname, label=cur.label)
-                            done.append(f"named {cur.label}")
-                    if c.get("main"):
-                        want_main = cur.label
-                m = reg.members.get(uid) or m
-                if want_main and not (m.main and m.main.label == want_main):
-                    reg.set_main(uid, want_main)
-                    done.append(f"{m.display_name}: main is {want_main}")
+                rows = [{"label": str(label), "delete": True} for label in row.get("deletes") or []] + table_rows(row.get("characters"))
+                if rows:
+                    done.extend(f"{line} ({m.display_name})" for line in reg.save_character_table(uid, rows, v.name))
             return "; ".join(done) or "no changes"
         return await run(request, go, officer=True)
 
@@ -797,11 +771,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/members/absence/clear")
     async def members_absence_clear(request: Request):
-        def go(v, d):
-            b = parse(d, UidStartBody)
-            v.reg.clear_absence(b.uid, b.start)
-            return f"cleared absence {b.start}"
-        return await run(request, go, officer=True)
+        """Officer clears someone's absence: same ripple as the member doing it (sheets re-opened for them; the lines say which)."""
+        v, d = await body(request, officer=True)
+        b = parse(d, UidStartBody)
+        return await clear_absence(v, b.uid, b.start)
 
     # ---- ops, config (read-only)
     @app.get("/api/ops")
@@ -844,10 +817,17 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             if field.startswith("channel:"):
                 msg = await bot.set_channel(v.reg, field[8:], as_int(value, "channel id") if value else None, v.name)
             elif field == "officer_roles":
-                roles = [str(r) for r in (value or []) if str(r).strip()]
-                v.reg.config.officer_roles = sorted(set(roles))
-                v.reg.save_config(f"officer roles: {v.reg.config.officer_roles} (by {v.name})")
-                msg = "officer roles: " + (", ".join(v.reg.config.officer_roles) or "(none; Manage Server only)")
+                # the editor sends the whole list (by role NAME, as /gm config officer-role does); apply it as the
+                # command's role_add / role_remove ops so the same code path and audit lines are used
+                from .. import configops
+
+                want = {str(r).strip() for r in (value or []) if str(r).strip()}
+                have = set(v.reg.config.officer_roles)
+                for name in sorted(have - want):
+                    await asyncio.to_thread(configops.apply, v.reg, configops.ConfigOp(op="role_remove", value=name), v.name, True)
+                for name in sorted(want - have):
+                    await asyncio.to_thread(configops.apply, v.reg, configops.ConfigOp(op="role_add", value=name), v.name, True)
+                msg = ("officer roles: " if want != have else "officer roles unchanged: ") + (", ".join(v.reg.config.officer_roles) or "(none; Manage Server only)")
             elif field in ("timezone", "ask_audience", "about"):
                 from .. import configops
 

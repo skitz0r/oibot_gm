@@ -86,7 +86,8 @@ several. One **run** = one slot occurrence = one sheet. A run is **open**, then 
 Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
 
 1. **Sheet opens** — `signup_lead_hours` [120 h] before the slot the bot posts the sheet in the signup
-   channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks**. With more than one
+   channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
+   out after answering, ✈ = away that day, pre-filled from an absence). With more than one
    character you pick which one. Absences pre-fill *No thanks*. With `open_dm` on [off] every main is also
    DMed when the sheet opens. Officers can open a sheet early with `/raid open <raid>` (next slot, or a
    one-off `YYYY-MM-DD HH:MM`) or the Rosters page.
@@ -102,7 +103,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs
    update too. The bank sorts by **signup** (who answered first), **spec** or **role** (tanks, healers,
    melee, ranged); the choice sticks in your browser. On a joiner's menu, **Pin to roster** guarantees a seat and
-   **Keep on bench** keeps them off this run; pins are per run and the solver honours them at lock. **Propose
+   **Keep on bench** keeps them off this run; pins are per run and the solver honours them at lock (plain text
+   works too: "pin Xanthe to roster", "keep Jon on the bench", "clear the pin for Xanthe"). **Propose
    roster** shows the solver's own layout for the run (your placements and pins kept), with *another layout*
    for a different one, and *Use this layout on the board* seeds the builder; **Auto-fill empty seats** lets
    the solver seat whoever is left in the bank around what you placed; **Clear** empties the board after a
@@ -114,7 +116,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    the weaker run last window moves up) — check the one preview, press *another split like this* if it
    doesn't feel right, and *Use this split on the board*. The solver seats both runs in one go, so a shaman
    lands where it lifts the pair the most. Each raid has a **split policy** (Raids page, `/gm config raid`,
-   plain text) that the scheduled lock uses when nobody chose one for the run. **Cancel run** warns you that
+   plain text) that the scheduled lock uses when nobody chose one for the run. **Cancel run** withdraws every open confirmation ask (nothing lingers on anyone's Me page) and warns you that
    rostered members are not told automatically — say so in the signup channel yourself.
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
@@ -253,7 +255,9 @@ Guild state lives in a private git repository (one commit per change, so every e
 time). Absence reasons and officer notes are officer-only. The bot DMs only for sheets, nudges, confirmations,
 released seats and fill asks; switch DMs off on the **Me** page if you'd rather not get them — with DMs off
 you are never asked to fill, and a confirmation ask is shown on the Me page instead and counts as pending
-until you answer it there. Claude is used sparingly — never for registry, signup or solver work — and spend is
+until you answer it there. **My absences** on the absences card lists yours with a **Clear** button each; clearing
+an absence puts you back to unanswered on any open sheet it had pre-filled (a seat freed on a locked run is
+not handed back automatically — ask an officer). Claude is used sparingly — never for registry, signup or solver work — and spend is
 capped by a budget the owner sets; `/gm status` shows it.
 
 ## 10a. Asking the bot questions

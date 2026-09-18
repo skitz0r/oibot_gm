@@ -1,5 +1,8 @@
-"""Build the full command tree offline (no Discord connection) and fail on anything Discord would reject:
-descriptions over 100 chars, non-coroutine autocompletes, decorator errors. Run before restarting the bot."""
+"""Pre-restart check: build the full command tree offline (no Discord connection) and fail on anything Discord would
+reject — descriptions over 100 chars, non-coroutine autocompletes, decorator errors — then run the fast test suite
+(`pytest -q -m "not slow"`; the solver tests are left to a full `uv run pytest -q`). Exit code 1 on either failure."""
+import subprocess
+import sys
 from pathlib import Path
 
 import discord
@@ -48,4 +51,10 @@ for c in tree.get_commands():
     walk(c)
 if bad:
     raise SystemExit("\n".join(bad))
-print(f"{n} commands OK")
+print(f"{n} commands OK", flush=True)
+
+# the fast tests (tests/, everything not marked slow); their output follows, ours is the verdict line
+r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-m", "not slow"], cwd=ROOT)
+if r.returncode != 0:
+    raise SystemExit(f"tests failed (pytest exit {r.returncode}) — fix before restarting the bot")
+print("tests OK")

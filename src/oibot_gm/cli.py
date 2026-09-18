@@ -1,7 +1,7 @@
 """oibot CLI — offline prototype.
 
-  oibot roster  --guild fixtures/25bg --signup signup_2026-09-15.yaml
-  oibot loot    --guild fixtures/25bg --drops drops_bt_2026-09-15.yaml
+  oibot roster  --guild fixtures/demo --signup signup_2026-09-15.yaml
+  oibot loot    --guild fixtures/demo --drops drops_bt_2026-09-15.yaml
   oibot demo    (both, writes out/report.md)
 """
 from __future__ import annotations
@@ -59,7 +59,7 @@ def default_guild() -> Path:
     env = os.environ.get("OIBOT_GUILD_DIR")
     if env:
         return Path(env)
-    data = resolve_data_root(ROOT) / "25bg"
+    data = resolve_data_root(ROOT) / os.environ.get("OIBOT_MOCK_GUILD", "demo")  # the shadow guild used by /mock; set in .env
     return data if data.exists() else Path("fixtures/demo")
 
 

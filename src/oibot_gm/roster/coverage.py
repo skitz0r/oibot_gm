@@ -41,7 +41,8 @@ class GroupCoverage(BaseModel):
     picks: dict[str, str] = Field(default_factory=dict)  # slot -> buff id chosen for this group (totems)
     present: dict[str, list[str]] = Field(default_factory=dict)  # buff id -> providers in group
     wanted: dict[str, float] = Field(default_factory=dict)  # buff id -> total benefit to the group if present
-    covered: dict[str, str] = Field(default_factory=dict)  # buff id -> the buff of the same family that already covers this group (raid-wide or stronger)
+    # buff id -> the buff of the same family that already covers this group (raid-wide or stronger)
+    covered: dict[str, str] = Field(default_factory=dict)
 
 
 class Coverage(BaseModel):
@@ -50,7 +51,8 @@ class Coverage(BaseModel):
     unmet_raidwide: list[str]  # buffs nobody on the roster can provide
 
 
-def group_buffs(profile: GameProfile, members: list[tuple[str, SpecInfo]]) -> tuple[dict[str, list[str]], dict[str, str], dict[str, float]]:
+def group_buffs(profile: GameProfile,
+                members: list[tuple[str, SpecInfo]]) -> tuple[dict[str, list[str]], dict[str, str], dict[str, float]]:
     """(present: buff id -> providers, picks: slot -> buff id, wanted: buff id -> group benefit) for one group.
     Per slot, each provider brings the one buff worth most to the group; unslotted buffs are simply present
     when someone provides them."""
@@ -81,8 +83,9 @@ def group_buffs(profile: GameProfile, members: list[tuple[str, SpecInfo]]) -> tu
 
 
 def compute(profile: GameProfile, players: list[Player], result: RosterResult) -> Coverage:
-    """Family-aware: for each player and stacking family only the strongest present buff counts, and a raid-wide buff
-    of the same family provided by anyone seated covers every group (a party buff it beats is `covered`, not missing)."""
+    """Family-aware: for each player and stacking family only the strongest present buff counts, and a raid-wide
+    buff of the same family provided by anyone seated covers every group (a party buff it beats is `covered`,
+    not missing)."""
     by_name = {p.signup_name: p for p in players}
     buffs = profile.party_buffs()
     seated_specs = [profile.spec(p.cls, p.spec) for p in result.selected]
@@ -92,7 +95,8 @@ def compute(profile: GameProfile, players: list[Player], result: RosterResult) -
     for gi, names in enumerate(result.groups, 1):
         members = [by_name[n] for n in names]
         specs = {p.signup_name: profile.spec(p.cls, p.spec) for p in members}
-        present, picks, wanted = group_buffs(profile, [(p.character or p.signup_name, specs[p.signup_name]) for p in members])
+        present, picks, wanted = group_buffs(
+            profile, [(p.character or p.signup_name, specs[p.signup_name]) for p in members])
         pcs: list[PlayerCoverage] = []
         missing_tally: dict[str, tuple[int, float]] = {}
         covered: dict[str, str] = {}
@@ -116,7 +120,9 @@ def compute(profile: GameProfile, players: list[Player], result: RosterResult) -
             for b in buffs:
                 provs = present.get(b.id, [])
                 val = b.benefit(sp)
-                if b.slot and b.id not in picks.values() and val > 0 and any(b2.id in present for b2 in buffs if b2.slot == b.slot):
+                slot_taken = b.slot and b.id not in picks.values() and any(
+                    b2.id in present for b2 in buffs if b2.slot == b.slot)
+                if slot_taken and val > 0:
                     val = 0.0  # the slot is taken by a better totem for this group; not "missing"
                 top_val, top_id = best.get(b.family_id, (0.0, ""))
                 if val > 0 and provs:
@@ -135,14 +141,23 @@ def compute(profile: GameProfile, players: list[Player], result: RosterResult) -
                     n, v = missing_tally.get(b.name, (0, 0.0))
                     missing_tally[b.name] = (n + 1, v + val)
                 cells.append(Cell(buff=b.name, value=val, present=bool(provs), providers=provs))
-            pcs.append(PlayerCoverage(name=p.character or p.signup_name, cls=p.cls, spec=p.spec, role=p.role, cells=cells, covered=cov, missing=miss))
+            pcs.append(PlayerCoverage(name=p.character or p.signup_name, cls=p.cls, spec=p.spec, role=p.role,
+                                      cells=cells, covered=cov, missing=miss))
         for bid, top in outranked.items():
             if bid not in counted:  # nobody in the group got anything from it: a family-mate covers it
                 present.pop(bid, None)
                 covered.setdefault(bid, top)
-        summary = [f"{name} (wanted by {n}, +{v:.0f}){' — nobody on roster' if not anyone[next(b.id for b in buffs if b.name == name)] else ''}" for name, (n, v) in sorted(missing_tally.items(), key=lambda kv: -kv[1][1])]
-        groups.append(GroupCoverage(index=gi, players=pcs, missing_summary=summary, picks=picks, present=present, wanted=wanted, covered=covered))
-    return Coverage(buffs=[b.name for b in buffs], groups=groups, unmet_raidwide=[b.name for b in buffs if not anyone[b.id]])
+        id_of: dict[str, str] = {}
+        for b in buffs:
+            id_of.setdefault(b.name, b.id)  # first buff of that name, as before
+        summary = [
+            f"{name} (wanted by {n}, +{v:.0f}){'' if anyone[id_of[name]] else ' — nobody on roster'}"
+            for name, (n, v) in sorted(missing_tally.items(), key=lambda kv: -kv[1][1])
+        ]
+        groups.append(GroupCoverage(index=gi, players=pcs, missing_summary=summary, picks=picks, present=present,
+                                    wanted=wanted, covered=covered))
+    return Coverage(buffs=[b.name for b in buffs], groups=groups,
+                    unmet_raidwide=[b.name for b in buffs if not anyone[b.id]])
 
 
 GLYPH_PRESENT, GLYPH_MISSING, GLYPH_NA = "●", "○", "·"
@@ -150,13 +165,22 @@ GLYPH_PRESENT, GLYPH_MISSING, GLYPH_NA = "●", "○", "·"
 
 def markdown(cov: Coverage) -> str:
     short = [_short(b) for b in cov.buffs]
-    out = ["## Buff coverage", "", "● benefits and present · ○ benefits but missing · · not applicable", "", "| group | player | " + " | ".join(short) + " | cover |", "|---|---|" + "---|" * len(short) + "---|"]
+    out = [
+        "## Buff coverage", "",
+        "● benefits and present · ○ benefits but missing · · not applicable", "",
+        "| group | player | " + " | ".join(short) + " | cover |",
+        "|---|---|" + "---|" * len(short) + "---|",
+    ]
     for g in cov.groups:
         for pc in g.players:
-            cells = " | ".join(GLYPH_PRESENT if c.present and c.value > 0 else GLYPH_MISSING if c.value > 0 else GLYPH_NA for c in pc.cells)
+            cells = " | ".join(
+                GLYPH_PRESENT if c.present and c.value > 0 else GLYPH_MISSING if c.value > 0 else GLYPH_NA
+                for c in pc.cells
+            )
             out.append(f"| G{g.index} | {pc.name} ({pc.spec}) | {cells} | {pc.pct:.0%} |")
         if g.missing_summary:
-            out.append(f"| G{g.index} | _missing_ | " + " | ".join([""] * len(short)) + f" | {'; '.join(g.missing_summary)} |")
+            out.append(f"| G{g.index} | _missing_ | " + " | ".join([""] * len(short))
+                       + f" | {'; '.join(g.missing_summary)} |")
     if cov.unmet_raidwide:
         out += ["", "Nobody on the roster provides: " + ", ".join(cov.unmet_raidwide)]
     return "\n".join(out)

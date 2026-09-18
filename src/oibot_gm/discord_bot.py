@@ -49,7 +49,9 @@ from .store import GitStore, resolve_data_root
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "out"
 STORE: GitStore | None = None  # set in run(); None = fixtures-only mode (no git)
-GUILD_KEY = "25bg"
+# The mock fixtures' guild key: the directory name of the guild dir the bot was started on (run() sets it from
+# the real path; before that, OIBOT_GUILD_DIR or the public demo fixtures). Never a real guild's name in code.
+GUILD_KEY = Path(os.environ.get("OIBOT_GUILD_DIR") or "fixtures/demo").name
 
 
 def _store() -> GitStore:
@@ -130,7 +132,7 @@ class MockEvent(BaseModel):
     channel_id: int
     instance: str
     date: str
-    guild: str = "25bg"
+    guild: str = Field(default_factory=lambda: GUILD_KEY)  # the mock fixtures' guild unless a real raid says otherwise
     origin: str = "mock"  # mock | raid
     state: str = "signup_open"  # signup_open | roster_proposed | roster_locked | raid | ended
     signups: list[Player]
@@ -928,6 +930,31 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
         self.events.pop(ev.channel_id, None)
         await interaction.response.send_message(embed=e)
 
+    async def cached_member(self, guild, uid: int, max_age: float = 300):
+        """A guild member by id without the privileged members intent: the gateway cache first, else one REST
+        fetch per (guild, uid) per `max_age` seconds — misses (left the server, 404) are cached too, so a
+        page that polls or a scanner can't turn into a stream of fetches."""
+        if guild is None:
+            return None
+        m = guild.get_member(uid)
+        if m is not None:
+            return m
+        cache: dict[tuple[int, int], tuple[float, object]] = self.__dict__.setdefault("_member_cache", {})
+        key = (guild.id, uid)
+        hit = cache.get(key)
+        now = time.time()
+        if hit and now - hit[0] < max_age:
+            return hit[1]
+        try:
+            m = await guild.fetch_member(uid)
+        except Exception:  # noqa: BLE001 — not a member (404) or transient
+            m = None
+        if len(cache) > 4096:  # bounded: drop what has aged out
+            for k in [k for k, (t, _) in cache.items() if now - t >= max_age]:
+                cache.pop(k, None)
+        cache[key] = (now, m)
+        return m
+
     # ---- chat handlers
     def officiates(self, user, guild) -> bool:
         """Officer check for buttons and chat: the guild's registry rules if configured, else Manage Server."""
@@ -1075,7 +1102,7 @@ class OibotGM(FeedMixin, RaidMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMi
         @app_commands.choices(instance=raid_choices)
         async def signup(interaction: discord.Interaction, instance: app_commands.Choice[str], date_: str = ""):
             d = date_ or self.ctx.seed_event["starts_at"][:10]
-            ev = MockEvent(id=f"{instance.value.split('_')[0].upper()[:3]}-{d[5:].replace('-', '')}", channel_id=interaction.channel_id, instance=instance.value, date=d, signups=copy.deepcopy(self.ctx.seed_players))
+            ev = MockEvent(id=f"{instance.value.split('_')[0].upper()[:3]}-{d[5:].replace('-', '')}", channel_id=interaction.channel_id, instance=instance.value, date=d, guild=self.ctx.guild_key, signups=copy.deepcopy(self.ctx.seed_players))
             self.events[ev.channel_id] = ev
             ev.save()
             await interaction.response.send_message(embed=signup_embed(ev, self.ctx))

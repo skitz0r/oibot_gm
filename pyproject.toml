@@ -34,8 +34,13 @@ packages = ["src/oibot_gm"]
 [tool.uv]
 python-preference = "managed"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: runs the CP-SAT solver (a few seconds each); scripts/check_commands.py runs -m 'not slow'"]
+
 [dependency-groups]
 dev = [
     "playwright>=1.63.0",
+    "pytest>=9.1.1",
     "websockets>=17.1",
 ]

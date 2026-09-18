@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- oibot_GM Discord bot as a per-user launchd agent (gui domain): starts at login, restarts when it exits.
+         Install/restart/stop: see README.md next to this file. Secrets stay in the repo's .env (read by the bot). -->
+    <key>Label</key>
+    <string>gg.earlyandoften.oibot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>oibot</string>
+        <string>discord</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jonathanlin/dev/oibot_gm</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- uv (Homebrew), git (Xcode CLT / Homebrew), node for nothing at runtime; launchd gives agents a bare PATH -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <!-- a crash loop still waits this long between restarts (launchd's default is 10 s) -->
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+    <!-- SIGTERM → OibotGM.close() flushes unpushed data-repo commits; give it time before launchd kills -->
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/launchd.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

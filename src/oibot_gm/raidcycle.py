@@ -332,6 +332,38 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     return s
 
 
+def signup_by_name(ev: RaidEvent, display_name: str) -> Optional[Signup]:
+    n = display_name.strip().lower()
+    return next((s for s in ev.signups.values() if s.display_name.lower() == n), None)
+
+
+def set_pin(ev: RaidEvent, display_name: str, pin: str | None) -> None:
+    """Officer decision the lock solve must honour: "in" | "out" | None (clear). Pins are keyed by discord id (as
+    the web API keys them); the person must be on the sheet. Appends the log line; the caller saves the event."""
+    if pin not in ("in", "out", None):
+        raise ValueError("pin must be in, out or nothing (clear)")
+    sg = signup_by_name(ev, display_name)
+    if not sg:
+        raise ValueError(f"{display_name} isn't on this sheet")
+    uid = str(sg.discord_id)
+    if pin:
+        ev.pins[uid] = pin
+    else:
+        ev.pins.pop(uid, None)
+    ev.log.append(f"{sg.display_name} {'pinned ' + pin if pin else 'unpinned'}")
+
+
+def pin_summary(ev: RaidEvent) -> str:
+    """'pinned in: A, B · pinned out: C' (people no longer on the sheet are skipped), or 'no pins'."""
+    by_uid = {str(sg.discord_id): sg.display_name for sg in ev.signups.values()}
+    parts = []
+    for pin in ("in", "out"):
+        names = sorted(by_uid[u] for u, v in ev.pins.items() if v == pin and u in by_uid)
+        if names:
+            parts.append(f"pinned {pin}: {', '.join(names)}")
+    return " · ".join(parts) or "no pins"
+
+
 def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, note: str | None) -> Callout:
     s = ev.signups.get(str(m.discord_id))
     c = s.character if s else (m.main.name if m.main else "?")
@@ -879,8 +911,22 @@ def confirmations(reg: Registry, ev: RaidEvent) -> list[dict]:
             m = found[0] if found else next((mm for mm in reg.members.values() if mm.display_name == p.signup_name), None)
             ask = next((a for a in reversed(m.placement_asks) if a["roster"] == ev.team), None) if m else None
             out.append({"uid": str(m.discord_id) if m else None, "display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role,
-                        "roster": i + 1, "answer": (ask or {}).get("answer"), "asked_at": (ask or {}).get("asked_at")})
+                        "roster": i + 1, "answer": (ask or {}).get("answer"), "asked_at": (ask or {}).get("asked_at"), "channel": (ask or {}).get("channel", "dm")})
     return out
+
+
+def withdraw_confirmations(reg: Registry, ev: RaidEvent, why: str) -> list[str]:
+    """A cancelled run: every open placement ask on its roster key is closed as `why` so nobody is left with a
+    pending question on the site or in the tallies. Returns who was waiting."""
+    gone = []
+    for m in reg.members.values():
+        asks = [a for a in m.placement_asks if a["roster"] == ev.team and a.get("answer") is None]
+        if asks:
+            for a in asks:
+                a["answer"], a["answered_at"] = why, now()
+            reg.save(m, f"{m.display_name}'s confirmation for {ev.team} withdrawn ({why})")
+            gone.append(m.display_name)
+    return gone
 
 
 def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, display_name: str, why: str) -> Player | None:

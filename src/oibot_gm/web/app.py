@@ -3,10 +3,12 @@ The old server-rendered pages are gone; their URLs redirect into the app.
 
 Env: OIBOT_WEB_BIND (host:port, unset = web off), OIBOT_WEB_URL (public base, e.g. https://gm.earlyandoften.gg),
 DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET (OAuth2), OIBOT_WEB_SECRET (cookie signing),
+OIBOT_WEB_SESSION_EPOCH (unix time or ISO datetime: every session issued before it is logged out),
 OIBOT_WEB_DEV_USER (a Discord id: skip OAuth on localhost while developing)."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import re
 import secrets
@@ -26,11 +28,51 @@ HERE = Path(__file__).parent
 DISCORD_API = "https://discord.com/api/v10"
 DISCORD_OAUTH = "https://discord.com/oauth2/authorize"
 COOKIE = "oibot_session"
+NONCE_COOKIE = "oibot_oauth"  # short-lived: binds the OAuth round trip to the browser that started it
+STATE_TTL_S = 600  # a login must complete within 10 minutes of the redirect
+SESSION_MAX_AGE_S = 30 * 86400
 
 
 def web_config() -> tuple[str | None, str]:
     """(bind, public url); bind None disables the dashboard."""
     return os.environ.get("OIBOT_WEB_BIND") or None, os.environ.get("OIBOT_WEB_URL", "http://127.0.0.1:8788")
+
+
+def session_epoch() -> float:
+    """OIBOT_WEB_SESSION_EPOCH: sessions issued before this moment are invalid (a way to log everyone out).
+    A unix timestamp or an ISO datetime; unset or unparsable = no cutoff."""
+    raw = (os.environ.get("OIBOT_WEB_SESSION_EPOCH") or "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    try:
+        from datetime import datetime, timezone
+
+        t = datetime.fromisoformat(raw)
+        return (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def safe_next(target: str | None) -> str:
+    """Only in-app paths are valid post-login destinations (no open redirect, no protocol-relative URLs)."""
+    t = (target or "").strip()
+    return t if t.startswith("/app") and not t.startswith("/app//") and "\\" not in t else "/app/me"
+
+
+def session_valid(s: dict | None, now: float | None = None) -> bool:
+    """A signed session is honoured only with an issue time inside the 30-day window and after the revocation epoch."""
+    if not s or "uid" not in s:
+        return False
+    try:
+        iat = float(s.get("iat"))
+    except (TypeError, ValueError):
+        return False  # pre-hardening cookies carry no iat: log in again
+    now = time.time() if now is None else now
+    return iat <= now + 60 and now - iat <= SESSION_MAX_AGE_S and iat >= session_epoch()
 
 
 class Viewer:
@@ -55,26 +97,14 @@ def create_app(bot) -> FastAPI:
         if not raw:
             return None
         try:
-            return signer.loads(raw)
+            s = signer.loads(raw)
         except BadSignature:
             return None
-
-    member_cache: dict[int, tuple[float, object]] = {}
+        return s if session_valid(s) else None  # too old, or issued before OIBOT_WEB_SESSION_EPOCH → logged out
 
     async def guild_member(guild, uid: int, max_age: float = 300):
-        """Live guild member (roles decide the tier). No members intent, so fall back to a REST fetch, cached `max_age` s."""
-        m = guild.get_member(uid)
-        if m is not None:
-            return m
-        hit = member_cache.get(uid)
-        if hit and time.time() - hit[0] < max_age:
-            return hit[1]
-        try:
-            m = await guild.fetch_member(uid)
-        except Exception:  # noqa: BLE001 — not a member (404) or transient
-            m = None
-        member_cache[uid] = (time.time(), m)
-        return m
+        """Live guild member (roles decide the tier): the bot's TTL-cached lookup (get_member, then a REST fetch)."""
+        return await bot.cached_member(guild, uid, max_age)
 
     async def viewer(request: Request) -> Viewer | None:
         """None = not logged in. Raises 403 for a Discord user who is not in the guild's server:
@@ -123,9 +153,14 @@ def create_app(bot) -> FastAPI:
     async def login(request: Request, next: str = "/"):
         if not client_id:
             return HTMLResponse("<p>Login isn't configured yet (DISCORD_CLIENT_ID missing).</p>", status_code=503)
-        state = signer.dumps({"next": next, "t": time.time()})
+        # The signed state carries a hash of a nonce that only this browser holds (short-lived cookie): a state
+        # captured elsewhere can't complete a login here, and a stale one expires with the cookie.
+        nonce = secrets.token_urlsafe(24)
+        state = signer.dumps({"next": safe_next(next), "t": time.time(), "n": hashlib.sha256(nonce.encode()).hexdigest()})
         q = urlencode({"client_id": client_id, "redirect_uri": f"{public_url}/auth/callback", "response_type": "code", "scope": "identify", "state": state, "prompt": "none"})
-        return RedirectResponse(f"{DISCORD_OAUTH}?{q}")
+        resp = RedirectResponse(f"{DISCORD_OAUTH}?{q}")
+        resp.set_cookie(NONCE_COOKIE, nonce, max_age=STATE_TTL_S, httponly=True, secure=public_url.startswith("https"), samesite="lax", path="/auth")
+        return resp
 
     @app.get("/auth/callback")
     async def callback(request: Request, code: str = "", state: str = ""):
@@ -133,14 +168,26 @@ def create_app(bot) -> FastAPI:
             st = signer.loads(state)
         except BadSignature:
             raise HTTPException(400, "bad state")
+        try:
+            issued = float(st.get("t") or 0)
+        except (TypeError, ValueError):
+            issued = 0.0
+        if not (0 <= time.time() - issued <= STATE_TTL_S):
+            raise HTTPException(400, "login took too long; start again")
+        nonce = request.cookies.get(NONCE_COOKIE) or ""
+        if not nonce or not secrets.compare_digest(hashlib.sha256(nonce.encode()).hexdigest(), str(st.get("n") or "")):
+            raise HTTPException(400, "login didn't start in this browser; start again")
+        if not code:
+            raise HTTPException(400, "Discord refused the login")
         async with httpx.AsyncClient(timeout=15) as hc:
             tok = await hc.post(f"{DISCORD_API}/oauth2/token", data={"client_id": client_id, "client_secret": client_secret, "grant_type": "authorization_code", "code": code, "redirect_uri": f"{public_url}/auth/callback"})
             if tok.status_code != 200:
                 raise HTTPException(400, "Discord refused the login")
             me = await hc.get(f"{DISCORD_API}/users/@me", headers={"Authorization": f"Bearer {tok.json()['access_token']}"})
         u = me.json()
-        resp = RedirectResponse(st.get("next") or "/", status_code=303)
-        resp.set_cookie(COOKIE, signer.dumps({"uid": u["id"], "name": u.get("global_name") or u["username"]}), httponly=True, secure=public_url.startswith("https"), samesite="lax", max_age=30 * 86400)
+        resp = RedirectResponse(safe_next(st.get("next")), status_code=303)
+        resp.set_cookie(COOKIE, signer.dumps({"uid": u["id"], "name": u.get("global_name") or u["username"], "iat": time.time()}), httponly=True, secure=public_url.startswith("https"), samesite="lax", max_age=SESSION_MAX_AGE_S)
+        resp.delete_cookie(NONCE_COOKIE, path="/auth")
         return resp
 
     @app.get("/auth/logout")

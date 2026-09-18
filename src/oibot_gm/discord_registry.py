@@ -6,6 +6,7 @@ officer role; /gm config needs the owner."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 import time
 from pathlib import Path
@@ -470,12 +471,17 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not reg:
             return
         try:
-            m = reg.clear_absence(interaction.user.id, start)
+            a = reg.clear_absence(interaction.user.id, start, interaction.user.display_name)
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.response.send_message(f"✅ Cleared absence starting {start}.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} cleared absence {start}")
+        m = reg.members[interaction.user.id]
+        # sheets that pre-filled "out" from this absence are put back to unanswered (or the seat re-offered); the bot reports what changed
+        lines = interaction.client.absence_cleared(reg, m, a, interaction.user.display_name)
+        if inspect.isawaitable(lines):
+            lines = await lines
+        text = f"✅ Cleared absence starting {start}." + ("\n" + "\n".join(f"• {line}" for line in lines) if lines else "")
+        await interaction.response.send_message(text[:1900], ephemeral=True)  # absence_cleared already wrote the ops line
 
 
     # ---------------- /apply (recruitment intake)

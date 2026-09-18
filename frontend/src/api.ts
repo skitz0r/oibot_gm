@@ -40,8 +40,9 @@ export interface Meta {
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; confirmed: boolean; role: string; off_role: string | null }
 export interface Absence { start: string; end: string; reason: string | null }
 export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null }
-/** `roster` is the run's key (what the answer is posted with); `raid` + `when` are what people see. */
-export interface PlacementAsk { roster: string; character: string; asked_at: string; raid: string; when: string; key: string | null }
+/** `roster` is the run's key (what the answer is posted with); `raid` + `when` are what people see.
+ *  `channel` is where the ask went: "dm", or "web" when DMs are off (the Me page is then the only place to answer). */
+export interface PlacementAsk { roster: string; character: string; asked_at: string; channel?: string | null; raid: string; when: string; key: string | null }
 export interface Aura { abbr: string; colour: string; art: string | null; name: string; who?: string; in_run?: boolean; covered?: boolean }
 export interface GroupSummary {
   roles: Record<string, number>; synergy: number | null; unmet: string[]; assumptions: string[];
@@ -81,6 +82,8 @@ export interface FillAskRow { display_name: string; kind: string; character: str
 export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size: number }; waiting: string[]; batch: FillAskRow[] }
 export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: { roster: string; answer: string | null; raid: string; when: string; key: string | null }[] }
 export interface Members { rows: MemberRow[]; members: number; tz: string }
+/** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
+export interface AbsenceCleared { message: string; lines: string[] }
 export interface Ops { head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
 export interface Config { yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }> }
 export interface Me {

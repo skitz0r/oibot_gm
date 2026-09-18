@@ -685,3 +685,5 @@ These are the numbers to confirm with real usage logs.
 17. **Loot tiers and wishlists**: replace mock tiers with the guild's BisCouncil per-item tiers or TMB wishlists; verify item rows against the Blizzard API.
 18. **Weekly cycle** (§5.10) build order relative to the database migration (§6.2).
 14. ~~T6 zone IDs~~ Resolved: zone 1060, encounters 50601+ on `fresh.` (research §6c).
+
+**Web sessions (2026-09-17):** OAuth login sets a 10-minute nonce cookie whose hash is inside the signed `state`; the callback checks nonce, age and that `next` is under `/app`. Session cookies carry `iat`; `OIBOT_WEB_SESSION_EPOCH` (unix time or ISO) in `.env` invalidates every session issued before it. The dev-user login exists only with `OIBOT_WEB_DEV=1` on a non-https `OIBOT_WEB_URL`, and uvicorn trusts forwarded headers only from `OIBOT_WEB_PROXY_IPS` (default 127.0.0.1, the tunnel).

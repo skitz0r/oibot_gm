@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# E501 (line too long): existing code still has long lines outside the files that were wrapped; enforce later
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["oibot_gm"]

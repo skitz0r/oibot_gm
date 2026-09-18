@@ -675,6 +675,21 @@ class Registry:
         return {"tank": b["tank"], "healer": b["healer"], "dps": {"min": 0, "max": size}}
 
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
+        """Owner override for a raid (validated): a refused value never stays in memory — the override dict is
+        restored, so the next save_config can't commit it."""
+        import copy
+
+        before = copy.deepcopy(self.config.raids.get(instance))
+        try:
+            return self._apply_raid_override(instance, field, value, by)
+        except RegistryError:
+            if before is None:
+                self.config.raids.pop(instance, None)
+            else:
+                self.config.raids[instance] = before
+            raise
+
+    def _apply_raid_override(self, instance: str, field: str, value, by: str) -> str:
         """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max
         | slots | signup_lead_hours | lock_hours_before | confirm_hours_before | nudge_hours_before | fill_ask_hours | split_policy
         | nudge / autofill / open_dm (true|false) | weight_rank/main/sat_out/signup_order."""
@@ -1164,10 +1179,11 @@ class Registry:
         return [m for m, _ in self.roster_pool(team)]
 
     # ---- placement confirmations (after a roster build is approved)
-    def add_placement_ask(self, discord_id: int, roster: str, character: str, by: str) -> dict:
+    def add_placement_ask(self, discord_id: int, roster: str, character: str, by: str, channel: str = "dm") -> dict:
+        """`channel`: dm (the Confirm / Can't DM) | web (DMs off: the ask waits on the Me page; unanswered still expires)."""
         m = self.member(discord_id)
         m.placement_asks = [a for a in m.placement_asks if not (a["roster"] == roster and a.get("answer") is None)]
-        ask = {"roster": roster, "character": character, "asked_at": now(), "answer": None, "answered_at": None, "by": by}
+        ask = {"roster": roster, "character": character, "asked_at": now(), "answer": None, "answered_at": None, "by": by, "channel": channel}
         m.placement_asks.append(ask)
         m.placement_asks = m.placement_asks[-PLACEMENT_ASK_HISTORY:]
         self.save(m, f"{m.display_name} asked to confirm {character} on {roster}")
@@ -1210,14 +1226,74 @@ class Registry:
         self.save(m, f"{m.display_name} absent {a.start}" + (f"→{a.end}" if a.end != a.start else "") + (f" (by {by})" if by != m.display_name else ""))
         return m, a
 
-    def clear_absence(self, discord_id: int, start: str) -> Member:
+    def clear_absence(self, discord_id: int, start: str, by: str | None = None) -> Absence:
+        """Remove the absence starting `start`; returns it so the caller can ripple the cleared span into the sheets
+        (RaidMixin.after_absence_cleared). `by` defaults to the member (officers pass their own name)."""
         m = self.member(discord_id)
-        before = len(m.absences)
-        m.absences = [a for a in m.absences if a.start != start]
-        if len(m.absences) == before:
+        a = next((a for a in m.absences if a.start == start), None)
+        if a is None:
             raise RegistryError(f"No absence starting {start}.")
-        self.save(m, f"{m.display_name} cleared absence {start}")
-        return m
+        m.absences = [x for x in m.absences if x.start != start]
+        self.save(m, f"{m.display_name} cleared absence {start}" + (f" (by {by})" if by and by != m.display_name else ""))
+        return a
+
+    # ---- the character table (Me page and the Members page save the same shape)
+    def save_character_table(self, discord_id: int, rows: list[dict], by: str) -> list[str]:
+        """One save for a member's table. Each row: {label?, cls, spec, offspec?, name?, surname?, main?: bool (or slot: "main"),
+        rank?, delete?: bool, retire?: bool}. A row whose label matches an active character updates it (spec/offspec,
+        a name for a planned one, rank when given); an unknown row adds a character (named) or a plan (unnamed);
+        `main` on a row makes it the main. One commit; returns the change lines."""
+        m = self.members.get(discord_id)
+        who = m.display_name if m else by
+        done: list[str] = []
+        want_main = None
+        with self.store.batch(f"{self.key}: {by} saved {who}'s characters"):
+            for row in rows or []:
+                if not isinstance(row, dict):
+                    raise RegistryError("rows must be objects")
+                label = str(row.get("label") or "").strip()
+                cur = next((x for x in (m.active() if m else []) if x.label == label), None) if label else None
+                if row.get("delete") or row.get("retire"):
+                    if cur is None:
+                        continue
+                    if row.get("delete"):
+                        self.delete_character(discord_id, cur.label)
+                        done.append(f"deleted {cur.label}")
+                    else:
+                        self.retire(discord_id, cur.label)
+                        done.append(f"retired {cur.label}")
+                    m = self.members.get(discord_id)
+                    continue
+                cls, spec, off = (row.get("cls") or "").strip(), (row.get("spec") or "").strip(), (row.get("offspec") or "").strip() or None
+                name, surname = (row.get("name") or "").strip(), (row.get("surname") or "").strip() or None
+                is_main = bool(row.get("main")) or row.get("slot") == "main"
+                if cur is None:
+                    if not cls or not spec:
+                        continue
+                    if name:
+                        m, cur = self.add_character(discord_id, who, name, cls, spec, off, is_main, surname=surname)
+                        done.append(f"added {cur.label}")
+                    else:
+                        m, cur = self.set_plan(discord_id, who, cls, spec, off, "main" if is_main else "alt")
+                        done.append(f"planned {cur.cls} {cur.spec}")
+                else:
+                    if spec and (spec, off) != (cur.spec, cur.offspec):
+                        cur = self.set_spec(discord_id, cur.label, spec, off)
+                        done.append(f"{cur.label}: {spec}" + (f"/{off}" if off else ""))
+                    if not cur.name and name:
+                        m, cur = self.name_character(discord_id, name, "main" if cur.is_main else "alt", surname=surname, label=cur.label)
+                        done.append(f"named {cur.label}")
+                rank = str(row.get("rank") or "").strip()
+                if rank and rank != cur.rank:
+                    self.set_rank(cur.label, rank, by)
+                    done.append(f"{cur.label}: rank {rank}")
+                if is_main:
+                    want_main = cur.label
+            m = self.members.get(discord_id) or m
+            if m and want_main and not (m.main and m.main.label == want_main):
+                self.set_main(discord_id, want_main)
+                done.append(f"main is {want_main}")
+        return done
 
     def absences_between(self, start: str, end: str) -> list[tuple[Member, Absence]]:
         out = []

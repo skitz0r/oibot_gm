@@ -26,7 +26,19 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
   const name = runName(e);
 
   const pin = (s: Signup, p: "in" | "out" | null) => onAct(`pin${s.uid}`, `/api/run/${e.key}/pin`, { uid: s.uid, pin: p });
-  const set = (uid: string, status: string) => onAct(`set${uid}`, `/api/run/${e.key}/set`, { uid, status });
+  /** Officer sets an answer for someone. Before lock it only changes the sheet; after lock the same verb as the board applies:
+   *  Join seats them and asks them to confirm, No thanks releases the seat and fills it, Bench keeps them as a fill candidate. */
+  async function set(s: Signup, status: string) {
+    const label = meta.labels[status] || status;
+    const after = status === "in" ? `Join after lock seats ${s.display_name} (${s.character}) and asks them to confirm — by DM, or on their Me page if their DMs are off. If every seat is taken they join unrostered; move them in on the board.`
+      : status === "out" ? `No thanks after lock releases ${s.display_name}'s seat and DMs them that it was released; the bench is asked to fill it.`
+      : `Bench after lock is the answer only: ${s.display_name} keeps a seat they already hold until you set No thanks; off the roster, they are a fill candidate.`;
+    const before = status === "in" ? `${s.display_name} counts as joined on ${s.character}; the board picks them up at lock.`
+      : status === "out" ? `${s.display_name} is off the sheet for this run; they are told nothing — this is an officer answer, not theirs.`
+      : `${s.display_name} sits on the bench for this run; the fill engine may ask them after lock.`;
+    if (!(await ask({ title: `Set ${label} for ${s.display_name}?`, message: `${locked ? after : before} The log records that ${meta.viewer.name} set it.`, confirmLabel: `Set ${label}`, color: status === "out" ? "red" : undefined }))) return;
+    await onAct(`set${s.uid}`, `/api/run/${e.key}/set`, { uid: s.uid, status });
+  }
   const menu = (s: Signup) => (
     <Menu shadow="md" width={200} position="bottom-end">
       <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`actions for ${s.display_name}`}><IconDotsVertical size={14} /></ActionIcon></Menu.Target>
@@ -36,7 +48,7 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
         {!locked && s.pin !== "out" && s.status !== "out" && <Menu.Item leftSection={<IconUserOff size={14} />} onClick={() => pin(s, "out")}>Keep on bench</Menu.Item>}
         {!locked && s.pin && <Menu.Item leftSection={<IconPinnedOff size={14} />} onClick={() => pin(s, null)}>Unpin</Menu.Item>}
         {!locked && <Menu.Divider />}
-        {meta.statuses.filter((st) => st !== s.status).map((st) => <Menu.Item key={st} onClick={() => set(s.uid, st)}>Set {meta.labels[st] || st}</Menu.Item>)}
+        {meta.statuses.filter((st) => st !== s.status).map((st) => <Menu.Item key={st} onClick={() => set(s, st)}>Set {meta.labels[st] || st}</Menu.Item>)}
       </Menu.Dropdown>
     </Menu>
   );
@@ -46,7 +58,7 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
     await onAct(`lock${e.key}`, `/api/run/${e.key}/lock`);
   }
   async function cancelRun() {
-    if (!(await ask({ title: `Cancel ${name}?`, message: "Rostered members are not told automatically — say so in the channel.", confirmLabel: "Cancel the run", color: "red" }))) return;
+    if (!(await ask({ title: `Cancel ${name}?`, message: `The sheet closes for everyone on it${locked ? `; the ${e.rostered} rostered seat${e.rostered === 1 ? "" : "s"} and any open confirmation asks are withdrawn` : ""}. Rostered members are not told automatically — say so in the channel.`, confirmLabel: "Cancel the run", color: "red" }))) return;
     await onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`);
   }
 

@@ -284,7 +284,34 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs:(?
         m = reg.members.get(interaction.user.id)
         today = reg.now_local().date().isoformat()
         ups = m.upcoming_absences(today) if m else []
-        await interaction.response.send_message("\n".join(f"• {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") for a in ups) or "No upcoming absences. Clear one with `/me absent clear`.", ephemeral=True)
+        if not ups:
+            await interaction.response.send_message("No upcoming absences.", ephemeral=True)
+            return
+        await interaction.response.send_message("\n".join(f"• {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") for a in ups), view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)
+
+
+def clear_absences_view(reg: Registry, m, absences: list) -> discord.ui.View:
+    """One Clear button per listed absence on the ephemeral 'My absences' reply: clears it and ripples the span into the sheets."""
+    view = discord.ui.View(timeout=180)
+    for a in absences:
+        btn = discord.ui.Button(label=f"Clear {a.start}" + (f" → {a.end}" if a.end != a.start else ""), style=discord.ButtonStyle.secondary)
+
+        async def clear(i: discord.Interaction, start=a.start):
+            bot = i.client
+            from .registry import RegistryError
+
+            await i.response.edit_message(content="Clearing…", view=None)
+            try:
+                gone = reg.clear_absence(m.discord_id, start, i.user.display_name)
+            except RegistryError as e:
+                await i.edit_original_response(content=f"❌ {e}")
+                return
+            lines = await bot.absence_cleared(reg, m, gone, i.user.display_name)
+            await i.edit_original_response(content=f"✅ Cleared absence {start}" + (f" → {gone.end}" if gone.end != gone.start else "") + ("\n" + "\n".join("• " + l for l in lines) if lines else ""))
+
+        btn.callback = clear
+        view.add_item(btn)
+    return view
 
 
 def absences_card(reg: Registry) -> discord.Embed:
@@ -345,6 +372,15 @@ class AbsencesMixin:
                 pass
         await self.refresh_absences_card(reg)
         await self.ops.emit(reg.config, "info", f"{m.display_name} absent {span}" + (f" — {a.reason}" if a.reason else "") + (f" (by {by})" if by != m.display_name else "") + (f" · sheets: {', '.join(touched)}" if touched else ""))
+
+    async def absence_cleared(self, reg: Registry, m, a, by: str) -> list[str]:
+        """After Registry.clear_absence: the cleared span ripples into the live sheets (after_absence_cleared), the
+        card is refreshed, one ops line. Returns the member-facing lines (which sheets they can answer again)."""
+        span = a.start + (f" → {a.end}" if a.end != a.start else "")
+        lines = await self.after_absence_cleared(reg, m, a)
+        await self.refresh_absences_card(reg)
+        await self.ops.emit(reg.config, "info", f"{m.display_name} cleared absence {span}" + (f" (by {by})" if by != m.display_name else "") + (f" · {len(lines)} sheet(s) touched" if lines else ""))
+        return lines
 
 
 # ---------------------------------------------------------------- setup from the web + test bench
@@ -408,10 +444,7 @@ class SetupMixin:
         for ev in rs.live():
             t = reg.config.roster(ev.team) or {}
             if t.get("test"):
-                ev.state = "cancelled"
-                ev.log.append(f"test bench cleared by {by}")
-                rs.save(ev, "cancelled (test)")
-                await self.refresh_sheet(reg, ev)
+                await self.cancel_run(reg, rs, ev, by=by, reason="test bench cleared")
                 cancelled.append(ev.key)
         gone = await asyncio.to_thread(reg.clear_test_members, by)
         await self.cleanup_ephemeral(reg, rs)

@@ -1,7 +1,8 @@
 import { Box, Group, Text, Title } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 
-export const ok = (message: string) => notifications.show({ message, color: "teal" });
+/** Success toast. A string with newlines shows one line per line (the server's multi-line replies: what happened, then the ripple). */
+export const ok = (message: React.ReactNode) => notifications.show({ message: typeof message === "string" && message.includes("\n") ? <span style={{ whiteSpace: "pre-line" }}>{message}</span> : message, color: "teal" });
 export const fail = (e: unknown) => notifications.show({ message: (e as Error).message || "Something went wrong", color: "red" });
 
 export function PageTitle({ title, intro, right }: { title: string; intro?: React.ReactNode; right?: React.ReactNode }) {

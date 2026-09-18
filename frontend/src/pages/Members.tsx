@@ -2,10 +2,11 @@ import { Fragment, useEffect, useState } from "react";
 import { ActionIcon, Badge, Button, Card, Group, Modal, Radio, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
-import { api, type Character, type MemberRow, type Members as MembersData, type Meta } from "../api";
+import { api, type AbsenceCleared, type Character, type MemberRow, type Members as MembersData, type Meta } from "../api";
 import { GameIcon } from "../components/Icons";
 import { CharacterCell, SpecCell } from "../components/Cells";
 import { PageTitle, fail, ok } from "../components/Page";
+import { useConfirm } from "../components/ConfirmModal";
 import { classColour } from "../theme";
 
 const PRIV: Record<string, string> = { owner: "yellow", officer: "teal", member: "gray", outside: "red", test: "violet" };
@@ -18,6 +19,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const [absFor, setAbsFor] = useState<MemberRow | null>(null);
   const [drafts, setDrafts] = useState<Record<string, MemberDraft> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<MembersData>("/api/members").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
 
@@ -53,8 +55,21 @@ export function MembersPage({ meta }: { meta: Meta }) {
     try { const r = await api.post<{ message: string }>(path, payload); ok(r.message); await load(); } catch (e) { fail(e); } finally { setBusy(null); }
   }
   async function del(r: MemberRow, c: Character) {
-    if (!confirm(`Delete ${c.label} (${r.display_name})? It is removed from every roster.`)) return;
+    const rosters = c.rosters.length ? `It comes off ${c.rosters.length === 1 ? "the " + c.rosters[0] + " roster" : `${c.rosters.length} rosters`} and any sheet ${r.display_name} answered with it.` : `Any sheet ${r.display_name} answered with it loses that answer.`;
+    if (!(await ask({ title: `Delete ${c.label}?`, message: `${r.display_name}'s ${c.cls} ${c.spec}${c.is_main ? " — their main" : ""}. ${rosters} The history stays in the log.`, confirmLabel: "Delete", color: "red" }))) return;
     await act(`d${c.label}`, "/api/members/save", { rows: [{ uid: r.uid, characters: [], deletes: [c.label] }] });
+  }
+  /** Clearing an absence re-opens the sheets it had answered for them; the toast lists what changed (which sheets, which seat had been freed). */
+  async function clearAbsence(r: MemberRow, a: MemberRow["absences"][number]) {
+    const span = `${a.start}${a.end !== a.start ? ` → ${a.end}` : ""}`;
+    if (!(await ask({ title: `${r.display_name} is back?`, message: `Their absence ${span}${a.reason ? ` (${a.reason})` : ""} is cleared. Sheets on those days re-open for them: the No thanks the absence had put there goes, and they are asked again. A seat that was handed back stays handed back.`, confirmLabel: "Clear the absence" }))) return;
+    const key = `ca${r.uid}${a.start}`;
+    setBusy(key);
+    try {
+      const x = await api.post<AbsenceCleared>("/api/members/absence/clear", { uid: r.uid, start: a.start });
+      ok(<Stack gap={2}><Text size="sm" fw={600}>{x.message.split("\n")[0]}</Text>{x.lines.length ? x.lines.map((l, i) => <Text key={i} size="sm">{l}</Text>) : <Text size="sm" c="dimmed">no sheet was affected</Text>}</Stack>);
+      await load();
+    } catch (e) { fail(e); } finally { setBusy(null); }
   }
 
   if (!data) return <Text c="dimmed">Loading…</Text>;
@@ -82,7 +97,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
                     <Group gap={4} mt={6} wrap="wrap">
                       {r.absences.map((a) => (
                         <Tooltip key={a.start} label={a.reason ? `${a.reason} · click to clear` : "click to clear"}>
-                          <Badge size="xs" variant="outline" color="gray" style={{ cursor: "pointer" }} onClick={() => confirm(`Clear ${r.display_name}'s absence from ${a.start}?`) && act(`ca${r.uid}${a.start}`, "/api/members/absence/clear", { uid: r.uid, start: a.start })}>away {a.start}{a.end !== a.start ? ` → ${a.end}` : ""} ×</Badge>
+                          <Badge size="xs" variant="outline" color="gray" style={{ cursor: "pointer", opacity: busy === `ca${r.uid}${a.start}` ? 0.5 : 1 }} onClick={() => clearAbsence(r, a)}>away {a.start}{a.end !== a.start ? ` → ${a.end}` : ""} ×</Badge>
                         </Tooltip>
                       ))}
                       <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setAbsFor(r)}>+ away</Button>
@@ -120,6 +135,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
         )}
       </Card>
       <AbsenceModal r={absFor} onClose={() => setAbsFor(null)} onSaved={() => { setAbsFor(null); load(); }} />
+      {confirmDialog}
     </Stack>
   );
 }

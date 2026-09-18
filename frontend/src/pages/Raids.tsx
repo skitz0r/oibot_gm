@@ -4,6 +4,7 @@ import { IconPencil } from "@tabler/icons-react";
 import { api, type RaidRule, type Raids } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
 import { PageTitle, fail, ok } from "../components/Page";
+import { useConfirm } from "../components/ConfirmModal";
 
 export function RaidsPage() {
   const [data, setData] = useState<Raids | null>(null);
@@ -24,6 +25,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
   const [editing, setEditing] = useState(false);
   const [d, setD] = useState<Draft>(() => toDraft(r));
   const [busy, setBusy] = useState(false);
+  const [ask, confirmDialog] = useConfirm();
   useEffect(() => setD(toDraft(r)), [r]);
   const over = (k: string) => r.overridden.includes(k);
   const oc = (k: string) => (over(k) ? "yellow" : undefined);
@@ -33,7 +35,8 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
     try { const x = await api.post<{ message: string }>("/api/admin/raid", { instance: r.id, ...d }); ok(x.message); setEditing(false); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
   }
   async function reset() {
-    if (!confirm(`Reset ${r.name} to the game defaults? Slots go too.`)) return;
+    const what = r.overridden.map((k) => k.replace(/^weight_/, "weight ").replace(/_/g, " ")).join(", ");
+    if (!(await ask({ title: `Reset ${r.name} to the game defaults?`, message: `${r.overridden.length} override${r.overridden.length === 1 ? "" : "s"} go: ${what}.${r.overridden.includes("slots") ? " With no slots, no sheet opens for this raid until you set them again." : ""}${r.live ? ` The ${r.live} live sheet${r.live === 1 ? "" : "s"} keep their times.` : ""}`, confirmLabel: "Reset", color: "red" }))) return;
     setBusy(true);
     try { const x = await api.post<{ message: string }>("/api/admin/raid/reset", { instance: r.id }); ok(x.message); setEditing(false); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
   }
@@ -108,6 +111,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
         )}
         {!owner && <Text size="xs" c="dimmed" mt="sm">The owner edits raid rules.</Text>}
       </Box>
+      {confirmDialog}
     </Card>
   );
 }
