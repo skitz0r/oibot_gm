@@ -200,14 +200,16 @@ def _aura_line(ico, g: dict | None) -> str:
     return (present + (f"  ⚠ {missing}" if missing else "")).strip()
 
 
-def _group_block(reg: Registry, ico, r, gi: int, marks: dict | None = None, summaries: list[dict] | None = None, title: str | None = None) -> str:
-    """One group as the web board shows it: heading, one member per line (spec icon + name), its auras under it."""
+def _group_block(reg: Registry, ico, r, gi: int, marks: dict | None = None, summaries: list[dict] | None = None, title: str | None = None, me: str | None = None) -> str:
+    """One group as the web board shows it: heading, one member per line (spec icon + name), its auras under it.
+    `me` = the reader's signup name: their line is bold with a pointer."""
     members = [next((p for p in r.selected if p.signup_name == n), None) for n in r.groups[gi]]
     lines = [f"**{title or f'Group {gi + 1}'}**"]
     for p in members:
         if p:
             mark = (marks or {}).get(p.signup_name)
-            lines.append(f"{(mark + ' ') if mark else ''}{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}")
+            name = p.character or p.signup_name
+            lines.append(f"{(mark + ' ') if mark else ''}{ico('spec', f'{p.cls}:{p.spec}')} " + (f"**{name}** ◀" if p.signup_name == me else name))
     aura = _aura_line(ico, summaries[gi] if summaries and gi < len(summaries) else None)
     if aura:
         lines.append("-# " + aura)
@@ -306,7 +308,12 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     rd = reg.raid_def(ev.instance)
     head = _header(reg, ev, f"You're seated · {rd.get('name', ev.instance)}", [f"{ico('spec', f'{sg.cls}:{sg.spec}')} **{sg.character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"])
     _s, _h, confirm = run_times(reg, ev, team)
-    parts = [head, ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"Group {gi + 1}")), ui.Separator(),
+    summaries = _group_summaries(reg, r)
+    parts = [head, ui.Separator()]
+    for k in range(len(r.groups)):  # the whole roster, group by group; the reader's own line is bold
+        if r.groups[k]:
+            parts.append(ui.TextDisplay(_group_block(reg, ico, r, k, None, summaries, me=sg.display_name)))
+    parts += [ui.Separator(),
              ui.TextDisplay(f"-# Confirm keeps the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:t> counts as out."),
              ui.ActionRow(PlaceButton(ev.team, uid, "yes"), PlaceButton(ev.team, uid, "no"))]
     view = ui.LayoutView(timeout=None)
