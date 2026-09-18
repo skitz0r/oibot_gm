@@ -117,8 +117,59 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 v = await viewer(request)
             except Exception:  # noqa: BLE001 — not logged in / not a member: still worth a line
                 v = None
-            log.info("api %s %s uid=%s status=%s", request.method, request.url.path, getattr(v, "uid", None), response.status_code)
+            via = getattr(v, "via", "web")
+            log.info("api %s %s uid=%s status=%s%s", request.method, request.url.path, getattr(v, "uid", None), response.status_code, "" if via == "web" else f" via={via}")
         return response
+
+    # ---- resolvers: the MCP server (and any client) may name people and runs the way officers do
+    def resolve_member(reg, ref, what: str = "member"):
+        """A member from a Discord id, a display name or a character name (case-insensitive; a unique prefix or
+        substring also works). Ambiguous → 400 listing the candidates; unknown → 400."""
+        raw = str(ref if ref is not None else "").strip()
+        if not raw:
+            raise HTTPException(400, f"{what} required")
+        if raw.lstrip("<@!>").isdigit():
+            m = reg.members.get(int(raw.strip("<@!>")))
+            if not m:
+                raise HTTPException(400, "unknown member")
+            return m
+        n = raw.lower()
+        exact = [m for m in reg.members.values() if m.display_name.lower() == n]
+        if len(exact) == 1:
+            return exact[0]
+        hit = reg.find(raw)
+        if hit:
+            return hit[0]
+        loose = [m for m in reg.members.values() if n in m.display_name.lower() or any(c.name and n in c.name.lower() for c in m.characters)]
+        if len(loose) == 1:
+            return loose[0]
+        if loose:
+            raise HTTPException(400, f"{raw}: which one? " + ", ".join(sorted(m.display_name for m in loose)[:12]))
+        raise HTTPException(400, f"unknown member {raw}")
+
+    def member_ref(d: dict):
+        """The body names a member as `uid` (the site) or `member` (name / character / id)."""
+        return d.get("member") if d.get("member") not in (None, "") else d.get("uid")
+
+    def find_live(reg, rs, ref: str):
+        """A live run from its key, its roster key, or the raid it is for (id or name; 'tonight's Barrow Deeps').
+        Several live runs for that raid → 400 listing their keys; nothing live → 404."""
+        key = (ref or "").strip()
+        ev = rs.events.get(key) or rs.for_team(key)
+        if ev and ev.state not in ("done", "cancelled"):
+            return ev
+        n = key.lower()
+        raids = [rid for rid in reg.profile.raids if rid.lower() == n or reg.raid_def(rid).get("name", rid).lower() == n]
+        if not raids:
+            raids = [rid for rid in reg.profile.raids if n and (n in rid.lower() or n in reg.raid_def(rid).get("name", rid).lower())]
+        evs = [e for e in rs.live() if e.instance in raids] if len(raids) == 1 else []
+        if len(evs) == 1:
+            return evs[0]
+        if len(evs) > 1:
+            raise HTTPException(400, f"several live runs for {reg.raid_def(raids[0]).get('name', raids[0])}: " + ", ".join(e.key for e in evs))
+        if len(raids) > 1:
+            raise HTTPException(400, f"{key}: which raid? " + ", ".join(raids))
+        raise HTTPException(404, "that run is closed" if key in rs.events else f"no live run {key or '?'}" + (" (live: " + ", ".join(e.key for e in rs.live()) + ")" if rs.live() else ""))
 
     async def body(request: Request, officer: bool = False):
         if request.headers.get("x-requested-with") != "oibot":
@@ -406,10 +457,18 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     def live_event(reg, key: str):
         rs = bot.raids.store(reg)
-        ev = rs.events.get(key)
-        if not ev or ev.state in ("done", "cancelled"):
-            raise HTTPException(404, "that run is closed")
+        ev = find_live(reg, rs, key)
         return rs, ev, (rc.run_team(reg, ev))
+
+    @app.get("/api/run/{key}")
+    async def run_get(request: Request, key: str):
+        """One run in full (the sheet, board, confirmations, fill asks, absences that day, log). Closed runs too, by key."""
+        v = await who(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None:
+            ev = find_live(v.reg, rs, key)
+        return await asyncio.to_thread(ev_json, v.reg, rs, ev)
 
     def solver_text(e: Exception) -> str:
         """A RuntimeError from the solver as one sentence an officer can act on (H2)."""
@@ -496,7 +555,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         """Pin someone to the roster / keep them on the bench for the lock — the same verb the board's menu uses."""
-        uid, pin = str(d.get("uid") or ""), d.get("pin")
+        pin = d.get("pin")
+        uid = str(resolve_member(v.reg, member_ref(d)).discord_id)
         if pin not in ("in", "out", None):
             return JSONResponse({"error": "pin must be in, out or null"}, status_code=400)
         if uid not in ev.signups:
@@ -516,10 +576,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         Join after lock seats them and asks them to confirm, No thanks after lock frees the seat and fills it."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        m = v.reg.members.get(as_int(d.get("uid"), "uid"))
+        m = resolve_member(v.reg, member_ref(d))
         status = d.get("status")
-        if not m or status not in rc.STATUSES:
-            return JSONResponse({"error": "unknown member or status"}, status_code=400)
+        if status not in rc.STATUSES:
+            return JSONResponse({"error": f"status must be one of {', '.join(rc.STATUSES)}"}, status_code=400)
         try:  # set_answer refreshes the sheet and cards and writes the ops line itself; its reply is Discord-flavoured
             line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name))
         except (RegistryError, ValueError) as e:
@@ -608,6 +668,86 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     @app.post("/api/admin/confirm")
     async def admin_confirm(request: Request):
         return await run(request, lambda v, d: f"confirmed {v.reg.confirm(parse(d, LabelBody).label, v.name)[1].label}", officer=True)
+
+    @app.post("/api/admin/placement")
+    async def admin_placement(request: Request):
+        """Officer answers a Confirm / Can't make it ask on someone's behalf (what the test bench's may_answer_for
+        allows on the buttons): same verb and ripple as the member pressing it."""
+        v, d = await body(request, officer=True)
+        m = resolve_member(v.reg, member_ref(d))
+        rs, ev, t = live_event(v.reg, str(d.get("run") or d.get("roster") or ""))
+        yes = d.get("answer") in ("yes", True, "true")
+        try:
+            line = await asyncio.to_thread(v.reg.answer_placement, m.discord_id, ev.team, yes, v.name)
+        except (RegistryError, ValueError, KeyError) as e:
+            return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
+        await bot.after_placement_answer(v.reg, m.discord_id, ev.team, yes, line)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} answered for {m.display_name}: {line}")
+        return {"message": line}
+
+    @app.post("/api/admin/test")
+    async def admin_test(request: Request):
+        """The test bench over HTTP — the same steps as /gm test seed|run|answer|clear (discord_registry.py)."""
+        v, d = await body(request, officer=True)
+        reg, action = v.reg, str(d.get("action") or "")
+        rs = bot.raids.store(reg)
+        if action == "seed":
+            made = await asyncio.to_thread(reg.seed_test_members, as_int(d.get("count", 20), "count"), v.name)
+            total = len(reg.test_members())
+            await bot.ops.emit(reg.config, "warn", f"test bench: {len(made)} test members seeded by {v.name} ({total} total)")
+            return {"message": f"{len(made)} test member(s) created, {total} in total: " + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30])}
+        if action == "run":
+            rid = str(d.get("raid") or "")
+            if rid not in reg.profile.raids:
+                return JSONResponse({"error": f"unknown raid; options: {', '.join(reg.profile.raids)}"}, status_code=400)
+            start_in, lock_in, confirm_in, nudge_in = (as_int(d.get(k, dflt), k) for k, dflt in (("start_in", 40), ("lock_in", 25), ("confirm_in", 15), ("nudge_in", 32)))
+            if not (start_in > lock_in > confirm_in >= 0) or nudge_in <= lock_in:
+                return JSONResponse({"error": "need start_in > nudge_in > lock_in > confirm_in ≥ 0 (all minutes)"}, status_code=400)
+            start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
+            ev = await asyncio.to_thread(rc.open_run, reg, rs, rid, start, by=v.name, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(d.get("dm_open")), "test_by": v.uid})
+            channel = bot.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
+            if not ev.message_id and channel is not None:
+                await bot.post_sheet(reg, rs, ev, channel)
+            await bot.ops.emit(reg.config, "warn", f"test bench: {v.name} opened test run {ev.key} (lock in {start_in - lock_in} min)")
+            return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before" + ("" if ev.message_id else " (no signup channel set — sheet not posted)"), "key": ev.key}
+        if action == "answer":
+            ev = find_live(reg, rs, str(d.get("run") or "")) if d.get("run") else next(iter(rs.live()), None)
+            if not ev:
+                return JSONResponse({"error": "no live run"}, status_code=400)
+            team = reg.config.roster(ev.team) or {"key": ev.team, "size": 20}
+            done = []
+            if d.get("member"):
+                m, status = resolve_member(reg, d.get("member")), str(d.get("status") or "in")
+                if not m.test:
+                    return JSONResponse({"error": "pick a test member"}, status_code=400)
+                if status not in rc.STATUSES:
+                    return JSONResponse({"error": f"status must be one of {', '.join(rc.STATUSES)}"}, status_code=400)
+                if ev.state != "open" and status == "out" and ev.seat_of(m.display_name):
+                    await bot.drop_seated(reg, rs, ev, team, m, "callout (test)", None)
+                    done.append(f"{m.display_name} called out")
+                else:
+                    s = rc.set_signup(reg, rs, ev, m, None, status, source="test")
+                    done.append(f"{m.display_name} {rc.LABELS[s.status]}")
+            else:
+                import random
+
+                pool = [m for m in reg.test_members() if str(m.discord_id) not in ev.signups]
+                random.shuffle(pool)
+                for st, n in (("in", as_int(d.get("join", 0), "join")), ("sub", as_int(d.get("bench", 0), "bench")), ("out", as_int(d.get("out", 0), "out"))):
+                    for _ in range(n):
+                        if not pool:
+                            break
+                        m = pool.pop()
+                        rc.set_signup(reg, rs, ev, m, None, st, source="test")
+                        done.append(f"{m.display_name} {rc.LABELS[st]}")
+            await bot.refresh_sheet(reg, ev)
+            await bot.ops.emit(reg.config, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {v.name}")
+            return {"message": ("; ".join(done)) if done else "nobody left to answer (seed more, or they've all answered)", "key": ev.key}
+        if action == "clear":
+            line = await bot.test_bench_clear(reg, v.name)
+            await bot.ops.emit(reg.config, "warn", f"test bench: {line} (by {v.name})")
+            return {"message": line}
+        return JSONResponse({"error": "action must be seed, run, answer or clear"}, status_code=400)
 
     # ---- raids: rules per raid (officers read, owner edits)
     @app.get("/api/raids")
@@ -761,23 +901,85 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             for row in d.get("rows") or []:
                 if not isinstance(row, dict):
                     raise HTTPException(400, "rows must be objects")
-                uid = as_int(row.get("uid"), "uid")
-                m = reg.members.get(uid)
+                if row.get("member"):  # the MCP server names people; the site sends ids
+                    m = resolve_member(reg, row["member"])
+                else:
+                    m = reg.members.get(as_int(row.get("uid"), "uid"))
                 if not m:
                     continue
+                uid = m.discord_id
                 rows = [{"label": str(label), "delete": True} for label in row.get("deletes") or []] + table_rows(row.get("characters"))
                 if rows:
                     done.extend(f"{line} ({m.display_name})" for line in reg.save_character_table(uid, rows, v.name))
             return "; ".join(done) or "no changes"
         return await run(request, go, officer=True)
 
+    @app.get("/api/member")
+    async def member_get(request: Request, name: str = ""):
+        """One member by display name, character name or id (`?name=`): characters, every absence on file, open asks, DM setting."""
+        v = await who(request, officer=True)
+        reg = v.reg
+        m = resolve_member(reg, name)
+        rs = bot.raids.store(reg)
+        primary, flex = reg.roles_of(m)
+        return {"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else await privilege(reg, m.discord_id),
+                "test": bool(m.test), "dm": not m.dm_opt_out, "roles": {"primary": primary, "flex": list(flex)},
+                "characters": [char_json(reg, c) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))],
+                "absences": [absence_json(a) for a in sorted(m.absences, key=lambda a: a.start)],
+                "asks": [{"roster": a["roster"], "answer": a.get("answer"), "asked_at": a.get("asked_at"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-5:]],
+                "sheets": [{"key": e.key, "status": e.signups[str(m.discord_id)].status, "character": e.signups[str(m.discord_id)].character} for e in rs.live() if str(m.discord_id) in e.signups]}
+
+    @app.get("/api/absences")
+    async def absences(request: Request, all: bool = False):
+        """Every upcoming absence (`?all=true` = past ones too), newest start first, with the member it belongs to."""
+        v = await who(request, officer=True)
+        reg = v.reg
+        today = reg.now_local().date().isoformat()
+        rows = [{"uid": str(m.discord_id), "display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "by": a.by, "current": a.start <= today <= a.end}
+                for m in reg.members.values() for a in (m.absences if all else m.upcoming_absences(today))]
+        return {"rows": sorted(rows, key=lambda r: (r["start"], r["display_name"])), "today": today, "tz": reg.config.timezone}
+
+    @app.post("/api/members/set")
+    async def members_set(request: Request):
+        """Officer edits one member's record the way the Discord commands do: `rank` (on `character`, default the main),
+        `confirm` (true: the character is verified), `main` (a character name becomes the main). Any subset of the three."""
+        def go(v, d):
+            reg, done = v.reg, []
+            m = resolve_member(reg, member_ref(d))
+            char = str(d.get("character") or "").strip() or (m.main.label if m.main else "")
+            if d.get("main"):
+                name = str(d["main"]).strip() if isinstance(d["main"], str) else char
+                mm, c, old = reg.officer_set_main(m.discord_id, name, v.name)
+                done.append(f"{m.display_name}: main is now {c.label}")
+                char = str(d.get("character") or "").strip() or c.label
+            if d.get("rank"):
+                if not char:
+                    raise HTTPException(400, "character required (no main to default to)")
+                mm, c = reg.set_rank(char, str(d["rank"]), v.name)
+                done.append(f"{c.label}: rank {c.rank}")
+            if d.get("confirm"):
+                if not char:
+                    raise HTTPException(400, "character required (no main to default to)")
+                mm, c = reg.confirm(char, v.name)
+                done.append(f"confirmed {c.label}")
+            return "; ".join(done) or f"{m.display_name}: no changes"
+        return await run(request, go, officer=True)
+
+    @app.post("/api/members/dm")
+    async def members_dm(request: Request):
+        """Officer switches someone's DMs on/off (the Me page's toggle, for them)."""
+        def go(v, d):
+            m = resolve_member(v.reg, member_ref(d))
+            m.dm_opt_out = not bool(d.get("on"))
+            v.reg.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'} (by {v.name})")
+            return f"{m.display_name}: DMs {'off' if m.dm_opt_out else 'on'}"
+        return await run(request, go, officer=True)
+
     @app.post("/api/members/absence")
     async def members_absence(request: Request):
         """Officer records an absence for someone (same ripple as the member doing it)."""
         v, d = await body(request, officer=True)
-        m0 = v.reg.members.get(as_int(d.get("uid"), "uid"))
-        if not m0:
-            return JSONResponse({"error": "unknown member"}, status_code=400)
+        m0 = resolve_member(v.reg, member_ref(d))
         try:
             m, a = await asyncio.to_thread(v.reg.add_absence, m0.discord_id, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, m0.display_name)
         except (RegistryError, ValueError) as e:
@@ -789,8 +991,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     async def members_absence_clear(request: Request):
         """Officer clears someone's absence: same ripple as the member doing it (sheets re-opened for them; the lines say which)."""
         v, d = await body(request, officer=True)
-        b = parse(d, UidStartBody)
-        return await clear_absence(v, b.uid, b.start)
+        m = resolve_member(v.reg, member_ref(d))
+        return await clear_absence(v, m.discord_id, parse(d, StartBody).start)
 
     # ---- ops, config (read-only)
     @app.get("/api/ops")
@@ -838,7 +1040,13 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         field, value = d.get("field") or "", d.get("value")
         try:
             if field.startswith("channel:"):
-                msg = await bot.set_channel(v.reg, field[8:], as_int(value, "channel id") if value else None, v.name)
+                if value and not str(value).strip("<#>").isdigit():  # a channel *name* (the MCP server) → its id
+                    want = str(value).strip().lstrip("#").lower()
+                    hits = [c for c in bot.guild_channels(v.reg) if c["name"].lower() == want]
+                    if len(hits) != 1:
+                        return JSONResponse({"error": f"no channel named #{want}" if not hits else f"#{want}: several channels match"}, status_code=400)
+                    value = hits[0]["id"]
+                msg = await bot.set_channel(v.reg, field[8:], as_int(str(value).strip("<#>"), "channel id") if value else None, v.name)
             elif field == "officer_roles":
                 # the editor sends the whole list of role IDS (as /gm config officer-role stores them); applied as the
                 # command's role_add / role_remove ops so the same code path and audit lines are used
@@ -861,6 +1069,47 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return JSONResponse({"error": str(e)}, status_code=400)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
         return {"message": msg}
+
+    @app.post("/api/ops/change")
+    async def ops_change(request: Request):
+        """Plain-text configuration (what `/gm change` and the ops-channel @mention do): Claude parses the text into
+        whitelisted ConfigOps, `describe()` says current → new per op. Nothing is applied unless `apply: true`;
+        questions from the parser come back instead of ops, and owner-only ops need the owner."""
+        from .. import configops
+        from ..policy import PolicyStore
+
+        v, d = await body(request, officer=True)
+        text = str(d.get("text") or "").strip()
+        if not text:
+            return JSONResponse({"error": "text required"}, status_code=400)
+        provider = getattr(getattr(bot, "ctx", None), "provider", None)
+        if provider is None:
+            return JSONResponse({"error": "the LLM provider is off (ANTHROPIC_API_KEY unset)"}, status_code=503)
+        try:
+            req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name)
+        except Exception as e:  # noqa: BLE001 — provider/schema errors are 502s the caller can retry
+            return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
+        ops = [op.model_dump(exclude_none=True) for op in req.ops]
+        desc = []
+        for op in req.ops:
+            try:
+                desc.append(configops.describe(v.reg, op))
+            except Exception as e:  # noqa: BLE001
+                desc.append(f"{op.op}: {e}")
+        out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": []}
+        if not d.get("apply") or req.kind != "change" or not req.ops:
+            return out
+        ps = PolicyStore(bot.registries.store, v.reg.key)
+        for op in req.ops:
+            try:
+                line = await configops.apply_async(v.reg, op, v.name, v.owner, ps, bot=bot)
+            except (RegistryError, ValueError) as e:
+                out["applied"].append(f"{op.op}: {e}")
+                out["error"] = str(e)
+                break
+            out["applied"].append(line)
+            await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        return out
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

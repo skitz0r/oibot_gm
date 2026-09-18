@@ -232,6 +232,35 @@ opens; `fill_ask_hours` [4] — how long a fill DM waits before silence counts a
 lockout window, page clock and "asked/starts at" stamp the bot shows is in that timezone; only Discord's own
 `<t:…>` timestamps render in each viewer's local time.
 
+**Plain text does everything the site does.** `/gm change <text>` (or an @mention in the ops or analytics
+channel) covers every action on the Rosters, Raids, Members and Config pages, not only settings. The bot turns
+the sentence into one or more operations, shows each as a one-line "what will happen" diff, and applies on
+**Apply** through exactly the code the slash command or page button would use — so a lock sends the same
+confirmation DMs and cards as `/raid lock`, a cancel withdraws the same confirmations, a cleared absence
+re-opens the same sheets. Officer actions need an officer; the owner-only settings still need the owner. A run is
+named by its key (`bd-1209-1930`), or by raid and day ("tonight's Barrow Deeps", "the Hyjal run") when only one of
+that raid's runs is live — with two live, the bot asks which. A member is named by display name, @mention or one
+of their characters.
+
+- *Runs:* "open Barrow Deeps for Thursday 19:30" (or "open the next Barrow Deeps") posts the sheet now;
+  "lock tonight's Barrow Deeps" builds the roster and DMs everyone rostered; "cancel bd-1209-1930, server
+  down"; "put Xanthe on the bench for bd-1209-1930" / "set Marrow to join as Marrowlite" / "Kestrel can't
+  make it" (after lock: join seats and asks to confirm, no thanks frees the seat and the fill engine looks for
+  cover); "who would fill ask next for tonight's run" (preview, nothing sent) and "send the fill asks"; "split
+  tonight's run first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock);
+  "groups for bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the board — the layout the lock will use, or after
+  lock the roster itself (names added are asked to confirm, names dropped are freed). Pins and per-run seats
+  stay as before ("pin Ash to the roster", "keep Dusk on the bench").
+- *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`), "change Jonny to Fire",
+  "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
+  character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
+  raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "Marrow is back, clear her absence" (by start
+  date when she has several); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
+- *Test bench:* "seed 20 test members", "open a test Barrow Deeps run" (the `/gm test run` defaults: starts in
+  40 min, nudge 32, lock 25, confirm 15 min before), "clear the test bench".
+- Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
+  DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are still not settable anywhere.
+
 ## 8a. Rehearsing with the test bench (officers)
 
 `/gm test seed count:20` creates puppet members (fake Discord ids, a realistic class mix and ranks, mains
@@ -247,6 +276,46 @@ send a puppet (open, nudge, Confirm / Can't make it, fill asks) arrives in **you
 name on it, and you can press its buttons on their behalf. What real members do see: the sheet itself in the
 signup channel (marked as a test), the roster-channel cards, the ops lines, and the analytics cards pausing
 until `/gm test clear`.
+
+## 8b. MCP server (owner, from Claude Code)
+
+The bot ships an MCP server, `oibot-mcp`, so a Claude Code session opened in the bot's repo can run the
+guild the way the site does: read sheets and records, answer for people, lock, fill, cancel, edit raid
+cadence and auras, record absences, change settings in plain words. It is a thin client: every tool is one
+call to the **running** bot's web API, so what it does is exactly what the officer panel does, side effects
+included (sheets re-rendered, roster cards, DMs, ops lines). If the bot is not running, every tool says so.
+
+**Start.** `uv run oibot discord` (the bot, with `OIBOT_WEB_BIND` set) and `OIBOT_MCP_TOKEN` in `.env`
+(the same value the bot reads). `.mcp.json` at the repo root registers the server for Claude Code
+(`uv run oibot-mcp`); `claude mcp list` shows `oibot_gm`. `uv run oibot-mcp --list-tools` prints the tools.
+The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change it).
+
+| Tool | Does |
+|---|---|
+| `guild_overview` | timezone, owner, officer roles, channels, raids' cadence, live runs, test bench |
+| `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (signups, board, confirmations, fill asks, absences that day, log) |
+| `list_raids` · `get_raid` | effective raid settings and overrides |
+| `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record |
+| `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status and the ops feed |
+| `open_run` | open a sheet now (next slot, or a date and time) |
+| `set_answer` · `pin` · `confirm_for` | Join / Bench / No thanks for someone (character swap) · pin in/out for the lock · answer a Confirm ask for them |
+| `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved) · remember the strategy · solver shapes the board · set the groups |
+| `lock_run` · `fill_seats` · `cancel_run` | lock now · preview the fill asks, `send=true` sends them · cancel with a reason |
+| `raid_set` · `raid_reset` | one raid setting (slots, hours, weights, comp bounds, first open…) · back to defaults |
+| `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
+| `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened) |
+| `save_characters` · `set_member` · `set_dm` | character table rows · rank / confirm / main · DMs on or off |
+| `set_channel` · `set_config` | a bot channel by name · timezone, ask audience, about, officer roles |
+| `test_bench` | seed / run / answer / clear, as `/gm test` |
+| `plain_change` | text → the config ops it means, with current → new; applied only with `apply=true` |
+
+Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
+name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
+
+**Safety.** The server acts as the **guild owner** (owner-only settings included) and every change is logged
+as the owner via `mcp`. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
+put it in `.mcp.json` or a commit. Ask for a preview first (`propose_split`, `fill_seats` without send,
+`plain_change` without apply) and read the returned line back: it says what actually happened.
 
 ## 9. Loot (when loot tables exist)
 
@@ -275,6 +344,20 @@ your own record. Who may do that is set by the owner (`ask_audience`: officers, 
 registered members, or everyone; default registered). Anyone outside that audience gets the **static
 guide** instead — a menu with *About the guild*, *Raid schedule*, *How to register*, *How signups work*,
 *How to apply*, *Who to contact* — built from the guild's settings, no AI involved.
+
+What `/ask` knows is what the site shows, in one bounded snapshot taken when you ask: the guild's channels,
+officer roles, owner and ask audience; every raid's cadence (slots, when sheets open, nudge, lock and
+confirmation times, `fill_ask_hours`, `autofill`, `open_dm`, split policy, weights, comp bounds, comp targets
+and group layout, which settings are overridden); the guild's aura and family overrides; the test bench (puppets,
+test runs); and every live run as the Raids page has it — state, nudge / lock / confirmation-expiry times, split
+strategy, who joined (with character and spec), bench, no thanks, who hasn't answered, pins, the board before
+lock, the rostered groups after lock with confirmed / waiting / declined, the bench after lock, what the run is
+short, fill asks outstanding (who, for what, deadline) and recent answers, members absent that day, callouts, and
+the last log lines. It also knows your own record — characters, roles, DMs, upcoming absences, confirmations
+waiting on you, and your answer and seat on each live run. An officer who names a member (display name or
+character) in the question gets that member's record too, absence reasons included; members asking about
+others don't. Long lists are cut short rather than dumped, and the answer only ever *points* at commands —
+changing anything is `/gm change`.
 
 ## 11. Things the bot cannot do (yet)
 

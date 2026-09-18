@@ -76,9 +76,32 @@ def session_valid(s: dict | None, now: float | None = None) -> bool:
 
 
 class Viewer:
-    def __init__(self, uid: int, name: str, reg, officer: bool, owner: bool):
-        self.uid, self.name, self.reg, self.officer, self.owner = uid, name, reg, officer, owner
+    def __init__(self, uid: int, name: str, reg, officer: bool, owner: bool, via: str = "web"):
+        self.uid, self.name, self.reg, self.officer, self.owner, self.via = uid, name, reg, officer, owner, via
         self.member = reg.members.get(uid) if reg else None
+
+
+MCP_TOKEN_ENV = "OIBOT_MCP_TOKEN"
+
+
+def bearer_ok(request, token: str | None) -> bool:
+    """`Authorization: Bearer <OIBOT_MCP_TOKEN>` — the MCP server's identity (§5.24). No token configured = bearer auth
+    off; the compare is constant-time so a probe learns nothing from timing."""
+    if not token:
+        return False
+    auth = request.headers.get("authorization") or ""
+    scheme, _, presented = auth.partition(" ")
+    return scheme.lower() == "bearer" and bool(presented.strip()) and secrets.compare_digest(presented.strip(), token)
+
+
+def mcp_viewer(request, bot, token: str | None) -> Viewer | None:
+    """The bearer identity: the guild owner (every write is attributed to them, name 'mcp', via='mcp')."""
+    if not bearer_ok(request, token):
+        return None
+    reg = next(iter(bot.registries.by_discord.values()), None)  # single-guild deployment
+    if reg is None or not reg.config.owner_discord_id:
+        return None
+    return Viewer(int(reg.config.owner_discord_id), "mcp", reg, officer=True, owner=True, via="mcp")
 
 
 def create_app(bot) -> FastAPI:
@@ -109,6 +132,8 @@ def create_app(bot) -> FastAPI:
     async def viewer(request: Request) -> Viewer | None:
         """None = not logged in. Raises 403 for a Discord user who is not in the guild's server:
         the server's membership and roles are the whitelist — there is no separate user list."""
+        if request.headers.get("authorization"):  # the MCP server: bearer token → the owner; a wrong token is nobody
+            return mcp_viewer(request, bot, os.environ.get(MCP_TOKEN_ENV) or None)
         s = session(request)
         if not s and dev_user and request.client and request.client.host in ("127.0.0.1", "::1"):
             s = {"uid": int(dev_user), "name": "dev"}

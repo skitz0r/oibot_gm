@@ -90,7 +90,7 @@ class ConfigConfirmView(discord.ui.View):
         done, refused = [], []
         for op in self.req.ops:
             try:
-                done.append(await configops.apply_async(self.reg, op, interaction.user.display_name, owner, self.ps, bot=interaction.client))
+                done.append(await configops.apply_async(self.reg, op, interaction.user.display_name, owner, self.ps, bot=interaction.client, by_id=interaction.user.id))
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001
                 refused.append(f"{configops.describe(self.reg, op)} — {e}")
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
@@ -133,8 +133,11 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         await send(req.reply[:1900] or "Nothing to change.", ephemeral=True)
         return
     e = discord.Embed(title="Proposed changes", colour=TEAL, description="\n".join(f"• {configops.describe(reg, op)}" + (" _(owner)_" if op.op in configops.OWNER_OPS and not owner else "") for op in req.ops)[:4000])
+    acts = any(op.op in configops.RUN_OPS or op.op == "test" for op in req.ops)
     if any(op.op in configops.OWNER_OPS for op in req.ops) and not owner:
-        e.set_footer(text="Items marked (owner) will be refused for you.")
+        e.set_footer(text="Items marked (owner) will be refused for you." + (" Run actions happen at once on Apply (DMs, cards, sheet)." if acts else ""))
+    elif acts:
+        e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
     await send(req.reply[:500] if req.reply else None, embed=e, view=ConfigConfirmView(reg, req, ps, ops, owner), ephemeral=True)
 
 
