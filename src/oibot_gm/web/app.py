@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import os
 import re
 import secrets
@@ -31,6 +32,25 @@ COOKIE = "oibot_session"
 NONCE_COOKIE = "oibot_oauth"  # short-lived: binds the OAuth round trip to the browser that started it
 STATE_TTL_S = 600  # a login must complete within 10 minutes of the redirect
 SESSION_MAX_AGE_S = 30 * 86400
+CONFIRM_TTL_S = 300  # the "continue as <name>" page (login finished in another browser than it started in)
+MOBILE_LOGIN_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>oibot_GM · sign in</title>
+<body style="margin:0;background:#171a1c;color:#e6e2d8;font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh">
+<div style="max-width:22rem;padding:24px;text-align:center">
+<p style="font-size:20px;font-weight:700;margin:0 0 8px">Sign in with Discord</p>
+<p style="color:#a3a89f;margin:0 0 20px">If the Discord app is installed it opens and asks you to authorize; otherwise you sign in on Discord's page.</p>
+<a href="{url}" style="display:inline-block;font-weight:600;padding:10px 22px;border-radius:8px;background:#5865f2;color:#fff;text-decoration:none">Continue with Discord</a>
+</div></body>"""
+CONFIRM_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>oibot_GM · sign in</title>
+<body style="margin:0;background:#171a1c;color:#e6e2d8;font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh">
+<form method="post" action="/auth/confirm" style="max-width:22rem;padding:24px;text-align:center">
+<p style="font-size:20px;font-weight:700;margin:0 0 8px">Continue as {name}?</p>
+<p style="color:#a3a89f;margin:0 0 20px">Discord finished signing you in from a different app or browser than the one you started in, so please confirm this is you.</p>
+<input type="hidden" name="ticket" value="{ticket}">
+<button style="font:inherit;font-weight:600;padding:10px 22px;border:0;border-radius:8px;background:#38b2a0;color:#0f1416;cursor:pointer">Continue</button>
+<p style="margin:16px 0 0"><a href="/auth/logout" style="color:#a3a89f">Not you? Cancel</a></p>
+</form></body>"""
 
 
 def web_config() -> tuple[str | None, str]:
@@ -183,7 +203,14 @@ def create_app(bot) -> FastAPI:
         nonce = secrets.token_urlsafe(24)
         state = signer.dumps({"next": safe_next(next), "t": time.time(), "n": hashlib.sha256(nonce.encode()).hexdigest()})
         q = urlencode({"client_id": client_id, "redirect_uri": f"{public_url}/auth/callback", "response_type": "code", "scope": "identify", "state": state, "prompt": "none"})
-        resp = RedirectResponse(f"{DISCORD_OAUTH}?{q}")
+        # Phones hand a discord.com link to the Discord app only when it is TAPPED (universal / app links ignore
+        # redirects), so on mobile show a button instead of redirecting: one tap, and the app's "Authorize" sheet
+        # opens with the account already signed in. Desktop keeps the straight redirect.
+        ua = request.headers.get("user-agent", "")
+        if re.search(r"iPhone|iPad|iPod|Android|Mobile", ua):
+            resp = HTMLResponse(MOBILE_LOGIN_PAGE.format(url=html.escape(f"{DISCORD_OAUTH}?{q}", quote=True)))
+        else:
+            resp = RedirectResponse(f"{DISCORD_OAUTH}?{q}")
         resp.set_cookie(NONCE_COOKIE, nonce, max_age=STATE_TTL_S, httponly=True, secure=public_url.startswith("https"), samesite="lax", path="/auth")
         return resp
 
@@ -200,8 +227,7 @@ def create_app(bot) -> FastAPI:
         if not (0 <= time.time() - issued <= STATE_TTL_S):
             raise HTTPException(400, "login took too long; start again")
         nonce = request.cookies.get(NONCE_COOKIE) or ""
-        if not nonce or not secrets.compare_digest(hashlib.sha256(nonce.encode()).hexdigest(), str(st.get("n") or "")):
-            raise HTTPException(400, "login didn't start in this browser; start again")
+        same_browser = bool(nonce) and secrets.compare_digest(hashlib.sha256(nonce.encode()).hexdigest(), str(st.get("n") or ""))
         if not code:
             raise HTTPException(400, "Discord refused the login")
         async with httpx.AsyncClient(timeout=15) as hc:
@@ -210,9 +236,32 @@ def create_app(bot) -> FastAPI:
                 raise HTTPException(400, "Discord refused the login")
             me = await hc.get(f"{DISCORD_API}/users/@me", headers={"Authorization": f"Bearer {tok.json()['access_token']}"})
         u = me.json()
+        name = u.get("global_name") or u["username"]
+        if not same_browser:
+            # Phones: the login often starts in an in-app browser and Discord finishes it in the Discord app or the
+            # system browser — a different cookie jar, so the nonce isn't here. The nonce exists to stop someone being
+            # signed into an account silently; an explicit "continue as <name>" does the same job, so ask instead of failing.
+            ticket = signer.dumps({"uid": u["id"], "name": name, "next": safe_next(st.get("next")), "t": time.time(), "k": "confirm"})
+            return HTMLResponse(CONFIRM_PAGE.format(name=html.escape(name), ticket=html.escape(ticket, quote=True)))
         resp = RedirectResponse(safe_next(st.get("next")), status_code=303)
         resp.set_cookie(COOKIE, signer.dumps({"uid": u["id"], "name": u.get("global_name") or u["username"], "iat": time.time()}), httponly=True, secure=public_url.startswith("https"), samesite="lax", max_age=SESSION_MAX_AGE_S)
         resp.delete_cookie(NONCE_COOKIE, path="/auth")
+        return resp
+
+    @app.post("/auth/confirm")
+    async def confirm(request: Request):
+        """Second half of a login that finished in a different browser than it started in: the person pressed Continue."""
+        from urllib.parse import parse_qs
+
+        form = parse_qs((await request.body()).decode("utf-8", "replace"))
+        try:
+            t = signer.loads((form.get("ticket") or [""])[0])
+        except BadSignature:
+            raise HTTPException(400, "bad ticket; start again")
+        if t.get("k") != "confirm" or not (0 <= time.time() - float(t.get("t") or 0) <= CONFIRM_TTL_S):
+            raise HTTPException(400, "that took too long; start again")
+        resp = RedirectResponse(safe_next(t.get("next")), status_code=303)
+        resp.set_cookie(COOKIE, signer.dumps({"uid": t["uid"], "name": t["name"], "iat": time.time()}), httponly=True, secure=public_url.startswith("https"), samesite="lax", max_age=SESSION_MAX_AGE_S)
         return resp
 
     @app.get("/auth/logout")

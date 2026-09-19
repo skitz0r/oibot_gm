@@ -26,3 +26,39 @@ def test_session_valid_age_and_epoch(monkeypatch):
     assert not web.session_valid({"uid": "1", "iat": now}, now)
     monkeypatch.setenv("OIBOT_WEB_SESSION_EPOCH", "not a date")
     assert web.session_epoch() == 0.0
+
+
+
+def test_login_finished_in_another_browser_asks_to_continue(reg, rs, monkeypatch):
+    """Phones: the OAuth callback can land in a browser without the nonce cookie. The callback then offers
+    'Continue as <name>' and POST /auth/confirm sets the session; an old, forged or wrong-kind ticket is refused."""
+    import time
+
+    from fastapi.testclient import TestClient
+    from itsdangerous import URLSafeSerializer
+    from test_mcp import FakeBot
+
+    monkeypatch.setenv("OIBOT_WEB_SECRET", "s" * 40)
+    sign = URLSafeSerializer("s" * 40, salt="session")
+    c = TestClient(web.create_app(FakeBot(reg, rs)), follow_redirects=False)
+    good = sign.dumps({"uid": "42", "name": "Tester", "next": "/app/rosters", "t": time.time(), "k": "confirm"})
+    r = c.post("/auth/confirm", data={"ticket": good})
+    assert r.status_code == 303 and r.headers["location"] == "/app/rosters" and web.COOKIE in r.headers.get("set-cookie", "")
+    assert c.post("/auth/confirm", data={"ticket": "forged"}).status_code == 400
+    old = sign.dumps({"uid": "42", "name": "Tester", "next": "/app", "t": time.time() - web.CONFIRM_TTL_S - 5, "k": "confirm"})
+    assert c.post("/auth/confirm", data={"ticket": old}).status_code == 400
+    session_like = sign.dumps({"uid": "42", "name": "Tester", "iat": time.time()})  # a session cookie is not a ticket
+    assert c.post("/auth/confirm", data={"ticket": session_like}).status_code == 400
+    assert "Continue as" in web.CONFIRM_PAGE and "{name}" in web.CONFIRM_PAGE
+
+
+def test_mobile_login_is_a_tappable_link_desktop_is_a_redirect(reg, rs, monkeypatch):
+    from fastapi.testclient import TestClient
+    from test_mcp import FakeBot
+
+    monkeypatch.setenv("DISCORD_CLIENT_ID", "123"); monkeypatch.setenv("DISCORD_CLIENT_SECRET", "x")
+    c = TestClient(web.create_app(FakeBot(reg, rs)), follow_redirects=False)
+    d = c.get("/auth/login", headers={"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)"})
+    assert d.status_code in (302, 307) and "discord.com" in d.headers["location"] and web.NONCE_COOKIE in d.headers.get("set-cookie", "")
+    m = c.get("/auth/login", headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148"})
+    assert m.status_code == 200 and "Continue with Discord" in m.text and "discord.com" in m.text and web.NONCE_COOKIE in m.headers.get("set-cookie", "")
