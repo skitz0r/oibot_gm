@@ -275,9 +275,11 @@ def run_actions_row(ev: rc.RaidEvent, locked: bool):
     url = board_url(ev)
     if url:
         items.append(ui.Button(label="Open the board", style=discord.ButtonStyle.link, url=url))
-    if locked:  # the fill engine only runs on a locked roster
-        items.append(RunButton(ev.key, "fill"))
-    items.append(RunButton(ev.key, "cancel" if locked else "lock"))
+    # one order in every state — Open · Lock · Fill · Cancel — so nothing moves when the run locks; what does not
+    # apply is disabled in place (fill only runs on a locked roster)
+    items.append(RunButton(ev.key, "lock", disabled=locked, label="Locked" if locked else None))
+    items.append(RunButton(ev.key, "fill", disabled=not locked))
+    items.append(RunButton(ev.key, "cancel"))
     return ui.ActionRow(*items)
 
 
@@ -375,7 +377,7 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
 
 
 def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discord.ui.LayoutView:
-    """Fill DM: what opened, the seat offered (character + spec), the group they'd join, Yes / Can't."""
+    """Fill DM: what opened, the seat offered (character + spec), the group they'd join, Confirm / Can't make it."""
     ui = discord.ui
     rd = reg.raid_def(ev.instance)
     what = {"sub": "you're on the bench", "pool": "you haven't answered the sheet", "other_roster": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec", "alt": "you could bring your alt"}[ask.kind]
@@ -396,7 +398,7 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
                 parts += [ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"You'd join Group {gi + 1}" + (f" of Roster {i + 1}" if len(ev.all_rosters) > 1 else ""), show_missing=False))]
                 break
     deadline = f" No answer by <t:{int(datetime.fromisoformat(ask.expires_at).timestamp())}:f> counts as no." if ask.expires_at else ""
-    parts += [ui.Separator(), ui.TextDisplay(("-# Yes makes the swap at once." if ask.swap else "-# Yes puts you straight in the seat.") + " A no asks the next person." + deadline), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
+    parts += [ui.Separator(), ui.TextDisplay(("-# Confirm makes the swap at once." if ask.swap else "-# Confirm puts you straight in the seat.") + " A no asks the next person." + deadline), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0xE0A448))
     return view

@@ -1,3 +1,4 @@
+import { useRefresh } from "../hooks/usePoll";
 import { useRef, Fragment, useEffect, useState } from "react";
 import { ActionIcon, Badge, Button, Card, Group, Modal, Radio, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
@@ -24,6 +25,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const draftsRef = useRef<unknown>(null);
   const load = () => api.get<MembersData>("/api/members").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  useRefresh(load);
   useLive(() => { if (draftsRef.current === null) load(); }, ["member", "run:"]);  // never under an edit in progress
 
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));

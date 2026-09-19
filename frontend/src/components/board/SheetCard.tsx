@@ -73,11 +73,6 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
             </Text>
           )}
         </Box>
-        <Group gap="xs">
-          {!locked && <Button size="xs" leftSection={<IconLock size={13} />} loading={busy === `lock${e.key}`} onClick={lockNow}>Lock now</Button>}
-          {locked && <Button size="xs" variant="default" leftSection={<IconUsersPlus size={13} />} onClick={() => setFillOpen(true)}>Fill seats</Button>}
-          <Button size="xs" variant="subtle" color="red" loading={busy === `cancel${e.key}`} onClick={cancelRun}>Cancel run</Button>
-        </Group>
       </Group>
 
       <Group gap="xs" mt="sm" align="baseline">
@@ -106,6 +101,17 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
       </Group>
 
       {e.board && <BoardView e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} />}
+      {/* Run actions live here in every state, under the board they act on: destructive far left, the step that
+          commits the work last on the right. What does not apply yet is disabled with the reason, never removed. */}
+      <Group justify="space-between" wrap="wrap" gap="sm" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
+        <Button size="xs" variant="subtle" color="red" loading={busy === `cancel${e.key}`} onClick={cancelRun}>Cancel run</Button>
+        <Group gap="xs">
+          <Tooltip label="after lock: asks the bench to fill freed seats" disabled={locked}>
+            <Button size="xs" variant="default" leftSection={<IconUsersPlus size={13} />} disabled={!locked} onClick={() => setFillOpen(true)}>Fill seats</Button>
+          </Tooltip>
+          <Button size="xs" leftSection={<IconLock size={13} />} disabled={locked} loading={busy === `lock${e.key}`} onClick={lockNow}>{locked ? `Locked${e.timeline?.locked_at ? ` ${e.timeline.locked_at}` : ""}` : "Lock now"}</Button>
+        </Group>
+      </Group>
       <Detail e={e} />
       {locked && <FillModal e={e} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />}
       {confirmDialog}

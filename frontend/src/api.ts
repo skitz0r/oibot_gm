@@ -58,7 +58,7 @@ export interface Confirmation { uid: string | null; display_name: string; charac
 export interface Sheet {
   key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; live: boolean; fill_state: string;
   counts: Record<string, number>; rostered: number; n_rosters: number;
-  timeline?: { nudge: string; lock: string; confirm: string };
+  timeline?: { nudge: string; lock: string; confirm: string; locked_at?: string | null };
   signups?: Signup[]; not_answered?: Seat[]; absences?: { display_name: string; start: string; end: string; reason: string | null; signed: boolean }[]; double_booked?: string[];
   needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean; rev?: string;
   split?: { strategy: string; policy: string; runs: number };

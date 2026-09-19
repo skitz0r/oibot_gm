@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ActionIcon, Badge, Box, Button, Card, Group, Select, Stack, Switch, Table, Text, TextInput, Title, Tooltip, Modal } from "@mantine/core";
 import css from "./me.module.css";
 import { DateInput } from "@mantine/dates";
-import { IconCrown, IconPencil, IconPlus, IconRefresh, IconTrash } from "@tabler/icons-react";
+import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { api, type Character, type Me, type Meta } from "../api";
 import { GameIcon } from "../components/Icons";
 import { CharacterCell, SpecCell } from "../components/Cells";
@@ -20,13 +20,11 @@ export function MePage({ meta }: { meta: Meta }) {
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [absOpen, setAbsOpen] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<Me>("/api/me").then(setMe).catch(fail);
   useEffect(() => { load(); }, []);
   usePoll(() => { if (!editing) load(); });
   useLive(() => { if (!editing) load(); }, ["run:", "member"]);
-  async function refresh() { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }
 
   const specsOf = (cls: string) => Object.entries(meta.classes[cls] || {}).map(([s, role]) => ({ value: s, label: `${s} · ${role}` }));
 
@@ -68,7 +66,6 @@ export function MePage({ meta }: { meta: Meta }) {
         <Box><Title order={1} size="h2">{me.display_name}</Title><Text c="dimmed" size="sm" mt={4}>{summary}</Text></Box>
         <Group gap="xs">
           {!editing && <Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit characters</Button>}
-          <Tooltip label="Refresh"><ActionIcon variant="default" size="lg" aria-label="refresh" loading={refreshing} onClick={refresh}><IconRefresh size={16} /></ActionIcon></Tooltip>
         </Group>
       </Group>
 

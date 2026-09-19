@@ -1,3 +1,4 @@
+import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useState } from "react";
 import { Badge, Box, Button, Card, Group, NumberInput, Select, Stack, Switch, TagsInput, Text, TextInput } from "@mantine/core";
 import { IconPencil } from "@tabler/icons-react";
@@ -10,6 +11,7 @@ export function RaidsPage() {
   const [data, setData] = useState<Raids | null>(null);
   const load = () => api.get<Raids>("/api/raids").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  useRefresh(load);
   if (!data) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">

@@ -155,6 +155,15 @@ If you can't make a run you joined: press *No thanks* on an open sheet, *Can't m
 `/raid out [note]` (the note goes to the run's updates thread for officers, not to the public sheet). After
 lock this releases your seat immediately and the bench is asked.
 
+**Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
+run* far left, then *Fill seats* and *Lock now* on the right; what does not apply yet is greyed with the reason
+(Fill before lock, Lock after it). The board's own tools sit above the groups: *Auto-fill empty seats*, *Propose
+roster/splits*, and *Clear* set apart. Officer cards in Discord use the same fixed order — Open the board · Lock now ·
+Fill seats · Cancel run — and cancelling asks *Keep the run* / *Cancel the run*. Tables (Me, Members, Raids, Auras)
+share one edit mode: an Edit button in the header, then a footer with any reset far left and *Cancel* / *Save changes*
+on the right. Config saves each field as you change it and marks it *✓ saved*. Pages update on their own; *Refresh* in
+the left rail is the manual fallback. Every yes/no DM (confirmations and fill asks) reads **Confirm / Can't make it**.
+
 ## 5. How groups are built
 
 The group optimiser (a constraint solver, no AI) maximises party-buff synergy: totems, auras and shouts

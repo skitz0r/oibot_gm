@@ -1,5 +1,6 @@
+import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useState } from "react";
-import { Badge, Box, Button, Card, Code, Group, MultiSelect, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import { api, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 
@@ -24,14 +25,18 @@ const CHANNELS: { kind: string; label: string; hint: string }[] = [
 export function ConfigPage() {
   const [data, setData] = useState<ConfigData | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const load = () => api.get<ConfigData>("/api/config").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  useRefresh(load);
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const ro = !data.owner;
   async function set(field: string, value: unknown) {
     setBusy(field);
-    try { const r = await api.post<{ message: string }>("/api/admin/config", { field, value }); ok(r.message); await load(); } catch (e) { fail(e); } finally { setBusy(null); }
+    try { const r = await api.post<{ message: string }>("/api/admin/config", { field, value }); ok(r.message); await load(); setSaved(field); setTimeout(() => setSaved((f) => (f === field ? null : f)), 3000); } catch (e) { fail(e); } finally { setBusy(null); }
   }
+  /** Fields here save as you change them; the mark beside the label says which one was just written. */
+  const lab = (field: string, text: string) => <>{text}{saved === field && <Text span size="xs" c="teal" ml={8}>✓ saved</Text>}</>;
   const channelOptions = [{ value: "", label: "— not set —" }, ...data.guild_channels.map((c) => ({ value: c.id, label: `#${c.name}${c.category ? ` · ${c.category}` : ""}` }))];
   // values are role ids, labels the current names; a configured role the server no longer has stays selectable so it can be removed
   const known = new Set(data.guild_roles.map((r) => r.id));
@@ -45,7 +50,7 @@ export function ConfigPage() {
         <Stack gap="sm" p="md">
           {CHANNELS.map(({ kind, label, hint }) => (
             <Group key={kind} gap="md" wrap="wrap" align="flex-end">
-              <Select label={label} description={hint} data={channelOptions} value={data.channels[kind]?.id || ""} onChange={(v) => v !== null && v !== (data.channels[kind]?.id || "") && set(`channel:${kind}`, v || null)} disabled={ro || busy === `channel:${kind}`} searchable w={360} />
+              <Select label={lab(`channel:${kind}`, label)} description={hint} data={channelOptions} value={data.channels[kind]?.id || ""} onChange={(v) => v !== null && v !== (data.channels[kind]?.id || "") && set(`channel:${kind}`, v || null)} disabled={ro || busy === `channel:${kind}`} searchable w={360} />
               {data.channels[kind]?.id && !data.channels[kind]?.name && <Badge color="red" variant="light">channel not found</Badge>}
             </Group>
           ))}
@@ -55,13 +60,13 @@ export function ConfigPage() {
       <Card>
         <CardHeader title="Settings" />
         <Stack gap="sm" p="md">
-          <MultiSelect label="Officer roles" description="Discord roles that count as officer (Manage Server always does); picked by role, so renaming a role keeps its officers" data={roleOptions} value={data.settings.officer_roles.map((r) => r.id)} onChange={(v) => set("officer_roles", v)} disabled={ro || busy === "officer_roles"} searchable w={420} />
+          <MultiSelect label={lab("officer_roles", "Officer roles")} description="Discord roles that count as officer (Manage Server always does); picked by role, so renaming a role keeps its officers" data={roleOptions} value={data.settings.officer_roles.map((r) => r.id)} onChange={(v) => set("officer_roles", v)} disabled={ro || busy === "officer_roles"} searchable w={420} />
           {data.settings.officer_roles_pending.length > 0 && <Text size="xs" c="orange">Not found in the server (from an older config, by name): {data.settings.officer_roles_pending.join(", ")} — pick the role above to re-add it.</Text>}
           <Group gap="md" wrap="wrap" align="flex-end">
-            <TextInput label="Timezone" description="IANA name; every schedule and clock on the site" defaultValue={data.settings.timezone} disabled={ro} w={260} onBlur={(e) => e.currentTarget.value !== data.settings.timezone && set("timezone", e.currentTarget.value)} />
-            <Select label="Who may ask the bot questions" description="/ask, DMs, @mentions; others get the static guide" data={["officers", "confirmed", "registered", "everyone"]} value={data.settings.ask_audience} onChange={(v) => v && v !== data.settings.ask_audience && set("ask_audience", v)} disabled={ro} w={260} />
+            <TextInput label={lab("timezone", "Timezone")} description="IANA name; every schedule and clock on the site" defaultValue={data.settings.timezone} disabled={ro} w={260} onBlur={(e) => e.currentTarget.value !== data.settings.timezone && set("timezone", e.currentTarget.value)} />
+            <Select label={lab("ask_audience", "Who may ask the bot questions")} description="/ask, DMs, @mentions; others get the static guide" data={["officers", "confirmed", "registered", "everyone"]} value={data.settings.ask_audience} onChange={(v) => v && v !== data.settings.ask_audience && set("ask_audience", v)} disabled={ro} w={260} />
           </Group>
-          <Textarea label="About the guild" description="one paragraph shown in the static guide to unregistered visitors" defaultValue={data.settings.about} disabled={ro} autosize minRows={2} onBlur={(e) => e.currentTarget.value !== data.settings.about && set("about", e.currentTarget.value)} />
+          <Textarea label={lab("about", "About the guild")} description="one paragraph shown in the static guide to unregistered visitors" defaultValue={data.settings.about} disabled={ro} autosize minRows={2} onBlur={(e) => e.currentTarget.value !== data.settings.about && set("about", e.currentTarget.value)} />
           <Text size="xs" c="dimmed">Owner: {data.settings.owner_id ? `Discord id ${data.settings.owner_id}` : "not claimed — /gm config owner"} · transfer with /gm config owner</Text>
         </Stack>
       </Card>
@@ -85,7 +90,6 @@ export function ConfigPage() {
           {d.summary && <Text size="xs" c="dimmed" px="md" pb="md">Compiled reading: {d.summary}</Text>}
         </Card>
       ))}
-      {!ro && <Button variant="subtle" size="xs" style={{ alignSelf: "flex-start" }} onClick={load}>Reload</Button>}
     </Stack>
   );
 }

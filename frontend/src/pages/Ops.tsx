@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActionIcon, Badge, Box, Card, SimpleGrid, Stack, Table, Text, Tooltip } from "@mantine/core";
-import { IconRefresh } from "@tabler/icons-react";
+import { Badge, Box, Card, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { api, type Ops as OpsData } from "../api";
 import { CardHeader, Eyebrow, PageTitle, fail } from "../components/Page";
 import { usePoll } from "../hooks/usePoll";
@@ -12,18 +11,15 @@ const uptime = (secs: number) => (secs >= 3600 ? `${Math.floor(secs / 3600)}h ${
 
 export function OpsPage() {
   const [data, setData] = useState<OpsData | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const load = () => api.get<OpsData>("/api/ops").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   usePoll(load);
   useLive(load, ["ops"]);
-  async function refresh() { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const up = uptime(data.up);
   return (
     <Stack gap="lg">
-      <PageTitle title="Ops" intro="What the bot has been doing, and where its data lives. The page refreshes itself while open."
-        right={<Tooltip label="Refresh"><ActionIcon variant="default" size="lg" aria-label="refresh" loading={refreshing} onClick={refresh}><IconRefresh size={16} /></ActionIcon></Tooltip>} />
+      <PageTitle title="Ops" intro="What the bot has been doing, and where its data lives. The page refreshes itself while open." />
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
         <Stat label="data repo" value={data.head} sub={`push ${data.push ? "on" : "off"}`} />
         <Stat label="model" value={data.llm} />

@@ -1,6 +1,6 @@
 """Persistent buttons for the cycle (DynamicItems with a `custom_id` template, so they survive restarts):
 SignupButton (Join / Bench / No thanks, Can't make it once locked, with the character picker for members with several
-characters), FillButton (Yes / Can't on a fill DM), PlaceButton (Confirm / Can't make it on a confirmation DM),
+characters), FillButton (Confirm / Can't make it on a fill DM, same pair as the confirmation DM), PlaceButton (Confirm / Can't make it on a confirmation DM),
 RunButton (officer Fill seats / Lock now / Cancel run on the health and lock cards), and the plain-View factories
 the DMs use (`place_view`, `fill_view`, `sheet_view`). Callbacks call the `RaidMixin` methods on `interaction.client`.
 
@@ -20,9 +20,11 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
     """Officer buttons on the health and lock cards: Fill seats (with a preview + confirm), Lock now, Cancel run."""
     LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger)}
 
-    def __init__(self, key: str, action: str):
-        label, style = self.LABELS[action]
-        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"runact:{key}:{action}"))
+    def __init__(self, key: str, action: str, disabled: bool = False, label: str | None = None):
+        """`disabled`/`label` are render-time only (the card is re-rendered on every state change): a button that does
+        not apply yet stays in its place, greyed, instead of disappearing."""
+        text, style = self.LABELS[action]
+        super().__init__(discord.ui.Button(label=label or text, style=style, custom_id=f"runact:{key}:{action}", disabled=disabled))
         self.key, self.action = key, action
 
     @classmethod
@@ -58,7 +60,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             if batch:
                 lines.append("**Will DM now:**\n" + "\n".join("• " + ask_line(reg, bot.ico, a) + (" — tied to " + next((b.display_name for b in batch if b.discord_id == a.pair), "?") if a.pair else "") for a in batch))
                 hrs = reg.raid_def(ev.instance).get("fill_ask_hours")
-                lines.append(f"-# Each gets Yes / Can't this time. A yes takes the seat at once; a no asks the next person; no answer within {hrs:g} h counts as no. Tied asks go out together and a no from either withdraws the other. Never more than 3 questions out at a time. Answers post in this run's thread.")
+                lines.append(f"-# Each gets Confirm / Can't make it. A yes takes the seat at once; a no asks the next person; no answer within {hrs:g} h counts as no. Tied asks go out together and a no from either withdraws the other. Never more than 3 questions out at a time. Answers post in this run's thread.")
             else:
                 lines.append("**Nobody to ask right now** — either the 3 outstanding questions already cover it, or everyone eligible has been asked.")
             view = discord.ui.View(timeout=120)
@@ -94,7 +96,13 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             return
         if self.action == "cancel":
             view = discord.ui.View(timeout=60)
+            keep = discord.ui.Button(label="Keep the run", style=discord.ButtonStyle.secondary)
             yes = discord.ui.Button(label="Cancel the run", style=discord.ButtonStyle.danger)
+
+            async def kept(i: discord.Interaction):
+                await i.response.edit_message(content="Nothing changed — the run stays.", view=None)
+
+            keep.callback = kept
 
             async def do(i: discord.Interaction):
                 await i.response.edit_message(content="Cancelling…", view=None)
@@ -102,6 +110,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
                 await i.edit_original_response(content=line)
 
             yes.callback = do
+            view.add_item(keep)  # the safe choice first, the destructive one last and red
             view.add_item(yes)
             await interaction.response.send_message(f"Cancel {run_label(reg, ev)}? Rostered members are not told automatically.", view=view, ephemeral=True)
 
@@ -111,7 +120,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
 class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?P<key>[A-Za-z0-9_\-]+):(?P<status>in|tentative|out|sub|cant)"):
     """The sheet's member buttons: Join / Bench / No thanks while open; a single Can't make it once locked, which
     releases a rostered member's seat (anyone else: nothing to do)."""
-    STYLES = {"in": discord.ButtonStyle.success, "sub": discord.ButtonStyle.primary, "out": discord.ButtonStyle.secondary, "cant": discord.ButtonStyle.danger}
+    STYLES = {"in": discord.ButtonStyle.success, "sub": discord.ButtonStyle.primary, "out": discord.ButtonStyle.secondary, "cant": discord.ButtonStyle.secondary}  # grey like the same choice in a DM; red is for destructive officer actions
 
     def __init__(self, key: str, status: str):
         status = "in" if status == "tentative" else status
@@ -175,7 +184,7 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill:(?P<
     """Yes/No on a fill DM. Survives restarts; only the person asked can answer."""
 
     def __init__(self, key: str, uid: int, answer: str):
-        super().__init__(discord.ui.Button(label="Yes, count me in" if answer == "yes" else "Can't this time", style=discord.ButtonStyle.success if answer == "yes" else discord.ButtonStyle.secondary, custom_id=f"fill:{key}:{uid}:{answer}"))
+        super().__init__(discord.ui.Button(label="Confirm" if answer == "yes" else "Can't make it", style=discord.ButtonStyle.success if answer == "yes" else discord.ButtonStyle.secondary, custom_id=f"fill:{key}:{uid}:{answer}"))
         self.key, self.uid, self.answer = key, uid, answer
 
     @classmethod

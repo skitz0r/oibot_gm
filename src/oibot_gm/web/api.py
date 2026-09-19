@@ -418,7 +418,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                     for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
         busy = rc.conflicts(rs, ev) if live else {}
         return {**base,
-                "timeline": {"nudge": t12(reg, soft), "lock": t12(reg, hard), "confirm": clock12(reg, confirm) if confirm.date() == ev.start.astimezone(reg.tz).date() else t12(reg, confirm)},
+                "timeline": {"nudge": t12(reg, soft), "lock": t12(reg, hard), "confirm": clock12(reg, confirm) if confirm.date() == ev.start.astimezone(reg.tz).date() else t12(reg, confirm), "locked_at": clock12(reg, ev.locked_at) if ev.locked_at else None},
                 "signups": [signup_json(s, ev.pins) for s in sorted(ev.signups.values(), key=lambda s: (rc.STATUSES.index(s.status) if s.status in rc.STATUSES else 9, s.updated_at))],
                 "not_answered": [{"uid": str(m.discord_id), "display_name": m.display_name, "character": m.main.label, "cls": m.main.cls, "spec": m.main.spec, "role": reg.profile.spec(m.main.cls, m.main.spec).role}
                                  for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups] if live else [],

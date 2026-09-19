@@ -134,7 +134,7 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if officer:
             e.add_field(name="Officers", value="\n".join(tiers["officer"])[:1024], inline=False)
             e.add_field(name="Owner", value="\n".join(tiers["owner"])[:1024], inline=False)
-        e.set_footer(text="Buttons: #register card (Register / Add an alt / My status) · sheets (Join / Bench / No thanks; locked: Can't make it) · DMs (Confirm / Can't make it, fill: Yes / Can't)")
+        e.set_footer(text="Buttons: #register card (Register / Add an alt / My status) · sheets (Join / Bench / No thanks; locked: Can't make it) · DMs (Confirm / Can't make it, fill: Confirm / Can't make it)")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @tree.command(name="ask", description="Ask the bot how something works or what to do next (it answers from its own manual and your record)")

@@ -1,6 +1,7 @@
+import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useMemo, useState } from "react";
 import { ActionIcon, Badge, Box, Button, Card, Group, NumberInput, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
-import { IconCheck, IconPencil, IconX } from "@tabler/icons-react";
+import { IconPencil, IconRestore } from "@tabler/icons-react";
 import { api } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
@@ -18,6 +19,21 @@ export function AurasPage() {
   const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<Auras>("/api/auras").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  useRefresh(load);
+  type BuffDraft = { scope: string; family: string; strength: number | string; status: string; note: string };
+  const [drafts, setDrafts] = useState<Record<string, BuffDraft> | null>(null);  // the Buffs table's edit mode: one Save for the whole table
+  const [saving, setSaving] = useState(false);
+  const draftOf = (b: Buff): BuffDraft => ({ scope: b.scope, family: b.family, strength: b.strength, status: b.status, note: b.note });
+  async function saveBuffs() {
+    if (!data || !drafts) return;
+    const changed = data.buffs.filter((b) => JSON.stringify(draftOf(b)) !== JSON.stringify({ ...drafts[b.id], strength: Number(drafts[b.id].strength) }));
+    setSaving(true);
+    try {
+      for (const b of changed) await api.post<{ message: string }>("/api/admin/aura", { id: b.id, ...drafts[b.id] });
+      ok(changed.length ? `saved ${changed.length} buff${changed.length === 1 ? "" : "s"}` : "nothing changed");
+      setDrafts(null); load();
+    } catch (e) { fail(e); load(); } finally { setSaving(false); }
+  }
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const famName = (id: string) => data.families.find((f) => f.id === id)?.name || id;
   const known = new Set(data.buffs.filter((b) => (b.kind === "aura")).map((b) => b.id));
@@ -37,15 +53,15 @@ export function AurasPage() {
       <PageTitle title="Auras" intro="What we know about Forever's buffs. A stacking family says which buffs don't stack (the strongest present one counts) and who benefits from it; each buff says who casts it, whether it reaches the party or the whole raid, how strong it is, and how sure we are. Amber marks a guild override of the game defaults. The solver, the cards and the board all read this." />
 
       <Card>
-        <CardHeader title="Buffs" hint={data.owner ? "click a row to edit" : "the owner edits these"} />
+        <CardHeader title="Buffs" hint={data.owner ? undefined : "the owner edits these"} action={data.owner && !drafts ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} onClick={() => setDrafts(Object.fromEntries(data.buffs.map((b) => [b.id, draftOf(b)])))}>Edit auras</Button> : undefined} />
         <Table.ScrollContainer minWidth={820}>
           <Table>
-            <Table.Thead><Table.Tr><Table.Th>Buff</Table.Th><Table.Th>Cast by</Table.Th><Table.Th>Scope</Table.Th><Table.Th>Family</Table.Th><Table.Th w={90}>Strength</Table.Th><Table.Th w={110}>Status</Table.Th><Table.Th>Note</Table.Th><Table.Th w={40} /></Table.Tr></Table.Thead>
+            <Table.Thead><Table.Tr><Table.Th>Buff</Table.Th><Table.Th>Cast by</Table.Th><Table.Th>Scope</Table.Th><Table.Th>Family</Table.Th><Table.Th w={90}>Strength</Table.Th><Table.Th w={drafts ? 150 : 110}>Status</Table.Th><Table.Th>Note</Table.Th><Table.Th w={40} /></Table.Tr></Table.Thead>
             <Table.Tbody>
-              {data.buffs.map((b) => editing === `b:${b.id}`
-                ? <BuffEdit key={b.id} b={b} data={data} onDone={() => { setEditing(null); load(); }} onReset={() => resetOne("buff", b.id, b.name, b.overridden, () => { setEditing(null); load(); })} />
+              {data.buffs.map((b) => drafts
+                ? <BuffEdit key={b.id} b={b} data={data} d={drafts[b.id]} setD={(d) => setDrafts({ ...drafts, [b.id]: d })} onReset={() => resetOne("buff", b.id, b.name, b.overridden, () => { setDrafts(null); load(); })} />
                 : (
-                  <Table.Tr key={b.id} style={{ cursor: data.owner ? "pointer" : undefined }} onClick={() => data.owner && setEditing(`b:${b.id}`)}>
+                  <Table.Tr key={b.id}>
                     <Table.Td><Group gap="sm" wrap="nowrap">{b.art ? <Box component="img" src={`/img/icon/${b.art}.jpg`} alt="" style={{ width: 26, height: 26, borderRadius: 5, border: "1px solid var(--mantine-color-slate-5)" }} /> : <Box style={{ width: 26, height: 26, borderRadius: 5, background: b.colour }} />}<Box><Text size="sm" fw={600}>{b.name}</Text><Text size="xs" c="dimmed">{b.id}{b.slot ? ` · slot ${b.slot.replace("shaman_", "")}` : ""}</Text></Box></Group></Table.Td>
                     <Table.Td><Group gap={4}>{b.providers.map((p) => <Text key={p} size="xs" c={CLASS_COLOURS[p.split(":")[0]]}>{p.replace(":*", "")}</Text>)}</Group></Table.Td>
                     <Table.Td><Badge variant="light" color={b.overridden.includes("scope") ? "yellow" : b.scope === "raid" ? "teal" : "gray"}>{b.scope}</Badge></Table.Td>
@@ -53,12 +69,20 @@ export function AurasPage() {
                     <Table.Td><Text size="sm" c={b.overridden.includes("strength") ? "yellow" : undefined}>×{b.strength}</Text></Table.Td>
                     <Table.Td><Badge size="xs" variant="outline" color={b.overridden.includes("status") ? "yellow" : STATUS_COLOUR[b.status]}>{b.status}</Badge></Table.Td>
                     <Table.Td><Text size="xs" c="dimmed" lineClamp={2}>{b.note}</Text></Table.Td>
-                    <Table.Td>{data.owner && <IconPencil size={14} opacity={0.5} />}</Table.Td>
+                    <Table.Td />
                   </Table.Tr>
                 ))}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
+        {drafts && (
+          <Group p="sm" px="md" justify="flex-end" gap="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)", background: "var(--mantine-color-slate-6)" }}>
+            {(overBuffs.length > 0 || overFams.length > 0) && <Button size="sm" variant="subtle" color="red" onClick={resetAll}>Reset all to game defaults</Button>}
+            <Text size="sm" c="dimmed" mr="auto">Edits apply on save · yellow = differs from the game default</Text>
+            <Button variant="default" size="sm" onClick={() => setDrafts(null)}>Cancel</Button>
+            <Button size="sm" loading={saving} onClick={saveBuffs}>Save changes</Button>
+          </Group>
+        )}
       </Card>
 
       <Card>
@@ -83,11 +107,6 @@ export function AurasPage() {
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
-        {data.owner && (overBuffs.length > 0 || overFams.length > 0) && (
-          <Group p="sm" px="md" justify="flex-end" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
-            <Button size="xs" variant="subtle" color="red" onClick={resetAll}>Reset all to game defaults</Button>
-          </Group>
-        )}
       </Card>
       <Text size="xs" c="dimmed">Also in plain text, in the ops channel or with /gm change: "fortitude and blood pact don't stack", "sanctity aura is raid-wide", "only mana users benefit from intellect", "windfury is confirmed". Or /gm config aura.</Text>
       {confirmDialog}
@@ -95,16 +114,10 @@ export function AurasPage() {
   );
 }
 
-function BuffEdit({ b, data, onDone, onReset }: { b: Buff; data: Auras; onDone: () => void; onReset: () => void }) {
-  const [d, setD] = useState({ scope: b.scope, family: b.family, strength: b.strength as number | string, status: b.status, note: b.note });
-  const [busy, setBusy] = useState(false);
+function BuffEdit({ b, data, d, setD, onReset }: { b: Buff; data: Auras; d: { scope: string; family: string; strength: number | string; status: string; note: string }; setD: (d: { scope: string; family: string; strength: number | string; status: string; note: string }) => void; onReset: () => void }) {
   const fams = data.families.map((f) => ({ value: f.id, label: `${f.name} (${f.id})` }));
-  async function save() {
-    setBusy(true);
-    try { const r = await api.post<{ message: string }>("/api/admin/aura", { id: b.id, ...d }); ok(r.message); onDone(); } catch (e) { fail(e); } finally { setBusy(false); }
-  }
   return (
-    <Table.Tr style={{ background: "var(--mantine-color-slate-6)" }}>
+    <Table.Tr>
       <Table.Td><Text size="sm" fw={600}>{b.name}</Text><Text size="xs" c="dimmed">{b.id}</Text></Table.Td>
       <Table.Td><Text size="xs" c="dimmed">{b.providers.join(", ")}</Text></Table.Td>
       <Table.Td><Select size="xs" w={100} data={data.scopes} value={d.scope} onChange={(v) => setD({ ...d, scope: v || d.scope })} /></Table.Td>
@@ -112,7 +125,7 @@ function BuffEdit({ b, data, onDone, onReset }: { b: Buff; data: Auras; onDone: 
       <Table.Td><NumberInput size="xs" min={0} step={0.5} value={d.strength} onChange={(v) => setD({ ...d, strength: v })} /></Table.Td>
       <Table.Td><Select size="xs" data={data.statuses} value={d.status} onChange={(v) => setD({ ...d, status: v || d.status })} /></Table.Td>
       <Table.Td><TextInput size="xs" value={d.note} onChange={(e) => setD({ ...d, note: e.currentTarget.value })} placeholder="source, date, what was tested" /></Table.Td>
-      <Table.Td><Group gap={2} wrap="nowrap"><ActionIcon size="sm" color="teal" variant="light" loading={busy} onClick={save}><IconCheck size={14} /></ActionIcon><ActionIcon size="sm" variant="subtle" color="gray" onClick={onDone}><IconX size={14} /></ActionIcon>{b.overridden.length > 0 && <Tooltip label="back to the game defaults for this buff"><ActionIcon size="sm" variant="subtle" color="red" onClick={onReset}>↺</ActionIcon></Tooltip>}</Group></Table.Td>
+      <Table.Td>{b.overridden.length > 0 && <Tooltip label={`${b.name} back to the game defaults`}><ActionIcon size="sm" variant="subtle" color="red" onClick={onReset}><IconRestore size={14} /></ActionIcon></Tooltip>}</Table.Td>
     </Table.Tr>
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { REFRESH_EVENT } from "./hooks/usePoll";
 import { AppShell, Box, Burger, Group, NavLink, Stack, Text, Title } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers } from "@tabler/icons-react";
+import { IconChartBar, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, type Meta } from "./api";
 import { MePage } from "./pages/Me";
@@ -52,7 +53,8 @@ export default function App() {
             {OFFICER.map(link)}
           </Stack>
         )}
-        <Group mt="auto" gap="sm" px="xs" pt="md" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
+        <NavLink mt="auto" label="Refresh" leftSection={<IconRefresh size={18} stroke={1.8} />} onClick={() => window.dispatchEvent(new Event(REFRESH_EVENT))} style={{ borderRadius: 7, color: "var(--mantine-color-dimmed)" }} />
+        <Group gap="sm" px="xs" pt="md" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
           <Box style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, #C79C6E, #6F4E2A)" }} />
           <Box style={{ minWidth: 0 }}><Text size="sm" truncate>{meta.viewer.name}</Text><Text size="xs" c="dimmed">{meta.viewer.owner ? "owner" : meta.viewer.officer ? "officer" : "member"} · <a href="/auth/logout" style={{ color: "inherit" }}>log out</a></Text></Box>
         </Group>

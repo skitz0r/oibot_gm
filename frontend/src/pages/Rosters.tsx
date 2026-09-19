@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { ActionIcon, Badge, Box, Button, Card, Group, Stack, Tabs, Text, TextInput, Tooltip } from "@mantine/core";
-import { IconRefresh, IconSparkles } from "@tabler/icons-react";
+import { Badge, Box, Button, Card, Group, Stack, Tabs, Text, TextInput } from "@mantine/core";
+import { IconSparkles } from "@tabler/icons-react";
 import { api, type Board, type Meta, type RaidRuns, type Rosters, type Sheet } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
 import { Eyebrow, PageTitle, fail, ok } from "../components/Page";
@@ -12,7 +12,6 @@ import { useLive } from "../hooks/useLive";
 export function RostersPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Rosters | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const load = (): Promise<void> => api.get<Rosters>("/api/rosters").then(setData).catch((e) => { fail(e); });
   useEffect(() => { load(); }, []);
   usePoll(load);
@@ -32,13 +31,11 @@ export function RostersPage({ meta }: { meta: Meta }) {
   function patchBoard(key: string, board: Board, needs?: Sheet["needs"], rev?: string) {
     setData((d) => d && { ...d, raids: d.raids.map((r) => ({ ...r, open: r.open.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs, rev: rev ?? e.rev, has_layout: true } : e)), locked: r.locked.map((e) => (e.key === key ? { ...e, board, needs: needs ?? e.needs, rev: rev ?? e.rev } : e)) })) });
   }
-  async function refresh() { setRefreshing(true); try { await load(); } finally { setRefreshing(false); } }
 
   if (!data) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">
-      <PageTitle title="Rosters" intro={`One sheet per raid slot, opened on cadence. Shape the roster on the board before it locks; after lock, the board is the roster. Times are ${data.tz}; the page refreshes itself while open.`}
-        right={<Tooltip label="Refresh"><ActionIcon variant="default" size="lg" aria-label="refresh" loading={refreshing} onClick={refresh}><IconRefresh size={16} /></ActionIcon></Tooltip>} />
+      <PageTitle title="Rosters" intro={`One sheet per raid slot, opened on cadence. Shape the roster on the board before it locks; after lock, the board is the roster. Times are ${data.tz}; the page refreshes itself while open.`} />
       {data.raids.map((r) => <RaidCard key={r.id} r={r} meta={meta} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
       {data.orphans.length > 0 && (
         <Card><Box p="md"><Eyebrow>Sheets not tied to a raid</Eyebrow>{data.orphans.map((e) => <Text key={e.key} size="sm">{runName(e)} · {e.state}</Text>)}</Box></Card>

@@ -102,9 +102,9 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
         <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
         {!locked && (
           <Group gap="xs">
-            {canSplit && <Button size="xs" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>{multi ? "Propose splits" : "Propose roster"}</Button>}
-            <Button size="xs" variant="default" leftSection={<IconSparkles size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
-            <Button size="xs" variant="default" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={clear}>Clear</Button>
+            <Button size="xs" variant="light" leftSection={<IconSparkles size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
+            {canSplit && <Button size="xs" variant="default" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>{multi ? "Propose splits" : "Propose roster"}</Button>}
+            <Button size="xs" variant="subtle" color="red" ml="md" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={clear}>Clear</Button>
           </Group>
         )}
       </Group>
