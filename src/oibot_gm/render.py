@@ -165,6 +165,14 @@ def buff_badge_png(abbr: str, colour: str, size: int = 96) -> bytes:
     return buf.getvalue()
 
 
+RAID_ART = {
+    # our own stylised emblems, no game art: (sky top, sky bottom, ridge colours far→near, accent, glyph)
+    "barrow_deeps": ("#1B1E3A", "#3A2F5C", ["#4A4470", "#2E2A4C", "#1A1830"], "#9C8CFF", "cave"),
+    "hyjal_summit_forever": ("#0F2A2A", "#1E5C48", ["#2F7A5A", "#1F5A44", "#12382C"], "#E8C36A", "tree"),
+    "onyxias_lair": ("#2A0F0F", "#5C1E12", ["#7A2E1E", "#4A1A12", "#2A0E0A"], "#FF8A3D", "dragon"),
+}
+
+
 def raid_thumb_png(raid_id: str, name: str, size: int, lockout_days: int, w: int = 640, h: int = 300) -> bytes:
     """Generative emblem card for a raid: layered ridges under a gradient sky, a glyph, the size badge."""
     import colorsys

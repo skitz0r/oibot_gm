@@ -55,3 +55,11 @@ def test_refresh_edits_in_place_and_removes_legacy_cards(reg):
     assert set(reg.config.analytics_message_ids) == {f"{dp.CARD_PREFIX}{rid}" for rid in reg.profile.raids}
     asyncio.run(bot.refresh_pool(reg))  # second pass: nothing new is posted, every card is edited
     assert ch.sent == n and all(m.edits == 1 for m in ch.msgs.values() if m is not legacy)
+
+
+def test_every_comp_line_has_an_icon_and_the_raid_thumbnail_renders(reg):
+    from oibot_gm import render
+    assert dp._comp_icon(ico, "dps") == "<role:melee><role:ranged>" and dp._comp_icon(ico, "tank") == "<role:tank>"
+    assert dp._comp_icon(ico, "Shaman") == "<class:Shaman>" and dp._comp_icon(ico, "Shaman:Restoration") == "<spec:Shaman:Restoration>"
+    for rid, rd in reg.profile.raids.items():  # the card's thumbnail: a removed renderer once took a constant with it
+        assert render.raid_thumb_png(rid, rd.get("name", rid), int(rd.get("size") or 0), 7)[:4] == b"\x89PNG"

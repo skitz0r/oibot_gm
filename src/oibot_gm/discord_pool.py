@@ -26,6 +26,8 @@ def _comp_icon(ico, key: str) -> str:
     """The icon for a desired-comp line: a role, a class or a spec (icons stand alone: no name beside them)."""
     if key in ROLES:
         return ico("role", key)
+    if key == "dps":  # comp bounds speak of dps; the icons are per damage role
+        return ico("role", "melee") + ico("role", "ranged")
     return ico("spec", key) if ":" in key else ico("class", key)
 
 
