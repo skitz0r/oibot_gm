@@ -22,8 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from .. import comp as comp_mod, raidcycle as rc, render
-from ..registry import bank_rows, pool_health_data
+from .. import render
 
 HERE = Path(__file__).parent
 DISCORD_API = "https://discord.com/api/v10"
@@ -132,7 +131,6 @@ def create_app(bot) -> FastAPI:
     # Dev login (no Discord OAuth) only when explicitly switched on AND the site is not public: never behind the tunnel.
     _bind, _url = web_config()
     dev_user = os.environ.get("OIBOT_WEB_DEV_USER") if os.environ.get("OIBOT_WEB_DEV") == "1" and not _url.startswith("https") else None
-    card_cache: dict[str, tuple[float, str, bytes]] = {}  # key -> (time, data head, png)
 
     # ---- identity
     def session(request: Request) -> dict | None:
@@ -371,61 +369,6 @@ p{color:#8C97A8;margin:0 0 18px}a{display:inline-block;background:#38B2A0;color:
 
     for _old, _new in (("/admin", "/app/members"), ("/admin/build", "/app/rosters"), ("/bank", "/app/members"), ("/rosters", "/app/rosters"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):
         app.add_api_route(_old, (lambda new: (lambda: RedirectResponse(new, status_code=301)))(_new), methods=["GET"])
-
-    # ---- cards (PNG, rendered on demand, cached per data-repo head)
-    async def cached_png(key: str, fn) -> bytes:
-        head = bot.registries.store.head()
-        hit = card_cache.get(key)
-        if hit and hit[1] == head and time.time() - hit[0] < 600:
-            return hit[2]
-        png = await asyncio.to_thread(fn)
-        card_cache[key] = (time.time(), head, png)
-        return png
-
-    @app.get("/card/bank.png")
-    async def card_bank(request: Request):
-        v = await need(request, officer=True)
-        reg = v.reg
-
-        def build():
-            rows = bank_rows(reg)
-            return render.bank_png(f"Character bank · {reg.config.name}", f"{len(rows)} members", rows)
-
-        return Response(await cached_png("bank", build), media_type="image/png")
-
-    @app.get("/card/{kind}/{key}.png")
-    async def card(request: Request, kind: str, key: str):
-        v = await need(request, officer=True)
-        reg = v.reg
-        t = reg.config.roster(key) or {"key": key, "name": key, "size": 20}
-
-        def build():
-            if kind == "pool":
-                h = pool_health_data(reg, t)
-                n, size, alts, on_roster = h["headcount"]
-                return render.health_png(f"Pool readiness · {t.get('name', key)} ({size}-man)", "every planned or active main counts", h["headcount"], h["roles"], h["buffs"], h["unresponsive"],
-                                         headcount_text=f"{n}/{size} mains · {alts} alts · {on_roster} on roster", unresponsive_label="Not on this roster", buff_hint="badge = buff · name = provider · red outline = nobody in the pool brings it")
-            if kind == "groups":
-                players, result, cov, labels = comp_mod.optimize(reg, t)
-                if result is None:
-                    return render.health_png(f"Optimised groups · {key}", "waiting for registrations", (len(players), int(t.get("size") or 20), 0, 0), [], [], [], headcount_text=f"{len(players)} mains")
-                rb = comp_mod.raid_buff_status(reg.profile, players)
-                return render.groups_png(reg.profile, players, result, cov, rb, f"Optimised groups · {t.get('name', key)} ({t.get('size', 20)}-man)", f"{len(result.selected)} of {len(players)} mains placed", reg.profile.buff_assumptions(), labels)
-            if kind == "comp":
-                players = comp_mod.pool_players(reg)
-                ic = comp_mod.ideal_comp(reg.profile, int(t.get("size") or 20), players, t.get("comp_targets") or {}, t.get("instance"), reg)
-                return render.comp_png(ic.lines, f"Desired comp · {t.get('name', key)} ({ic.size}-man, {ic.groups} groups)", "derived from the buff matrix and comp rules", ic.notes)
-            if kind == "health":
-                rs = bot.raids.store(reg)
-                ev = rs.events.get(key)
-                if not ev:
-                    raise HTTPException(404)
-                tt = reg.config.team(ev.team) or {"key": ev.team, "size": 20}
-                h = rc.health_data(reg, ev, tt)
-                return render.health_png(f"Roster health · {tt.get('name', ev.team)} · {ev.key}", reg.local(ev.start, "%a %b %d %H:%M %Z"), h["headcount"], h["roles"], h["buffs"], h["unresponsive"])
-            raise HTTPException(404)
-
-        return Response(await cached_png(f"{kind}:{key}", build), media_type="image/png")
 
     from .api import install_api
 

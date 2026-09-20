@@ -8,118 +8,65 @@ Registry commits drive both through Registry.listeners; refreshes are debounced 
 from __future__ import annotations
 
 import asyncio
+import os
 import re
-from io import BytesIO
 
 import discord
 
-from . import comp as comp_mod, render
+from . import comp as comp_mod
 from .discord_registry import registration_card, registration_view
-from .registry import Registry, bank_rows, pool_health_data
+from .registry import Registry, pool_health_data
 
-from .constants import LEVEL_DOT, TEAL  # noqa: E402
+from .constants import LEVEL_COLOUR, ROLES, TEAL  # noqa: E402
 DEBOUNCE_S = 5.0  # a burst of registrations re-posts the cards once
-BANK_KEY = "_bank"  # analytics_message_ids slot for the character bank card
+CARD_PREFIX = "pool2:"  # analytics_message_ids key of a raid's native card (anything else is a legacy image card, removed on refresh)
 
 
-def _stamp(reg: Registry) -> str:
-    """Guild-time 12-hour stamp for text baked into a card image (Discord can't render <t:…> there)."""
-    return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", reg.local(reg.now_local(), "%a %b %d %I:%M %p"))
+def _comp_icon(ico, key: str) -> str:
+    """The icon for a desired-comp line: a role, a class or a spec (icons stand alone: no name beside them)."""
+    if key in ROLES:
+        return ico("role", key)
+    return ico("spec", key) if ":" in key else ico("class", key)
 
 
-def groups_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.File]:
-    """Optimised groups for the pool at this roster's size, with per-group aura coverage and raid buffs."""
-    key = roster.get("key", "main")
-    players, result, cov, labels = comp_mod.optimize(reg, roster)
-    rb = comp_mod.raid_buff_status(reg.profile, players)
-    fname = f"groups-{key}.png"
-    if result is None or cov is None:
-        e = discord.Embed(colour=0x98A3B5, description=f"**Groups · {key}** — no mains in the pool yet" if not players else f"**Groups · {key}** — the solver couldn't build groups from {len(players)} main(s) yet")
-        png = render.health_png(f"Optimised groups · {key}", "waiting for registrations", (len(players), int(roster.get("size") or 20), 0, 0), [], [], [], headcount_text=f"{len(players)} mains")
-        return e, discord.File(BytesIO(png), filename=fname)
-    open_slots = int(roster.get("size") or 20) - len(result.selected)
-    png = render.groups_png(reg.profile, players, result, cov, rb,
-                            f"Optimised groups · {roster.get('name', key)} ({roster.get('size', 20)}-man)",
-                            f"{len(result.selected)} of {len(players)} mains placed · {open_slots} open slot{'s' if open_slots != 1 else ''} · groups seeded by archetype, synergy {result.synergy_value} · updated {_stamp(reg)}",
-                            reg.profile.buff_assumptions(), labels)
-    file = discord.File(BytesIO(png), filename=fname)
-    missing_raid = [r for r in rb if not r["providers"]]
-    worst = "red" if missing_raid or any(g.missing_summary and "nobody on roster" in " ".join(g.missing_summary) for g in cov.groups) else ("amber" if any(g.missing_summary for g in cov.groups) else "green")
-    colour = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]
-    e = discord.Embed(colour=colour, description=f"{LEVEL_DOT[worst]} **{len(result.groups)}** groups from **{len(result.selected)}** mains · " + " · ".join(f"{ico('role', r)} {n}" for r, n in result.role_counts.items()))
-    e.set_image(url=f"attachment://{fname}")
-    if cov.unmet_raidwide:
-        e.add_field(name="No provider in the pool", value=", ".join(cov.unmet_raidwide)[:900], inline=False)
-    if missing_raid:
-        e.add_field(name="Raid buffs nobody brings", value=" ".join(f"{ico('buff', r['id'])}" for r in missing_raid) + "\n" + ", ".join(r["name"] for r in missing_raid)[:800], inline=False)
-    adv = [a for a in result.advisories if a.startswith(("🔴", "🟡"))][:3]
-    if adv:
-        e.add_field(name="Advisories", value="\n".join(adv)[:900], inline=False)
-    e.set_footer(text=f"Groups seeded as {', '.join(labels)} — change with e.g. “{key}: groups tank, healers, melee, casters”. Badges: coloured = aura present, red outline = wanted but missing")
-    return e, file
+def _site(path: str) -> str | None:
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    return f"{web}{path}" if web.startswith("https") else None
 
 
-def comp_card(reg: Registry, roster: dict) -> tuple[discord.Embed, discord.File]:
-    """Desired comp for this roster's size vs the pool, with justifications; officer targets from roster config."""
-    key = roster.get("key", "main")
-    players = comp_mod.pool_players(reg)
-    size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or 20)
-    ic = comp_mod.ideal_comp(reg.profile, size, players, roster.get("comp_targets") or {}, roster.get("instance"), reg)
-    n_off = sum(1 for l in ic.lines if l.source == "officer")
-    png = render.comp_png(ic.lines, f"Desired comp · {roster.get('name', key)} ({size}-man, {ic.groups} groups)",
-                          f"derived from the buff matrix and comp rules · {n_off} officer target(s) · updated {_stamp(reg)}", ic.notes)
-    fname = f"comp-{key}.png"
-    file = discord.File(BytesIO(png), filename=fname)
-    short = [l for l in ic.lines if l.level == "red"]
-    over = [l for l in ic.lines if l.max is not None and l.have > l.max]
-    worst = "red" if short else ("amber" if over or any(l.level == "amber" for l in ic.lines) else "green")
-    colour = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]
-    e = discord.Embed(colour=colour, description=f"{LEVEL_DOT[worst]} **Desired comp · {key}** — " + (("short: " + ", ".join(f"{l.key} {l.have}/{l.want}" for l in short[:6])) if short else "every slot filled"))
-    e.set_image(url=f"attachment://{fname}")
-    if over:
-        e.add_field(name="Over cap", value=", ".join(f"{l.key} {l.have}/{l.max}" for l in over)[:900], inline=False)
-    e.set_footer(text=f"Change the ideals in plain text: @mention me here, e.g. “{key}: we want 3 tanks”, “cap hunters at 3 because of Trueshot”, “clear the paladin target”; the planner's runs inherit them")
-    return e, file
-
-
-def bank_card(reg: Registry) -> tuple[discord.Embed, discord.File]:
-    rows = bank_rows(reg)
-    mains = sum(1 for r in rows if r["main"])
-    alts = sum(len(r["alts"]) for r in rows)
-    unnamed = sum(1 for r in rows if r["main"] and not r["main"]["name"])
-    png = render.bank_png(f"Character bank · {reg.config.name}", f"{len(rows)} members · {mains} mains · {alts} alts" + (f" · {unnamed} mains unnamed" if unnamed else "") + f" · updated {_stamp(reg)}",
-                          rows, footer="sorted by role then class · grey name = planned, not yet created · rank/rosters are officer-set")
-    file = discord.File(BytesIO(png), filename="bank.png")
-    e = discord.Embed(colour=TEAL, description=f"**{len(rows)}** members · **{mains}** mains · **{alts}** alts")
-    e.set_image(url="attachment://bank.png")
-    e.set_footer(text="Kept current by the bot")
-    return e, file
-
-
-def pool_card(reg: Registry, roster: dict, ico) -> tuple[discord.Embed, discord.File]:
+def pool_layout(reg: Registry, roster: dict, ico) -> tuple[discord.ui.LayoutView, str]:
+    """One native card per raid: who the pool could field at this size (roles have/need, buffs nobody brings) and
+    where the desired comp is short or over. Icons + numbers only; the Members and Raids pages hold the detail.
+    Returns (view, level)."""
+    ui = discord.ui
+    key, name = roster.get("key", "main"), roster.get("name") or roster.get("key", "main")
     h = pool_health_data(reg, roster)
-    levels = [h["headcount_level"]] + [r["level"] for r in h["roles"] if r["need"]]
-    worst = "red" if "red" in levels else ("amber" if "amber" in levels else "green")
-    colour = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]
-    n, size, alts, on_roster = h["headcount"]
-    png = render.health_png(
-        f"Pool readiness · {roster.get('name', roster.get('key', 'main'))} ({size}-man)",
-        f"every planned or active main counts · updated {_stamp(reg)}",
-        h["headcount"], h["roles"], h["buffs"], h["unresponsive"],
-        footer="tiles: mains by primary role / needed at this size · amber = offspec/flex/alt could cover · red = recruit",
-        headcount_text=f"{n}/{size} mains · {alts} alts · {on_roster} on roster" + (f" · {h['unnamed']} unnamed" if h["unnamed"] else ""),
-        unresponsive_label="Not on this roster", buff_hint="badge = buff · name = provider · red outline = nobody in the pool brings it")
-    file = discord.File(BytesIO(png), filename=f"pool-{roster.get('key', 'main')}.png")
-    e = discord.Embed(colour=colour, description=f"{LEVEL_DOT[worst]} **{n}/{size}** mains registered · {on_roster} placed on **{roster.get('key', 'main')}** · {alts} alts")
-    e.set_image(url=f"attachment://pool-{roster.get('key', 'main')}.png")
-    missing = [b for b in h["buffs"] if not b["providers"]]
+    n, size, alts, _on = h["headcount"]
+    players = comp_mod.pool_players(reg)
+    ic = comp_mod.ideal_comp(reg.profile, size, players, roster.get("comp_targets") or {}, roster.get("instance"), reg)
+    short = [ln for ln in ic.lines if ln.level == "red" and ln.key not in ROLES]
+    over = [ln for ln in ic.lines if ln.max is not None and ln.have > ln.max]
+    levels = [h["headcount_level"]] + [r["level"] for r in h["roles"] if r["need"]] + (["red"] if short else [])
+    worst = "red" if "red" in levels else ("amber" if "amber" in levels or over else "green")
+    head = f"## {name}\n**{n}** / {size} mains" + (f" · {alts} alts" if alts else "") + (f" · {h['unnamed']} unnamed" if h.get("unnamed") else "")
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    top = ui.Section(ui.TextDisplay(head), accessory=ui.Thumbnail(media=f"{web}/img/raid/{roster.get('instance') or key}.png")) if web.startswith("https") and (roster.get("instance") or key) in reg.profile.raids else ui.TextDisplay(head)
+    lines = ["   ".join(f"{ico('role', r['role'])} {r['have']}/{r['need']}" + (" ⚠" if r["level"] == "red" else "") for r in h["roles"] if r["need"])]
+    missing = [b for b in h["buffs"] if not b["providers"] and ico("buff", b["id"])]
     if missing:
-        e.add_field(name="Nobody brings", value=" ".join(f"{ico('buff', b['id'])}" for b in missing) + "\n" + ", ".join(b["name"] for b in missing)[:900], inline=False)
-    asks = [f"{r['need'] - r['have']} {r['role']}" for r in h["roles"] if r["need"] and r["have"] < r["need"]]
-    if asks:
-        e.add_field(name="Recruiting ask", value=", ".join(asks), inline=False)
-    e.set_footer(text="Re-posted by the bot after every registry change; the log above says what moved")
-    return e, file
+        lines.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing[:12]))
+    if short:
+        lines.append("**Short** " + "   ".join(f"{_comp_icon(ico, ln.key)} {ln.have}/{ln.want}" for ln in short[:8]))
+    if over:
+        lines.append("**Over cap** " + "   ".join(f"{_comp_icon(ico, ln.key)} {ln.have}/{ln.max}" for ln in over[:8]))
+    parts = [top, ui.Separator(), ui.TextDisplay("\n".join(x for x in lines if x.strip()) or "every slot filled")]
+    links = [ui.Button(label=label, style=discord.ButtonStyle.link, url=url) for label, url in (("Members", _site("/app/members")), ("Raid rules", _site("/app/raids"))) if url]
+    parts += [ui.Separator(), ui.TextDisplay(f"-# Change the ideals in plain text here: @mention me, e.g. “{roster.get('instance') or key}: we want 3 tanks”, “cap hunters at 3”.")]
+    if links:
+        parts.append(ui.ActionRow(*links))
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=LEVEL_COLOUR[worst]))
+    return view, worst
 
 
 class PoolMixin:
@@ -160,53 +107,49 @@ class PoolMixin:
             await self.ops.emit(reg.config, "warn", f"analytics log post failed: {e}")
 
     async def refresh_pool(self, reg: Registry, announce: bool = False) -> list[discord.Message]:
-        """Re-post every card at the bottom of the channel (old copies deleted) so the cards are always the
-        newest messages, under the change log. One refresh at a time per guild."""
+        """Keep one native card per raid current in the analytics channel: edited in place (no delete/re-post noise);
+        a card is only posted when it doesn't exist yet. Cards from the old image era are removed once."""
         ch = self.get_channel(reg.config.analytics_channel_id) if reg.config.analytics_channel_id else None
         if not ch:
             return []
         locks = self.__dict__.setdefault("_pool_locks", {})
         lock = locks.setdefault(reg.key, asyncio.Lock())
         async with lock:
-            out = []
-            rosters = [reg.raid_shell(rid) for rid in reg.profile.raids]  # one set of cards per raid definition
-            keys = [BANK_KEY]
-            for r in rosters:
-                keys += [r["key"], f"comp:{r['key']}", f"groups:{r['key']}"]
-            cards = []
-            for key in keys:
+            out, ids = [], dict(reg.config.analytics_message_ids)
+            wanted = {f"{CARD_PREFIX}{rid}": reg.raid_shell(rid) for rid in reg.profile.raids}
+            for key in [k for k in ids if k not in wanted]:  # the bank / pool / comp / groups PNG cards, or a raid that left the profile
                 try:
-                    if key == BANK_KEY:
-                        cards.append((key, await asyncio.to_thread(bank_card, reg)))
-                    elif key.startswith("comp:"):
-                        cards.append((key, await asyncio.to_thread(comp_card, reg, next(r for r in rosters if r["key"] == key[5:]))))
-                    elif key.startswith("groups:"):
-                        cards.append((key, await asyncio.to_thread(groups_card, reg, next(r for r in rosters if r["key"] == key[7:]), self.ico)))
-                    else:
-                        cards.append((key, await asyncio.to_thread(pool_card, reg, next(r for r in rosters if r["key"] == key), self.ico)))
+                    await (await ch.fetch_message(ids[key])).delete()
+                except Exception:  # noqa: BLE001 — already gone
+                    pass
+                ids.pop(key)
+            for key, roster in wanted.items():
+                try:
+                    view, _level = await asyncio.to_thread(pool_layout, reg, roster, self.ico)
                 except Exception as e:  # noqa: BLE001
                     await self.ops.emit(reg.config, "error", f"analytics card for {key} failed", e)
-            # delete the previous copies, then post the new set in order
-            for key, mid in list(reg.config.analytics_message_ids.items()):
-                try:
-                    await (await ch.fetch_message(mid)).delete()
-                except Exception:  # noqa: BLE001
-                    pass
-            reg.config.analytics_message_ids = {}
-            for key, (embed, file) in cards:
-                try:
-                    msg = await ch.send(embed=embed, file=file)
-                except Exception as e:  # noqa: BLE001
-                    await self.ops.emit(reg.config, "warn", f"analytics card post for {key} failed: {e}")
                     continue
-                reg.config.analytics_message_ids[key] = msg.id
+                msg = None
+                if key in ids:
+                    try:
+                        msg = await (await ch.fetch_message(ids[key])).edit(view=view)
+                    except Exception:  # noqa: BLE001 — deleted by hand: post it again
+                        ids.pop(key)
+                if msg is None:
+                    try:
+                        msg = await ch.send(view=view)
+                    except Exception as e:  # noqa: BLE001
+                        await self.ops.emit(reg.config, "warn", f"analytics card post for {key} failed: {e}")
+                        continue
+                ids[key] = msg.id
                 out.append(msg)
-            reg.save_config("analytics card messages", notify=False)
+            if ids != reg.config.analytics_message_ids:
+                reg.config.analytics_message_ids = ids
+                reg.save_config("analytics card messages", notify=False)
             if announce:
                 await self.ops.emit(reg.config, "info", f"analytics cards refreshed in #{ch.name}")
             return out
 
-    # ---- registration channel
     async def post_registration_card(self, reg: Registry, ch: discord.TextChannel, by: str) -> str:
         """Post (or move) the persistent card and try to make the channel read-only for members. Returns a status note."""
         notes = []

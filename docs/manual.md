@@ -33,9 +33,10 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 - **Absences channel** — a pinned card with *I'll be away*; each absence is announced there (no reason shown).
 - **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Each run's card
   has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged.
-- **Analytics channel (officers)** — the character bank, and per raid: pool readiness, optimised
-  groups, desired comp. They re-post at the bottom after every change, with a change-log line above.
-  Officers change comp ideals here in plain text by @mentioning the bot.
+- **Analytics channel (officers)** — one card per raid: how many mains the pool has for its size, role counts
+  have/need, buffs nobody brings, and where the desired comp is short or over cap. The cards are edited in place
+  (no re-posting), with a change-log line when the registry changes. Officers change comp ideals here in plain
+  text by @mentioning the bot. The character bank is the **Members** page; building groups is the **Rosters** board.
 - **Ops channel (officers)** — every action the bot takes, one line each; errors also DM the owner. The same
   lines go to a rotating log file on the host (`out/oibot.log`).
 - **Applications channel** — review cards for `/apply` with Accept / Decline buttons.
@@ -191,15 +192,13 @@ returns to the game defaults.
 
 ## 6. Analytics (officers)
 
-- **Character bank** — every member → main (class, spec/offspec, role, rank, runs) and alts.
-- **Pool readiness** per raid — every planned/active main vs the raid size: headcount, role tiles,
-  buff coverage, who isn't on an upcoming run yet.
-- **Optimised groups** per raid — the solver on the pool at full size with open slots shown, aura
-  badges per group, totem picks, raid-wide buffs.
-- **Desired comp** per raid — derived targets per role/class/spec with a one-line reason each,
-  have vs want, and how many could fill a slot by switching to their offspec. Officers override targets in
-  plain text: "reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target",
-  "groups tank, healers, melee, casters".
+- **One card per raid** in the analytics channel, native (no images): mains vs the raid size, a role icon with
+  have/need for each role (⚠ = short), ⛔ followed by the buffs nobody in the pool brings, **Short** and **Over cap**
+  lines from the desired comp (class or spec icon with have/want), and links to the Members and Raids pages.
+- **Desired comp** per raid is derived from the buff matrix and comp rules. Officers override targets in plain
+  text: "reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target".
+- The **character bank** lives on the Members page and **groups** are built on the Rosters board (Auto-fill /
+  Propose); the old bank, optimised-groups and comp images are gone.
 - `/roster overview` shows the readiness card on demand; `/roster members` lists a run's roster.
 
 ## 7. Officers: day-to-day commands

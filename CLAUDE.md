@@ -52,8 +52,8 @@ src/oibot_gm/
   raid_scheduler.py    RaidSchedulerMixin: the minute loop (open on cadence → health → lock → expire → fill → close), calls RaidMixin
   raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|end|set|cancel|list|out|fill
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
-  discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with the character
-                       bank, and per raid: pool readiness, optimised groups, desired comp + change log (Registry.listeners, debounced);
+  discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with one native
+                       card per raid (pool_layout: readiness + comp shortfalls, edited in place, no images) + change log (Registry.listeners, debounced);
                        absences channel (AbsencesMixin: card + "I'll be away" modal → announce_absence → sheets updated);
                        SetupMixin: set_channel (web Config page + plain-text `set …_channel` via configops.apply_async), guild_channels/roles, test_bench_clear.
                        Test bench: Member.test puppets, /gm test seed|run|answer|clear; RaidMixin.send_member_dm routes puppet DMs to the TESTER's own DMs
@@ -83,7 +83,7 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
-  render.py            roster/coverage PNG + emoji badges;  report_html.py → out/coverage.html
+  render.py            /mock roster PNG, raid thumbnails, generated emoji badges (no analytics images any more);  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`
 out/                   generated reports/logs only (event state is in the data repo)
 ```

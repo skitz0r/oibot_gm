@@ -664,7 +664,7 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
         buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
     unresp = [m.display_name for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups]
     hc_level = "green" if len(ins) >= size else ("amber" if len(ins) + len(subs) >= size else "red")
-    # headcount keeps its 4-tuple shape for render.health_png / discord_raid: (in, size, 0 [was tentative], sub)
+    # headcount is a 4-tuple (in, size, 0 [was tentative], sub): the cards and the pool data share the shape
     return {"headcount": (len(ins), size, 0, len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp}
 
 
