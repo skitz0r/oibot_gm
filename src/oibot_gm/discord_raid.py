@@ -19,7 +19,7 @@ from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
 from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _group_block, _group_summaries, _header, _member_rows,
                          _raidwide_line, _role_counts, ask_line, board_url, clock12, closed_layout, confirm_layout, fill_layout,
-                         gaps_text, health_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_layout,
+                         gaps_text, health_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
                          sheet_state)
 from .registry import Registry
 
@@ -30,7 +30,7 @@ __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "regist
            "FillButton", "PlaceButton", "RunButton", "SignupButton", "fill_view", "place_view", "sheet_view",
            # views + helpers
            "CLOCK12", "OUT_MARK", "RELEASE_WHY", "ask_line", "board_url", "clock12", "closed_layout", "confirm_layout", "fill_layout", "gaps_text",
-           "health_layout", "lock_layout", "raid_name", "run_actions_row", "run_label", "run_times", "run_title", "sheet_layout", "sheet_state",
+           "health_layout", "lock_layout", "raid_name", "run_actions_row", "run_label", "run_times", "run_title", "sheet_message", "sheet_state",
            "_aura_line", "_group_block", "_group_summaries", "_header", "_member_rows", "_raidwide_line", "_role_counts"]
 
 
@@ -189,13 +189,21 @@ class RaidMixin:
             ch = self.get_channel(ev.channel_id)
             try:
                 msg = await ch.fetch_message(ev.message_id)
-                await msg.edit(view=sheet_layout(reg, ev, team, self.ico))
+                embed, view = sheet_message(reg, ev, team, self.ico)
+                if msg.flags.components_v2:  # a sheet from the layout-component era can't become an embed: replace it once
+                    new = await ch.send(embed=embed, view=view)
+                    ev.message_id = new.id
+                    self.raids.store(reg).save(ev, "sheet re-posted (embed layout)")
+                    await msg.delete()
+                else:
+                    await msg.edit(embed=embed, view=view)
             except Exception as e:  # noqa: BLE001
                 log.warning("sheet refresh failed (%s): %s", ev.key, e)
 
     async def post_sheet(self, reg, rs, ev, channel) -> None:
         team = rc.run_team(reg, ev)
-        msg = await channel.send(view=sheet_layout(reg, ev, team, self.ico))
+        embed, view = sheet_message(reg, ev, team, self.ico)
+        msg = await channel.send(embed=embed, **({"view": view} if view else {}))
         ev.channel_id, ev.message_id = channel.id, msg.id
         rs.save(ev, "sheet posted")
         if rc.team_setting(team, "open_dm"):

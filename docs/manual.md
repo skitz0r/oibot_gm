@@ -30,6 +30,8 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   No thanks are your answer as a person, so they don't. A **locked** sheet shows the roster(s) group by group,
   a **Not rostered** row (joiners the solver left off), the Bench and No thanks rows, and a single **Can't make
   it** button. A **cancelled** or **finished** sheet says so and has no buttons.
+  The sheet lists who joined in columns, a class per column with one character per line (spec icon + name);
+  after lock the columns are the groups, with ✅ / ⏳ / ❌ for each person's confirmation.
 - **Absences channel** — a pinned card with *I'll be away*; each absence is announced there (no reason shown).
 - **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Each run's card
   has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged.

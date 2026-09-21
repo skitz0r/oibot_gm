@@ -33,3 +33,31 @@ def test_yes_no_dms_share_one_label_pair_and_cant_is_grey():
     import discord
     assert [FillButton("k", 1, a).item.label for a in ("yes", "no")] == [PlaceButton("k", 1, a).item.label for a in ("yes", "no")] == ["Confirm", "Can't make it"]
     assert SignupButton("k", "cant").item.style == discord.ButtonStyle.secondary
+
+
+def test_sheet_is_an_embed_with_class_then_group_columns(reg, rs):
+    """Raid-Helper-style arrangement: inline fields are columns — a class per column while open, a group per column
+    once locked — one member per line; icons carry no labels; buttons match the state."""
+    from oibot_gm import raidcycle as rc
+    ev = open_test_run(reg, rs)
+    members = reg.test_members()[:12]
+    join(reg, rs, ev, members)
+    join(reg, rs, ev, reg.test_members()[12:14], status="sub")
+    team = rc.run_team(reg, ev)
+    tag = lambda kind, key: f"<{kind}:{key}>"  # noqa: E731
+    e, view = views.sheet_message(reg, ev, team, tag)
+    cols = [f for f in e.fields if f.inline]
+    classes = {m.main.cls for m in members}
+    assert len(cols) == len(classes) and all(f.name.startswith("<class:") and f.name.endswith(")") for f in cols)
+    assert sum(len(f.value.split("\n")) for f in cols) == 12 and all(ln.startswith("<spec:") for f in cols for ln in f.value.split("\n"))
+    assert [f.name for f in e.fields if not f.inline] == ["Bench (2)"]
+    assert [b.item.label for b in view.children] == ["Join", "Bench", "No thanks"] and "<role:tank> " in e.description
+    lock_with_board(reg, rs, ev, [m.display_name for m in members[:10]])
+    e, view = views.sheet_message(reg, ev, team, tag)
+    groups = [f for f in e.fields if f.inline]
+    assert [f.name for f in groups] == ["Group 1", "Group 2"] and all(len(f.value.split("\n")) == 5 for f in groups)
+    assert [b.item.label for b in view.children] == ["Can't make it"] and "Not rostered (2)" in [f.name for f in e.fields]
+    ev.state = "cancelled"
+    e, view = views.sheet_message(reg, ev, team, tag)
+    assert e.title.startswith("🧪 Cancelled") and view is None and not e.fields
+    assert len(e) < 6000

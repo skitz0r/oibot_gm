@@ -12,7 +12,7 @@ from . import raidcycle as rc
 from .constants import TEAL
 from .discord_registry import Guilds, is_officer
 from .ops import Ops
-from .raid_views import ask_line, gaps_text, health_layout, raid_name, run_label, run_title, sheet_layout, sheet_state
+from .raid_views import ask_line, gaps_text, health_layout, raid_name, run_label, run_title, sheet_message, sheet_state
 from .registry import Registry
 
 
@@ -85,7 +85,8 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if not ev:
             await interaction.response.send_message("No live sheet.", ephemeral=True)
             return
-        await interaction.response.send_message(view=sheet_layout(reg, ev, t, bot.ico))
+        embed, view = sheet_message(reg, ev, t, bot.ico)
+        await interaction.response.send_message(embed=embed, **({"view": view} if view else {}))
         msg = await interaction.original_response()
         ev.channel_id, ev.message_id = msg.channel.id, msg.id
         rs.save(ev, "sheet re-posted")

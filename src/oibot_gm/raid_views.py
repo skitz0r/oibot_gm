@@ -98,12 +98,29 @@ def _member_rows(subs, outs) -> list[str]:
     return rows
 
 
-def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui.LayoutView:
-    """The sheet as a Discord layout message, one explicit layout per state:
-    open — header with the raid emblem, class lines with real icons, Bench / No thanks member rows, timeline, Join / Bench / No thanks;
-    locked — 🔒 header, the roster(s) group by group (the board's layout, one member per line), Not rostered, Bench / No thanks, Can't make it;
-    done — "Finished" header over the roster; cancelled — "Cancelled" header, nothing else. Edited in place on every answer."""
-    ui = discord.ui
+EMBED_FIELD_MAX, EMBED_TOTAL_MAX = 1024, 5600  # Discord: 1024 per field value, 6000 per embed (kept under, with headroom)
+
+
+def _column(lines: list[str]) -> str:
+    """One embed column: one member per line, cut to the field limit (never mid-line)."""
+    out, used = [], 0
+    for ln in lines:
+        if used + len(ln) + 1 > EMBED_FIELD_MAX - 12:
+            out.append(f"… +{len(lines) - len(out)}")
+            break
+        out.append(ln)
+        used += len(ln) + 1
+    return "\n".join(out) or "—"
+
+
+def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[discord.Embed, discord.ui.View | None]:
+    """The sheet as an embed + buttons. An embed because its inline fields are the only columns Discord has (layout
+    components run as one long text block): up to three columns per row, a class per column while the sheet is open,
+    a group per column once it is locked, one member per line, spec icon + character. Header: raid emblem thumbnail,
+    live timestamps, headcount and role counts (icon + number). One explicit layout per state:
+    open — class columns, Bench / No thanks rows, Join / Bench / No thanks buttons;
+    locked — group columns per roster with confirmation marks, Not rostered / Bench / No thanks, Can't make it;
+    done — "Finished" over the roster; cancelled — "Cancelled", nothing else. Edited in place on every answer."""
     state = sheet_state(ev)
     unix = int(ev.start.timestamp())
     ins, subs, outs = (ev.by_status(s) for s in ("in", "sub", "out"))
@@ -113,67 +130,73 @@ def sheet_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> discord.ui
     test = bool(team.get("test"))
     tag = "🧪 " if test else ""
     web = os.environ.get("OIBOT_WEB_URL", "")
+    e = discord.Embed(colour=0x8C97A8 if test else 0x98A3B5 if state in ("done", "cancelled") else TEAL)
+    if web.startswith("https") and ev.instance:
+        e.set_thumbnail(url=f"{web}/img/raid/{ev.instance}.png")
 
-    def header(text: str):
-        return ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=f"{web}/img/raid/{ev.instance}.png")) if web.startswith("https") and ev.instance else ui.TextDisplay(text)
+    def member(character: str, cls: str, spec: str, mark: str | None = None, icons: bool = True) -> str:
+        return ((mark + " ") if mark else "") + ((ico("spec", f"{cls}:{spec}") + " ") if icons else "") + character
 
-    parts: list = []
+    def rows_field() -> None:
+        if subs:
+            e.add_field(name=f"Bench ({len(subs)})", value=" · ".join(sg.display_name for sg in subs)[:EMBED_FIELD_MAX], inline=False)
+        if outs:
+            e.add_field(name=f"No thanks ({len(outs)})", value=" · ".join(sg.display_name + OUT_MARK.get(sg.source, "") for sg in outs)[:EMBED_FIELD_MAX], inline=False)
+
     if state == "cancelled":
-        parts.append(header(f"## {tag}Cancelled · {name}\n<t:{unix}:F>"))
-    elif state == "open":
+        e.title, e.description = f"{tag}Cancelled · {name}", f"<t:{unix}:F>"
+        return e, None
+    if state == "open":
         counts = {r: sum(1 for s in ins if s.role == r) for r in ROLES}
         runs = max(1, len(ins) // size) if size else 1
-        head = f"## {tag}{name}\n<t:{unix}:F> · <t:{unix}:R>\n**{len(ins)}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + "  " + "   ".join(f"{ico('role', r)} {n}" for r, n in counts.items())
-        parts += [header(head), ui.Separator()]
+        _soft, hard, confirm = run_times(reg, ev, team)
+        e.title = f"{tag}{name}"
+        e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n**{len(ins)}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
+                         + f"\n🔒 locks <t:{int(hard.timestamp())}:R> · ✓ confirm by <t:{int(confirm.timestamp())}:f>")
         by_cls: dict[str, list] = {}
         for sg in ins:
             by_cls.setdefault(sg.cls, []).append(sg)
-        if by_cls:
-            lines = [f"{ico('class', cls)} **{cls}** {len(ss)} — " + " · ".join(f"{ico('spec', f'{sg.cls}:{sg.spec}')} {sg.character}" for sg in ss) for cls, ss in sorted(by_cls.items(), key=lambda kv: -len(kv[1]))]
-            parts.append(ui.TextDisplay("\n".join(lines)[:3900]))
-        else:
-            parts.append(ui.TextDisplay("-# Nobody has joined yet."))
-        rows = _member_rows(subs, outs)
-        if rows:
-            parts += [ui.Separator(), ui.TextDisplay("\n".join(rows))]
-        _soft, hard, confirm = run_times(reg, ev, team)
-        parts += [ui.Separator(), ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R> · ✓ confirm by <t:{int(confirm.timestamp())}:f>"),
-                  ui.ActionRow(*[SignupButton(ev.key, st) for st in rc.STATUSES]),
-                  ui.TextDisplay("-# " + ("test run · " if test else "") + "Join = I'm coming · Bench = call me if you need me")]
-    else:  # locked | done: the roster(s) as the board shows them
-        rosters = ev.all_rosters
-        conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)} if rosters else {}
-        marks = {n: MARK.get(a) for n, a in conf.items()}
-        tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
-        if state == "done":
-            head = f"## {tag}Finished · {name}\n<t:{unix}:F>" + (f"\n**{len(ev.seated())}** rostered" if rosters else "")
-        else:
-            head = f"## {tag}🔒 {name}\n<t:{unix}:F> · <t:{unix}:R>\n" + (f"🔒 **{len(ev.seated())}** rostered" + (f" in {len(rosters)} rosters" if len(rosters) > 1 else "") + f" · {tally}" if rosters else "-# Building the roster…")
-        parts += [header(head), ui.Separator()]
-        for i, r in enumerate(rosters):
-            if len(rosters) > 1:
-                parts.append(ui.TextDisplay(f"### Roster {i + 1}"))
-            summaries = _group_summaries(reg, r)
-            for gi in range(len(r.groups)):
-                if r.groups[gi]:
-                    parts.append(ui.TextDisplay(_group_block(reg, ico, r, gi, marks, summaries, show_missing=False)))
-        rows = []
-        if rosters:
-            joined = {sg.display_name for sg in ins}
-            left_off = [p.signup_name for p in rosters[0].benched if p.signup_name in joined]  # joiners the solver left off; Bench / No thanks people sit in their own rows
-            if left_off:
-                rows.append("**Not rostered** " + " · ".join(left_off))
-        rows += _member_rows(subs, outs)
-        if rows:
-            parts += [ui.Separator(), ui.TextDisplay("\n".join(rows))]
-        if state == "locked":
-            _soft, _hard, confirm = run_times(reg, ev, team)
-            parts += [ui.Separator(), ui.TextDisplay(f"✓ confirm by <t:{int(confirm.timestamp())}:f>"),
-                      ui.ActionRow(SignupButton(ev.key, "cant")),
-                      ui.TextDisplay("-# " + ("test run · " if test else "") + "Rostered? answer your DM. Not rostered? nothing to do.")]
-    view = ui.LayoutView(timeout=None)
-    view.add_item(ui.Container(*parts, accent_colour=0x8C97A8 if test else 0x98A3B5 if state in ("done", "cancelled") else TEAL))
-    return view
+        icons = sum(len(ico("spec", f"{sg.cls}:{sg.spec}")) + len(sg.character) + 2 for sg in ins) < EMBED_TOTAL_MAX - 600
+        for cls, ss in sorted(by_cls.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            e.add_field(name=f"{ico('class', cls) or cls} ({len(ss)})", value=_column([member(sg.character, sg.cls, sg.spec, icons=icons) for sg in ss]), inline=True)
+        if not by_cls:
+            e.add_field(name="\u200b", value="-# Nobody has joined yet.", inline=False)
+        rows_field()
+        e.set_footer(text=("test run · " if test else "") + "Join = I'm coming · Bench = call me if you need me")
+        return e, sheet_view(ev.key)
+    # locked | done: the roster(s) as the board shows them, a group per column
+    rosters = ev.all_rosters
+    conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)} if rosters else {}
+    marks = {n: MARK.get(a) for n, a in conf.items()} if state == "locked" else {}
+    tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
+    if state == "done":
+        e.title, e.description = f"{tag}Finished · {name}", f"<t:{unix}:F>" + (f"\n**{len(ev.seated())}** rostered" if rosters else "")
+    else:
+        _soft, _hard, confirm = run_times(reg, ev, team)
+        e.title = f"{tag}🔒 {name}"
+        e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n" + (f"**{len(ev.seated())}** rostered" + (f" in {len(rosters)} rosters" if len(rosters) > 1 else "") + f"\u2003{tally}" if rosters else "-# Building the roster…")
+                         + f"\n✓ confirm by <t:{int(confirm.timestamp())}:f>")
+    icons = sum(len(ico("spec", f"{p.cls}:{p.spec}")) + len(p.character or p.signup_name) + 4 for p in ev.seated()) < EMBED_TOTAL_MAX - 600
+    for i, r in enumerate(rosters):
+        if len(rosters) > 1:
+            e.add_field(name=f"Roster {i + 1}", value=_role_counts(ico, r.selected) or "\u200b", inline=False)
+        by = {p.signup_name: p for p in r.selected}
+        for gi, g in enumerate(r.groups):
+            ps = [by[n] for n in g if n in by]
+            if ps:
+                e.add_field(name=f"Group {gi + 1}", value=_column([member(p.character or p.signup_name, p.cls, p.spec, marks.get(p.signup_name), icons) for p in ps]), inline=True)
+    if rosters:
+        joined = {sg.display_name for sg in ins}
+        left_off = [p.signup_name for p in rosters[0].benched if p.signup_name in joined]  # joiners the solver left off
+        if left_off:
+            e.add_field(name=f"Not rostered ({len(left_off)})", value=" · ".join(left_off)[:EMBED_FIELD_MAX], inline=False)
+    rows_field()
+    if state != "locked":
+        return e, None
+    e.set_footer(text=("test run · " if test else "") + "Rostered? answer your DM. Not rostered? nothing to do.")
+    v = discord.ui.View(timeout=None)
+    v.add_item(SignupButton(ev.key, "cant"))
+    return e, v
 
 
 def board_url(ev: rc.RaidEvent) -> str | None:
@@ -415,4 +438,4 @@ def closed_layout(reg: Registry, ev: rc.RaidEvent, ico) -> discord.ui.LayoutView
 
 # the buttons the layouts place; imported last so `raid_buttons` (which imports this module's helpers at its own
 # bottom) always finds every name above bound, whichever module is imported first
-from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton  # noqa: E402
+from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton, sheet_view  # noqa: E402

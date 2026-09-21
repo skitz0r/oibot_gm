@@ -44,7 +44,7 @@ src/oibot_gm/
                        come from raid_def. No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
   discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer (the one path for an answer), lock_run → roster
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below
-  raid_views.py        pure rendering: sheet_layout / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
+  raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
                        run_times, run_label/run_title/clock12, gaps_text/ask_line; BotProto = what the mixins expect from the client
   raid_buttons.py      persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
