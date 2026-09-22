@@ -855,20 +855,35 @@ class Registry:
     def test_members(self) -> list[Member]:
         return [m for m in self.members.values() if m.test]
 
+    def test_roster(self) -> list[dict]:
+        """The shape of the test bench. `<guild>/test_roster.yaml` in the PRIVATE data repo wins when it exists: a list of
+        {name, character?, cls, spec, rank?} so a guild can rehearse against its own real signup shape. Real names must
+        never be hard-coded here — this repo is public — so the built-in fallback is the invented TEST_NAMES/TEST_MIX."""
+        p = self.store.root / self.key / "test_roster.yaml"
+        if p.exists():
+            rows = yaml.safe_load(p.read_text()) or []
+            return [r for r in rows if isinstance(r, dict) and r.get("name") and r.get("cls")]
+        return [{"name": n, "cls": c, "spec": sp, "rank": rk}
+                for n, (c, sp, rk) in zip(self.TEST_NAMES, [self.TEST_MIX[i % len(self.TEST_MIX)] for i in range(len(self.TEST_NAMES))])]
+
     def seed_test_members(self, count: int, by: str) -> list[Member]:
-        """Create `count` test members with a realistic class/spec/rank mix (idempotent: existing ones are kept)."""
-        count = max(1, min(count, len(self.TEST_NAMES)))
+        """Create `count` test members from `test_roster()` (idempotent: existing ones are kept)."""
+        roster = self.test_roster()
+        count = max(1, min(count, len(roster)))
         made = []
         with self.store.batch(f"{self.key}: test bench seeded by {by}"):
             for i in range(count):
                 uid = self.TEST_BASE + i
                 if uid in self.members:
                     continue
-                name = self.TEST_NAMES[i]
-                cls, spec, rank = self.TEST_MIX[i % len(self.TEST_MIX)]
+                row = roster[i]
+                name, cls, spec, rank = row["name"], row["cls"], row.get("spec") or "", row.get("rank") or "trial"
                 if spec not in self.profile.classes.get(cls, {}):
                     spec = next(iter(self.profile.classes[cls]))
-                m, c = self.add_character(uid, name, name, cls, spec, None, True)
+                # a Discord display name may hold spaces, digits and punctuation; a character name may not, and the
+                # roster file is hand-edited, so derive a legal one rather than letting the whole seed raise
+                character = row.get("character") or re.sub(r"[^A-Za-z]", "", name)[:12] or f"Puppet{i:02d}"
+                m, c = self.add_character(uid, name, character, cls, spec, None, True)
                 m.test = True
                 c.rank = rank
                 c.confirmed_by = by
