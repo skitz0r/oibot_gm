@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from .registry import Registry
+from .registry import CLOCK12, Registry
 
 ROOT = Path(__file__).resolve().parents[2]
 MANUAL = ROOT / "docs" / "manual.md"
@@ -114,10 +114,10 @@ def run_lines(reg: Registry, rs, ev) -> list[str]:
     rd = reg.raid_def(ev.instance)
     soft, hard, confirm = run_times(reg, ev, team)
     day = ev.start.astimezone(reg.tz).date().isoformat()
-    fmt = "%a %d %b %H:%M"
+    fmt = CLOCK12  # 12-hour: what the asker sees in Discord and on the site
     spec_of = {s.display_name: f"{s.character} {s.spec}" for s in ev.signups.values()}
     test = " · TEST RUN (puppets + the tester only)" if team.get("test") else ""
-    out = [f"live run {ev.key} — {rd.get('name', ev.instance)} {reg.local(ev.start, fmt)} ({ev.instance}, size {rc.run_size(reg, ev)}): state {ev.state}{test} · nudge {reg.local(soft, fmt)} · lock {reg.local(hard, fmt)} · confirmations expire {reg.local(confirm, fmt)}"
+    out = [f"live run {ev.key} — {rd.get('name', ev.instance)} {reg.local12(ev.start, fmt)} ({ev.instance}, size {rc.run_size(reg, ev)}): state {ev.state}{test} · nudge {reg.local(soft, fmt)} · lock {reg.local(hard, fmt)} · confirmations expire {reg.local(confirm, fmt)}"
            f" · split strategy {ev.split_strategy or rd.get('split_policy', 'balanced')} · fill {ev.fill_state} · health card {'posted' if ev.health_posted else 'not yet'}" + (f" · LAST LOCK FAILED: {ev.lock_error}" if ev.lock_error else "")]
     pool = reg.team_pool(team["key"])
     unanswered = [m.display_name for m in pool if m.main and str(m.discord_id) not in ev.signups]
@@ -146,7 +146,7 @@ def run_lines(reg: Registry, rs, ev) -> list[str]:
     open_asks = [a for a in ev.fill_asks if a.open]
     done_asks = [a for a in ev.fill_asks if not a.open][-4:]
     if open_asks or done_asks:
-        asks = [f"{a.display_name} ({a.kind}: {a.character} {a.spec} for {a.role}, {a.reason}, deadline {reg.local(a.expires_at, fmt) if a.expires_at else '?'})" for a in open_asks]
+        asks = [f"{a.display_name} ({a.kind}: {a.character} {a.spec} for {a.role}, {a.reason}, deadline {reg.local12(a.expires_at, fmt) if a.expires_at else '?'})" for a in open_asks]
         out.append("  fill asks outstanding: " + (_names(asks) if asks else "none")
                    + (f" · recent answers: {', '.join(f'{a.display_name} {a.answer}' for a in done_asks)}" if done_asks else ""))
     away = [f"{m.display_name}{' (answered)' if str(m.discord_id) in ev.signups else ''}" for m in reg.members.values() if m.absent_on(day)]
@@ -190,7 +190,7 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str
         lines.append(f"raid {rid} ({rd.get('name', rid)}): size {rd.get('size')}, slots {', '.join(rd.get('slots') or []) or 'none (nothing opens)'}, sheet opens {rd['signup_lead_hours']}h before, "
                      f"nudge {'at ' + str(rd['nudge_hours_before']) + 'h before' if rd.get('nudge', True) else 'off'}, locks {rd['lock_hours_before']}h before, confirmations expire {rd['confirm_hours_before']}h before, "
                      f"fill asks time out after {rd['fill_ask_hours']}h, autofill {rd.get('autofill', True)}, open_dm {rd.get('open_dm', False)}, split {rd.get('split_policy')}, weights {rd.get('weights')}, lockout {rd['lockout_days']}d, duration {rd.get('duration_hours')}h, comp {comp}"
-                     + (f", first open {reg.local(fo, '%Y-%m-%d %H:%M')}" if fo else "") + (f", comp targets {over['comp_targets']}" if over.get("comp_targets") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
+                     + (f", first open {reg.local12(fo)}" if fo else "") + (f", comp targets {over['comp_targets']}" if over.get("comp_targets") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
                      + (f", overridden: {', '.join(k for k in over if k not in ('comp_targets', 'comp_groups'))}" if any(k not in ("comp_targets", "comp_groups") for k in over) else ""))
     if cfg.buffs or cfg.families:
         auras = "; ".join(f"{bid} {ov}" for bid, ov in (cfg.buffs or {}).items())

@@ -62,3 +62,28 @@ def test_mobile_login_is_a_tappable_link_desktop_is_a_redirect(reg, rs, monkeypa
     assert d.status_code in (302, 307) and "discord.com" in d.headers["location"] and web.NONCE_COOKIE in d.headers.get("set-cookie", "")
     m = c.get("/auth/login", headers={"user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148"})
     assert m.status_code == 200 and "Continue with Discord" in m.text and "discord.com" in m.text and web.NONCE_COOKIE in m.headers.get("set-cookie", "")
+
+
+def test_opening_a_run_refuses_the_past_and_explains_a_missing_slot(reg, rs, monkeypatch):
+    """The web opens a run from a picked time; a mistyped past date and a raid with no slots both get a sentence
+    that names the fix, not a parser complaint (CLAUDE.md: no typed timestamps, no military time)."""
+    from fastapi.testclient import TestClient
+    from test_mcp import FakeBot, TOKEN, bearer
+
+    monkeypatch.setenv("OIBOT_MCP_TOKEN", TOKEN)
+    c = TestClient(web.create_app(FakeBot(reg, rs)), follow_redirects=False)
+    rid = next(iter(reg.profile.raids))
+    h = {**bearer(), "X-Requested-With": "oibot"}
+    past = c.post(f"/api/raid/{rid}/open", json={"when": "2020-01-02 19:30"}, headers=h)
+    assert past.status_code == 400 and "in the past" in past.json()["error"]
+    assert "PM" in past.json()["error"] and ":30" in past.json()["error"]  # 12-hour, never "19:30"
+    junk = c.post(f"/api/raid/{rid}/open", json={"when": "next tuesday"}, headers=h)
+    assert junk.status_code == 400 and "picker" in junk.json()["error"]
+    reg.set_raid_override(rid, "slots", "", "t")
+    none = c.post(f"/api/raid/{rid}/open", json={"when": ""}, headers=h)
+    assert none.status_code == 400 and "no recurring slots yet" in none.json()["error"] and "Pick a date and time" in none.json()["error"]
+    # slots exist but every occurrence is before the raid opens: say THAT, not "no slots"
+    reg.set_raid_override(rid, "slots", "Tue 19:30", "t")
+    reg.set_raid_override(rid, "first_open", "2030-01-01T15:00", "t")
+    early = c.post(f"/api/raid/{rid}/open", json={"when": ""}, headers=h)
+    assert early.status_code == 400 and "before it opens" in early.json()["error"] and "PM" in early.json()["error"]

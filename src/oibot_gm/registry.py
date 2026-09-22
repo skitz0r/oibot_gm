@@ -211,6 +211,7 @@ RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm")  # true/false raid settings 
 RAID_DEFAULTS = {"lockout_days": 7, "duration_hours": 3, "signup_lead_hours": 120, "lock_hours_before": 24, "confirm_hours_before": 6,
                  "split_policy": "balanced", "nudge": True, "fill_ask_hours": 4, "autofill": True, "open_dm": False}
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
+CLOCK12 = "%a %d %b %I:%M %p"  # the one human-facing clock format; %H:%M is for machines
 TRUE_WORDS = ("true", "yes", "on", "1")
 
 
@@ -480,6 +481,11 @@ class Registry:
         return t.astimezone(self.tz).strftime(fmt)
 
     # ---- persistence
+    def local12(self, value, fmt: str = CLOCK12) -> str:
+        """Guild-local time the way every surface a PERSON reads shows it: 12-hour, no leading zero. ISO and 24-hour
+        stay for machines only (datetime-local inputs, comparisons, the data repo). See CLAUDE.md: no military time."""
+        return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", self.local(value, fmt))
+
     def load_config(self) -> GuildConfig:
         p = self.store.root / self.key / "guild.yaml"
         return GuildConfig(**yaml.safe_load(p.read_text()))

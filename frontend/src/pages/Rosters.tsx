@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Badge, Box, Button, Card, Group, Stack, Tabs, Text, TextInput } from "@mantine/core";
+import { DateTimePicker } from "@mantine/dates";
+import { Badge, Box, Button, Card, Group, Stack, Tabs, Text, Tooltip } from "@mantine/core";
 import { IconSparkles } from "@tabler/icons-react";
 import { api, type Board, type Meta, type RaidRuns, type Rosters, type Sheet } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
@@ -44,18 +45,45 @@ export function RostersPage({ meta }: { meta: Meta }) {
   );
 }
 
+/** The picker hands back "YYYY-MM-DD HH:mm:ss"; show it the way every other time on the site is shown. */
+function fmt12(v: string): string {
+  const d = new Date(v.replace(" ", "T"));
+  return isNaN(d.getTime()) ? v : d.toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+/** Open a run: pick a date and time, or take the raid's next scheduled slot. Nobody types a timestamp, and a raid with
+ *  no slots yet is a prompt to pick one rather than an error after the fact. */
+function OpenRaid({ r, busy, onAct, when, setWhen }: { r: RaidRuns; busy: string | null; onAct: Act; when: string | null; setWhen: (v: string | null) => void }) {
+  const next = r.upcoming[0];
+  const picked = (when || "").trim();
+  const hint = picked ? `Opens a run starting ${fmt12(picked)}` : next ? `The raid's next slot: ${next.start}` : "Pick a date and time, or set recurring slots on the Raids page";
+  return (
+    <Group gap="xs" align="center" wrap="nowrap">
+      <DateTimePicker
+        size="sm" w={240} clearable value={when} onChange={setWhen}
+        placeholder={next ? `next slot: ${next.start}` : "pick a date and time"}
+        minDate={new Date().toISOString().slice(0, 10)}
+        valueFormat="ddd DD MMM h:mm A" timePickerProps={{ format: "12h", withDropdown: true }}
+        popoverProps={{ withinPortal: true }} aria-label="when the run starts"
+      />
+      <Tooltip label={hint} withinPortal>
+        <Button size="sm" leftSection={<IconSparkles size={15} />} loading={busy === `open${r.id}`} disabled={!picked && !next}
+          onClick={() => onAct(`open${r.id}`, `/api/raid/${r.id}/open`, { when: picked })}>
+          {picked ? "Open that run" : next ? "Open next slot" : "Open a run"}
+        </Button>
+      </Tooltip>
+    </Group>
+  );
+}
+
 function RaidCard({ r, meta, busy, onAct, onBoard, onReload }: { r: RaidRuns; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
-  const [when, setWhen] = useState("");
+  const [when, setWhen] = useState<string | null>(null);  // "YYYY-MM-DD HH:mm:ss" from the picker; empty = take the next slot
   const metaLine = [r.slots.length ? `slots ${r.slots.join(", ")}` : "no slots set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
   const first = r.locked.some((e) => e.key === target) ? "locked" : r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
   return (
     <Card>
-      <RaidHeader id={r.id} name={r.name} meta={metaLine} right={
-        <Group gap="xs">
-          <Button variant="default" size="sm" leftSection={<IconSparkles size={15} />} loading={busy === `open${r.id}`} onClick={() => onAct(`open${r.id}`, `/api/raid/${r.id}/open`, { when })}>Open {when ? "at that time" : "next slot"} now</Button>
-          <TextInput size="sm" w={170} placeholder="2026-12-10 19:30" value={when} onChange={(e) => setWhen(e.currentTarget.value)} />
-        </Group>} />
+      <RaidHeader id={r.id} name={r.name} meta={metaLine} right={<OpenRaid r={r} busy={busy} onAct={onAct} when={when} setWhen={setWhen} />} />
       <Tabs defaultValue={first} px="md" pb="md">
         <Tabs.List>
           <Tabs.Tab value="open" rightSection={r.open.length ? <Badge size="xs" color="teal" variant="light">{r.open.length}</Badge> : null}>Open for signup</Tabs.Tab>

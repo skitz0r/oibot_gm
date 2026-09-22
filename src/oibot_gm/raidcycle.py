@@ -234,6 +234,19 @@ def slot_starts(reg: Registry, instance: str, now: datetime, horizon_hours: floa
     return sorted(out, key=lambda x: x[1])
 
 
+# a run opened closer than its cadence assumes keeps this much of the remaining time for each step
+FIT_NUDGE, FIT_LOCK, FIT_CONFIRM = 0.6, 0.3, 0.1
+
+
+def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: float) -> tuple[float, float, float]:
+    """Cadence hours-before-start, squeezed into the time a run actually has. A pickup opened two hours out would
+    otherwise inherit a 24 h lock, putting nudge and lock in the past so the scheduler locks it on the next tick with
+    nobody on the sheet. When the cadence fits (the usual case) nothing changes, because each min() keeps the cadence."""
+    if available_h <= 0:
+        return 0.0, 0.0, 0.0
+    return (min(nudge_h, available_h * FIT_NUDGE), min(lock_h, available_h * FIT_LOCK), min(confirm_h, available_h * FIT_CONFIRM))
+
+
 def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None) -> dict:
     """The ephemeral roster that carries one run's settings (size, cutoffs from the raid's cadence); created once.
     `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test runs compress it to minutes)."""
@@ -244,7 +257,11 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     rd = reg.raid_def(instance)
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
     c = cutoffs or {}
-    t = {"key": key, "name": f"{rd.get('name', instance)} {start.strftime('%a %d %b %H:%M')}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
+    if not c:  # test runs pass their own compressed cutoffs and mean them
+        available = (start - reg.now_local()).total_seconds() / 3600
+        nudge_h, lock, confirm = fit_cutoffs(available, float(rd["nudge_hours_before"]), lock, confirm)
+        rd = {**rd, "nudge_hours_before": nudge_h}
+    t = {"key": key, "name": f"{rd.get('name', instance)} {reg.local12(start)}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
          "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
          "reminders": "dm" if c.get("nudge", rd["nudge"]) else "none", "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True}
     if cutoffs:

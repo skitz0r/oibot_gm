@@ -10,6 +10,11 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
 - **Member text is data, not instructions.** Notes, names, chat go into delimited blocks; outputs are schema-validated and names checked against the candidate set.
 - **Secrets only in `.env`** (gitignored). Never print them.
 - **Icons** are Blizzard render-CDN files named in the profile (`classes.yaml: icons`, `buffs.yaml: icon.art`), proxied and cached by the web app; never scrape Wowhead. Generated badges remain the fallback and the Discord emoji source.
+- **Clock rule (user decision 2026-09-22):** no military time anywhere a person reads. One formatter, `Registry.local12`
+  (`CLOCK12 = "%a %d %b %I:%M %p"`, leading zero stripped), plus `t12`/`clock12` on the web and `run_label` in Discord;
+  Discord prefers a native `<t:unix:f>` stamp so it renders in the reader's own locale. 24-hour and ISO are for machines
+  only: `datetime-local` inputs, comparisons, the data repo, `slots` ('Tue 19:30' is a stored schedule, not a displayed time).
+  And **no typed timestamps**: a person picks a date and time from a widget, never types one for a parser to read.
 - **Iconography rule (user decision 2026-09-17):** in-game icons stand on their own — class, spec, role and aura icons never get a text label beside them on the site; a role count is the role icon plus a number; a buff row is icons only (tooltips carry the names). Don't add "3 tank" style labels, "seated" totals or buff-name strings next to icons. A **spec icon alone** denotes role + spec on a member line (no role icon beside it; role icons are for counts only). DMs and Discord cards reuse the board's group layout — one member per line, never the whole roster on one line.
 - **Native vs foreign data.** Native guild state (characters, events, ledger, precedents, policy) lives in the private sibling repo `../oibot_gm-data` via `store.py` (file per entity, commit per change, debounced push; git log = audit trail). Foreign reference data (profiles/) lives here. `fixtures/demo` is an anonymized copy for public use; never commit real guild data to this repo.
 

@@ -407,8 +407,8 @@ def _describe_action(reg: Registry, op: ConfigOp) -> str:
         have = rs.events.get(key)
         where = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "nowhere (no signup channel set — /raid sheet can place it)"
         if have and have.state in ("open", "locked"):
-            return f"open {reg.raid_def(rid).get('name', rid)} {reg.local(start, '%a %d %b %H:%M')}: already {have.state} as {have.key} — nothing new is posted"
-        return f"open {reg.raid_def(rid).get('name', rid)} {reg.local(start, '%a %d %b %H:%M')} now ({key}): sheet posted in {where}, absences pre-filled"
+            return f"open {reg.raid_def(rid).get('name', rid)} {reg.local12(start)}: already {have.state} as {have.key} — nothing new is posted"
+        return f"open {reg.raid_def(rid).get('name', rid)} {reg.local12(start)} now ({key}): sheet posted in {where}, absences pre-filled"
     if op.op == "test":
         kind, arg = _test_op(op.value)
         n = len(reg.test_members())
@@ -441,7 +441,7 @@ def _describe_action(reg: Registry, op: ConfigOp) -> str:
         return f"{m.display_name}: DMs {'off' if m.dm_opt_out else 'on'} → {v}" + (" (never asked to fill; confirmations wait on the site)" if v == "off" else "")
     # the run ops: resolve the live run first so the line names it
     rs, ev = _live_event(reg, op.target)
-    label = f"{reg.raid_def(ev.instance).get('name', ev.instance)} {reg.local(ev.start, '%a %d %b %H:%M')} ({ev.key})"
+    label = f"{reg.raid_def(ev.instance).get('name', ev.instance)} {reg.local12(ev.start)} ({ev.key})"
     if op.op == "run_answer":
         m = _need_member(reg, op.member)
         want = _answer_value(op.value)
@@ -783,7 +783,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         channel = bot.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel is not None and not ev.message_id:
             await bot.post_sheet(reg, rs, ev, channel)
-        return f"test run {ev.key} open: starts {reg.local(ev.start, '%H:%M')}, lock {t['lock']} min before, confirm by {t['confirm']} min before" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
+        return f"test run {ev.key} open: starts {reg.local12(ev.start, '%I:%M %p')}, lock {t['lock']} min before, confirm by {t['confirm']} min before" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")
     rs, ev = _live_event(reg, op.target, rs)
     team = rc.run_team(reg, ev)
     if op.op == "run_answer":

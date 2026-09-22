@@ -92,8 +92,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
    out after answering, ✈ = away that day, pre-filled from an absence). With more than one
    character you pick which one. Absences pre-fill *No thanks*. With `open_dm` on [off] every main is also
-   DMed when the sheet opens. Officers can open a sheet early with `/raid open <raid>` (next slot, or a
-   one-off `YYYY-MM-DD HH:MM`) or the Rosters page.
+   DMed when the sheet opens. Officers can open a sheet early from the
+   Rosters page: pick a date and time with the picker beside the raid's name, or press the button with nothing picked
+   to take the raid's next scheduled slot. `/raid open <raid> [when]` does the same in Discord. A run opened closer
+   than its cadence assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
+   hours instead of inheriting a lock time that has already passed.
 2. **Nudge** — at `nudge_hours_before` [halfway between open and lock: lock + (lead − lock) / 2, so 72 h for a
    sheet that opens 120 h out and locks at 24 h] the officer channel gets a health card (headcount, tank/healer
    tiles with who could cover via offspec/alt, buff coverage, non-responders, double-booked members) and mains

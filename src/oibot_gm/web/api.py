@@ -445,7 +445,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             upcoming = [{"slot": slot, "start": t12(reg, start), "opens": t12(reg, start - timedelta(hours=float(rd["signup_lead_hours"])))}
                         for slot, start in rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if f"{rc.run_key(rid, start)}-{start.date().isoformat()}" not in rs.events][:6]
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "lockout_days": int(rd["lockout_days"]),
-                        "opened": bool(fo and fo <= now), "first_open": reg.local(fo, "%a %d %b %Y %H:%M") if fo else None,
+                        "opened": bool(fo and fo <= now), "first_open": reg.local12(fo, "%a %d %b %Y %I:%M %p") if fo else None,
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "upcoming": upcoming})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
         return {"raids": out, "orphans": orphans, "tz": reg.config.timezone}
@@ -730,7 +730,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         reg = v.reg
         if rid not in reg.profile.raids:
             return JSONResponse({"error": "unknown raid"}, status_code=400)
-        now = reg.now_local()
+        now, rd = reg.now_local(), reg.raid_def(rid)
         when = (d.get("when") or "").strip()
         try:
             if when:
@@ -738,10 +738,15 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             else:
                 nxt = rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS)
                 if not nxt:
-                    return JSONResponse({"error": "no slots configured for this raid (or none before it opens) — pass a date and time"}, status_code=400)
+                    fo = reg.first_open(rid)
+                    why = (f"its slots all fall before it opens on {reg.local12(fo)}" if rd["slots"] and fo and fo > now
+                           else "it has no recurring slots yet")
+                    return JSONResponse({"error": f"No next slot for this raid: {why}. Pick a date and time instead, or set it up on the Raids page."}, status_code=400)
                 start = nxt[0][1]
         except ValueError:
-            return JSONResponse({"error": "time looks like 2026-12-10 19:30"}, status_code=400)
+            return JSONResponse({"error": "that date and time didn't parse — pick one with the picker"}, status_code=400)
+        if start < now - timedelta(minutes=5):  # a mistyped year would open a run the scheduler may close at once
+            return JSONResponse({"error": f"{reg.local12(start)} is in the past — pick a time from now on"}, status_code=400)
         rs = bot.raids.store(reg)
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
             ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name))
@@ -851,7 +856,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
-                        "window": [reg.local(ws, "%a %d %b %H:%M"), reg.local(we, "%a %d %b %H:%M")], "live": sum(1 for e in rs.live() if e.instance == rid)})
+                        "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid)})
         return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES)}
 
     @app.post("/api/admin/raid")
