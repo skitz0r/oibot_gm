@@ -39,7 +39,8 @@ src/oibot_gm/
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client; loot sessions (MockEvent, carries `guild`/`origin`): /mock flow on shadow data, or a real raid via /raid loot
   lootctx.py           RegistryLootContext: a registered guild's ledger/precedents/wishlists/compiled policy for the loot pipeline; bot.loot_ctx(session) picks mock vs real
-  registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member)
+  registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
+                       PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|plan main|alt|roles|char …|absent … (members);
                        /roster overview|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers; `poll` retired, PlanButton is a stub);
@@ -73,7 +74,8 @@ src/oibot_gm/
                        sheet refuses presses from real members
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
-  discord_help.py      /help (no LLM, by tier), /ask, @mention outside the officer channels and DMs → help_answer
+  discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
+                       @mentions and DMs routed by intent under the plain-text policy)
   wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms
                        (a select inside ui.Label, or a TextInput only for prose), owner-only presses + a guard re-checked on
                        every press, FLOWS registry (@flow), no-typing dates/times (day/hour/minute selects, 12-hour,
@@ -83,13 +85,15 @@ src/oibot_gm/
                        flows_config · flows_roster · flows_register · flows_misc. Commands and card buttons call FLOWS[name].
                        tests/wizard_harness.py drives a flow end to end with fake interactions and lints every screen
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id), describe() diff,
-                       apply() via the same code paths as commands, apply_async(bot=) for card-posting channels and announced absences; request text in <request>
+                       apply() via the same code paths as commands, apply_async(bot=) for card-posting channels and announced absences; request text in <request>;
+                       OP_GROUP (every op in one capability group), bind_self (own-record scope decided in code, never by the model),
+                       authorize → Registry.may_plain; confirm_for (an officer records a member's Confirm/Can't through answer_placement_for)
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr
   mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
                        that call the RUNNING bot's /api/* over HTTP as the owner (`Authorization: Bearer $OIBOT_MCP_TOKEN` → web/app.py `mcp_viewer`,
                        via=mcp in the request log). Never a second code path: every write is the site's route. `.mcp.json` (repo root, no secrets)
                        registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py
-  discord_policy.py    /policy show|edit|reload, /loot-rule, /comp-rule, /gm change, @mention in the ops channel
+  discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change; handle_change for every plain-text path (ConfigConfirmView re-authorizes the presser)
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks
   discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence
   ops.py               ops feed (channel line per action; errors DM the owner)
@@ -99,7 +103,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands
 frontend/              React + Mantine app (Vite). components/board/* (SheetCard, BoardView, SplitModal, BoardPreview, FillModal), components/Cells.tsx (icon-only cells),
-                       components/ConfirmModal.tsx (useConfirm), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours). `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
+                       components/ConfirmModal.tsx (useConfirm), components/PlainPermissions.tsx (Ops page: who may do what, where), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours). `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
                        `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
