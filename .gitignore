@@ -29,3 +29,5 @@ __pycache__/
 .vscode/
 data_cycle/
 data_copy*/
+.claude/worktrees/
+.claude/settings.local.json
