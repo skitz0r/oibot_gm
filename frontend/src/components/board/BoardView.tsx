@@ -6,7 +6,7 @@ import { SPLIT_LABEL } from "../../pages/Raids";
 import { RaidWide } from "../GroupsBlock";
 import { Eyebrow, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
-import { Aura, RosterHeader, SeatLine, chunk, sortBank, live, type Act, type BankSort, type OnBoard } from "./shared";
+import { Aura, RosterHeader, SeatLine, SplitReasonLine, chunk, sortBank, splitBank, live, type Act, type BankSort, type OnBoard } from "./shared";
 import { SplitModal } from "./SplitModal";
 import css from "../../pages/rosters.module.css";
 
@@ -27,6 +27,8 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
   const [bankSort, setBankSort] = useState<BankSort>(() => { try { return (localStorage.getItem("oibot.bankSort") as BankSort) || "signup"; } catch { return "signup"; } });
   const pickSort = (v: string) => { setBankSort(v as BankSort); try { localStorage.setItem("oibot.bankSort", v); } catch { /* per-viewer convenience only */ } };
   const bank = sortBank(board.bank, bankSort, meta.roles);
+  const { left, rest } = splitBank(board, bank);  // leftovers: joiners the full roster(s) left out
+  const reason = e.split?.reason || null;
   const caps = meta.group_caps || {};
   const placed = board.rosters.reduce((n, r) => n + r.groups.reduce((m, g) => m + g.length, 0), 0);
 
@@ -99,7 +101,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
   return (
     <Box mt="lg">
       <Group justify="space-between" wrap="wrap" mb="xs">
-        <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
+        <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}{canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
         {!locked && (
           <Group gap="xs">
             <Button size="xs" variant="light" leftSection={<IconSparkles size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
@@ -116,7 +118,12 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
           </Group>
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
             {board.bank.length === 0 && <Text size="xs" c="dimmed">everyone who joined is placed</Text>}
-            {bank.map((s) => chip(s, null))}
+            {left.length > 0 && <Text size="xs" fw={700}>Leftovers ({left.length})</Text>}
+            {left.map((s) => chip(s, null))}
+            {left.length > 0 && locked && reason && <SplitReasonLine meta={meta} r={reason} />}
+            {left.length > 0 && board.another && <Text size="xs" c="dimmed">{board.another}</Text>}
+            {left.length > 0 && rest.length > 0 && <Text size="xs" fw={700} mt={6}>Bench</Text>}
+            {rest.map((s) => chip(s, null))}
           </Stack>
           <Text size="xs" c="dimmed" mt={6}>Drag into a group. Drag a placed name back here to bench them. Dropping on someone swaps.</Text>
         </Box>

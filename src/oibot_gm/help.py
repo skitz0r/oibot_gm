@@ -125,6 +125,9 @@ def run_lines(reg: Registry, rs, ev) -> list[str]:
     out.append(f"  joined: {_names(f'{s.display_name} ({spec_of[s.display_name]})' for s in ev.by_status('in'))}")
     outs = [s.display_name + (f" ({s.source})" if s.source != "member" else "") for s in ev.by_status("out")]
     out.append(f"  bench: {_names(s.display_name for s in ev.by_status('sub'))} · no thanks: {_names(outs, 15)} · not answered: {_names(unanswered, 15)}")
+    reason = rc.run_split_reason(reg, ev) if ev.state in ("open", "locked") else None
+    if reason:  # computed in code: the headcount allows more runs than the tank/healer minimums do
+        out.append(f"  why not more runs: {rc.split_reason_text(reason)}")
     if ev.state == "open":
         if ev.layout:
             out.append("  board (layout the lock will use): " + " | ".join(f"g{i + 1}: {', '.join(g)}" for i, g in enumerate(ev.layout) if g))
@@ -135,7 +138,7 @@ def run_lines(reg: Registry, rs, ev) -> list[str]:
         conf = {c["display_name"]: c for c in rc.confirmations(reg, ev)}
         for i, r in enumerate(ev.all_rosters):
             groups = " | ".join(f"g{gi + 1}: " + ", ".join(f"{n} ({spec_of.get(n, '?')})" for n in g) for gi, g in enumerate(r.groups) if g)
-            out.append(f"  roster {i + 1} ({len(r.selected)} seated): {groups or 'empty'}")
+            out.append(f"  roster {i + 1} ({len(r.selected)} rostered): {groups or 'empty'}")
         by = {"yes": [], "no": [], None: []}
         for n, c in conf.items():
             by.setdefault(c.get("answer"), []).append(n)

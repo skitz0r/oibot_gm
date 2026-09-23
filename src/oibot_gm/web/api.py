@@ -396,8 +396,25 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             boards.append({"n": i + 1, "rostered": len(r.selected), "synergy": r.synergy_value or None, "advisories": list(r.advisories[:6]),
                            "groups": [[seat_json(by[m], conf, uids) for m in g if m in by] for g in r.groups], "summary": roster_summary(reg, r)})
         bench = rosters[0].benched if rosters else []
+        # joiners the full roster(s) left out (listed apart from the Bench answers), and whether the leftovers + bench +
+        # pool could make another run: one line, no action
+        live = ev.state not in ("done", "cancelled")
+        left = rc.leftovers(reg, ev, rosters) if live else []
+        another = rc.another_run_hint(reg, ev, rosters, rc.run_split_reason(reg, ev)) if left else None
         return {"n_groups": rc.groups_per_roster(reg, size), "group_size": int(reg.profile.comp_rules["group_size"]), "size": size,
-                "bank": [seat_json(p, conf, uids, signed) for p in bench], "rosters": boards}
+                "bank": [seat_json(p, conf, uids, signed) for p in bench], "rosters": boards,
+                "leftovers": [p.signup_name for p in left], "another": another}
+
+    def split_json(reg, ev) -> dict:
+        """How many runs the joiners support and, when the headcount allows more than the tank/healer minimums do, why
+        (structured for the builder's icons, plus the plain line for MCP and the help context)."""
+        rd = reg.raid_def(ev.instance)
+        size = rc.run_size(reg, ev)
+        players = rc.players_for(reg, ev)
+        rb = reg.role_bounds(ev.instance, size)
+        reason = rc.split_reason(reg, players, size, rb)
+        return {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
+                "runs": rc.how_many_rosters(reg, players, size, rb), "reason": reason, "reason_text": rc.split_reason_text(reason) if reason else None}
 
     def ev_json(reg, rs, ev, full: bool = True) -> dict:
         t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
@@ -425,8 +442,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "absences": absences, "double_booked": [reg.members[u].display_name for u in busy if u in reg.members],
                 "needs": rc.needs(reg, ev, t) if live else None,
                 "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
-                "split": {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
-                          "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), rc.run_size(reg, ev), reg.role_bounds(ev.instance, rc.run_size(reg, ev))) if live else 1},
+                "split": split_json(reg, ev) if live else {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"), "runs": 1, "reason": None, "reason_text": None},
                 "confirmations": conf_rows,
                 "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer, "expires_at": a.expires_at, "pair": a.pair} for a in ev.fill_asks],
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
@@ -601,7 +617,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             except Exception as e:  # noqa: BLE001
                 return JSONResponse({"error": f"solver: {e}"}, status_code=400)
         syn = [r.synergy_value for r in rosters]
-        return {"strategy": strategy, "layout": layout, "board": board_json(v.reg, ev, rosters, []), "synergy": syn, "total": sum(syn), "gap": (max(syn) - min(syn)) if syn else 0}
+        sp = split_json(v.reg, ev)  # why there aren't more rosters, when the roles are what holds it back
+        return {"strategy": strategy, "layout": layout, "board": board_json(v.reg, ev, rosters, []), "synergy": syn, "total": sum(syn), "gap": (max(syn) - min(syn)) if syn else 0,
+                "reason": sp["reason"], "reason_text": sp["reason_text"]}
 
     @app.post("/api/run/{key}/strategy")
     async def run_strategy(request: Request, key: str):

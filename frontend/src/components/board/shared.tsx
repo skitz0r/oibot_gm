@@ -1,5 +1,5 @@
 import { Box, Group, Text, Tooltip } from "@mantine/core";
-import type { Board, BoardRoster, Meta, Seat, Sheet, Signup } from "../../api";
+import type { Board, BoardRoster, Meta, Seat, Sheet, Signup, SplitReason } from "../../api";
 import { GameIcon } from "../Icons";
 import { classColour } from "../../theme";
 
@@ -72,3 +72,26 @@ export function chunk(flat: string[][], n: number): string[][][] {
 
 /** "{raid} · {when}" — how a run is named to people (never its key). */
 export const runName = (e: { raid: string; when: string }) => `${e.raid} · ${e.when}`;
+
+const NTH = ["first", "second", "third", "fourth", "fifth"];
+/** Why the joiners make fewer runs than the headcount allows (computed server-side, raidcycle.split_reason): the
+ *  shortfall is role icon + number, never "2 tank". */
+export function SplitReasonLine({ meta, r }: { meta: Meta; r: SplitReason }) {
+  const lead = r.roles_allow === 0
+    ? (r.bodies_allow <= 1 ? "1 run is short" : `Enough people for ${r.bodies_allow} runs — even one is short`)
+    : `Enough people for ${r.bodies_allow} runs — a ${NTH[r.run - 1] || `run ${r.run}`} is short`;
+  return (
+    <Group gap={6} wrap="wrap">
+      <Text size="xs" c={r.roles_allow === 0 ? "red.5" : "yellow.5"}>{lead}</Text>
+      {Object.entries(r.short).map(([role, n]) => (
+        <Group key={role} gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={14} title={role} /><Text size="xs" style={{ fontVariantNumeric: "tabular-nums" }}>{n}</Text></Group>
+      ))}
+    </Group>
+  );
+}
+
+/** The bank split for display: joiners the full roster(s) left out first ("Leftovers"), then everyone else. */
+export function splitBank(board: Board, bank: Seat[]): { left: Seat[]; rest: Seat[] } {
+  const names = new Set(board.leftovers || []);
+  return { left: bank.filter((s) => names.has(s.display_name)), rest: bank.filter((s) => !names.has(s.display_name)) };
+}

@@ -53,7 +53,10 @@ export interface GroupSummary {
 export interface Signup { uid: string; display_name: string; character: string; cls: string; spec: string; offspec: string | null; role: string; status: string; label: string; source: string; note: string | null; pin: "in" | "out" | null }
 export interface Seat { display_name: string; character: string; cls: string; spec: string; role: string; uid?: string | null; answer?: string | null; signed_at?: string | null }
 export interface BoardRoster { n: number; rostered: number; synergy: number | null; advisories: string[]; groups: Seat[][]; summary: GroupSummary }
-export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[] }
+/** `leftovers` = joiners the full roster(s) left out (names, also in `bank`); `another` = one line when leftovers + bench + pool could make another run. */
+export interface Board { n_groups: number; group_size: number; size: number; bank: Seat[]; rosters: BoardRoster[]; leftovers?: string[]; another?: string | null }
+/** Why the joiners make fewer runs than the headcount allows: run `run` is short these tank/healer counts (roles_allow 0 = not even one). */
+export interface SplitReason { bodies_allow: number; roles_allow: number; run: number; short: Record<string, number> }
 export interface Confirmation { uid: string | null; display_name: string; character: string; cls: string; spec: string; role: string; roster: number; answer: string | null; asked_at: string | null }
 export interface Sheet {
   key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; live: boolean; fill_state: string;
@@ -61,7 +64,7 @@ export interface Sheet {
   timeline?: { nudge: string; lock: string; confirm: string; locked_at?: string | null };
   signups?: Signup[]; not_answered?: Seat[]; absences?: { display_name: string; start: string; end: string; reason: string | null; signed: boolean }[]; double_booked?: string[];
   needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean; rev?: string;
-  split?: { strategy: string; policy: string; runs: number };
+  split?: { strategy: string; policy: string; runs: number; reason?: SplitReason | null; reason_text?: string | null };
   confirmations?: Confirmation[];
   fill_asks?: { display_name: string; kind: string; character: string; spec: string; role: string; reason: string; answer: string | null }[];
   callouts?: { display_name: string; hours_before: number; late: boolean }[]; log?: string[];
@@ -77,7 +80,7 @@ export interface RaidRule {
   overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; live: number;
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[] }
-export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number }
+export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; reason?: SplitReason | null; reason_text?: string | null }
 export interface FillAskRow { display_name: string; kind: string; character: string; spec: string; cls: string | null; role: string; reason: string; pair: number | null }
 /** What Fill seats would send: the shortfall, who is still being waited on, the next batch of asks. */
 export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size: number }; waiting: string[]; batch: FillAskRow[] }

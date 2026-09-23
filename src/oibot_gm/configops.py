@@ -448,7 +448,7 @@ def _describe_action(reg: Registry, op: ConfigOp) -> str:
         cur = ev.signups.get(str(m.discord_id))
         now = f"now {rc.LABELS[cur.status]} as {cur.character}" if cur else "hasn't answered"
         char = f" as {op.character}" if op.character else ""
-        effect = {"in": " — seated and asked to confirm" if ev.state == "locked" else "", "sub": " — keeps the seat until set No thanks" if ev.state == "locked" and ev.seat_of(m.display_name) else "",
+        effect = {"in": " — rostered and asked to confirm" if ev.state == "locked" else "", "sub": " — keeps the seat until set No thanks" if ev.state == "locked" and ev.seat_of(m.display_name) else "",
                   "out": " — seat freed, the fill engine looks for cover" if ev.state == "locked" and ev.seat_of(m.display_name) else ""}[want]
         return f"{label}: {m.display_name} → {rc.LABELS[want]}{char} ({now}){effect}"
     if op.op == "run_lock":
@@ -686,7 +686,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         ev.layout = layout
         ev.log.append(f"{by}: auto-filled the board")
         rs.save(ev, "board auto-filled")
-        return f"{ev.key}: board auto-filled ({sum(len(g) for g in layout)} seated in {len(layout)} groups)"
+        return f"{ev.key}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
     if op.op == "run_fill" and (op.value or "preview").strip().lower() == "preview":
         from . import raidcycle as rc
 

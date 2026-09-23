@@ -381,7 +381,7 @@ def test_guild_state_reads(reg, rs):
     ev.fill_asks.append(rc.FillAsk(discord_id=ms[7].discord_id, display_name=ms[7].display_name, kind="sub", role="melee", character=ms[7].main.label, spec=ms[7].main.spec, reason="short 15", expires_at=ev.start.isoformat()))
     rs.save(ev, "ask")
     s = help_mod.guild_state(reg, rs, ms[0].discord_id, True)
-    assert "roster 1 (5 seated): g1:" in s and f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec})" in s
+    assert "roster 1 (5 rostered): g1:" in s and f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec})" in s
     assert f"confirmations: confirmed {ms[0].display_name}" in s and ms[1].display_name in s.split("waiting")[1].split("declined")[0]
     assert f"fill asks outstanding: {ms[7].display_name} (sub: {ms[7].main.label} {ms[7].main.spec} for melee, short 15, deadline" in s
     assert f"bench after lock: {ms[5].display_name} · short: {rc.run_size(reg, ev) - 5} seat(s)" in s
