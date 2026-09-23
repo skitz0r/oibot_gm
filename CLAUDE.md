@@ -15,6 +15,11 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
   Discord prefers a native `<t:unix:f>` stamp so it renders in the reader's own locale. 24-hour and ISO are for machines
   only: `datetime-local` inputs, comparisons, the data repo, `slots` ('Tue 19:30' is a stored schedule, not a displayed time).
   And **no typed timestamps**: a person picks a date and time from a widget, never types one for a parser to read.
+- **Wizard rule (user decision 2026-09-22):** a Discord command never asks for a value a parser must read. An argument
+  that needs a PARSER (a date, a time, a slot, a spec name, a run key, a 'rank=3 main=2' string) is removed and picked
+  inside a wizard; an argument Discord already renders as a WIDGET (a member, a role, a channel, a fixed Choice, a bool)
+  stays. Prose (a reason, a note, a character name) may be typed — it is validated, not parsed. Numbers are preset
+  selects. The command opens the wizard; the wizard writes nothing before its Confirm.
 - **Iconography rule (user decision 2026-09-17):** in-game icons stand on their own — class, spec, role and aura icons never get a text label beside them on the site; a role count is the role icon plus a number; a buff row is icons only (tooltips carry the names). Don't add "3 tank" style labels, "seated" totals or buff-name strings next to icons. A **spec icon alone** denotes role + spec on a member line (no role icon beside it; role icons are for counts only). DMs and Discord cards reuse the board's group layout — one member per line, never the whole roster on one line.
 - **Native vs foreign data.** Native guild state (characters, events, ledger, precedents, policy) lives in the private sibling repo `../oibot_gm-data` via `store.py` (file per entity, commit per change, debounced push; git log = audit trail). Foreign reference data (profiles/) lives here. `fixtures/demo` is an anonymized copy for public use; never commit real guild data to this repo.
 
@@ -67,6 +72,14 @@ src/oibot_gm/
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
   discord_help.py      /help (no LLM, by tier), /ask, @mention outside the officer channels and DMs → help_answer
+  wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms
+                       (a select inside ui.Label, or a TextInput only for prose), owner-only presses + a guard re-checked on
+                       every press, FLOWS registry (@flow), no-typing dates/times (day/hour/minute selects, 12-hour,
+                       resolve_local = DST-safe), lint() = what the Discord API would refuse, checked offline
+  wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
+  wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow) · flows_raid ·
+                       flows_config · flows_roster · flows_register · flows_misc. Commands and card buttons call FLOWS[name].
+                       tests/wizard_harness.py drives a flow end to end with fake interactions and lints every screen
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id), describe() diff,
                        apply() via the same code paths as commands, apply_async(bot=) for card-posting channels and announced absences; request text in <request>
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr

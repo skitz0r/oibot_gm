@@ -56,14 +56,19 @@ on the sheet in Discord.
 
 - **Register / plan a main**: press *Register / plan my main* in #register (class → spec → optional
   offspec → first and last name; Forever characters have two-word names; leave them blank until the
-  character exists) or use `/register` / `/me plan main`.
+  character exists) or use `/register` / `/me plan main`. Each opens the same picker (class → spec → offspec →
+  names). Nothing is typed but the name, and a refused name reopens the form with your picks kept.
   Pressing the button again replaces a planned main (roster placement and rank carry over). A named
   character waits for an officer to confirm it.
-- **Alts**: *Add an alt* button, `/me char add`, `/me plan alt`.
+- **Alts**: *Add an alt* button, `/me char add` (first and last name, like the button), `/me plan alt`.
 - **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main` (or the crown on the website).
   **Delete**: the bin icon on the website removes a character and its roster placements (`/me char retire`
   keeps history instead).
-- **Name a planned character at launch**: `/me char name`.
+- **Name a planned character at launch**: `/me char name`: pick the planned character (skipped when there is
+  only one), then type first and last name.
+- `/me char spec|main|retire` take no arguments: pick the character from your own list. Spec choices are always
+  that character's class, and retire asks you to confirm. `/apply` opens the same class/spec picker, then a form
+  for name, logs, when you can raid and anything else.
 - **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` (or the per-character
   flex toggles on the website) adds roles you'd play beyond that.
 - **Absences**: `/me absent list` shows yours with a **Clear** button on each; `/me absent clear` does the same.
@@ -85,7 +90,7 @@ dps counts, and — what drives everything — its **slots** and **cadence**. At
 sheet opens before it. The owner sets all of this with `/gm config raid`, on the Raids page, or in plain
 text (`raid_set`). There are no standing rosters: every run is built from its own sheet.
 
-A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. `Tue 19:30`. A raid can have
+A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. Tue 7:30 PM (on the site and in Discord you pick the weekday and time; nothing is typed). A raid can have
 several. One **run** = one slot occurrence = one sheet. A run is **open**, then **locked**, then **done**
 (or **cancelled**). Members never keep standing availability; they answer each sheet.
 
@@ -97,7 +102,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    character you pick which one. Absences pre-fill *No thanks*. With `open_dm` on [off] every main is also
    DMed when the sheet opens. Officers can open a sheet early from the
    Rosters page: pick a date and time with the picker beside the raid's name, or press the button with nothing picked
-   to take the raid's next scheduled slot. `/raid open <raid> [when]` does the same in Discord. A run opened closer
+   to take the raid's next scheduled slot. `/raid open` does the same in Discord: pick the raid, then press *Open the next slot*, pick another upcoming
+   run, or choose *Another day and time…* (day, hour and minutes from lists; nothing typed). The confirm screen shows
+   the time in guild time and in your own. A raid with no run times offers *Set this raid's run times →*. A run opened closer
    than its cadence assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
    hours instead of inheriting a lock time that has already passed.
 2. **Nudge** — at `nudge_hours_before` [halfway between open and lock: lock + (lead − lock) / 2, so 72 h for a
@@ -161,7 +168,7 @@ standing instructions, officer pins, and the raid's **weights** — rank (core >
 alt, sat out last window, earlier signup. Officers tune the weights per raid on the Raids page.
 
 If you can't make a run you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
-`/raid out [note]` (the note goes to the run's updates thread for officers, not to the public sheet). After
+`/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
 lock this releases your seat immediately and the bench is asked.
 
 **Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
@@ -195,7 +202,8 @@ stack (the strongest present one counts) and **who benefits** from it, as points
 mana user, or a specific spec. Examples: put Blood Pact into Fortitude's family if they turn out not to
 stack; set Sanctity Aura to raid if it reaches the whole raid; set "only mana users" on Intellect. Plain
 text works too ("fortitude and blood pact don't stack", "sanctity aura is raid-wide", "hunters don't
-benefit from blood pact"), as does `/gm config aura`. Amber on the page marks a guild override; *Reset*
+benefit from blood pact"), as does `/gm config aura` (pick the buff, then what to change; *Who benefits* changes one beneficiary at a
+time and leaves the rest of the family's map alone). Amber on the page marks a guild override; *Reset*
 returns to the game defaults.
 
 ## 6. Analytics (officers)
@@ -211,10 +219,15 @@ returns to the game defaults.
 
 ## 7. Officers: day-to-day commands
 
-- Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`.
+- Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`. They take at most a member
+  (Discord's own picker); the character, rank or roster is picked from a list and confirmed before anything saves.
+  `/roster confirm` alone walks the unconfirmed characters.
 - Applications: `/roster applicants`, `/roster applicant`, or the buttons on the review card.
 - Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|end` (officers) and `/raid out` (anyone).
-- Policy: `/gm policy show|edit|reload`, `/gm rule loot|comp` — prose is compiled by Claude into rules and
+  They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
+  and answer, then asks which character. `/raid cancel` asks for an optional reason in a box.
+- Policy: `/gm policy show|edit|reload`, `/gm rule loot|comp` (the bot shows the end of the current document; press
+  **Write the rule** and write it in a paragraph box) — prose is compiled by Claude into rules and
   an officer confirms the reading before it goes live.
 - Plain-text config: `/gm change <text>` or @mention the bot in the ops or analytics channel — the bot
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
@@ -227,13 +240,16 @@ returns to the game defaults.
 
 `/gm config owner` (first claim needs the Discord server owner or Manage Server), then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
-`signup-channel`, `absences-channel`, `applications-channel`, `officer-role`, `timezone` — or all of these on
+`signup-channel`, `absences-channel`, `applications-channel`, `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
+now and the next run become before saving) — or all of these on
 the site's **Config** page (channel pickers per function, officer roles, timezone, who may ask the bot,
 the about text; changing a channel posts its card the same way the command does) — and per raid
-`/gm config raid raid:<id> slots:'Tue 19:30, Thu 20:00' signup_lead_hours: nudge: nudge_hours_before: lock_hours_before: confirm_hours_before: fill_ask_hours:`
-(also `autofill`, `open_dm`, weights, split_policy, first_open, lockout, duration, comp, notes). Nothing opens until a raid has slots.
-The same settings are on the Raids page and in plain text (`raid_set`). Comp bounds are one thing with three
-spellings: `tanks:'2-3'` on the command ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
+`/gm config raid`: pick the raid, then a section — Run times (nights + hour + minutes), Signup cadence (Standard /
+Short notice / Same week, or Custom… hour by hour), Group make-up, Selection weights, Lockout & length, First lockout
+opens, Behaviour (nudge, fill seats automatically, DM on open, split policy, fill-ask expiry), Notes, Reset. Changes
+collect in a draft; Save shows them as sentences with the next three runs and writes them as one change. Nothing
+opens until a raid has run times. The same settings are on the Raids page and in plain text (`raid_set`). Comp
+bounds: *Group make-up* in `/gm config raid` ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
 plain text (same for healers and dps).
 
 **Officer roles.** `/gm config officer-role role:@Officers` (add; `remove:true` to take one away), the Config page's
@@ -276,18 +292,20 @@ of their characters.
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
   raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "Marrow is back, clear her absence" (by start
   date when she has several); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
-- *Test bench:* "seed 20 test members", "open a test Barrow Deeps run" (the `/gm test run` defaults: starts in
-  40 min, nudge 32, lock 25, confirm 15 min before), "clear the test bench".
+- *Test bench:* "seed 20 test members", "open a test Barrow Deeps run" (`/gm test run` preselects the Standard
+  tempo: starts in 40 min, nudge 32, lock 25, confirm 15 min before; Quick is 20/16/12/8 and Slow 90/70/55/35), "clear the test bench".
 - Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
   DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are still not settable anywhere.
 
 ## 8a. Rehearsing with the test bench (officers)
 
-`/gm test seed count:20` creates puppet members (fake Discord ids, a realistic class mix and ranks, mains
-confirmed). `/gm test run raid:<id> start_in:40 lock_in:25 confirm_in:15 nudge_in:32` opens a real sheet for
-that raid in the signup channel with minute-level cadence, so the unchanged scheduler goes through nudge →
-lock → confirmations → expiry → fill → close within the hour. `/gm test answer` makes puppets answer (a random
-mix with `join: bench: out:` counts, or one puppet with a status); after lock a puppet's *No thanks* is a
+`/gm test seed` asks how many puppet members to create (5, 10, 20 or the whole bench; fake Discord ids, a
+realistic class mix and ranks, mains confirmed). `/gm test run` is one screen: the raid (when there is more than
+one), a tempo (Quick, Standard or Slow) and whether to DM everyone when it opens, then **Open the test run**. It
+opens a real sheet for that raid in the signup channel with minute-level cadence, so the unchanged scheduler goes through nudge →
+lock → confirmations → expiry → fill → close within the hour. `/gm test answer` offers **Random mix** (how many
+Join, Bench and No thanks) or **One member** (pick a puppet, then Join, Bench or No thanks), and stays open so you
+can answer again; after lock a puppet's *No thanks* is a
 callout. `/gm test clear` cancels the test runs and deletes every puppet and their placements.
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,

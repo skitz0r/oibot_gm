@@ -6,8 +6,6 @@ officer role; /gm config needs the owner."""
 from __future__ import annotations
 
 import asyncio
-import inspect
-import os
 import time
 from pathlib import Path
 
@@ -20,7 +18,6 @@ from .registry import RANKS, Registry, RegistryError
 from .store import GitStore
 from .wizard_flows import FLOWS
 
-CLASS_CHOICES = [app_commands.Choice(name=c, value=c) for c in ("Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid")]
 RANK_CHOICES = [app_commands.Choice(name=r, value=r) for r in RANKS]
 STARTED = time.time()
 
@@ -84,37 +81,6 @@ def char_line(ico, c) -> str:
     return f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · _{', '.join(flags)}_"
 
 
-class NameModal(discord.ui.Modal):
-    """Last step of the registration wizard: optional character name (blank = planned, name it at launch)."""
-
-    name = discord.ui.TextInput(label="First name (blank = not created yet)", required=False, max_length=12)  # labels max 45 chars
-    surname = discord.ui.TextInput(label="Last name (Forever names are two words)", required=False, max_length=12)
-
-    def __init__(self, reg: Registry, cls: str, spec: str, offspec: str | None, roles: list[str], slot: str):
-        super().__init__(title=f"{cls} {spec} — almost done"[:45])
-        self.reg, self.cls, self.spec, self.offspec, self.roles, self.slot = reg, cls, spec, offspec, roles, slot
-
-    async def on_submit(self, interaction: discord.Interaction):
-        reg, bot = self.reg, interaction.client
-        name = str(self.name.value).strip()
-        try:
-            if name:
-                m, c = reg.add_character(interaction.user.id, interaction.user.display_name, name, self.cls, self.spec, self.offspec, self.slot == "main", surname=str(self.surname.value).strip() or None)
-            else:
-                m, c = reg.set_plan(interaction.user.id, interaction.user.display_name, self.cls, self.spec, self.offspec, self.slot)
-            if self.roles:
-                primary = self.roles[0]
-                reg.set_roles(interaction.user.id, interaction.user.display_name, primary, self.roles[1:])
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        what = f"{'Registered' if name else 'Planned'} {'main' if self.slot == 'main' else 'alt'}: **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''}"
-        roles = f" · roles: {self.roles[0]}" + (f" (+{', '.join(self.roles[1:])})" if len(self.roles) > 1 else "") if self.roles else ""
-        tail = " An officer will confirm the character." if name else " Add the name at launch with `/me char name`."
-        await interaction.response.send_message(f"✅ {what}{roles}.{tail} `/me view` shows everything.", ephemeral=True)
-        await bot.ops.emit(reg.config, "info", f"**{m.display_name}** {'registered' if name else 'planned'} {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ', alt'})" + (f" · roles {self.roles}" if self.roles else "") + ("" if not name else " — pending confirmation"))
-
-
 class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(?P<action>register|alt|status)"):
     """Persistent registration card: Register/Plan main → class → spec/offspec → roles → name (optional)."""
 
@@ -148,51 +114,7 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
                 lines.append("Rosters: " + ", ".join(rosters))
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
-        slot = "main" if self.action == "register" else "alt"
-        view = discord.ui.View(timeout=600)
-        cls_sel = discord.ui.Select(placeholder="Class", options=[discord.SelectOption(label=c, value=c, emoji=_emoji(bot.ico("class", c))) for c in reg.profile.classes])
-        spec_sel = discord.ui.Select(placeholder="Main spec (pick a class first)", options=[discord.SelectOption(label="—", value="-")], disabled=True)
-        off_sel = discord.ui.Select(placeholder="Offspec (optional)", options=[discord.SelectOption(label="none", value="-")], disabled=True)
-        go = discord.ui.Button(label="Continue → name", style=discord.ButtonStyle.primary, disabled=True)
-        state: dict = {"roles": []}  # roles derive from spec (primary) and offspec (flex); /me plan roles adds more
-
-        def specs_for(c):
-            return [discord.SelectOption(label=s, value=s, description=reg.profile.spec(c, s).role) for s in reg.profile.classes[c]]
-
-        async def on_cls(i: discord.Interaction):
-            state["cls"] = cls_sel.values[0]
-            state.pop("spec", None)
-            spec_sel.options = specs_for(state["cls"])
-            spec_sel.placeholder = f"{state['cls']}: main spec"
-            spec_sel.disabled = False
-            off_sel.options = [discord.SelectOption(label="none", value="-")] + specs_for(state["cls"])
-            off_sel.disabled = False
-            go.disabled = True
-            await i.response.edit_message(view=view)
-
-        async def on_spec(i: discord.Interaction):
-            state["spec"] = spec_sel.values[0]
-            go.disabled = False
-            await i.response.edit_message(view=view)
-
-        async def on_off(i: discord.Interaction):
-            state["offspec"] = None if off_sel.values[0] == "-" else off_sel.values[0]
-            await i.response.defer()
-
-        async def on_go(i: discord.Interaction):
-            await i.response.send_modal(NameModal(reg, state["cls"], state["spec"], state.get("offspec"), state["roles"], slot))
-
-        cls_sel.callback, spec_sel.callback, off_sel.callback, go.callback = on_cls, on_spec, on_off, on_go
-        for item in (cls_sel, spec_sel, off_sel, go):
-            view.add_item(item)
-        await interaction.response.send_message(f"**{'Register or plan your main' if slot == 'main' else 'Add an alt'}** — class, spec, optional offspec (your role follows the spec; an offspec in another role counts as flexibility), then a name (or leave it blank until launch).", view=view, ephemeral=True)
-
-
-def _emoji(raw: str):
-    try:
-        return discord.PartialEmoji.from_str(raw) if raw else None
-    except Exception:  # noqa: BLE001
-        return None
+        await FLOWS["register"](interaction, reg, slot="main" if self.action == "register" else "alt")
 
 
 def registration_card(reg: Registry) -> discord.Embed:
@@ -211,6 +133,93 @@ def registration_view() -> discord.ui.View:
     return v
 
 
+# ---------------- /apply (recruitment intake): module level so the apply wizard can post the same card
+def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
+    ico = ico or (lambda kind, key: "")
+    e = discord.Embed(title=f"Application · {a.name}", colour=TEAL, description=f"{ico('class', a.cls)} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''} · from **{a.display_name}** (<@{a.discord_id}>)")
+    if a.logs_url:
+        e.add_field(name="Logs", value=a.logs_url[:200], inline=False)
+    if a.availability:  # the applicant's free-text raid times (Applicant field, not a member setting)
+        e.add_field(name="When they can raid", value=a.availability[:300], inline=False)
+    if a.about:
+        e.add_field(name="About", value=a.about[:600], inline=False)
+    e.set_footer(text=f"status: {a.status}" + (f" · {a.decided_by}: {a.decision_note or ''}" if a.decided_by else " · officers: Accept / Decline below, or /roster applicant"))
+    return e
+
+async def decide_application(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None):
+    try:
+        a, char = reg.decide(discord_id, accept, interaction.user.display_name, note)
+    except RegistryError as e:
+        await interaction.response.send_message(f"❌ {e}", ephemeral=True) if not interaction.response.is_done() else await interaction.followup.send(f"❌ {e}", ephemeral=True)
+        return
+    verdict = f"✅ Accepted {a.display_name} as {a.name} (trial, confirmed)" if accept else f"⛔ Declined {a.display_name} ({a.name})"
+    if interaction.response.is_done():
+        await interaction.followup.send(verdict, ephemeral=True)
+    else:
+        await interaction.response.send_message(verdict, ephemeral=True)
+    await interaction.client.ops.emit(reg.config, "info", f"{interaction.user.display_name}: {verdict}" + (f" — {note}" if note else ""))
+    try:
+        user = await interaction.client.fetch_user(a.discord_id)
+        if accept:
+            await user.send(f"✅ Your application for **{a.name}** to {reg.config.name} was accepted by {interaction.user.display_name}. You're registered as a trial; /me view shows your status." + (f"\n\n{note}" if note else ""))
+        else:
+            await user.send(f"Your application for **{a.name}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "") + "\n\nYou can apply again later.")
+    except Exception:  # noqa: BLE001
+        pass
+    ch_id = reg.config.applications_channel_id or reg.config.ops_channel_id
+    if a.message_id and ch_id:
+        ch = interaction.client.get_channel(ch_id)
+        try:
+            msg = await ch.fetch_message(a.message_id)
+            await msg.edit(embed=application_embed(reg, a, getattr(interaction.client, "ico", None)), view=None)
+        except Exception:  # noqa: BLE001
+            pass
+
+class DeclineModal(discord.ui.Modal, title="Decline application"):
+    note = discord.ui.TextInput(label="Note to the applicant (optional)", style=discord.TextStyle.paragraph, required=False, max_length=400)
+
+    def __init__(self, reg: Registry, discord_id: int):
+        super().__init__()
+        self.reg, self.discord_id = reg, discord_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await decide_application(interaction, self.reg, self.discord_id, False, str(self.note.value))
+
+class ApplicationView(discord.ui.View):
+    def __init__(self, reg: Registry, discord_id: int):
+        super().__init__(timeout=None)
+        self.reg, self.discord_id = reg, discord_id
+
+    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not is_officer(interaction, self.reg):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        await decide_application(interaction, self.reg, self.discord_id, True, None)
+
+    @discord.ui.button(label="Decline…", style=discord.ButtonStyle.secondary)
+    async def decline(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not is_officer(interaction, self.reg):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        await interaction.response.send_modal(DeclineModal(self.reg, self.discord_id))
+
+
+
+async def post_application(client, reg: Registry, a) -> str:
+    """Post an application's review card (Accept / Decline) where officers see it; used by /apply and the apply
+    wizard. Returns a line saying where it went."""
+    ch_id = reg.config.applications_channel_id or reg.config.ops_channel_id
+    ch = client.get_channel(ch_id) if ch_id else None
+    if not ch:
+        await client.ops.emit(reg.config, "warn", f"application from {a.display_name} ({a.name}, {a.cls} {a.spec}) — no applications/ops channel configured; use /roster applicants")
+        return "no applications channel is set, so officers will find it under /roster applicants"
+    msg = await ch.send(embed=application_embed(reg, a, getattr(client, "ico", None)), view=ApplicationView(reg, a.discord_id))
+    a.message_id = msg.id
+    reg.save_applicant(a, f"application card posted for {a.name}")
+    return f"posted for review in #{getattr(ch, 'name', 'applications')}"
+
+
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
     async def need(interaction: discord.Interaction) -> Registry | None:
         reg = guilds.for_interaction(interaction)
@@ -225,33 +234,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             if v:
                 return getattr(v, "value", v)
         return None
-
-    async def spec_autocomplete(interaction: discord.Interaction, current: str):
-        """Specs filtered by the class picked in the same command (or by the named character's class)."""
-        reg = guilds.for_interaction(interaction)
-        if reg is None:
-            return []
-        cls = _ns(interaction, "class", "class_", "cls")
-        if not cls:
-            name = _ns(interaction, "name")
-            hit = reg.find(name) if name else None
-            if not hit and name and interaction.user.id in reg.members:
-                hit = next(((reg.members[interaction.user.id], c) for c in reg.members[interaction.user.id].active() if c.label.lower() == name.lower()), None)
-            cls = hit[1].cls if hit else None
-        specs = list(reg.profile.classes.get(cls, {})) if cls else sorted({s for c in reg.profile.classes.values() for s in c})
-        return [app_commands.Choice(name=s, value=s) for s in specs if current.lower() in s.lower()][:25]
-
-    async def own_char_autocomplete(interaction: discord.Interaction, current: str):
-        """The caller's characters, planned ones by label."""
-        reg = guilds.for_interaction(interaction)
-        if reg is None or interaction.user.id not in reg.members:
-            return []
-        out = []
-        for c in reg.members[interaction.user.id].active():
-            key = c.name or c.label
-            if current.lower() in key.lower():
-                out.append(app_commands.Choice(name=f"{c.label} · {c.cls} {c.spec}"[:100], value=key))
-        return out[:25]
 
     async def member_char_autocomplete(interaction: discord.Interaction, current: str):
         """Characters of the member picked in the same command (officer commands with a `member` option)."""
@@ -284,58 +266,30 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         return out[:25]
 
     # ---------------- /register
-    @tree.command(name="register", description="Register your character (first one becomes your main)")
-    @app_commands.describe(name="First name", class_="Class", spec="Main spec", offspec="Offspec (optional)", main="Make this your main", surname="Last name (Forever names are two words)")
-    @app_commands.rename(class_="class")
-    @app_commands.choices(class_=CLASS_CHOICES)
-    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def register(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None, main: bool = False, surname: str | None = None):
+    @tree.command(name="register", description="Register a character: pick class and spec, then name it (blank = plan it)")
+    @app_commands.describe(main="Make this your main")
+    async def register(interaction: discord.Interaction, main: bool = False):
         reg = await need(interaction)
         if not reg:
             return
-        try:
-            m, c = reg.add_character(interaction.user.id, interaction.user.display_name, name, class_.value, spec, offspec, main, surname=surname)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ Registered {char_line(ico, c)}. An officer will confirm it. Your characters: " + ", ".join(x.label + (" (main)" if x.is_main else "") for x in m.active()), ephemeral=True)
-        await ops.emit(reg.config, "info", f"**{m.display_name}** registered {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ''}) — pending confirmation")
+        m = reg.members.get(interaction.user.id)
+        await FLOWS["register"](interaction, reg, slot="main" if main or not (m and m.main) else "alt")
 
     # ---------------- /plan (pre-launch: what are you going to play?)
     me = app_commands.Group(name="me", description="Your plan, characters and absences")
     plan = app_commands.Group(name="plan", description="Pre-launch: what you're planning to play (no character name needed)", parent=me)
 
-    @plan.command(name="main", description="What you plan to main")
-    @app_commands.rename(class_="class")
-    @app_commands.choices(class_=CLASS_CHOICES)
-    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def plan_main(interaction: discord.Interaction, class_: app_commands.Choice[str], spec: str, offspec: str | None = None):
+    @plan.command(name="main", description="What you plan to main (no name needed yet)")
+    async def plan_main(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        try:
-            m, c = reg.set_plan(interaction.user.id, interaction.user.display_name, class_.value, spec, offspec, "main")
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ Planned main: {char_line(ico, c)}. Your role follows the spec; extra roles you'd play: `/me plan roles`.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} plans to main {c.cls} {c.spec}")
+        if reg:
+            await FLOWS["register"](interaction, reg, slot="main", plan_only=True)
 
     @plan.command(name="alt", description="What you plan to play as an alt")
-    @app_commands.rename(class_="class")
-    @app_commands.choices(class_=CLASS_CHOICES)
-    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def plan_alt(interaction: discord.Interaction, class_: app_commands.Choice[str], spec: str, offspec: str | None = None):
+    async def plan_alt(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        try:
-            m, c = reg.set_plan(interaction.user.id, interaction.user.display_name, class_.value, spec, offspec, "alt")
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ Planned alt: {char_line(ico, c)}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} plans an alt {c.cls} {c.spec}")
+        if reg:
+            await FLOWS["register"](interaction, reg, slot="alt", plan_only=True)
 
     @plan.command(name="roles", description="Extra roles your main can play besides its spec (flex); also on the website per character")
     @app_commands.choices(primary=ROLE_CHOICES, flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
@@ -357,68 +311,35 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     # ---------------- /char
     char = app_commands.Group(name="char", description="Manage your characters", parent=me)
 
-    @char.command(name="name", description="At launch: give your planned main (or alt) its real character name")
-    @app_commands.choices(slot=[app_commands.Choice(name="main", value="main"), app_commands.Choice(name="alt", value="alt")])
-    async def char_name(interaction: discord.Interaction, name: str, slot: app_commands.Choice[str] | None = None, surname: str | None = None):
+    @char.command(name="name", description="At launch: give your planned character its real name")
+    async def char_name(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        try:
-            m, c = reg.name_character(interaction.user.id, name, slot.value if slot else "main", surname=surname)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {char_line(ico, c)} — an officer will confirm it.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"**{m.display_name}** named their planned {slot.value if slot else 'main'}: {c.label} ({c.cls} {c.spec}) — pending confirmation")
+        if reg:
+            await FLOWS["char_name"](interaction, reg)
 
     @char.command(name="add", description="Register another character (alt)")
-    @app_commands.rename(class_="class")
-    @app_commands.choices(class_=CLASS_CHOICES)
-    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def char_add(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None):
-        await register.callback(interaction, name, class_, spec, offspec, False)
+    async def char_add(interaction: discord.Interaction):
+        reg = await need(interaction)
+        if reg:
+            await FLOWS["register"](interaction, reg, slot="alt")
 
     @char.command(name="main", description="Make one of your characters your main (rank follows you)")
-    @app_commands.autocomplete(name=own_char_autocomplete)
-    async def char_main(interaction: discord.Interaction, name: str):
+    async def char_main(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        try:
-            m, c, old = reg.set_main(interaction.user.id, name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ Main is now {char_line(ico, c)}" + (f" (was {old.name}, now alt)" if old else ""), ephemeral=True)
-        await ops.emit(reg.config, "info", f"**{m.display_name}** changed main {old.label if old else '-'} → {c.label}")
+        if reg:
+            await FLOWS["char_main"](interaction, reg)
 
     @char.command(name="spec", description="Change a character's spec/offspec")
-    @app_commands.autocomplete(name=own_char_autocomplete, spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def char_spec(interaction: discord.Interaction, name: str, spec: str, offspec: str | None = None):
+    async def char_spec(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        try:
-            c = reg.set_spec(interaction.user.id, name, spec, offspec)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {char_line(ico, c)}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name}: {c.label} now {c.spec}{'/' + c.offspec if c.offspec else ''}")
+        if reg:
+            await FLOWS["char_spec"](interaction, reg)
 
     @char.command(name="retire", description="Retire a character (history is kept)")
-    @app_commands.autocomplete(name=own_char_autocomplete)
-    async def char_retire(interaction: discord.Interaction, name: str):
+    async def char_retire(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        try:
-            c = reg.retire(interaction.user.id, name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ Retired {c.label}.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} retired {c.label}")
+        if reg:
+            await FLOWS["char_retire"](interaction, reg)
 
     @char.command(name="list", description="Show your registered characters")
     async def char_list(interaction: discord.Interaction):
@@ -436,8 +357,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     async def roster_autocomplete(interaction: discord.Interaction, current: str):
         reg = guilds.for_interaction(interaction)
         return [app_commands.Choice(name=t, value=t) for t in (reg.config.roster_keys() if reg else []) if current.lower() in t.lower()][:25]
-
-    team_autocomplete = roster_autocomplete
 
     absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)", parent=me)
 
@@ -475,99 +394,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message("\n".join(lines)[:1900], view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)
 
 
-    # ---------------- /apply (recruitment intake)
-    def application_embed(reg: Registry, a) -> discord.Embed:
-        e = discord.Embed(title=f"Application · {a.name}", colour=TEAL, description=f"{ico('class', a.cls)} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''} · from **{a.display_name}** (<@{a.discord_id}>)")
-        if a.logs_url:
-            e.add_field(name="Logs", value=a.logs_url[:200], inline=False)
-        if a.availability:  # the applicant's free-text raid times (Applicant field, not a member setting)
-            e.add_field(name="When they can raid", value=a.availability[:300], inline=False)
-        if a.about:
-            e.add_field(name="About", value=a.about[:600], inline=False)
-        e.set_footer(text=f"status: {a.status}" + (f" · {a.decided_by}: {a.decision_note or ''}" if a.decided_by else " · officers: Accept / Decline below, or /roster applicant"))
-        return e
-
-    async def decide_application(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None):
-        try:
-            a, char = reg.decide(discord_id, accept, interaction.user.display_name, note)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True) if not interaction.response.is_done() else await interaction.followup.send(f"❌ {e}", ephemeral=True)
-            return
-        verdict = f"✅ Accepted {a.display_name} as {a.name} (trial, confirmed)" if accept else f"⛔ Declined {a.display_name} ({a.name})"
-        if interaction.response.is_done():
-            await interaction.followup.send(verdict, ephemeral=True)
-        else:
-            await interaction.response.send_message(verdict, ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name}: {verdict}" + (f" — {note}" if note else ""))
-        try:
-            user = await interaction.client.fetch_user(a.discord_id)
-            if accept:
-                await user.send(f"✅ Your application for **{a.name}** to {reg.config.name} was accepted by {interaction.user.display_name}. You're registered as a trial; /me view shows your status." + (f"\n\n{note}" if note else ""))
-            else:
-                await user.send(f"Your application for **{a.name}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "") + "\n\nYou can apply again later.")
-        except Exception:  # noqa: BLE001
-            pass
-        ch_id = reg.config.applications_channel_id or reg.config.ops_channel_id
-        if a.message_id and ch_id:
-            ch = interaction.client.get_channel(ch_id)
-            try:
-                msg = await ch.fetch_message(a.message_id)
-                await msg.edit(embed=application_embed(reg, a), view=None)
-            except Exception:  # noqa: BLE001
-                pass
-
-    class DeclineModal(discord.ui.Modal, title="Decline application"):
-        note = discord.ui.TextInput(label="Note to the applicant (optional)", style=discord.TextStyle.paragraph, required=False, max_length=400)
-
-        def __init__(self, reg: Registry, discord_id: int):
-            super().__init__()
-            self.reg, self.discord_id = reg, discord_id
-
-        async def on_submit(self, interaction: discord.Interaction):
-            await decide_application(interaction, self.reg, self.discord_id, False, str(self.note.value))
-
-    class ApplicationView(discord.ui.View):
-        def __init__(self, reg: Registry, discord_id: int):
-            super().__init__(timeout=None)
-            self.reg, self.discord_id = reg, discord_id
-
-        @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
-        async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
-            if not is_officer(interaction, self.reg):
-                await interaction.response.send_message("Officers only.", ephemeral=True)
-                return
-            await decide_application(interaction, self.reg, self.discord_id, True, None)
-
-        @discord.ui.button(label="Decline…", style=discord.ButtonStyle.secondary)
-        async def decline(self, interaction: discord.Interaction, _: discord.ui.Button):
-            if not is_officer(interaction, self.reg):
-                await interaction.response.send_message("Officers only.", ephemeral=True)
-                return
-            await interaction.response.send_modal(DeclineModal(self.reg, self.discord_id))
-
     @tree.command(name="apply", description="Apply to join the guild")
-    @app_commands.describe(name="Character name", class_="Class", spec="Main spec", offspec="Offspec (optional)", logs="Warcraft Logs / armory link (optional)", raid_times="When you can raid (optional)", about="Anything else (optional)")
-    @app_commands.rename(class_="class")
-    @app_commands.choices(class_=CLASS_CHOICES)
-    @app_commands.autocomplete(spec=spec_autocomplete, offspec=spec_autocomplete)
-    async def apply(interaction: discord.Interaction, name: str, class_: app_commands.Choice[str], spec: str, offspec: str | None = None, logs: str | None = None, raid_times: str | None = None, about: str | None = None):
+    async def apply(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        try:
-            a = reg.apply(interaction.user.id, interaction.user.display_name, name, class_.value, spec, offspec, logs, raid_times, about)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ Application received for **{a.name}** ({a.cls} {a.spec}). An officer will review it; you'll get a DM either way.", ephemeral=True)
-        ch_id = reg.config.applications_channel_id or reg.config.ops_channel_id
-        ch = interaction.client.get_channel(ch_id) if ch_id else None
-        if ch:
-            msg = await ch.send(embed=application_embed(reg, a), view=ApplicationView(reg, a.discord_id))
-            a.message_id = msg.id
-            reg.save_applicant(a, f"application card posted for {a.name}")
-        else:
-            await ops.emit(reg.config, "warn", f"application from {a.display_name} ({a.name}, {a.cls} {a.spec}) — no applications/ops channel configured; use /roster applicants")
+        if reg:
+            await FLOWS["register"](interaction, reg, mode="apply")
 
     @me.command(name="view", description="Your plan, characters and upcoming absences")
     async def me(interaction: discord.Interaction):
@@ -588,7 +419,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me plan roles` to add more", inline=True)
         e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)
         ups = m.upcoming_absences(today)
-        e.add_field(name="Upcoming absences", value="\n".join(f"{a.start}" + (f" → {a.end}" if a.end != a.start else "") for a in ups) or "none", inline=True)
+        e.add_field(name="Upcoming absences", value="\n".join(reg.span_label(a.start, a.end) for a in ups) or "none", inline=True)
         e.set_footer(text="Sheets: answer each run in the signup channel (Join / Bench / No thanks). Attendance and loot history appear here once the raid ledger is live.")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -620,56 +451,34 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         for cls, lines in by_cls.items():
             e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
         pend = reg.pending()
-        e.set_footer(text=f"★ main · ⏳ unconfirmed ({len(pend)}) · /roster confirm <name>")
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        from .flows_roster import confirm_pending_view
 
-    @roster.command(name="confirm", description="Confirm a registered character")
-    @app_commands.autocomplete(name=any_char_autocomplete)
-    async def roster_confirm(interaction: discord.Interaction, name: str):
+        e.set_footer(text=f"★ main · ⏳ unconfirmed ({len(pend)})")
+        view = confirm_pending_view(reg, len(pend))
+        await interaction.response.send_message(embed=e, view=view or discord.utils.MISSING, ephemeral=True)
+
+    @roster.command(name="confirm", description="Confirm registered characters: pick from the unconfirmed ones, one after another")
+    async def roster_confirm(interaction: discord.Interaction):
         reg = await officer(interaction)
         if not reg:
             return
-        try:
-            m, c = reg.confirm(name, interaction.user.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ Confirmed {char_line(ico, c)} ({m.display_name})", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} confirmed {c.label} ({m.display_name})")
-        try:
-            user = await interaction.client.fetch_user(m.discord_id)
-            await user.send(f"✅ {c.label} was confirmed by {interaction.user.display_name}. Welcome aboard.")
-        except Exception:  # noqa: BLE001
-            pass
+        await FLOWS["roster_confirm"](interaction, reg)
 
-    @roster.command(name="rank", description="Set a character's rank")
-    @app_commands.autocomplete(name=any_char_autocomplete)
-    @app_commands.choices(rank=RANK_CHOICES)
-    async def roster_rank(interaction: discord.Interaction, name: str, rank: app_commands.Choice[str]):
+    @roster.command(name="rank", description="Set a member's character rank: pick the character and rank")
+    @app_commands.describe(member="whose character")
+    async def roster_rank(interaction: discord.Interaction, member: discord.User):
         reg = await officer(interaction)
         if not reg:
             return
-        try:
-            m, c = reg.set_rank(name, rank.value, interaction.user.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {char_line(ico, c)}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {c.label} → {rank.value}")
+        await FLOWS["roster_rank"](interaction, reg, member=member)
 
-    @roster.command(name="set-main", description="Set a member's main on their behalf")
-    @app_commands.autocomplete(name=member_char_autocomplete)
-    async def roster_set_main(interaction: discord.Interaction, member: discord.User, name: str):
+    @roster.command(name="set-main", description="Set a member's main on their behalf: pick the character")
+    @app_commands.describe(member="whose main")
+    async def roster_set_main(interaction: discord.Interaction, member: discord.User):
         reg = await officer(interaction)
         if not reg:
             return
-        try:
-            m, c, old = reg.officer_set_main(member.id, name, interaction.user.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {m.display_name}'s main is now {c.label}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} set {m.display_name}'s main → {c.label}")
+        await FLOWS["roster_set_main"](interaction, reg, member=member)
 
     @roster.command(name="overview", description="Who is planning to play what: classes, roles, flexibility, buff coverage")
     @app_commands.describe(size="raid size to check against (default: the first raid's size or 20)")
@@ -711,35 +520,21 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
         await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
 
-    @roster.command(name="add", description="Add a member's character to a roster (defaults to their main)")
-    @app_commands.autocomplete(roster=roster_autocomplete, character=member_char_autocomplete)
-    async def roster_add(interaction: discord.Interaction, member: discord.User, character: str | None = None, roster: str | None = None):
+    @roster.command(name="add", description="Add a member's character to a roster: pick the roster and character")
+    @app_commands.describe(member="who to add")
+    async def roster_add(interaction: discord.Interaction, member: discord.User):
         reg = await officer(interaction)
         if not reg:
             return
-        key = roster or reg.config.roster_keys()[0]
-        try:
-            m, c = reg.roster_add(member.id, key, interaction.user.display_name, character, display_name=member.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {char_line(ico, c)} ({m.display_name}) → roster **{key}** ({len(reg.roster_members(key))} characters)", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} added {m.display_name} ({c.label}) to roster {key}")
+        await FLOWS["roster_add"](interaction, reg, member=member)
 
-    @roster.command(name="remove", description="Remove a member from a roster (they can still sign as sub)")
-    @app_commands.autocomplete(roster=roster_autocomplete)
-    async def roster_remove(interaction: discord.Interaction, member: discord.User, roster: str | None = None):
+    @roster.command(name="remove", description="Take a member off a roster: pick one they're on (they can still sign as sub)")
+    @app_commands.describe(member="who to remove")
+    async def roster_remove(interaction: discord.Interaction, member: discord.User):
         reg = await officer(interaction)
         if not reg:
             return
-        key = roster or reg.config.roster_keys()[0]
-        try:
-            m = reg.roster_remove(member.id, key, interaction.user.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {m.display_name} removed from **{key}**", ephemeral=True)
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} removed {m.display_name} from roster {key}")
+        await FLOWS["roster_remove"](interaction, reg, member=member)
 
     @roster.command(name="members", description="A roster's characters by role")
     @app_commands.autocomplete(roster=roster_autocomplete)
@@ -793,7 +588,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not opens:
             await interaction.response.send_message("No open applications.", ephemeral=True)
             return
-        await interaction.response.send_message(embeds=[application_embed(reg, a) for a in opens[:10]], ephemeral=True)
+        await interaction.response.send_message(embeds=[application_embed(reg, a, ico) for a in opens[:10]], ephemeral=True)
 
     @roster.command(name="applicant", description="Accept or decline an application by member")
     @app_commands.choices(decision=[app_commands.Choice(name="accept", value="accept"), app_commands.Choice(name="decline", value="decline")])
@@ -918,39 +713,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.followup.send(f"✅ {len(msgs)} analytics card(s) posted in {channel.mention}; they re-post at the bottom after every registry change, with a change-log line above.", ephemeral=True)
         await ops.emit(reg.config, "info", f"analytics channel → #{channel.name} (by {interaction.user.display_name})")
 
-    async def buff_autocomplete(interaction: discord.Interaction, current: str):
-        reg = guilds.for_interaction(interaction)
-        return [app_commands.Choice(name=f"{b.short} ({b.id})"[:100], value=b.id) for b in (reg.profile.buffs if reg else []) if current.lower() in b.id or current.lower() in b.short.lower()][:25]
-
     @config.command(name="aura", description="Owner: what we know about a buff — scope, stacking family, strength, status, who benefits")
-    @app_commands.autocomplete(buff=buff_autocomplete)
-    @app_commands.describe(buff="buff id", scope="party or raid", family="family id or another buff's id (don't stack); 'own' = stands alone", strength="1 = the family's full value", status="confirmed / reported / assumed", benefits="who benefits from the buff's FAMILY, e.g. 'all: 3, mana: 2' (keys: all physical spell mana melee ranged healer tank spec:Name)")
-    @app_commands.choices(scope=[app_commands.Choice(name=x, value=x) for x in ("party", "raid")], status=[app_commands.Choice(name=x, value=x) for x in ("confirmed", "reported", "assumed")])
-    async def cfg_aura(interaction: discord.Interaction, buff: str, scope: app_commands.Choice[str] | None = None, family: str | None = None, strength: float | None = None, status: app_commands.Choice[str] | None = None, benefits: str | None = None, note: str | None = None, reset: bool = False):
+    async def cfg_aura(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        try:
-            msg = [reg.clear_aura_overrides(interaction.user.display_name, buff)] if reset else []
-            if not reset:
-                for f, val in (("scope", scope.value if scope else None), ("family", family), ("strength", strength), ("status", status.value if status else None), ("note", note)):
-                    if val is not None:
-                        msg.append(reg.set_buff_override(buff, f, val, interaction.user.display_name))
-                if benefits is not None:  # one key at a time: naming 'mana: 2' must not erase the family's other beneficiaries
-                    for kv in str(benefits).replace(";", ",").split(","):
-                        k, _, v = kv.partition(":")
-                        if k.strip():
-                            msg.append(reg.set_family_override(reg.buff(buff).family_id, f"value:{k.strip()}", v.strip(), interaction.user.display_name))
-            b = reg.buff(buff)
-            fam = reg.profile.families[b.family_id]
-            eff = f"**{b.short}** · {b.scope} · family **{fam.name}** ({b.family_id}) ×{b.strength:g} · {b.status} · benefits: " + (", ".join(f"{k} {v:g}" for k, v in fam.value.items()) or "nobody")
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff, ephemeral=True)
+        if reg:
+            await FLOWS["aura"](interaction, reg)
 
     @config.command(name="absences-channel", description="Owner: public channel with the 'I'll be away' card; the bot posts one line per absence there")
     async def cfg_absences_channel(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -994,76 +761,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
 
-    @config.command(name="raid", description="Owner: raid rules — slots, signup/lock/confirm hours, lockout, duration, comp, weights")
-    @app_commands.autocomplete(raid=instance_autocomplete)
-    @app_commands.choices(split_policy=[app_commands.Choice(name=x, value=x) for x in ("balanced", "first", "rotation")])
-    @app_commands.describe(slots="recurring run times, e.g. 'Tue 19:30, Thu 20:00' ('none' clears)", split_policy="how to split when more join than one run seats", signup_lead_hours="sheet opens this many hours before the slot", lock_hours_before="roster locks this many hours before", confirm_hours_before="unanswered confirmations expire this many hours before", fill_ask_hours="a fill DM with no answer counts as no after this many hours", autofill="ask replacements automatically after lock", open_dm="DM every raider when the sheet opens", weights="rank=3 main=2 sat_out=2 signup_order=1")
-    async def cfg_raid(interaction: discord.Interaction, raid: str, slots: str | None = None, split_policy: app_commands.Choice[str] | None = None, nudge: bool | None = None, nudge_hours_before: float | None = None, signup_lead_hours: float | None = None, lock_hours_before: float | None = None, confirm_hours_before: float | None = None, fill_ask_hours: float | None = None, autofill: bool | None = None, open_dm: bool | None = None, weights: str | None = None, lockout_days: int | None = None, duration_hours: float | None = None, tanks: str | None = None, healers: str | None = None, dps: str | None = None, notes: str | None = None, first_open: str | None = None, reset: bool = False):
+    @config.command(name="raid", description="Owner: a raid's rules — run times, signup cadence, make-up, weights, lockout, notes")
+    async def cfg_raid(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        try:
-            if reset:
-                msg = [reg.clear_raid_override(raid, interaction.user.display_name)]
-            else:
-                msg = []
-                if slots is not None:
-                    msg.append(reg.set_raid_override(raid, "slots", "" if slots.strip().lower() in ("none", "clear", "-") else slots, interaction.user.display_name))
-                for field, val in (("split_policy", split_policy.value if split_policy else None), ("nudge", nudge), ("nudge_hours_before", nudge_hours_before), ("signup_lead_hours", signup_lead_hours), ("lock_hours_before", lock_hours_before), ("confirm_hours_before", confirm_hours_before), ("fill_ask_hours", fill_ask_hours), ("autofill", autofill), ("open_dm", open_dm), ("lockout_days", lockout_days), ("duration_hours", duration_hours), ("notes", notes), ("first_open", first_open)):
-                    if val is not None:
-                        msg.append(reg.set_raid_override(raid, field, val, interaction.user.display_name))
-                for part in (weights or "").replace(",", " ").split():
-                    k, _, v = part.partition("=")
-                    msg.append(reg.set_raid_override(raid, f"weight_{k.strip()}", v.strip(), interaction.user.display_name))
-                for role, val in (("tank", tanks), ("healer", healers), ("dps", dps)):
-                    if val:
-                        lo, _, hi = val.replace("–", "-").partition("-")
-                        msg.append(reg.set_raid_override(raid, f"{role}_min", lo.strip(), interaction.user.display_name))
-                        if hi.strip():
-                            msg.append(reg.set_raid_override(raid, f"{role}_max", hi.strip(), interaction.user.display_name))
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        rd = reg.raid_def(raid)
-        comp = rd.get("comp") or {}
-        fo = reg.first_open(raid)
-        eff = (f"**{rd.get('name', raid)}** · {rd.get('size')}-player · slots {', '.join(reg.slot_label(x) for x in rd['slots']) or 'none'} · opens {rd['signup_lead_hours']}h before · locks {rd['lock_hours_before']}h before · confirm by {rd['confirm_hours_before']}h before"
-               f" · split {rd['split_policy']} · lockout {rd['lockout_days']}d" + (f" from <t:{int(fo.timestamp())}:f>" if fo else "") + f" · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items()) + " · weights " + " ".join(f"{k}={v}" for k, v in rd['weights'].items()))
-        await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff + (f"\n{rd['notes']}" if rd.get("notes") else ""), ephemeral=True)
+        if reg:
+            await FLOWS["raid_config"](interaction, reg)
 
     @config.command(name="about", description="Owner: one-paragraph public blurb for the static guide ('About the guild')")
-    async def cfg_about(interaction: discord.Interaction, text: str):
+    async def cfg_about(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        reg.config.about = text.strip()[:600] or None
-        reg.save_config("about text updated")
-        await interaction.response.send_message("✅ About text saved.", ephemeral=True)
+        if reg:
+            await FLOWS["about"](interaction, reg)
 
-    @config.command(name="timezone", description="Owner: IANA timezone for schedules, e.g. America/Los_Angeles")
-    async def cfg_tz(interaction: discord.Interaction, timezone: str):
+    @config.command(name="timezone", description="Owner: the guild's timezone for every run time, lock and lockout")
+    async def cfg_tz(interaction: discord.Interaction):
         reg = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        from zoneinfo import ZoneInfo
-
-        try:
-            ZoneInfo(timezone)
-        except Exception:  # noqa: BLE001
-            await interaction.response.send_message("❌ Unknown timezone (use IANA names like America/Los_Angeles).", ephemeral=True)
-            return
-        reg.config.timezone = timezone
-        reg.save_config(f"timezone → {timezone}")
-        await interaction.response.send_message(f"✅ Timezone {timezone}", ephemeral=True)
+        if reg:
+            await FLOWS["timezone"](interaction, reg)
 
     @config.command(name="show", description="Effective configuration")
     async def cfg_show(interaction: discord.Interaction):
@@ -1113,95 +827,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     # ---------------- /gm test: seed puppet members and rehearse the whole cycle in Discord within the hour
     test = app_commands.Group(name="test", description="Officers: test bench — seed fake members, open a compressed run, answer for them", parent=gm)
 
-    async def live_run_autocomplete(interaction: discord.Interaction, current: str):
-        reg = guilds.for_interaction(interaction)
-        live = interaction.client.raids.store(reg).live() if reg else []
-        return [app_commands.Choice(name=f"{e.team} · {e.state}"[:100], value=e.team) for e in live if current.lower() in e.team.lower()][:25]
-
-    async def test_member_autocomplete(interaction: discord.Interaction, current: str):
-        reg = guilds.for_interaction(interaction)
-        return [app_commands.Choice(name=m.display_name, value=str(m.discord_id)) for m in (reg.test_members() if reg else []) if current.lower() in m.display_name.lower()][:25]
-
-    @test.command(name="seed", description="Officer: create N test members (fake Discord ids, realistic classes, ranks); idempotent")
-    async def test_seed(interaction: discord.Interaction, count: int = 20):
+    @test.command(name="seed", description="Officer: add test members to the bench (5, 10, 20 or all of them)")
+    async def test_seed(interaction: discord.Interaction):
         reg = await officer(interaction)
-        if not reg:
-            return
-        await interaction.response.defer(ephemeral=True)
-        made = await asyncio.to_thread(reg.seed_test_members, count, interaction.user.display_name)
-        total = len(reg.test_members())
-        await interaction.followup.send(f"🧪 {len(made)} test member(s) created, {total} in total: " + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30]) + "\nAnalytics cards pause until `/gm test clear`.", ephemeral=True)
-        await ops.emit(reg.config, "warn", f"test bench: {len(made)} test members seeded by {interaction.user.display_name} ({total} total)")
+        if reg:
+            await FLOWS["test_seed"](interaction, reg)
 
-    @test.command(name="run", description="Officer: open a compressed test run now (minutes until start, lock and confirm deadlines in minutes)")
-    @app_commands.autocomplete(raid=instance_autocomplete)
-    @app_commands.describe(start_in="minutes until the run starts", lock_in="minutes before start the roster locks", confirm_in="minutes before start confirmations expire", nudge_in="minutes before start the nudge goes out", dm_open="DM everyone when the sheet opens (the puppets' DMs come to you)")
-    async def test_run(interaction: discord.Interaction, raid: str, start_in: int = 40, lock_in: int = 25, confirm_in: int = 15, nudge_in: int = 32, dm_open: bool = False):
+    @test.command(name="run", description="Officer: open a short test run now (pick raid and tempo)")
+    async def test_run(interaction: discord.Interaction):
         reg = await officer(interaction)
-        if not reg:
-            return
-        if raid not in reg.profile.raids:
-            await interaction.response.send_message(f"Unknown raid. Options: {', '.join(reg.profile.raids)}", ephemeral=True)
-            return
-        if not (start_in > lock_in > confirm_in >= 0) or nudge_in <= lock_in:
-            await interaction.response.send_message("Need start_in > nudge_in > lock_in > confirm_in ≥ 0 (all minutes).", ephemeral=True)
-            return
-        from datetime import timedelta
-        from . import raidcycle as rc
+        if reg:
+            await FLOWS["test_run"](interaction, reg)
 
-        await interaction.response.defer(ephemeral=True)
-        start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
-        rs = interaction.client.raids.store(reg)
-        ev = rc.open_run(reg, rs, raid, start, by=interaction.user.display_name, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": dm_open, "test_by": interaction.user.id})
-        channel = interaction.client.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else interaction.channel
-        if not ev.message_id:
-            await interaction.client.post_sheet(reg, rs, ev, channel)
-        await interaction.followup.send(f"🧪 Test run {ev.key} open in {channel.mention}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before. Next: `/gm test answer`; the puppets' DMs arrive in *your* DMs with their name on them.", ephemeral=True)
-        await ops.emit(reg.config, "warn", f"test bench: {interaction.user.display_name} opened test run {ev.key} (lock in {start_in - lock_in} min)")
-
-    @test.command(name="answer", description="Officer: test members answer a sheet — a random mix (join/bench/out counts) or one member")
-    @app_commands.autocomplete(run=live_run_autocomplete, member=test_member_autocomplete)
-    @app_commands.choices(status=[app_commands.Choice(name=n, value=v) for v, n in (("in", "Join"), ("sub", "Bench"), ("out", "No thanks"))])
-    async def test_answer(interaction: discord.Interaction, run: str | None = None, join: int = 0, bench: int = 0, out: int = 0, member: str | None = None, status: app_commands.Choice[str] | None = None):
+    @test.command(name="answer", description="Officer: test members answer a sheet (a random mix, or one member)")
+    async def test_answer(interaction: discord.Interaction):
         reg = await officer(interaction)
-        if not reg:
-            return
-        import random
-
-        from . import raidcycle as rc
-
-        rs = interaction.client.raids.store(reg)
-        ev = rs.for_team(run) if run else next(iter(rs.live()), None)
-        if not ev:
-            await interaction.response.send_message("No live run.", ephemeral=True)
-            return
-        team = reg.config.roster(ev.team) or {"key": ev.team, "size": 20}
-        await interaction.response.defer(ephemeral=True)
-        done = []
-        if member and status:
-            m = reg.members.get(int(member))
-            if not m or not m.test:
-                await interaction.followup.send("Pick a test member.", ephemeral=True)
-                return
-            if ev.state != "open" and status.value == "out" and ev.seat_of(m.display_name):
-                await interaction.client.drop_seated(reg, rs, ev, team, m, "callout (test)", None)
-                done.append(f"{m.display_name} called out")
-            else:
-                s = rc.set_signup(reg, rs, ev, m, None, status.value, source="test")
-                done.append(f"{m.display_name} {rc.LABELS[s.status]}")
-        else:
-            pool = [m for m in reg.test_members() if str(m.discord_id) not in ev.signups]
-            random.shuffle(pool)
-            for st, n in (("in", join), ("sub", bench), ("out", out)):
-                for _ in range(n):
-                    if not pool:
-                        break
-                    m = pool.pop()
-                    rc.set_signup(reg, rs, ev, m, None, st, source="test")
-                    done.append(f"{m.display_name} {rc.LABELS[st]}")
-        await interaction.client.refresh_sheet(reg, ev)
-        await interaction.followup.send(("🧪 " + "; ".join(done)) if done else "Nobody left to answer (seed more, or they've all answered).", ephemeral=True)
-        await ops.emit(reg.config, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {interaction.user.display_name}")
+        if reg:
+            await FLOWS["test_answer"](interaction, reg)
 
     @test.command(name="clear", description="Officer: end the test — cancel test runs, remove every test member and their placements")
     async def test_clear(interaction: discord.Interaction):

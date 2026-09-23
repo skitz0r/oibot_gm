@@ -1061,10 +1061,14 @@ class Registry:
             key = self._value_key(field[6:])
             cur = dict(over.get("value") or (self.profile.families[fid].value if fid in self.profile.families else {}))
             try:
-                n = float(value) if value not in (None, "") else 0.0
+                n = float(value) if value not in (None, "") else None
             except (TypeError, ValueError):
                 raise RegistryError(f"{key}: {value!r} isn't a number")
-            if n > 0:
+            if n is not None and n < 0:
+                raise RegistryError(f"{key}: can't be negative")
+            if n is None:  # blank removes the entry
+                cur.pop(key, None)
+            elif n > 0 or key.startswith("spec:"):  # an explicit 0 on a spec key means "this spec gets nothing"
                 cur[key] = n
             else:
                 cur.pop(key, None)
@@ -1256,6 +1260,8 @@ class Registry:
         if not hit:
             raise RegistryError(f"No character named {name}.")
         m, c = hit
+        if c.confirmed_by:  # re-confirming used to overwrite who confirmed it, silently
+            raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
         c.confirmed_by, c.confirmed_at, c.updated_at = by, now(), now()
         self.save(m, f"{by} confirmed {c.label}")
         return m, c

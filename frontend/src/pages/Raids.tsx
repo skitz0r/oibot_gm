@@ -1,11 +1,13 @@
 import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useState } from "react";
-import { Badge, Box, Button, Card, Group, NumberInput, Select, Stack, Switch, TagsInput, Text, TextInput } from "@mantine/core";
+import { Badge, Box, Button, Card, Group, NumberInput, Select, Stack, Switch, Text, TextInput } from "@mantine/core";
+import { DateTimePicker } from "@mantine/dates";
 import { IconPencil } from "@tabler/icons-react";
 import { api, type RaidRule, type Raids } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
 import { PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
+import { SlotEditor } from "../components/SlotEditor";
 
 export function RaidsPage() {
   const [data, setData] = useState<Raids | null>(null);
@@ -62,7 +64,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
               <Fact label="split policy" value={SPLIT_LABEL[r.split_policy] || r.split_policy} c={oc("split_policy")} />
             </Group>
             <Group gap="xl" wrap="wrap">
-              <Fact label="first opens" value={r.first_open_local ? r.first_open_local.replace("T", " ") : "—"} c={oc("first_open")} />
+              <Fact label="first opens" value={r.first_open_local ? local12(r.first_open_local) : "—"} c={oc("first_open")} />
               <Fact label="lockout" value={`${r.lockout_days} days`} c={oc("lockout_days")} />
               <Fact label="duration" value={`${r.duration_hours} h`} c={oc("duration_hours")} />
               {(["tank", "healer", "dps"] as const).map((role) => <Fact key={role} label={role} value={`${r.comp[role]?.min ?? "?"}–${r.comp[role]?.max ?? "?"}`} c={over(`${role}_min`) || over(`${role}_max`) ? "yellow" : undefined} />)}
@@ -72,7 +74,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
           </Stack>
         ) : (
           <Stack gap="sm">
-            <TagsInput label="run slots" description="type a time like Tue 19:30 and press Enter; one sheet per slot per week (only after the raid opens)" value={d.slots} onChange={(v) => setD({ ...d, slots: v })} placeholder="Tue 19:30" />
+            <SlotEditor label="run slots" description={`one sheet per slot per week, guild time (only after the raid opens)`} value={d.slots} onChange={(v) => setD({ ...d, slots: v })} />
             <Group gap="md" wrap="wrap" align="flex-end">
               <NumberInput label="signup opens (h before)" min={1} value={d.signup_lead_hours} onChange={(v) => setD({ ...d, signup_lead_hours: v })} w={190} />
               <NumberInput label="nudge (h before)" description="one DM to mains who haven't answered" min={0} value={d.nudge_hours_before} onChange={(v) => setD({ ...d, nudge_hours_before: v })} w={170} disabled={!d.nudge} />
@@ -85,7 +87,8 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
               <Select label="split policy" description="when more join than one run seats" data={policies.map((p) => ({ value: p, label: SPLIT_LABEL[p] || p }))} value={d.split_policy} onChange={(v) => setD({ ...d, split_policy: v || d.split_policy })} w={200} />
             </Group>
             <Group gap="md" wrap="wrap" align="flex-end">
-              <TextInput label="first opens" description="guild time" type="datetime-local" value={d.first_open} onChange={(e) => setD({ ...d, first_open: e.currentTarget.value })} w={230} />
+              <DateTimePicker label="first opens" description="guild time" value={pickerValue(d.first_open)} onChange={(v) => setD({ ...d, first_open: fromPicker(v, d.first_open) })}
+                valueFormat="ddd DD MMM YYYY h:mm A" timePickerProps={{ format: "12h", withDropdown: true }} popoverProps={{ withinPortal: true }} w={240} />
               <NumberInput label="lockout days" min={1} step={1} value={d.lockout_days} onChange={(v) => setD({ ...d, lockout_days: v })} w={130} />
               <NumberInput label="duration h" min={0.5} step={0.5} value={d.duration_hours} onChange={(v) => setD({ ...d, duration_hours: v })} w={130} />
             </Group>
@@ -126,6 +129,25 @@ function toDraft(r: RaidRule): Draft {
   return { slots: r.slots, split_policy: r.split_policy, nudge: r.nudge, autofill: r.autofill, open_dm: r.open_dm, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },
     first_open: r.first_open_local, lockout_days: r.lockout_days, duration_hours: r.duration_hours, notes: r.notes,
     comp: Object.fromEntries(["tank", "healer", "dps"].map((role) => [role, { min: r.comp[role]?.min ?? "", max: r.comp[role]?.max ?? "" }])) };
+}
+
+/** The draft keeps the API's machine form ('2026-12-09T15:00', guild time); the picker speaks 'YYYY-MM-DD HH:mm:ss'. */
+function pickerValue(iso: string): string | null {
+  return iso ? `${iso.slice(0, 16).replace("T", " ")}:00` : null;
+}
+function fromPicker(v: string | null, keep: string): string {
+  return v ? v.slice(0, 16).replace(" ", "T") : keep;
+}
+
+/** '2026-12-09T15:00' (guild wall time, no zone) → 'Wed 9 Dec 2026 3:00 PM'. Read field by field: a Date would shift it
+ *  into the viewer's zone, and this is guild time. */
+function local12(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
+  if (!m) return iso;
+  const [y, mo, d, h, mi] = m.slice(1).map(Number);
+  const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(Date.UTC(y, mo - 1, d)).getUTCDay()];
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][mo - 1];
+  return `${wd} ${d} ${mon} ${y} ${h % 12 || 12}:${String(mi).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
 function Fact({ label, value, c }: { label: string; value: string; c?: string }) {

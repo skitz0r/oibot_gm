@@ -11,6 +11,7 @@ from . import configops, policy as policy_mod
 from .discord_registry import Guilds, is_officer, is_owner
 from .ops import Ops
 from .registry import Registry, RegistryError
+from .wizard_flows import FLOWS
 
 from .constants import TEAL  # noqa: E402
 
@@ -195,23 +196,17 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         await compile_and_confirm(interaction, reg, ps, doc.value, ps.read(doc.value), bot.ctx.provider, ops, followup=True)
 
 
-    async def rule_cmd(interaction: discord.Interaction, doc: str, text: str):
-        reg = await officer(interaction)
-        if not reg:
-            return
-        ps = pctx.store(reg)
-        previous = ps.read(doc)
-        ps.write_draft(doc, previous.rstrip() + f"\n- {text.strip()}\n", interaction.user.display_name)
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await compile_and_confirm(interaction, reg, ps, doc, previous, bot.ctx.provider, ops, followup=True)
-
     @rule.command(name="comp", description="Add a standing composition instruction in plain English")
-    async def comp_rule(interaction: discord.Interaction, text: str):
-        await rule_cmd(interaction, "comp", text)
+    async def comp_rule(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if reg:
+            await FLOWS["rule"](interaction, reg, doc="comp")
 
     @rule.command(name="loot", description="Add a loot policy rule in plain English")
-    async def loot_rule(interaction: discord.Interaction, text: str):
-        await rule_cmd(interaction, "loot", text)
+    async def loot_rule(interaction: discord.Interaction):
+        reg = await officer(interaction)
+        if reg:
+            await FLOWS["rule"](interaction, reg, doc="loot")
 
 
     @gm.command(name="change", description="Officer: change configuration in plain English (shows a diff, applies on confirm)")

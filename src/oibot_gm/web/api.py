@@ -1050,8 +1050,12 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             if d.get("confirm"):
                 if not char:
                     raise HTTPException(400, "character required (no main to default to)")
-                mm, c = reg.confirm(char, v.name)
-                done.append(f"confirmed {c.label}")
+                hit = reg.find(char)
+                if hit and hit[1].confirmed_by:  # a "set" is declarative: already confirmed is already done
+                    done.append(f"{hit[1].label} already confirmed by {hit[1].confirmed_by}")
+                else:
+                    mm, c = reg.confirm(char, v.name)
+                    done.append(f"confirmed {c.label}")
             return "; ".join(done) or f"{m.display_name}: no changes"
         return await run(request, go, officer=True)
 

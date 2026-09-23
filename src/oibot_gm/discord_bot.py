@@ -687,6 +687,12 @@ class ConfirmView(discord.ui.View):
 class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, discord.Client):
     ico = staticmethod(ico)
 
+    async def post_application(self, reg, a) -> str:
+        """The application review card, for /apply and the apply wizard (one implementation)."""
+        from .discord_registry import post_application
+
+        return await post_application(self, reg, a)
+
     async def close(self) -> None:
         """Shutdown: push any unpushed data-repo commits before the process goes away."""
         try:
