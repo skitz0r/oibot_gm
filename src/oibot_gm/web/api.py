@@ -1138,7 +1138,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "docs": {d: {"text": ps.read(d), "compiled": bool(ps.compiled(d)), "summary": ((ps.compiled(d) or {}).get("summary") if isinstance(ps.compiled(d), dict) else None)} for d in ("loot", "comp", "persona")},
                 "channels": {k: {"id": str(getattr(cfg, attr)) if getattr(cfg, attr) else None, "name": chans.get(str(getattr(cfg, attr)))} for k, attr in CHANNEL_KINDS.items()},
                 "guild_channels": bot.guild_channels(reg), "guild_roles": guild_roles,
-                "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles,
+                "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles, "news_keywords": list(cfg.news_keywords),
                              "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None},
                 "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner}
 
@@ -1169,10 +1169,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 for rid in sorted(want - have):
                     await configops.apply_async(v.reg, configops.ConfigOp(op="role_add", value=str(rid)), v.name, True, bot=bot)
                 msg = ("officer roles: " if want != have else "officer roles unchanged: ") + (", ".join(bot.officer_role_names(v.reg)) or "(none; Manage Server only)")
-            elif field in ("timezone", "ask_audience", "about"):
+            elif field in ("timezone", "ask_audience", "about", "news_keywords"):
                 from .. import configops
 
-                msg = await configops.apply_async(v.reg, configops.ConfigOp(op="set", path=field, value=str(value or "")), v.name, True, bot=bot)
+                text = ", ".join(str(w) for w in value) if isinstance(value, list) else str(value or "")  # news_keywords: a list from the page
+                msg = await configops.apply_async(v.reg, configops.ConfigOp(op="set", path=field, value=text), v.name, True, bot=bot)
             else:
                 return JSONResponse({"error": f"unknown setting {field}"}, status_code=400)
         except (RegistryError, ValueError) as e:
@@ -1264,6 +1265,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             out["applied"].append(line)
             await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
         return out
+
+    from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
+
+    install_agents_api(app, bot, who=who, body=body, publish=publish)
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

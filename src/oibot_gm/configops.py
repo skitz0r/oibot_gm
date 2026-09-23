@@ -16,7 +16,8 @@ SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never gue
 Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
   roster_channel (officer channel for health cards and roster proposals), registration_channel (public card with the
   Register / Add an alt / My status buttons), analytics_channel (bank + per-raid readiness cards), absences_channel
-  (the "I'll be away" card), officer_role add/remove (role_add/role_remove: value = the role mention <@&id>, id or name; stored by id),
+  (the "I'll be away" card), news_channel (where the news webhook posts; the bot keeps the relevant items), news_keywords
+  (comma list of extra words that make a news item relevant; empty clears), officer_role add/remove (role_add/role_remove: value = the role mention <@&id>, id or name; stored by id),
   ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb).
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
@@ -73,7 +74,7 @@ class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test")
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|ask_audience|about")
+    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|news_keywords|ask_audience|about")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
     field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; dm: on|off; test: 'seed N'|'run <raid>'|'clear')")
@@ -136,7 +137,7 @@ def parse(provider: Provider, reg: Registry, text: str, by: str | None = None) -
 
 
 OWNER_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset"}
-CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel")
+CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel")
 
 
 RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board", "confirm_for"}
@@ -408,7 +409,7 @@ def describe(reg: Registry, op: ConfigOp) -> str:
     """Human-readable 'current → new' for the diff, without applying."""
     cfg = reg.config
     if op.op == "set":
-        cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:60],
+        cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:60], "news_keywords": ", ".join(cfg.news_keywords),
                **{p: (getattr(cfg, f"{p}_id", None) and f"<#{getattr(cfg, f'{p}_id')}>") for p in CHANNEL_PATHS}}.get(op.path or "", "?")
         return f"{op.path}: {cur or '—'} → {op.value}"
     if op.op in ("role_add", "role_remove"):
@@ -616,6 +617,11 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             cfg.ask_audience = op.value
         elif op.path == "about":
             cfg.about = (op.value or "").strip()[:600] or None
+        elif op.path == "news_keywords":
+            words = [w.strip() for w in (op.value or "").replace("\n", ",").split(",") if w.strip()]
+            if len(words) > 40 or any(len(w) > 60 for w in words):
+                raise RegistryError("news_keywords: at most 40 words or phrases of up to 60 characters")
+            cfg.news_keywords = list(dict.fromkeys(words))
         elif op.path in CHANNEL_PATHS:
             cid = _channel_id(op.value)
             if not cid:

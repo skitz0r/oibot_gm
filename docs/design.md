@@ -501,6 +501,64 @@ then `after_placement_answer` (a no frees the seat, logs, refreshes, fills), the
 runs around its interaction reply; `/api/me/placement` and `/api/admin/placement` (MCP `confirm_for`) use it too.
 Describe refuses before Apply when the run isn't locked or no ask is waiting.
 
+### 5.26 News review: proposals from the news, officer approval, local apply (built 2026-09-22)
+
+**Shape (owner's ask).** "Daily read news, compare to app logic and state, suggest changes in the discord. If an officer
+green-lights, a local agent makes the changes (config or rebuild) and redeploys" — and a way to *see* it working.
+
+**Ingest (bot, no LLM).** `GuildConfig.news_channel_id` (Config page picker, `/gm config news-channel`, plain-text `set
+news_channel`) and `news_keywords`. `OibotGM.on_message` calls `NewsMixin.news_message` first (webhooks are bots, so
+it runs before the `author.bot` return; one line in on_message). `news.ingest` reads each embed's title +
+description + url — never the linked article (no Wowhead scraping) — and keeps an item when a **version name**
+(`profiles/<version>/news.yaml: version_terms`), a **raid name** (effective, `raid_def`) or a guild **extra keyword**
+appears; buff and class names only annotate (every version's news has them). Kept items go to `<guild>/news.jsonl`
+(append + commit, deduped by url). `POST /api/news/backfill` re-reads the channel's last 100 messages (posts made
+while the bot was down); the review calls it first.
+
+**Proposals (`news.py`).** One YAML per proposal in `<guild>/proposals/<id>.yaml`: title, cited news urls (must be in
+the news list), `affects`, `kind: guild_setting | profile | needs_developer`, the change in words, the typed `edit`
+(a `ConfigOp` from `SETTING_OPS` — raid_set, aura_set, family_set, comp_target… — validated with `describe`; or
+`{file: profiles/<version>/…yaml, key, value}`), evidence, confidence, state + history. States: proposed → approved |
+dismissed → applying → applied | failed | reverted (failed → approved to retry; applied → reverted). Officers make
+the decisions (`OFFICER_MOVES`, web or the card's `ProposalButton`); only the MCP bearer identity (`via == "mcp"`, the
+local jobs) reports the job's steps (`JOB_MOVES`). Approving flips the state and records who — nothing else.
+`NewsMixin.proposal_card_update` posts the card in the ops channel and edits it in place on every move (commit hash
+when applied). API (`web/api_agents.py`, officer read): `GET /api/news`, `POST /api/news/backfill`, `GET/POST
+/api/proposals`, `GET /api/proposals/{id}`, `POST /api/proposals/{id}/resolve`, `POST /api/proposals/{id}/apply`
+(job only: a guild setting through `configops.apply_async`, the plain-text path), `GET /api/agents/profile?section=`
+(effective buffs/families/raids/comp_rules, overrides marked with the game file's default). MCP: `list_news`,
+`get_profile`, `post_proposal`, `list_proposals`, `get_proposal`, `resolve_proposal`, `job_status`.
+
+**Jobs (`scripts/agents/`, `agents.py`).** Both are LaunchAgents beside the bot's; neither runs inside the bot.
+- *review* (daily 9:00 AM, `review.py`): backfill + `GET /api/news?since=<last good run>` from the script; nothing new
+  → done, no Claude session. Otherwise `claude -p` (prompt `news_review.md` on stdin) with `--mcp-config .mcp.json
+  --strict-mcp-config --tools Read,Grep,Glob`, `--allowedTools` = those + the read MCP tools + `post_proposal`,
+  `--disallowedTools` = every other MCP tool + WebFetch/WebSearch/Write…, `--permission-mode dontAsk` (unlisted =
+  refused, never prompted), `--max-budget-usd`, `--output-format stream-json --verbose`.
+- *apply* (every 15 min, `apply.py`): one API call; only an approved proposal does anything, oldest first. needs_developer
+  → failed. guild_setting → `POST /api/proposals/{id}/apply` (no Claude, no restart). profile → refuses a dirty tree
+  or a checkout off main (the proposal waits); `claude -p` with Edit + reads + `Bash(uv run python
+  scripts/check_commands.py | uv run pytest * | git diff * | git status *)` edits the YAML; then **the script, not the
+  model**: edits outside `profiles/` → reverted + failed; `check_commands.py`, `pytest -q`, `check_bundle.py` (fail →
+  revert, failed); commit to main (`--pr` / `OIBOT_APPLY_MODE=pr`: branch + `gh pr create`, no restart), push,
+  `launchctl kickstart -k` the bot, wait ≤ 90 s for a new pid and `/healthz` with the Discord user; unhealthy →
+  `git revert`, push, restart, reverted. Keeping commit/restart/revert in code keeps the rollback deterministic.
+
+**Monitor.** Each job writes `out/agents/<job>.json` (state idle|running|failed, started, finished, result, current
+step, run id, pid — a `running` file whose pid is gone reads as failed) and a transcript per run
+(`out/agents/runs/<job>-<utc stamp>.jsonl`: the stream-json lines plus the runner's own `{"type": "runner"}` lines; the
+last 30 per job; the apply poll writes none when nothing is approved). `agents.steps` turns a transcript into readable
+steps ("Reading news since Tue 22 Sep 8:00 PM", "Called get_profile(buffs)", "Posted proposal: …", tool results
+folded in). The **Agents** page (`frontend/src/pages/Agents.tsx`, officers; `GET /api/agents`, `GET
+/api/agents/run/{id}`) shows each job's light (green idle / amber running or not installed / red failed), schedule,
+last and next run, launchd state, the live run (polled every 3 s while a job runs), past runs, news and proposals.
+**Run review now** (owner, `POST /api/agents/run`) = `launchctl kickstart gui/<uid>/<label>` of the review job:
+launchd starts it exactly as the schedule would, the bot never runs Claude itself, a running job is left alone, and
+an uninstalled job is a clear 409. The menu-bar item (`scripts/agents/menubar.py`, rumps via `uv run --with rumps`,
+its own LaunchAgent) reads the same status files, `launchctl print` and the data repo's proposals, so it works with the
+bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,menubar}.plist`; `scripts/agents/install.sh`
+/ `uninstall.sh`.
+
 ## 6. Architecture
 
 ```mermaid

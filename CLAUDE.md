@@ -46,7 +46,7 @@ src/oibot_gm/
                        /roster overview|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers; `poll` retired, PlanButton is a stub);
                        Rosters are first-class: config `rosters[]` (key/size/schedule/instance/cutoffs), membership lives on characters (`RegisteredCharacter.rosters`),
                        raids are opened for a roster, officer posts go to `roster_channel_id`. Internal helpers still say "team" (aliases) — don't rename them casually.
-                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences channels, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py); /mock … (demo)
+                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news channels, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py); /mock … (demo)
   raidcycle.py         signup-driven cycle (design.md §5.20): raid slots + cadence (raid_def: slots, signup_lead/lock/confirm hours, weights) →
                        slot_starts/open_run (ephemeral roster per run), Join/Bench/No thanks (in/sub/out), propose() at lock (weights, pins,
                        role min/max, splits into several rosters per slot), confirmations (placement asks on the run key), free_seat/seat_player/
@@ -94,17 +94,28 @@ src/oibot_gm/
                        via=mcp in the request log). Never a second code path: every write is the site's route. `.mcp.json` (repo root, no secrets)
                        registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change; handle_change for every plain-text path (ConfigConfirmView re-authorizes the presser)
+  news.py              news review (design §5.26): keyword filter of #news webhook embeds (profiles/<v>/news.yaml version_terms + raid names +
+                       guild news_keywords) → <guild>/news.jsonl (dedupe by url); Proposal/ProposalStore (<guild>/proposals/<id>.yaml,
+                       proposed → approved|dismissed → applying → applied|failed|reverted; officers decide, only the MCP bearer reports job steps)
+  discord_news.py      NewsMixin: news_message (the ONE hook at the top of on_message; webhooks are bots), news_backfill, proposal_card_update
+                       (ops-channel card edited in place); ProposalButton (DynamicItem Approve/Dismiss, officers only)
+  agents.py            local jobs on the Mac mini: out/agents/<job>.json status + runs/<job>-<stamp>.jsonl transcripts (last 30), stream-json → steps,
+                       launchctl print/kickstart, claude command lines (allow/deny lists, dontAsk; never a permission bypass)
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks
   discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence
   ops.py               ops feed (channel line per action; errors DM the owner)
+scripts/agents/        review.py (daily 9:00 AM; no Claude session without new news), apply.py (every 15 min; guild settings by the bot, profile
+                       edits by Claude then checks/commit/push/restart/health/revert by the SCRIPT; --pr), menubar.py (rumps via uv --with),
+                       install/uninstall.sh; plists in scripts/launchd/
 companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests
   web/app.py           FastAPI served inside the bot (OIBOT_WEB_BIND): Discord OAuth2, landing page, icon/emblem/card images, old URLs → /app redirects;
                        published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg)
+  web/api_agents.py    /api/news, /api/proposals…, /api/agents (the monitor), /api/agents/profile (effective profile, overrides marked)
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands
 frontend/              React + Mantine app (Vite). components/board/* (SheetCard, BoardView, SplitModal, BoardPreview, FillModal), components/Cells.tsx (icon-only cells),
                        components/ConfirmModal.tsx (useConfirm), components/PlainPermissions.tsx (Ops page: who may do what, where), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours). `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid) · Ops · Config (Mantine, left rail,
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Members · Agents (the news review's monitor) (bank + admin merged; officers edit anyone's characters/grid) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            /mock roster PNG, raid thumbnails, generated emoji badges (no analytics images any more);  report_html.py → out/coverage.html

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- oibot_GM daily news review (scripts/agents/README.md): reads the news the bot kept, posts proposals through the MCP server.
+         Starts Claude only when there is new news. "Run review now" (Agents page, menu bar) = launchctl kickstart of this label. -->
+    <key>Label</key>
+    <string>gg.earlyandoften.oibot.news-review</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>scripts/agents/review.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jonathanlin/dev/oibot_gm</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- uv, git, claude (~/.local/bin) -->
+        <key>PATH</key>
+        <string>/Users/jonathanlin/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <!-- daily at 9:00 AM local (agents.JOBS["review"] shows the same time on the Agents page); a missed run (asleep) runs at wake -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/agents/review.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/agents/review.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

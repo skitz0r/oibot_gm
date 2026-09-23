@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- oibot_GM menu-bar status (scripts/agents/menubar.py): bot up/down, jobs running/failed, approvals waiting.
+         rumps is pulled in by uv (the with-rumps flag below); it is not a project dependency. Interactive: it needs the logged-in session. -->
+    <key>Label</key>
+    <string>gg.earlyandoften.oibot.menubar</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>--with</string>
+        <string>rumps</string>
+        <string>python</string>
+        <string>scripts/agents/menubar.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jonathanlin/dev/oibot_gm</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- restart it if it quits by accident; "Quit" in its menu stops it until the next login -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/agents/menubar.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/agents/menubar.log</string>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>LimitLoadToSessionType</key>
+    <string>Aqua</string>
+</dict>
+</plist>

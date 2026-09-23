@@ -420,13 +420,14 @@ def set_dm(member: str, on: bool) -> str:
 @mcp.tool()
 def set_channel(kind: str, channel: str | None = None) -> str:
     """Point a bot channel at a server channel (owner): kind = ops | applications | signup | roster | registration |
-    analytics | absences; `channel` = a channel name (#general), an id, or empty to unset. Cards are (re)posted."""
+    analytics | absences | news; `channel` = a channel name (#general), an id, or empty to unset. Cards are (re)posted."""
     return msg(api().post("/api/admin/config", {"field": f"channel:{kind}", "value": channel or None}))
 
 
 @mcp.tool()
 def set_config(field: str, value: Any) -> str:
-    """One guild setting (owner): timezone (IANA name), ask_audience, about (text), or officer_roles (a list of role ids
+    """One guild setting (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
+    phrases that make a news item relevant), or officer_roles (a list of role ids
     — the whole list; role names are NOT resolved here, use plain_change for that)."""
     return msg(api().post("/api/admin/config", {"field": field, "value": value}))
 
@@ -487,6 +488,62 @@ def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: 
     if default:
         body["default"] = default
     return msg(api().post("/api/admin/plain-permissions", body))
+
+
+# ---------------------------------------------------------------- news review (design §5.26)
+
+@mcp.tool()
+def list_news(since: str | None = None) -> dict:
+    """News items the bot kept from the #news channel (webhook embed text only: title, description, url, when posted,
+    the keywords that matched), oldest first. `since` = an ISO date-time: only items recorded after it. The linked
+    articles are never fetched — judge from this text alone."""
+    return api().get("/api/news", since=since)
+
+
+@mcp.tool()
+def get_profile(section: str | None = None) -> dict:
+    """The effective game profile the guild runs on: section = buffs | families | raids | comp_rules (none = all).
+    Guild overrides are applied and marked (`overridden` fields, `default` = the game file's value); `setting_op`
+    says which config op changes a section as a guild setting, `files` where the defaults live."""
+    return api().get("/api/agents/profile", section=section)
+
+
+@mcp.tool()
+def post_proposal(title: str, news: list[str], affects: str, kind: str, change: str, edit: dict, evidence: str, confidence: str = "medium") -> dict:
+    """Propose one correction from the news (officers approve or dismiss it on a card in the ops channel).
+    title: one line naming the contradiction. news: the urls of the items it rests on (from list_news).
+    affects: what it touches ('raid barrow_deeps lockout_days', 'profiles/forever/buffs.yaml: blood_pact.family').
+    kind: guild_setting (edit = a config op: {op: raid_set|aura_set|family_set|comp_target|…, target, field, value})
+    | profile (edit = {file: 'profiles/<version>/<file>.yaml', key: 'entry.field', value}) | needs_developer (code must change).
+    change: the change in plain words. evidence: the news sentence(s), quoted. confidence: low | medium | high."""
+    return api().post("/api/proposals", {"title": title, "news": news, "affects": affects, "kind": kind, "change": change, "edit": edit or {}, "evidence": evidence, "confidence": confidence})
+
+
+@mcp.tool()
+def list_proposals(state: str | None = None) -> dict:
+    """Proposals, newest first; `state` narrows (proposed, approved, dismissed, applying, applied, failed, reverted;
+    comma-separated for several). Check it before proposing so the same thing is not proposed twice."""
+    return api().get("/api/proposals", state=state)
+
+
+@mcp.tool()
+def get_proposal(id: str) -> dict:
+    """One proposal in full: the news it cites, the typed edit, its state history."""
+    return api().get(f"/api/proposals/{id}")
+
+
+@mcp.tool()
+def resolve_proposal(id: str, state: str, commit: str | None = None, note: str | None = None) -> str:
+    """Move a proposal: approved | dismissed (an officer's decision), or the apply job's steps applying | applied |
+    failed | reverted, with the commit hash and a short note. The Discord card updates in place."""
+    return msg(api().post(f"/api/proposals/{id}/resolve", {"state": state, "commit": commit, "note": note}))
+
+
+@mcp.tool()
+def job_status() -> dict:
+    """The local agent jobs (news review, apply): state, last run and outcome, next run, whether launchd has them
+    loaded, and the recent runs."""
+    return api().get("/api/agents")
 
 
 # ---------------------------------------------------------------- entry point

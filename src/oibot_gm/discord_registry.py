@@ -748,6 +748,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"signup channel → #{channel.name}")
         await interaction.response.send_message(f"✅ Sheets → {channel.mention}", ephemeral=True)
 
+    @config.command(name="news-channel", description="Owner: where the news webhook posts; the bot keeps the items about our game version")
+    async def cfg_news_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+        reg = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        try:
+            msg = await interaction.client.set_channel(reg, "news", channel.id, interaction.user.display_name)
+        except ValueError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {msg}. New posts there are filtered by our game version, raids and the news keywords; "
+                                                "the daily review turns contradictions into proposal cards in the ops channel.", ephemeral=True)
+        await ops.emit(reg.config, "info", f"news channel → #{channel.name} (by {interaction.user.display_name})")
+
     @config.command(name="ask-audience", description="Owner: who may ask the bot free-form questions (/ask, DMs, @mentions); others get the static guide")
     @app_commands.choices(audience=[app_commands.Choice(name=a, value=a) for a in ("officers", "confirmed", "registered", "everyone")])
     async def cfg_ask_audience(interaction: discord.Interaction, audience: app_commands.Choice[str]):

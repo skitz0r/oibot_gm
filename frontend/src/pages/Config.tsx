@@ -1,6 +1,6 @@
 import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useState } from "react";
-import { Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, Text, TextInput, Textarea } from "@mantine/core";
+import { Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, TagsInput, Text, TextInput, Textarea } from "@mantine/core";
 import { api, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 
@@ -8,7 +8,7 @@ interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
   channels: Record<string, { id: string | null; name: string | null }>; guild_channels: { id: string; name: string; category: string | null }[]; guild_roles: RoleRef[];
   /** officer_roles: by role id (renames are safe); officer_roles_pending: legacy names the bot could not match to a role */
-  settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null };
+  settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null; news_keywords: string[] };
   test_bench: { members: number; runs: string[] }; owner: boolean;
 }
 
@@ -20,6 +20,7 @@ const CHANNELS: { kind: string; label: string; hint: string }[] = [
   { kind: "analytics", label: "Analytics (officers)", hint: "character bank, readiness, groups and desired comp cards + change log" },
   { kind: "applications", label: "Applications (officers)", hint: "review cards for /apply (defaults to ops)" },
   { kind: "ops", label: "Ops (officers)", hint: "one line per action the bot takes; plain-text config by @mention" },
+  { kind: "news", label: "News", hint: "where the news webhook posts; the bot keeps the items about our game and raids (Agents page)" },
 ];
 
 export function ConfigPage() {
@@ -54,6 +55,8 @@ export function ConfigPage() {
               {data.channels[kind]?.id && !data.channels[kind]?.name && <Badge color="red" variant="light">channel not found</Badge>}
             </Group>
           ))}
+          <TagsInput label={lab("news_keywords", "News keywords")} description="extra words or phrases that make a news post relevant, beside our game version's names and raid names" value={data.settings.news_keywords || []}
+            onChange={(v) => set("news_keywords", v)} disabled={ro || busy === "news_keywords"} clearable maw={560} />
         </Stack>
       </Card>
 

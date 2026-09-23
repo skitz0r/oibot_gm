@@ -42,12 +42,16 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 - **Ops channel (officers)** — every action the bot takes, one line each; errors also DM the owner. The same
   lines go to a rotating log file on the host (`out/oibot.log`).
 - **Applications channel** — review cards for `/apply` with Accept / Decline buttons.
+- **News channel** — a Wowhead webhook posts game news there. The bot reads only the post itself (title and
+  summary, never the linked article) and keeps the items about our game version, our raids, or the extra news
+  keywords on the Config page. A daily review compares them with what the bot believes about the game; a
+  contradiction becomes a **news proposal** card in the ops channel (§7a).
 
 ## 2a. The website
 
 **https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save), **Config** (owner edits; officers read) and **Ops** (the bot's log). Only
+your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save), **Config** (owner edits; officers read), **Ops** (the bot's log) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 Pages refresh themselves every 45 s, so what you see is at most that old. Signing up for a raid is still done
 on the sheet in Discord.
@@ -255,6 +259,29 @@ returns to the game defaults.
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, recent ops),
   `/gm config show`.
 
+## 7a. News proposals (officers)
+
+Once a day (9:00 AM by the host's clock) a review reads the news the bot kept from the news channel and compares it with
+what the bot believes: the buffs and which ones stack, the raids (size, lockout, opening), the comp rules, and the
+guild's own overrides. When a post clearly contradicts one of those, it posts a **news proposal** card in the ops
+channel: the change in words, what it touches, the sentence from the news it rests on, links to the posts, and a
+confidence (low / medium / high). Most days there is no card: nothing new, or nothing that contradicts anything.
+
+- **Approve** (officers) records who approved it and when. It changes nothing by itself: the apply job on the host
+  checks every 15 minutes and carries it out. A **guild setting** (a raid's lockout, what the guild knows about a
+  buff) is applied like the same change on the Raids or Auras page, without a restart. A **game data** change edits
+  the bot's profile file for the game version, runs the full test suite, commits, restarts the bot and checks it
+  came back — about two minutes.
+- **Dismiss** (officers) keeps the card as dismissed; nothing changes, and the review won't propose it again unless
+  newer news says more. An approved proposal can still be dismissed until the job picks it up.
+- **Needs a developer** — the change can't be expressed as a setting or a data edit; the card has no Approve. Dismiss
+  it once someone has handled it.
+- The card updates in place: **Applying now**, then **Applied** (with the commit for a game data change),
+  **Failed — nothing changed** (the setting was refused, or the tests failed and the edit was undone; a failed one can
+  be approved again), or **Reverted — the change was rolled back** (the bot did not come back healthy after a game
+  data change, so the commit was undone and the bot restarted on the old version).
+- The same list, with Approve / Dismiss, is on the site's **Agents** page.
+
 ## 8. Owner: setup
 
 `/gm config owner` (first claim needs the Discord server owner or Manage Server), then
@@ -270,6 +297,14 @@ collect in a draft; Save shows them as sentences with the next three runs and wr
 opens until a raid has run times. The same settings are on the Raids page and in plain text (`raid_set`). Comp
 bounds: *Group make-up* in `/gm config raid` ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
 plain text (same for healers and dps).
+
+**News.** `/gm config news-channel` (or the Config page's *News* picker, or "set the news channel to #news" in
+plain text) is where the Wowhead webhook posts; *News keywords* on the Config page (or `news_keywords` in plain
+text) adds words that make a post relevant besides the game version's names and raid names. The review and apply
+jobs run on the host as their own launchd agents (`scripts/agents/README.md`; `sh scripts/agents/install.sh`), and the
+site's **Agents** page shows whether they are installed and running, what the current run is doing step by step,
+past runs, the news kept and the proposals; **Run review now** (owner) starts the review at once. A menu-bar item on
+the Mac mini (GM ✓ / ⟳ / ⚠ / ✕) shows the same at a glance, even when the bot is down.
 
 **Officer roles.** `/gm config officer-role role:@Officers` (add; `remove:true` to take one away), the Config page's
 role picker, or in plain text ("make @Council officers"). The bot remembers the *role itself* (its Discord id), not
@@ -409,6 +444,9 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `set_channel` · `set_config` | a bot channel by name · timezone, ask audience, about, officer roles |
 | `test_bench` | seed / run / answer / clear, as `/gm test` |
 | `plain_change` | text → the config ops it means, with current → new; applied only with `apply=true` |
+| `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with guild overrides marked |
+| `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full, move its state |
+| `job_status` | the review and apply jobs: state, last and next run, launchd, recent runs |
 
 Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.

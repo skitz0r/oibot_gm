@@ -310,7 +310,7 @@ class AbsencesMixin:
 # ---------------------------------------------------------------- setup from the web + test bench
 
 CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_id", "signup": "signup_channel_id", "roster": "roster_channel_id",
-                 "registration": "registration_channel_id", "analytics": "analytics_channel_id", "absences": "absences_channel_id"}
+                 "registration": "registration_channel_id", "analytics": "analytics_channel_id", "absences": "absences_channel_id", "news": "news_channel_id"}
 
 
 class SetupMixin:
