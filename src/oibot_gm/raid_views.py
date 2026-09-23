@@ -148,10 +148,11 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         return e, None
     if state == "open":
         counts = {r: sum(1 for s in ins if s.role == r) for r in ROLES}
-        runs = max(1, len(ins) // size) if size else 1
+        want = max(1, int(team.get("rosters") or 1))  # a schedule that declares N rosters advertises N × the seats
+        runs = max(want, len(ins) // size) if size else want
         _soft, hard, confirm = run_times(reg, ev, team)
         e.title = f"{tag}{name}"
-        e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n**{len(ins)}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
+        e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n**{len(ins)}** / {size * want}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
                          + f"\n🔒 locks <t:{int(hard.timestamp())}:R> · ✓ confirm by <t:{int(confirm.timestamp())}:f>")
         by_cls: dict[str, list] = {}
         for sg in ins:
@@ -311,18 +312,20 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
     nobody-brings icons, no-answer count, double-booked; officer buttons."""
     ui = discord.ui
     h = rc.health_data(reg, ev, team)
-    n, size, _t, subs = h["headcount"]
+    n, seats, _t, subs = h["headcount"]
+    per, want = rc.run_size(reg, ev), h.get("rosters", 1)  # health_data measures against the rosters the run expects
     players = rc.players_for(reg, ev)
-    runs = rc.how_many_rosters(reg, players, size, reg.role_bounds(ev.instance, size))
+    runs = max(want, rc.how_many_rosters(reg, players, per, reg.role_bounds(ev.instance, per), want=want))
+    size = seats  # the seats the run advertises (size × the rosters its schedule expects)
     roles = []
     for r in h["roles"]:
-        have, need = r["have"], r["need"]
+        have, need = r["have"], r["need"] // want
         roles.append(f"{ico('role', r['role'])} " + (f"**{have}**/{need * max(1, runs)}" if need and have < need * max(1, runs) else f"{have}" + (f"/{need * max(1, runs)}" if need else "")))
     head = _header(reg, ev, f"Roster health · {reg.raid_def(ev.instance).get('name', ev.instance)}", [f"**{n}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + (f" · {subs} bench" if subs else "") + "   " + "   ".join(roles)])
     body = []
-    short = [r for r in h["roles"] if r["need"] and r["have"] < r["need"] * max(1, runs)]
+    short = [r for r in h["roles"] if r["need"] and r["have"] < r["need"] // want * max(1, runs)]
     if short:
-        body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] * max(1, runs) - r['have']}" for r in short))
+        body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] // want * max(1, runs) - r['have']}" for r in short))
         hints = [r["hint"] for r in short if r["hint"]]
         if hints:
             body.append("-# " + " · ".join(hints))  # `-#` only renders at the start of a line

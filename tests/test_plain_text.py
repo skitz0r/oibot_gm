@@ -335,7 +335,8 @@ def test_test_bench(reg, rs):
 
 def test_owner_gating_unchanged(reg, rs):
     """The new ops are officer ops (like /raid, /gm test and the Members page); the owner set is untouched."""
-    assert configops.OWNER_OPS == {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset"}
+    assert configops.OWNER_OPS == {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset",
+                                   "schedule_set", "schedule_remove"}  # schedules are raid rules: owner, like raid_set
     assert not (configops.RUN_OPS | {"character", "absence_clear", "dm", "test"}) & configops.OWNER_OPS
     bot = FakeBot(rs)
     with pytest.raises(RegistryError, match="needs the owner"):

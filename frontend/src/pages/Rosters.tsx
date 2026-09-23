@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DateTimePicker } from "@mantine/dates";
-import { Badge, Box, Button, Card, Group, Stack, Tabs, Text, Tooltip } from "@mantine/core";
+import { Badge, Box, Button, Card, Group, Select, Stack, Tabs, Text, Tooltip } from "@mantine/core";
 import { IconSparkles } from "@tabler/icons-react";
 import { api, type Board, type Meta, type RaidRuns, type Rosters, type Sheet } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
@@ -51,25 +51,35 @@ function fmt12(v: string): string {
   return isNaN(d.getTime()) ? v : d.toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-/** Open a run: pick a date and time, or take the raid's next scheduled slot. Nobody types a timestamp, and a raid with
- *  no slots yet is a prompt to pick one rather than an error after the fact. */
+/** Open a run: pick a date and time, or take the raid's next scheduled run — of any schedule, or of the one picked; a
+ *  pickup template opens at the time picked. Nobody types a timestamp, and a raid with no schedule yet is a prompt to
+ *  pick a time rather than an error after the fact. */
 function OpenRaid({ r, busy, onAct, when, setWhen }: { r: RaidRuns; busy: string | null; onAct: Act; when: string | null; setWhen: (v: string | null) => void }) {
-  const next = r.upcoming[0];
+  const [sched, setSched] = useState<string>("");  // "" = the next run of any schedule (or the raid's own cadence at a picked time)
+  const scheds = (r.schedules || []).filter((s) => s.active);
+  const chosen = scheds.find((s) => s.id === sched);
+  const next = r.upcoming.find((u) => !sched || u.schedule === sched);
   const picked = (when || "").trim();
-  const hint = picked ? `Opens a run starting ${fmt12(picked)}` : next ? `The raid's next slot: ${next.start}` : "Pick a date and time, or set recurring slots on the Raids page";
+  const needsTime = chosen?.kind === "pickup";
+  const hint = picked ? `Opens ${chosen ? chosen.name : "a run"} starting ${fmt12(picked)}` : needsTime ? `${chosen?.name} is a template: pick when it starts`
+    : next ? `The next run${chosen ? ` of ${chosen.name}` : ""}: ${next.start}` : "Pick a date and time, or add a schedule on the Raids page";
   return (
-    <Group gap="xs" align="center" wrap="nowrap">
+    <Group gap="xs" align="center" wrap="wrap">
+      {(scheds.length > 1 || scheds.some((s) => s.kind === "pickup")) && (
+        <Select size="sm" w={200} allowDeselect={false} aria-label="which schedule" value={sched} onChange={(v) => setSched(v || "")}
+          data={[{ value: "", label: "Any schedule" }, ...scheds.map((s) => ({ value: s.id, label: s.kind === "pickup" ? `${s.name} (template)` : s.name }))]} />
+      )}
       <DateTimePicker
         size="sm" w={240} clearable value={when} onChange={setWhen}
-        placeholder={next ? `next slot: ${next.start}` : "pick a date and time"}
+        placeholder={next && !needsTime ? `next: ${next.start}` : "pick a date and time"}
         minDate={new Date().toISOString().slice(0, 10)}
         valueFormat="ddd DD MMM h:mm A" timePickerProps={{ format: "12h", withDropdown: true }}
         popoverProps={{ withinPortal: true }} aria-label="when the run starts"
       />
       <Tooltip label={hint} withinPortal>
-        <Button size="sm" leftSection={<IconSparkles size={15} />} loading={busy === `open${r.id}`} disabled={!picked && !next}
-          onClick={() => onAct(`open${r.id}`, `/api/raid/${r.id}/open`, { when: picked })}>
-          {picked ? "Open that run" : next ? "Open next slot" : "Open a run"}
+        <Button size="sm" leftSection={<IconSparkles size={15} />} loading={busy === `open${r.id}`} disabled={!picked && (!next || needsTime)}
+          onClick={() => onAct(`open${r.id}`, `/api/raid/${r.id}/open`, { when: picked, schedule: sched })}>
+          {picked ? "Open that run" : next && !needsTime ? "Open next slot" : "Open a run"}
         </Button>
       </Tooltip>
     </Group>
@@ -78,7 +88,8 @@ function OpenRaid({ r, busy, onAct, when, setWhen }: { r: RaidRuns; busy: string
 
 function RaidCard({ r, meta, busy, onAct, onBoard, onReload }: { r: RaidRuns; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
   const [when, setWhen] = useState<string | null>(null);  // "YYYY-MM-DD HH:mm:ss" from the picker; empty = take the next slot
-  const metaLine = [r.slots.length ? `slots ${(r.slot_labels || r.slots).join(", ")}` : "no slots set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
+  const scheds = (r.schedules || []).filter((s) => s.active && s.kind !== "pickup");
+  const metaLine = [scheds.length ? scheds.map((s) => (scheds.length > 1 ? `${s.name}: ${s.label}` : s.label)).join(" · ") : "no schedule set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
   const first = r.locked.some((e) => e.key === target) ? "locked" : r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
   return (
@@ -92,7 +103,7 @@ function RaidCard({ r, meta, busy, onAct, onBoard, onReload }: { r: RaidRuns; me
           <Tabs.Tab value="history">History</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="open" pt="md">
-          {r.open.length === 0 && <Text size="sm" c="dimmed">No sheet open. The next slot opens on its own {r.upcoming[0] ? `${r.upcoming[0].opens}` : "once slots are set on Raids"}, or open one now.</Text>}
+          {r.open.length === 0 && <Text size="sm" c="dimmed">No sheet open. The next slot opens on its own {r.upcoming[0] ? `${r.upcoming[0].opens}` : "once a schedule is set on Raids"}, or open one now.</Text>}
           <Stack gap="md">{r.open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
         </Tabs.Panel>
         <Tabs.Panel value="locked" pt="md">
@@ -100,7 +111,7 @@ function RaidCard({ r, meta, busy, onAct, onBoard, onReload }: { r: RaidRuns; me
           <Stack gap="md">{r.locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
         </Tabs.Panel>
         <Tabs.Panel value="upcoming" pt="md">
-          {r.upcoming.length === 0 && <Text size="sm" c="dimmed">No upcoming slots{r.slots.length ? " before the raid opens" : " — set slots on Raids"}.</Text>}
+          {r.upcoming.length === 0 && <Text size="sm" c="dimmed">No upcoming runs{scheds.length ? " before the raid opens" : " — add a schedule on Raids"}.</Text>}
           <Stack gap={4}>{r.upcoming.map((u) => <Text key={u.start} size="sm"><b>{u.start}</b> <Text span c="dimmed">· {u.slot} · sheet opens {u.opens}</Text></Text>)}</Stack>
         </Tabs.Panel>
         <Tabs.Panel value="history" pt="md">

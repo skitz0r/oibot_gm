@@ -90,13 +90,13 @@ async def with_run(interaction: discord.Interaction, reg: Registry, *, title: st
 # ---------------------------------------------------------------- /raid open
 
 class OpenWizard(Wizard):
-    """Raid → the shortlist (next slot as one button, the other upcoming runs in a select, or 'Another day and
-    time…') → confirm with both clocks → open and post."""
+    """Raid → the shortlist (next run as one button, the other upcoming runs of every schedule in a select, a pickup
+    template's own button, or 'Another day and time…') → confirm with both clocks → open and post."""
 
     def __init__(self, reg: Registry, rs, owner_id: int):
         super().__init__(reg, owner_id, title="Open a run", guard=officer_guard(reg))
         self.rs = rs
-        self.draft = {"raid": None, "start": None, "note": "", "day0": reg.now_local().date()}
+        self.draft = {"raid": None, "start": None, "note": "", "day0": reg.now_local().date(), "schedule": None}
 
     @property
     def rid(self) -> str:
@@ -105,8 +105,32 @@ class OpenWizard(Wizard):
     def name(self) -> str:
         return self.reg.raid_def(self.rid).get("name", self.rid)
 
+    def upcoming(self) -> list[tuple[dict, datetime]]:
+        """(schedule, start) for every active schedule, soonest first."""
+        return rc.upcoming(self.reg, self.rid, self.reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)
+
     def starts(self) -> list[datetime]:
-        return [t for _slot, t in rc.slot_starts(self.reg, self.rid, self.reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)]
+        return [t for _s, t in self.upcoming()]
+
+    def templates(self) -> list[dict]:
+        return [s for s in self.reg.schedules(self.rid) if s["kind"] == "pickup" and s.get("active", True)]
+
+    def many(self) -> bool:
+        """More than one schedule to tell apart: runs are then labelled with their schedule's name."""
+        return len([s for s in self.reg.schedules(self.rid) if s["kind"] != "pickup"]) > 1
+
+    def sched_name(self, sid: str | None) -> str:
+        s = next((x for x in self.reg.schedules(self.rid) if x["id"] == (sid or "default")), None)
+        return (s or {}).get("name") or ""
+
+    def template_buttons(self) -> list[discord.ui.Item]:
+        return [self.button(f"Open {s['name']} — pick a time", self._template(s["id"])) for s in self.templates()[:3]]
+
+    def _template(self, sid: str):
+        async def go(interaction: discord.Interaction) -> None:
+            self.draft["schedule"] = sid
+            await self.open_form(interaction, self.when_form())
+        return go
 
     async def start(self, interaction: discord.Interaction) -> None:
         opts = wo.raids(self.reg)
@@ -122,28 +146,33 @@ class OpenWizard(Wizard):
 
     # ---- layer 1: the shortlist
     async def shortlist(self, interaction: discord.Interaction) -> None:
-        starts = self.starts()
+        ups = self.upcoming()
         self.draft["day0"] = self.reg.now_local().date()
-        if not starts:
+        self.draft["schedule"] = None
+        many = self.many()
+        if not ups:
             await self.show(interaction, f"**{self.name()}** has no upcoming run to open: {self.no_slot_reason()}\n"
                             "-# Set its run times, or open a one-off run at a day and time you pick.",
                             self.button("Set this raid's run times →", self.to_run_times, discord.ButtonStyle.primary),
+                            *self.template_buttons(),
                             self.button("Another day and time…", self.open_when),
                             self.button("Cancel", self.cancel))
             return
         items: list[discord.ui.Item] = []
-        others = starts[1:1 + OTHER_STARTS]
-        if others:
-            items.append(self.select("Or another upcoming run", [Opt(t.isoformat(), self.reg.local12(t), when_relative(self.reg, t)) for t in others], self.start_picked))
-        items += [self.button(f"Open the next slot — {self.reg.local12(starts[0])}", self.next_picked, discord.ButtonStyle.primary),
+        others = ups[1:1 + OTHER_STARTS]
+        if others:  # the value names the schedule only when it isn't the raid's own run times (old values stay ISO)
+            items.append(self.select("Or another upcoming run", [Opt(t.isoformat() + ("" if s["id"] == "default" else f"|{s['id']}"), self.reg.local12(t),
+                                                                     (f"{s['name']} · " if many else "") + when_relative(self.reg, t)) for s, t in others], self.start_picked))
+        s0, t0 = ups[0]
+        items += [self.button(f"Open the next slot — {self.reg.local12(t0)}" + (f" · {s0['name']}" if many else ""), self.next_picked, discord.ButtonStyle.primary),
+                  *self.template_buttons(),
                   self.button("Another day and time…", self.open_when),
                   self.button("Cancel", self.cancel)]
         await self.show(interaction, f"**{self.name()}** — which run?", *items)
 
     def no_slot_reason(self) -> str:
-        rd = self.reg.raid_def(self.rid)
-        if not rd.get("slots"):
-            return "it has no run times yet."
+        if not [s for s in self.reg.schedules(self.rid) if s["kind"] != "pickup" and s.get("active", True)]:
+            return "it has no run times yet." + (" (its pickup templates open when you pick a time)" if self.templates() else "")
         fo = self.reg.first_open(self.rid)
         if fo is not None:
             return f"every run time in the next {rc.OPEN_HORIZON_DAYS} days falls before its first lockout opens ({self.reg.local12(fo)})."
@@ -161,28 +190,32 @@ class OpenWizard(Wizard):
         await nxt(interaction, self.reg, raid=self.rid, section="times")
 
     async def next_picked(self, interaction: discord.Interaction) -> None:
-        starts = self.starts()
-        if not starts:
+        ups = self.upcoming()
+        if not ups:
             await self.shortlist(interaction)
             return
-        self.draft["start"], self.draft["note"] = starts[0], ""
+        self.draft["start"], self.draft["note"], self.draft["schedule"] = ups[0][1], "", ups[0][0]["id"]
         await self.confirm(interaction)
 
     async def start_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["start"], self.draft["note"] = datetime.fromisoformat(values[0]), ""
+        iso, _, sid = values[0].partition("|")
+        self.draft["start"], self.draft["note"], self.draft["schedule"] = datetime.fromisoformat(iso), "", sid or None
         await self.confirm(interaction)
 
     # ---- layer 2: day · hour · minutes
     def when_form(self) -> Form:
         starts = self.starts()
         usual = starts[0] if starts else None
-        return Form(f"Open {self.name()}", when_fields(self.reg, day0=self.draft["day0"], default=usual, day_note=self._day_note), self.when_submitted)
+        tpl = self.draft.get("schedule")
+        title = f"Open {self.sched_name(tpl) or self.name()}" if tpl else f"Open {self.name()}"
+        return Form(title, when_fields(self.reg, day0=self.draft["day0"], default=usual, day_note=self._day_note), self.when_submitted)
 
     def _day_note(self, day: date) -> str | None:
         hits = [t for t in self.starts() if t.astimezone(self.reg.tz).date() == day]
         return f"{self.name()} run time {self.reg.local12(hits[0], '%I:%M %p')}" if hits else None
 
     async def open_when(self, interaction: discord.Interaction) -> None:
+        self.draft["schedule"] = None  # a one-off at a picked time: the raid's own cadence
         await self.open_form(interaction, self.when_form())
 
     async def when_submitted(self, interaction: discord.Interaction, v: dict[str, str]) -> None:
@@ -205,12 +238,19 @@ class OpenWizard(Wizard):
     # ---- confirm and save
     def existing(self, start: datetime) -> rc.RaidEvent | None:
         """The run open_run would hand back for this start (same roster key and day), if it is still live."""
-        ev = self.rs.events.get(f"{rc.run_key(self.rid, start)}-{start.date().isoformat()}")
+        ev = self.rs.events.get(rc.event_key(self.rid, start, self.draft.get("schedule")))
         return ev if ev and ev.state not in ("done", "cancelled") else None
 
     async def confirm(self, interaction: discord.Interaction) -> None:
         start = self.draft["start"]
-        lines = [f"Open **{self.name()}** at {both_clocks(self.reg, start)}?"]
+        sid = self.draft.get("schedule")
+        label = f"**{self.name()}**" + (f" · {self.sched_name(sid)}" if sid and (sid != "default" or self.many()) else "")
+        lines = [f"Open {label} at {both_clocks(self.reg, start)}?"]
+        if sid:
+            sd = self.reg.schedule_def(self.rid, sid)
+            n = int(sd["schedule"].get("rosters") or 1)
+            if n > 1:
+                lines.append(f"-# {n} rosters of {sd.get('size', '?')}: the sheet advertises {n * int(sd.get('size') or 0)} seats.")
         if self.draft["note"]:
             lines.append(when_note(self.draft["note"], start))
         ev = self.existing(start)
@@ -233,7 +273,7 @@ class OpenWizard(Wizard):
             return
         await self.working(interaction, "Opening…")
         bot, rs = interaction.client, self.rs
-        ev = await bot.open_run_and_post(self.reg, rs, self.rid, start, by=interaction.user.display_name)
+        ev = await bot.open_run_and_post(self.reg, rs, self.rid, start, by=interaction.user.display_name, **rc.schedule_kw(self.draft.get("schedule")))
         extra = ""
         if not ev.message_id:  # no signup channel configured: the sheet goes where the officer asked
             if interaction.channel is not None:

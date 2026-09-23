@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, raid_views as dr, raidcycle as rc, render
-from ..registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, RegistryError
+from ..registry import MAX_SCHEDULE_ROSTERS, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 
 HERE = Path(__file__).parent
@@ -368,6 +368,18 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return f"in {int(secs // 3600)} h"
         return f"in {int(secs // 86400)} days"
 
+    def schedule_json(reg, rid: str, s: dict) -> dict:
+        """One schedule for the pages: its stored settings (machine form, for the editors), what it inherits, and every
+        time a person reads already in words (`label`, `slot_labels`, `time_label`, `next`) — no page formats a clock."""
+        sd = reg.schedule_def(rid, s["id"])
+        size = int(sd.get("size") or 20)
+        return {"id": s["id"], "name": s.get("name") or s["id"], "kind": s["kind"], "active": bool(s.get("active", True)), "rosters": int(s.get("rosters") or 1),
+                "seats": size * int(s.get("rosters") or 1), "slots": list(s.get("slots") or []), "slot_labels": [reg.slot_label(x) for x in s.get("slots") or []],
+                "days": list(s.get("days") or []), "time": s.get("time") or "", "time_label": reg.time_label(s.get("time")) if s.get("time") else "",
+                "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]), "is_default": s["id"] == "default",
+                "effective": {k: sd[k] for k in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "nudge", "autofill", "open_dm", "split_policy")},
+                "next": [t12(reg, t) for t in rc.next_runs_of(reg, rid, s)]}
+
     def signup_json(s, pins: dict) -> dict:
         return {"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "offspec": s.offspec, "role": s.role, "status": s.status,
                 "label": rc.LABELS.get(s.status, s.status), "source": s.source, "note": s.note, "pin": pins.get(str(s.discord_id))}
@@ -406,7 +418,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         day = ev.start.astimezone(reg.tz).date().isoformat()
         base = {"key": ev.key, "run": ev.team, "name": t.get("name") or t["key"], "size": rc.run_size(reg, ev), "instance": ev.instance, "raid": rd.get("name", ev.instance),
                 "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "rel": rel(reg, ev.start), "state": ev.state, "live": live, "fill_state": ev.fill_state,
-                "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters)}
+                "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters), "schedule": ev.schedule, "rosters_expected": rc.run_rosters(reg, ev)}
         if not full:
             return base
         from ..raid_views import run_times
@@ -426,7 +438,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "needs": rc.needs(reg, ev, t) if live else None,
                 "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
                 "split": {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
-                          "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), rc.run_size(reg, ev), reg.role_bounds(ev.instance, rc.run_size(reg, ev))) if live else 1},
+                          "runs": rc.how_many_rosters(reg, rc.players_for(reg, ev), rc.run_size(reg, ev), reg.role_bounds(ev.instance, rc.run_size(reg, ev)), want=rc.run_rosters(reg, ev)) if live else 1},
                 "confirmations": conf_rows,
                 "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer, "expires_at": a.expires_at, "pair": a.pair} for a in ev.fill_asks],
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
@@ -442,9 +454,13 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             live = [ev_json(reg, rs, e) for e in evs if e.state not in ("done", "cancelled")]
             past = [ev_json(reg, rs, e, full=False) for e in reversed(evs) if e.state in ("done", "cancelled")][:8]
             fo = reg.first_open(rid)
-            upcoming = [{"slot": slot, "start": t12(reg, start), "opens": t12(reg, start - timedelta(hours=float(rd["signup_lead_hours"])))}
-                        for slot, start in rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if f"{rc.run_key(rid, start)}-{start.date().isoformat()}" not in rs.events][:6]
+            scheds = reg.schedules(rid)
+            many = len([s for s in scheds if s["kind"] != "pickup"]) > 1
+            upcoming = [{"slot": (s["name"] if many else reg.slot_label(start.astimezone(reg.tz).strftime("%a %H:%M"))), "schedule": s["id"], "schedule_name": s["name"], "start": t12(reg, start),
+                         "opens": t12(reg, start - timedelta(hours=float(reg.schedule_def(rid, s["id"])["signup_lead_hours"])))}
+                        for s, start in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if rc.event_key(rid, start, s["id"]) not in rs.events][:6]
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
+                        "schedules": [{"id": s["id"], "name": s["name"], "kind": s["kind"], "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True))} for s in scheds],
                         "opened": bool(fo and fo <= now), "first_open": reg.local12(fo, "%a %d %b %Y %I:%M %p") if fo else None,
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "upcoming": upcoming})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
@@ -725,31 +741,40 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/raid/{rid}/open")
     async def raid_open(request: Request, rid: str):
-        """Open a sheet now: the raid's next slot, or a one-off 'YYYY-MM-DD HH:MM' in guild time."""
+        """Open a sheet now: the raid's next run (of `schedule` when given, else of any schedule), or a one-off
+        'YYYY-MM-DD HH:MM' in guild time from the picker (with `schedule`: that schedule's settings, e.g. a pickup template)."""
         v, d = await body(request, officer=True)
         reg = v.reg
         if rid not in reg.profile.raids:
             return JSONResponse({"error": "unknown raid"}, status_code=400)
         now, rd = reg.now_local(), reg.raid_def(rid)
         when = (d.get("when") or "").strip()
+        sid = (d.get("schedule") or "").strip() or None
+        sched = next((s for s in reg.schedules(rid) if s["id"] == sid), None) if sid else None
+        if sid and sched is None:
+            return JSONResponse({"error": f"{rd.get('name', rid)} has no schedule {sid}"}, status_code=400)
         try:
             if when:
                 start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=ZoneInfo(reg.config.timezone))
+            elif sched is not None and sched["kind"] == "pickup":
+                return JSONResponse({"error": f"{sched['name']} is a pickup template: pick the date and time it starts"}, status_code=400)
             else:
-                nxt = rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS)
+                nxt = [(s, t) for s, t in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if sched is None or s["id"] == sid]
                 if not nxt:
                     fo = reg.first_open(rid)
-                    why = (f"its slots all fall before it opens on {reg.local12(fo)}" if rd["slots"] and fo and fo > now
+                    has = [s for s in reg.schedules(rid) if s["kind"] != "pickup" and (sched is None or s["id"] == sid)]
+                    why = (f"its slots all fall before it opens on {reg.local12(fo)}" if has and fo and fo > now
                            else "it has no recurring slots yet")
                     return JSONResponse({"error": f"No next slot for this raid: {why}. Pick a date and time instead, or set it up on the Raids page."}, status_code=400)
-                start = nxt[0][1]
+                sched, start = nxt[0]
+                sid = sched["id"]
         except ValueError:
             return JSONResponse({"error": "that date and time didn't parse — pick one with the picker"}, status_code=400)
         if start < now - timedelta(minutes=5):  # a mistyped year would open a run the scheduler may close at once
             return JSONResponse({"error": f"{reg.local12(start)} is in the past — pick a time from now on"}, status_code=400)
         rs = bot.raids.store(reg)
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
-            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name))
+            ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, **rc.schedule_kw(sid)))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")}
@@ -856,8 +881,30 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
-                        "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid)})
-        return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES)}
+                        "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid),
+                        "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)]})
+        return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES),
+                "schedule_kinds": list(SCHEDULE_KINDS), "schedule_cadence": list(SCHEDULE_CADENCE), "max_rosters": MAX_SCHEDULE_ROSTERS}
+
+    @app.post("/api/admin/raid/schedule")
+    async def admin_raid_schedule(request: Request):
+        """Change or create one schedule (owner): {instance, id, fields: {setting: value}} — a cadence value of null goes
+        back to the raid's. One registry write (Registry.set_schedule): validated as a whole, one commit."""
+        def go(v, d):
+            need_owner(v)
+            inst, sid = parse(d, InstanceBody).instance, str(d.get("id") or "").strip()
+            fields = d.get("fields")
+            if not isinstance(fields, dict) or not fields:
+                raise HTTPException(400, "fields: a map of schedule settings to change")
+            return "; ".join(v.reg.set_schedule(inst, sid, fields, v.name)) or f"{inst}: no changes"
+        return await run(request, go, officer=True)
+
+    @app.post("/api/admin/raid/schedule/remove")
+    async def admin_raid_schedule_remove(request: Request):
+        def go(v, d):
+            need_owner(v)
+            return v.reg.remove_schedule(parse(d, InstanceBody).instance, str(d.get("id") or ""), v.name)
+        return await run(request, go, officer=True)
 
     @app.post("/api/admin/raid")
     async def admin_raid(request: Request):

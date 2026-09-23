@@ -244,6 +244,160 @@ def parse_slots(text) -> list[str]:
     return out
 
 
+# ---- schedules: WHEN a raid runs, as entries under the raid (design.md §5.25). A raid keeps its identity (size, comp,
+# lockout, weights) and its cadence fields as the DEFAULTS; each schedule says when runs happen and may override any
+# cadence field. The raid's own `slots` are the implicit weekly schedule `default`, so a raid that only has slots behaves
+# exactly as before (same starts, same run keys); guild.yaml `raids.<id>.schedules` holds the rest (and `default`'s own
+# settings — never its slots, which stay on the raid).
+DEFAULT_SCHEDULE = "default"
+SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of each lockout · a template opened on demand
+SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
+                    "nudge", "autofill", "open_dm", "split_policy")  # unset = the raid's value
+SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters") + SCHEDULE_CADENCE
+MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
+SCHEDULE_NAMES = {"weekly": "Weekly", "lockout": "Lockout days", "pickup": "Pickup"}
+DEFAULT_SCHEDULE_NAME = "Regular nights"
+INHERIT_WORDS = ("", "inherit", "raid", "default", "same", "clear", "none")  # a cadence override set to one of these goes back to the raid's
+_SCHED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
+_TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\s*(am|pm)?$", re.I)  # a picker may add :ss
+DAY_PLURAL = {"Mon": "Mondays", "Tue": "Tuesdays", "Wed": "Wednesdays", "Thu": "Thursdays", "Fri": "Fridays", "Sat": "Saturdays", "Sun": "Sundays"}
+
+
+def parse_time(value) -> str:
+    """'20:00', '8:00 pm', '8:00PM' → '20:00' (the stored 24-hour form; people only ever read time_label)."""
+    m = _TIME_RE.match(str(value or "").strip())
+    if not m:
+        raise RegistryError(f"time {value!r} should look like 20:00")
+    h, mi, ap = int(m.group(1)), int(m.group(2)), (m.group(3) or "").lower()
+    if ap:
+        if not 1 <= h <= 12:
+            raise RegistryError(f"time {value!r}: a 12-hour clock runs 1–12")
+        h = h % 12 + (12 if ap == "pm" else 0)
+    return f"{h:02d}:{mi:02d}"
+
+
+def parse_days(value) -> list[int]:
+    """'1, 3' (or a list) → [1, 3]: days of a lockout, counted from 1 = the day it resets."""
+    raw = value if isinstance(value, list) else str(value or "").replace(";", ",").replace(" and ", ",").split(",")
+    out = set()
+    for x in raw:
+        x = str(x).strip().lower().removeprefix("day").strip()
+        if not x:
+            continue
+        if not x.isdigit() or not 1 <= int(x) <= 28:
+            raise RegistryError(f"lockout day {x!r} should be a number from 1")
+        out.add(int(x))
+    return sorted(out)
+
+
+def schedule_value(field: str, value):
+    """One schedule setting, validated and in its stored form. None = not set (a cadence field then inherits the raid's)."""
+    if field in SCHEDULE_CADENCE and (value is None or str(value).strip().lower() in INHERIT_WORDS):
+        return None
+    if field == "name":
+        return str(value or "").strip()[:40] or None
+    if field == "kind":
+        if value not in SCHEDULE_KINDS:
+            raise RegistryError(f"a schedule's kind is one of {', '.join(SCHEDULE_KINDS)}")
+        return value
+    if field == "active":
+        return None if value is None else parse_bool(value)
+    if field == "slots":
+        return parse_slots(value)
+    if field == "days":
+        return parse_days(value)
+    if field == "time":
+        return parse_time(value) if value not in (None, "") else None
+    if field == "rosters":
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise RegistryError("rosters must be a whole number")
+        if not 1 <= n <= MAX_SCHEDULE_ROSTERS:
+            raise RegistryError(f"a run holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
+        return n
+    if field in RAID_HOURS_FIELDS:
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            raise RegistryError(f"{field} must be a number of hours")
+        if num < 0:
+            raise RegistryError(f"{field} can't be negative")
+        return int(num) if num == int(num) else num
+    if field in RAID_BOOL_FIELDS:
+        return parse_bool(value)
+    if field == "split_policy":
+        if value not in SPLIT_POLICIES:
+            raise RegistryError(f"split_policy must be one of {', '.join(SPLIT_POLICIES)}")
+        return value
+    raise RegistryError(f"unknown schedule setting {field} (one of {', '.join(SCHEDULE_FIELDS)})")
+
+
+def norm_schedule(row: dict) -> dict:
+    """A stored schedule entry, validated: id + only the settings that are set. The ordering rules that need the raid
+    (cadence, lockout days, slots) are Registry._check_raid's, on the merged result."""
+    if not isinstance(row, dict):
+        raise RegistryError("a schedule is a mapping of settings")
+    sid = str(row.get("id") or "").strip().lower()
+    if not _SCHED_ID_RE.match(sid):
+        raise RegistryError(f"schedule id {sid or '(empty)'!r}: a short key of letters, digits, - or _ (at most 16)")
+    out: dict = {"id": sid}
+    for k, v in row.items():
+        if k == "id":
+            continue
+        nv = schedule_value(k, v)
+        if nv is not None and not ((k == "active" and nv is True) or (k == "rosters" and nv == 1)):  # the defaults aren't stored
+            out[k] = nv
+    if sid == DEFAULT_SCHEDULE:
+        if out.pop("kind", "weekly") != "weekly":
+            raise RegistryError("the default schedule is the raid's own weekly run times; add another schedule for other kinds")
+    else:
+        out.setdefault("kind", "weekly")
+    return out
+
+
+def schedules_of(rd: dict) -> list[dict]:
+    """The effective schedules of an effective raid definition (Registry.raid_def), every key present: `default` first
+    (from the raid's slots, listed when it has slots or settings of its own), then the stored ones in order."""
+    stored = [s for s in (rd.get("schedules") or []) if isinstance(s, dict) and s.get("id")]
+    dflt = next((s for s in stored if s["id"] == DEFAULT_SCHEDULE), None)
+    base = {"active": True, "rosters": 1, "slots": [], "days": [], "time": None}
+    out = []
+    if rd.get("slots") or dflt:
+        out.append({**base, "name": DEFAULT_SCHEDULE_NAME, **(dflt or {}), "id": DEFAULT_SCHEDULE, "kind": "weekly", "slots": list(rd.get("slots") or [])})
+    for s in stored:
+        if s["id"] != DEFAULT_SCHEDULE:
+            kind = s.get("kind") or "weekly"
+            out.append({**base, "name": SCHEDULE_NAMES.get(kind, kind), **s, "kind": kind})
+    for s in out:
+        s["active"] = parse_bool(s.get("active", True))
+    return out
+
+
+def schedule_def_of(rd: dict, sid: str | None) -> dict:
+    """The raid definition as one schedule sees it: the raid's fields with the schedule's cadence overrides on top, and
+    the schedule itself under "schedule" (its overrides under "schedule"]["own"]). A schedule that moves the opening or
+    the lock without its own nudge gets the nudge halfway again. None / "" / "default" = the raid's own cadence."""
+    sid = sid or DEFAULT_SCHEDULE
+    s = next((x for x in schedules_of(rd) if x["id"] == sid), None)
+    if s is None:
+        if sid != DEFAULT_SCHEDULE:
+            raise RegistryError(f"no schedule {sid} on {rd.get('name', 'this raid')}")
+        s = {"id": DEFAULT_SCHEDULE, "name": DEFAULT_SCHEDULE_NAME, "kind": "weekly", "active": True, "rosters": 1, "slots": list(rd.get("slots") or []), "days": [], "time": None}
+    own = {k: s[k] for k in SCHEDULE_CADENCE if s.get(k) is not None}
+    eff = {**rd, **own}
+    if "nudge_hours_before" not in own and ("signup_lead_hours" in own or "lock_hours_before" in own):
+        eff["nudge_hours_before"] = default_nudge_hours(eff["signup_lead_hours"], eff["lock_hours_before"])
+    for k in RAID_BOOL_FIELDS:
+        eff[k] = parse_bool(eff[k])
+    eff["schedule"] = {**s, "own": own}
+    return eff
+
+
+def join_words(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1] if words else ""
+
+
 def _clabel(c: dict) -> str:
     if c.get("name"):
         return f"{c['name']} {c['surname']}" if c.get("surname") else c["name"]
@@ -489,6 +643,30 @@ class Registry:
         except ValueError:
             return str(slot)
         return f"{day} {h % 12 or 12}:{mi:02d} {'AM' if h < 12 else 'PM'}"
+
+    def time_label(self, hm: str | None) -> str:
+        """A stored time of day as a person reads it: '20:00' -> '8:00 PM'."""
+        return self.slot_label(f"Mon {hm}").removeprefix("Mon ") if hm else "no time set"
+
+    def schedule_label(self, instance: str | None, s: dict) -> str:
+        """A schedule in plain words: 'Tuesdays and Thursdays 7:30 PM · 2 rosters', 'Day 1 of each 3-day lockout, 8:00 PM',
+        'Pickup template'. Never a 24-hour time."""
+        kind, n = s.get("kind") or "weekly", int(s.get("rosters") or 1)
+        if kind == "pickup":
+            text = "Pickup template: opened by an officer"
+        elif kind == "lockout":
+            days = list(s.get("days") or [])
+            lockout = int(self.raid_def(instance).get("lockout_days") or 7)
+            text = (f"Day{'s' if len(days) > 1 else ''} {join_words([str(d) for d in days])} of each {lockout}-day lockout, {self.time_label(s.get('time'))}"
+                    if days else "No lockout days yet")
+        else:
+            order = {d: i for i, d in enumerate(DAY_PLURAL)}
+            by_time: dict[str, list[str]] = {}
+            for slot in sorted(s.get("slots") or [], key=lambda x: (order.get(x.split()[0][:3].title(), 9), x.split()[-1])):
+                day, hm = slot.split()
+                by_time.setdefault(hm, []).append(DAY_PLURAL.get(day[:3].title(), day))
+            text = ", ".join(f"{join_words(days)} {self.time_label(hm)}" for hm, days in sorted(by_time.items(), key=lambda kv: order.get(kv[1][0][:3], 9))) or "No run times yet"
+        return text + (f" · {n} rosters" if n > 1 else "") + ("" if s.get("active", True) else " · paused")
 
     def day_label(self, iso_day: str, with_year: bool = False) -> str:
         """'2026-12-24' -> 'Thu 24 Dec' (a date a person reads; ISO stays for the data repo and the API)."""
@@ -777,6 +955,75 @@ class Registry:
         b = scaled_role_bounds(self.profile.comp_rules, size)
         return {"tank": b["tank"], "healer": b["healer"], "dps": {"min": 0, "max": size}}
 
+    def schedules(self, instance: str | None) -> list[dict]:
+        """The raid's effective schedules (see schedules_of)."""
+        return schedules_of(self.raid_def(instance))
+
+    def schedule_def(self, instance: str | None, sid: str | None = None) -> dict:
+        """The raid definition as schedule `sid` sees it (see schedule_def_of)."""
+        return schedule_def_of(self.raid_def(instance), sid)
+
+    def set_schedule(self, instance: str, sid: str, fields: dict, by: str) -> list[str]:
+        """Change (or create) one schedule of a raid: `fields` = {setting: value} from SCHEDULE_FIELDS, a cadence value
+        of None / 'inherit' going back to the raid's. A new id needs what it is first — a kind, run times, or lockout
+        days and a time. One set_raid_overrides call: validated as a whole, one commit, a refusal leaves config as it was."""
+        import copy
+
+        if instance not in self.profile.raids:
+            raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+        sid = str(sid or "").strip().lower()
+        if not fields:
+            return []
+        bad = [f for f in fields if f not in SCHEDULE_FIELDS]
+        if bad:
+            raise RegistryError(f"unknown schedule setting {bad[0]} (one of {', '.join(SCHEDULE_FIELDS)})")
+        rd = self.raid_def(instance)
+        stored = copy.deepcopy([s for s in (rd.get("schedules") or []) if isinstance(s, dict)])
+        entry = next((s for s in stored if s.get("id") == sid), None)
+        before = next((s for s in schedules_of(rd) if s["id"] == sid), None)
+        if before is None and entry is None:
+            kind = fields.get("kind") or ("weekly" if "slots" in fields else "lockout" if ("days" in fields or "time" in fields) else None)
+            if not kind:
+                raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'}; start it with its kind (weekly, lockout or pickup) or its run times")
+            entry = {"id": sid, "kind": kind} if sid != DEFAULT_SCHEDULE else {"id": sid}
+            stored.append(entry)
+        want: dict = {}
+        for f, v in fields.items():
+            if f == "slots" and sid == DEFAULT_SCHEDULE:
+                want["slots"] = v  # the default schedule's run times ARE the raid's slots
+                continue
+            if entry is None:
+                entry = {"id": sid}
+                stored.append(entry)
+            nv = schedule_value(f, v)
+            if nv is None:
+                entry.pop(f, None)
+            else:
+                entry[f] = nv
+        want["schedules"] = stored
+        self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} {', '.join(fields)} (by {by})")
+        after = next((s for s in self.schedules(instance) if s["id"] == sid), None) or {"id": sid}
+        return [f"{rd.get('name', instance)} · {after.get('name') or sid}: " + ("new schedule, " if before is None else "") + self.schedule_label(instance, after)]
+
+    def remove_schedule(self, instance: str, sid: str, by: str) -> str:
+        """Drop one schedule. `default` is the raid's own run times: removing it clears the raid's slots. Runs already
+        opened from it keep their times."""
+        import copy
+
+        if instance not in self.profile.raids:
+            raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+        sid = str(sid or "").strip().lower()
+        rd = self.raid_def(instance)
+        have = next((s for s in schedules_of(rd) if s["id"] == sid), None)
+        if have is None:
+            raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'} (it has {', '.join(s['id'] for s in schedules_of(rd)) or 'none'})")
+        stored = [copy.deepcopy(s) for s in (rd.get("schedules") or []) if isinstance(s, dict) and s.get("id") != sid]
+        want: dict = {"schedules": stored}
+        if sid == DEFAULT_SCHEDULE:
+            want["slots"] = []
+        self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} removed (by {by})")
+        return f"{rd.get('name', instance)}: schedule {have.get('name') or sid} removed"
+
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
         """Owner override for a raid (validated): a refused value never stays in memory — the override dict is
         restored, so the next save_config can't commit it."""
@@ -792,7 +1039,7 @@ class Registry:
                 self.config.raids[instance] = before
             raise
 
-    def set_raid_overrides(self, instance: str, fields: dict, by: str) -> list[str]:
+    def set_raid_overrides(self, instance: str, fields: dict, by: str, message: str | None = None) -> list[str]:
         """Several raid fields as ONE change: every field is applied, the cross-field rules are checked once on the
         result, and it is saved in a single commit. A refused value leaves the stored config exactly as it was — no
         field commits on its own. This is what every multi-field editor must call (the Discord wizard, the web Raids
@@ -812,7 +1059,7 @@ class Registry:
             else:
                 self.config.raids[instance] = before
             raise
-        self.save_config(f"raid {instance}: {', '.join(fields)} (by {by})")
+        self.save_config(message or f"raid {instance}: {', '.join(fields)} (by {by})")
         return lines
 
     def _check_raid(self, instance: str) -> None:
@@ -828,17 +1075,65 @@ class Registry:
         for role, b in (eff.get("comp") or {}).items():
             if b.get("min", 0) > b.get("max", 999):
                 raise RegistryError(f"{role}: min {b['min']} above max {b['max']}")
+        self._check_schedules(eff)
+
+    def _check_schedules(self, eff: dict) -> None:
+        """Every schedule on the merged raid: unique ids, the cadence ordering with its overrides, slots for a weekly
+        one, first_open + days within the lockout for a lockout one, 1–4 rosters."""
+        scheds = schedules_of(eff)
+        ids = [s["id"] for s in scheds]
+        dup = sorted({i for i in ids if ids.count(i) > 1})
+        if dup:
+            raise RegistryError(f"schedule id {dup[0]} is used twice")
+        lockout = int(eff.get("lockout_days") or 7)
+        for s in scheds:
+            name = s.get("name") or s["id"]
+            se = schedule_def_of(eff, s["id"])
+            if se["lock_hours_before"] < se["confirm_hours_before"]:
+                raise RegistryError(f"{name}: lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
+            if se["signup_lead_hours"] <= se["lock_hours_before"]:
+                raise RegistryError(f"{name}: signups must open before they lock (signup_lead_hours > lock_hours_before)")
+            if not (se["lock_hours_before"] <= float(se["nudge_hours_before"]) <= se["signup_lead_hours"]):
+                raise RegistryError(f"{name}: the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
+            if not 1 <= int(s.get("rosters") or 1) <= MAX_SCHEDULE_ROSTERS:
+                raise RegistryError(f"{name}: a run holds 1 to {MAX_SCHEDULE_ROSTERS} rosters")
+            if s["kind"] == "weekly" and s["id"] != DEFAULT_SCHEDULE and not s.get("slots"):
+                raise RegistryError(f"{name}: a weekly schedule needs at least one run time")
+            if s["kind"] == "lockout":
+                if not eff.get("first_open"):
+                    raise RegistryError(f"{name}: a lockout schedule counts from the raid's first opening; set that first")
+                if not s.get("days") or not s.get("time"):
+                    raise RegistryError(f"{name}: a lockout schedule needs its day(s) and a start time")
+                if max(s["days"]) > lockout:
+                    raise RegistryError(f"{name}: day {max(s['days'])} is past the end of a {lockout}-day lockout")
 
     def _apply_raid_override(self, instance: str, field: str, value, by: str, commit: bool = True) -> str:
         """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max
         | slots | signup_lead_hours | lock_hours_before | confirm_hours_before | nudge_hours_before | fill_ask_hours | split_policy
-        | nudge / autofill / open_dm (true|false) | weight_rank/main/sat_out/signup_order."""
+        | nudge / autofill / open_dm (true|false) | weight_rank/main/sat_out/signup_order | schedules (the whole list)."""
         if instance not in self.profile.raids:
             raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
         over = self.config.raids.setdefault(instance, {})
         if field == "slots":
             over["slots"] = parse_slots(value)
             value = ", ".join(over["slots"]) or "none"
+        elif field == "schedules":  # the whole stored list (the wizard's and set_schedule's one write); `default`'s slots go to the raid
+            if not isinstance(value, list):
+                raise RegistryError("schedules must be a list of schedules")
+            rows = []
+            for row in value:
+                e = norm_schedule(row)
+                if e["id"] == DEFAULT_SCHEDULE:
+                    if "slots" in e:
+                        over["slots"] = e.pop("slots")
+                    if len(e) == 1:
+                        continue  # nothing of its own left: the raid's slots are the whole of it
+                rows.append(e)
+            if rows:
+                over["schedules"] = rows
+            else:
+                over.pop("schedules", None)
+            value = ", ".join(e["id"] for e in rows) or "none"
         elif field in RAID_HOURS_FIELDS:
             try:
                 num = float(value)

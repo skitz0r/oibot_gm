@@ -72,23 +72,27 @@ def guide_text(reg, key: str) -> str:
     """Static answers for people who may not ask free-form questions: config + manual excerpts, no LLM."""
     cfg = reg.config
     if key == "about":
-        raids = ", ".join(f"{rd.get('name', rid)} ({rd.get('size')}-player{', ' + ' / '.join(reg.slot_label(x) for x in rd['slots']) if rd.get('slots') else ''})" for rid in reg.profile.raids for rd in [reg.raid_def(rid)]) or "no raids configured yet"
+        raids = ", ".join(f"{rd.get('name', rid)} ({rd.get('size')}-player{''.join(', ' + reg.schedule_label(rid, s) for s in reg.schedules(rid) if s['kind'] != 'pickup' and s.get('active', True))})" for rid in reg.profile.raids for rd in [reg.raid_def(rid)]) or "no raids configured yet"
         return f"**{cfg.name}**\n{cfg.about or 'A WoW: Forever raiding guild.'}\n\nRaids: {raids}.\nMembers registered: {len(reg.members)}."
     if key == "schedule":
         from . import raidcycle as rc
 
         lines = []
-        now = reg.now_local()
         for rid in reg.profile.raids:
             rd = reg.raid_def(rid)
-            slots = rd.get("slots") or []
-            if not slots:
+            scheds = reg.schedules(rid)
+            if not scheds:
                 lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — no run times yet")
                 continue
-            starts = rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS)
-            nxt = starts[0][1] if starts else None
-            lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — {', '.join(reg.slot_label(x) for x in slots)} {cfg.timezone}"
-                         + (f" · next <t:{int(nxt.timestamp())}:F> (<t:{int(nxt.timestamp())}:R>); its sheet opens {rd['signup_lead_hours']:g} h before" if nxt else " · nothing in the next two weeks"))
+            lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player)")
+            for s in scheds:  # every schedule, with its real next runs (Discord stamps render in the reader's own zone)
+                sd = reg.schedule_def(rid, s["id"])
+                head = f"  ◦ {s['name']}: {reg.schedule_label(rid, s)}" + ("" if s["kind"] == "pickup" else f" ({cfg.timezone})")
+                if s["kind"] == "pickup" or not s.get("active", True):
+                    lines.append(head)
+                    continue
+                nxt = rc.next_runs_of(reg, rid, s)
+                lines.append(head + (" · next " + ", ".join(f"<t:{int(t.timestamp())}:f>" for t in nxt) + f"; each sheet opens {float(sd['signup_lead_hours']):g} h before" if nxt else " · nothing coming up"))
         where = f" in <#{cfg.signup_channel_id}>" if cfg.signup_channel_id else ""
         return "**Raid schedule**\n" + ("\n".join(lines) or "Nothing scheduled yet.") + f"\nEach run gets its own sheet{where}: answer Join / Bench / No thanks there."
     if key == "register":

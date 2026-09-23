@@ -14,11 +14,11 @@ Ico = Callable[[str, str], str]
 
 
 def raids(reg: Registry, *, current: str | None = None) -> list[Opt]:
-    """Every raid in the game profile: name, size and its run times (12-hour)."""
+    """Every raid in the game profile: name, size and its schedules in words (12-hour)."""
     out = []
     for rid in reg.profile.raids:
         rd = reg.raid_def(rid)
-        slots = ", ".join(reg.slot_label(s) for s in rd.get("slots") or []) or "no run times yet"
+        slots = "; ".join(reg.schedule_label(rid, s) for s in reg.schedules(rid) if s["kind"] != "pickup") or "no run times yet"
         out.append(Opt(rid, rd.get("name", rid), f"{rd.get('size', '?')}-player · {slots}", default=rid == current))
     return out
 
