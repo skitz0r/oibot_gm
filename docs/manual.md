@@ -66,10 +66,13 @@ on the sheet in Discord.
 - **Name a planned character at launch**: `/me char name`.
 - **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` (or the per-character
   flex toggles on the website) adds roles you'd play beyond that.
-- **Absences**: `/me absent list`, `/me absent clear` (adding is below).
-- **Away for a while**: press *I'll be away* on the card in the absences channel (from, to, optional
-  reason for officers), or `/me absent add`, or the Me page. Sheets on those days get *No thanks* for you,
-  and if you were already rostered the seat is released (you get a DM saying so) and the bench is asked.
+- **Absences**: `/me absent list` shows yours with a **Clear** button on each; `/me absent clear` does the same.
+- **Away for a while**: press *I'll be away* on the card in the absences channel, or `/me absent add`, or the Me
+  page. Nothing is typed: pick the **first day** (Today, Tomorrow, then the days after — *Later than this…* picks a
+  week further out) and **how long** (1 day up to 4 months), with an optional reason only officers see. A confirm
+  screen shows the days in words and which live sheets it touches before anything is saved. Sheets on those days
+  get *No thanks* for you, and if you were already rostered the seat is released (you get a DM saying so) and the
+  bench is asked. Officers record one for someone else with `/roster absent` and a member picker, same screens.
 - **See everything the bot has on you**: `/me view` or the *My status* button.
 - All `/me` commands also work in a DM with the bot.
 

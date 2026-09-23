@@ -184,29 +184,6 @@ class PoolMixin:
 
 # ---------------------------------------------------------------- absences channel
 
-class AbsenceModal(discord.ui.Modal, title="I'll be away"):
-    start = discord.ui.TextInput(label="From (YYYY-MM-DD)", placeholder="2026-12-24", min_length=10, max_length=10)
-    end = discord.ui.TextInput(label="To (YYYY-MM-DD, blank = one day)", required=False, max_length=10)
-    reason = discord.ui.TextInput(label="Reason (officers only, optional)", required=False, max_length=120)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        bot = interaction.client
-        reg = bot.registries.for_interaction(interaction)
-        if not reg:
-            await interaction.response.send_message("Not configured here.", ephemeral=True)
-            return
-        from .registry import RegistryError
-
-        try:
-            m, a = reg.add_absence(interaction.user.id, str(self.start.value).strip(), str(self.end.value).strip() or None, str(self.reason.value).strip() or None, interaction.user.display_name, display_name=interaction.user.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        span = a.start + (f" → {a.end}" if a.end != a.start else "")
-        await interaction.response.send_message(f"✅ Away {span}. Sheets on those days will have you as No thanks; if you're already rostered, the seat is handed back.", ephemeral=True)
-        await bot.announce_absence(reg, m, a, interaction.user.display_name)
-
-
 class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs:(?P<action>new|mine)"):
     def __init__(self, action: str):
         label, style = ("I'll be away", discord.ButtonStyle.primary) if action == "new" else ("My absences", discord.ButtonStyle.secondary)
@@ -223,8 +200,10 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs:(?
         if not reg:
             await interaction.response.send_message("Not configured here.", ephemeral=True)
             return
-        if self.action == "new":
-            await interaction.response.send_modal(AbsenceModal())
+        if self.action == "new":  # the same wizard as /me absent add: pick the first day and how long, nothing typed
+            from .wizard_flows import FLOWS
+
+            await FLOWS["absence"](interaction, reg)
             return
         m = reg.members.get(interaction.user.id)
         today = reg.now_local().date().isoformat()

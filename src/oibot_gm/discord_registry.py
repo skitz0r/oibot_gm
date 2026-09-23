@@ -18,6 +18,7 @@ from . import ops as ops_mod
 from .profiles import GameProfile
 from .registry import RANKS, Registry, RegistryError
 from .store import GitStore
+from .wizard_flows import FLOWS
 
 CLASS_CHOICES = [app_commands.Choice(name=c, value=c) for c in ("Warrior", "Paladin", "Hunter", "Rogue", "Priest", "Shaman", "Mage", "Warlock", "Druid")]
 RANK_CHOICES = [app_commands.Choice(name=r, value=r) for r in RANKS]
@@ -440,20 +441,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)", parent=me)
 
-    @absent.command(name="add", description="Register an absence: one day or a range")
-    @app_commands.describe(start="YYYY-MM-DD", end="YYYY-MM-DD (optional)", reason="Optional; only officers see it")
-    async def absent_add(interaction: discord.Interaction, start: str, end: str | None = None, reason: str | None = None):
+    @absent.command(name="add", description="Say you'll be away: pick the first day and how long")
+    async def absent_add(interaction: discord.Interaction):
         reg = await need(interaction)
         if not reg:
             return
-        try:
-            m, a = reg.add_absence(interaction.user.id, start, end, reason, interaction.user.display_name, display_name=interaction.user.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        span = a.start + (f" → {a.end}" if a.end != a.start else "")
-        await interaction.response.send_message(f"✅ Absent {span}. You'll be left off sheets for those dates.", ephemeral=True)
-        await interaction.client.announce_absence(reg, m, a, interaction.user.display_name)
+        await FLOWS["absence"](interaction, reg)
 
     @absent.command(name="list", description="Your upcoming absences")
     async def absent_list(interaction: discord.Interaction):
@@ -783,18 +776,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
         await interaction.response.send_message("\n".join(lines)[:1900] or f"No absences in the next {days} days.", ephemeral=True)
 
-    @roster.command(name="absent", description="Record an absence on a member's behalf")
-    async def roster_absent(interaction: discord.Interaction, member: discord.User, start: str, end: str | None = None, reason: str | None = None):
+    @roster.command(name="absent", description="Record an absence on a member's behalf: pick the days, no typing")
+    @app_commands.describe(member="who is away")
+    async def roster_absent(interaction: discord.Interaction, member: discord.User):
         reg = await officer(interaction)
         if not reg:
             return
-        try:
-            m, a = reg.add_absence(member.id, start, end, reason, interaction.user.display_name, display_name=member.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else ""), ephemeral=True)
-        await interaction.client.announce_absence(reg, m, a, interaction.user.display_name)
+        await FLOWS["absence"](interaction, reg, member=member)
 
     @roster.command(name="applicants", description="Open applications")
     async def roster_applicants(interaction: discord.Interaction):
