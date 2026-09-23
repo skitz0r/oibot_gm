@@ -35,7 +35,7 @@ export function SplitModal({ e, meta, multi, opened, onClose, onUse }: { e: Shee
           <Text size="xs" c="dimmed">{busy ? "solving…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : <>Solver's pick · synergy {preview.total} · your own placements on the board are kept</>) : ""}</Text>
           {preview && !busy && <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={12} />} onClick={() => run(strategy, seen)}>{multi ? "another split like this" : "another layout"}</Button>}
         </Group>
-        {preview && !busy && <BoardPreview meta={meta} board={preview.board} />}
+        {preview && !busy && <BoardPreview meta={meta} board={preview.board} reason={preview.reason} />}
         {busy && <Text size="sm" c="dimmed" ta="center" py="xl">The solver is working on it…</Text>}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>

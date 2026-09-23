@@ -1,11 +1,12 @@
 import { Box, Group, Stack, Text } from "@mantine/core";
-import type { Board, Meta } from "../../api";
+import type { Board, Meta, SplitReason } from "../../api";
 import { RaidWide } from "../GroupsBlock";
-import { Aura, RosterHeader, SeatLine } from "./shared";
+import { Aura, RosterHeader, SeatLine, SplitReasonLine, splitBank } from "./shared";
 import css from "../../pages/rosters.module.css";
 
 /** Read-only rendering of a board (the split preview): the same groups, badges and raid-wide row as the builder. */
-export function BoardPreview({ meta, board }: { meta: Meta; board: Board }) {
+export function BoardPreview({ meta, board, reason }: { meta: Meta; board: Board; reason?: SplitReason | null }) {
+  const { left, rest } = splitBank(board, board.bank);
   return (
     <Stack gap="md">
       {board.rosters.map((r) => (
@@ -31,7 +32,15 @@ export function BoardPreview({ meta, board }: { meta: Meta; board: Board }) {
           <RaidWide sm={r.summary} />
         </Box>
       ))}
-      {board.bank.length > 0 && <Text size="xs" c="dimmed">Bench: {board.bank.map((b) => b.character).join(", ")}</Text>}
+      {left.length > 0 && (
+        <Box p="sm" style={{ border: "1px dashed var(--mantine-color-slate-5)", borderRadius: 8 }}>
+          <Text size="sm" fw={700} mb={4}>Leftovers ({left.length})</Text>
+          {left.map((s) => <SeatLine key={s.display_name} meta={meta} s={s} />)}
+          {reason && <Box mt={6}><SplitReasonLine meta={meta} r={reason} /></Box>}
+          {board.another && <Text size="xs" c="dimmed" mt={4}>{board.another}</Text>}
+        </Box>
+      )}
+      {rest.length > 0 && <Text size="xs" c="dimmed">Bench: {rest.map((b) => b.character).join(", ")}</Text>}
     </Stack>
   );
 }

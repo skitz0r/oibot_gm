@@ -246,9 +246,13 @@ def set_layout(run: str, groups: list[list[str]]) -> dict:
 def propose_split(run: str, strategy: str | None = None, avoid: list[list[list[str]]] | None = None) -> dict:
     """PREVIEW only (nothing saved): a fresh layout for an open run — one roster, or several under `strategy`
     (balanced | stacked | …; see list_raids split_policies). `avoid` = layouts already shown, to get a different one.
-    Apply the layout you like with set_layout, or remember the strategy with set_strategy."""
+    Apply the layout you like with set_layout, or remember the strategy with set_strategy. When the tanks/healers
+    allow fewer runs than the headcount, `why_not_more` says what another run is short, `leftovers` lists the joiners
+    the roster left out and `another_run` says whether leftovers + bench + pool could make one (offspecs/alts)."""
     data = api().post(f"/api/run/{run}/split", {"strategy": strategy, "avoid": avoid})
-    return {"strategy": data.get("strategy"), "layout": data.get("layout"), "synergy": data.get("synergy"), "total": data.get("total"), "gap": data.get("gap"), "board": data.get("board")}
+    board = data.get("board") or {}
+    return {"strategy": data.get("strategy"), "layout": data.get("layout"), "synergy": data.get("synergy"), "total": data.get("total"), "gap": data.get("gap"), "board": board,
+            "why_not_more": data.get("reason_text"), "leftovers": board.get("leftovers"), "another_run": board.get("another")}
 
 
 @mcp.tool()

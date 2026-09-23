@@ -137,7 +137,19 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    the weaker run last window moves up) — check the one preview, press *another split like this* if it
    doesn't feel right, and *Use this split on the board*. The solver seats both runs in one go, so a shaman
    lands where it lifts the pair the most. Each raid has a **split policy** (Raids page, `/gm config raid`,
-   plain text) that the scheduled lock uses when nobody chose one for the run. **Cancel run** withdraws every open confirmation ask (nothing lingers on anyone's Me page) and warns you that
+   plain text) that the scheduled lock uses when nobody chose one for the run.
+   **When it can't split.** If enough people joined for more runs than the tanks and healers allow, the builder
+   header says so where the split count would be — e.g. "Enough people for 2 runs — a second is short" followed by
+   the tank and healer icons with a number each (2 and 2) — and the same line is on the Discord health card,
+   `/raid health` and the lock card. If not even one run meets its tank/healer minimums it says "1 run is short"
+   and what. The bot then makes the **one healthiest run** it can: the tank/healer minimums come first (every tank
+   and healer who joined is rostered before anyone's rank or signup order counts), then buffs and weights. The
+   joiners it couldn't fit are listed apart as **Leftovers (n)** — on the board's bank, in the Propose preview and
+   on the lock card, one per line — with what another run is short under them. When the leftovers plus the Bench
+   answers plus the roster's pool (people who haven't answered and aren't away) could make another run, one more
+   line says so, and says when that needs offspecs or alts. Nothing is sent for it: open another run, or ask people,
+   yourself. After lock the leftovers are simply the bench — the first people Fill asks when a seat frees up.
+   **Cancel run** withdraws every open confirmation ask (nothing lingers on anyone's Me page) and warns you that
    rostered members are not told automatically — say so in the signup channel yourself.
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
@@ -338,7 +350,7 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status and the ops feed |
 | `open_run` | open a sheet now (next slot, or a date and time) |
 | `set_answer` · `pin` · `confirm_for` | Join / Bench / No thanks for someone (character swap) · pin in/out for the lock · answer a Confirm ask for them |
-| `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved) · remember the strategy · solver shapes the board · set the groups |
+| `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups |
 | `lock_run` · `fill_seats` · `cancel_run` | lock now · preview the fill asks, `send=true` sends them · cancel with a reason |
 | `raid_set` · `raid_reset` | one raid setting (slots, hours, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |

@@ -766,6 +766,107 @@ def how_many_rosters(reg: Registry, players: list[Player], size: int, rb: dict) 
     return max(1, n)
 
 
+ORDINALS = ("first", "second", "third", "fourth", "fifth")
+
+
+def split_reason(reg: Registry, players: list[Player], size: int, rb: dict) -> dict | None:
+    """Why the Join answers don't make more runs, when the headcount allows more rosters than the tank/healer minimums
+    do — or not even one roster meets them. None when the roles keep up with the bodies.
+    {"bodies_allow": 2, "roles_allow": 1, "run": 2, "short": {"tank": 2, "healer": 2}} = enough people for 2 runs,
+    run 2 is short 2 tanks and 2 healers; roles_allow 0 = the first run is already short (run 1)."""
+    signed = [p for p in players if p.status == "signed"]
+    bodies = min(MAX_ROSTERS_PER_SLOT, len(signed) // size)
+    mins = {r: int(rb[r]["min"]) for r in ("tank", "healer") if rb[r]["min"]}
+    have = {r: _capable(signed, r, reg) for r in mins}
+    roles = min([have[r] // mins[r] for r in mins], default=MAX_ROSTERS_PER_SLOT)
+    if roles >= max(1, bodies):
+        return None
+    run = roles + 1
+    short = {r: mins[r] * run - have[r] for r in mins if mins[r] * run > have[r]}
+    return {"bodies_allow": bodies, "roles_allow": roles, "run": run, "short": short}
+
+
+def split_reason_text(reason: dict, role=None) -> str:
+    """The reason as one line. `role(role, n)` formats a shortfall — the cards and the site pass role icon + number
+    (the Iconography rule); the default spells it out for logs, MCP and the help context."""
+    if role:
+        need = "   ".join(role(r, n) for r, n in reason["short"].items())
+    else:
+        need = " and ".join(f"{n} {r}{'s' if n != 1 else ''}" for r, n in reason["short"].items())
+    if reason["roles_allow"] == 0:
+        return f"1 run is short {need}" if reason["bodies_allow"] <= 1 else f"Enough people for {reason['bodies_allow']} runs — even one is short {need}"
+    nth = ORDINALS[reason["run"] - 1] if reason["run"] <= len(ORDINALS) else f"run {reason['run']}"
+    return f"Enough people for {reason['bodies_allow']} runs — a {nth} is short {need}"
+
+
+def run_split_reason(reg: Registry, ev: "RaidEvent") -> dict | None:
+    size = run_size(reg, ev)
+    return split_reason(reg, players_for(reg, ev), size, reg.role_bounds(ev.instance, size))
+
+
+def leftovers(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]) -> list[Player]:
+    """Joiners (Join answers) the roster(s) left out: not silently bench — the cards and the board list them apart.
+    Only once the rosters are full (or locked): while an open board still has seats, the bank is just unplaced."""
+    if not rosters:
+        return []
+    size = run_size(reg, ev)
+    if ev.state == "open" and any(len(r.selected) < size for r in rosters):
+        return []
+    seated = {p.signup_name for r in rosters for p in r.selected}
+    return [p for p in rosters[0].benched if p.status == "signed" and p.signup_name not in seated
+            and (sg := signup_by_name(ev, p.signup_name)) is not None and sg.status == "in"]
+
+
+def _can_cover(people: list[set[str]], need: list[str]) -> bool:
+    """Distinct people for every role seat in `need` (bipartite matching, people → the roles they can play)."""
+    match: dict[int, int] = {}  # person → seat
+
+    def place(seat: int, seen: set[int]) -> bool:
+        for i, roles in enumerate(people):
+            if need[seat] in roles and i not in seen:
+                seen.add(i)
+                holder = next((s for s, p in match.items() if p == i), None)
+                if holder is None or place(holder, seen):
+                    match[seat] = i
+                    return True
+        return False
+
+    return all(place(s, set()) for s in range(len(need)))
+
+
+def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult], reason: dict | None) -> str | None:
+    """One line, no action: could the leftovers + Bench answers + the roster's pool (not on the sheet, not away that
+    day) make one more run if some came on an offspec or an alt? Only when the joiners alone fall short on roles."""
+    if not reason or reason["roles_allow"] < 1:
+        return None
+    size = run_size(reg, ev)
+    rb = reg.role_bounds(ev.instance, size)
+    day = ev.start.date().isoformat()
+    role_of = lambda cls, spec: reg.profile.spec(cls, spec).role  # noqa: E731
+    main_only: list[set[str]] = []
+    any_role: list[set[str]] = []
+
+    def add(m: Member | None, main: str, off: set[str] = frozenset()) -> None:
+        main_only.append({main})
+        any_role.append({main} | set(off) | {role_of(c.cls, c.spec) for c in (m.active() if m else [])})
+
+    seated = {p.signup_name for r in rosters for p in r.selected}
+    for p in leftovers(reg, ev, rosters):
+        sg = signup_by_name(ev, p.signup_name)
+        add(reg.members.get(sg.discord_id) if sg else None, p.role, {role_of(p.cls, p.offspec)} if p.offspec else set())
+    for sg in ev.by_status("sub"):
+        if sg.display_name not in seated:
+            add(reg.members.get(sg.discord_id), sg.role, {role_of(sg.cls, sg.offspec)} if sg.offspec else set())
+    for m, c in reg.roster_pool(run_team(reg, ev)["key"]):
+        if c and str(m.discord_id) not in ev.signups and not m.absent_on(day):
+            add(m, role_of(c.cls, c.spec))
+    need = [r for r in ("tank", "healer") for _ in range(int(rb[r]["min"] or 0))]
+    if len(any_role) < size or not _can_cover(any_role, need):
+        return None
+    how = "" if _can_cover(main_only, need) else " with offspecs or alts"
+    return f"Leftovers, bench and pool ({len(any_role)}) could make another run{how}."
+
+
 def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
     the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective."""
@@ -826,7 +927,9 @@ def propose(reg: Registry, rs: RaidStore, ev: RaidEvent, save: bool = True) -> t
     rosters[0].benched = [p for p in players if p.signup_name not in seated]
     ev.rosters = rosters
     if save:  # the state is the caller's (lock_run sets "locked"); a proposal on its own just stores the rosters
-        ev.log.append("proposed " + " + ".join(str(len(r.selected)) for r in rosters) + f" in / {len(rosters[0].benched)} bench")
+        reason = run_split_reason(reg, ev)
+        ev.log.append("proposed " + " + ".join(str(len(r.selected)) for r in rosters) + f" in / {len(rosters[0].benched)} bench"
+                      + (f" · {split_reason_text(reason)}" if reason else ""))
         rs.save(ev, "proposed")
     return players, rosters[0]
 

@@ -328,6 +328,9 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
         roles.append(f"{ico('role', r['role'])} " + (f"**{have}**/{need * max(1, runs)}" if need and have < need * max(1, runs) else f"{have}" + (f"/{need * max(1, runs)}" if need else "")))
     head = _header(reg, ev, f"Roster health · {reg.raid_def(ev.instance).get('name', ev.instance)}", [f"**{n}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + (f" · {subs} bench" if subs else "") + "   " + "   ".join(roles)])
     body = []
+    reason = rc.split_reason(reg, players, size, reg.role_bounds(ev.instance, size))
+    if reason:  # the headcount allows more runs than the tanks/healers do (or not even one meets its minimums)
+        body.append(rc.split_reason_text(reason, lambda role, k: f"{ico('role', role)} {k}"))
     short = [r for r in h["roles"] if r["need"] and r["have"] < r["need"] * max(1, runs)]
     if short:
         body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] * max(1, runs) - r['have']}" for r in short))
@@ -353,6 +356,27 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
     return view
 
 
+LEFTOVER_LINES = 15  # a card's text is capped (4000 chars across its displays); the board lists the rest
+
+
+def leftover_block(reg: Registry, ev: rc.RaidEvent, ico) -> str:
+    """Joiners the locked roster(s) left out, as the board shows them: "Leftovers (n)", one member per line with the
+    spec icon, then what another run is short and whether leftovers + bench + pool could make one. "" when none."""
+    left = rc.leftovers(reg, ev, ev.all_rosters)
+    if not left:
+        return ""
+    lines = [f"**Leftovers ({len(left)})**"] + [f"{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for p in left[:LEFTOVER_LINES]]
+    if len(left) > LEFTOVER_LINES:
+        lines.append(f"-# +{len(left) - LEFTOVER_LINES} more on the board")
+    reason = rc.run_split_reason(reg, ev)
+    if reason:
+        lines.append("-# " + rc.split_reason_text(reason, lambda role, k: f"{ico('role', role)} {k}"))
+    hint = rc.another_run_hint(reg, ev, ev.all_rosters, reason)
+    if hint:
+        lines.append("-# " + hint)
+    return "\n".join(lines)
+
+
 def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> discord.ui.LayoutView:
     """One locked roster as a card: groups with confirmation marks and auras, raid-wide row, bench, waiting-on, buttons."""
     ui = discord.ui
@@ -370,9 +394,14 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> dis
     for gi in range(len(r.groups)):
         if r.groups[gi]:
             parts.append(ui.TextDisplay(_group_block(reg, ico, r, gi, marks, summaries)))
+    left = leftover_block(reg, ev, ico) if i == 0 else ""
+    if left:
+        parts.append(ui.TextDisplay(left))
     tail = ["-# " + _raidwide_line(reg, ico, r)]
-    if i == 0 and r.benched:
-        tail.append("**Bench** " + " · ".join(p.signup_name for p in r.benched))
+    lefts = {p.signup_name for p in rc.leftovers(reg, ev, ev.all_rosters)} if i == 0 else set()
+    bench = [p for p in r.benched if p.signup_name not in lefts] if i == 0 else []
+    if bench:
+        tail.append("**Bench** " + " · ".join(p.signup_name for p in bench))
     pending = [n + (" (site)" if n in via_site else "") for n, a in conf.items() if a is None]
     if pending:
         tail.append("**Waiting on** " + ", ".join(pending[:15]))
