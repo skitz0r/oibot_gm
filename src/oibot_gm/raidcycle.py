@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, RAID_DEFAULTS, Member, Registry, RegisteredCharacter, now
+from .registry import DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, RAID_DEFAULTS, Member, Registry, RegisteredCharacter, RegistryError, now
 from .roster import explain, solver
 from .store import GitStore
 
@@ -376,6 +376,43 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
 
 def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> "RaidEvent":
     return open_event(reg, rs, ensure_run(reg, instance, start, by, cutoffs, schedule), start)
+
+
+def forget_test_members(reg: Registry, rs: "RaidStore", uids: list[int], by: str) -> list["RaidEvent"]:
+    """Remove chosen puppets and take them off every open sheet (answer, pin, board place). Refused, with nothing
+    changed, when one is rostered on a locked run: its seat would need the fill engine, so cancel the run or clear the
+    bench instead. Returns the sheets that changed (the caller refreshes their messages)."""
+    names = {reg.members[u].display_name for u in uids if u in reg.members}
+    held = [(n, e.key) for e in rs.live() for n in sorted(names) if e.seat_of(n)]
+    if held:
+        raise RegistryError(f"{', '.join(n for n, _ in held)} {'is' if len(held) == 1 else 'are'} rostered on a locked run "
+                            f"({', '.join(sorted({k for _, k in held}))}): cancel it or clear the whole bench")
+    reg.remove_test_members(uids, by)
+    ids, changed = {str(u) for u in uids}, []
+    for ev in rs.live():
+        if ids & set(ev.signups) or (ev.layout and any(n in names for g in ev.layout for n in g)):
+            ev.signups = {k: sg for k, sg in ev.signups.items() if k not in ids}
+            ev.pins = {k: p for k, p in ev.pins.items() if k not in ids}
+            if ev.layout:
+                ev.layout = [[n for n in g if n not in names] for g in ev.layout]
+            rs.save(ev, f"test members removed by {by}")
+            changed.append(ev)
+    return changed
+
+
+def open_comp_sandbox(reg: Registry, rs: "RaidStore", instance: str, by: str, test_by) -> "RaidEvent":
+    """A test run two weeks out with every puppet joined, never posted: the board's Propose roster then builds the best
+    comp from whatever mix the bench holds. Cleared with the rest of the test bench."""
+    if instance not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {instance or '?'} (one of {', '.join(reg.profile.raids)})")
+    puppets = reg.test_members()
+    if not puppets:
+        raise RegistryError("add test members first")
+    start = (reg.now_local() + timedelta(days=14)).replace(minute=0, second=0, microsecond=0)
+    ev = open_run(reg, rs, instance, start, by=by, cutoffs={"soft": 2, "hard": 1, "confirm": 0.5, "open_dm": False, "test_by": test_by})
+    for m in puppets:
+        set_signup(reg, rs, ev, m, None, "in", source="test")
+    return ev
 
 
 def run_rosters(reg: Registry, ev: "RaidEvent") -> int:

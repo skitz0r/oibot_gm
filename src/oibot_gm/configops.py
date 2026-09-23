@@ -70,7 +70,9 @@ Members (officer): character: member, character=<their character's name>, field=
     name: the real name for a planned character; rank: trial|raider|core|alt|social; main / retire: no value. A class never changes: retire and add.
   absence_clear: member, start=<YYYY-MM-DD the absence starts; blank = their only upcoming absence> — back early; sheets it had pre-filled re-open for them.
   dm: member, value=on|off — whether the bot DMs them (off: never asked to fill, confirmations wait on the site).
-Test bench (officer): test: value="seed <N>" (puppet members) | "run <raid id>" (a compressed run: starts in 40 min, nudge 32, lock 25, confirm 15 min before) | "clear".
+Test bench (officer): test: value="seed <N>" (puppet members) | "add <N> <Class> <Spec>[/<Offspec>], …" (puppets of exactly that mix)
+  | "remove <N> <Class> <Spec>, …" | "comp <raid id>" (every puppet joined to a sandbox run two weeks out, not posted, to build a comp on its board)
+  | "run <raid id>" (a compressed run: starts in 40 min, nudge 32, lock 25, confirm 15 min before) | "clear".
 Resolving a run: "tonight's run" / "the Barrow Deeps run" = the live run of that raid on that day in the live-runs list; when several fit, ask which.
 A member is named by display name, mention or one of their characters. A request with several parts becomes several ops, in the order asked.
 The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm"): leave member EMPTY — the bot fills in
@@ -369,12 +371,44 @@ def _value_words(field: str, v) -> str:
 
 
 def _test_op(value: str | None) -> tuple[str, str]:
-    """'seed 20' → ('seed', '20'); 'run barrow_deeps' → ('run', 'barrow_deeps'); 'clear' → ('clear', '')."""
+    """'seed 20' → ('seed', '20'); 'run barrow_deeps' → ('run', 'barrow_deeps'); 'clear' → ('clear', '');
+    'add 3 Warrior Protection, 2 Priest Holy' / 'remove 2 Warrior Protection' → the spec list; 'comp barrow_deeps' → the raid."""
     words = (value or "").strip().split()
     kind = words[0].lower() if words else ""
-    if kind not in ("seed", "run", "clear"):
-        raise RegistryError("test is 'seed N', 'run <raid id>' or 'clear'")
+    if kind not in ("seed", "run", "clear", "add", "remove", "comp"):
+        raise RegistryError("test is 'seed N', 'run <raid id>', 'add N Class Spec, …', 'remove N Class Spec, …', 'comp <raid id>' or 'clear'")
     return kind, " ".join(words[1:])
+
+
+def _test_specs(reg: Registry, text: str) -> list[dict]:
+    """'3 Warrior Protection, 2 Priest Holy/Discipline' → [{cls, spec, offspec, count}], against the profile's names."""
+    rows = []
+    for part in [p.strip() for p in text.replace(";", ",").split(",") if p.strip()]:
+        words = part.split()
+        n = int(words.pop(0)) if words and words[0].isdigit() else 1
+        rest = " ".join(words)
+        cls = next((c for c in reg.profile.classes if rest.lower().startswith(c.lower() + " ")), None)
+        if cls is None:
+            raise RegistryError(f"'{part}' doesn't start with a class ({', '.join(reg.profile.classes)})")
+        spec, _, off = rest[len(cls):].strip().partition("/")
+        by_low = {s.lower(): s for s in reg.profile.classes[cls]}
+        if spec.strip().lower() not in by_low or (off.strip() and off.strip().lower() not in by_low):
+            raise RegistryError(f"{cls} specs are {', '.join(reg.profile.classes[cls])}")
+        rows.append({"cls": cls, "spec": by_low[spec.strip().lower()], "offspec": by_low.get(off.strip().lower()), "count": n})
+    if not rows:
+        raise RegistryError("say which specs, e.g. 'add 3 Warrior Protection, 2 Priest Holy'")
+    return rows
+
+
+def _test_removals(reg: Registry, rows: list[dict]) -> list[int]:
+    """The newest puppets of each spec asked for (their main's class and spec), refused when there are too few."""
+    out = []
+    for r in rows:
+        have = sorted((m.discord_id for m in reg.test_members() if m.main and (m.main.cls, m.main.spec) == (r["cls"], r["spec"])), reverse=True)
+        if len(have) < r["count"]:
+            raise RegistryError(f"the bench has {len(have)} {r['spec']} {r['cls']}, not {r['count']}")
+        out += have[:r["count"]]
+    return out
 
 
 def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
@@ -618,6 +652,16 @@ def _describe_action(reg: Registry, op: ConfigOp) -> str:
         n = len(reg.test_members())
         if kind == "seed":
             return f"test bench: seed {arg or 20} puppet member(s) (now {n}); analytics cards pause until cleared"
+        if kind in ("add", "remove"):
+            rows = _test_specs(reg, arg)
+            if kind == "remove":
+                _test_removals(reg, rows)
+            words = ", ".join(f"{r['count']} {r['spec']} {r['cls']}" for r in rows)
+            return f"test bench: {kind} {words} (now {n} test members)"
+        if kind == "comp":
+            if arg not in reg.profile.raids:
+                raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
+            return f"test bench: a {reg.raid_def(arg).get('name', arg)} comp sandbox two weeks out with all {n} test members joined (not posted); Propose roster on its board builds the comp"
         if kind == "run":
             if arg not in reg.profile.raids:
                 raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
@@ -882,7 +926,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if kind == "clear":  # offline: the puppets go; cancelling their runs is the bot's part (apply_async)
             gone = reg.clear_test_members(by)
             return f"test bench: {gone} puppet(s) removed"
-        raise RegistryError(f"test run {NEEDS_BOT}")
+        if kind == "add":
+            made = reg.add_test_members(_test_specs(reg, arg), by)
+            return f"test bench: {len(made)} added, {len(reg.test_members())} test members"
+        raise RegistryError(f"test {kind} {NEEDS_BOT}")
     if op.op == "run_strategy":
         from .registry import SPLIT_POLICIES
 
@@ -993,6 +1040,17 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             return f"test bench: {len(made)} puppet(s) created, {len(reg.test_members())} in total"
         if kind == "clear":
             return "test bench: " + await bot.test_bench_clear(reg, by)
+        if kind == "add":
+            made = await asyncio.to_thread(reg.add_test_members, _test_specs(reg, arg), by)
+            return f"test bench: {len(made)} added, {len(reg.test_members())} test members"
+        if kind == "remove":
+            uids = _test_removals(reg, _test_specs(reg, arg))
+            for ev in await asyncio.to_thread(rc.forget_test_members, reg, rs, uids, by):
+                await bot.refresh_sheet(reg, ev)
+            return f"test bench: {len(uids)} removed, {len(reg.test_members())} test members"
+        if kind == "comp":
+            ev = await asyncio.to_thread(rc.open_comp_sandbox, reg, rs, arg, by, by_id)
+            return f"comp sandbox {ev.key}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp"
         if arg not in reg.profile.raids:
             raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
         from datetime import timedelta

@@ -459,12 +459,16 @@ def set_config(field: str, value: Any) -> str:
 
 @mcp.tool()
 def test_bench(action: str, count: int = 20, raid: str | None = None, start_in: int = 40, lock_in: int = 25, confirm_in: int = 15, nudge_in: int = 32, dm_open: bool = False,
-               run: str | None = None, join: int = 0, bench: int = 0, out: int = 0, member: str | None = None, status: str | None = None) -> str:
+               run: str | None = None, join: int = 0, bench: int = 0, out: int = 0, member: str | None = None, status: str | None = None,
+               add: list[dict] | None = None, remove: list[str] | None = None) -> str:
     """The test bench (/gm test): action = seed (`count` puppet members), run (`raid`, minute cadence start_in > nudge_in
     > lock_in > confirm_in), answer (`run` + a random mix join/bench/out, or one `member` with `status`), clear (cancel
-    test runs, delete every puppet). Puppets' DMs land in the tester's DMs; real members are never touched."""
-    if action not in ("seed", "run", "answer", "clear"):
-        raise ToolError("action must be seed, run, answer or clear")
+    test runs, delete every puppet), compose (`add` = [{cls, spec, offspec?, count}] puppets of exactly that mix, `remove`
+    = puppet ids from get_member/list_members), comp (`raid`: every puppet joined to a sandbox run two weeks out, not
+    posted — then propose_split on its key builds the best comp). Puppets' DMs land in the tester's DMs; real members
+    are never touched."""
+    if action not in ("seed", "run", "answer", "clear", "compose", "comp"):
+        raise ToolError("action must be seed, run, answer, clear, compose or comp")
     body: dict[str, Any] = {"action": action}
     if action == "seed":
         body["count"] = count
@@ -474,6 +478,12 @@ def test_bench(action: str, count: int = 20, raid: str | None = None, start_in: 
         body.update(raid=get_raid(raid)["id"], start_in=start_in, lock_in=lock_in, confirm_in=confirm_in, nudge_in=nudge_in, dm_open=dm_open)
     elif action == "answer":
         body.update(run=run, join=join, bench=bench, out=out, member=member, status=status)
+    elif action == "compose":
+        body.update(add=add or [], remove=remove or [])
+    elif action == "comp":
+        if not raid:
+            raise ToolError("comp needs a raid")
+        body["raid"] = get_raid(raid)["id"]
     return msg(api().post("/api/admin/test", body))
 
 

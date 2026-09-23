@@ -1,6 +1,6 @@
 import { useRefresh } from "../hooks/usePoll";
 import { useRef, Fragment, useEffect, useState } from "react";
-import { ActionIcon, Badge, Button, Card, Group, Modal, Radio, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Modal, Radio, Select, Stack, Switch, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { DateInput } from "@mantine/dates";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useLive } from "../hooks/useLive";
@@ -9,9 +9,13 @@ import { GameIcon } from "../components/Icons";
 import { CharacterCell, SpecCell } from "../components/Cells";
 import { PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
+import { TestBench } from "../components/TestBench";
 import { classColour } from "../theme";
 
 const PRIV: Record<string, string> = { owner: "yellow", officer: "teal", member: "gray", outside: "red", test: "violet" };
+/** "2026-11-01" → "Sun 01 Nov" (the server's day label; a calendar day, so no timezone shift). */
+const day = (iso: string) => { const d = new Date(`${iso}T12:00:00`); return isNaN(d.getTime()) ? iso : `${d.toLocaleDateString("en-GB", { weekday: "short" })} ${String(d.getDate()).padStart(2, "0")} ${d.toLocaleDateString("en-GB", { month: "short" })}`; };
+const awaySpan = (a: { start: string; end: string }) => (a.end !== a.start ? `${day(a.start)} – ${day(a.end)}` : day(a.start));
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; main: boolean; named: boolean; isNew?: boolean };
 type MemberDraft = { characters: Draft[]; deletes: string[] };
@@ -21,6 +25,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const [absFor, setAbsFor] = useState<MemberRow | null>(null);
   const [drafts, setDrafts] = useState<Record<string, MemberDraft> | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [showTest, setShowTest] = useState(false);
   const [ask, confirmDialog] = useConfirm();
   const draftsRef = useRef<unknown>(null);
   const load = () => api.get<MembersData>("/api/members").then(setData).catch(fail);
@@ -66,8 +71,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
   }
   /** Clearing an absence re-opens the sheets it had answered for them; the toast lists what changed (which sheets, which seat had been freed). */
   async function clearAbsence(r: MemberRow, a: MemberRow["absences"][number]) {
-    const span = `${a.start}${a.end !== a.start ? ` → ${a.end}` : ""}`;
-    if (!(await ask({ title: `${r.display_name} is back?`, message: `Their absence ${span}${a.reason ? ` (${a.reason})` : ""} is cleared. Sheets on those days re-open for them: the No thanks the absence had put there goes, and they are asked again. A seat that was handed back stays handed back.`, confirmLabel: "Clear the absence" }))) return;
+    if (!(await ask({ title: `${r.display_name} is back?`, message: `Their absence ${awaySpan(a)}${a.reason ? ` (${a.reason})` : ""} is cleared. Sheets on those days re-open for them: the No thanks the absence had put there goes, and they are asked again. A seat that was handed back stays handed back.`, confirmLabel: "Clear the absence" }))) return;
     const key = `ca${r.uid}${a.start}`;
     setBusy(key);
     try {
@@ -80,10 +84,12 @@ export function MembersPage({ meta }: { meta: Meta }) {
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const editing = drafts !== null;
   draftsRef.current = drafts;
+  const nTest = data.rows.filter((r) => r.privilege === "test").length;
+  const rows = showTest || editing ? data.rows : data.rows.filter((r) => r.privilege !== "test");
   return (
     <Stack gap="lg">
-      <PageTitle title="Members" intro={`${data.rows.length} members with characters · ${data.members} in the registry · owner and officer badges come from Discord roles · absences pre-fill No thanks on the sheets they overlap`}
-        right={!editing ? <Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit members</Button> : null} />
+      <PageTitle title="Members" intro={`${data.rows.length - nTest} members with characters${nTest ? ` (and ${nTest} test members)` : ""} · ${data.members} in the registry · owner and officer badges come from Discord roles · someone away on a run's day is listed under Away on its sheet`}
+        right={!editing ? <Group gap="md">{nTest > 0 && <Switch size="sm" label={`show ${nTest} test members`} checked={showTest} onChange={(e) => setShowTest(e.currentTarget.checked)} />}<Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit members</Button></Group> : null} />
       <Card>
         <Table.ScrollContainer minWidth={900}>
           <Table style={{ tableLayout: "fixed" }}>
@@ -91,7 +97,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
               <Table.Tr><Table.Th w={210}>Member</Table.Th><Table.Th w={editing ? 56 : 44} /><Table.Th>Character</Table.Th><Table.Th w="20%">Spec</Table.Th><Table.Th w="20%">Offspec</Table.Th><Table.Th w={130}>{editing ? "" : "Confirmed"}</Table.Th><Table.Th w={48} /></Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {data.rows.map((r) => {
+              {rows.map((r) => {
                 const d = drafts?.[r.uid];
                 const chars = d ? d.characters : r.characters;
                 const span = chars.length + (editing ? 1 : 0);
@@ -103,7 +109,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
                     <Group gap={4} mt={6} wrap="wrap">
                       {r.absences.map((a) => (
                         <Tooltip key={a.start} label={a.reason ? `${a.reason} · click to clear` : "click to clear"}>
-                          <Badge size="xs" variant="outline" color="gray" style={{ cursor: "pointer", opacity: busy === `ca${r.uid}${a.start}` ? 0.5 : 1 }} onClick={() => clearAbsence(r, a)}>away {a.start}{a.end !== a.start ? ` → ${a.end}` : ""} ×</Badge>
+                          <Badge size="xs" variant="outline" color="gray" style={{ cursor: "pointer", opacity: busy === `ca${r.uid}${a.start}` ? 0.5 : 1 }} onClick={() => clearAbsence(r, a)}>away {awaySpan(a)} ×</Badge>
                         </Tooltip>
                       ))}
                       <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setAbsFor(r)}>+ away</Button>
@@ -140,6 +146,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
           </Group>
         )}
       </Card>
+      {meta.viewer.officer && !editing && <TestBench meta={meta} rows={data.rows} onChanged={load} />}
       <AbsenceModal r={absFor} onClose={() => setAbsFor(null)} onSaved={() => { setAbsFor(null); load(); }} />
       {confirmDialog}
     </Stack>

@@ -54,6 +54,9 @@ class FakeBot:
     def guild_channels(self, reg):
         return []
 
+    async def refresh_sheet(self, reg, ev):
+        self.refreshed = [*getattr(self, "refreshed", []), ev.key]
+
     async def set_answer(self, reg, rs, ev, m, status, character, by):
         return rc.LABELS[rc.set_signup(reg, rs, ev, m, character, status, source="officer").status] + f" for {m.display_name}"
 

@@ -695,10 +695,18 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         return await post_application(self, reg, a)
 
     async def close(self) -> None:
-        """Shutdown: push any unpushed data-repo commits before the process goes away."""
+        """Shutdown: push any unpushed data-repo commits, stop the feed listener, then disconnect. Every step is
+        bounded, so a stopping bot always lets go of its ports (launchd waits ExitTimeOut, then kills it)."""
         try:
             if STORE is not None:
-                await asyncio.to_thread(STORE.flush)
+                await asyncio.wait_for(asyncio.to_thread(STORE.flush), timeout=20)
+        except Exception as e:  # noqa: BLE001 — the commits stay local; the next start pushes them
+            log.warning("shutdown push skipped: %s", type(e).__name__)
+        try:
+            if self.feed is not None:
+                await asyncio.wait_for(self.feed.stop(), timeout=5)
+        except Exception as e:  # noqa: BLE001
+            log.warning("feed listener stop: %s", type(e).__name__)
         finally:
             await super().close()
 

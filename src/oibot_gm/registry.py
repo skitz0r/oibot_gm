@@ -1282,6 +1282,69 @@ class Registry:
                 made.append(m)
         return made
 
+    TEST_COMPOSED_BASE = TEST_BASE + 1_000  # composed puppets (add_test_members) never take a seed_test_members id
+    TEST_MAX = 80  # enough for two 40-player benches; a guard against a typo like 400
+    _PUPPET_HEADS = ["Ash", "Bright", "Cinder", "Dusk", "Ember", "Fen", "Glim", "Hollow", "Iron", "Juni", "Kes", "Lor", "Mar", "Night", "Oak",
+                     "Pem", "Quil", "Rook", "Sable", "Thorn", "Um", "Val", "Wren", "Yar", "Zeph", "Alder", "Briar", "Coal", "Dun", "Elder"]
+    _PUPPET_TAILS = ["vane", "moor", "fall", "bane", "lyn", "wick", "mere", "well", "bell", "per", "trel", "ath", "row", "song", "shield",
+                     "ley", "quin", "wood", "wind", "field"]
+
+    def _puppet_names(self):
+        """Invented, legal, unused names (letters only, ≤12): the built-in test names first, then head+tail pairs."""
+        taken = {m.display_name.lower() for m in self.members.values()} | {(c.name or "").lower() for m in self.members.values() for c in m.characters}
+        for n in [*self.TEST_NAMES, *(h + t for t in self._PUPPET_TAILS for h in self._PUPPET_HEADS)]:
+            if n.lower() not in taken and 2 <= len(n) <= 12:
+                taken.add(n.lower())
+                yield n
+
+    def add_test_members(self, rows: list[dict], by: str) -> list[Member]:
+        """Puppets by composition: rows of {cls, spec, offspec?, count}. Checked in full before anything is written
+        (the profile's classes and specs, the TEST_MAX cap); then one commit for the lot. Mains, rank raider, confirmed."""
+        want = []
+        for r in rows:
+            cls, spec, off, n = str(r.get("cls") or ""), str(r.get("spec") or ""), r.get("offspec") or None, int(r.get("count") or 0)
+            if cls not in self.profile.classes:
+                raise RegistryError(f"{cls or '?'} isn't a class in this game version.")
+            if spec not in self.profile.classes[cls]:
+                raise RegistryError(f"{cls} has no spec called {spec or '?'}.")
+            if off is not None and (off not in self.profile.classes[cls] or off == spec):
+                raise RegistryError(f"{off} isn't another {cls} spec.")
+            if n < 0:
+                raise RegistryError("A count can't be negative.")
+            want += [(cls, spec, off)] * n
+        have = len(self.test_members())
+        if have + len(want) > self.TEST_MAX:
+            raise RegistryError(f"That would make {have + len(want)} test members; the bench holds {self.TEST_MAX}.")
+        names = self._puppet_names()
+        free = (uid for uid in range(self.TEST_COMPOSED_BASE, self.TEST_COMPOSED_BASE + 10_000) if uid not in self.members)
+        made = []
+        with self.store.batch(f"{self.key}: {len(want)} test members added by {by}"):
+            for cls, spec, off in want:
+                name, uid = next(names), next(free)
+                m, c = self.add_character(uid, name, name, cls, spec, off, True)
+                m.test, c.rank, c.confirmed_by = True, "raider", by
+                self.save(m, f"test member {name} added ({cls} {spec}, by {by})")
+                made.append(m)
+        return made
+
+    def remove_test_members(self, uids: list[int], by: str) -> int:
+        """Remove the chosen puppets (real members are refused, never skipped silently): one commit for the lot."""
+        ms = [self.members.get(int(u)) for u in uids]
+        bad = [str(u) for u, m in zip(uids, ms) if m is None or not m.test]
+        if bad:
+            raise RegistryError("Only test members can be removed here.")
+        with self.store.batch(f"{self.key}: {len(ms)} test members removed by {by}"):
+            for m in ms:
+                path = self.store.root / self.key / "members" / f"{m.discord_id}.json"
+                del self.members[m.discord_id]
+                self._snap.pop(m.discord_id, None)
+                if path.exists():
+                    path.unlink()
+                    self.store.commit(f"{self.key}: test member {m.display_name} removed (by {by})")
+        if ms:
+            self._notify("member", [f"test bench: {len(ms)} test members removed (by {by})"])
+        return len(ms)
+
     def clear_test_members(self, by: str) -> int:
         """Remove every test member (their placements go with them): one commit for the lot."""
         gone = 0

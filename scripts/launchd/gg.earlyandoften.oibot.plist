@@ -7,12 +7,14 @@
     <key>Label</key>
     <string>gg.earlyandoften.oibot</string>
 
+    <!-- sync the environment, then EXEC the bot: the process launchd tracks (and signals, and kills after ExitTimeOut) is
+         the bot itself. `uv run oibot discord` left uv as the tracked process, so a bot that hung on shutdown was
+         orphaned when launchd killed uv — still holding ports 8787/8788, and the new copy crash-looped on "address in use". -->
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/uv</string>
-        <string>run</string>
-        <string>oibot</string>
-        <string>discord</string>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>/opt/homebrew/bin/uv sync --frozen --quiet; exec .venv/bin/oibot discord</string>
     </array>
 
     <key>WorkingDirectory</key>

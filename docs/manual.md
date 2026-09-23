@@ -51,7 +51,7 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 
 **https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save), **Config** (owner edits; officers read), **Ops** (the bot's log) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
+your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Ops** (the bot's log) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 Pages refresh themselves every 45 s, so what you see is at most that old. Signing up for a raid is still done
 on the sheet in Discord.
@@ -434,6 +434,17 @@ lock → confirmations → expiry → fill → close within the hour. `/gm test 
 Join, Bench and No thanks) or **One member** (pick a puppet, then Join, Bench or No thanks), and stays open so you
 can answer again; after lock a puppet's *No thanks* is a
 callout. `/gm test clear` cancels the test runs and deletes every puppet and their placements.
+
+**Any mix, on the Members page.** Officers get a **Test bench** card under the members table: the bench as spec icons
+with a count each (− / + to change it), the role totals, and a class → spec picker with **Add** for a spec it doesn't
+hold yet. **Save test members** adds or removes the difference (removals take the newest puppets of that spec; one
+rostered on a locked run is refused — cancel that run or clear the bench). **Delete all test members** is `/gm test
+clear`. **Try a comp** (pick the raid, a 20-player one by default) opens a *comp sandbox*: a test run two weeks out
+with every puppet joined, never posted in Discord, and takes you to its board, where **Propose roster** builds the best
+comp from that mix (Leftovers and "what a second run would need" included). Change the mix and try again; the old
+sandbox goes with the next clear. The members table hides test members unless you switch them on. Plain text does the
+same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 Warrior Protection", "comp sandbox for
+Barrow Deeps"), and so does MCP (`test_bench` compose / comp). The bench holds at most 80.
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,
 rostered or asked to fill it, and the test sheet refuses presses from real members. Every DM the bot would

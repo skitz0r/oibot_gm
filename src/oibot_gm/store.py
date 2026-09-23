@@ -81,8 +81,21 @@ class GitStore:
         return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
 
     # ---- git
+    GIT_TIMEOUT_S = {"push": 60, "fetch": 60, "pull": 60}  # network calls; anything local gets 30 s
+
     def _git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-        return subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True, check=check)
+        """A git call that can never hang the bot: no credential prompts, and a timeout (a stuck push used to hold the
+        store lock and keep a stopping process alive with its ports bound). A timeout reads as a failed call (124)."""
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=15")}
+        try:
+            return subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True, check=check, env=env,
+                                  timeout=self.GIT_TIMEOUT_S.get(args[0] if args else "", 30))
+        except subprocess.TimeoutExpired as e:
+            log.warning("git %s timed out after %ss", " ".join(args[:2]), e.timeout)
+            r = subprocess.CompletedProcess(e.cmd, 124, stdout="", stderr=f"timed out after {e.timeout}s")
+            if check:
+                raise subprocess.CalledProcessError(124, e.cmd, "", r.stderr) from None
+            return r
 
     def commit(self, message: str) -> bool:
         """Stage everything and commit if anything changed. Schedules a debounced push.

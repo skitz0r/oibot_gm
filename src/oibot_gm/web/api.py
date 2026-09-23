@@ -877,7 +877,27 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             line = await bot.test_bench_clear(reg, v.name)
             await bot.ops.emit(reg.config, "warn", f"test bench: {line} (by {v.name})")
             return {"message": line}
-        return JSONResponse({"error": "action must be seed, run, answer or clear"}, status_code=400)
+        if action == "compose":  # the Members page's test bench: remove chosen puppets, add by class/spec
+            try:
+                remove = [int(u) for u in d.get("remove") or []]
+                changed = await asyncio.to_thread(rc.forget_test_members, reg, rs, remove, v.name) if remove else []
+                made = await asyncio.to_thread(reg.add_test_members, d.get("add") or [], v.name)
+            except (RegistryError, ValueError, TypeError) as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            for ev in changed:
+                await bot.refresh_sheet(reg, ev)
+            line = f"test bench: {len(made)} added, {len(remove)} removed · {len(reg.test_members())} test members"
+            await bot.ops.emit(reg.config, "warn", f"{line} (by {v.name})")
+            return {"message": line}
+        if action == "comp":  # a sandbox run: every puppet joined to a far-off test run, nothing posted; Propose builds the comp
+            try:
+                ev = await asyncio.to_thread(rc.open_comp_sandbox, reg, rs, str(d.get("raid") or ""), v.name, v.uid)
+            except RegistryError as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            n = len(reg.test_members())
+            await bot.ops.emit(reg.config, "warn", f"test bench: {v.name} opened a comp sandbox {ev.key} with {n} test members joined (not posted)")
+            return {"message": f"comp sandbox {ev.key}: {n} test members joined — Propose roster on its board builds the comp", "key": ev.key}
+        return JSONResponse({"error": "action must be seed, run, answer, clear, compose or comp"}, status_code=400)
 
     # ---- raids: rules per raid (officers read, owner edits)
     @app.get("/api/raids")
