@@ -622,10 +622,15 @@ class Registry:
     def find(self, name: str) -> tuple[Member, RegisteredCharacter] | None:
         """By character name; planned (unnamed) characters match by their label, e.g. 'Shaman (Enhancement)'."""
         n = name.strip().lower()
-        for m in self.members.values():
-            for c in m.characters:
-                if c.name and (c.label.lower() == n or c.name.lower() == n):
-                    return m, c
+        named = [(m, c) for m in self.members.values() for c in m.characters if c.name]
+        exact = next(((m, c) for m, c in named if c.label.lower() == n), None)  # a full name is unique
+        if exact:
+            return exact
+        first = [(m, c) for m, c in named if c.name.lower() == n]
+        if len({(m.discord_id, c.label) for m, c in first}) > 1:  # "Jon" when there's a Jon Smith and a Jon Jones
+            raise RegistryError(f"More than one character is called {name.strip()}: " + ", ".join(f"{c.label} ({m.display_name})" for m, c in first) + ". Use the full name.")
+        if first:
+            return first[0]
         for m in self.members.values():
             for c in m.characters:
                 if not c.name and c.status == "planned" and c.label.lower() == n:

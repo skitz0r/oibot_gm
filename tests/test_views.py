@@ -61,3 +61,23 @@ def test_sheet_is_an_embed_with_class_then_group_columns(reg, rs):
     e, view = views.sheet_message(reg, ev, team, tag)
     assert e.title.startswith("🧪 Cancelled") and view is None and not e.fields
     assert len(e) < 6000
+
+
+def test_away_row_holds_registered_absences_only(reg, rs, monkeypatch):
+    """Away = a registered absence covers the run's day; No thanks = people who chose it. Someone away who joins anyway
+    is not Away; the row names 15 then +N."""
+    from oibot_gm import raidcycle as rc
+    ev = open_test_run(reg, rs)
+    day = ev.start.astimezone(reg.tz).date().isoformat()
+    ms = reg.test_members()
+    monkeypatch.setattr(views, "AWAY_SHOWN", 10)  # a short cap so the fixture's 16 members exercise the "+N" tail
+    away, chose, joined_anyway = ms[:12], ms[12:14], ms[14]
+    for m in away + [joined_anyway]:
+        reg.add_absence(m.discord_id, day, day, "trip", "t")
+    join(reg, rs, ev, away + chose, status="out")
+    join(reg, rs, ev, [joined_anyway])
+    e, _ = views.sheet_message(reg, ev, rc.run_team(reg, ev), ico)
+    rows = {f.name: f.value for f in e.fields if not f.inline}
+    assert rows["No thanks (2)"].split(" · ") == [m.display_name for m in chose]
+    assert rows["Away (12)"].endswith(" · +2") and len(rows["Away (12)"].split(" · ")) == 11
+    assert joined_anyway.display_name not in rows["Away (12)"] and "✈" not in str(rows)

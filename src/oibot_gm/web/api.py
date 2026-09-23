@@ -319,7 +319,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         await bot.announce_absence(v.reg, m, a, v.name)
-        return {"message": f"away {a.start}" + (f" → {a.end}" if a.end != a.start else "")}
+        return {"message": f"away {v.reg.span_label(a.start, a.end)}"}
 
     @app.post("/api/me/absence/clear")
     async def me_absence_clear(request: Request):
@@ -1079,7 +1079,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         await bot.announce_absence(v.reg, m, a, v.name)
-        return {"message": f"{m.display_name} away {a.start}" + (f" → {a.end}" if a.end != a.start else "")}
+        return {"message": f"{m.display_name} away {v.reg.span_label(a.start, a.end)}"}
 
     @app.post("/api/members/absence/clear")
     async def members_absence_clear(request: Request):

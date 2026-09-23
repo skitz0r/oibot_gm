@@ -17,7 +17,7 @@ from .discord_registry import Guilds
 from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton, fill_view, place_view, sheet_view
 from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
-from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _group_block, _group_summaries, _header, _member_rows,
+from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _group_block, _group_summaries, _header,
                          _raidwide_line, _role_counts, ask_line, board_url, clock12, closed_layout, confirm_layout, fill_layout,
                          gaps_text, health_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
                          sheet_state)
@@ -31,7 +31,7 @@ __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "regist
            # views + helpers
            "CLOCK12", "OUT_MARK", "RELEASE_WHY", "ask_line", "board_url", "clock12", "closed_layout", "confirm_layout", "fill_layout", "gaps_text",
            "health_layout", "lock_layout", "raid_name", "run_actions_row", "run_label", "run_times", "run_title", "sheet_message", "sheet_state",
-           "_aura_line", "_group_block", "_group_summaries", "_header", "_member_rows", "_raidwide_line", "_role_counts"]
+           "_aura_line", "_group_block", "_group_summaries", "_header", "_raidwide_line", "_role_counts"]
 
 
 class RaidContext:

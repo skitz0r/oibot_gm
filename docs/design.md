@@ -695,7 +695,7 @@ These are the numbers to confirm with real usage logs.
 
 **Still open**
 
-13. **Monthly LLM cap**, once shadow mode gives real numbers (prototype default: `OIBOT_BUDGET_USD=5` per bot process; a real night of 24 drops on Opus 5 measured ≈ $1).
+13. **Monthly LLM cap**, once shadow mode gives real numbers (built: `OIBOT_BUDGET_USD=5` per calendar month from a usage ledger in out/llm_usage.jsonl that survives restarts, `help`/`config_change` capped at half unless `OIBOT_BUDGET_USD_<WORKLOAD>` says otherwise, unknown models priced by family; a real night of 24 drops on Opus 5 measured ≈ $1).
 17. **Loot tiers and wishlists**: replace mock tiers with the guild's BisCouncil per-item tiers or TMB wishlists; verify item rows against the Blizzard API.
 18. **Weekly cycle** (§5.10) build order relative to the database migration (§6.2).
 14. ~~T6 zone IDs~~ Resolved: zone 1060, encounters 50601+ on `fresh.` (research §6c).

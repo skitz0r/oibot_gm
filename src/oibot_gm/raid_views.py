@@ -85,17 +85,22 @@ def run_times(reg: Registry, ev: rc.RaidEvent, team: dict) -> tuple[datetime, da
     return soft, hard, confirm
 
 
-OUT_MARK = {"callout": " ⚑", "absence": " ✈"}  # a No thanks that wasn't a manual press: called out / away
+OUT_MARK = {"callout": " ⚑"}  # a No thanks that wasn't a manual press: called out after answering
+AWAY_SHOWN = 15  # the Away row names this many, then "+N"
 
 
-def _member_rows(subs, outs) -> list[str]:
-    """The Bench and No thanks member rows, identical on the open and locked sheet."""
-    rows = []
-    if subs:
-        rows.append("**Bench** " + " · ".join(sg.display_name for sg in subs))
-    if outs:
-        rows.append("**No thanks** " + " · ".join(sg.display_name + OUT_MARK.get(sg.source, "") for sg in outs))
-    return rows
+def split_away(reg: Registry, ev: rc.RaidEvent, outs: list) -> tuple[list, list]:
+    """(away, no thanks): Away = a registered absence covers the run's day, whatever put them on No thanks; the rest
+    pressed No thanks themselves (or called out). Someone away who pressed Join or Bench anyway is not Away."""
+    day = ev.start.astimezone(reg.tz).date().isoformat()
+    away = [sg for sg in outs if (m := reg.members.get(sg.discord_id)) and m.absent_on(day)]
+    ids = {sg.discord_id for sg in away}
+    return away, [sg for sg in outs if sg.discord_id not in ids]
+
+
+def away_line(away: list) -> str:
+    names = [sg.display_name for sg in away[:AWAY_SHOWN]]
+    return " · ".join(names) + (f" · +{len(away) - AWAY_SHOWN}" if len(away) > AWAY_SHOWN else "")
 
 
 EMBED_FIELD_MAX, EMBED_TOTAL_MAX = 1024, 5600  # Discord: 1024 per field value, 6000 per embed (kept under, with headroom)
@@ -138,10 +143,13 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         return ((mark + " ") if mark else "") + ((ico("spec", f"{cls}:{spec}") + " ") if icons else "") + character
 
     def rows_field() -> None:
+        away, declined = split_away(reg, ev, outs)
         if subs:
             e.add_field(name=f"Bench ({len(subs)})", value=" · ".join(sg.display_name for sg in subs)[:EMBED_FIELD_MAX], inline=False)
-        if outs:
-            e.add_field(name=f"No thanks ({len(outs)})", value=" · ".join(sg.display_name + OUT_MARK.get(sg.source, "") for sg in outs)[:EMBED_FIELD_MAX], inline=False)
+        if away:  # a registered absence that day: not a choice, so not counted as No thanks
+            e.add_field(name=f"Away ({len(away)})", value=away_line(away)[:EMBED_FIELD_MAX], inline=False)
+        if declined:
+            e.add_field(name=f"No thanks ({len(declined)})", value=" · ".join(sg.display_name + OUT_MARK.get(sg.source, "") for sg in declined)[:EMBED_FIELD_MAX], inline=False)
 
     if state == "cancelled":
         e.title, e.description = f"{tag}Cancelled · {name}", f"<t:{unix}:F>"

@@ -98,8 +98,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 
 1. **Sheet opens** — `signup_lead_hours` [120 h] before the slot the bot posts the sheet in the signup
    channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
-   out after answering, ✈ = away that day, pre-filled from an absence). With more than one
-   character you pick which one. Absences pre-fill *No thanks*. With `open_dm` on [off] every main is also
+   out after answering). With more than one character you pick which one. Anyone with a registered absence that day
+   is listed under **Away** instead (names only, the first 15 then "+N"; reasons stay with officers): they aren't
+   nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. With `open_dm` on [off] every main is also
    DMed when the sheet opens. Officers can open a sheet early from the
    Rosters page: pick a date and time with the picker beside the raid's name, or press the button with nothing picked
    to take the raid's next scheduled slot. `/raid open` does the same in Discord: pick the raid, then press *Open the next slot*, pick another upcoming
@@ -373,7 +374,9 @@ you are never asked to fill, and a confirmation ask is shown on the Me page inst
 until you answer it there. **My absences** on the absences card lists yours with a **Clear** button each; clearing
 an absence puts you back to unanswered on any open sheet it had pre-filled (a seat freed on a locked run is
 not handed back automatically — ask an officer). Claude is used sparingly — never for registry, signup or solver work — and spend is
-capped by a budget the owner sets; `/gm status` shows it.
+capped by a monthly budget the owner sets (`OIBOT_BUDGET_USD`, per calendar month, kept across restarts); questions and
+plain-text requests may use at most half of it each, so they can't spend what loot night needs. `/gm status` shows
+this month's spend.
 
 ## 10a. Asking the bot questions
 
