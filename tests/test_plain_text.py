@@ -290,7 +290,7 @@ def test_absence_clear(reg, rs):
     m = reg.test_members()[0]
     reg.add_absence(m.discord_id, "2030-03-01", "2030-03-03", "holiday", "t")
     bot = FakeBot(rs)
-    with pytest.raises(RegistryError, match="(?i)no absence starting 2030-04-01"):
+    with pytest.raises(RegistryError, match="(?i)no absence starting Mon 01 Apr"):
         run(configops.apply_async(reg, ConfigOp(op="absence_clear", member=m.display_name, start="2030-04-01"), "Officer", False, bot=bot))
     out = run(configops.apply_async(reg, ConfigOp(op="absence_clear", member=m.display_name), "Officer", False, bot=bot))
     assert out == f"{m.display_name}: cleared absence 2030-03-01 → 2030-03-03 — sheet re-opened"

@@ -460,28 +460,26 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg = await need(interaction)
         if not reg:
             return
-        m = reg.members.get(interaction.user.id)
-        today = reg.now_local().date().isoformat()
-        ups = m.upcoming_absences(today) if m else []
-        await interaction.response.send_message("\n".join(f"• {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") for a in ups) or "No upcoming absences.", ephemeral=True)
+        await show_my_absences(interaction, reg)
 
-    @absent.command(name="clear", description="Remove an absence by its start date")
-    async def absent_clear(interaction: discord.Interaction, start: str):
+    @absent.command(name="clear", description="Remove one of your absences (pick it from the list)")
+    async def absent_clear(interaction: discord.Interaction):
         reg = await need(interaction)
         if not reg:
             return
-        try:
-            a = reg.clear_absence(interaction.user.id, start, interaction.user.display_name)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+        await show_my_absences(interaction, reg)
+
+    async def show_my_absences(interaction: discord.Interaction, reg: Registry) -> None:
+        """Your upcoming absences, each with its own Clear button — the same view as the absences card's *My absences*."""
+        from .discord_pool import clear_absences_view
+
+        m = reg.members.get(interaction.user.id)
+        ups = m.upcoming_absences(reg.now_local().date().isoformat()) if m else []
+        if not ups:
+            await interaction.response.send_message("No upcoming absences. Add one with `/me absent add`.", ephemeral=True)
             return
-        m = reg.members[interaction.user.id]
-        # sheets that pre-filled "out" from this absence are put back to unanswered (or the seat re-offered); the bot reports what changed
-        lines = interaction.client.absence_cleared(reg, m, a, interaction.user.display_name)
-        if inspect.isawaitable(lines):
-            lines = await lines
-        text = f"✅ Cleared absence starting {start}." + ("\n" + "\n".join(f"• {line}" for line in lines) if lines else "")
-        await interaction.response.send_message(text[:1900], ephemeral=True)  # absence_cleared already wrote the ops line
+        lines = [f"• {reg.span_label(a.start, a.end)}" + (f" — {a.reason}" if a.reason else "") for a in ups]
+        await interaction.response.send_message("\n".join(lines)[:1900], view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)
 
 
     # ---------------- /apply (recruitment intake)
@@ -718,11 +716,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
         asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
         e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
-        from .discord_pool import pool_card
-
-        card, file = await asyncio.to_thread(pool_card, reg, {**team, "size": n} if team else {"key": "main", "name": "main", "size": n}, ico)
-        e.set_image(url=card.image.url)
-        await interaction.response.send_message(embed=e, file=file, ephemeral=not is_officer(interaction, reg))
+        await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
 
     @roster.command(name="add", description="Add a member's character to a roster (defaults to their main)")
     @app_commands.autocomplete(roster=roster_autocomplete, character=member_char_autocomplete)
@@ -957,8 +951,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 for f, val in (("scope", scope.value if scope else None), ("family", family), ("strength", strength), ("status", status.value if status else None), ("note", note)):
                     if val is not None:
                         msg.append(reg.set_buff_override(buff, f, val, interaction.user.display_name))
-                if benefits is not None:
-                    msg.append(reg.set_family_override(reg.buff(buff).family_id, "value", benefits, interaction.user.display_name))
+                if benefits is not None:  # one key at a time: naming 'mana: 2' must not erase the family's other beneficiaries
+                    for kv in str(benefits).replace(";", ",").split(","):
+                        k, _, v = kv.partition(":")
+                        if k.strip():
+                            msg.append(reg.set_family_override(reg.buff(buff).family_id, f"value:{k.strip()}", v.strip(), interaction.user.display_name))
             b = reg.buff(buff)
             fam = reg.profile.families[b.family_id]
             eff = f"**{b.short}** · {b.scope} · family **{fam.name}** ({b.family_id}) ×{b.strength:g} · {b.status} · benefits: " + (", ".join(f"{k} {v:g}" for k, v in fam.value.items()) or "nobody")
@@ -1045,7 +1042,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         rd = reg.raid_def(raid)
         comp = rd.get("comp") or {}
         fo = reg.first_open(raid)
-        eff = (f"**{rd.get('name', raid)}** · {rd.get('size')}-player · slots {', '.join(rd['slots']) or 'none'} · opens {rd['signup_lead_hours']}h before · locks {rd['lock_hours_before']}h before · confirm by {rd['confirm_hours_before']}h before"
+        eff = (f"**{rd.get('name', raid)}** · {rd.get('size')}-player · slots {', '.join(reg.slot_label(x) for x in rd['slots']) or 'none'} · opens {rd['signup_lead_hours']}h before · locks {rd['lock_hours_before']}h before · confirm by {rd['confirm_hours_before']}h before"
                f" · split {rd['split_policy']} · lockout {rd['lockout_days']}d" + (f" from <t:{int(fo.timestamp())}:f>" if fo else "") + f" · {rd['duration_hours']}h · " + " · ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in comp.items()) + " · weights " + " ".join(f"{k}={v}" for k, v in rd['weights'].items()))
         await interaction.response.send_message(("✅ " + "; ".join(msg) + "\n" if msg else "") + eff + (f"\n{rd['notes']}" if rd.get("notes") else ""), ephemeral=True)
 

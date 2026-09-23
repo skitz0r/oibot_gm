@@ -187,7 +187,7 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str
         over = cfg.raids.get(rid, {}) if cfg.raids else {}
         comp = " ".join(f"{r} {b.get('min', '?')}-{b.get('max', '?')}" for r, b in (rd.get("comp") or {}).items())
         fo = reg.first_open(rid)
-        lines.append(f"raid {rid} ({rd.get('name', rid)}): size {rd.get('size')}, slots {', '.join(rd.get('slots') or []) or 'none (nothing opens)'}, sheet opens {rd['signup_lead_hours']}h before, "
+        lines.append(f"raid {rid} ({rd.get('name', rid)}): size {rd.get('size')}, slots {', '.join(reg.slot_label(x) for x in rd.get('slots') or []) or 'none (nothing opens)'}, sheet opens {rd['signup_lead_hours']}h before, "
                      f"nudge {'at ' + str(rd['nudge_hours_before']) + 'h before' if rd.get('nudge', True) else 'off'}, locks {rd['lock_hours_before']}h before, confirmations expire {rd['confirm_hours_before']}h before, "
                      f"fill asks time out after {rd['fill_ask_hours']}h, autofill {rd.get('autofill', True)}, open_dm {rd.get('open_dm', False)}, split {rd.get('split_policy')}, weights {rd.get('weights')}, lockout {rd['lockout_days']}d, duration {rd.get('duration_hours')}h, comp {comp}"
                      + (f", first open {reg.local12(fo)}" if fo else "") + (f", comp targets {over['comp_targets']}" if over.get("comp_targets") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")

@@ -481,6 +481,28 @@ class Registry:
         return t.astimezone(self.tz).strftime(fmt)
 
     # ---- persistence
+    def slot_label(self, slot: str) -> str:
+        """A stored weekly slot as a person reads it: 'Tue 19:30' -> 'Tue 7:30 PM'. The stored form stays 24-hour."""
+        try:
+            day, hm = str(slot).split()
+            h, mi = (int(x) for x in hm.split(":"))
+        except ValueError:
+            return str(slot)
+        return f"{day} {h % 12 or 12}:{mi:02d} {'AM' if h < 12 else 'PM'}"
+
+    def day_label(self, iso_day: str, with_year: bool = False) -> str:
+        """'2026-12-24' -> 'Thu 24 Dec' (a date a person reads; ISO stays for the data repo and the API)."""
+        from datetime import date as _d
+
+        try:
+            d = _d.fromisoformat(str(iso_day))
+        except ValueError:
+            return str(iso_day)
+        return d.strftime("%a %d %b %Y" if with_year else "%a %d %b")  # same day form as CLOCK12 ('Wed 09 Dec')
+
+    def span_label(self, start: str, end: str | None) -> str:
+        return self.day_label(start) + (f" → {self.day_label(end)}" if end and end != start else "")
+
     def local12(self, value, fmt: str = CLOCK12) -> str:
         """Guild-local time the way every surface a PERSON reads shows it: 12-hour, no leading zero. ISO and 24-hour
         stay for machines only (datetime-local inputs, comparisons, the data repo). See CLAUDE.md: no military time."""
@@ -770,7 +792,44 @@ class Registry:
                 self.config.raids[instance] = before
             raise
 
-    def _apply_raid_override(self, instance: str, field: str, value, by: str) -> str:
+    def set_raid_overrides(self, instance: str, fields: dict, by: str) -> list[str]:
+        """Several raid fields as ONE change: every field is applied, the cross-field rules are checked once on the
+        result, and it is saved in a single commit. A refused value leaves the stored config exactly as it was — no
+        field commits on its own. This is what every multi-field editor must call (the Discord wizard, the web Raids
+        page); calling set_raid_override in a loop commits the first fields and then fails on a later one against the
+        STORED values, leaving a half-applied raid in git."""
+        import copy
+
+        if not fields:
+            return []
+        before = copy.deepcopy(self.config.raids.get(instance))
+        try:
+            lines = [self._apply_raid_override(instance, f, v, by, commit=False) for f, v in fields.items()]
+            self._check_raid(instance)
+        except RegistryError:
+            if before is None:
+                self.config.raids.pop(instance, None)
+            else:
+                self.config.raids[instance] = before
+            raise
+        self.save_config(f"raid {instance}: {', '.join(fields)} (by {by})")
+        return lines
+
+    def _check_raid(self, instance: str) -> None:
+        """The cross-field rules, on the merged result (profile → guild override → defaults), never on one field at a
+        time: that way a change that is only valid as a whole (lead and nudge raised together) is accepted."""
+        eff = self.raid_def(instance)
+        if eff["lock_hours_before"] < eff["confirm_hours_before"]:
+            raise RegistryError("lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
+        if eff["signup_lead_hours"] <= eff["lock_hours_before"]:
+            raise RegistryError("signups must open before they lock (signup_lead_hours > lock_hours_before)")
+        if not (eff["lock_hours_before"] <= float(eff["nudge_hours_before"]) <= eff["signup_lead_hours"]):
+            raise RegistryError("the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
+        for role, b in (eff.get("comp") or {}).items():
+            if b.get("min", 0) > b.get("max", 999):
+                raise RegistryError(f"{role}: min {b['min']} above max {b['max']}")
+
+    def _apply_raid_override(self, instance: str, field: str, value, by: str, commit: bool = True) -> str:
         """Owner override for a raid: lockout_days | duration_hours | first_open | notes | auto | tank_min/max | healer_min/max | dps_min/max
         | slots | signup_lead_hours | lock_hours_before | confirm_hours_before | nudge_hours_before | fill_ask_hours | split_policy
         | nudge / autofill / open_dm (true|false) | weight_rank/main/sat_out/signup_order."""
@@ -788,13 +847,6 @@ class Registry:
             if num < 0:
                 raise RegistryError(f"{field} can't be negative")
             over[field] = int(num) if num == int(num) else num
-            eff = self.raid_def(instance)
-            if eff["lock_hours_before"] < eff["confirm_hours_before"]:
-                raise RegistryError("lock must come before the confirmation deadline (lock_hours_before ≥ confirm_hours_before)")
-            if eff["signup_lead_hours"] <= eff["lock_hours_before"]:
-                raise RegistryError("signups must open before they lock (signup_lead_hours > lock_hours_before)")
-            if not (eff["lock_hours_before"] <= float(eff["nudge_hours_before"]) <= eff["signup_lead_hours"]):
-                raise RegistryError("the nudge must fall between signup opening and lock (lock_hours_before ≤ nudge_hours_before ≤ signup_lead_hours)")
         elif field in RAID_BOOL_FIELDS:
             over[field] = parse_bool(value)
         elif field == "split_policy":
@@ -842,13 +894,14 @@ class Registry:
                 n = int(value)
             except (TypeError, ValueError):
                 raise RegistryError(f"{field} must be a whole number")
+            if n < 0:
+                raise RegistryError(f"{field} can't be negative")
             over.setdefault("comp", {}).setdefault(role, {})[bound] = n
-            eff = self.raid_def(instance)["comp"][role]
-            if eff.get("min", 0) > eff.get("max", 999):
-                raise RegistryError(f"{role}: min {eff['min']} above max {eff['max']}")
         else:
             raise RegistryError(f"unknown raid field {field}")
-        self.save_config(f"raid {instance} {field} → {value} (by {by})")
+        if commit:
+            self._check_raid(instance)
+            self.save_config(f"raid {instance} {field} → {value} (by {by})")
         return f"{instance}: {field} = {value}"
 
     # ---- test bench: fake members the bot puppets so the whole cycle can be rehearsed in Discord
@@ -1239,14 +1292,17 @@ class Registry:
         return m, c
 
     def roster_remove(self, discord_id: int, roster: str, by: str) -> Member:
+        if roster not in self.config.roster_keys():
+            raise RegistryError(f"No roster called {roster}.")
         m = self.member(discord_id)
         changed = False
         for c in m.characters:
             if roster in c.rosters:
                 c.rosters.remove(roster)
                 changed = True
-        if changed:
-            self.save(m, f"{by} removed {m.display_name} from roster {roster}")
+        if not changed:
+            raise RegistryError(f"{m.display_name} isn't on {roster}.")
+        self.save(m, f"{by} removed {m.display_name} from roster {roster}")
         return m
 
     def roster_members(self, roster: str) -> list[tuple[Member, RegisteredCharacter]]:
@@ -1325,10 +1381,20 @@ class Registry:
     def clear_absence(self, discord_id: int, start: str, by: str | None = None) -> Absence:
         """Remove the absence starting `start`; returns it so the caller can ripple the cleared span into the sheets
         (RaidMixin.after_absence_cleared). `by` defaults to the member (officers pass their own name)."""
+        from datetime import date as _d
+
         m = self.member(discord_id)
+        try:
+            start = _d.fromisoformat(str(start).strip()).isoformat()
+        except ValueError:
+            parts = str(start).strip().split("-")
+            try:
+                start = _d(*(int(x) for x in parts)).isoformat() if len(parts) == 3 else start
+            except (TypeError, ValueError):
+                pass
         a = next((a for a in m.absences if a.start == start), None)
         if a is None:
-            raise RegistryError(f"No absence starting {start}.")
+            raise RegistryError(f"No absence starting {self.day_label(start)}.")
         m.absences = [x for x in m.absences if x.start != start]
         self.save(m, f"{m.display_name} cleared absence {start}" + (f" (by {by})" if by and by != m.display_name else ""))
         return a

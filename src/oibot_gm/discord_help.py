@@ -12,11 +12,41 @@ from .discord_registry import Guilds, is_officer
 from .ops import Ops
 
 from .constants import TEAL  # noqa: E402
+# /help topic: ONE choice per manual section (a picker, never a word to spell); the label says what is in it
 TOPICS = {
-    "register": "## 3", "characters": "## 3", "absences": "## 3",
-    "rosters": "## 4", "sheets": "## 4", "fill": "## 4", "cycle": "## 4", "runs": "## 4", "groups": "## 5", "analytics": "## 6",
-    "officers": "## 7", "setup": "## 8", "test": "## 8a", "loot": "## 9", "data": "## 10", "limits": "## 11", "channels": "## 2", "website": "## 2a",
+    "channels": ("## 2", "Channels: where everything happens"),
+    "website": ("## 2a", "The website"),
+    "register": ("## 3", "Registering, characters and absences"),
+    "cycle": ("## 4", "Raids, sheets, lock, confirm and fill"),
+    "groups": ("## 5", "Groups and auras"),
+    "analytics": ("## 6", "Analytics (officers)"),
+    "officers": ("## 7", "Officer tools"),
+    "setup": ("## 8", "Owner: setup"),
+    "test": ("## 8a", "Rehearsing with the test bench"),
+    "loot": ("## 9", "Loot"),
+    "data": ("## 10", "Data, privacy, cost"),
+    "limits": ("## 11", "What the bot can't do yet"),
 }
+TOPIC_CHOICES = [app_commands.Choice(name=label, value=key) for key, (_m, label) in TOPICS.items()]
+
+
+def chunk_text(text: str, limit: int = 1900) -> list[str]:
+    """Split on paragraph boundaries so a long manual section is sent whole, in order, never cut mid-sentence."""
+    out: list[str] = []
+    cur = ""
+    for para in text.split("\n\n"):
+        if cur and len(cur) + 2 + len(para) > limit:
+            out.append(cur)
+            cur = ""
+        while len(para) > limit:  # one paragraph longer than a message: break it on a line, else hard, in order
+            cut = para.rfind("\n", 0, limit)
+            cut = cut if cut > limit // 2 else limit
+            out.append(para[:cut])
+            para = para[cut:].lstrip("\n")
+        cur = f"{cur}\n\n{para}" if cur else para
+    if cur:
+        out.append(cur)
+    return out
 
 
 def manual_section(marker: str) -> str:
@@ -42,7 +72,7 @@ def guide_text(reg, key: str) -> str:
     """Static answers for people who may not ask free-form questions: config + manual excerpts, no LLM."""
     cfg = reg.config
     if key == "about":
-        raids = ", ".join(f"{rd.get('name', rid)} ({rd.get('size')}-player{', ' + ' / '.join(rd['slots']) if rd.get('slots') else ''})" for rid in reg.profile.raids for rd in [reg.raid_def(rid)]) or "no raids configured yet"
+        raids = ", ".join(f"{rd.get('name', rid)} ({rd.get('size')}-player{', ' + ' / '.join(reg.slot_label(x) for x in rd['slots']) if rd.get('slots') else ''})" for rid in reg.profile.raids for rd in [reg.raid_def(rid)]) or "no raids configured yet"
         return f"**{cfg.name}**\n{cfg.about or 'A WoW: Forever raiding guild.'}\n\nRaids: {raids}.\nMembers registered: {len(reg.members)}."
     if key == "schedule":
         from . import raidcycle as rc
@@ -57,7 +87,7 @@ def guide_text(reg, key: str) -> str:
                 continue
             starts = rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS)
             nxt = starts[0][1] if starts else None
-            lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — {', '.join(slots)} {cfg.timezone}"
+            lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player) — {', '.join(reg.slot_label(x) for x in slots)} {cfg.timezone}"
                          + (f" · next <t:{int(nxt.timestamp())}:F> (<t:{int(nxt.timestamp())}:R>); its sheet opens {rd['signup_lead_hours']:g} h before" if nxt else " · nothing in the next two weeks"))
         where = f" in <#{cfg.signup_channel_id}>" if cfg.signup_channel_id else ""
         return "**Raid schedule**\n" + ("\n".join(lines) or "Nothing scheduled yet.") + f"\nEach run gets its own sheet{where}: answer Join / Bench / No thanks there."
@@ -66,7 +96,8 @@ def guide_text(reg, key: str) -> str:
         sheets = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "the signup channel"
         return f"**How to register**\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each run's sheet in {sheets} (Join / Bench / No thanks). `/me view` shows what the bot has on you."
     if key == "signups":
-        return manual_section("## 4")[:1900] or "See `/help topic:sheets`."
+        parts = chunk_text(manual_section("## 4"), 1800)  # the start of the section, cut on a paragraph, and where the rest is
+        return (parts[0] + ("\n\n-# The rest: `/help` → topic *Raids, sheets, lock, confirm and fill*." if len(parts) > 1 else "")) if parts else "See `/help` → topic *Raids, sheets, lock, confirm and fill*."
     if key == "apply":
         return "**Applying**\nUse `/apply` with your character, spec, logs link and a few words about you. Officers review it on a card and you'll get a DM with the decision. Accepted applicants are registered as trial."
     if key == "contact":
@@ -108,18 +139,20 @@ def guide_intro(reg) -> str:
 
 def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: Ops, bot) -> None:
     @tree.command(name="help", description="What the bot does and which commands you can use (no AI)")
-    @app_commands.describe(topic="register, characters, absences, runs, sheets, fill, groups, analytics, officers, setup, test, loot, limits")
-    async def help_cmd(interaction: discord.Interaction, topic: str | None = None):
+    @app_commands.describe(topic="a section of the manual")
+    @app_commands.choices(topic=TOPIC_CHOICES)
+    async def help_cmd(interaction: discord.Interaction, topic: app_commands.Choice[str] | None = None):
         reg = guilds.for_interaction(interaction)
         officer = bool(reg and is_officer(interaction, reg))
         if topic:
-            key = topic.strip().lower()
-            marker = TOPICS.get(key)
-            text = manual_section(marker) if marker else ""
+            text = manual_section(TOPICS[topic.value][0])
             if not text:
-                await interaction.response.send_message("Topics: " + ", ".join(sorted(set(TOPICS))) + ". Or just ask: `/ask how do I …`", ephemeral=True)
+                await interaction.response.send_message("That section is missing from the manual. `/ask` can still answer.", ephemeral=True)
                 return
-            await interaction.response.send_message(text[:1950], ephemeral=True)
+            parts = chunk_text(text)[:5]  # the whole section, in as many messages as it takes (Discord caps a message at 2000)
+            await interaction.response.send_message(parts[0], ephemeral=True)
+            for p in parts[1:]:
+                await interaction.followup.send(p, ephemeral=True)
             return
         lines = help_mod.command_lines(tree).splitlines()
         tiers = {"member": [], "officer": [], "owner": []}

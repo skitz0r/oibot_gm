@@ -51,7 +51,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
         {!editing ? (
           <Stack gap="md">
             <Group gap="xl" wrap="wrap">
-              <Fact label="slots" value={r.slots.join(", ") || "none — no sheets open"} c={oc("slots")} />
+              <Fact label="slots" value={(r.slot_labels || r.slots).join(", ") || "none — no sheets open"} c={oc("slots")} />
               <Fact label="signup opens" value={`${r.signup_lead_hours} h before`} c={oc("signup_lead_hours")} />
               <Fact label="nudge" value={r.nudge ? `${r.nudge_hours_before} h before` : "off"} c={over("nudge") || over("nudge_hours_before") ? "yellow" : undefined} />
               <Fact label="fill after lock" value={r.autofill ? "automatic" : "by hand"} c={oc("autofill")} />

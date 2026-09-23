@@ -239,7 +239,7 @@ def clear_absences_view(reg: Registry, m, absences: list) -> discord.ui.View:
     """One Clear button per listed absence on the ephemeral 'My absences' reply: clears it and ripples the span into the sheets."""
     view = discord.ui.View(timeout=180)
     for a in absences:
-        btn = discord.ui.Button(label=f"Clear {a.start}" + (f" → {a.end}" if a.end != a.start else ""), style=discord.ButtonStyle.secondary)
+        btn = discord.ui.Button(label=f"Clear {reg.span_label(a.start, a.end)}"[:80], style=discord.ButtonStyle.secondary)
 
         async def clear(i: discord.Interaction, start=a.start):
             bot = i.client
@@ -252,7 +252,7 @@ def clear_absences_view(reg: Registry, m, absences: list) -> discord.ui.View:
                 await i.edit_original_response(content=f"❌ {e}")
                 return
             lines = await bot.absence_cleared(reg, m, gone, i.user.display_name)
-            await i.edit_original_response(content=f"✅ Cleared absence {start}" + (f" → {gone.end}" if gone.end != gone.start else "") + ("\n" + "\n".join("• " + l for l in lines) if lines else ""))
+            await i.edit_original_response(content=f"✅ Cleared your absence {reg.span_label(gone.start, gone.end)}" + ("\n" + "\n".join("• " + l for l in lines) if lines else ""))
 
         btn.callback = clear
         view.add_item(btn)

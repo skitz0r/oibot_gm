@@ -78,7 +78,7 @@ function OpenRaid({ r, busy, onAct, when, setWhen }: { r: RaidRuns; busy: string
 
 function RaidCard({ r, meta, busy, onAct, onBoard, onReload }: { r: RaidRuns; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
   const [when, setWhen] = useState<string | null>(null);  // "YYYY-MM-DD HH:mm:ss" from the picker; empty = take the next slot
-  const metaLine = [r.slots.length ? `slots ${r.slots.join(", ")}` : "no slots set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
+  const metaLine = [r.slots.length ? `slots ${(r.slot_labels || r.slots).join(", ")}` : "no slots set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
   const first = r.locked.some((e) => e.key === target) ? "locked" : r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
   return (

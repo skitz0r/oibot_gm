@@ -444,7 +444,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             fo = reg.first_open(rid)
             upcoming = [{"slot": slot, "start": t12(reg, start), "opens": t12(reg, start - timedelta(hours=float(rd["signup_lead_hours"])))}
                         for slot, start in rc.slot_starts(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if f"{rc.run_key(rid, start)}-{start.date().isoformat()}" not in rs.events][:6]
-            out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "lockout_days": int(rd["lockout_days"]),
+            out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
                         "opened": bool(fo and fo <= now), "first_open": reg.local12(fo, "%a %d %b %Y %I:%M %p") if fo else None,
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "upcoming": upcoming})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
@@ -851,7 +851,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             eff, over, fo = reg.raid_def(rid), reg.config.raids.get(rid, {}), reg.first_open(rid)
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
-                        "slots": list(eff["slots"]), "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
+                        "slots": list(eff["slots"]), "slot_labels": [reg.slot_label(x) for x in eff["slots"]], "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
                         "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "autofill": bool(eff.get("autofill", True)), "open_dm": bool(eff.get("open_dm", False)), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
@@ -864,31 +864,32 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         def go(v, d):
             need_owner(v)
             inst = parse(d, InstanceBody).instance
-            cur, done = v.reg.raid_def(inst), []
+            cur, want = v.reg.raid_def(inst), {}  # collect every changed field, then ONE atomic write
             if "slots" in d:
-                want = d["slots"] if isinstance(d["slots"], list) else str(d["slots"])
+                raw = d["slots"] if isinstance(d["slots"], list) else str(d["slots"])
                 from ..registry import parse_slots
 
-                if parse_slots(want) != list(cur["slots"]):
-                    done.append(v.reg.set_raid_override(inst, "slots", want, v.name))
+                if parse_slots(raw) != list(cur["slots"]):
+                    want["slots"] = raw
             for f in RAID_HOURS_FIELDS + RAID_BOOL_FIELDS + ("lockout_days", "duration_hours", "notes", "split_policy"):
                 val = d.get(f)
                 if val not in (None, "") and str(val) != str(cur.get(f, "")):
-                    done.append(v.reg.set_raid_override(inst, f, str(val), v.name))
+                    want[f] = str(val)
             if "nudge" in d and d["nudge"] is not None and bool(d["nudge"]) != bool(cur.get("nudge", True)):
-                done.append(v.reg.set_raid_override(inst, "nudge", "true" if d["nudge"] else "false", v.name))
+                want["nudge"] = "true" if d["nudge"] else "false"
             for k, val in (d.get("weights") or {}).items():
                 if k in RAID_WEIGHT_DEFAULTS and val not in (None, "") and as_int(val, f"weight {k}") != int(cur["weights"].get(k, 0)):
-                    done.append(v.reg.set_raid_override(inst, f"weight_{k}", str(val), v.name))
+                    want[f"weight_{k}"] = str(val)
             fo = d.get("first_open") or ""
             cur_fo = v.reg.first_open(inst)
             if fo and (cur_fo is None or fo[:16] != cur_fo.astimezone(ZoneInfo(v.reg.config.timezone)).strftime("%Y-%m-%dT%H:%M")):
-                done.append(v.reg.set_raid_override(inst, "first_open", fo, v.name))
+                want["first_open"] = fo
             for role in ("tank", "healer", "dps"):
                 for bound in ("min", "max"):
                     val = (d.get("comp") or {}).get(role, {}).get(bound)
                     if val not in (None, "") and str(val) != str(((cur.get("comp") or {}).get(role) or {}).get(bound, "")):
-                        done.append(v.reg.set_raid_override(inst, f"{role}_{bound}", str(val), v.name))
+                        want[f"{role}_{bound}"] = str(val)
+            done = v.reg.set_raid_overrides(inst, want, v.name)  # a refused field leaves the raid exactly as it was
             return "; ".join(done) or f"{inst}: no changes"
         return await run(request, go, officer=True)
 
