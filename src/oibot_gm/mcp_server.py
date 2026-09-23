@@ -456,6 +456,35 @@ def plain_change(text: str, apply: bool = False) -> dict:
     return api().post("/api/ops/change", {"text": text, "apply": bool(apply)})
 
 
+@mcp.tool()
+def plain_permissions() -> dict:
+    """Who may act through plain text, and where: capability groups (id, label, who, the ops in it, an example
+    sentence), every channel's mode (act | self = own record only | answer = questions only | ignore), DMs, the
+    default for unlisted channels, and the guild's roles (for role:<id> in `who`)."""
+    d = api().get("/api/plain-permissions")
+    return {"groups": [{k: g[k] for k in ("id", "label", "who", "who_text", "ops", "example")} for g in d["groups"]],
+            "channels": [{"id": c["id"], "name": c["name"], "mode": c["mode"]} for c in d["channels"]], "listed": d["listed"],
+            "dm": d["dm"], "default": d["default"], "roles": d["guild_roles"]}
+
+
+@mcp.tool()
+def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: dict[str, str] | None = None, dm: str | None = None, default: str | None = None) -> str:
+    """Change the plain-text permissions (owner). `groups`: {group id: [who…]} for the groups to change — who is
+    everyone | registered | officers | owner | role:<role id> (the owner can always do everything; [] = owner only).
+    `channels`: the WHOLE per-channel map {channel id: act|self|answer|ignore} (unlisted channels use `default`; the ops
+    and analytics channels act unless listed). `dm` / `default`: act | self | answer | ignore. Read plain_permissions first."""
+    body: dict[str, Any] = {}
+    if groups is not None:
+        body["groups"] = groups
+    if channels is not None:
+        body["channels"] = channels
+    if dm:
+        body["dm"] = dm
+    if default:
+        body["default"] = default
+    return msg(api().post("/api/admin/plain-permissions", body))
+
+
 # ---------------------------------------------------------------- entry point
 
 def main(argv: list[str] | None = None) -> None:

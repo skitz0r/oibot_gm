@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from .llm.provider import Provider
 from .constants import ROLES
-from .registry import RANKS, Registry, RegistryError
+from .registry import PLAIN_GROUPS, RANKS, Registry, RegistryError
 
 SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never guess)
 Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
@@ -53,6 +53,8 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
   run_autofill: target — before lock: the solver fills the board's empty seats around the officers' placements.
   run_board: target, value=<groups of display names, "A, B, C | D, E" ('|' separates groups in order; a joiner in no group is bench)>
     — before lock it is the layout the lock will use; after lock it is the roster itself (names added are asked to confirm, names dropped are freed).
+  confirm_for: target, member, value=yes|no — on a LOCKED run, record someone's answer to their Confirm / Can't make it ask
+    (they said so out of band: "Xanthe confirmed for tonight"; no = can't make it, the seat is freed and the fill engine looks for cover).
 Members (officer): character: member, character=<their character's name>, field=add|spec|offspec|name|rank|main|retire, value:
     add: character = the new name, value = "Class Spec [Offspec]"; spec / offspec: the new spec (offspec "none" clears it);
     name: the real name for a planned character; rank: trial|raider|core|alt|social; main / retire: no value. A class never changes: retire and add.
@@ -61,6 +63,8 @@ Members (officer): character: member, character=<their character's name>, field=
 Test bench (officer): test: value="seed <N>" (puppet members) | "run <raid id>" (a compressed run: starts in 40 min, nudge 32, lock 25, confirm 15 min before) | "clear".
 Resolving a run: "tonight's run" / "the Barrow Deeps run" = the live run of that raid on that day in the live-runs list; when several fit, ask which.
 A member is named by display name, mention or one of their characters. A request with several parts becomes several ops, in the order asked.
+The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm"): leave member EMPTY — the bot fills in
+  the requester itself. Who may do what, and where, is decided by the bot after you answer; write the ops as asked, never refuse or widen them.
 Not settable here (say so): standing rosters or availability (members answer each run's sheet instead), loot items, tiers, wishlists.
 """
 
@@ -68,12 +72,12 @@ Not settable here (say so): standing rosters or availability (members answer eac
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, character, absence_clear, dm, test")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|ask_audience|about")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
     field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; run_fill: preview|send; run_board: 'A, B | C, D'; dm: on|off; test: 'seed N'|'run <raid>'|'clear')")
-    member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; dm: on|off; test: 'seed N'|'run <raid>'|'clear')")
+    member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer, team_member)")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
@@ -90,7 +94,7 @@ class ConfigRequest(BaseModel):
     questions: list[str] = Field(default_factory=list, description="Anything ambiguous that must be resolved before applying")
 
 
-SYSTEM = """You turn an officer's plain-text request into configuration operations for a WoW guild bot.
+SYSTEM = """You turn a guild member's or officer's plain-text request into configuration operations for a WoW guild bot.
 Only use the whitelisted schema. If the request names something not in it, or is ambiguous (which raid? which
 member?), return kind=question with the question — never guess. Current configuration is provided; a request that
 matches the current state is still a change (idempotent).
@@ -135,10 +139,81 @@ OWNER_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_s
 CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel")
 
 
-RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board"}
+RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board", "confirm_for"}
 NEEDS_BOT = "needs the bot (Discord side effects): apply it from /gm change or an @mention, not offline"
 ANSWER_VALUES = {"in": "in", "join": "in", "joined": "in", "yes": "in", "sub": "sub", "bench": "sub", "benched": "sub", "out": "out", "no thanks": "out", "nothanks": "out", "no": "out", "decline": "out", "declined": "out"}
 TEST_RUN_MINUTES = {"start": 40, "nudge": 32, "lock": 25, "confirm": 15}  # the /gm test run defaults
+
+
+# ---- who may do what, where (design §5.25): every op is in exactly one capability group (registry.PLAIN_GROUPS);
+# an op in SELF_OPS aimed at the requester's own record is "self" instead. The model never decides this: bind_self
+# resolves the member in code, and Registry.may_plain checks the result against the guild's policy.
+OP_GROUP = {
+    "absence": "members", "absence_clear": "members", "dm": "members", "character": "members", "set_main": "members", "rank": "members", "confirm": "members",
+    "run_open": "runs", "run_answer": "runs", "run_lock": "runs", "run_cancel": "runs", "run_fill": "runs", "run_strategy": "runs",
+    "run_autofill": "runs", "run_board": "runs", "confirm_for": "runs", "team_member": "runs",
+    "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
+    "raid_set": "raids", "raid_reset": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
+    "set": "setup", "role_add": "setup", "role_remove": "setup",
+    "test": "test",
+}
+SELF_OPS = {"absence", "absence_clear", "dm", "character", "set_main", "run_answer", "confirm_for"}
+OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other ops use their group's label
+    "absence": ("your absences", "someone else's absence"), "absence_clear": ("your absences", "someone else's absence"),
+    "dm": ("your DM setting", "someone else's DM setting"), "character": ("your characters", "someone else's characters"),
+    "set_main": ("your main", "someone else's main"), "run_answer": ("your answer on a sheet", "someone else's answer on a sheet"),
+    "confirm_for": ("your confirmation", "someone else's confirmation"), "rank": ("ranks", "ranks"), "confirm": ("character confirmations", "character confirmations"),
+}
+
+
+def _candidates(reg: Registry, ref: str) -> set[int]:
+    """Every member a reference could mean: a mention's id, or everyone whose display name OR any character (retired
+    too) matches. Deliberately wider than `_member`, so a collision never reads as the requester's own record."""
+    r = ref.strip()
+    if r.startswith("<@") and r.endswith(">"):
+        digits = r[2:-1].lstrip("!")
+        return {int(digits)} if digits.isdigit() else set()
+    low = r.lower()
+    return {m.discord_id for m in reg.members.values() if m.display_name.lower() == low or any(c.matches(r) for c in m.characters)}
+
+
+def bind_self(reg: Registry, op: ConfigOp, author_id: int) -> tuple[str | None, str | None]:
+    """(capability group, refusal) for one op, decided in code. An empty member on a SELF_OPS op is the requester,
+    never anyone else; a member reference that means the requester and nobody else is pinned to their mention (so
+    apply resolves exactly them). Such an op is "self"; a character it names must be one of theirs. A rank change is
+    never self-service. Mutates `op.member` only to the requester's own mention."""
+    group = OP_GROUP.get(op.op)
+    if group is None:
+        return None, f"{op.op} isn't something plain text can do"
+    if op.op not in SELF_OPS or (op.op == "character" and (op.field or "").strip().lower() == "rank"):
+        return group, None
+    ref = (op.member or "").strip()
+    if ref and _candidates(reg, ref) != {author_id}:
+        return group, None  # someone else (or several people could be meant): their usual group decides
+    op.member = f"<@{author_id}>"
+    if op.character and not (op.op == "character" and (op.field or "").strip().lower() == "add"):
+        m = reg.members.get(author_id)
+        if m is None or not any(c.matches(op.character) for c in m.characters):
+            return "self", f"{op.character} isn't one of your characters"
+    return "self", None
+
+
+def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bool, role_ids=(), channel=None) -> tuple[list[ConfigOp], list[str]]:
+    """Split parsed ops into (allowed, refusal lines) for this requester in this place — Registry.may_plain per op.
+    The allowed ones can still apply when others are refused."""
+    allowed, refused = [], []
+    for op in ops:
+        group, bad = bind_self(reg, op, author_id)
+        if bad is None:
+            own = group == "self"
+            key = "rank" if op.op == "character" and (op.field or "").strip().lower() == "rank" else op.op
+            noun = OP_NOUN.get(key, (None, None))[0 if own else 1] or PLAIN_GROUPS[group][0].lower()
+            bad = reg.may_plain(group, author_id, officer=officer, role_ids=role_ids, channel=channel, what=noun, fallback=OP_GROUP[op.op] if own else None)
+        if bad is None:
+            allowed.append(op)
+        elif bad not in refused:
+            refused.append(bad)
+    return allowed, refused
 
 
 def _member(reg: Registry, ref: str | None):
@@ -167,6 +242,25 @@ def _answer_value(value: str | None) -> str:
     if v not in ANSWER_VALUES:
         raise RegistryError("answer is join | bench | no thanks")
     return ANSWER_VALUES[v]
+
+
+def _yes_no(value: str | None) -> bool:
+    v = (value or "yes").strip().lower()
+    if v in ("yes", "y", "confirm", "confirmed", "true", "in"):
+        return True
+    if v in ("no", "n", "decline", "declined", "false", "out", "can't", "cant", "can't make it"):
+        return False
+    raise RegistryError("confirm_for is yes | no")
+
+
+def _placement_ask(reg: Registry, ev, m) -> dict:
+    """The open Confirm / Can't make it ask a locked run holds for this member (what the DM buttons answer)."""
+    if ev.state != "locked":
+        raise RegistryError(f"{ev.key} isn't locked yet — confirmations start at lock (set their answer instead)")
+    ask = next((a for a in reg.open_placement_asks(m.discord_id) if a["roster"] == ev.team), None)
+    if ask is None:
+        raise RegistryError(f"{m.display_name} has no confirmation waiting on {ev.key}")
+    return ask
 
 
 def _layout(value: str | None) -> list[list[str]]:
@@ -451,6 +545,11 @@ def _describe_action(reg: Registry, op: ConfigOp) -> str:
         effect = {"in": " — seated and asked to confirm" if ev.state == "locked" else "", "sub": " — keeps the seat until set No thanks" if ev.state == "locked" and ev.seat_of(m.display_name) else "",
                   "out": " — seat freed, the fill engine looks for cover" if ev.state == "locked" and ev.seat_of(m.display_name) else ""}[want]
         return f"{label}: {m.display_name} → {rc.LABELS[want]}{char} ({now}){effect}"
+    if op.op == "confirm_for":
+        m = _need_member(reg, op.member)
+        yes = _yes_no(op.value)
+        _placement_ask(reg, ev, m)
+        return f"{label}: {m.display_name} → " + ("confirmed" if yes else "can't make it — seat freed, the fill engine looks for cover")
     if op.op == "run_lock":
         if ev.state != "open":
             raise RegistryError(f"{ev.key} is already {ev.state}")
@@ -500,7 +599,8 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     """Apply one op through the same code paths as the slash commands. Raises RegistryError on refusal.
     Synchronous: channel kinds that post a card and absences that should be announced are completed by `apply_async`
     when a bot is available; here they only record the setting. `raids`: the bot's RaidStore for ops on live runs
-    (pin); without one the store is read from disk."""
+    (pin); without one the store is read from disk. `is_owner`: the right to the owner-only ops — the plain-text
+    paths pass True for an op `authorize` allowed (the guild's policy may open raids or setup to others)."""
     cfg = reg.config
     if op.op in OWNER_OPS and not is_owner:
         raise RegistryError(f"{op.op} needs the owner")
@@ -794,6 +894,11 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         except ValueError as e:
             raise RegistryError(str(e))
         return str(line).replace("**", "").removeprefix("✅ ")
+    if op.op == "confirm_for":  # the member's own Confirm / Can't make it buttons, same verb and ripple
+        m = _need_member(reg, op.member)
+        yes = _yes_no(op.value)
+        _placement_ask(reg, ev, m)
+        return await bot.answer_placement_for(reg, m.discord_id, ev.team, yes, by)
     if op.op == "run_lock":
         if ev.state != "open":
             raise RegistryError(f"{ev.key} is already {ev.state}")

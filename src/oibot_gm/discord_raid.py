@@ -437,6 +437,15 @@ class RaidMixin:
                 await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
         await self.ops.emit(reg.config, "info", f"[web] {by} edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""))
 
+    async def answer_placement_for(self, reg, uid: int, roster: str, yes: bool, by: str) -> str:
+        """A Confirm / Can't make it answer from anywhere but the DM button itself (the Me page, an officer on the
+        site or MCP, plain text's confirm_for): the button's two steps — `Registry.answer_placement`, then
+        `after_placement_answer` (seat freed on a no, run thread line, sheet and cards). The button runs the same two
+        with its interaction reply in between. Raises RegistryError when there is nothing to answer."""
+        line = await asyncio.to_thread(reg.answer_placement, uid, roster, yes, by)
+        await self.after_placement_answer(reg, uid, roster, yes, line)
+        return line
+
     async def after_placement_answer(self, reg, uid: int, roster: str, yes: bool, line: str) -> None:
         cfg = reg.config
         rs = self.raids.store(reg)

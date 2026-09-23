@@ -1,8 +1,7 @@
 # oibot_GM — how the bot works (member and officer manual)
 
 This is the bot's own description of itself. It is injected, with the live command list and the guild's
-current settings, whenever someone asks the bot a question (`/ask`, or @mention it outside the officer
-channels). Keep it truthful: if a behaviour changes, change it here in the same commit.
+current settings, whenever someone asks the bot a question (`/ask`, a DM, or an @mention). Keep it truthful: if a behaviour changes, change it here in the same commit.
 
 ## 1. What the bot is
 
@@ -10,7 +9,8 @@ oibot_GM is the guild's raid administrator. It keeps the character registry, ope
 schedule, checks the roster's health, builds groups, fills freed seats by DM, and — once loot tables exist —
 runs a loot council whose recommendations an officer confirms or overrides. Code does the computing
 (solver, scoring, schedules); Claude only explains, judges against the written policy, and turns
-officers' plain-text requests into typed changes that are shown as a diff and confirmed before they apply.
+plain-text requests (members' about their own record, officers' about anything) into typed changes that are
+shown as a diff and confirmed before they apply.
 Humans always decide: every roster, award and config change has an approve step, and overrides are
 stored with their reason as precedents.
 
@@ -80,6 +80,12 @@ on the sheet in Discord.
   bench is asked. Officers record one for someone else with `/roster absent` and a member picker, same screens.
 - **See everything the bot has on you**: `/me view` or the *My status* button.
 - All `/me` commands also work in a DM with the bot.
+- **Or just tell the bot.** DM it or @mention it: "I'll be away Nov 1–3", "back early, clear my absence",
+  "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "bench me for tonight",
+  "I can't make tonight", "I confirm for tonight", "turn my DMs off". It shows what it will change and waits for
+  your **Apply** — only you (or an officer) can press it. Plain text only ever changes *your own* record: a
+  request about someone else is refused with who can do it, and the rest of what you asked still applies.
+  Ranks are officers' (see §8c for who may do what, and where).
 
 ## 4. Raids, runs and the signup cycle
 
@@ -229,9 +235,9 @@ returns to the game defaults.
 - Policy: `/gm policy show|edit|reload`, `/gm rule loot|comp` (the bot shows the end of the current document; press
   **Write the rule** and write it in a paragraph box) — prose is compiled by Claude into rules and
   an officer confirms the reading before it goes live.
-- Plain-text config: `/gm change <text>` or @mention the bot in the ops or analytics channel — the bot
+- Plain-text config: `/gm change <text>`, or @mention the bot in the ops or analytics channel — the bot
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
-  question. Whoever presses Apply needs the rights for the change. Absences entered this way are announced
+  question. Whoever presses Apply needs the rights for the change (§8c). Absences entered this way are announced
   like `/me absent add`; channel changes post their card like the command does.
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, recent ops),
   `/gm config show`.
@@ -273,7 +279,8 @@ channel) covers every action on the Rosters, Raids, Members and Config pages, no
 the sentence into one or more operations, shows each as a one-line "what will happen" diff, and applies on
 **Apply** through exactly the code the slash command or page button would use — so a lock sends the same
 confirmation DMs and cards as `/raid lock`, a cancel withdraws the same confirmations, a cleared absence
-re-opens the same sheets. Officer actions need an officer; the owner-only settings still need the owner. A run is
+re-opens the same sheets. Who may do what, and in which channel, is the owner's plain-text policy (§8c): by
+default officer actions need an officer and raids, auras and guild setup need the owner. A run is
 named by its key (`bd-1209-1930`), or by raid and day ("tonight's Barrow Deeps", "the Hyjal run") when only one of
 that raid's runs is live — with two live, the bot asks which. A member is named by display name, @mention or one
 of their characters.
@@ -282,7 +289,9 @@ of their characters.
   "lock tonight's Barrow Deeps" builds the roster and DMs everyone rostered; "cancel bd-1209-1930, server
   down"; "put Xanthe on the bench for bd-1209-1930" / "set Marrow to join as Marrowlite" / "Kestrel can't
   make it" (after lock: join seats and asks to confirm, no thanks frees the seat and the fill engine looks for
-  cover); "who would fill ask next for tonight's run" (preview, nothing sent) and "send the fill asks"; "split
+  cover); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked run: answers
+  their Confirm / Can't make it ask for them, when they told you out of band — exactly as if they had pressed the
+  button, so a no frees the seat and asks the bench); "who would fill ask next for tonight's run" (preview, nothing sent) and "send the fill asks"; "split
   tonight's run first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock);
   "groups for bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the board — the layout the lock will use, or after
   lock the roster itself (names added are asked to confirm, names dropped are freed). Pins and per-run seats
@@ -296,6 +305,47 @@ of their characters.
   tempo: starts in 40 min, nudge 32, lock 25, confirm 15 min before; Quick is 20/16/12/8 and Slow 90/70/55/35), "clear the test bench".
 - Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
   DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are still not settable anywhere.
+
+## 8c. Plain-text permissions (owner sets, officers read)
+
+Who may change what through plain text, and where, is one policy on the **Ops** page of the site (card
+*Plain-text permissions*; the owner presses **Edit permissions**, changes the table and presses one **Save**;
+officers see it read-only; MCP has `plain_permissions` / `set_plain_permissions`). It covers every plain-text
+path: @mentions, DMs, `/gm change`, and the site's plain-text box (which counts as a place where plain text acts).
+The owner can always do everything, anywhere the bot listens.
+
+**What** — seven capability groups; every plain-text operation belongs to exactly one:
+
+| Group | Default | Someone could type |
+|---|---|---|
+| Own record — your absences, DMs, characters (add, spec, offspec, name, main, retire) and your own answer or confirmation on a run | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight" |
+| Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters | officers | "rank Jonny raider", "Mira is away next week" |
+| Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, seats on a run, `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight" |
+| Comp & policy — comp targets and group layout, pins, appending a rule to the loot or comp policy | officers | "we want 3–4 healers in Barrow Deeps", "pin Jonny in tonight" |
+| Raids & auras — raid schedules and settings, buff and family facts | the owner | "Barrow Deeps runs Tue and Thu 7:30 pm" |
+| Guild setup — channels, officer roles, timezone, who may ask, the about text | the owner | "post raid sheets in #signups" |
+| Test bench | officers | "seed 20 puppets", "clear the test bench" |
+
+**Who** — per group, any mix of *everyone*, *registered members* (an active character), *officers*, *owner only*,
+and specific Discord roles (picked from the server's roles, stored by id, so renaming a role keeps it). An empty
+list means the owner only. Anyone allowed a group for other people may also do it for themselves.
+
+**Where** — each channel is one of: **Acts** (anything the person's groups allow), **Own record only** (a member's
+own record; other requests are refused with where to go instead), **Answers only** (questions, no changes) or
+**Ignored** (the bot doesn't answer @mentions there). DMs have their own entry, and there is a default for every
+channel not listed. Defaults: the ops and analytics channels act; DMs and every other channel are *own record
+only* — so a raider can tell the bot about their absence anywhere, while run and roster changes stay in the
+officer channels.
+
+**How it decides.** The bot reads a message's intent first: in a channel that acts, the sentence is parsed as a
+change straight away (a question gets a short answer from the live settings). Elsewhere the bot answers it like
+`/ask`, and only when the message asks it to *do* something — and you could act there — does it turn it into a
+change for you to Apply. Who an operation is about is decided by the bot's code, not the model: leaving the
+person out ("I'll be away") means *you*; naming yourself by display name, @mention or one of your characters
+means you; a name that could also be someone else (two people with that name, or your name is another member's
+character) counts as someone else; a character you name must be one of yours. Refusals say who may and where:
+*"Only officers can change someone else's absence."*, *"Plain text can't change runs in #general — use
+#officer-ops."* Every applied plain-text change is logged in the ops channel with who asked and where.
 
 ## 8a. Rehearsing with the test bench (officers)
 
@@ -378,7 +428,8 @@ capped by a budget the owner sets; `/gm status` shows it.
 ## 10a. Asking the bot questions
 
 `/ask`, a DM, or an @mention outside the officer channels gets a free-form answer from this manual and
-your own record. Who may do that is set by the owner (`ask_audience`: officers, confirmed members,
+your own record — or, when you're asking the bot to *do* something about your own record, the change itself to
+Apply (§3, §8c). Who may do that is set by the owner (`ask_audience`: officers, confirmed members,
 registered members, or everyone; default registered). Anyone outside that audience gets the **static
 guide** instead — a menu with *About the guild*, *Raid schedule*, *How to register*, *How signups work*,
 *How to apply*, *Who to contact* — built from the guild's settings, no AI involved.
@@ -395,7 +446,7 @@ the last log lines. It also knows your own record — characters, roles, DMs, up
 waiting on you, and your answer and seat on each live run. An officer who names a member (display name or
 character) in the question gets that member's record too, absence reasons included; members asking about
 others don't. Long lists are cut short rather than dumped, and the answer only ever *points* at commands —
-changing anything is `/gm change`.
+a change is a separate step you Apply (plain text, §8c).
 
 ## 11. Things the bot cannot do (yet)
 

@@ -120,6 +120,35 @@ class Applicant(BaseModel):
     message_id: Optional[int] = None  # review card in the applications channel
 
 
+# ---- plain-text permissions (design §5.25): what a sentence to the bot may DO, by capability group, by who, by where.
+# Every configops op belongs to exactly one group (configops.OP_GROUP); an op a member aims at their own record is
+# "self" instead of its usual group (configops.bind_self decides that in code, never the model).
+# id -> (label, default who, what a person could type)
+PLAIN_GROUPS: dict[str, tuple[str, list[str], str]] = {
+    "self": ("Own record", ["registered"], "I'll be away Nov 1–3 · make Xanthe my main · I can't make tonight"),
+    "members": ("Other people's records", ["officers"], "rank Jonny raider · Mira is away next week · turn Kessa's DMs off"),
+    "runs": ("Runs", ["officers"], "lock tonight's Barrow Deeps · Xanthe confirmed for tonight · fill the empty seats"),
+    "comp": ("Comp & policy", ["officers"], "we want 3–4 healers in Barrow Deeps · pin Jonny in tonight"),
+    "raids": ("Raids & auras", ["owner"], "Barrow Deeps runs Tue and Thu 7:30 pm · fortitude is party-wide"),
+    "setup": ("Guild setup", ["owner"], "post raid sheets in #signups · add @Raid Lead as an officer role"),
+    "test": ("Test bench", ["officers"], "seed 20 puppets · clear the test bench"),
+}
+PLAIN_WHO = ("everyone", "registered", "officers", "owner")  # plus "role:<discord role id>"
+# act = anything the person's groups allow · self = own record only (other requests are refused with where to go)
+# answer = questions only · ignore = the bot doesn't answer @mentions there at all
+PLAIN_MODES = ("act", "self", "answer", "ignore")
+PLAIN_WEB = "web"  # the site's plain-text box and the MCP server: not a Discord channel, always "act"
+
+
+class PlainPolicy(BaseModel):
+    """Owner-set (web Ops page, MCP). Missing groups use their PLAIN_GROUPS default; unlisted channels use `default`,
+    except the ops and analytics channels, which act unless listed."""
+    groups: dict[str, list[str]] = Field(default_factory=dict)
+    channels: dict[str, str] = Field(default_factory=dict)  # channel id (as a string) -> mode
+    dm: str = "self"
+    default: str = "self"
+
+
 class GuildConfig(BaseModel):
     key: str
     name: str
@@ -153,6 +182,7 @@ class GuildConfig(BaseModel):
     # auras: what the guild has learned about Forever's buffs, over profiles/<game>/buffs.yaml
     buffs: dict[str, dict] = Field(default_factory=dict)  # buff id -> {scope, family, strength, status, note}
     families: dict[str, dict] = Field(default_factory=dict)  # family id -> {name, value: {key: points}, status, note}
+    plain: PlainPolicy = Field(default_factory=PlainPolicy)  # who may act through plain text, and where
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -1106,6 +1136,101 @@ class Registry:
             return True
         lvl = self.verification(discord_id)
         return (aud == "registered" and lvl in ("registered", "confirmed")) or (aud == "confirmed" and lvl == "confirmed")
+
+    # ---- plain-text permissions (PLAIN_GROUPS / PlainPolicy; design §5.25)
+    def plain_who(self, group: str) -> list[str]:
+        """Who may use a capability group: the owner's list, or the group's default. An empty list = the owner only."""
+        groups = self.config.plain.groups
+        return list(groups[group]) if group in groups else list(PLAIN_GROUPS[group][1])
+
+    def plain_mode(self, channel) -> str:
+        """act | self | answer | ignore for a channel id (int or str), None = DMs, PLAIN_WEB = the site / MCP."""
+        if channel == PLAIN_WEB:
+            return "act"
+        p = self.config.plain
+        if channel is None:
+            return p.dm
+        listed = p.channels.get(str(channel))
+        if listed:
+            return listed
+        if str(channel) in (str(self.config.ops_channel_id), str(self.config.analytics_channel_id)):
+            return "act"
+        return p.default
+
+    def plain_act_channels(self) -> list[str]:
+        """The channels where plain text acts on anything (explicitly listed, or ops/analytics by default)."""
+        p = self.config.plain
+        ids = [c for c, mode in p.channels.items() if mode == "act"]
+        for cid in (self.config.ops_channel_id, self.config.analytics_channel_id):
+            if cid and str(cid) not in p.channels and str(cid) not in ids:
+                ids.append(str(cid))
+        return ids
+
+    def plain_allows(self, group: str, author_id: int, officer: bool, role_ids=()) -> bool:
+        if self.config.owner_discord_id is not None and author_id == self.config.owner_discord_id:
+            return True  # the owner can always do everything
+        roles = {str(r) for r in role_ids}
+        for tok in self.plain_who(group):
+            if tok == "everyone" or (tok == "officers" and officer) or (tok == "registered" and self.verification(author_id) != "unregistered"):
+                return True
+            if tok.startswith("role:") and tok[5:] in roles:
+                return True
+        return False
+
+    def plain_who_text(self, group: str) -> str:
+        names = {"everyone": "everyone", "registered": "registered members", "officers": "officers", "owner": "the owner"}
+        out = [names.get(t) or ("@" + self.role_names.get(int(t[5:]), f"role {t[5:]}") if t.startswith("role:") and t[5:].isdigit() else t) for t in self.plain_who(group)]
+        return " or ".join(dict.fromkeys(out)) or "the owner"
+
+    def may_plain(self, group: str, author_id: int, *, officer: bool, role_ids=(), channel=None, what: str | None = None, fallback: str | None = None) -> str | None:
+        """THE plain-text permission check, used by every plain-text path (Discord @mention and DMs, /gm change, the
+        site's box, MCP). `group`: the op's capability group ("self" when it acts on the author's own record, see
+        configops.bind_self); `fallback`: the group that would allow it on anyone (an officer's own absence passes as
+        "members" even if "self" were closed to them); `channel`: channel id, None = DMs, PLAIN_WEB. Returns None when
+        allowed, otherwise the refusal line: who may, and where."""
+        what = what or PLAIN_GROUPS[group][0].lower()
+        mode = self.plain_mode(channel)
+        owner = self.config.owner_discord_id is not None and author_id == self.config.owner_discord_id
+        where = "in DMs" if channel is None else f"in <#{channel}>"
+        act = self.plain_act_channels()
+        go = ("use " + " or ".join(f"<#{c}>" for c in act)) if act else "use the slash commands or the site"
+        if not (self.plain_allows(group, author_id, officer, role_ids) or (fallback and self.plain_allows(fallback, author_id, officer, role_ids))):
+            hint = " — /register first" if group == "self" and "registered" in self.plain_who(group) and self.verification(author_id) == "unregistered" else ""
+            return f"Only {self.plain_who_text(group)} can change {what}{hint}."  # who first: it holds in every channel
+        if mode == "ignore" or (mode == "answer" and not owner):
+            return f"Plain text only answers questions {where} — {go}."
+        if mode == "self" and group != "self" and not owner:
+            return f"Plain text can't change {what} {where} — {go}."
+        return None
+
+    def set_plain_policy(self, policy: dict, by: str) -> str:
+        """Owner: replace the plain-text policy (validated: known groups, who tokens, modes). One commit."""
+        p = PlainPolicy.model_validate(policy or {})
+        bad = [g for g in p.groups if g not in PLAIN_GROUPS]
+        if bad:
+            raise RegistryError(f"unknown capability group {', '.join(bad)} (one of {', '.join(PLAIN_GROUPS)})")
+        for g, who in p.groups.items():
+            wrong = [t for t in who if t not in PLAIN_WHO and not (t.startswith("role:") and t[5:].isdigit())]
+            if wrong:
+                raise RegistryError(f"{g}: who is {', '.join(PLAIN_WHO)} or role:<id>, not {', '.join(wrong)}")
+            p.groups[g] = list(dict.fromkeys(who))
+        modes = {"dm": p.dm, "default": p.default, **{f"<#{c}>": m for c, m in p.channels.items()}}
+        wrong = [f"{k}={m}" for k, m in modes.items() if m not in PLAIN_MODES]
+        if wrong:
+            raise RegistryError(f"channel mode is one of {', '.join(PLAIN_MODES)}, not {', '.join(wrong)}")
+        if any(not c.isdigit() for c in p.channels):
+            raise RegistryError("channels are keyed by channel id")
+        # a group left at its default is not stored, so a changed default later reaches it
+        p.groups = {g: w for g, w in p.groups.items() if w != PLAIN_GROUPS[g][1]}
+        before = self.config.plain
+        self.config.plain = p
+        changed = [g for g in PLAIN_GROUPS if self.plain_who(g) != (list(before.groups[g]) if g in before.groups else PLAIN_GROUPS[g][1])]
+        chans = sorted(set(p.channels.items()) ^ set(before.channels.items()))
+        line = "plain-text permissions: " + ("; ".join(f"{PLAIN_GROUPS[g][0]} → {self.plain_who_text(g)}" for g in changed) or "groups unchanged") \
+            + (f"; channels {len({c for c, _ in chans})} changed" if chans else "") + (f"; DMs {before.dm} → {p.dm}" if before.dm != p.dm else "") \
+            + (f"; other channels {before.default} → {p.default}" if before.default != p.default else "")
+        self.save_config(f"{line} (by {by})")
+        return line
 
     def roles_of(self, m: Member) -> tuple[str | None, list[str]]:
         """(primary, flex). Primary always follows the main's current spec — a stored preference from an earlier

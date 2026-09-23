@@ -77,69 +77,90 @@ class PolicyEditModal(discord.ui.Modal):
 # ---------------------------------------------------------------- plain-text config
 
 class ConfigConfirmView(discord.ui.View):
-    def __init__(self, reg: Registry, req: configops.ConfigRequest, ps: policy_mod.PolicyStore, ops: Ops, owner: bool):
+    """Apply / Cancel under a plain-text diff. The requester or an officer may press; the presser's rights decide
+    (the ops are authorized again for them, in the channel the request was made in)."""
+
+    def __init__(self, reg: Registry, req: configops.ConfigRequest, ps: policy_mod.PolicyStore, ops: Ops, requester_id: int, requester: str, channel):
         super().__init__(timeout=600)
-        self.reg, self.req, self.ps, self.ops, self.owner = reg, req, ps, ops, owner
+        self.reg, self.req, self.ps, self.ops = reg, req, ps, ops
+        self.requester_id, self.requester, self.channel = requester_id, requester, channel
+
+    async def _may_press(self, interaction: discord.Interaction) -> tuple[bool, list[int]] | None:
+        officer, role_ids = await interaction.client.plain_identity(self.reg, interaction.user)
+        if interaction.user.id != self.requester_id and not officer:
+            await interaction.response.send_message(f"Only {self.requester} or an officer can apply this.", ephemeral=True)
+            return None
+        return officer, role_ids
 
     @discord.ui.button(label="Apply", style=discord.ButtonStyle.success)
     async def apply(self, interaction: discord.Interaction, _: discord.ui.Button):
-        # the presser's rights decide, not the requester's: the diff can be a public message in the ops channel
-        if not is_officer(interaction, self.reg):
-            await interaction.response.send_message("Officers only.", ephemeral=True)
+        who = await self._may_press(interaction)
+        if who is None:
             return
-        owner = is_owner(interaction, self.reg)
-        done, refused = [], []
-        for op in self.req.ops:
-            try:
-                done.append(await configops.apply_async(self.reg, op, interaction.user.display_name, owner, self.ps, bot=interaction.client, by_id=interaction.user.id))
+        officer, role_ids = who
+        ops = [op.model_copy() for op in self.req.ops]
+        allowed, refused = configops.authorize(self.reg, ops, interaction.user.id, officer=officer, role_ids=role_ids, channel=self.channel)
+        me = self.reg.members.get(interaction.user.id)
+        by = me.display_name if me else interaction.user.display_name  # the registry's name: a member's own answer counts as theirs
+        done = []
+        for op in allowed:
+            try:  # authorize() allowed it, so owner-only ops pass when the policy opens them
+                done.append(await configops.apply_async(self.reg, op, by, True, self.ps, bot=interaction.client, by_id=interaction.user.id))
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001
                 refused.append(f"{configops.describe(self.reg, op)} — {e}")
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
         await interaction.response.edit_message(content=text[:1900] or "Nothing applied.", view=None, embed=None)
-        await self.ops.emit(self.reg.config, "info" if not refused else "warn", f"{interaction.user.display_name} config change: {'; '.join(done) or '-'}" + (f" (refused: {len(refused)})" if refused else ""))
+        where = "DMs" if self.channel is None else f"<#{self.channel}>"
+        asked = f" (asked by {self.requester})" if interaction.user.id != self.requester_id else ""
+        await self.ops.emit(self.reg.config, "info" if not refused else "warn", f"{by} plain-text change in {where}{asked}: {'; '.join(done) or '-'}" + (f" (refused: {len(refused)})" if refused else ""))
         self.stop()
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if not is_officer(interaction, self.reg):
-            await interaction.response.send_message("Officers only.", ephemeral=True)
+        if await self._may_press(interaction) is None:
             return
         await interaction.response.edit_message(content="Cancelled.", view=None, embed=None)
         self.stop()
 
 
-async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.PolicyStore, provider, ops: Ops, text: str, owner: bool, officer: bool):
-    """Shared by /gm change and @mention. `interaction_or_message` is an Interaction (deferred) or a Message."""
+async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.PolicyStore, provider, ops: Ops, text: str, *, bot, channel, req: configops.ConfigRequest | None = None):
+    """Shared by /gm change, @mentions and DMs. `interaction_or_message` is an Interaction (deferred) or a Message;
+    `channel`: where it was asked (channel id, None = DMs) — Registry.may_plain decides per op what may act there;
+    `req`: an already parsed request (the router parsed first). Refused ops are listed; the rest can still apply."""
     is_msg = isinstance(interaction_or_message, discord.Message)
 
     async def send(content=None, **kw):
         if is_msg:
-            return await interaction_or_message.reply(content, **{k: v for k, v in kw.items() if k != "ephemeral"})
+            return await interaction_or_message.reply(content, allowed_mentions=discord.AllowedMentions.none(), **{k: v for k, v in kw.items() if k != "ephemeral"})
         return await interaction_or_message.followup.send(content, **kw)
 
-    if not officer:
-        await send("Officers only.", ephemeral=True)
-        return
-    if provider is None:
-        await send("Plain-text config needs the LLM; use `/gm config …` commands.", ephemeral=True)
+    if provider is None and req is None:
+        await send("Plain-text changes need the LLM; use the slash commands or the site.", ephemeral=True)
         return
     author = interaction_or_message.author if is_msg else interaction_or_message.user
-    req = await asyncio.to_thread(configops.parse, provider, reg, text, author.display_name)
+    me = reg.members.get(author.id)
+    name = me.display_name if me else author.display_name
+    if req is None:
+        req = await asyncio.to_thread(configops.parse, provider, reg, text, name)
     if req.kind == "ignore":
         return
     if req.kind == "question" or req.questions:
-        await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900], ephemeral=True)
+        await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900] or "Could you say that another way?", ephemeral=True)
         return
     if not req.ops:
         await send(req.reply[:1900] or "Nothing to change.", ephemeral=True)
         return
-    e = discord.Embed(title="Proposed changes", colour=TEAL, description="\n".join(f"• {configops.describe(reg, op)}" + (" _(owner)_" if op.op in configops.OWNER_OPS and not owner else "") for op in req.ops)[:4000])
-    acts = any(op.op in configops.RUN_OPS or op.op == "test" for op in req.ops)
-    if any(op.op in configops.OWNER_OPS for op in req.ops) and not owner:
-        e.set_footer(text="Items marked (owner) will be refused for you." + (" Run actions happen at once on Apply (DMs, cards, sheet)." if acts else ""))
-    elif acts:
+    officer, role_ids = await bot.plain_identity(reg, author)
+    allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel)
+    if not allowed:
+        await send("⛔ " + "\n⛔ ".join(refused), ephemeral=True)
+        return
+    req.ops = allowed
+    lines = [f"• {configops.describe(reg, op)}" for op in allowed] + [f"⛔ {r}" for r in refused]
+    e = discord.Embed(title="Proposed changes", colour=TEAL, description="\n".join(lines)[:4000])
+    if any(op.op in configops.RUN_OPS or op.op == "test" for op in allowed):
         e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
-    await send(req.reply[:500] if req.reply else None, embed=e, view=ConfigConfirmView(reg, req, ps, ops, owner), ephemeral=True)
+    await send(req.reply[:500] if req.reply else None, embed=e, view=ConfigConfirmView(reg, req, ps, ops, author.id, name, channel), ephemeral=True)
 
 
 # ---------------------------------------------------------------- commands
@@ -209,11 +230,14 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
             await FLOWS["rule"](interaction, reg, doc="loot")
 
 
-    @gm.command(name="change", description="Officer: change configuration in plain English (shows a diff, applies on confirm)")
+    @gm.command(name="change", description="Change things in plain English (shows a diff, applies on confirm; plain-text permissions decide)")
     async def gm_change(interaction: discord.Interaction, text: str):
         reg = guilds.for_interaction(interaction)
         if reg is None:
             await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
             return
+        if reg.plain_mode(interaction.channel_id) == "ignore" and not is_owner(interaction, reg):
+            await interaction.response.send_message("Plain text is switched off in this channel.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await handle_change(interaction, reg, pctx.store(reg), bot.ctx.provider, ops, text, is_owner(interaction, reg), is_officer(interaction, reg))
+        await handle_change(interaction, reg, pctx.store(reg), bot.ctx.provider, ops, text, bot=bot, channel=interaction.channel_id)

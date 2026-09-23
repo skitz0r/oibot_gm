@@ -185,10 +185,16 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         await interaction.followup.send(text, ephemeral=True)
 
 
+ACT = "\x00act"  # help_answer's "this was a request to do something" (never shown)
+
+
 class HelpMixin:
     """Needs self.ctx.provider, self.tree, self.raids, self.ops."""
 
-    async def help_answer(self, reg, user_id: int, officer: bool, question: str) -> str:
+    async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False):
+        """The answer text; None outside the ask audience (the caller shows the static guide). `may_act`: plain text
+        may act for this person here — a message the model reads as a request to DO something returns ACT instead
+        (the caller hands it to the change flow), so a plain question costs one model call."""
         if not reg.may_ask(user_id, officer):
             return None  # caller shows the static guide
         provider = self.ctx.provider
@@ -200,6 +206,8 @@ class HelpMixin:
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             return "Something went wrong answering that; the officers have been told. `/help` lists what I do."
+        if may_act and ans.acts:
+            return ACT
         text = ans.answer.strip()
         if ans.commands:
             text += "\n\n" + " · ".join(f"`{c}`" for c in ans.commands[:4])
