@@ -28,10 +28,10 @@ import yaml
 from discord import app_commands
 from pydantic import BaseModel, Field
 
-from . import nl, render
+from . import configops, nl, render
 from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, register_policy_commands
-from .discord_help import GuideSelect, HelpMixin, guide_intro, guide_view, register_help_commands
+from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
@@ -1034,40 +1034,66 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         ref = message.reference.resolved if message.reference else None
         return isinstance(ref, discord.Message) and ref.author.id == self.user.id
 
+    async def plain_identity(self, reg, user) -> tuple[bool, list[int]]:
+        """(officer, role ids) for the plain-text check (Registry.may_plain): from the guild member — fetched when the
+        person wrote in a DM, where Discord hands over a bare User without roles."""
+        guild = self.get_guild(reg.config.discord_guild_id)
+        member = user if isinstance(user, discord.Member) and guild is not None and user.guild.id == guild.id else await self.cached_member(guild, user.id)
+        officer = reg.config.owner_discord_id == user.id or (member is not None and self.officiates(member, guild))
+        return officer, ([r.id for r in member.roles] if member is not None else [])
+
+    async def plain_text(self, message: discord.Message, reg, text: str, channel) -> None:
+        """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
+        An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
+        question gets the parser's own reply from the live config (one model call either way). Elsewhere (DMs and
+        other channels): the help answer first, which also says whether the message asks the bot to DO something;
+        only then, and only if the person could act here, is it parsed into a change — a plain question costs one call,
+        a change two. Outside the ask audience a person who may act on their own record is parsed directly."""
+        mode = reg.plain_mode(channel)
+        if mode == "ignore":
+            return
+        uid = message.author.id
+        officer, role_ids = await self.plain_identity(reg, message.author)
+        provider, ps = self.ctx.provider, self.policies.store(reg)
+        quiet = discord.AllowedMentions.none()
+        if mode == "act" and provider is not None:
+            async with message.channel.typing():
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
+            return
+        owner = reg.config.owner_discord_id == uid
+        may_act = provider is not None and (owner or (mode == "self" and reg.may_plain("self", uid, officer=officer, role_ids=role_ids, channel=channel, fallback="members") is None))
+        async with message.channel.typing():
+            if may_act and not reg.may_ask(uid, officer):
+                req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name)
+                if req.kind == "change" and req.ops:
+                    await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req)
+                else:
+                    await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=quiet)
+                return
+            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act)
+            if answer == HELP_ACT:
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
+                return
+        if answer is None:  # outside the ask audience: static guide only
+            await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=quiet)
+        else:
+            await message.reply(answer, allowed_mentions=quiet)
+
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
-        if not message.guild:  # a DM to the bot = a question about how it works
+        if not message.guild:  # a DM to the bot: a question, or a change to the sender's own record (plain-text policy "DMs")
             reg = next(iter(self.registries.by_discord.values()), None) if len(self.registries.by_discord) == 1 else next((r for r in self.registries.by_discord.values() if message.author.id in r.members), None)
             if reg and message.content.strip():
-                async with message.channel.typing():
-                    text = await self.help_answer(reg, message.author.id, reg.config.owner_discord_id == message.author.id, message.content)
-                if text is None:  # outside the ask audience: static guide only
-                    await message.reply(guide_intro(reg), view=guide_view())
-                else:
-                    await message.reply(text)
+                await self.plain_text(message, reg, message.content.strip(), None)
             return
         reg = self.registries.by_discord.get(message.guild.id)
-        # @mention anywhere else = a question about how the bot works (no state changes)
-        if reg and message.channel.id not in (reg.config.ops_channel_id, reg.config.analytics_channel_id) and self._addressed(message) and not self.event_for(message.channel.id):
+        # an @mention: routed by intent and by the channel's plain-text mode (the ops and analytics channels act by default;
+        # the mock loot/roster channels keep their own chat below)
+        if reg and self._addressed(message) and (message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) or not self.event_for(message.channel.id)):
             text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
             if text:
-                async with message.channel.typing():
-                    answer = await self.help_answer(reg, message.author.id, self.officiates(message.author, message.guild), text)
-                if answer is None:
-                    await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=discord.AllowedMentions.none())
-                else:
-                    await message.reply(answer, allowed_mentions=discord.AllowedMentions.none())
-            return
-        # @mention in the ops or analytics channel = plain-text configuration (comp ideals live in analytics)
-        if reg and message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) and self._addressed(message):
-            text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
-            if text:
-                member = message.author
-                owner = reg.config.owner_discord_id == member.id
-                officer = self.officiates(member, message.guild)
-                async with message.channel.typing():
-                    await handle_change(message, reg, self.policies.store(reg), self.ctx.provider, self.ops, text, owner, officer)
+                await self.plain_text(message, reg, text, message.channel.id)
             return
         ev = self.event_for(message.channel.id)
         if not ev or not self.ctx.provider:

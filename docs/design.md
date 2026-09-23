@@ -317,7 +317,7 @@ Three kinds of configuration, three surfaces, all landing as versioned files in 
 2. **Policy documents** (loot policy, standing comp instructions, persona): prose. `/policy show|edit <doc>` (modal; longer docs link to the file on GitHub), `/policy reload` after a PR. On every save the bot **compiles** the doc with Claude into rules/constraints and posts its reading for confirmation; only the confirmed compiled form goes live, committed next to the prose. NL shortcuts `/comp rule "…"` and `/loot rule "…"` append a line and run the same compile-and-confirm.
 3. **Tables** (item tiers per spec, prio notes, scoring weights): `/prio show <raid>` (embed/image), `/prio set <item> <text>`, **CSV round-trip** (`/prio export` → Sheets → `/prio import` with a diff and confirmation), `/prio draft <raid>` (Claude first pass, marked draft until reviewed), `/loot weights show|set|preview` where preview re-scores the last raid under the proposed weights. Guild overrides (`<guild>/config/*.yaml`) sit on top of the game profile defaults. A private web page (Discord OAuth, Cloudflare Tunnel) can replace the CSV loop for the tier grid later.
 
-**Plain-text configuration.** `/gm change <text>` (or @mention in the ops channel): Claude receives the config schema (every settable path with type, allowed values and required permission) plus current values, and returns typed operations. The bot renders a diff with Confirm/Cancel; apply runs through the same functions as the slash commands (identical validation and permission checks), as one commit in the officer's name. Ambiguity or unknown fields produce a question, never a guess. Members cannot trigger it. Slash commands remain for discoverability and for anything needing pickers; the long tail of settings is text.
+**Plain-text configuration.** `/gm change <text>` (or @mention in the ops channel): Claude receives the config schema (every settable path with type, allowed values and required permission) plus current values, and returns typed operations. The bot renders a diff with Confirm/Cancel; apply runs through the same functions as the slash commands (identical validation and permission checks), as one commit in the officer's name. Ambiguity or unknown fields produce a question, never a guess. Who may trigger which op, and where, is the plain-text permission policy (§5.25; members may act on their own record). Slash commands remain for discoverability and for anything needing pickers; the long tail of settings is text.
 
 `configops.ConfigOp` (2026-09-17) is deliberately a flat 13-field schema — the structured-output compiler rejects anything much larger, so new ops reuse the generic fields instead of adding their own: `op`, `path` (op=set: `timezone | signup_channel | ops_channel | applications_channel | roster_channel | registration_channel | analytics_channel | absences_channel | ask_audience | about`), `target` (what the op acts on — a raid id for `raid_set`/`raid_reset`/`comp_target*`/`comp_groups`, a run key for `team_member` and comp ops on one run, a buff id for `aura_set`/`aura_reset`, a family id for `family_set`/`aura_reset`), `field`, `value`, `member`, `character`, `rank`, `start`, `end`, `reason`, `doc`, `text`. Ops: `set`, `role_add`, `role_remove`, `rank`, `confirm`, `set_main`, `absence`, `team_member`, `policy_append`, `comp_target`, `comp_target_clear`, `comp_groups`, `raid_set`, `raid_reset`, `aura_set`, `family_set`, `aura_reset`. The old standing-roster ops (`team_set`, `team_add`, `team_remove`) and `availability` are gone with the rosters they configured; `raid_set` carries the run cadence (`slots`, `signup_lead_hours`, `nudge`, `nudge_hours_before`, `lock_hours_before`, `confirm_hours_before`, `fill_ask_hours`, `autofill`, `open_dm`, `split_policy`, weights, comp bounds `tank_min`…). `configops.apply` is synchronous and shared with the web API; `configops.apply_async(…, bot=)` adds the Discord side effects the slash commands have — the registration/analytics/absences channel kinds go through `SetupMixin.set_channel` (card posted), an `absence` is announced with `announce_absence` like `/me absent add`. The officer's request is passed inside a `<request>` block with a "Requested by" line written by code, so the text cannot impersonate anyone or rewrite the rules.
 
@@ -439,6 +439,67 @@ Members never fill in standing availability. The unit of work is a **run**: one 
 **Names, not ids.** The API grew resolvers so tools can take what officers say: `resolve_member` (Discord id, display name, character name, then a unique substring; ambiguous → 400 listing the candidates), `find_live` (run key, roster key, or raid id/name → the one live run for that raid; several → 400 listing keys). Routes that took `uid` now also take `member`. New routes for the gaps the site did not have: `GET /api/run/{key}` (one run, full `ev_json`), `GET /api/member?name=`, `GET /api/absences`, `POST /api/members/set` (rank / confirm / main), `POST /api/members/dm`, `POST /api/admin/placement` (answer a Confirm ask for someone), `POST /api/admin/test` (the `/gm test` steps), `POST /api/ops/change` (plain text → `configops.parse` + `describe`; applied only with `apply: true`). `/api/admin/config` accepts a channel *name* for `channel:<kind>`.
 
 **Safety.** Reads are free. Write tools return the server's message line so the model quotes what actually happened; preview tools (`propose_split`, `fill_seats` without `send`, `plain_change` without `apply`) exist so the model can show first and act on a yes. Tests (`tests/test_mcp.py`): the bearer path over `create_app` with a fake bot on the demo fixtures, the resolvers, the tool layer over `httpx.MockTransport` (message lines, server reasons, bot-down error) and a stdio `initialize` + `list_tools` against the real entry point.
+
+### 5.25 Plain-text permissions: members act too, by role and channel (built 2026-09-22)
+
+**Why.** Plain text was routed by *channel*: an @mention in the ops or analytics channel parsed a change (officers
+only), anything else got a read-only help answer. So the owner telling the bot "I'll be away Nov 1–3" in a normal
+channel got instructions, and a raider could not act through text anywhere. The owner asked for acting by intent,
+for members too, with who-may-do-what-where configurable on the web's Ops page.
+
+**Capability groups.** Every configops op is in exactly one group (`configops.OP_GROUP`; a test asserts the op list
+and the map agree): *members* (absence, absence_clear, dm, character, set_main, rank, confirm), *runs* (run_open,
+run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, team_member),
+*comp* (comp_target, comp_target_clear, comp_groups, pin, policy_append), *raids* (raid_set, raid_reset, aura_set,
+family_set, aura_reset), *setup* (set, role_add, role_remove), *test* (test). The seventh group, *self*, is not a
+set of ops but a scope: an op in `SELF_OPS` (absence, absence_clear, dm, character, set_main, run_answer,
+confirm_for) aimed at the requester's own record. A rank change (op `rank`, or `character` with field `rank`) is never
+self-service. Labels and one example sentence per group live in `registry.PLAIN_GROUPS`.
+
+**Self, decided in code.** `configops.bind_self(reg, op, author_id)` runs after the parse, never trusting the
+model: an empty `member` is the requester (the parser is told to leave it empty for "I/me/my"); a reference is self
+only if *every* member it could mean is the requester (`_candidates`: a mention's id, or everyone whose display
+name or any character — retired too — matches; deliberately wider than `_member`, so a collision is "someone
+else"); a self op is then pinned to `<@author>` so apply resolves exactly them; a character it names must be one
+of theirs (except `character add`, which names a new one). Everything else goes to the op's own group.
+
+**Who and where.** `GuildConfig.plain: PlainPolicy` — `groups` (group → who tokens: `everyone`, `registered`
+(an active character), `officers`, `owner`, `role:<id>`; a group left at its default is not stored; `[]` = owner
+only), `channels` (channel id → mode), `dm`, `default`. Modes: `act` (any group the person holds), `self` (own record
+only), `answer` (questions only), `ignore` (no reply to @mentions). Defaults reproduce the old behaviour plus
+self-service: self → registered; members, runs, comp, test → officers; raids, setup → owner; the ops and analytics
+channels act unless listed; DMs and other channels are `self`. The site's box and MCP are `PLAIN_WEB`, which acts.
+The owner can always do everything (only `ignore` silences the bot for them).
+
+**One check.** `Registry.may_plain(group, author_id, officer=, role_ids=, channel=, what=, fallback=)` returns None or
+the refusal line; `configops.authorize(reg, ops, author_id, …)` binds and checks every op and returns (allowed,
+refusals), so the rest of a request still applies. Who is checked before where, because it holds in every channel:
+"Only officers can change someone else's absence." / "Plain text can't change runs in #general — use #ops." A
+self op also passes if the person holds its usual group (`fallback`), so closing *self* never locks officers out of
+their own record. Every path calls it: `OibotGM.plain_text` (DMs and @mentions) → `handle_change`, `/gm change`
+(the channel it is run in), `ConfigConfirmView.apply` (re-checked for the *presser*: the requester or an officer may
+press; a stranger is refused), `POST /api/ops/change` (channel `PLAIN_WEB`; MCP `plain_change` is the owner). Once
+authorized, apply runs with owner rights (`is_owner=True`) so an owner-opened group works for others. The ops feed
+line names who applied, where, and who asked.
+
+**Routing by intent, cost.** In an `act` channel the text goes to `configops.parse` first (one call): a change becomes
+the diff, a question gets the parser's reply from the live config, as the ops channel always did. Elsewhere the help
+answer comes first (`HelpAnswer.acts`: "the message asks the bot to do something"); only when it is set and the
+person could act there (self allowed, or the owner) is the text parsed into a change. A plain question therefore
+costs one call anywhere; a change outside the act channels costs two. Outside the ask audience, a person who may
+act on their own record is parsed directly and gets the static guide for anything that isn't a change.
+
+**Surfaces.** Web: `GET /api/plain-permissions` (officers; groups with who, ops and example, the guild's channels with
+their effective mode, roles), `POST /api/admin/plain-permissions` (owner; `Registry.set_plain_policy` validates and
+commits one line); the Ops page's *Plain-text permissions* card (a who multi-select per group from the tiers and the
+server's roles, a mode per channel plus DMs and the default, the usual edit mode with one Save). MCP:
+`plain_permissions`, `set_plain_permissions`.
+
+**`confirm_for`.** An op for "Xanthe confirmed for tonight": target = a locked run, member, value yes|no. It answers
+the member's open Confirm / Can't make it ask through `RaidMixin.answer_placement_for` — `Registry.answer_placement`
+then `after_placement_answer` (a no frees the seat, logs, refreshes, fills), the same two steps the `PlaceButton`
+runs around its interaction reply; `/api/me/placement` and `/api/admin/placement` (MCP `confirm_for`) use it too.
+Describe refuses before Apply when the run isn't locked or no ask is waiting.
 
 ## 6. Architecture
 

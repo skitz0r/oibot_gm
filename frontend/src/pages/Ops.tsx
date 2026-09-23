@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Badge, Box, Card, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { api, type Ops as OpsData } from "../api";
 import { CardHeader, Eyebrow, PageTitle, fail } from "../components/Page";
+import { PlainPermissions } from "../components/PlainPermissions";
 import { usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
 
@@ -26,6 +27,7 @@ export function OpsPage() {
         <Stat label="loot feed" value={data.feed} />
         <Stat label="uptime" value={up} />
       </SimpleGrid>
+      <PlainPermissions />
       <Card>
         <CardHeader title="Recent actions" hint="newest first" />
         <Table.ScrollContainer minWidth={520}>

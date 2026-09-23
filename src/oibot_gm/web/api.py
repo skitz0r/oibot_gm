@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, raid_views as dr, raidcycle as rc, render
-from ..registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, RegistryError
+from ..registry import PLAIN_GROUPS, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 
 HERE = Path(__file__).parent
@@ -333,10 +333,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         b = parse(d, PlacementBody)
         yes = b.answer == "yes"
         try:
-            line = await asyncio.to_thread(v.reg.answer_placement, v.uid, b.roster, yes, v.name)
+            line = await bot.answer_placement_for(v.reg, v.uid, b.roster, yes, v.name)
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
-        await bot.after_placement_answer(v.reg, v.uid, b.roster, yes, line)
         return {"message": line}
 
     @app.post("/api/me/dm")
@@ -784,11 +783,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         m = resolve_member(v.reg, member_ref(d))
         rs, ev, t = live_event(v.reg, str(d.get("run") or d.get("roster") or ""))
         yes = d.get("answer") in ("yes", True, "true")
-        try:
-            line = await asyncio.to_thread(v.reg.answer_placement, m.discord_id, ev.team, yes, v.name)
+        try:  # the member's Confirm / Can't make it buttons' own verb (plain text's confirm_for uses it too)
+            line = await bot.answer_placement_for(v.reg, m.discord_id, ev.team, yes, v.name)
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
-        await bot.after_placement_answer(v.reg, m.discord_id, ev.team, yes, line)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} answered for {m.display_name}: {line}")
         return {"message": line}
 
@@ -1182,6 +1180,47 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
         return {"message": msg}
 
+    # ---- plain-text permissions (design §5.25): officers read, the owner edits
+    def plain_json(reg) -> dict:
+        from ..configops import OP_GROUP
+
+        cfg = reg.config
+        guild = bot.get_guild(cfg.discord_guild_id)
+        if guild is not None:
+            reg.cache_roles(guild)  # role ids → names for the "who" lines
+        roles = [{"id": str(r.id), "name": r.name} for r in sorted(guild.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if guild else []
+        chans = bot.guild_channels(reg)
+        return {"groups": [{"id": g, "label": label, "example": example, "who": reg.plain_who(g), "default": default, "who_text": reg.plain_who_text(g),
+                            "ops": sorted(op for op, grp in OP_GROUP.items() if grp == g)} for g, (label, default, example) in PLAIN_GROUPS.items()],
+                "channels": [{"id": c["id"], "name": c["name"], "category": c.get("category"), "mode": reg.plain_mode(c["id"]), "listed": c["id"] in cfg.plain.channels,
+                              "role": "ops" if str(cfg.ops_channel_id) == c["id"] else "analytics" if str(cfg.analytics_channel_id) == c["id"] else None} for c in chans],
+                "listed": cfg.plain.channels, "dm": cfg.plain.dm, "default": cfg.plain.default,
+                "tiers": list(PLAIN_WHO), "modes": list(PLAIN_MODES), "guild_roles": roles, "owner": False}
+
+    @app.get("/api/plain-permissions")
+    async def plain_get(request: Request):
+        v = await who(request, officer=True)
+        return {**plain_json(v.reg), "owner": v.owner}
+
+    @app.post("/api/admin/plain-permissions")
+    async def plain_set(request: Request):
+        """Owner: the whole policy — {groups: {group: [who…]}, channels: {channel id: mode}, dm, default}. Groups or
+        fields left out keep their current value."""
+        v, d = await body(request, officer=True)
+        need_owner(v)
+        guild = bot.get_guild(v.reg.config.discord_guild_id)
+        if guild is not None:
+            v.reg.cache_roles(guild)
+        cur = v.reg.config.plain
+        want = {"groups": {**{g: v.reg.plain_who(g) for g in cur.groups}, **(d.get("groups") or {})} if "groups" in d else dict(cur.groups),
+                "channels": d["channels"] if "channels" in d else dict(cur.channels), "dm": d.get("dm") or cur.dm, "default": d.get("default") or cur.default}
+        try:
+            msg = await asyncio.to_thread(v.reg.set_plain_policy, want, v.name)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e).splitlines()[0]}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        return {"message": msg, **plain_json(v.reg), "owner": True}
+
     @app.post("/api/ops/change")
     async def ops_change(request: Request):
         """Plain-text configuration (what `/gm change` and the ops-channel @mention do): Claude parses the text into
@@ -1201,6 +1240,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name)
         except Exception as e:  # noqa: BLE001 — provider/schema errors are 502s the caller can retry
             return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
+        # the same policy check as Discord: the site (and MCP, as the owner) counts as a channel where plain text acts
+        allowed, refused = configops.authorize(v.reg, req.ops, v.uid, officer=v.officer, channel=PLAIN_WEB)
+        req.ops = allowed
         ops = [op.model_dump(exclude_none=True) for op in req.ops]
         desc = []
         for op in req.ops:
@@ -1208,13 +1250,13 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 desc.append(configops.describe(v.reg, op))
             except Exception as e:  # noqa: BLE001
                 desc.append(f"{op.op}: {e}")
-        out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": []}
+        out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": [], "refused": refused}
         if not d.get("apply") or req.kind != "change" or not req.ops:
             return out
         ps = PolicyStore(bot.registries.store, v.reg.key)
         for op in req.ops:
             try:
-                line = await configops.apply_async(v.reg, op, v.name, v.owner, ps, bot=bot)
+                line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid)  # authorize() allowed it
             except (RegistryError, ValueError) as e:
                 out["applied"].append(f"{op.op}: {e}")
                 out["error"] = str(e)
