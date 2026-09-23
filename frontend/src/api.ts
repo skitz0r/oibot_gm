@@ -89,6 +89,22 @@ export interface Ops { head: string; push: boolean; llm: string; feed: string; u
 /** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
 export interface RoleRef { id: string; name: string }
 export interface Config { yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }> }
+/** The news review (design §5.25): the local jobs as the monitor sees them. Times arrive as 12-hour labels from the server. */
+export interface LaunchdState { loaded: boolean; state: string | null; pid: number | null; last_exit: string | null }
+export interface AgentJob {
+  job: string; name: string; label: string; state: "idle" | "running" | "failed"; light: "green" | "amber" | "red"; step: string | null; run_id: string | null;
+  result: string | null; started_label: string; finished_label: string; next_label: string; schedule: string; launchd: LaunchdState;
+}
+export interface AgentRunRow { id: string; job: string; started: string; started_label: string; outcome: string }
+export interface Agents { jobs: AgentJob[]; bot: LaunchdState; runs: AgentRunRow[]; owner: boolean; waiting: number; approved: number }
+export interface AgentStep { kind: "runner" | "start" | "text" | "tool" | "result"; title: string; detail?: string | null; result?: string | null; ok: boolean | null; level?: string; tool?: string }
+export interface AgentRun { id: string; live: boolean; outcome: string; steps: AgentStep[] }
+export interface NewsItem { url: string; title: string; description: string; posted_at: string; posted_label: string; ingested_label: string; matched: string[] }
+export interface Proposal {
+  id: string; title: string; news: string[]; affects: string; kind: "guild_setting" | "profile" | "needs_developer"; change: string; edit: Record<string, unknown>;
+  evidence: string; confidence: string; state: string; created_label: string; decided_by: string | null; decided_label: string; commit: string | null; note: string | null;
+  history: { state: string; by: string; at_label: string; note: string | null }[];
+}
 export interface Me {
   display_name: string; registered: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
   absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[];

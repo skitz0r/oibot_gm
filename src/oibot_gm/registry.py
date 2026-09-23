@@ -136,6 +136,8 @@ class GuildConfig(BaseModel):
     analytics_message_ids: dict[str, int] = Field(default_factory=dict)  # roster key -> card message id
     absences_channel_id: Optional[int] = None  # public: 'I'll be away' card + one line per absence (reason stays officer-only)
     absences_message_id: Optional[int] = None
+    news_channel_id: Optional[int] = None  # officer/read-only: a webhook posts game news here; the bot keeps the relevant items (news.py)
+    news_keywords: list[str] = Field(default_factory=list)  # extra words that make a news item relevant (over the profile's news.yaml)
     timezone: str = "America/Los_Angeles"  # guild time: every schedule, window and displayed clock uses it
     auto_propose_hour: int = 12  # guild-local hour when the planner runs for raids with auto-propose on
     slots: list[str] = Field(default_factory=list)  # legacy candidate-slot poll (unused since the signup-driven cycle)

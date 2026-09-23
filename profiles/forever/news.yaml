@@ -1,0 +1,11 @@
+# News filter for WoW: Forever (design.md §5.25). The bot reads ONLY the text of the #news webhook embeds
+# (title + description) — never the linked article. An item is kept when one of these version names appears,
+# or one of the guild's raid names, or a word from the guild's own extra list (Config page: news keywords).
+# Buff and class names are recorded as matched keywords but don't make an item relevant on their own: every
+# other version's news mentions them too.
+version_terms:
+  - "WoW: Forever"
+  - "WoW Forever"
+  - "World of Warcraft: Forever"
+  - "Forever realms"
+  - "Classic Forever"

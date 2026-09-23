@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { REFRESH_EVENT } from "./hooks/usePoll";
 import { AppShell, Box, Burger, Group, NavLink, Stack, Text, Title } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh } from "@tabler/icons-react";
+import { IconChartBar, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, type Meta } from "./api";
 import { MePage } from "./pages/Me";
@@ -12,6 +12,7 @@ import { MembersPage } from "./pages/Members";
 import { OpsPage } from "./pages/Ops";
 import { ConfigPage } from "./pages/Config";
 import { AurasPage } from "./pages/Auras";
+import { AgentsPage } from "./pages/Agents";
 
 const NAV = [{ to: "/me", label: "Me", icon: IconUser }];
 const OFFICER = [
@@ -20,6 +21,7 @@ const OFFICER = [
   { to: "/members", label: "Members", icon: IconUsers },
   { to: "/auras", label: "Auras", icon: IconSparkles },
   { to: "/ops", label: "Ops", icon: IconChartBar },
+  { to: "/agents", label: "Agents", icon: IconRobot },
   { to: "/config", label: "Config", icon: IconListDetails },
 ];
 
@@ -70,6 +72,7 @@ export default function App() {
             <Route path="/admin" element={<Navigate to="/members" replace />} />
             <Route path="/auras" element={officer(<AurasPage />)} />
             <Route path="/ops" element={officer(<OpsPage />)} />
+            <Route path="/agents" element={officer(<AgentsPage />)} />
             <Route path="/config" element={officer(<ConfigPage />)} />
             <Route path="*" element={<Navigate to="/me" replace />} />
           </Routes>

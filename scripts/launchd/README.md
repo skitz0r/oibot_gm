@@ -34,6 +34,11 @@ launchctl bootout gui/$(id -u)/gg.earlyandoften.oibot
 Logs: `out/oibot.log` (rotating, the bot's own) and `out/launchd.log` (stdout/stderr of the process).
 Do not also start the bot with `nohup`: two processes would fight over the Discord gateway and the web port.
 
+## The news review, apply and menu-bar agents
+`gg.earlyandoften.oibot.news-review.plist` (daily 9:00 AM), `gg.earlyandoften.oibot.apply.plist` (every 15 minutes) and
+`gg.earlyandoften.oibot.menubar.plist` (the GM status item) sit next to this one; they are installed and removed
+with `scripts/agents/install.sh` / `uninstall.sh`. How they work and how to read the monitor: `scripts/agents/README.md`.
+
 ## Why not Docker / a LaunchDaemon
 Docker Desktop on macOS only starts after login too, and adds a VM between the bot and the things it needs on
 the host (data repo + git credentials, `.env`, the tunnel to 127.0.0.1:8788, the MCP server and local agents).

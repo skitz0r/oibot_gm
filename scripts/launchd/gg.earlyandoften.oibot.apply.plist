@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- oibot_GM apply poller (scripts/agents/README.md): every 15 minutes, one API call; acts only on an APPROVED news proposal.
+         Guild settings are applied by the bot; profile edits: Claude edits the YAML, the script checks, commits, pushes, restarts the bot. -->
+    <key>Label</key>
+    <string>gg.earlyandoften.oibot.apply</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>python</string>
+        <string>scripts/agents/apply.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jonathanlin/dev/oibot_gm</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/jonathanlin/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <!-- "pr" = profile edits go to a branch + pull request instead of main (no restart) -->
+        <key>OIBOT_APPLY_MODE</key>
+        <string>main</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/agents/apply.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jonathanlin/dev/oibot_gm/out/agents/apply.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

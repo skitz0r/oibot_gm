@@ -35,6 +35,7 @@ from .discord_help import GuideSelect, HelpMixin, guide_intro, guide_view, regis
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
+from .discord_news import NewsMixin, ProposalButton
 from .discord_raid import RaidContext, RaidMixin
 from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton
 from .raid_commands import register_raid_commands
@@ -684,7 +685,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, discord.Client):
+class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
     ico = staticmethod(ico)
 
     async def post_application(self, reg, a) -> str:
@@ -740,7 +741,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             walk(c)
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
-        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, GuideSelect, AbsenceButton)
+        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, GuideSelect, AbsenceButton, ProposalButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -1035,6 +1036,8 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         return isinstance(ref, discord.Message) and ref.author.id == self.user.id
 
     async def on_message(self, message: discord.Message):
+        if await self.news_message(message):  # the news webhook (a bot) is read before the bot filter below
+            return
         if message.author.bot:
             return
         if not message.guild:  # a DM to the bot = a question about how it works
