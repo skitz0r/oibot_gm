@@ -1,4 +1,4 @@
-"""The local jobs and their monitor (design.md §5.25): status files, transcripts and rotation, the stream-json →
+"""The local jobs and their monitor (design.md §5.26): status files, transcripts and rotation, the stream-json →
 readable steps parser (on a recorded sample built here), launchctl parsing, the claude command lines and their
 tool restrictions (--dry-run), the menu-bar snapshot, the API routes and their permissions, and the MCP tools'
 request shapes. No network, no real claude, no launchctl."""

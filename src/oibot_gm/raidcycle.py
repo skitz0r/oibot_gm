@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import DEFAULT_RAID_SIZE, RAID_DEFAULTS, Member, Registry, RegisteredCharacter, now
+from .registry import DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, RAID_DEFAULTS, Member, Registry, RegisteredCharacter, now
 from .roster import explain, solver
 from .store import GitStore
 
@@ -94,6 +94,7 @@ class RaidEvent(BaseModel):
     key: str  # <run roster key>-<YYYY-MM-DD>
     team: str  # roster key; for cadence runs an ephemeral roster named like the run (bd-1209-1930)
     instance: Optional[str] = None
+    schedule: Optional[str] = None  # the schedule id it was opened from (None: the raid's own run times, or a one-off)
     starts_at: str  # ISO with offset
     state: Literal["open", "locked", "done", "cancelled"] = "open"
     signups: dict[str, Signup] = Field(default_factory=dict)  # discord_id -> signup
@@ -213,16 +214,46 @@ def abbr(instance: str) -> str:
     return "".join(w[0] for w in instance.split("_"))[:4]
 
 
-def run_key(instance: str, start: datetime) -> str:
-    return f"{abbr(instance)}-{start.strftime('%m%d-%H%M')}"
+def run_key(instance: str, start: datetime, schedule: str | None = None) -> str:
+    """The run's roster key: 'bd-1209-1930'. A run from a schedule other than the raid's own run times carries the
+    schedule id ('bd-1209-1930-alt'), so two schedules starting the same minute never share a run."""
+    base = f"{abbr(instance)}-{start.strftime('%m%d-%H%M')}"
+    return base if schedule in (None, "", DEFAULT_SCHEDULE) else f"{base}-{schedule}"
+
+
+def event_key(instance: str, start: datetime, schedule: str | None = None) -> str:
+    """The key open_event gives the run's sheet: roster key + the start's date."""
+    return f"{run_key(instance, start, schedule)}-{start.date().isoformat()}"
+
+
+def schedule_kw(schedule: str | None) -> dict:
+    """`schedule=` for open_run_and_post, only when the run comes from a schedule other than the raid's own run times."""
+    return {"schedule": schedule} if schedule not in (None, "", DEFAULT_SCHEDULE) else {}
 
 
 def slot_starts(reg: Registry, instance: str, now: datetime, horizon_hours: float) -> list[tuple[str, datetime]]:
-    """(slot, start) for every occurrence of the raid's slots within `horizon_hours` of now (and never before first_open)."""
+    """(slot, start) for every occurrence of the raid's own slots (the `default` schedule) within `horizon_hours` of
+    now (and never before first_open)."""
     rd = reg.raid_def(instance)
-    fo = reg.first_open(instance)
+    return _weekly_starts(reg, rd, rd.get("slots") or [], now, horizon_hours)
+
+
+def first_open_of(reg: Registry, rd: dict) -> datetime | None:
+    """An effective raid dict's first_open as an aware datetime (Registry.first_open, for a draft that isn't saved)."""
+    raw = rd.get("first_open")
+    if not raw:
+        return None
+    try:
+        t = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=reg.tz)
+
+
+def _weekly_starts(reg: Registry, rd: dict, slots, now: datetime, horizon_hours: float) -> list[tuple[str, datetime]]:
+    fo = first_open_of(reg, rd)
     out = []
-    for slot in rd.get("slots") or []:
+    for slot in slots:
         try:
             t = next_raid_time(slot, reg.config.timezone, after=now - timedelta(minutes=1))
         except ValueError:
@@ -232,6 +263,70 @@ def slot_starts(reg: Registry, instance: str, now: datetime, horizon_hours: floa
                 out.append((slot, t))
             t += timedelta(days=7)
     return sorted(out, key=lambda x: x[1])
+
+
+def _lockout_starts(reg: Registry, rd: dict, sched: dict, now: datetime, horizon_hours: float) -> list[datetime]:
+    """Day N (1 = the reset's calendar day) of every lockout window at the schedule's time, windows counted from
+    first_open every lockout_days calendar days — so a 3- or 5-day reset is followed exactly. Wall-clock times are
+    resolved DST-safely (a time the clocks skip moves past the gap; one that happens twice takes the first)."""
+    from datetime import time as _time
+
+    from .wizard import resolve_local
+
+    fo = first_open_of(reg, rd)
+    if fo is None or not sched.get("days") or not sched.get("time"):
+        return []
+    z = reg.tz
+    lockout = int(rd.get("lockout_days") or 7)
+    h, m = (int(x) for x in str(sched["time"]).split(":"))
+    d0 = fo.astimezone(z).date()
+    lo, hi = now - timedelta(minutes=1), now + timedelta(hours=horizon_hours)
+    k = max(0, (lo.astimezone(z).date() - d0).days // lockout - 1)
+    out = []
+    while True:
+        wstart = d0 + timedelta(days=k * lockout)
+        if datetime.combine(wstart, _time(0, 0), tzinfo=z) > hi:
+            break
+        for n in sched["days"]:
+            t, _note = resolve_local(datetime.combine(wstart + timedelta(days=int(n) - 1), _time(h, m)), z)
+            if lo < t <= hi and t >= fo:
+                out.append(t)
+        k += 1
+    return sorted(out)
+
+
+def schedule_starts(reg: Registry, instance: str, sched: dict, now: datetime, horizon_hours: float, rd: dict | None = None) -> list[datetime]:
+    """One schedule's run starts within `horizon_hours` of now. A pickup template never has any: it opens on demand.
+    `rd`: an effective raid dict to read first_open / lockout_days from (a wizard's unsaved draft); default the stored raid."""
+    rd = rd if rd is not None else reg.raid_def(instance)
+    if sched.get("kind") == "lockout":
+        return _lockout_starts(reg, rd, sched, now, horizon_hours)
+    if sched.get("kind") == "pickup":
+        return []
+    return [t for _s, t in _weekly_starts(reg, rd, sched.get("slots") or [], now, horizon_hours)]
+
+
+def upcoming(reg: Registry, instance: str, now: datetime, horizon_hours: float | None = None, *, lead: bool = False) -> list[tuple[dict, datetime]]:
+    """(schedule, start) for every ACTIVE schedule's runs, soonest first. `lead=True`: each schedule looks only as far
+    ahead as its own signup lead (what the scheduler opens now); else `horizon_hours` for all."""
+    out = []
+    for s in reg.schedules(instance):
+        if not s.get("active", True) or s["kind"] == "pickup":
+            continue
+        h = float(reg.schedule_def(instance, s["id"])["signup_lead_hours"]) if lead else float(horizon_hours or 0)
+        out += [(s, t) for t in schedule_starts(reg, instance, s, now, h)]
+    return sorted(out, key=lambda x: (x[1], x[0]["id"] != DEFAULT_SCHEDULE))
+
+
+def next_runs_of(reg: Registry, instance: str, sched: dict, n: int = 3, now: datetime | None = None, rd: dict | None = None) -> list[datetime]:
+    """A schedule's next `n` starts (active or not), for "the next three runs" on every surface; never before the raid
+    first opens (before that: its first runs, not an empty list)."""
+    rd = rd if rd is not None else reg.raid_def(instance)
+    now = now or reg.now_local()
+    fo = first_open_of(reg, rd)
+    base = max(now, fo) if fo else now
+    horizon = 24 * max(OPEN_HORIZON_DAYS, 8 * int(rd.get("lockout_days") or 7))
+    return schedule_starts(reg, instance, sched, base, horizon, rd)[:n]
 
 
 # a run opened closer than its cadence assumes keeps this much of the remaining time for each step
@@ -247,14 +342,16 @@ def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: fl
     return (min(nudge_h, available_h * FIT_NUDGE), min(lock_h, available_h * FIT_LOCK), min(confirm_h, available_h * FIT_CONFIRM))
 
 
-def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None) -> dict:
-    """The ephemeral roster that carries one run's settings (size, cutoffs from the raid's cadence); created once.
+def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> dict:
+    """The ephemeral roster that carries one run's settings (size, cutoffs from its schedule's cadence, how many rosters
+    it expects); created once. `schedule` = the schedule id it comes from (None: the raid's own cadence).
     `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test runs compress it to minutes)."""
-    key = run_key(instance, start)
+    key = run_key(instance, start, schedule)
     t = reg.config.roster(key)
     if t:
         return t
-    rd = reg.raid_def(instance)
+    rd = reg.schedule_def(instance, schedule)
+    sched = rd["schedule"]
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
     c = cutoffs or {}
     if not c:  # test runs pass their own compressed cutoffs and mean them
@@ -264,6 +361,11 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     t = {"key": key, "name": f"{rd.get('name', instance)} {reg.local12(start)}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
          "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
          "reminders": "dm" if c.get("nudge", rd["nudge"]) else "none", "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True}
+    if sched["id"] != DEFAULT_SCHEDULE or sched.get("own") or int(sched.get("rosters") or 1) > 1:
+        # the run carries its schedule's settings (the raid's are read live, as before, for a plain run)
+        t.update({"schedule_id": sched["id"], "rosters": int(sched.get("rosters") or 1), "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"})
+        if sched["id"] != DEFAULT_SCHEDULE:
+            t["name"] = f"{rd.get('name', instance)} · {sched.get('name') or sched['id']} {reg.local12(start)}"
     if cutoffs:
         t["test"] = True
         t["test_by"] = c.get("test_by")
@@ -272,8 +374,13 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     return t
 
 
-def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None) -> "RaidEvent":
-    return open_event(reg, rs, ensure_run(reg, instance, start, by, cutoffs), start)
+def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> "RaidEvent":
+    return open_event(reg, rs, ensure_run(reg, instance, start, by, cutoffs, schedule), start)
+
+
+def run_rosters(reg: Registry, ev: "RaidEvent") -> int:
+    """How many rosters the run expects up front (its schedule's `rosters`, 1 for a plain run)."""
+    return max(1, int((reg.config.team(ev.team) or {}).get("rosters") or 1))
 
 
 # ---------------------------------------------------------------- events on the store
@@ -314,7 +421,7 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
     key = f"{team['key']}-{starts_at.date().isoformat()}"
     if key in rs.events:
         return rs.events[key]
-    ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), starts_at=starts_at.isoformat())
+    ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=team.get("schedule_id"), starts_at=starts_at.isoformat())
     prefill(reg, ev, team)
     ev.log.append(f"opened; {len(ev.signups)} pre-filled from absences")
     rs.save(ev, "opened")
@@ -424,8 +531,8 @@ def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = CONFLICT_WINDO
 
 
 def needs(reg: Registry, ev: RaidEvent, team: dict) -> dict:
-    """What the sheet is short: headcount and per-role minimums. Before lock: Join signups vs the raid size.
-    After lock: freed seats across the locked roster(s)."""
+    """What the sheet is short: headcount and per-role minimums. Before lock: Join signups vs the raid size times the
+    rosters the run expects. After lock: freed seats across the locked roster(s)."""
     size = run_size(reg, ev)
     if ev.state != "open" and ev.all_rosters:
         bounds = reg.role_bounds(ev.instance, size)
@@ -438,9 +545,9 @@ def needs(reg: Registry, ev: RaidEvent, team: dict) -> dict:
                 role_short[role] = bounds[role]["min"] * n - have
         return {"headcount": max(0, size * n - len(seated)), "roles": role_short, "size": size}
     h = health_data(reg, ev, team)
-    n_in, size, _legacy, _subs = h["headcount"]
+    n_in, seats, _legacy, _subs = h["headcount"]
     role_short = {r["role"]: r["need"] - r["have"] for r in h["roles"] if r["need"] and r["have"] < r["need"]}
-    return {"headcount": max(0, size - n_in), "roles": role_short, "size": size}
+    return {"headcount": max(0, seats - n_in), "roles": role_short, "size": size}
 
 
 def _rank_key(reg: Registry, m: Member) -> tuple:
@@ -451,14 +558,14 @@ def _rank_key(reg: Registry, m: Member) -> tuple:
 def ask_deadline(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> datetime:
     """When an unanswered fill ask counts as no: `fill_ask_hours` after it was sent, never past the run start."""
     at = at or datetime.now(ev.start.tzinfo)
-    hours = float(reg.raid_def(ev.instance).get("fill_ask_hours") or FILL_ASK_HOURS_DEFAULT)
+    hours = float((reg.config.team(ev.team) or {}).get("fill_ask_hours") or reg.raid_def(ev.instance).get("fill_ask_hours") or FILL_ASK_HOURS_DEFAULT)
     return min(at + timedelta(hours=hours), ev.start)
 
 
 def would_short(reg: Registry, ev: RaidEvent, team: dict, role: str) -> bool:
     """Would losing one `role` player (a Join before lock, a seated player after) drop that role under its minimum?"""
     size = run_size(reg, ev)
-    n = len(ev.all_rosters) or 1
+    n = len(ev.all_rosters) or run_rosters(reg, ev)
     bounds = reg.role_bounds(ev.instance, size)
     players = ev.seated() if ev.state != "open" and ev.all_rosters else ev.by_status("in")
     key = "dps" if role in ("melee", "ranged") else role
@@ -647,13 +754,16 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
 # ---------------------------------------------------------------- health
 
 def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
-    """Structured health check: headcount, per-role tiles, per-buff providers, non-responders."""
+    """Structured health check: headcount, per-role tiles, per-buff providers, non-responders. A run that expects N
+    rosters (its schedule's `rosters`) is measured against N × the seats and N × each role minimum."""
     profile = reg.profile
     ins, subs = ev.by_status("in"), ev.by_status("sub")
-    size = run_size(reg, ev)
-    bounds = reg.role_bounds(ev.instance, size)
+    n_rosters = run_rosters(reg, ev)
+    per = run_size(reg, ev)
+    size = per * n_rosters
+    bounds = reg.role_bounds(ev.instance, per)
     counts = {r: sum(1 for s in ins if s.role == r) for r in ROLES}
-    need = {"tank": bounds["tank"]["min"], "healer": bounds["healer"]["min"], "melee": 0, "ranged": 0}
+    need = {"tank": bounds["tank"]["min"] * n_rosters, "healer": bounds["healer"]["min"] * n_rosters, "melee": 0, "ranged": 0}
     roles = []
     for r in ROLES:
         have, n = counts[r], need[r]
@@ -682,7 +792,7 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
     unresp = [m.display_name for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups]
     hc_level = "green" if len(ins) >= size else ("amber" if len(ins) + len(subs) >= size else "red")
     # headcount is a 4-tuple (in, size, 0 [was tentative], sub): the cards and the pool data share the shape
-    return {"headcount": (len(ins), size, 0, len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp}
+    return {"headcount": (len(ins), size, 0, len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp, "rosters": n_rosters}
 
 
 def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
@@ -756,10 +866,11 @@ def _capable(players: list[Player], role: str, reg: Registry) -> int:
     return n
 
 
-def how_many_rosters(reg: Registry, players: list[Player], size: int, rb: dict) -> int:
-    """How many full runs the Join answers support: bodies, and tank/healer minimums per run."""
+def how_many_rosters(reg: Registry, players: list[Player], size: int, rb: dict, want: int = 1) -> int:
+    """How many runs to build: as many full runs as the Join answers support (bodies), or the `want` rosters the
+    schedule declares up front when that is more — either way never more than the tank/healer minimums per run allow."""
     signed = [p for p in players if p.status == "signed"]
-    n = min(MAX_ROSTERS_PER_SLOT, len(signed) // size)
+    n = min(MAX_ROSTERS_PER_SLOT, max(len(signed) // size, want))
     for role in ("tank", "healer"):
         if rb[role]["min"]:
             n = min(n, _capable(signed, role, reg) // rb[role]["min"])
@@ -886,8 +997,8 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     k = groups_per_roster(reg, size)
     layout = [[n for n in g if n in names] for g in (ev.layout or [])]
     placed = {n: gi for gi, g in enumerate(layout) for n in g}
-    n_rosters = max(how_many_rosters(reg, players, size, rb), -(-len(layout) // k) if any(layout) else 1)
-    strategy = strategy or ev.split_strategy or rd.get("split_policy") or "balanced"
+    n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-len(layout) // k) if any(layout) else 1)
+    strategy = strategy or ev.split_strategy or (reg.config.team(ev.team) or {}).get("split_policy") or rd.get("split_policy") or "balanced"
     bonus = seat_bonus(reg, rs, ev, players)
     roster_bonus = None
     if strategy == "rotation":

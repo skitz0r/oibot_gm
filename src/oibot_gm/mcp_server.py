@@ -127,7 +127,8 @@ def guild_overview() -> dict:
         "channels": {k: v.get("name") for k, v in cfg.get("channels", {}).items()},
         "policy_docs": {k: {"compiled": v.get("compiled"), "summary": v.get("summary")} for k, v in cfg.get("docs", {}).items()},
         "raids": [{"id": r["id"], "name": r["name"], "size": r["size"], "slots": r["slots"], "lockout_days": r["lockout_days"], "signup_lead_hours": r["signup_lead_hours"],
-                   "lock_hours_before": r["lock_hours_before"], "confirm_hours_before": r["confirm_hours_before"], "split_policy": r["split_policy"], "opened": r["opened"], "live": r["live"]} for r in raids.get("raids", [])],
+                   "lock_hours_before": r["lock_hours_before"], "confirm_hours_before": r["confirm_hours_before"], "split_policy": r["split_policy"], "opened": r["opened"], "live": r["live"],
+                   "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "next": s.get("next", [])} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
         "live_runs": live,
         "test_bench": cfg.get("test_bench"),
     }
@@ -156,7 +157,8 @@ def get_run(run: str) -> dict:
 @mcp.tool()
 def list_raids() -> dict:
     """Every raid of the game profile with the guild's effective cadence: size, slots, lockout, signup lead, nudge/lock/
-    confirm hours, fill-ask hours, weights, split policy, comp bounds, which fields the guild overrides, live-run count."""
+    confirm hours, fill-ask hours, weights, split policy, comp bounds, which fields the guild overrides, live-run count,
+    and its schedules (id, name, kind, a plain-words label, own cadence overrides vs the effective values, the next runs)."""
     return api().get("/api/raids")
 
 
@@ -217,11 +219,13 @@ def ops_log(limit: int = 40) -> dict:
 # ---------------------------------------------------------------- writes: runs
 
 @mcp.tool()
-def open_run(raid: str, when: str | None = None) -> str:
-    """Open a signup sheet now for `raid` (id or name): its next scheduled slot, or a one-off start `when` as
-    'YYYY-MM-DD HH:MM' in guild time. Posts the sheet in the signup channel (and DMs members if the raid says so)."""
+def open_run(raid: str, when: str | None = None, schedule: str | None = None) -> str:
+    """Open a signup sheet now for `raid` (id or name): its next scheduled run, or a one-off start `when` as
+    'YYYY-MM-DD HH:MM' in guild time. `schedule` (an id from get_raid's schedules) picks that schedule's next run, or
+    with `when` its settings — a pickup template always needs `when`. Posts the sheet in the signup channel (and DMs
+    members if the raid says so)."""
     rid = get_raid(raid)["id"]
-    return msg(api().post(f"/api/raid/{rid}/open", {"when": when or ""}))
+    return msg(api().post(f"/api/raid/{rid}/open", {"when": when or "", "schedule": schedule or ""}))
 
 
 @mcp.tool()
@@ -330,6 +334,27 @@ def raid_set(raid: str, field: str, value: str) -> str:
     else:
         raise ToolError(f"unknown raid field {field}; one of " + ", ".join(RAID_FIELDS) + ", weight_<key>, <role>_min/<role>_max")
     return msg(api().post("/api/admin/raid", body))
+
+
+@mcp.tool()
+def schedule_set(raid: str, schedule: str, field: str, value: Any) -> str:
+    """Change one setting of a raid's schedule (owner) — or create the schedule with its first setting. Schedules are
+    listed per raid by list_raids / get_raid (`schedules`: id, name, kind, plain-words label, next runs); `default` is
+    the raid's own weekly slots. field = kind (weekly|lockout|pickup) | name | active (true|false) | rosters (1-4) |
+    slots ('Sat 20:00, Sun 20:00') | days ('1, 3' = days of each lockout, 1 = reset day) | time ('20:00') |
+    signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge |
+    autofill | open_dm | split_policy. A cadence field set to 'inherit' goes back to the raid's value. A new schedule
+    starts with its kind, slots, or days/time."""
+    rid = get_raid(raid)["id"]
+    return msg(api().post("/api/admin/raid/schedule", {"instance": rid, "id": schedule, "fields": {field.strip(): value}}))
+
+
+@mcp.tool()
+def schedule_remove(raid: str, schedule: str) -> str:
+    """Remove a raid's schedule (owner). Removing `default` clears the raid's weekly slots; runs already open keep
+    their times."""
+    rid = get_raid(raid)["id"]
+    return msg(api().post("/api/admin/raid/schedule/remove", {"instance": rid, "id": schedule}))
 
 
 @mcp.tool()

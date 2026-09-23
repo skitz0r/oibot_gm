@@ -104,6 +104,23 @@ A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. Tu
 several. One **run** = one slot occurrence = one sheet. A run is **open**, then **locked**, then **done**
 (or **cancelled**). Members never keep standing availability; they answer each sheet.
 
+**Schedules** say *when* a raid runs; the raid itself keeps what it is (size, comp, lockout, weights) and its
+cadence as the defaults. A raid's own run times are its first schedule (*Regular nights*); it can have more, each
+with a name, and each can set its own cadence (when its sheet opens, nudges, locks, confirms, how long fill asks
+wait, autofill, DM on open, split policy) — anything it doesn't set follows the raid's. Three kinds:
+- **Weekly nights** — run times like the raid's own ("Saturdays 8:00 PM"). A Tuesday main night and a Saturday alt
+  run of the same raid, each with its own lock time.
+- **Days of each lockout** — "Day 1 of each 3-day lockout, 8:00 PM": day 1 is the day the lockout resets, counted
+  from the raid's first opening every `lockout_days`, so a 3- or 5-day reset is followed exactly (and daylight saving
+  never moves the wall-clock time; a time the clocks skip that night moves past the gap).
+- **Pickup template** — never opens by itself. `/raid open` offers *Open Pickup — pick a time*, the Rosters page has it
+  in the schedule picker beside the date and time; the run gets the template's settings.
+Each schedule also says how many **rosters** a run expects (1–4). With 2, the sheet advertises 2 × the raid's size
+(20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock aims
+for two — as far as the tanks and healers who joined allow (it never builds a roster its minimums can't fill). A
+schedule can be **paused** (nothing opens from it). Runs from a schedule other than the raid's own run times carry
+its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same minute are two runs.
+
 Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
 
 1. **Sheet opens** — `signup_lead_hours` [120 h] before the slot the bot posts the sheet in the signup
@@ -113,8 +130,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. With `open_dm` on [off] every main is also
    DMed when the sheet opens. Officers can open a sheet early from the
    Rosters page: pick a date and time with the picker beside the raid's name, or press the button with nothing picked
-   to take the raid's next scheduled slot. `/raid open` does the same in Discord: pick the raid, then press *Open the next slot*, pick another upcoming
-   run, or choose *Another day and time…* (day, hour and minutes from lists; nothing typed). The confirm screen shows
+   to take the raid's next scheduled slot (with several schedules, a picker beside it chooses which schedule, or a
+   pickup template, which needs the date and time). `/raid open` does the same in Discord: pick the raid, then press *Open the next slot*, pick another upcoming
+   run (each labelled with its schedule's name when there are several), press *Open <template> — pick a time* for a
+   pickup template, or choose *Another day and time…* (day, hour and minutes from lists; nothing typed; the raid's own
+   cadence). The confirm screen shows
    the time in guild time and in your own. A raid with no run times offers *Set this raid's run times →*. A run opened closer
    than its cadence assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
    hours instead of inheriting a lock time that has already passed.
@@ -290,11 +310,20 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
 now and the next run become before saving) — or all of these on
 the site's **Config** page (channel pickers per function, officer roles, timezone, who may ask the bot,
 the about text; changing a channel posts its card the same way the command does) — and per raid
-`/gm config raid`: pick the raid, then a section — Run times (nights + hour + minutes), Signup cadence (Standard /
+`/gm config raid`: pick the raid, then a section — Schedules, Signup cadence (Standard /
 Short notice / Same week, or Custom… hour by hour), Group make-up, Selection weights, Lockout & length, First lockout
 opens, Behaviour (nudge, fill seats automatically, DM on open, split policy, fill-ask expiry), Notes, Reset. Changes
-collect in a draft; Save shows them as sentences with the next three runs and writes them as one change. Nothing
-opens until a raid has run times. The same settings are on the Raids page and in plain text (`raid_set`). Comp
+collect in a draft; Save shows them as sentences with the next three runs (per schedule) and writes them as one change. Nothing
+opens until a raid has run times. The same settings are on the Raids page and in plain text (`raid_set`).
+**Schedules** in `/gm config raid`: a raid with only its own run times opens straight on them (✕ a time to drop it,
+*Add a run time* = nights + hour + minutes, *Add another schedule*); with several, pick one from the list. *Add a
+schedule* asks the kind (weekly nights, days of each lockout, pickup template) and then one form (name, nights or
+lockout days, hour, minutes). *Change this schedule* renames it, sets its rosters per run (1–4), its cadence (each
+step "Same as the raid" or its own hours), its behaviour (each switch "the raid's", on or off), pauses/resumes it or
+removes it. On the site: the Raids page's **Schedules** block under each raid lists them in words with the next three
+runs; the owner adds, edits (weekday + 12-hour time pickers, lockout-day picks; cadence fields left empty follow the
+raid) and removes them. In plain text: `schedule_set` (e.g. "add an alt run on Saturdays at 8 to Barrow Deeps",
+"Barrow Deeps alt run locks 12 hours before", "make the alt run two rosters") and `schedule_remove`. Comp
 bounds: *Group make-up* in `/gm config raid` ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
 plain text (same for healers and dps).
 
@@ -433,7 +462,8 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `list_raids` · `get_raid` | effective raid settings and overrides |
 | `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record |
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status and the ops feed |
-| `open_run` | open a sheet now (next slot, or a date and time) |
+| `open_run` | open a sheet now (next slot, or a date and time; `schedule` = that schedule's next run, or a pickup template at `when`) |
+| `schedule_set` · `schedule_remove` | one setting of a raid's schedule (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` | Join / Bench / No thanks for someone (character swap) · pin in/out for the lock · answer a Confirm ask for them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups |
 | `lock_run` · `fill_seats` · `cancel_run` | lock now · preview the fill asks, `send=true` sends them · cancel with a reason |
@@ -488,7 +518,8 @@ guide** instead — a menu with *About the guild*, *Raid schedule*, *How to regi
 *How to apply*, *Who to contact* — built from the guild's settings, no AI involved.
 
 What `/ask` knows is what the site shows, in one bounded snapshot taken when you ask: the guild's channels,
-officer roles, owner and ask audience; every raid's cadence (slots, when sheets open, nudge, lock and
+officer roles, owner and ask audience; every raid's schedules (in words, with their own settings and next runs —
+*Raid schedule* in the static guide lists each schedule's next three runs too) and cadence (slots, when sheets open, nudge, lock and
 confirmation times, `fill_ask_hours`, `autofill`, `open_dm`, split policy, weights, comp bounds, comp targets
 and group layout, which settings are overridden); the guild's aura and family overrides; the test bench (puppets,
 test runs); and every live run as the Raids page has it — state, nudge / lock / confirmation-expiry times, split

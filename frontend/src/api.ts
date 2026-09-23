@@ -71,15 +71,26 @@ export interface Sheet {
 }
 export interface RaidRuns {
   id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null;
-  open: Sheet[]; locked: Sheet[]; past: Sheet[]; upcoming: { slot: string; start: string; opens: string }[];
+  open: Sheet[]; locked: Sheet[]; past: Sheet[]; upcoming: { slot: string; start: string; opens: string; schedule?: string; schedule_name?: string }[];
+  /** every schedule of the raid, in words (`label`), for the open-a-run control; pickup templates open only on demand */
+  schedules?: { id: string; name: string; kind: string; label: string; active: boolean }[];
+}
+/** One schedule of a raid (mirrors web/api.py schedule_json). Machine forms (`slots`, `days`, `time`) are for the editors;
+ *  everything a person reads comes as words from the server (`label`, `slot_labels`, `time_label`, `next`). */
+export interface Schedule {
+  id: string; name: string; kind: "weekly" | "lockout" | "pickup"; active: boolean; rosters: number; seats: number; is_default: boolean;
+  slots: string[]; slot_labels: string[]; days: number[]; time: string; time_label: string; label: string;
+  /** cadence the schedule sets itself; anything missing inherits the raid's (`effective` = what applies) */
+  own: Record<string, number | boolean | string>; effective: Record<string, number | boolean | string>; next: string[];
 }
 export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; tz: string }
 export interface RaidRule {
   id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; comp: Record<string, { min?: number; max?: number }>;
   slots: string[]; slot_labels?: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number; autofill: boolean; open_dm: boolean;
   overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; live: number;
+  schedules: Schedule[];
 }
-export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[] }
+export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[]; schedule_kinds: string[]; schedule_cadence: string[]; max_rosters: number }
 export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; reason?: SplitReason | null; reason_text?: string | null }
 export interface FillAskRow { display_name: string; kind: string; character: string; spec: string; cls: string | null; role: string; reason: string; pair: number | null }
 /** What Fill seats would send: the shortfall, who is still being waited on, the next batch of asks. */
@@ -92,7 +103,7 @@ export interface Ops { head: string; push: boolean; llm: string; feed: string; u
 /** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
 export interface RoleRef { id: string; name: string }
 export interface Config { yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }> }
-/** The news review (design §5.25): the local jobs as the monitor sees them. Times arrive as 12-hour labels from the server. */
+/** The news review (design §5.26): the local jobs as the monitor sees them. Times arrive as 12-hour labels from the server. */
 export interface LaunchdState { loaded: boolean; state: string | null; pid: number | null; last_exit: string | null }
 export interface AgentJob {
   job: string; name: string; label: string; state: "idle" | "running" | "failed"; light: "green" | "amber" | "red"; step: string | null; run_id: string | null;

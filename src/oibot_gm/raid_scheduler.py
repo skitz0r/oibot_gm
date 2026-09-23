@@ -57,15 +57,14 @@ class RaidSchedulerMixin:
             channel = self.get_channel(cfg.signup_channel_id) if cfg.signup_channel_id else None
             await self.cleanup_ephemeral(reg, rs)
             now = reg.now_local()
-            # open sheets on cadence: every slot occurrence within its raid's signup lead (needs the signup channel)
+            # open sheets on cadence: every active schedule's runs within that schedule's signup lead (needs the signup
+            # channel); a pickup template never opens here
             if channel:
                 for inst in reg.profile.raids:
-                    rd = reg.raid_def(inst)
-                    for _slot, start in rc.slot_starts(reg, inst, now, float(rd["signup_lead_hours"])):
-                        key = f"{rc.run_key(inst, start)}-{start.date().isoformat()}"
-                        if key in rs.events:
+                    for sched, start in rc.upcoming(reg, inst, now, lead=True):
+                        if rc.event_key(inst, start, sched["id"]) in rs.events:
                             continue
-                        await self.open_run_and_post(reg, rs, inst, start, by="scheduler")
+                        await self.open_run_and_post(reg, rs, inst, start, by="scheduler", **rc.schedule_kw(sched["id"]))
             # every live run is processed even when its sheet channel can't be resolved: the steps that post to a
             # channel (refresh_sheet, post_run_update, cards) fail soft on their own
             for ev in rs.live():

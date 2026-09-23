@@ -38,13 +38,22 @@ Raids (owner): raid_set: target=<raid id: barrow_deeps|hyjal_summit_forever|onyx
   |open_dm (true|false: DM every main when a sheet opens)|weight_rank|weight_main|weight_sat_out|weight_signup_order|lockout_days|duration_hours
   |first_open (ISO datetime, when the instance first opens)|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
   raid_reset (owner): target=<raid id> — drop the guild's overrides for that raid.
+Schedules (owner): WHEN a raid runs. Each raid has schedules (ids in the effective raid cadence below; `default` = the raid's own
+  weekly slots). schedule_set: target=<raid id>, field=<schedule id>.<setting>, value. A new schedule id is created by its first op,
+  which must say what it is: <id>.slots (weekly: comma list of 'Sat 20:00' run times), <id>.lockout (value "<days> at <HH:MM>",
+  e.g. "1, 3 at 20:00" = days 1 and 3 of every lockout; day 1 = the reset day) or <id>.kind=pickup (a template officers open on demand).
+  Other settings: name (e.g. "Alt run") | active (true|false: false = paused, opens nothing) | rosters (1-4: rosters the run expects;
+  the sheet advertises size × this) | slots | lockout | signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before
+  | fill_ask_hours | nudge | autofill | open_dm | split_policy — a cadence setting given value "inherit" goes back to the raid's.
+  schedule_remove: target=<raid id>, field=<schedule id> (removing `default` clears the raid's weekly slots).
 Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.g. fortitude|blood_pact|windfury_totem|sanctity_aura>,
     field=<scope (party|raid)|family (a family id or another buff's id: "X and Y don't stack" = set the weaker one's family to the other's id; 'own' = stands alone)|strength (number, 1 = full)|status (confirmed|reported|assumed)|note>, value.
   family_set (owner): who benefits from a stacking family and how much. target=<family id, e.g. fortitude|arcane_intellect|stamina (new ids are created)>,
     field=<name|status|note|value (whole map: "all: 3, mana: 2")|value:<all|physical|spell|mana|melee|ranged|healer|tank|spec:Name> (one entry; 0 removes it)>, value.
   aura_reset (owner): target=<buff or family id, blank = everything> — back to the game defaults.
 Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, or the raid id when only one of its runs is live):
-  run_open: target=<raid id>, value=<optional "YYYY-MM-DD HH:MM" in guild time; blank = the raid's next slot> — opens the sheet now and posts it in the signup channel.
+  run_open: target=<raid id>, value=<optional "YYYY-MM-DD HH:MM" in guild time; blank = the raid's next slot>, field=<optional schedule id:
+    its next run, or with a time its settings (a pickup template needs the time)> — opens the sheet now and posts it in the signup channel.
   run_answer: target, member, value=join|bench|no thanks, character=<optional: which of their characters> — an officer sets someone's
     answer (after lock: join seats them and asks them to confirm, no thanks frees their seat and the fill engine looks for cover).
   run_lock: target — lock now: roster(s) built from the signups (pins honoured), confirmation DMs to everyone rostered.
@@ -73,10 +82,10 @@ Not settable here (say so): standing rosters or availability (members answer eac
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|news_keywords|ask_audience|about")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
-    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
+    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; dm: on|off; test: 'seed N'|'run <raid>'|'clear')")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer, team_member)")
@@ -124,7 +133,9 @@ def current_config_text(reg: Registry) -> str:
     cfg.pop("rosters", None)  # the ephemeral run rosters are noise here; live runs are listed on their own below
     members = ", ".join(f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]"
                         + (f" away {', '.join(a.start + ('→' + a.end if a.end != a.start else '') for a in m.absences[-3:])}" if m.absences else "") for m in reg.members.values())
-    raids = "\n".join(f"- {rid}: " + ", ".join(f"{k}={v}" for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "split_policy", "weights")) for rid in reg.profile.raids)
+    raids = "\n".join(f"- {rid}: " + ", ".join(f"{k}={v}" for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "split_policy", "weights"))
+                      + "".join(f"\n  - schedule {s['id']} ({s['name']}, {s['kind']}): {reg.schedule_label(rid, s)}" + (f"; own settings {reg.schedule_def(rid, s['id'])['schedule']['own']}" if reg.schedule_def(rid, s["id"])["schedule"]["own"] else "")
+                                for s in reg.schedules(rid)) for rid in reg.profile.raids)
     return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n## Effective raid cadence (profile defaults + overrides)\n" + raids
             + f"\n## Now: {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} (guild time)\n## Live runs (run key: raid, start, state, answers)\n" + live_runs_text(reg)
             + f"\n## Test bench: {len(reg.test_members())} puppet member(s)"
@@ -136,7 +147,7 @@ def parse(provider: Provider, reg: Registry, text: str, by: str | None = None) -
     return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg) + asker + "\n\n## Request\n<request>\n" + text.strip()[:2000] + "\n</request>", ConfigRequest)
 
 
-OWNER_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset"}
+OWNER_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove"}
 CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel")
 
 
@@ -154,7 +165,7 @@ OP_GROUP = {
     "run_open": "runs", "run_answer": "runs", "run_lock": "runs", "run_cancel": "runs", "run_fill": "runs", "run_strategy": "runs",
     "run_autofill": "runs", "run_board": "runs", "confirm_for": "runs", "team_member": "runs",
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
-    "raid_set": "raids", "raid_reset": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
+    "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
     "set": "setup", "role_add": "setup", "role_remove": "setup",
     "test": "test",
 }
@@ -270,24 +281,91 @@ def _layout(value: str | None) -> list[list[str]]:
     return [[n.strip() for n in g.split(",") if n.strip()] for g in groups if g.strip()]
 
 
-def _open_time(reg: Registry, rid: str, value: str | None):
-    """run_open: the raid's next slot, or a one-off 'YYYY-MM-DD HH:MM' in guild time (what /raid open and the web take)."""
+def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None = None):
+    """run_open: the raid's next run (of `schedule` when named), or a one-off 'YYYY-MM-DD HH:MM' in guild time (what
+    /raid open and the web take). Returns (start, schedule id or None)."""
     from datetime import datetime
 
     from . import raidcycle as rc
 
     if rid not in reg.profile.raids:
         raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
+    sid = (schedule or "").strip().lower() or None
+    sched = next((s for s in reg.schedules(rid) if s["id"] == sid), None) if sid else None
+    if sid and sched is None:
+        raise RegistryError(f"{rid} has no schedule {sid} (it has {', '.join(s['id'] for s in reg.schedules(rid)) or 'none'})")
     when = (value or "").strip()
     if when:
         try:
-            return datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=reg.tz)
+            return datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=reg.tz), sid
         except ValueError:
             raise RegistryError("time looks like 2026-12-10 19:30 (guild time)")
-    nxt = rc.slot_starts(reg, rid, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS)
+    if sched is not None and sched["kind"] == "pickup":
+        raise RegistryError(f"{sched['name']} is a pickup template — give the date and time it starts")
+    nxt = [(s, t) for s, t in rc.upcoming(reg, rid, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS) if sid is None or s["id"] == sid]
     if not nxt:
         raise RegistryError(f"{rid} has no slots yet (or none before it opens) — give a date and time")
-    return nxt[0][1]
+    return nxt[0][1], nxt[0][0]["id"]
+
+
+def _schedule_ref(op: ConfigOp) -> tuple[str, str]:
+    """schedule_set's field '<schedule id>.<setting>' → (id, setting)."""
+    sid, _, setting = (op.field or "").strip().partition(".")
+    if not sid or not setting:
+        raise RegistryError("schedule_set field is <schedule id>.<setting>, e.g. alt.slots")
+    return sid.strip().lower(), setting.strip().lower()
+
+
+def _schedule_fields(setting: str, value: str | None) -> dict:
+    """One schedule_set op as Registry.set_schedule fields: `lockout` = '<days> at <time>' sets kind, days and time together."""
+    if setting == "lockout":
+        days, sep, at = (value or "").replace("@", " at ").partition(" at ")
+        if not sep:
+            raise RegistryError('lockout is "<days> at <time>", e.g. "1, 3 at 20:00"')
+        return {"kind": "lockout", "days": days, "time": at.strip()}
+    return {setting: value}
+
+
+def _schedule_words(reg: Registry, rid: str, fields: dict) -> str:
+    """What a schedule setting becomes, in words (12-hour; 'the raid's' for an inherited cadence value)."""
+    from .registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, parse_days, parse_slots, parse_time, schedule_value
+
+    out = []
+    for f, v in fields.items():
+        if f == "kind":
+            out.append({"weekly": "weekly", "lockout": "days of each lockout", "pickup": "a pickup template"}.get(v, str(v)))
+        elif f == "slots":
+            out.append(", ".join(reg.slot_label(s) for s in parse_slots(v)) or "no run times")
+        elif f == "days":
+            out.append("day " + " and ".join(str(d) for d in parse_days(v)))
+        elif f == "time":
+            out.append(reg.time_label(parse_time(v)))
+        elif f in RAID_HOURS_FIELDS or f in RAID_BOOL_FIELDS or f == "split_policy":
+            nv = schedule_value(f, v)
+            if nv is None:
+                raid = reg.raid_def(rid)[f]
+                out.append(f"{f.replace('_', ' ')}: the raid's ({_value_words(f, raid)})")
+            else:
+                out.append(f"{f.replace('_', ' ')}: {_value_words(f, nv)}")
+        elif f == "rosters":
+            n = schedule_value(f, v)
+            out.append(f"{n} roster{'s' if n != 1 else ''}")
+        elif f == "active":
+            out.append("active" if schedule_value(f, v) else "paused")
+        else:
+            out.append(f"{f} “{v}”")
+    return ", ".join(out)
+
+
+def _value_words(field: str, v) -> str:
+    from .registry import RAID_BOOL_FIELDS
+
+    if field in RAID_BOOL_FIELDS:
+        return "on" if v else "off"
+    if field == "split_policy":
+        return str(v)
+    h = float(v)
+    return f"{h:g} hour{'' if h == 1 else 's'}" + ("" if field == "fill_ask_hours" else " before")
 
 
 def _test_op(value: str | None) -> tuple[str, str]:
@@ -470,6 +548,11 @@ def describe(reg: Registry, op: ConfigOp) -> str:
         return f"auras: drop overrides for {op.target or 'everything'}"
     if op.op == "raid_reset":
         return f"raid {op.target}: overrides {cfg.raids.get(op.target or '', {}) or 'none'} → profile defaults"
+    if op.op in ("schedule_set", "schedule_remove"):
+        try:
+            return _describe_schedule(reg, op)
+        except RegistryError as e:
+            return f"{op.op} {op.target or '?'} {op.field or ''}: {e}"
     if op.op in ("comp_target", "comp_target_clear"):
         key = _key(reg, op)
         slot = op.field or op.path or ""
@@ -488,6 +571,31 @@ def describe(reg: Registry, op: ConfigOp) -> str:
     return str(op)
 
 
+def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
+    """'Barrow Deeps · Alt run: Saturdays 8:00 PM → Saturdays 9:00 PM' — the schedule's current value → the new one,
+    in words. Raises RegistryError when the op can't apply (unknown raid or schedule, a value that won't parse)."""
+    rid = op.target or ""
+    if rid not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
+    name = reg.raid_def(rid).get("name", rid)
+    if op.op == "schedule_remove":
+        sid = (op.field or op.value or "").strip().lower()
+        cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
+        if cur is None:
+            raise RegistryError(f"{name} has no schedule {sid or '?'}")
+        return (f"{name}: remove schedule {cur['name']} ({reg.schedule_label(rid, cur)})"
+                + (" — the raid's weekly run times are cleared" if sid == "default" else "") + "; runs already open keep their times")
+    sid, setting = _schedule_ref(op)
+    fields = _schedule_fields(setting, op.value)
+    cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
+    new = _schedule_words(reg, rid, fields)
+    if cur is None:
+        return f"{name}: new schedule {sid} — {new}"
+    own = reg.schedule_def(rid, sid)["schedule"]["own"]
+    now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name") else cur.get(f) for f in fields}
+    return f"{name} · {cur['name']}: {_schedule_words(reg, rid, {k: v for k, v in now.items() if v is not None}) or 'not set'} → {new}"
+
+
 def _describe_action(reg: Registry, op: ConfigOp) -> str:
     """One line per action op: what will happen (and the current state it acts on). Raises RegistryError when the
     op can't apply, so the diff shows the refusal before anyone presses Apply."""
@@ -496,14 +604,15 @@ def _describe_action(reg: Registry, op: ConfigOp) -> str:
     cfg = reg.config
     if op.op == "run_open":
         rid = op.target or ""
-        start = _open_time(reg, rid, op.value)
+        start, sid = _open_time(reg, rid, op.value, op.field)
         rs = rc.RaidStore(reg.store, reg.key)
-        key = f"{rc.run_key(rid, start)}-{start.date().isoformat()}"
+        key = rc.event_key(rid, start, sid)
         have = rs.events.get(key)
         where = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "nowhere (no signup channel set — /raid sheet can place it)"
+        sname = next((f" · {s['name']}" for s in reg.schedules(rid) if s["id"] == sid and sid != "default"), "")
         if have and have.state in ("open", "locked"):
-            return f"open {reg.raid_def(rid).get('name', rid)} {reg.local12(start)}: already {have.state} as {have.key} — nothing new is posted"
-        return f"open {reg.raid_def(rid).get('name', rid)} {reg.local12(start)} now ({key}): sheet posted in {where}, absences pre-filled"
+            return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}: already {have.state} as {have.key} — nothing new is posted"
+        return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)} now ({key}): sheet posted in {where}, absences pre-filled"
     if op.op == "test":
         kind, arg = _test_op(op.value)
         n = len(reg.test_members())
@@ -684,6 +793,11 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         return reg.set_raid_override(op.target or "", op.field or "", op.value, by)
     if op.op == "raid_reset":
         return reg.clear_raid_override(op.target or "", by)
+    if op.op == "schedule_set":
+        sid, setting = _schedule_ref(op)
+        return "; ".join(reg.set_schedule(op.target or "", sid, _schedule_fields(setting, op.value), by))
+    if op.op == "schedule_remove":
+        return reg.remove_schedule(op.target or "", (op.field or op.value or "").strip(), by)
     if op.op == "aura_set":
         return reg.set_buff_override(op.target or "", op.field or "", op.value, by)
     if op.op == "family_set":
@@ -863,8 +977,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     rs = bot.raids.store(reg)
     if op.op == "run_open":
         rid = op.target or ""
-        start = _open_time(reg, rid, op.value)
-        ev = await bot.open_run_and_post(reg, rs, rid, start, by)
+        start, sid = _open_time(reg, rid, op.value, op.field)
+        ev = await bot.open_run_and_post(reg, rs, rid, start, by, **rc.schedule_kw(sid))
         return f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)

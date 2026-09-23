@@ -202,6 +202,13 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str
                      f"fill asks time out after {rd['fill_ask_hours']}h, autofill {rd.get('autofill', True)}, open_dm {rd.get('open_dm', False)}, split {rd.get('split_policy')}, weights {rd.get('weights')}, lockout {rd['lockout_days']}d, duration {rd.get('duration_hours')}h, comp {comp}"
                      + (f", first open {reg.local12(fo)}" if fo else "") + (f", comp targets {over['comp_targets']}" if over.get("comp_targets") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
                      + (f", overridden: {', '.join(k for k in over if k not in ('comp_targets', 'comp_groups'))}" if any(k not in ("comp_targets", "comp_groups") for k in over) else ""))
+        for s in reg.schedules(rid):  # when it runs: each schedule in words, its own cadence overrides, its next runs
+            own = reg.schedule_def(rid, s["id"])["schedule"]["own"]
+            from .raidcycle import next_runs_of
+
+            nxt = [reg.local12(t) for t in next_runs_of(reg, rid, s)] if s["kind"] != "pickup" else []
+            lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}): {reg.schedule_label(rid, s)}" + (f"; own settings {own}" if own else "; the raid's cadence")
+                         + (f"; next runs {', '.join(nxt)}" if nxt else ""))
     if cfg.buffs or cfg.families:
         auras = "; ".join(f"{bid} {ov}" for bid, ov in (cfg.buffs or {}).items())
         fams = "; ".join(f"{fid} {ov}" for fid, ov in (cfg.families or {}).items())

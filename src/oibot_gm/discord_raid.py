@@ -481,10 +481,11 @@ class RaidMixin:
                 await self.post_run_update(reg, ev, f"🧩 replacement for {m.display_name}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
 
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
-    async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str) -> rc.RaidEvent:
-        """Open (or find) the run for `instance` at `start`, post its sheet in the signup channel when one is set
-        (else the event stays unposted: channel_id None, `/raid sheet` can place it), and say so on the ops feed."""
-        ev = rc.open_run(reg, rs, instance, start, by=by)
+    async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None) -> rc.RaidEvent:
+        """Open (or find) the run for `instance` at `start` (from `schedule`, None = the raid's own cadence), post its
+        sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
+        place it), and say so on the ops feed."""
+        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:
             await self.post_sheet(reg, rs, ev, channel)

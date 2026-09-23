@@ -7,7 +7,7 @@ import { api, type RaidRule, type Raids } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
 import { PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
-import { SlotEditor } from "../components/SlotEditor";
+import { Schedules } from "../components/ScheduleCard";
 
 export function RaidsPage() {
   const [data, setData] = useState<Raids | null>(null);
@@ -17,15 +17,15 @@ export function RaidsPage() {
   if (!data) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">
-      <PageTitle title="Raids" intro={`Each raid's rules: run slots and cadence (signup opens, lock, confirmation deadline), first opening, lockout, desired comp, and how the solver weighs seats. Amber marks an override of the game defaults. Times are ${data.tz}.`} />
-      {data.raids.map((r) => <RuleCard key={r.id} r={r} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} onSaved={load} />)}
+      <PageTitle title="Raids" intro={`Each raid's rules: cadence (signup opens, lock, confirmation deadline), first opening, lockout, desired comp, and how the solver weighs seats — then its schedules, which say when it runs. Amber marks an override of the game defaults. Times are ${data.tz}.`} />
+      {data.raids.map((r) => <RuleCard key={r.id} r={r} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} onSaved={load} />)}
     </Stack>
   );
 }
 
-type Draft = { slots: string[]; split_policy: string; nudge: boolean; autofill: boolean; open_dm: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; fill_ask_hours: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
+type Draft = { split_policy: string; nudge: boolean; autofill: boolean; open_dm: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; fill_ask_hours: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
 
-function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; owner: boolean; weightKeys: string[]; policies: string[]; onSaved: () => void }) {
+function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: RaidRule; owner: boolean; weightKeys: string[]; policies: string[]; maxRosters: number; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [d, setD] = useState<Draft>(() => toDraft(r));
   const [busy, setBusy] = useState(false);
@@ -40,11 +40,11 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
   }
   async function reset() {
     const what = r.overridden.map((k) => k.replace(/^weight_/, "weight ").replace(/_/g, " ")).join(", ");
-    if (!(await ask({ title: `Reset ${r.name} to the game defaults?`, message: `${r.overridden.length} override${r.overridden.length === 1 ? "" : "s"} go: ${what}.${r.overridden.includes("slots") ? " With no slots, no sheet opens for this raid until you set them again." : ""}${r.live ? ` The ${r.live} live sheet${r.live === 1 ? "" : "s"} keep their times.` : ""}`, confirmLabel: "Reset", color: "red" }))) return;
+    if (!(await ask({ title: `Reset ${r.name} to the game defaults?`, message: `${r.overridden.length} override${r.overridden.length === 1 ? "" : "s"} go: ${what}.${r.overridden.includes("slots") || r.overridden.includes("schedules") ? " Its schedules go too: no sheet opens for this raid until you add one again." : ""}${r.live ? ` The ${r.live} live sheet${r.live === 1 ? "" : "s"} keep their times.` : ""}`, confirmLabel: "Reset", color: "red" }))) return;
     setBusy(true);
     try { const x = await api.post<{ message: string }>("/api/admin/raid/reset", { instance: r.id }); ok(x.message); setEditing(false); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
   }
-  const metaLine = [`${r.size}-player`, r.slots.length ? `${r.slots.length} slot${r.slots.length === 1 ? "" : "s"}` : "no slots", r.live ? `${r.live} live` : null, r.opened ? `window ${r.window[0]} → ${r.window[1]}` : r.first_open_local ? `opens ${r.window[0]}` : "no opening date set"].filter(Boolean).join(" · ");
+  const metaLine = [`${r.size}-player`, r.schedules.length ? `${r.schedules.length} schedule${r.schedules.length === 1 ? "" : "s"}` : "no schedules", r.live ? `${r.live} live` : null, r.opened ? `window ${r.window[0]} → ${r.window[1]}` : r.first_open_local ? `opens ${r.window[0]}` : "no opening date set"].filter(Boolean).join(" · ");
 
   return (
     <Card>
@@ -53,7 +53,6 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
         {!editing ? (
           <Stack gap="md">
             <Group gap="xl" wrap="wrap">
-              <Fact label="slots" value={(r.slot_labels || r.slots).join(", ") || "none — no sheets open"} c={oc("slots")} />
               <Fact label="signup opens" value={`${r.signup_lead_hours} h before`} c={oc("signup_lead_hours")} />
               <Fact label="nudge" value={r.nudge ? `${r.nudge_hours_before} h before` : "off"} c={over("nudge") || over("nudge_hours_before") ? "yellow" : undefined} />
               <Fact label="fill after lock" value={r.autofill ? "automatic" : "by hand"} c={oc("autofill")} />
@@ -74,7 +73,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
           </Stack>
         ) : (
           <Stack gap="sm">
-            <SlotEditor label="run slots" description={`one sheet per slot per week, guild time (only after the raid opens)`} value={d.slots} onChange={(v) => setD({ ...d, slots: v })} />
+            <Text size="xs" c="dimmed">The raid's cadence: every schedule below follows it unless the schedule sets its own. Run times are set per schedule.</Text>
             <Group gap="md" wrap="wrap" align="flex-end">
               <NumberInput label="signup opens (h before)" min={1} value={d.signup_lead_hours} onChange={(v) => setD({ ...d, signup_lead_hours: v })} w={190} />
               <NumberInput label="nudge (h before)" description="one DM to mains who haven't answered" min={0} value={d.nudge_hours_before} onChange={(v) => setD({ ...d, nudge_hours_before: v })} w={170} disabled={!d.nudge} />
@@ -116,6 +115,7 @@ function RuleCard({ r, owner, weightKeys, policies, onSaved }: { r: RaidRule; ow
         )}
         {!owner && <Text size="xs" c="dimmed" mt="sm">The owner edits raid rules.</Text>}
       </Box>
+      <Schedules r={r} owner={owner} policies={policies} maxRosters={maxRosters} onSaved={onSaved} />
       {confirmDialog}
     </Card>
   );
@@ -126,7 +126,7 @@ export const SPLIT_BLURB: Record<string, string> = { balanced: "both runs equal:
 const WEIGHT_HINT: Record<string, string> = { rank: "core > raider > trial", main: "main over alt", sat_out: "benched last window", signup_order: "earlier signup" };
 
 function toDraft(r: RaidRule): Draft {
-  return { slots: r.slots, split_policy: r.split_policy, nudge: r.nudge, autofill: r.autofill, open_dm: r.open_dm, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },
+  return { split_policy: r.split_policy, nudge: r.nudge, autofill: r.autofill, open_dm: r.open_dm, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },
     first_open: r.first_open_local, lockout_days: r.lockout_days, duration_hours: r.duration_hours, notes: r.notes,
     comp: Object.fromEntries(["tank", "healer", "dps"].map((role) => [role, { min: r.comp[role]?.min ?? "", max: r.comp[role]?.max ?? "" }])) };
 }

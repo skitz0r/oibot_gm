@@ -1,4 +1,4 @@
-"""News review (design.md §5.25): the embed filter and dedupe, the proposal store and its state machine, the
+"""News review (design.md §5.26): the embed filter and dedupe, the proposal store and its state machine, the
 news channel setting on every surface, the Discord card and its officer-gated buttons, and the on_message hook.
 Offline: fake messages and interactions over the demo fixtures (conftest)."""
 from __future__ import annotations
