@@ -87,7 +87,7 @@ function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: 
             </Group>
             <Group gap="md" wrap="wrap" align="flex-end">
               <DateTimePicker label="first opens" description="guild time" value={pickerValue(d.first_open)} onChange={(v) => setD({ ...d, first_open: fromPicker(v, d.first_open) })}
-                valueFormat="ddd DD MMM YYYY h:mm A" timePickerProps={{ format: "12h", withDropdown: true }} popoverProps={{ withinPortal: true }} w={240} />
+                valueFormat="ddd DD MMM YYYY h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }} popoverProps={{ withinPortal: true }} w={240} />
               <NumberInput label="lockout days" min={1} step={1} value={d.lockout_days} onChange={(v) => setD({ ...d, lockout_days: v })} w={130} />
               <NumberInput label="duration h" min={0.5} step={0.5} value={d.duration_hours} onChange={(v) => setD({ ...d, duration_hours: v })} w={130} />
             </Group>

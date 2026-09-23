@@ -73,7 +73,7 @@ function OpenRaid({ r, busy, onAct, when, setWhen }: { r: RaidRuns; busy: string
         size="sm" w={240} clearable value={when} onChange={setWhen}
         placeholder={next && !needsTime ? `next: ${next.start}` : "pick a date and time"}
         minDate={new Date().toISOString().slice(0, 10)}
-        valueFormat="ddd DD MMM h:mm A" timePickerProps={{ format: "12h", withDropdown: true }}
+        valueFormat="ddd DD MMM h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }}
         popoverProps={{ withinPortal: true }} aria-label="when the run starts"
       />
       <Tooltip label={hint} withinPortal>
