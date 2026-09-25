@@ -7,6 +7,13 @@
 # Every entry carries `status`: confirmed (Blizzard/beta capture), reported (fan-site claim),
 # assumed (Vanilla behaviour, nothing published for Forever). The analytics cards print these,
 # so keep them honest. Sources: docs/research.md §1a.
+# 2026-09-23: vetted against foreverchanges.pro, a fan site that publishes the Forever beta client's own tooltips
+# (build 1.60.1.69913, from the client's data tables) beside Classic's. Its tooltips move entries from assumed to
+# reported; our own captures and Blizzard's posts stay the only `confirmed`. Removed after that pass: Sanctity Aura
+# (no longer in the Retribution tree) and Tranquil Air Totem (absent from the Forever shaman spellbook).
+# Leader of the Pack and Moonkin Aura are one family now (both tooltips say "exclusive with" the other).
+# Not tracked on purpose: the other resistance totems, paladin resistance auras and Aspect of the Wild — raid-wide in
+# Forever but encounter-specific, so they would only add "missing" noise to every card.
 #
 # scope:    party | raid | class | self   (only `party` drives grouping)
 # kind:     aura | proc
@@ -26,8 +33,11 @@ buffs:
     kind: aura
     stacking: unique
     slot: shaman_air
-    status: assumed
-    note: Air totem. Vanilla party-wide; Forever scope not published.
+    status: reported
+    note: >-
+      Air totem, party. Forever: main-hand hits only, 20% for 1 extra attack with 246 AP (Classic 315), 5 min; the
+      tooltip's radius reads "?". Windfury Weapon on a shaman's main hand cancels their own benefit from the totem.
+      Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: grace_of_air
     family: grace_of_air
@@ -38,20 +48,10 @@ buffs:
     kind: aura
     stacking: unique
     slot: shaman_air
-    status: assumed
-    note: Air totem (agility). Wins the air slot in hunter/rogue groups without warriors.
-
-  - id: tranquil_air
-    family: tranquil_air
-    icon: {abbr: TqA, colour: "#B7E4F2", art: spell_nature_brilliance}
-    name: Tranquil Air Totem
-    providers: [Shaman:*]
-    scope: party
-    kind: aura
-    stacking: unique
-    slot: shaman_air
-    status: assumed
-    note: Air totem (threat). Only wins the slot in a pure caster group.
+    status: reported
+    note: >-
+      Air totem (agility), party, 30 yd, 5 min. Forever raised it to 89 Agility (Classic 77) while Strength of Earth
+      fell, so it wins the air slot more often in hunter/rogue/feral groups. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: strength_of_earth
     family: strength_of_earth
@@ -62,8 +62,10 @@ buffs:
     kind: aura
     stacking: unique
     slot: shaman_earth
-    status: assumed
-    note: Earth totem.
+    status: reported
+    note: >-
+      Earth totem, party, 30 yd, 5 min. Forever: 53 Strength (Classic 77) — about a third weaker.
+      Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: stoneskin
     family: stoneskin
@@ -74,8 +76,10 @@ buffs:
     kind: aura
     stacking: unique
     slot: shaman_earth
-    status: assumed
-    note: Earth totem; loses to Strength of Earth unless the group is all casters/healers.
+    status: reported
+    note: >-
+      Earth totem, party, 30 yd, 5 min: Physical damage taken −30 (Classic: melee only). Loses the slot to
+      Strength of Earth unless the group has no melee. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: mana_spring
     family: mana_spring
@@ -86,8 +90,10 @@ buffs:
     kind: aura
     stacking: unique
     slot: shaman_water
-    status: assumed
-    note: Water totem.
+    status: reported
+    note: >-
+      Water totem, group, 30 yd, 5 min (Classic 1 min): 10 mana every 2 s; Restorative Totems +25%.
+      Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: mana_tide
     family: mana_tide
@@ -98,8 +104,10 @@ buffs:
     kind: aura
     stacking: unique
     slot: shaman_water_cd
-    status: assumed
-    note: Restoration talent (Vanilla). Cooldown totem, so it does not compete with Mana Spring for the slot.
+    status: reported
+    note: >-
+      Restoration talent, now tier 4 without Restorative Totems. Forever: 88 mana every 3 s for 12 s (Classic 170),
+      30 yd. Cooldown totem, so it does not compete with Mana Spring for the slot. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: healing_stream
     family: healing_stream
@@ -110,20 +118,38 @@ buffs:
     kind: aura
     stacking: unique
     slot: shaman_water
-    status: assumed
-    note: Water totem; usually loses the slot to Mana Spring.
+    status: reported
+    note: >-
+      Water totem, group, 30 yd, 5 min: 11 health every 2 s (Classic 14); Restorative Totems now +50%. Usually loses
+      the slot to Mana Spring. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: fire_resistance
     family: fire_resistance
     icon: {abbr: FR, colour: "#E06A3A", art: spell_fireresistancetotem_01}
     name: Fire Resistance Totem
     providers: [Shaman:*]
+    scope: raid
+    kind: aura
+    stacking: unique
+    status: reported
+    note: >-
+      Forever: "party and raid members within 30 yards", +60 fire resistance, 5 min — raid-wide by radius, so one
+      shaman covers it wherever they are grouped (it takes that shaman's fire totem). Encounter-specific (Onyxia).
+      Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
+
+  - id: flametongue_totem
+    family: flametongue_totem
+    icon: {abbr: FT, colour: "#F28B3C", art: spell_nature_guardianward}
+    name: Flametongue Totem
+    providers: [Shaman:*]
     scope: party
     kind: aura
     stacking: unique
     slot: shaman_fire
-    status: assumed
-    note: Fire slot placeholder; encounter-specific (Onyxia). Not a grouping driver.
+    status: reported
+    note: >-
+      Fire totem, party, 30 yd: each main-hand hit deals 17–55 extra Fire damage. With Fire Resistance now raid-wide,
+      this is the fire totem that matters for grouping (melee groups). Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   # ---------------------------------------------------------------- other party auras
   - id: trueshot_aura
@@ -145,19 +171,23 @@ buffs:
     scope: party
     kind: aura
     stacking: unique
-    status: assumed
-    note: Vanilla Feral talent; party-wide. Not in the Forever druid captures either way.
+    status: reported
+    note: >-
+      Feral talent, now tier 5. Forever: +3% critical strike chance (all crit, not just melee/ranged) for party
+      members within 45 yd, "exclusive with Moonkin Aura" — same family as Moonkin. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: moonkin_aura
-    family: moonkin_aura
+    family: leader_of_the_pack
     icon: {abbr: MA, colour: "#D7A6FF", art: spell_nature_moonglow}
-    name: Moonkin Aura (3% spell crit)
+    name: Moonkin Aura (3% crit)
     providers: [Druid:Balance]
     scope: party
     kind: aura
     stacking: unique
-    status: assumed
-    note: Vanilla Balance talent; party-wide.
+    status: reported
+    note: >-
+      Moonkin Form, Forever: +3% critical strike chance (all crit, was spell crit) for party members within 45 yd
+      (was 30), "exclusive with Leader of the Pack"; also doubles Omen of Clarity procs. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: battle_shout
     family: battle_shout
@@ -167,8 +197,10 @@ buffs:
     scope: party
     kind: aura
     stacking: unique
-    status: assumed
-    note: Vanilla party-wide, 2 min. Fury warriors keep it up.
+    status: reported
+    note: >-
+      Party, 20 yd, 3 min. Forever: 139 melee attack power (Classic 232) — about 40% weaker; Improved Battle Shout
+      is gone and Booming Voice only widens the radius. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: blood_pact
     family: blood_pact
@@ -179,18 +211,22 @@ buffs:
     kind: aura
     stacking: unique
     status: assumed
-    note: Vanilla party-wide, needs an imp out. Demonic Sacrifice locks won't have one.
+    note: >-
+      Vanilla party-wide, needs an imp out. The Blood Pact spell itself isn't published for Forever (pet spells
+      aren't in the client captures); Improved Imp no longer boosts it (foreverchanges.pro, beta 1.60.1).
 
-  - id: sanctity_aura
-    family: sanctity_aura
-    icon: {abbr: SA, colour: "#F58CBA", art: spell_holy_mindvision}
-    name: Sanctity Aura (10% holy)
-    providers: [Paladin:Retribution]
+  - id: devotion_aura
+    family: devotion_aura
+    icon: {abbr: Dev, colour: "#F5D76E", art: spell_holy_devotionaura}
+    name: Devotion Aura
+    providers: [Paladin:*]
     scope: party
     kind: aura
     stacking: unique
-    status: assumed
-    note: Vanilla Ret talent; party-wide. One paladin aura at a time (Devotion/Retribution/Concentration/Sanctity).
+    status: reported
+    note: >-
+      Party, 30 yd: +735 armor, same as Classic. With Sanctity Aura gone from Forever's Retribution tree, it is the
+      paladin party aura that matters for grouping (one aura per paladin). Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: vampiric_embrace
     family: vampiric_embrace
@@ -201,7 +237,9 @@ buffs:
     kind: aura
     stacking: unique
     status: reported
-    note: Beta capture says the debuff is 30 s with a cooldown; small party heal. Not a mana battery like TBC's Vampiric Touch.
+    note: >-
+      Beta capture says the debuff is 30 s with a cooldown (foreverchanges.pro agrees: 30 s, 20% of Shadow damage as
+      party healing; Improved Vampiric Embrace is gone). Small party heal, not a mana battery like TBC's Vampiric Touch.
 
   # ---------------------------------------------------------------- raid-wide cast buffs (coverage = enough providers)
   - id: fortitude
@@ -212,8 +250,10 @@ buffs:
     scope: raid
     kind: aura
     stacking: unique
-    status: assumed
-    note: Prayer of Fortitude covers the raid; 1 priest is enough, 2 is comfortable.
+    status: reported
+    note: >-
+      Prayer of Fortitude: "all party and raid members", +70 Stamina, 1 h — one cast covers the raid, so 1 priest is
+      enough. Improved Power Word: Fortitude is gone. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   - id: divine_spirit
     family: divine_spirit
@@ -224,7 +264,9 @@ buffs:
     kind: aura
     stacking: unique
     status: confirmed
-    note: "Blizzard deep dive: Divine Spirit is baseline (was a Discipline talent), so any priest brings it."
+    note: >-
+      Blizzard deep dive: Divine Spirit is baseline (was a Discipline talent), so any priest brings it. The client
+      agrees: trained at 30, +40 Spirit for 1 h; Prayer of Spirit reaches all party and raid members.
 
   - id: shadow_protection
     family: shadow_protection
@@ -234,7 +276,8 @@ buffs:
     scope: raid
     kind: aura
     stacking: unique
-    status: assumed
+    status: reported
+    note: "Prayer of Shadow Protection: all party and raid members, +60 Shadow resistance, 20 min. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23."
 
   - id: mark_of_the_wild
     family: mark_of_the_wild
@@ -245,7 +288,9 @@ buffs:
     kind: aura
     stacking: unique
     status: confirmed
-    note: "Blizzard deep dive: Improved Mark of the Wild is baseline; Gift of the Wild covers the raid."
+    note: >-
+      Blizzard deep dive: Improved Mark of the Wild is baseline; the client agrees (385 armor, +16 attributes, +27
+      resistances, 1 h — the old talent's numbers, and the talent is gone). Gift of the Wild reaches all party and raid members.
 
   - id: arcane_intellect
     family: arcane_intellect
@@ -255,8 +300,8 @@ buffs:
     scope: raid
     kind: aura
     stacking: unique
-    status: assumed
-    note: Arcane Brilliance covers the raid.
+    status: reported
+    note: "Arcane Brilliance: the target's party and raid, +31 Intellect, 1 h. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23."
 
   - id: blessings
     family: blessings
@@ -267,12 +312,13 @@ buffs:
     kind: aura
     stacking: stack
     status: reported
-    choices: [Kings, Might, Wisdom, Salvation, Light, Sanctuary]
+    choices: [Kings, Might, Wisdom, Salvation, Light]
     wanted: 4
     note: >-
-      Each paladin keeps one Greater Blessing on the raid; blessings reported to last 1 h in Forever and
-      Kings is baseline (no talent tax). Priority order above is the classic default — Kings first, then Might
-      for the physical groups, Wisdom for casters/healers, Salvation for threat. 4 paladins = full coverage.
+      Each paladin keeps one Greater Blessing per class on the raid, 1 h (Classic 15 min); Kings is trained at 20,
+      no talent. Forever numbers: Might 133 AP (Classic 185), Wisdom 40 mana/5 s (Classic 33); Improved Might,
+      Improved Wisdom and Blessing of Sanctuary are gone. Priority: Kings, then Might for physical classes, Wisdom
+      for casters/healers, Salvation for threat. 4 paladins = full coverage. Source: foreverchanges.pro (beta client 1.60.1.69913 tooltips), vetted 2026-09-23.
 
   # ---------------------------------------------------------------- log signals that must not drive grouping
   - id: windfury_attack
@@ -290,72 +336,74 @@ buffs:
 # Guilds override any of this in guild.yaml (`families:` / `buffs:`) as Forever facts come in; the Auras page edits it.
 families:
   - id: windfury_totem
-    name: Windfury (melee haste)
-    status: assumed
-    value: {melee: 10, tank: 3, "spec:Enhancement": 2, "spec:Feral": 4}
+    name: Windfury (extra attacks)
+    status: reported
+    # 246 AP per proc (Classic 315); an Enhancement shaman with Windfury Weapon gets nothing from their own totem
+    value: {melee: 9, tank: 3, "spec:Enhancement": 0, "spec:Feral": 4}
   - id: grace_of_air
     name: Agility
-    status: assumed
-    value: {ranged: 5, "spec:Feral": 3, "spec:Combat": 2, "spec:Assassination": 2, "spec:Subtlety": 2}
-  - id: tranquil_air
-    name: Threat reduction
-    status: assumed
-    value: {"spec:Shadow": 3, "spec:Fire": 2, "spec:Frost": 2, "spec:Arcane": 2, "spec:Destruction": 2, "spec:Affliction": 2, "spec:Demonology": 2, "spec:Balance": 2}
+    status: reported
+    # 89 Agility (Classic 77)
+    value: {ranged: 6, "spec:Feral": 4, "spec:Combat": 3, "spec:Assassination": 3, "spec:Subtlety": 3}
   - id: strength_of_earth
     name: Strength
-    status: assumed
-    value: {melee: 5, tank: 3}
+    status: reported
+    # 53 Strength (Classic 77)
+    value: {melee: 3.5, tank: 2}
   - id: stoneskin
     name: Physical damage reduction
-    status: assumed
+    status: reported
     value: {tank: 2}
   - id: mana_spring
     name: Mana regen
-    status: assumed
+    status: reported
     value: {mana: 3, healer: 4}
   - id: mana_tide
     name: Mana burst
-    status: assumed
-    value: {healer: 5, mana: 2}
+    status: reported
+    # 88 mana per tick (Classic 170)
+    value: {healer: 3, mana: 1}
   - id: healing_stream
     name: Health regen
-    status: assumed
+    status: reported
     value: {tank: 2, melee: 1}
   - id: fire_resistance
     name: Fire Resistance Totem
-    status: assumed
+    status: reported
     value: {tank: 1}
+  - id: flametongue_totem
+    name: Fire damage on melee hits
+    status: reported
+    value: {melee: 2, tank: 1, "spec:Enhancement": 0}
   - id: trueshot_aura
     name: Ranged attack power
     status: confirmed
     value: {ranged: 3, "spec:Elemental": 0, "spec:Balance": 0, "spec:Shadow": 0, "spec:Fire": 0, "spec:Frost": 0, "spec:Arcane": 0, "spec:Affliction": 0, "spec:Destruction": 0, "spec:Demonology": 0}
   - id: leader_of_the_pack
-    name: Melee crit
-    status: assumed
-    value: {physical: 4, tank: 2}
-  - id: moonkin_aura
-    name: Spell crit
-    status: assumed
-    value: {spell: 4}
+    name: Critical strike (party)
+    status: reported
+    # Leader of the Pack and Moonkin Aura: +3% crit of every kind, and "exclusive with" each other
+    value: {physical: 4, spell: 4, tank: 2, healer: 1}
   - id: battle_shout
     name: Attack power
-    status: assumed
-    value: {physical: 4, tank: 2}
+    status: reported
+    # 139 AP (Classic 232)
+    value: {physical: 2.5, tank: 1.5}
   - id: blood_pact
     name: Stamina (Blood Pact)
     status: assumed
     value: {all: 1, tank: 2}
-  - id: sanctity_aura
-    name: Holy damage
-    status: assumed
-    value: {"spec:Retribution": 0, "spec:Protection": 2, "spec:Holy": 1, all: 0}
+  - id: devotion_aura
+    name: Armor (Devotion Aura)
+    status: reported
+    value: {tank: 2, melee: 1}
   - id: vampiric_embrace
     name: Party heal
     status: reported
     value: {melee: 1, ranged: 1, tank: 1}
   - id: fortitude
     name: Stamina (Fortitude)
-    status: assumed
+    status: reported
     value: {all: 3}
   - id: divine_spirit
     name: Spirit
@@ -363,7 +411,7 @@ families:
     value: {mana: 2, healer: 3}
   - id: shadow_protection
     name: Shadow resistance
-    status: assumed
+    status: reported
     value: {all: 1}
   - id: mark_of_the_wild
     name: All stats
@@ -371,7 +419,7 @@ families:
     value: {all: 3}
   - id: arcane_intellect
     name: Intellect
-    status: assumed
+    status: reported
     value: {mana: 3, healer: 2}
   - id: blessings
     name: Blessings

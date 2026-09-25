@@ -46,7 +46,7 @@ Schedules (owner): WHEN a raid runs. Each raid has schedules (ids in the effecti
   the sheet advertises size × this) | slots | lockout | signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before
   | fill_ask_hours | nudge | autofill | open_dm | split_policy — a cadence setting given value "inherit" goes back to the raid's.
   schedule_remove: target=<raid id>, field=<schedule id> (removing `default` clears the raid's weekly slots).
-Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.g. fortitude|blood_pact|windfury_totem|sanctity_aura>,
+Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.g. fortitude|blood_pact|windfury_totem|devotion_aura>,
     field=<scope (party|raid)|family (a family id or another buff's id: "X and Y don't stack" = set the weaker one's family to the other's id; 'own' = stands alone)|strength (number, 1 = full)|status (confirmed|reported|assumed)|note>, value.
   family_set (owner): who benefits from a stacking family and how much. target=<family id, e.g. fortitude|arcane_intellect|stamina (new ids are created)>,
     field=<name|status|note|value (whole map: "all: 3, mana: 2")|value:<all|physical|spell|mana|melee|ranged|healer|tank|spec:Name> (one entry; 0 removes it)>, value.

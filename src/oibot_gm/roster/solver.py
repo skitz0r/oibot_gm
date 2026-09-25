@@ -84,6 +84,7 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
     _selection_terms(s, roster_bonus)
     _preference_terms(s)
     _synergy_terms(s)
+    _raid_cover_terms(s)
     _add_symmetry_break(s)
     _balance_terms(s)
     solver, status = _run(s)
@@ -317,6 +318,28 @@ def _preference_terms(s: _Model) -> None:
             s.terms.append(opts.prefer_weight * SCALE * s.y[name, g1 - 1])
     for n in s.o:
         s.terms.append(-opts.offspec_penalty * SCALE * s.o[n])
+
+
+def _raid_cover_terms(s: _Model) -> None:
+    """Raid-wide cast buffs (Fortitude, Mark, Intellect, Blessings…): a roster earns each one's value for up to `wanted`
+    providers it seats. Party synergy alone can't see them — they reach everyone wherever the caster stands — so
+    without this a class with strong party buffs could push every priest to the bench and leave the raid without
+    Fortitude. Value per provider = the buff's mean benefit over the pool × the roster's seats ÷ providers wanted."""
+    for b in s.profile.raid_buffs():
+        provs = [p.signup_name for p in s.players if b.provided_by(s.specs[p.signup_name])
+                 or (p.signup_name in s.off_specs and b.provided_by(s.off_specs[p.signup_name]))]
+        if not provs:
+            continue
+        wanted = b.wanted or (len(b.choices) if b.choices else 1)
+        mean = sum(b.benefit(s.specs[p.signup_name]) for p in s.players) / len(s.players)
+        unit = int(round(mean * s.target / wanted * SCALE))
+        if unit <= 0:
+            continue
+        for r in range(s.rosters):
+            n = s.m.NewIntVar(0, wanted, f"cover_{b.id}_{r}")
+            s.m.Add(n <= sum(s.xr[name, r] for name in provs))
+            s.synergy_terms.append(unit * n)
+            s.roster_syn[r].append(unit * n)
 
 
 def _synergy_terms(s: _Model) -> None:

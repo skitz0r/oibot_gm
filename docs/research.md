@@ -49,6 +49,32 @@ The cards print each entry's `status` (confirmed / reported / assumed) so office
 
 ---
 
+### 1b. Auras vetted against foreverchanges.pro (2026-09-23)
+
+foreverchanges.pro is a fan site that publishes the Forever beta client's own tooltips (build 1.60.1.69913, read from
+the client's data tables and cited per entry) beside Classic Era's (1.15.9). Its class pages embed 965 structured
+talent/spell records (Forever text, Classic text, change kind, evidence = client_data); robots.txt allows the class
+pages and `/changes`, disallows `/spell/` and `/api/`. Tooltips are datamined, not tested in game: cross-class
+stacking is only known where a tooltip says so, and pet spells (Blood Pact) are absent. What it changed in
+`profiles/forever/buffs.yaml` (status assumed → reported unless noted):
+- **Removed:** Sanctity Aura (not in the Retribution tree), Tranquil Air Totem (absent from the shaman spellbook).
+- **One family:** Leader of the Pack and Moonkin Aura — both "+3% critical strike chance" (all crit), each "exclusive
+  with" the other.
+- **Weaker:** Battle Shout 139 AP (232), Strength of Earth 53 (77), Windfury Totem 246 AP (315; a Windfury Weapon
+  main hand cancels the shaman's own benefit), Mana Tide 88 (170), Blessing of Might 133 (185).
+- **Stronger:** Grace of Air 89 (77), Blessing of Wisdom 40 (33), Mark of the Wild 385 armor / +16 / +27 (the old
+  improved values; the talent is gone). Totems last 5 min at 30 yd.
+- **Raid-wide:** Prayer of Fortitude / Spirit / Shadow Protection, Arcane Brilliance, Gift of the Wild ("all party and
+  raid members"), and the resistance totems and paladin resistance auras. Fire Resistance Totem moved to raid scope;
+  the others are left out as encounter-specific.
+- **Added:** Flametongue Totem (the party fire totem now), Devotion Aura (the paladin party aura with Sanctity gone).
+- **Talents removed:** Improved Battle Shout, Improved Power Word: Fortitude, Improved Mark of the Wild, Improved
+  Blessing of Might/Wisdom, Blessing of Sanctuary, Improved Vampiric Embrace; Improved Imp no longer boosts Blood Pact.
+
+The vetting also exposed a solver gap, fixed in the same change: raid-wide buffs only discounted party buffs, so a
+pool rich in party-buff classes could bench every priest. `solver._raid_cover_terms` now values each raid buff's
+first `wanted` providers per roster.
+
 ## 2. letmelcthatforyou (prior art)
 
 [github.com/rashad-malik/letmelcthatforyou](https://github.com/rashad-malik/letmelcthatforyou): MIT, 1 author, 4★, last commit 2026-08-10 (v2.6.0-beta).

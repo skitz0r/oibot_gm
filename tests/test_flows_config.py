@@ -271,15 +271,16 @@ def test_raid_config_is_owner_only(reg, store):
 def test_aura_benefit_edit_keeps_the_familys_other_beneficiaries(reg, store, owner):
     h = Harness(reg)
     before = dict(reg.profile.families["windfury_totem"].value)
+    melee = f"Melee {before['melee']:g}"  # from the profile, so a vetted value change doesn't break the test
 
     async def go():
         await FLOWS["aura"](h.command(), reg)
         await h.pick("Pick a buff", "windfury_totem")
         await h.pick("What to change", "benefits")
-        assert "Melee 10" in h.text and "Feral 4" in h.text
+        assert melee in h.text and "Feral 4" in h.text
         await h.pick("Pick who", "mana")
         await h.pick("How many points", "2")
-        assert "Mana users" in h.text and "Melee 10" in h.text  # the confirm shows the whole map it will leave
+        assert "Mana users" in h.text and melee in h.text  # the confirm shows the whole map it will leave
         await h.press("Confirm")
         await h.pick("What to change", "benefits")
         await h.pick("Pick who", "__spec")

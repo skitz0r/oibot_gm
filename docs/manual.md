@@ -243,8 +243,8 @@ owner records it here and the solver, the cards and the roster board follow. Eac
 (party or raid), a **stacking family**, a **strength** and a status; each family says which buffs don't
 stack (the strongest present one counts) and **who benefits** from it, as points per role, damage type,
 mana user, or a specific spec. Examples: put Blood Pact into Fortitude's family if they turn out not to
-stack; set Sanctity Aura to raid if it reaches the whole raid; set "only mana users" on Intellect. Plain
-text works too ("fortitude and blood pact don't stack", "sanctity aura is raid-wide", "hunters don't
+stack; set Devotion Aura to raid if it turns out to reach the whole raid; set "only mana users" on Intellect. Plain
+text works too ("fortitude and blood pact don't stack", "devotion aura is raid-wide", "hunters don't
 benefit from blood pact"), as does `/gm config aura` (pick the buff, then what to change; *Who benefits* changes one beneficiary at a
 time and leaves the rest of the family's map alone). Amber on the page marks a guild override; *Reset*
 returns to the game defaults.
