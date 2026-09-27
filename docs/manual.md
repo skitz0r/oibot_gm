@@ -49,7 +49,14 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 
 ## 2a. The website
 
-**https://gm.earlyandoften.gg** — log in with Discord. Everything below can also be done there:
+**https://gm.earlyandoften.gg** — the homepage (for visitors who aren't logged in) shows the guild's name and
+Discord icon, a one-line intro, the owner's *about* paragraph, **Join our Discord** when the owner has set an
+invite (no invite, no button) and **Log in with Discord** for members. Anyone can join the Discord server;
+new raiders apply there with `/apply` (there is no application form on the website). Someone who logs in
+with a Discord account that isn't in the server yet gets a short page saying so, with the Join button and a
+log-out link, instead of an error; after joining they log in again. A logged-in member goes straight to **Me**.
+
+Log in with Discord. Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
 your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Ops** (the bot's log) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
@@ -327,6 +334,24 @@ raid) and removes them. In plain text: `schedule_set` (e.g. "add an alt run on S
 bounds: *Group make-up* in `/gm config raid` ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
 plain text (same for healers and dps).
 
+**Recruitment** (site: the Config page's **Recruitment** section; the owner presses **Edit recruitment**,
+officers read). Applications happen in Discord; this section sets what they ask and who needs one:
+- **Applications open** (a switch; closed = `/apply` and the Apply button explain that instead of the form) and
+  the **recruitment note**, one line on the Apply screen (up to 200 characters, e.g. "looking for healers").
+- **Discord invite**, the homepage's Join button. Paste one (`https://discord.gg/…`) or pick a channel and press
+  **Create invite**: the bot makes a permanent, unlimited-use invite there and fills the field (it needs the
+  *Create Invite* permission in that channel and says so if it lacks it). Clear the field to hide the button.
+- **Member roles**: people with these Discord roles register without applying (existing members who haven't
+  registered yet); officers always can.
+- **Application questions**: an ordered list, up to 15 (Discord's forms ask five per page). Each has a short
+  label (Discord allows 45 characters; a counter shows how many are used), an optional hint (100) and a
+  *required* switch; ↑/↓ reorder, the bin removes, **Add question** adds. An application keeps the questions
+  as they were asked, so later edits don't reword old answers.
+
+Nothing is written until **Save recruitment**; if any part is refused (a label over 45 characters, a link
+that isn't a Discord invite, the same question twice), the reason shows in the section and nothing changes.
+The same settings are in `/gm config recruitment` and in the MCP tools (§8b).
+
 **News.** `/gm config news-channel` (or the Config page's *News* picker, or "set the news channel to #news" in
 plain text) is where the Wowhead webhook posts; *News keywords* on the Config page (or `news_keywords` in plain
 text) adds words that make a post relevant besides the game version's names and raid names. The review and apply
@@ -483,6 +508,8 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened) |
 | `save_characters` · `set_member` · `set_dm` | character table rows · rank / confirm / main · DMs on or off |
 | `set_channel` · `set_config` | a bot channel by name · timezone, ask audience, about, officer roles |
+| `recruitment` · `set_recruitment` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list) |
+| `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed / run / answer / clear, as `/gm test` |
 | `plain_change` | text → the config ops it means, with current → new; applied only with `apply=true` |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with guild overrides marked |

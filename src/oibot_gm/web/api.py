@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, raid_views as dr, raidcycle as rc, render
-from ..registry import MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
+from ..registry import MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 
 HERE = Path(__file__).parent
@@ -86,6 +86,46 @@ def need_owner(v) -> None:
 
 
 log = logging.getLogger(__name__)
+
+
+def public_info(bot, reg) -> dict:
+    """What anyone may see (the homepage, the not-a-member page, GET /api/public): the guild's name, its public blurb,
+    the Discord invite and whether applications are open, plus the server's icon. Nothing personal, no member names."""
+    if reg is None:
+        return {"name": "oibot_GM", "about": None, "invite_url": None, "recruiting": False, "icon": None}
+    cfg = reg.config
+    guild = bot.get_guild(cfg.discord_guild_id)
+    icon = getattr(guild, "icon", None) if guild is not None else None
+    return {"name": cfg.name, "about": cfg.about or None, "invite_url": cfg.invite_url or None, "recruiting": bool(cfg.recruitment.open),
+            "icon": str(icon.with_size(128).url) if icon is not None and hasattr(icon, "with_size") else None}
+
+
+def schedule_choice_label(reg, key: str) -> str:
+    """An applicant's '<raid id>:<schedule id>' as words: 'Barrow Deeps · Tuesdays and Thursdays 7:30 PM'."""
+    rid, _, sid = str(key).partition(":")
+    if rid not in reg.profile.raids:
+        return key
+    name = reg.raid_def(rid).get("name", rid)
+    sc = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
+    if sc is None:
+        return name
+    title = sc.get("name") if sid != "default" and sc.get("name") else None
+    return f"{name} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
+
+
+def recruitment_json(reg) -> dict:
+    cfg = reg.config
+    return {"open": cfg.recruitment.open, "note": cfg.recruitment.note or "", "invite_url": cfg.invite_url or "",
+            "questions": [q.model_dump() for q in cfg.recruitment.questions], "member_role_ids": [str(r) for r in cfg.member_role_ids],
+            "questions_max": QUESTIONS_MAX}
+
+
+def application_json(reg, a) -> dict:
+    return {"uid": str(a.discord_id), "display_name": a.display_name, "label": a.label, "cls": a.cls, "spec": a.spec, "offspec": a.offspec,
+            "schedules": [schedule_choice_label(reg, s) for s in a.schedules], "answers": list(a.answers), "availability": a.availability,
+            "about": a.about, "logs_url": a.logs_url, "source": a.source, "status": a.status,
+            "created": reg.local12(a.created_at), "decided": reg.local12(a.decided_at) if a.decided_at else None,
+            "decided_by": a.decided_by, "note": a.decision_note}
 
 
 def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
@@ -1288,6 +1328,89 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return JSONResponse({"error": str(e).splitlines()[0]}, status_code=400)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
         return {"message": msg, **plain_json(v.reg), "owner": True}
+
+    # ---- recruitment (design §5.28): the homepage's public facts, the owner's settings, the officers' applications
+    @app.get("/api/public")
+    async def public(request: Request):
+        """Anonymous: the guild's name, blurb, invite and whether it is recruiting. Nothing personal."""
+        return public_info(bot, next(iter(bot.registries.by_discord.values()), None))
+
+    def guild_role_refs(reg) -> list[dict]:
+        guild = bot.get_guild(reg.config.discord_guild_id)
+        return [{"id": str(r.id), "name": r.name} for r in sorted(guild.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if guild else []
+
+    @app.get("/api/recruitment")
+    async def recruitment_get(request: Request):
+        v = await who(request, officer=True)
+        return {**recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": v.owner}
+
+    @app.post("/api/admin/recruitment")
+    async def recruitment_set(request: Request):
+        """Owner: any of {open, note, questions: [{id?, label, hint, required}], invite_url, member_role_ids} in one
+        validated write (Registry.set_recruitment); a refusal names the part and nothing is saved."""
+        v, d = await body(request, officer=True)
+        need_owner(v)
+        kw: dict = {}
+        if "open" in d:
+            kw["open"] = bool(d["open"])
+        for k in ("note", "invite_url"):
+            if k in d:
+                kw[k] = str(d[k] or "")
+        if "questions" in d:
+            if not isinstance(d["questions"], list) or not all(isinstance(q, dict) for q in d["questions"]):
+                return JSONResponse({"error": "questions must be a list of {label, hint, required}"}, status_code=400)
+            kw["questions"] = d["questions"]
+        if "member_role_ids" in d:
+            kw["member_role_ids"] = [as_int(r, "role id") for r in (d["member_role_ids"] or []) if str(r).strip()]
+        try:
+            msg = await asyncio.to_thread(v.reg.set_recruitment, v.name, **kw)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        return {"message": msg, **recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": True}
+
+    @app.get("/api/applications")
+    async def applications(request: Request):
+        """Officers: the open applications (oldest first) and the last 20 decided (newest first)."""
+        v = await who(request, officer=True)
+        reg = v.reg
+        decided = sorted([a for a in reg.applicants.values() if a.status != "open"], key=lambda a: a.decided_at or a.created_at, reverse=True)[:20]
+        return {"open": [application_json(reg, a) for a in reg.open_applicants()], "decided": [application_json(reg, a) for a in decided],
+                "recruiting": reg.config.recruitment.open}
+
+    @app.post("/api/admin/application/decide")
+    async def application_decide(request: Request):
+        """Officers: {uid, accept, note} → the bot's decide_application (the same verdict as the Discord card: the
+        applicant is DMed, the card updated, a character added on accept). Answers with the verdict line."""
+        v, d = await body(request, officer=True)
+        uid = as_int(d.get("uid"), "uid")
+        if "accept" not in d:
+            return JSONResponse({"error": "accept: true or false"}, status_code=400)
+        note = str(d.get("note") or "").strip() or None
+        a = v.reg.applicants.get(uid)
+        if not a or a.status != "open":
+            return JSONResponse({"error": "No open application for that member."}, status_code=400)
+        try:
+            line = await maybe_await(bot.decide_application(v.reg, uid, bool(d["accept"]), v.name, note))
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        line = str(line or f"application from {a.display_name} {'accepted' if d['accept'] else 'declined'}")
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        return {"message": line}
+
+    @app.post("/api/admin/invite")
+    async def create_invite(request: Request):
+        """Owner: {channel_id} → a permanent, unlimited-use invite to that channel. Returned, not saved: the Config page
+        puts it in the invite field and the owner saves the section."""
+        v, d = await body(request, officer=True)
+        need_owner(v)
+        cid = as_int(str(d.get("channel_id") or "").strip("<#>"), "channel id")
+        try:
+            url = await maybe_await(bot.create_invite(v.reg, cid))
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: created invite {url}")
+        return {"invite_url": url, "message": f"invite created: {url} (save the section to use it)"}
 
     @app.post("/api/ops/change")
     async def ops_change(request: Request):

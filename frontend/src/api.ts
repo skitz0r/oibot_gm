@@ -102,6 +102,11 @@ export interface AbsenceCleared { message: string; lines: string[] }
 export interface Ops { head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
 /** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
 export interface RoleRef { id: string; name: string }
+/** GET /api/public (anonymous): what the homepage and the not-a-member screen show. */
+export interface PublicInfo { name: string; about: string | null; invite_url: string | null; recruiting: boolean; icon: string | null }
+export interface Question { id?: string; label: string; hint: string | null; required: boolean }
+/** GET /api/recruitment (officers); the owner saves the same shape to /api/admin/recruitment. */
+export interface Recruitment { open: boolean; note: string; invite_url: string; questions: Question[]; member_role_ids: string[]; questions_max: number; guild_roles: RoleRef[]; owner: boolean }
 export interface Config { yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }> }
 /** The news review (design §5.26): the local jobs as the monitor sees them. Times arrive as 12-hour labels from the server. */
 export interface LaunchdState { loaded: boolean; state: string | null; pid: number | null; last_exit: string | null }
