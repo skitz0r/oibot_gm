@@ -812,7 +812,7 @@ class Registry:
         if not self.config.recruitment.open:
             raise RegistryError(f"{self.config.name} isn't taking applications right now.")
         if discord_id in self.members and self.members[discord_id].active():
-            raise RegistryError("You're already a member; use /register or /char add for more characters.")
+            raise RegistryError("You're already a member; use /register or /me char add for more characters.")
         name = self.normalise_name(name)
         surname = self.normalise_name(surname) if surname else None
         if cls not in self.profile.classes:

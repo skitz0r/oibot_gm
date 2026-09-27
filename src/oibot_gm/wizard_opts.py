@@ -65,3 +65,29 @@ def ranks(*, current: str | None = None) -> list[Opt]:
 
 def rosters(reg: Registry, *, current: str | None = None) -> list[Opt]:
     return [Opt(k, (reg.config.roster(k) or {}).get("name") or k, default=k == current) for k in reg.config.roster_keys()][:MAX_OPTIONS]
+
+
+def schedules(reg: Registry, *, current: list[str] | None = None) -> list[Opt]:
+    """The guild's active, non-pickup schedules across raids ('Barrow Deeps · Tuesdays and Thursdays 7:30 PM'), for an
+    applicant to say which they can make. Value = '<raid id>:<schedule id>' (what Applicant.schedules stores)."""
+    picked = set(current or [])
+    out = []
+    for rid in reg.profile.raids:
+        name = reg.raid_def(rid).get("name", rid)
+        for s in reg.schedules(rid):
+            if s["kind"] == "pickup" or not s.get("active", True):
+                continue
+            key = f"{rid}:{s['id']}"
+            out.append(Opt(key, f"{name} · {reg.schedule_label(rid, s)}", s.get("name") or None, default=key in picked))
+    return out[:MAX_OPTIONS]
+
+
+def schedule_names(reg: Registry, keys: list[str]) -> list[str]:
+    """Stored '<raid id>:<schedule id>' keys as a person reads them; a schedule removed since shows as its raid and id."""
+    out = []
+    for key in keys:
+        rid, _, sid = str(key).partition(":")
+        s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
+        name = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else rid
+        out.append(f"{name} · {reg.schedule_label(rid, s)}" if s else f"{name} · {sid} (no longer scheduled)")
+    return out

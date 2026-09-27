@@ -382,7 +382,7 @@ def lint(obj: discord.ui.View | discord.ui.Modal) -> list[str]:
         if isinstance(cid, str) and len(cid) > 100:
             errs.append(f"custom_id over 100: {cid!r}")
     if not is_modal:
-        selects = sum(1 for it in kids if isinstance(it, discord.ui.Select | discord.ui.UserSelect))
+        selects = sum(1 for it in kids if isinstance(it, discord.ui.Select | discord.ui.UserSelect | discord.ui.RoleSelect | discord.ui.ChannelSelect | discord.ui.MentionableSelect))
         buttons = sum(1 for it in kids if isinstance(it, discord.ui.Button))
         if selects + -(-buttons // 5) > 5:
             errs.append(f"view needs {selects + -(-buttons // 5)} rows (max 5)")

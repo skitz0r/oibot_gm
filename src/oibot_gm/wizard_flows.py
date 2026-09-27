@@ -3,6 +3,7 @@ from . import flows_absence  # noqa: F401
 from . import flows_config  # noqa: F401
 from . import flows_misc  # noqa: F401
 from . import flows_raid  # noqa: F401
+from . import flows_recruit  # noqa: F401
 from . import flows_register  # noqa: F401
 from . import flows_roster  # noqa: F401
 from .wizard import FLOWS  # noqa: F401

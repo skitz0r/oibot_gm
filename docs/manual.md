@@ -21,8 +21,9 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 
 ## 2. Channels
 
-- **#register (registration channel)** — read-only; the pinned card has three buttons: *Register / plan my
-  main*, *Add an alt*, *My status*. Anyone can press them.
+- **#register (registration channel)** — read-only; the pinned card has four buttons: *Apply to join*
+  (newcomers start here), *Register / plan my main*, *Add an alt*, *My status*. Anyone can press them. The card
+  says when applications are closed and shows the recruitment note; the bot edits it in place when those change.
 - **Signup channel** — one sheet per run. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
   call me if you need me). The sheet is a card: raid emblem, date and countdown, joined count and role counts,
   joiners grouped by class with real class/spec/role icons, Bench and No thanks as member rows, lock and confirm
@@ -41,7 +42,8 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   text by @mentioning the bot. The character bank is the **Members** page; building groups is the **Rosters** board.
 - **Ops channel (officers)** — every action the bot takes, one line each; errors also DM the owner. The same
   lines go to a rotating log file on the host (`out/oibot.log`).
-- **Applications channel** — review cards for `/apply` with Accept / Decline buttons.
+- **Applications channel** — one review card per application (§3a) with Accept / Decline… buttons (they keep
+  working after a bot restart).
 - **News channel** — a Wowhead webhook posts game news there. The bot reads only the post itself (title and
   summary, never the linked article) and keeps the items about our game version, our raids, or the extra news
   keywords on the Config page. A daily review compares them with what the bot believes about the game; a
@@ -58,6 +60,12 @@ on the sheet in Discord.
 
 ## 3. Members: registering and keeping your record current
 
+- **New here? Apply first.** Anyone can join the Discord server with the public invite; joining the guild is an
+  application, made in Discord (§3a). Someone with nothing registered who presses *Register / plan my main* or
+  *Add an alt*, or runs `/register`, `/me plan main|alt` or `/me char add`, is sent to the application with one line:
+  *"New here? Apply first — the officers take it from there."* Plain text ("add my alt …") says the same and points
+  to `/apply`. Officers, and anyone holding one of the guild's **member roles** (set by the owner, §8), register
+  directly; anyone already registered is never affected and keeps adding alts as below.
 - **Register / plan a main**: press *Register / plan my main* in #register (class → spec → optional
   offspec → first and last name; Forever characters have two-word names; leave them blank until the
   character exists) or use `/register` / `/me plan main`. Each opens the same picker (class → spec → offspec →
@@ -71,8 +79,7 @@ on the sheet in Discord.
 - **Name a planned character at launch**: `/me char name`: pick the planned character (skipped when there is
   only one), then type first and last name.
 - `/me char spec|main|retire` take no arguments: pick the character from your own list. Spec choices are always
-  that character's class, and retire asks you to confirm. `/apply` opens the same class/spec picker, then a form
-  for name, logs, when you can raid and anything else.
+  that character's class, and retire asks you to confirm. `/apply` is the application (§3a).
 - **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` (or the per-character
   flex toggles on the website) adds roles you'd play beyond that.
 - **Absences**: `/me absent list` shows yours with a **Clear** button on each; `/me absent clear` does the same.
@@ -90,6 +97,36 @@ on the sheet in Discord.
   your **Apply** — only you (or an officer) can press it. Plain text only ever changes *your own* record: a
   request about someone else is refused with who can do it, and the rest of what you asked still applies.
   Ranks are officers' (see §8c for who may do what, and where).
+
+## 3a. Applying to join
+
+Press **Apply to join** on the registration card, or run `/apply` (also in a DM with the bot). It is one private
+message that moves forward screen by screen; nothing is sent until you press **Submit**, and closing it changes
+nothing.
+
+1. **Class, main spec and an optional offspec** — the same picker as registering. The guild's recruitment note (e.g.
+   "Looking for healers") is shown here.
+2. **Your character's first and last name** (2–12 letters each) and an optional logs or armory link. If the guild
+   has no questions of its own, this form also has an optional *Anything else?* box.
+3. **The raid schedules you can make** — pick every one that fits (or none) from the guild's active schedules, e.g.
+   "Barrow Deeps · Tuesdays and Thursdays 7:30 PM". Skipped when the guild has no schedules yet.
+4. **The officers' questions** — the guild's own list (the owner edits it, §8), five per form. With more than five,
+   a *Next questions (2 of 3)* button leads to the next form. Required questions must be answered; each answer
+   holds up to 1000 characters. A refused answer says what is missing and **Fix this** reopens that form with
+   everything you typed kept.
+5. **Review** — every answer on one screen (long ones shortened for the screen only). *Change a step* goes back to
+   any step and returns here; **Submit** sends it; **Cancel** drops it.
+
+When applications are closed, `/apply` and the button say so instead of opening. You can have one open application
+at a time; *My status* on the card tells you it is waiting.
+
+**Officers** get a review card in the applications channel: the full character name, class and spec icons, the logs
+link, the schedules the applicant can make in words, and every answer as its own line. A very long application is
+shortened on the card with "…" (with a link to the full answers on the site when the site is set up).
+**Accept** registers the character as the applicant's main, rank trial, already confirmed; **Decline…** takes an
+optional note. Either way the applicant gets a DM, the card updates to show the decision, and the ops channel logs
+it. The same decision is on `/roster applicant` and the site, through the same code. A declined applicant is never
+removed from the Discord server; they can stay and apply again later.
 
 ## 4. Raids, runs and the signup cycle
 
@@ -265,7 +302,7 @@ returns to the game defaults.
 - Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`. They take at most a member
   (Discord's own picker); the character, rank or roster is picked from a list and confirmed before anything saves.
   `/roster confirm` alone walks the unconfirmed characters.
-- Applications: `/roster applicants`, `/roster applicant`, or the buttons on the review card.
+- Applications: `/roster applicants`, `/roster applicant`, or the Accept / Decline… buttons on the review card (§3a).
 - Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|end` (officers) and `/raid out` (anyone).
   They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
   and answer, then asks which character. `/raid cancel` asks for an optional reason in a box.
@@ -327,6 +364,18 @@ raid) and removes them. In plain text: `schedule_set` (e.g. "add an alt run on S
 bounds: *Group make-up* in `/gm config raid` ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
 plain text (same for healers and dps).
 
+**Recruitment.** `/gm config recruitment` opens one screen with the whole draft: applications **open or closed**, the
+**note** shown on the Apply screen and the registration card (one line, up to 200 characters; empty clears it), the
+guild's **questions** (up to 15, each a question of at most 45 characters, an optional hint of at most 100 shown under
+it, and required or optional — *Add a question…*, or pick one to *Edit…*, *Move up*, *Move down* or *Remove*), the
+**member roles** (Discord's role picker; anyone holding one registers without applying, e.g. members who joined
+before the bot) and the public **invite link** (https://discord.gg/…, what the website's Join button opens). A
+question that breaks a rule is refused the moment you add it, with your text kept. Nothing is saved until **Save**,
+which writes every change at once (a bad invite link is refused there, draft kept) and updates the registration
+card. In plain text (`recruit`): "close applications", "set the recruitment note to Looking for healers", "add a
+required question: Why do you want to join us?", "remove question 2", "set the invite link to https://discord.gg/abc123".
+Recruitment is in the **Setup** group of §8c (owner by default).
+
 **News.** `/gm config news-channel` (or the Config page's *News* picker, or "set the news channel to #news" in
 plain text) is where the Wowhead webhook posts; *News keywords* on the Config page (or `news_keywords` in plain
 text) adds words that make a post relevant besides the game version's names and raid names. The review and apply
@@ -378,6 +427,9 @@ of their characters.
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
   raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "Marrow is back, clear her absence" (by start
   date when she has several); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
+- *Recruitment (owner):* "close applications", "open applications", "set the recruitment note to Looking for
+  healers", "add a required question: Why us? — hint: a line or two is plenty", "remove the question Why us?" (or
+  by number), "set the invite link to https://discord.gg/abc123" (op `recruit`).
 - *Test bench:* "seed 20 test members", "open a test Barrow Deeps run" (`/gm test run` preselects the Standard
   tempo: starts in 40 min, nudge 32, lock 25, confirm 15 min before; Quick is 20/16/12/8 and Slow 90/70/55/35), "clear the test bench".
 - Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
@@ -400,7 +452,7 @@ The owner can always do everything, anywhere the bot listens.
 | Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, seats on a run, `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight" |
 | Comp & policy — comp targets and group layout, pins, appending a rule to the loot or comp policy | officers | "we want 3–4 healers in Barrow Deeps", "pin Jonny in tonight" |
 | Raids & auras — raid schedules and settings, buff and family facts | the owner | "Barrow Deeps runs Tue and Thu 7:30 pm" |
-| Guild setup — channels, officer roles, timezone, who may ask, the about text | the owner | "post raid sheets in #signups" |
+| Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite) | the owner | "post raid sheets in #signups" |
 | Test bench | officers | "seed 20 puppets", "clear the test bench" |
 
 **Who** — per group, any mix of *everyone*, *registered members* (an active character), *officers*, *owner only*,

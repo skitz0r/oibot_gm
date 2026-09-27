@@ -81,10 +81,12 @@ def char_line(ico, c) -> str:
     return f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · _{', '.join(flags)}_"
 
 
-class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(?P<action>register|alt|status)"):
-    """Persistent registration card: Register/Plan main → class → spec/offspec → roles → name (optional)."""
+class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(?P<action>register|alt|status|apply)"):
+    """Persistent registration card: Apply to join (newcomers) · Register/Plan main → class → spec/offspec → name
+    (optional) · Add an alt · My status. A newcomer pressing Register is sent to the application (flows_register)."""
 
-    LABELS = {"register": ("Register / plan my main", discord.ButtonStyle.success), "alt": ("Add an alt", discord.ButtonStyle.secondary), "status": ("My status", discord.ButtonStyle.secondary)}
+    LABELS = {"apply": ("Apply to join", discord.ButtonStyle.primary), "register": ("Register / plan my main", discord.ButtonStyle.success),
+              "alt": ("Add an alt", discord.ButtonStyle.secondary), "status": ("My status", discord.ButtonStyle.secondary)}
 
     def __init__(self, action: str):
         label, style = self.LABELS[action]
@@ -104,7 +106,10 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
         if self.action == "status":
             m = reg.members.get(interaction.user.id)
             if not m or not m.active():
-                await interaction.response.send_message("Nothing registered yet — press **Register / plan my main**.", ephemeral=True)
+                a = reg.applicants.get(interaction.user.id)
+                text = (f"Your application for **{a.label}** is waiting for an officer." if a and a.status == "open"
+                        else "Nothing registered yet — new here? press **Apply to join**; members press **Register / plan my main**.")
+                await interaction.response.send_message(text, ephemeral=True)
                 return
             primary, flex = reg.roles_of(m)
             lines = [char_line(bot.ico, c) for c in m.active()]
@@ -114,66 +119,144 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
                 lines.append("Rosters: " + ", ".join(rosters))
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
+        if self.action == "apply":
+            await FLOWS["register"](interaction, reg, mode="apply")
+            return
         await FLOWS["register"](interaction, reg, slot="main" if self.action == "register" else "alt")
 
 
 def registration_card(reg: Registry) -> discord.Embed:
-    e = discord.Embed(title=f"{reg.config.name} · character registration", colour=TEAL,
-                      description="**Register / plan my main** — class, spec, optional offspec, and the name if the character exists (leave it blank before launch; your role follows the spec).\n"
+    rec = reg.config.recruitment
+    apply = ("**Apply to join** — new here? Start here: class and spec, your character's name, the raid schedules you can make"
+             + (" and a few questions from the officers" if rec.questions else "") + ". An officer reviews it and you get a DM either way."
+             if rec.open else f"**Apply to join** — {reg.config.name} isn't taking applications right now.")
+    if rec.open and rec.note:
+        apply += f"\n> {rec.note}"
+    e = discord.Embed(title=f"{reg.config.name} · join and register", colour=TEAL,
+                      description=f"{apply}\n\n"
+                                  "**Members:**\n**Register / plan my main** — class, spec, optional offspec, and the name if the character exists (leave it blank before launch; your role follows the spec).\n"
                                   "**Add an alt** — same flow for an alt.\n**My status** — what the bot has for you.\n\n"
-                                  "Keyboard route: `/me plan …`, `/me char …`, `/me view`. Away for a while? `/me absent add` or the card in the absences channel.")
-    e.set_footer(text="Your Discord account is your identity; character names can be added later with /me char name.")
+                                  "Keyboard route: `/apply`, `/me plan …`, `/me char …`, `/me view`. Away for a while? `/me absent add` or the card in the absences channel.")
+    e.set_footer(text="Your Discord account is your identity. Newcomers apply first; members register and add alts.")
     return e
 
 
 def registration_view() -> discord.ui.View:
     v = discord.ui.View(timeout=None)
-    for a in ("register", "alt", "status"):
+    for a in ("apply", "register", "alt", "status"):
         v.add_item(RegisterButton(a))
     return v
 
 
-# ---------------- /apply (recruitment intake): module level so the apply wizard can post the same card
+# ---------------- applications: the officers' review card and the ONE decide path (buttons, /roster applicant, web, MCP)
+EMBED_TOTAL, FIELD_VALUE_MAX, FIELDS_MAX = 6000, 1024, 25  # Discord's embed limits
+
+
+def _clip(text: str, n: int) -> str:
+    text = str(text or "")
+    return text if len(text) <= n else text[:max(0, n - 1)].rstrip() + "…"
+
+
+def _site_link(path: str) -> str | None:
+    import os
+
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    return f"{web}{path}" if web.startswith("https") else None
+
+
 def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
+    """The review card: full name, class/spec icons, logs, the schedules they can make (in words) and every answer as a
+    field. Within Discord's limits (25 fields, 1024 per value, 6000 in all): long answers share what is left, each cut
+    with '…', and a link to the site's full answers is added only when there is a site to link to."""
+    from .wizard_opts import schedule_names
+
     ico = ico or (lambda kind, key: "")
-    e = discord.Embed(title=f"Application · {a.name}", colour=TEAL, description=f"{ico('class', a.cls)} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''} · from **{a.display_name}** (<@{a.discord_id}>)")
+    title = _clip(f"Application · {a.label}", 256)
+    desc = (f"{ico('class', a.cls)}{ico('spec', f'{a.cls}:{a.spec}')} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''}"
+            f" · from **{a.display_name}** (<@{a.discord_id}>)")
+    footer = f"status: {a.status}" + (f" · {a.decided_by}: {a.decision_note or ''}" if a.decided_by else " · officers: Accept / Decline below, or /roster applicant")
+    fixed: list[tuple[str, str]] = []
     if a.logs_url:
-        e.add_field(name="Logs", value=a.logs_url[:200], inline=False)
-    if a.availability:  # the applicant's free-text raid times (Applicant field, not a member setting)
-        e.add_field(name="When they can raid", value=a.availability[:300], inline=False)
+        fixed.append(("Logs", _clip(a.logs_url, 300)))
+    if a.schedules:
+        fixed.append(("Can raid", _clip("\n".join(schedule_names(reg, a.schedules)), FIELD_VALUE_MAX)))
+    if a.availability:  # older applications: free-text raid times
+        fixed.append(("When they can raid", _clip(a.availability, 300)))
+    answers = [(_clip(x.get("label") or "?", 256), str(x.get("answer") or "").strip() or "—") for x in (a.answers or [])]
     if a.about:
-        e.add_field(name="About", value=a.about[:600], inline=False)
-    e.set_footer(text=f"status: {a.status}" + (f" · {a.decided_by}: {a.decision_note or ''}" if a.decided_by else " · officers: Accept / Decline below, or /roster applicant"))
+        answers.append(("Anything else", a.about))
+    link = _site_link("/app/members")
+    room = FIELDS_MAX - len(fixed) - 1  # one field kept for the overflow / full-answers note
+    shown, hidden = answers[:room], answers[room:]
+    note_reserve = 200
+    used = len(title) + len(desc) + len(footer) + sum(len(n) + len(v) for n, v in fixed) + sum(len(n) for n, _ in shown) + note_reserve
+    budget = max(0, EMBED_TOTAL - used)
+    caps: dict[int, int] = {}
+    left = len(shown)
+    for i in sorted(range(len(shown)), key=lambda i: len(shown[i][1])):  # shortest first: short answers stay whole, long ones share the rest
+        cap = min(FIELD_VALUE_MAX, len(shown[i][1]), max(1, budget // max(1, left)))
+        caps[i], budget, left = cap, budget - cap, left - 1
+    cut = bool(hidden)
+    e = discord.Embed(title=title, colour=TEAL, description=desc)
+    for n, v in fixed:
+        e.add_field(name=n, value=v or "—", inline=False)
+    for i, (n, v) in enumerate(shown):
+        cut = cut or len(v) > caps[i]
+        e.add_field(name=n, value=_clip(v, caps[i]) or "…", inline=False)
+    if cut:
+        more = f"{len(hidden)} more answer(s) not shown. " if hidden else ""
+        e.add_field(name="…", value=(f"{more}Full answers on the site: {link}" if link else (more.strip() or "Long answers are shortened here.")), inline=False)
+    e.set_footer(text=footer)
     return e
 
-async def decide_application(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None):
+
+async def settle_application(client, reg: Registry, discord_id: int, accept: bool, by: str, note: str | None) -> str:
+    """Accept or decline an open application — the one path for the card's buttons, /roster applicant, the web and MCP
+    (`OibotGM.decide_application`). Registry decide (accept registers the main as a confirmed trial), DM the applicant,
+    update the review card, one ops line. Returns the verdict line; raises RegistryError when there is nothing to decide.
+    Declining never removes anyone from the server: they keep the invite's access and can apply again later."""
+    a, _char = reg.decide(discord_id, accept, by, note)
+    note = (note or "").strip() or None
+    verdict = f"✅ Accepted {a.display_name} as {a.label} (trial, confirmed)" if accept else f"⛔ Declined {a.display_name} ({a.label})"
     try:
-        a, char = reg.decide(discord_id, accept, interaction.user.display_name, note)
-    except RegistryError as e:
-        await interaction.response.send_message(f"❌ {e}", ephemeral=True) if not interaction.response.is_done() else await interaction.followup.send(f"❌ {e}", ephemeral=True)
-        return
-    verdict = f"✅ Accepted {a.display_name} as {a.name} (trial, confirmed)" if accept else f"⛔ Declined {a.display_name} ({a.name})"
-    if interaction.response.is_done():
-        await interaction.followup.send(verdict, ephemeral=True)
-    else:
-        await interaction.response.send_message(verdict, ephemeral=True)
-    await interaction.client.ops.emit(reg.config, "info", f"{interaction.user.display_name}: {verdict}" + (f" — {note}" if note else ""))
-    try:
-        user = await interaction.client.fetch_user(a.discord_id)
+        user = await client.fetch_user(a.discord_id)
         if accept:
-            await user.send(f"✅ Your application for **{a.name}** to {reg.config.name} was accepted by {interaction.user.display_name}. You're registered as a trial; /me view shows your status." + (f"\n\n{note}" if note else ""))
+            await user.send(f"✅ Your application for **{a.label}** to {reg.config.name} was accepted by {by}. You're registered as a trial; `/me view` shows your status."
+                            + (f"\n\n{note}" if note else ""))
         else:
-            await user.send(f"Your application for **{a.name}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "") + "\n\nYou can apply again later.")
-    except Exception:  # noqa: BLE001
-        pass
+            await user.send(f"Your application for **{a.label}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "")
+                            + "\n\nYou're welcome to stay in the server, and you can apply again later.")
+    except Exception:  # noqa: BLE001 — closed DMs: the officers still see the verdict
+        verdict += " · couldn't DM them (their DMs are closed)"
     ch_id = reg.config.applications_channel_id or reg.config.ops_channel_id
     if a.message_id and ch_id:
-        ch = interaction.client.get_channel(ch_id)
         try:
+            ch = client.get_channel(ch_id)
             msg = await ch.fetch_message(a.message_id)
-            await msg.edit(embed=application_embed(reg, a, getattr(interaction.client, "ico", None)), view=None)
-        except Exception:  # noqa: BLE001
+            await msg.edit(embed=application_embed(reg, a, getattr(client, "ico", None)), view=None)
+        except Exception:  # noqa: BLE001 — the card is a convenience; the decision is saved
             pass
+    ops = getattr(client, "ops", None)
+    if ops is not None:
+        await ops.emit(reg.config, "info", f"{by}: {verdict}" + (f" — {note}" if note else ""))
+    return verdict
+
+
+async def decide_application(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None):
+    """A Discord press or command → the client's decide_application; the verdict comes back ephemerally."""
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True, thinking=True)
+    client = interaction.client
+    try:
+        if hasattr(client, "decide_application"):
+            verdict = await client.decide_application(reg, discord_id, accept, interaction.user.display_name, note)
+        else:
+            verdict = await settle_application(client, reg, discord_id, accept, interaction.user.display_name, note)
+    except RegistryError as e:
+        await interaction.followup.send(f"❌ {e}", ephemeral=True)
+        return
+    await interaction.followup.send(verdict, ephemeral=True)
+
 
 class DeclineModal(discord.ui.Modal, title="Decline application"):
     note = discord.ui.TextInput(label="Note to the applicant (optional)", style=discord.TextStyle.paragraph, required=False, max_length=400)
@@ -185,25 +268,36 @@ class DeclineModal(discord.ui.Modal, title="Decline application"):
     async def on_submit(self, interaction: discord.Interaction):
         await decide_application(interaction, self.reg, self.discord_id, False, str(self.note.value))
 
+
+class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"app:(?P<action>accept|decline):(?P<uid>[0-9]{1,20})"):
+    """Accept / Decline… on a review card; persistent, so a card posted before a restart still works."""
+
+    def __init__(self, action: str, discord_id: int):
+        label, style = ("Accept", discord.ButtonStyle.success) if action == "accept" else ("Decline…", discord.ButtonStyle.secondary)
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"app:{action}:{discord_id}"))
+        self.action, self.discord_id = action, discord_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match, /):
+        return cls(match["action"], int(match["uid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        reg = interaction.client.registries.for_interaction(interaction)
+        if not reg or not is_officer(interaction, reg):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        if self.action == "accept":
+            await decide_application(interaction, reg, self.discord_id, True, None)
+        else:
+            await interaction.response.send_modal(DeclineModal(reg, self.discord_id))
+
+
 class ApplicationView(discord.ui.View):
     def __init__(self, reg: Registry, discord_id: int):
         super().__init__(timeout=None)
         self.reg, self.discord_id = reg, discord_id
-
-    @discord.ui.button(label="Accept", style=discord.ButtonStyle.success)
-    async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if not is_officer(interaction, self.reg):
-            await interaction.response.send_message("Officers only.", ephemeral=True)
-            return
-        await decide_application(interaction, self.reg, self.discord_id, True, None)
-
-    @discord.ui.button(label="Decline…", style=discord.ButtonStyle.secondary)
-    async def decline(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if not is_officer(interaction, self.reg):
-            await interaction.response.send_message("Officers only.", ephemeral=True)
-            return
-        await interaction.response.send_modal(DeclineModal(self.reg, self.discord_id))
-
+        self.add_item(ApplicationButton("accept", discord_id))
+        self.add_item(ApplicationButton("decline", discord_id))
 
 
 async def post_application(client, reg: Registry, a) -> str:
@@ -218,6 +312,21 @@ async def post_application(client, reg: Registry, a) -> str:
     a.message_id = msg.id
     reg.save_applicant(a, f"application card posted for {a.name}")
     return f"posted for review in #{getattr(ch, 'name', 'applications')}"
+
+
+async def refresh_registration_card(client, reg: Registry) -> bool:
+    """Edit the registration card in place after a recruitment change (open/closed, the note) — and give a card posted
+    before the Apply button existed its buttons. False when there is no card or it can't be edited."""
+    ch_id, msg_id = reg.config.registration_channel_id, reg.config.registration_message_id
+    if not ch_id or not msg_id:
+        return False
+    try:
+        ch = client.get_channel(ch_id)
+        msg = await ch.fetch_message(msg_id)
+        await msg.edit(embed=registration_card(reg), view=registration_view())
+        return True
+    except Exception:  # noqa: BLE001 — a deleted card is re-posted with /gm config registration-channel
+        return False
 
 
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
@@ -789,6 +898,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg = await need(interaction)
         if reg:
             await FLOWS["about"](interaction, reg)
+
+    @config.command(name="recruitment", description="Owner: applications open or closed, the note, the guild's questions, member roles, invite")
+    async def cfg_recruitment(interaction: discord.Interaction):
+        reg = await need(interaction)
+        if reg:
+            await FLOWS["recruitment"](interaction, reg)
 
     @config.command(name="timezone", description="Owner: the guild's timezone for every run time, lock and lockout")
     async def cfg_tz(interaction: discord.Interaction):

@@ -19,6 +19,12 @@ Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mentio
   (the "I'll be away" card), news_channel (where the news webhook posts; the bot keeps the relevant items), news_keywords
   (comma list of extra words that make a news item relevant; empty clears), officer_role add/remove (role_add/role_remove: value = the role mention <@&id>, id or name; stored by id),
   ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb).
+Recruitment (owner, op=recruit): the Discord application. field=open, value=true|false (closed: /apply and the Apply button say so);
+  field=note, value=<one line on the Apply screen, e.g. "Looking for healers"; empty clears>;
+  field=question_add, value=<the question, at most 45 characters>, reason=<optional hint shown under it, at most 100>,
+    text=required|optional (default optional) — the guild's own application questions, asked in order;
+  field=question_remove, value=<the question's text or its number in the list>;
+  field=invite, value=<the public Discord invite like https://discord.gg/abc123; empty clears>.
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
   team_member: add/remove <member> [character] to/from run <target=run key> (a seat on a specific run; defaults to their main).
@@ -84,10 +90,10 @@ Not settable here (say so): standing rosters or availability (members answer eac
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test, recruit")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|news_keywords|ask_audience|about")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
-    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire")
+    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire; recruit: open|note|question_add|question_remove|invite")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; dm: on|off; test: 'seed N'|'run <raid>'|'clear')")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer, team_member)")
@@ -149,7 +155,7 @@ def parse(provider: Provider, reg: Registry, text: str, by: str | None = None) -
     return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg) + asker + "\n\n## Request\n<request>\n" + text.strip()[:2000] + "\n</request>", ConfigRequest)
 
 
-OWNER_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove"}
+OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove"}
 CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel")
 
 
@@ -168,9 +174,10 @@ OP_GROUP = {
     "run_autofill": "runs", "run_board": "runs", "confirm_for": "runs", "team_member": "runs",
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
     "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
-    "set": "setup", "role_add": "setup", "role_remove": "setup",
+    "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup",
     "test": "test",
 }
+APPLY_FIRST = "New here? Apply first with `/apply` (or *Apply to join* on the registration card) — the officers take it from there."
 SELF_OPS = {"absence", "absence_clear", "dm", "character", "set_main", "run_answer", "confirm_for"}
 OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other ops use their group's label
     "absence": ("your absences", "someone else's absence"), "absence_clear": ("your absences", "someone else's absence"),
@@ -218,6 +225,9 @@ def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bo
     allowed, refused = [], []
     for op in ops:
         group, bad = bind_self(reg, op, author_id)
+        if (bad is None and group == "self" and op.op == "character" and (op.field or "").strip().lower() == "add"
+                and reg.must_apply(author_id, officer=officer, role_ids=role_ids)):
+            bad = APPLY_FIRST  # a newcomer's first character is an application (Registry.must_apply), and plain text can't open one
         if bad is None:
             own = group == "self"
             key = "rank" if op.op == "character" and (op.field or "").strip().lower() == "rank" else op.op
@@ -517,9 +527,47 @@ def _live_event(reg: Registry, target: str | None, raids=None):
     return rs, ev
 
 
+RECRUIT_FIELDS = ("open", "note", "question_add", "question_remove", "invite")
+
+
+def _recruit(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
+    """The recruit op as Registry.set_recruitment arguments and one 'current → new' line. Raises RegistryError when it
+    can't apply (an unknown field, a question that isn't there); set_recruitment checks the rest (lengths, the invite)."""
+    r, cfg = reg.config.recruitment, reg.config
+    f, value = (op.field or "").strip().lower(), (op.value or "").strip()
+    if f == "open":
+        words = {"true": True, "yes": True, "on": True, "open": True, "false": False, "no": False, "off": False, "closed": False}
+        if value.lower() not in words:
+            raise RegistryError("recruit open is true | false")
+        new = words[value.lower()]
+        return {"open": new}, f"applications: {'open' if r.open else 'closed'} → {'open' if new else 'closed'}"
+    if f == "note":
+        return {"note": value}, f"recruitment note: {r.note or '—'} → {value or '(cleared)'}"
+    if f == "invite":
+        return {"invite_url": value}, f"invite link: {cfg.invite_url or '—'} → {value or '(cleared)'}"
+    qs = [q.model_dump() for q in r.questions]
+    if f == "question_add":
+        req = (op.text or "optional").strip().lower() == "required"
+        hint = (op.reason or "").strip() or None
+        return ({"questions": qs + [{"label": value, "hint": hint, "required": req}]},
+                f"add question {len(qs) + 1}: “{value}”" + (" (required)" if req else " (optional)") + (f" — hint: {hint}" if hint else ""))
+    if f == "question_remove":
+        idx = int(value) - 1 if value.isdigit() else next((i for i, q in enumerate(qs) if q["label"].lower() == value.lower()), -1)
+        if not 0 <= idx < len(qs):
+            raise RegistryError(f"no question “{value}” (the questions: {'; '.join(q['label'] for q in qs) or 'none'})")
+        gone = qs.pop(idx)
+        return {"questions": qs}, f"remove question {idx + 1}: “{gone['label']}”"
+    raise RegistryError(f"recruit field is one of {', '.join(RECRUIT_FIELDS)}")
+
+
 def describe(reg: Registry, op: ConfigOp) -> str:
     """Human-readable 'current → new' for the diff, without applying."""
     cfg = reg.config
+    if op.op == "recruit":
+        try:
+            return _recruit(reg, op)[1]
+        except RegistryError as e:
+            return f"recruit {op.field or ''}: {e}"
     if op.op == "set":
         cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:60], "news_keywords": ", ".join(cfg.news_keywords),
                **{p: (getattr(cfg, f"{p}_id", None) and f"<#{getattr(cfg, f'{p}_id')}>") for p in CHANNEL_PATHS}}.get(op.path or "", "?")
@@ -784,6 +832,9 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             raise RegistryError(f"unknown setting {op.path}")
         reg.save_config(f"{op.path} → {op.value} (by {by})")
         return f"{op.path} = {op.value}"
+    if op.op == "recruit":
+        kw, _ = _recruit(reg, op)
+        return reg.set_recruitment(by, **kw)
     if op.op in ("role_add", "role_remove"):
         # stored by role id: a mention/id applies at once; a name resolves through the registry's role cache (filled by
         # the bot), otherwise it is parked in the legacy list and resolved on the bot's next ready / role event
@@ -1007,6 +1058,12 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
         m, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
         await bot.announce_absence(reg, m, a, by)
         return f"{m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else "")
+    if bot is not None and op.op == "recruit":
+        line = apply(reg, op, by, is_owner, policy_store)
+        refresh = getattr(bot, "refresh_registration_card", None)
+        if refresh is not None:
+            await refresh(reg)  # open/closed and the note show on the card
+        return line
     if bot is not None and op.op in ("role_add", "role_remove"):
         guild = bot.get_guild(reg.config.discord_guild_id)
         if guild is not None:

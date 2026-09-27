@@ -98,12 +98,19 @@ def guide_text(reg, key: str) -> str:
     if key == "register":
         where = f"<#{cfg.registration_channel_id}>" if cfg.registration_channel_id else "the registration card an officer posts"
         sheets = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "the signup channel"
-        return f"**How to register**\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each run's sheet in {sheets} (Join / Bench / No thanks). `/me view` shows what the bot has on you."
+        return f"**How to register**\nNew to the guild? Apply first (`/apply` or **Apply to join**); members register and add alts:\n1. Go to {where} and press **Register / plan my main**.\n2. Pick class → spec → optional offspec; leave the name blank if the character doesn't exist yet.\n3. Your role follows your spec. An officer confirms named characters.\n4. There is nothing else to fill in: answer each run's sheet in {sheets} (Join / Bench / No thanks). `/me view` shows what the bot has on you."
     if key == "signups":
         parts = chunk_text(manual_section("## 4"), 1800)  # the start of the section, cut on a paragraph, and where the rest is
         return (parts[0] + ("\n\n-# The rest: `/help` → topic *Raids, sheets, lock, confirm and fill*." if len(parts) > 1 else "")) if parts else "See `/help` → topic *Raids, sheets, lock, confirm and fill*."
     if key == "apply":
-        return "**Applying**\nUse `/apply` with your character, spec, logs link and a few words about you. Officers review it on a card and you'll get a DM with the decision. Accepted applicants are registered as trial."
+        rec = cfg.recruitment
+        if not rec.open:
+            return f"**Applying**\n{cfg.name} isn't taking applications right now. Ask an officer if you'd like to be told when it opens."
+        where = f" (or **Apply to join** on the card in <#{cfg.registration_channel_id}>)" if cfg.registration_channel_id else ""
+        asks = f", then {len(rec.questions)} question(s) from the officers" if rec.questions else ""
+        return (f"**Applying**\nNew here? Use `/apply`{where}: class and spec, your character's first and last name and a logs link, "
+                f"the raid schedules you can make{asks}, then a review screen before you submit. Officers review it on a card and "
+                "you'll get a DM with the decision. Accepted applicants are registered as trial." + (f"\n> {rec.note}" if rec.note else ""))
     if key == "contact":
         officers = ", ".join(f"@{r}" for r in reg.officer_role_names()) or "anyone with Manage Server"
         owner = f"<@{cfg.owner_discord_id}>" if cfg.owner_discord_id else "not set"

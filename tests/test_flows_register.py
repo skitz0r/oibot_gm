@@ -20,9 +20,16 @@ class FakeOps:
         self.lines.append((level, text))
 
 
-def harness(reg, *, uid=NEW_ID, name="Newbie"):
+MEMBER_ROLE = 4_242_000_001  # a member role: its holders register without applying (Registry.must_apply)
+
+
+def harness(reg, *, uid=NEW_ID, name="Newbie", member_role=True):
+    """A person with no characters yet. `member_role`: they hold the guild's member role, so Register registers (a
+    newcomer without it is sent to apply — tests/test_applications_discord.py)."""
     h = Harness(reg)
-    h.user = SimpleNamespace(id=uid, display_name=name, mention=f"@{name}")
+    if member_role and MEMBER_ROLE not in reg.config.member_role_ids:
+        reg.set_recruitment("t", member_role_ids=[*reg.config.member_role_ids, MEMBER_ROLE])
+    h.user = SimpleNamespace(id=uid, display_name=name, mention=f"@{name}", roles=[SimpleNamespace(id=MEMBER_ROLE)] if member_role else [])
     h.posted = []
 
     async def post_application(r, a):
@@ -190,12 +197,16 @@ def test_apply_calls_the_card_hook(reg):
         await FLOWS["register"](h.command(), reg, mode="apply")
         await pick_class_specs(h, cls, specs[0], specs[1])
         await h.press("Continue")
-        assert set(h.modal._items) == {"name", "logs", "times", "about"}
-        await h.submit(name="Hopeful", logs="https://logs.example/x", times="Tue and Thu evenings", about="Raided a lot")
-        assert "✅ Application received for **Hopeful**" in h.text and "applications channel" in h.text
+        assert set(h.modal._items) == {"first", "last", "logs", "about"}  # no guild questions: the free box stays
+        await h.submit(first="Hopeful", last="Soul", logs="https://logs.example/x", about="Raided a lot")
+        if "Raid schedules you can make" in (h.selects() if h.screen["view"] else []):
+            await h.press("Continue")
+        assert "Submit" in h.buttons()  # the review screen
+        await h.press("Submit")
+        assert "✅ Application received for **Hopeful Soul**" in h.text and "applications channel" in h.text
     run(go())
     a = h.posted[0]
-    assert (a.name, a.cls, a.spec, a.offspec, a.logs_url, a.availability, a.about) == ("Hopeful", cls, specs[0], specs[1], "https://logs.example/x", "Tue and Thu evenings", "Raided a lot")
+    assert (a.name, a.surname, a.cls, a.spec, a.offspec, a.logs_url, a.about) == ("Hopeful", "Soul", cls, specs[0], specs[1], "https://logs.example/x", "Raided a lot")
     assert reg.applicants[NEW_ID].status == "open"
 
 
@@ -207,10 +218,13 @@ def test_apply_refusal_reopens_the_form_filled(reg):
         await FLOWS["register"](h.command(), reg, mode="apply")
         await pick_class_specs(h, cls, specs[0])
         await h.press("Continue")
-        await h.submit(name="No1", about="hello")
+        await h.submit(first="No1", last="Good", about="hello")
+        if h.buttons() == ["Continue", "Cancel"]:
+            await h.press("Continue")  # the schedules screen
+        await h.press("Submit")
         assert "❌" in h.text and not h.posted
         await h.press("Fix this")
-        assert h.modal._items["name"].default == "No1" and h.modal._items["about"].default == "hello"
+        assert h.modal._items["first"].default == "No1" and h.modal._items["about"].default == "hello"
     run(go())
     assert NEW_ID not in reg.applicants
 

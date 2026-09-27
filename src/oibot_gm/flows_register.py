@@ -1,7 +1,11 @@
 """Registration wizards: one flow for class → spec → offspec → name, and the small character flows around it.
 
-`register` serves the registration card (Register / plan my main · Add an alt), /register, /me char add, /me plan
-main|alt (`plan_only`: no name step) and /apply (`mode="apply"`: the application form instead of the name form).
+`register` serves the registration card (Apply to join · Register / plan my main · Add an alt), /register, /me char
+add, /me plan main|alt (`plan_only`: no name step) and /apply (`mode="apply"`). A newcomer (Registry.must_apply) who
+tries to register is sent to the application instead. The application is: the class/spec picks (with the guild's
+recruitment note) → first and last name + logs → the raid schedules they can make (a multi-select) → the guild's own
+questions, five per modal with a button between pages → a review with every answer → Submit (reg.apply + the
+officers' card via client.post_application).
 The class list and each class's specs come from the game profile (wizard_opts), never a hardcoded list, and the spec
 list always belongs to the class picked. A name is prose with one rule (2–12 letters): a TextInput whose rule is on
 its label; a refusal keeps every pick and reopens the SAME form with the typed names filled in.
@@ -16,8 +20,9 @@ from collections.abc import Sequence
 import discord
 
 from . import wizard_opts as opts
-from .registry import RegisteredCharacter, Registry, RegistryError
-from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, flow
+from .constants import TEAL
+from .registry import ANSWER_MAX, Question, RegisteredCharacter, Registry, RegistryError
+from .wizard import MAX_MODAL_ITEMS, MAX_OPTIONS, Field, Form, Opt, Wizard, flow
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +79,7 @@ class RegisterWizard(Wizard):
     """Class · main spec · offspec on one screen (the spec list follows the class), then Continue: the name form
     (register), a confirm screen (plan only) or the application form (apply)."""
 
-    def __init__(self, reg: Registry, owner_id: int, *, slot: str, plan_only: bool, mode: str, roles: list[str] | None):
+    def __init__(self, reg: Registry, owner_id: int, *, slot: str, plan_only: bool, mode: str, roles: list[str] | None, lead: str | None = None):
         if mode == "apply":
             title = f"Apply to {reg.config.name}"
         elif plan_only:
@@ -83,13 +88,22 @@ class RegisterWizard(Wizard):
             title = "Register or plan your main" if slot == "main" else "Add an alt"
         super().__init__(reg, owner_id, title=title)
         self.slot, self.plan_only, self.mode, self.roles = slot, plan_only, mode, list(roles or [])
-        self.draft = {"cls": None, "spec": None, "offspec": None, "first": "", "last": "", "logs": "", "times": "", "about": ""}
+        self.draft = {"cls": None, "spec": None, "offspec": None, "first": "", "last": "", "logs": "", "about": "", "schedules": [], "answers": {}}
+        self.lead = lead  # one line above the first screen (a newcomer sent here from Register)
+        self.questions: list[Question] = list(reg.config.recruitment.questions) if mode == "apply" else []  # as asked when the wizard opened
+        self.reviewing = False  # after the review screen, a changed step returns to it
 
     # ---- screen 1: class · spec · offspec
     def intro(self) -> str:
         d = self.draft
         if self.mode == "apply":
-            head = "Pick your class, main spec and an optional offspec, then **Continue** for your name and a few words about you."
+            head = "Pick your class, main spec and an optional offspec, then **Continue** for your name"
+            head += (", the raid schedules you can make and the officers' questions." if self.questions else " and the raid schedules you can make.")
+            note = self.reg.config.recruitment.note
+            if note:
+                head += f"\n> {note}"
+            if self.lead:
+                head = f"**{self.lead}**\n{head}"
         elif self.plan_only:
             head = "Pick the class, main spec and an optional offspec — no name needed yet."
         else:
@@ -131,7 +145,10 @@ class RegisterWizard(Wizard):
 
     async def on_continue(self, interaction: discord.Interaction) -> None:
         if self.mode == "apply":
-            await self.open_form(interaction, self.apply_form())
+            if self.reviewing:
+                await self.review(interaction)
+            else:
+                await self.open_form(interaction, self.apply_form())
         elif self.plan_only:
             await self.confirm_plan(interaction)
         else:
@@ -206,31 +223,157 @@ class RegisterWizard(Wizard):
             await self.finish(interaction, f"✅ Planned alt: {_char_line(interaction, c)}")
             await _emit(interaction, reg, f"{m.display_name} plans an alt {c.cls} {c.spec}")
 
-    # ---- apply: the application form, then reg.apply + the officers' card
+    # ---- apply: names → schedules → the guild's questions (five per modal) → review → Submit (reg.apply + the card)
+    def pages(self) -> list[list[Question]]:
+        return [self.questions[i:i + MAX_MODAL_ITEMS] for i in range(0, len(self.questions), MAX_MODAL_ITEMS)]
+
     def apply_form(self) -> Form:
         d = self.draft
-        return Form(f"{d['cls']} {d['spec']} — application", [
-            Field("name", "Character name", description=NAME_RULE, default=d["first"] or None, min_length=2, max_length=12),
-            Field("logs", "Logs or armory link (optional)", required=False, default=d["logs"] or None, max_length=200,
-                  placeholder="Warcraft Logs / armory"),
-            Field("times", "When you can raid (optional)", required=False, paragraph=True, default=d["times"] or None, max_length=300,
-                  placeholder="the nights and times that suit you"),
-            Field("about", "About you (optional)", required=False, paragraph=True, default=d["about"] or None, max_length=600,
-                  placeholder="experience, what you're looking for"),
-        ], self.apply_submitted)
+        fields = [
+            Field("first", "First name", description=NAME_RULE, default=d["first"] or None, min_length=2, max_length=12),
+            Field("last", "Last name", description=NAME_RULE, default=d["last"] or None, min_length=2, max_length=12),
+            Field("logs", "Logs or armory link (optional)", required=False, default=d["logs"] or None, max_length=200, placeholder="Warcraft Logs / armory"),
+        ]
+        if not self.questions:  # no guild questions: keep the free box the application always had
+            fields.append(Field("about", "Anything else? (optional)", required=False, paragraph=True, default=d["about"] or None, max_length=600,
+                                placeholder="experience, what you're looking for"))
+        return Form(f"{d['cls']} {d['spec']} — application", fields, self.apply_names_submitted)
 
     async def reopen_apply(self, interaction: discord.Interaction) -> None:
         await self.open_form(interaction, self.apply_form())
 
-    async def apply_submitted(self, interaction: discord.Interaction, v: dict[str, str]) -> None:
+    async def apply_names_submitted(self, interaction: discord.Interaction, v: dict[str, str]) -> None:
         d = self.draft
-        d["first"], d["logs"], d["times"], d["about"] = v.get("name", ""), v.get("logs", ""), v.get("times", ""), v.get("about", "")
+        d["first"], d["last"], d["logs"] = v.get("first", ""), v.get("last", ""), v.get("logs", "")
+        if "about" in v:
+            d["about"] = v.get("about", "")
+        if not d["first"] or not d["last"]:
+            await self.refuse(interaction, f"Your character's first and last name, please ({NAME_RULE}).", self.reopen_apply)
+            return
+        if self.reviewing:
+            await self.review(interaction)
+        elif opts.schedules(self.reg):
+            await self.schedule_screen(interaction)
+        elif self.questions:
+            await self.question_gate(interaction, 0)
+        else:
+            await self.review(interaction)
+
+    async def schedule_screen(self, interaction: discord.Interaction) -> None:
+        choices = opts.schedules(self.reg, current=self.draft["schedules"])
+        picked = opts.schedule_names(self.reg, self.draft["schedules"])
+        text = ("Which of our raid schedules can you make? Pick every one that fits — or none — then **Continue**."
+                + (f"\n-# Picked: {'; '.join(picked)}" if picked else ""))
+        await self.show(interaction, text,
+                        self.select("Raid schedules you can make", choices, self.on_schedules, min_values=0, max_values=len(choices)),
+                        self.button("Continue", self.after_schedules, discord.ButtonStyle.primary),
+                        self.button("Cancel", self.cancel))
+
+    async def on_schedules(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["schedules"] = [x for x in values if x != "-"]
+        await self.schedule_screen(interaction)
+
+    async def after_schedules(self, interaction: discord.Interaction) -> None:
+        if self.questions and not self.reviewing:
+            await self.open_form(interaction, self.question_form(0))  # a button may open a modal directly
+        else:
+            await self.review(interaction)
+
+    async def question_gate(self, interaction: discord.Interaction, page: int) -> None:
+        """Between two modals (a modal submit can't open another): one button to the next page of questions."""
+        n = len(self.pages())
+        label = "Answer the questions" if n == 1 else (f"Answer the questions (1 of {n})" if page == 0 else f"Next questions ({page + 1} of {n})")
+        text = "Next, a few questions from the officers." if page == 0 else f"Thanks — page {page + 1} of {n} of the officers' questions is next. Your answers so far are kept."
+        await self.show(interaction, text, self.button(label, lambda i: self.open_form(i, self.question_form(page)), discord.ButtonStyle.primary),
+                        self.button("Cancel", self.cancel))
+
+    def question_form(self, page: int) -> Form:
+        pages = self.pages()
+        page = max(0, min(page, len(pages) - 1))
+        answers = self.draft["answers"]
+        fields = [Field(f"q{i}", q.label, description=q.hint, required=q.required, paragraph=True, default=answers.get(q.label) or None,
+                        max_length=ANSWER_MAX) for i, q in enumerate(pages[page])]
+        title = f"Questions ({page + 1} of {len(pages)})" if len(pages) > 1 else "Questions"
+
+        async def done(interaction: discord.Interaction, v: dict[str, str]) -> None:
+            await self.questions_submitted(interaction, page, v)
+        return Form(title, fields, done)
+
+    async def questions_submitted(self, interaction: discord.Interaction, page: int, v: dict[str, str]) -> None:
+        batch = self.pages()[page]
+        for i, q in enumerate(batch):
+            self.draft["answers"][q.label] = v.get(f"q{i}", "")
+        missing = next((q for q in batch if q.required and not self.draft["answers"].get(q.label)), None)
+        if missing:
+            await self.refuse(interaction, f"Please answer “{missing.label}”.", lambda i: self.open_form(i, self.question_form(page)))
+            return
+        if not self.reviewing and page + 1 < len(self.pages()):
+            await self.question_gate(interaction, page + 1)
+        else:
+            await self.review(interaction)
+
+    def review_embed(self, interaction: discord.Interaction) -> discord.Embed:
+        d, ico = self.draft, _ico(interaction)
+        spec_key = f"{d['cls']}:{d['spec']}"
+        e = discord.Embed(title=clip(f"Your application · {d['first']} {d['last']}".strip(), 256), colour=TEAL,
+                          description=f"{ico('class', d['cls'])}{ico('spec', spec_key)} **{d['cls']} {_specline(d['spec'], d['offspec'])}**")
+        if d["logs"]:
+            e.add_field(name="Logs", value=clip(d["logs"], 200), inline=False)
+        if opts.schedules(self.reg):
+            e.add_field(name="Can raid", value=clip("\n".join(opts.schedule_names(self.reg, d["schedules"])), 1000) or "none picked", inline=False)
+        for q in self.questions:
+            ans = d["answers"].get(q.label, "")
+            e.add_field(name=q.label, value=clip(ans, 200) if ans else "—", inline=False)
+        if not self.questions and d["about"]:
+            e.add_field(name="Anything else", value=clip(d["about"], 300), inline=False)
+        return e
+
+    async def review(self, interaction: discord.Interaction) -> None:
+        self.reviewing = True
+        steps = [Opt("picks", "Class and spec"), Opt("names", "Name and logs" if self.questions else "Name, logs and anything else")]
+        if opts.schedules(self.reg):
+            steps.append(Opt("schedules", "Raid schedules"))
+        n = len(self.pages())
+        steps += [Opt(f"q{p}", "Questions" if n == 1 else f"Questions ({p + 1} of {n})") for p in range(n)]
+        await self.show(interaction, "Check your application, then **Submit**. Nothing is sent before that; long answers are shortened here only.",
+                        self.select("Change a step", steps, self.on_change),
+                        self.button("Submit", self.submit_application, discord.ButtonStyle.success),
+                        self.button("Cancel", self.cancel), embed=self.review_embed(interaction))
+
+    async def on_change(self, interaction: discord.Interaction, values: list[str]) -> None:
+        step = values[0]
+        if step == "picks":
+            await self.start(interaction)
+        elif step == "names":
+            await self.reopen_apply(interaction)
+        elif step == "schedules":
+            await self.schedule_screen(interaction)
+        elif step.startswith("q") and step[1:].isdigit():
+            await self.open_form(interaction, self.question_form(int(step[1:])))
+        else:
+            await self.review(interaction)
+
+    def fix_for(self, error: str):
+        """The step a refusal points at, so "Fix this" reopens it with the draft kept (None: nothing to fix here)."""
+        if "taking applications" in error or "open application" in error or "already a member" in error:
+            return None
+        for p, batch in enumerate(self.pages()):
+            if any(q.label in error for q in batch):
+                return lambda i, p=p: self.open_form(i, self.question_form(p))
+        if "class" in error.lower() or "spec" in error.lower():
+            return self.start
+        return self.reopen_apply
+
+    async def submit_application(self, interaction: discord.Interaction) -> None:
+        d, user = self.draft, interaction.user
         await self.working(interaction, "Sending your application…")
-        user = interaction.user
+        answers = [{"label": q.label, "answer": d["answers"].get(q.label, "")} for q in self.questions if d["answers"].get(q.label)]
         try:
-            a = self.reg.apply(user.id, user.display_name, d["first"], d["cls"], d["spec"], d["offspec"], d["logs"] or None, d["times"] or None, d["about"] or None)
+            a = self.reg.apply(user.id, user.display_name, d["first"], d["cls"], d["spec"], d["offspec"], d["logs"] or None, None,
+                               (d["about"] or None) if not self.questions else None, surname=d["last"] or None, schedules=list(d["schedules"]),
+                               answers=answers, source="discord")
         except RegistryError as e:
-            await self.refuse(interaction, str(e), self.reopen_apply)
+            await self.refuse(interaction, str(e), self.fix_for(str(e)))
             return
         where = ""
         hook = getattr(interaction.client, "post_application", None)
@@ -241,24 +384,56 @@ class RegisterWizard(Wizard):
                 log.exception("posting the application card failed")
                 where = "The officers' card couldn't be posted; they'll still see it in `/roster applicants`."
         else:
-            log.warning("client has no post_application; application %s saved without a card", a.name)
-        await self.finish(interaction, f"✅ Application received for **{a.name}** ({a.cls} {a.spec}). An officer will review it; you'll get a DM either way."
+            log.warning("client has no post_application; application %s saved without a card", a.label)
+        await self.finish(interaction, f"✅ Application received for **{a.label}** ({a.cls} {a.spec}). An officer will review it; you'll get a DM either way."
                           + (f"\n-# {where}" if where else ""))
+
+
+NEWCOMER = "New here? Apply first — the officers take it from there."
+
+
+def clip(text: str, n: int) -> str:
+    """Shorten for display with a clean '…' (the stored text is never cut)."""
+    text = str(text or "")
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+def _role_ids(interaction: discord.Interaction) -> list[int]:
+    return [r.id for r in (getattr(interaction.user, "roles", None) or []) if getattr(r, "id", None) is not None]
+
+
+def must_apply(interaction: discord.Interaction, reg: Registry) -> bool:
+    """A newcomer (nothing registered, not an officer, no member role) applies instead of registering."""
+    from .discord_registry import is_officer
+
+    return reg.must_apply(interaction.user.id, officer=is_officer(interaction, reg), role_ids=_role_ids(interaction))
 
 
 @flow("register")
 async def open_register(interaction: discord.Interaction, reg: Registry, *, slot: str = "main", plan_only: bool = False, mode: str = "register",
                         roles: list[str] | None = None) -> None:
-    """The registration card's Register / Add an alt, /register, /me char add (slot="alt"), /me plan main|alt
-    (plan_only) and /apply (mode="apply")."""
+    """The registration card's Register / Add an alt / Apply to join, /register, /me char add (slot="alt"), /me plan
+    main|alt (plan_only) and /apply (mode="apply"). A newcomer's first character goes through the application instead."""
     if slot not in ("main", "alt") or mode not in ("register", "apply"):
         raise ValueError(f"register flow: bad seed slot={slot!r} mode={mode!r}")
+    lead = None
+    if mode == "register" and must_apply(interaction, reg):
+        mode, plan_only, lead = "apply", False, NEWCOMER
     if mode == "apply":
         m = reg.members.get(interaction.user.id)
         if m and m.active():
             await interaction.response.send_message("You're already a member — add characters with `/register` or `/me char add`.", ephemeral=True)
             return
-    await RegisterWizard(reg, interaction.user.id, slot=slot, plan_only=plan_only, mode=mode, roles=roles).start(interaction)
+        if not reg.config.recruitment.open:
+            await interaction.response.send_message((f"{lead}\n" if lead else "") + f"{reg.config.name} isn't taking applications right now — check back later, or ask an officer.",
+                                                    ephemeral=True)
+            return
+        a = reg.applicants.get(interaction.user.id)
+        if a and a.status == "open":
+            await interaction.response.send_message(f"You already have an open application for **{a.label}**. An officer will get to it; you'll get a DM either way.",
+                                                    ephemeral=True)
+            return
+    await RegisterWizard(reg, interaction.user.id, slot=slot, plan_only=plan_only, mode=mode, roles=roles, lead=lead).start(interaction)
 
 
 # ---------------------------------------------------------------- /me char name

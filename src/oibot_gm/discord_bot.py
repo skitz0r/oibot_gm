@@ -40,7 +40,7 @@ from .discord_raid import RaidContext, RaidMixin
 from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton
 from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
-from .discord_registry import Guilds, RegisterButton, is_officer, is_owner, register_commands
+from .discord_registry import ApplicationButton, Guilds, RegisterButton, is_officer, is_owner, register_commands
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
 from .llm.provider import Provider, get_provider
@@ -694,6 +694,20 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
         return await post_application(self, reg, a)
 
+    async def decide_application(self, reg, discord_id: int, accept: bool, by: str, note: str | None) -> str:
+        """Accept or decline an open application: registry decide, DM the applicant, update the review card, ops line.
+        The one path for the card's buttons, /roster applicant, the web and MCP. Returns the verdict line; raises
+        RegistryError when there is no open application. Never removes anyone from the server."""
+        from .discord_registry import settle_application
+
+        return await settle_application(self, reg, discord_id, accept, by, note)
+
+    async def refresh_registration_card(self, reg) -> bool:
+        """The registration card edited in place after a recruitment change (and given the Apply button)."""
+        from .discord_registry import refresh_registration_card
+
+        return await refresh_registration_card(self, reg)
+
     async def close(self) -> None:
         """Shutdown: push any unpushed data-repo commits, stop the feed listener, then disconnect. Every step is
         bounded, so a stopping bot always lets go of its ports (launchd waits ExitTimeOut, then kills it)."""
@@ -749,7 +763,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             walk(c)
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
-        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, GuideSelect, AbsenceButton, ProposalButton)
+        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -1340,6 +1354,8 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             await self.ops.emit(reg.config, "info", f"bot online · data @ {st.head()} · {len(reg.members)} members / {len(reg.all_characters())} characters · {len(reg.pending())} unconfirmed")
             if reg.config.analytics_channel_id and not getattr(self, "_pool_booted", False):
                 await self.refresh_pool(reg)  # state may have changed while offline (PRs to the data repo)
+            if not getattr(self, "_pool_booted", False):
+                await self.refresh_registration_card(reg)  # the card's text and buttons as this version draws them (Apply to join)
         self._pool_booted = True
 
 
