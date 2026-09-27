@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, TagsInput, Text, TextInput, Textarea } from "@mantine/core";
 import { api, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
+import { Recruitment } from "../components/Recruitment";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -69,10 +70,12 @@ export function ConfigPage() {
             <TextInput label={lab("timezone", "Timezone")} description="IANA name; every schedule and clock on the site" defaultValue={data.settings.timezone} disabled={ro} w={260} onBlur={(e) => e.currentTarget.value !== data.settings.timezone && set("timezone", e.currentTarget.value)} />
             <Select label={lab("ask_audience", "Who may ask the bot questions")} description="/ask, DMs, @mentions; others get the static guide" data={["officers", "confirmed", "registered", "everyone"]} value={data.settings.ask_audience} onChange={(v) => v && v !== data.settings.ask_audience && set("ask_audience", v)} disabled={ro} w={260} />
           </Group>
-          <Textarea label={lab("about", "About the guild")} description="one paragraph shown in the static guide to unregistered visitors" defaultValue={data.settings.about} disabled={ro} autosize minRows={2} onBlur={(e) => e.currentTarget.value !== data.settings.about && set("about", e.currentTarget.value)} />
+          <Textarea label={lab("about", "About the guild")} description="one paragraph on the public homepage and in the static guide to unregistered visitors" defaultValue={data.settings.about} disabled={ro} autosize minRows={2} onBlur={(e) => e.currentTarget.value !== data.settings.about && set("about", e.currentTarget.value)} />
           <Text size="xs" c="dimmed">Owner: {data.settings.owner_id ? `Discord id ${data.settings.owner_id}` : "not claimed — /gm config owner"} · transfer with /gm config owner</Text>
         </Stack>
       </Card>
+
+      <Recruitment channels={data.guild_channels} />
 
       <Card>
         <CardHeader title="Test bench" hint="rehearse the whole cycle in Discord with puppet members" action={data.test_bench.members > 0 ? <Badge color="yellow" variant="light">{data.test_bench.members} test members · {data.test_bench.runs.length} test run{data.test_bench.runs.length === 1 ? "" : "s"}</Badge> : <Badge color="gray" variant="outline">idle</Badge>} />

@@ -4,7 +4,8 @@ import { AppShell, Box, Burger, Group, NavLink, Stack, Text, Title } from "@mant
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { IconChartBar, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { api, type Meta } from "./api";
+import { api, ApiError, type Meta } from "./api";
+import { NotMember } from "./components/NotMember";
 import { MePage } from "./pages/Me";
 import { RostersPage } from "./pages/Rosters";
 import { RaidsPage } from "./pages/Raids";
@@ -30,8 +31,10 @@ export default function App() {
   const [opened, { toggle, close }] = useDisclosure();
   const mobile = useMediaQuery("(max-width: 48em)");
   const loc = useLocation();
-  useEffect(() => { api.get<Meta>("/api/meta").then(setMeta).catch(() => {}); }, []);
+  const [notMember, setNotMember] = useState(false);
+  useEffect(() => { api.get<Meta>("/api/meta").then(setMeta).catch((e) => { if (e instanceof ApiError && e.status === 403) setNotMember(true); }); }, []);
   useEffect(() => close(), [loc.pathname, close]);
+  if (notMember) return <NotMember />;
   if (!meta) return <Box p="xl"><Text c="dimmed">Loading…</Text></Box>;
 
   const officer = (el: React.ReactElement) => (meta.viewer.officer ? el : <Navigate to="/me" replace />);

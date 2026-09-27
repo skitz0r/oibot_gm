@@ -349,6 +349,23 @@ class SetupMixin:
         reg.save_config(f"{kind} channel → #{ch.name} (by {by})")
         return f"{kind} channel → #{ch.name}"
 
+    async def create_invite(self, reg: Registry, channel_id: int) -> str:
+        """A permanent, unlimited-use invite to one of the guild's text channels (the homepage's Join button). Needs
+        the Create Instant Invite permission there; a missing permission is a ValueError that says so. Nothing is
+        saved: the caller puts the link in the recruitment settings."""
+        ch = self.get_channel(int(channel_id)) if channel_id else None
+        if ch is None or not isinstance(ch, discord.TextChannel) or ch.guild.id != reg.config.discord_guild_id:
+            raise ValueError("that channel isn't a text channel of this server I can see")
+        if not ch.permissions_for(ch.guild.me).create_instant_invite:
+            raise ValueError(f"I can't create invites in #{ch.name}: give the bot the Create Invite permission there (or server-wide) and try again")
+        try:
+            inv = await ch.create_invite(max_age=0, max_uses=0, unique=False, reason=f"oibot_GM homepage invite for {reg.config.name}")
+        except discord.Forbidden:
+            raise ValueError(f"Discord refused: I don't have the Create Invite permission in #{ch.name}") from None
+        except discord.HTTPException as e:
+            raise ValueError(f"Discord refused the invite: {e.text or e}") from None
+        return inv.url
+
     def guild_channels(self, reg: Registry) -> list[dict]:
         g = self.get_guild(reg.config.discord_guild_id)
         if not g:

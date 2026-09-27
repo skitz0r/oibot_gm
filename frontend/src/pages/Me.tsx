@@ -65,9 +65,15 @@ export function MePage({ meta }: { meta: Meta }) {
       <Group justify="space-between" align="flex-start">
         <Box><Title order={1} size="h2">{me.display_name}</Title><Text c="dimmed" size="sm" mt={4}>{summary}</Text></Box>
         <Group gap="xs">
-          {!editing && <Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit characters</Button>}
+          {!editing && !me.must_apply && <Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit characters</Button>}
         </Group>
       </Group>
+      {me.must_apply && (
+        <Card withBorder>
+          <Text fw={700}>New here? Apply in Discord first.</Text>
+          <Text size="sm" c="dimmed" mt={4}>Press <b>Apply to join</b> on the registration card, or use <code>/apply</code>. Once an officer accepts you, your character shows up here.</Text>
+        </Card>
+      )}
 
       {me.asks.map((a) => (
         <Card key={a.roster} style={{ borderColor: "var(--mantine-color-teal-4)" }}>

@@ -94,6 +94,58 @@ def session_valid(s: dict | None, now: float | None = None) -> bool:
     return iat <= now + 60 and now - iat <= SESSION_MAX_AGE_S and iat >= session_epoch()
 
 
+class NotMember(HTTPException):
+    """A logged-in Discord user who isn't in the guild's server. The API answers 403 JSON as before; an HTML page
+    request (/, /app/*) gets the friendly 'not in the Discord yet' page with the Join button instead."""
+
+    def __init__(self, guild: str):
+        super().__init__(status_code=403, detail=f"Your Discord account isn't a member of the {guild} server.")
+        self.guild = guild
+
+
+PAGE_HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@700&family=Source+Sans+3:wght@400;600&display=swap">
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0F1318;color:#EAEFF5;font:16px/1.5 "Source Sans 3",system-ui,sans-serif}
+.card{box-sizing:border-box;background:#181E26;border:1px solid #313B48;border-radius:12px;padding:28px 32px;width:calc(100% - 32px);max-width:440px;margin:16px}
+.head{display:flex;align-items:center;gap:14px;margin:0 0 10px}.head img{width:56px;height:56px;border-radius:14px;flex:none}
+h1{font:700 26px Manrope,sans-serif;margin:0;overflow-wrap:anywhere}p{color:#8C97A8;margin:0 0 16px}p.about{color:#C9D1DC;white-space:pre-line}p.small{font-size:14px;margin:14px 0 0}
+.btns{display:flex;flex-wrap:wrap;gap:10px}.btn{display:inline-block;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600}
+.join{background:#5865F2;color:#fff}.login{background:#38B2A0;color:#0B1512}.alt{background:transparent;color:#C9D1DC;border:1px solid #313B48}
+a.plain{color:#8C97A8}@media(max-width:420px){.card{padding:22px 20px}.btn{flex:1 1 100%;text-align:center}}</style></head><body><div class="card">"""
+
+
+def join_button(invite_url: str | None) -> str:
+    """The Join our Discord button, or nothing (no invite configured = no button, never a broken link)."""
+    return f'<a class="btn join" href="{html.escape(invite_url, quote=True)}" rel="noopener">Join our Discord</a>' if invite_url else ""
+
+
+def head_block(info: dict) -> str:
+    icon = f'<img src="{html.escape(info["icon"], quote=True)}" alt="">' if info.get("icon") else ""
+    return f'<div class="head">{icon}<h1>{html.escape(info["name"])}</h1></div>'
+
+
+def landing_page(info: dict) -> str:
+    """The public homepage: who we are, Join our Discord (when an invite is set), Log in with Discord for members."""
+    about = f'<p class="about">{html.escape(info["about"])}</p>' if info.get("about") else ""
+    login_cls = "alt" if info.get("invite_url") else "login"
+    tail = ""
+    if info.get("invite_url"):
+        tail = "Anyone can join the Discord; new raiders apply there with /apply." if info.get("recruiting") else "Anyone can join the Discord."
+    return (PAGE_HEAD.replace("{title}", html.escape(info["name"])) + head_block(info)
+            + "<p>A World of Warcraft raiding guild. Members keep their characters, availability and raid signups here.</p>" + about
+            + f'<div class="btns">{join_button(info.get("invite_url"))}<a class="btn {login_cls}" href="/auth/login?next=/app/me">Log in with Discord</a></div>'
+            + (f'<p class="small">{tail}</p>' if tail else "") + "</div></body></html>")
+
+
+def not_member_page(info: dict) -> str:
+    """A logged-in Discord user who isn't in the server: how to get in (anyone can join)."""
+    how = "Join the server, then come back and log in again." if info.get("invite_url") else "Ask a member of the guild for an invite, then come back and log in again."
+    return (PAGE_HEAD.replace("{title}", html.escape(info["name"])) + head_block(info)
+            + f"<p>You're not in the {html.escape(info['name'])} Discord yet. The site is for members of the server. {how}</p>"
+            + f'<div class="btns">{join_button(info.get("invite_url"))}</div>'
+            + '<p class="small"><a class="plain" href="/auth/logout">Log out</a></p></div></body></html>')
+
+
 class Viewer:
     def __init__(self, uid: int, name: str, reg, officer: bool, owner: bool, via: str = "web"):
         self.uid, self.name, self.reg, self.officer, self.owner, self.via = uid, name, reg, officer, owner, via
@@ -164,7 +216,7 @@ def create_app(bot) -> FastAPI:
         guild = bot.get_guild(reg.config.discord_guild_id)
         member = await guild_member(guild, uid) if guild else None
         if member is None and reg.config.owner_discord_id != uid:
-            raise HTTPException(status_code=403, detail=f"Your Discord account isn't a member of the {reg.config.name} server.")
+            raise NotMember(reg.config.name)
         officer = bot.officiates(member, guild) if member else True
         owner = reg.config.owner_discord_id == uid
         name = member.display_name if member else (reg.members[uid].display_name if uid in reg.members else s.get("name", str(uid)))
@@ -351,20 +403,26 @@ def create_app(bot) -> FastAPI:
     async def healthz():
         return {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(bot.registries.by_discord)}
 
-    LANDING = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>oibot_GM</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@700&family=Source+Sans+3:wght@400;600&display=swap">
-<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0F1318;color:#EAEFF5;font:16px/1.5 "Source Sans 3",system-ui,sans-serif}
-.card{background:#181E26;border:1px solid #313B48;border-radius:12px;padding:28px 32px;max-width:420px;margin:16px}h1{font:700 26px Manrope,sans-serif;margin:0 0 6px}
-p{color:#8C97A8;margin:0 0 18px}a{display:inline-block;background:#38B2A0;color:#0B1512;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600}</style></head>
-<body><div class="card"><h1>{name}</h1><p>Raid administration for the guild: characters, availability, rosters, sheets. Log in with Discord — only members of the server get in.</p>
-<a href="/auth/login?next=/app/me">Log in with Discord</a></div></body></html>"""
+    from .api import public_info
+
+    def guild_info() -> dict:
+        return public_info(bot, guild_reg())
+
+    @app.exception_handler(NotMember)
+    async def _not_member(request: Request, exc: NotMember):
+        """Wins over the generic HTTPException handler (api.py) by class. The API keeps its 403 JSON (the SPA then
+        shows the same message from /api/public); a page request gets the friendly page with the Join button."""
+        if request.url.path.startswith("/api/"):
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"error": exc.detail, "not_member": True}, status_code=403)
+        return HTMLResponse(not_member_page(guild_info()), status_code=403)
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
         v = await viewer(request)
         if v is None:
-            reg = guild_reg()
-            return HTMLResponse(LANDING.replace("{name}", reg.config.name if reg else "oibot_GM"))
+            return HTMLResponse(landing_page(guild_info()))
         return RedirectResponse("/app/me", status_code=302)
 
     for _old, _new in (("/admin", "/app/members"), ("/admin/build", "/app/rosters"), ("/bank", "/app/members"), ("/rosters", "/app/rosters"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):

@@ -525,6 +525,77 @@ def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: 
     return msg(api().post("/api/admin/plain-permissions", body))
 
 
+# ---------------------------------------------------------------- recruitment (applications happen in Discord)
+
+@mcp.tool()
+def recruitment() -> dict:
+    """The recruitment settings: applications open or closed, the note shown on the Apply screen, the homepage's
+    Discord invite, the member roles (people holding one register without applying) and the guild's application
+    questions (label ≤45, hint ≤100, required), plus the server's roles (for set_recruitment's member_roles)."""
+    d = api().get("/api/recruitment")
+    names = {r["id"]: r["name"] for r in d.get("guild_roles", [])}
+    return {"open": d["open"], "note": d["note"], "invite_url": d["invite_url"], "questions": d["questions"],
+            "member_roles": [{"id": r, "name": names.get(r, f"role:{r}")} for r in d["member_role_ids"]], "roles": d.get("guild_roles", [])}
+
+
+@mcp.tool()
+def set_recruitment(open: bool | None = None, note: str | None = None, questions: list[dict] | None = None, invite_url: str | None = None,
+                    member_roles: list[str] | None = None) -> str:
+    """Change the recruitment settings (owner); anything left out keeps its value, and nothing is saved if any part is
+    refused. `note=""` / `invite_url=""` clear them (an invite looks like https://discord.gg/abc123). `questions` is the
+    WHOLE ordered list [{label, hint?, required?}] (≤15; label ≤45 characters, hint ≤100; keep an existing `id` to keep
+    it). `member_roles`: role names or ids (the whole list; [] = none). Read recruitment() first."""
+    body: dict[str, Any] = {}
+    if open is not None:
+        body["open"] = bool(open)
+    if note is not None:
+        body["note"] = note
+    if invite_url is not None:
+        body["invite_url"] = invite_url
+    if questions is not None:
+        body["questions"] = questions
+    if member_roles is not None:
+        roles = api().get("/api/recruitment").get("guild_roles", [])
+        ids = []
+        for ref in member_roles:
+            raw = str(ref).strip().lstrip("@").strip("<&>")
+            hit = [r for r in roles if r["id"] == raw or r["name"].lower() == raw.lower()]
+            if len(hit) != 1:
+                raise ToolError(f"no role named {ref}" if not hit else f"{ref}: several roles match")
+            ids.append(hit[0]["id"])
+        body["member_role_ids"] = ids
+    return msg(api().post("/api/admin/recruitment", body))
+
+
+@mcp.tool()
+def list_applications() -> dict:
+    """Applications made in Discord: the open ones (oldest first) and the last 20 decided, each with the applicant's
+    character (label, class/spec), the raid schedules they can make, their answers to the guild's questions, when
+    they applied and the decision (status, by, note)."""
+    return api().get("/api/applications")
+
+
+@mcp.tool()
+def decide_application(member: str, accept: bool, note: str | None = None) -> str:
+    """Accept or decline an OPEN application (officer verdict, same as the Discord card's buttons: the applicant is
+    DMed and, on accept, their character is added). `member`: the applicant's Discord name, character name or id.
+    `note` goes to the applicant with the verdict. Look at list_applications first."""
+    opens = api().get("/api/applications").get("open", [])
+    raw = str(member).strip().strip("<@!>")
+    n = raw.lower()
+    hit = [a for a in opens if a["uid"] == raw] or [a for a in opens if n in (a["display_name"].lower(), a["label"].lower())]
+    if not hit:
+        hit = [a for a in opens if n and (n in a["display_name"].lower() or n in a["label"].lower())]
+    if not hit:
+        raise ToolError(f"no open application for {member}" + (" (open: " + ", ".join(a["label"] for a in opens) + ")" if opens else ""))
+    if len(hit) > 1:
+        raise ToolError(f"{member}: which one? " + ", ".join(f"{a['label']} ({a['display_name']})" for a in hit))
+    body: dict[str, Any] = {"uid": hit[0]["uid"], "accept": bool(accept)}
+    if note:
+        body["note"] = note
+    return msg(api().post("/api/admin/application/decide", body))
+
+
 # ---------------------------------------------------------------- news review (design §5.26)
 
 @mcp.tool()
