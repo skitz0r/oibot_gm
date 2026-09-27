@@ -102,7 +102,31 @@ class Member(BaseModel):
         return [c for c in self.characters if c.status == "planned"]
 
 
+class Question(BaseModel):
+    """One of the guild's own application questions. Discord caps a modal label at 45 characters and a description at
+    100, so the question is a short label plus an optional hint; answers are prose (validated for length, never parsed)."""
+    id: str
+    label: str  # ≤ 45
+    hint: Optional[str] = None  # ≤ 100
+    required: bool = False
+
+
+class Recruitment(BaseModel):
+    open: bool = True  # closed: /apply and the Apply button explain that instead of opening the form
+    note: Optional[str] = None  # one line shown on the Apply screen (e.g. "looking for healers")
+    questions: list[Question] = Field(default_factory=list)
+
+
+QUESTIONS_MAX = 15  # three pages of five in Discord's modals
+ANSWER_MAX = 1000
+
+
 class Applicant(BaseModel):
+    @property
+    def label(self) -> str:
+        return f"{self.name} {self.surname}" if self.surname else self.name
+
+
     discord_id: int
     display_name: str
     name: str
@@ -112,12 +136,20 @@ class Applicant(BaseModel):
     logs_url: Optional[str] = None
     availability: Optional[str] = None
     about: Optional[str] = None
+    surname: Optional[str] = None  # Forever names are two words; carried onto the character on accept
+    schedules: list[str] = Field(default_factory=list)  # "<raid id>:<schedule id>" the applicant can make
+    answers: list[dict] = Field(default_factory=list)  # [{label, answer}] — the guild's questions as asked (a snapshot: later edits don't reword it)
+    source: str = "discord"  # discord (the /apply wizard / the card's Apply button)
     status: str = "open"  # open | accepted | declined | withdrawn
     created_at: str = Field(default_factory=now)
     decided_by: Optional[str] = None
     decided_at: Optional[str] = None
     decision_note: Optional[str] = None
     message_id: Optional[int] = None  # review card in the applications channel
+
+    @property
+    def label(self) -> str:
+        return f"{self.name} {self.surname}" if self.surname else self.name
 
 
 # ---- plain-text permissions (design §5.25): what a sentence to the bot may DO, by capability group, by who, by where.
@@ -172,6 +204,10 @@ class GuildConfig(BaseModel):
     slots: list[str] = Field(default_factory=list)  # legacy candidate-slot poll (unused since the signup-driven cycle)
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
     about: Optional[str] = None  # short public blurb for the static guide (owner-set)
+    invite_url: Optional[str] = None  # the public Discord invite the homepage's Join button opens (anyone can join; members apply inside)
+    recruitment: Recruitment = Field(default_factory=Recruitment)  # the Discord application: open/closed, a note, the guild's questions
+    # people holding one of these Discord roles register without applying (existing members who haven't registered yet); officers always can
+    member_role_ids: list[int] = Field(default_factory=list)
     # officer roles are Discord role IDS (a rename keeps them; a same-named role made by someone with Manage Roles does not count).
     # `officer_roles` (names) is the legacy field: migrated to ids once by Registry.resolve_officer_roles when the bot sees the guild;
     # until then, and only while no id is configured, names still match so nobody is locked out on the first start after the upgrade.
@@ -771,25 +807,113 @@ class Registry:
         self.store.commit(f"{self.key}: {message}")
 
     # ---- applicants
-    def apply(self, discord_id: int, display_name: str, name: str, cls: str, spec: str, offspec: str | None, logs_url: str | None, availability: str | None, about: str | None) -> Applicant:
+    def apply(self, discord_id: int, display_name: str, name: str, cls: str, spec: str, offspec: str | None, logs_url: str | None, availability: str | None, about: str | None,
+              *, surname: str | None = None, schedules: list[str] | None = None, answers: list[dict] | None = None, source: str = "discord") -> Applicant:
+        if not self.config.recruitment.open:
+            raise RegistryError(f"{self.config.name} isn't taking applications right now.")
         if discord_id in self.members and self.members[discord_id].active():
             raise RegistryError("You're already a member; use /register or /char add for more characters.")
         name = self.normalise_name(name)
+        surname = self.normalise_name(surname) if surname else None
         if cls not in self.profile.classes:
             raise RegistryError(f"Unknown class {cls}.")
         spec = self.validate_spec(cls, spec)
         offspec = self.validate_spec(cls, offspec) if offspec else None
-        if self.find(name):
-            raise RegistryError(f"{name} is already registered to a member.")
+        full = f"{name} {surname}" if surname else name
+        if self.find(full):
+            raise RegistryError(f"{full} is already registered to a member.")
+        answers = self.check_answers(answers or [])
+        known = {f"{rid}:{sc['id']}" for rid in self.profile.raids for sc in self.schedules(rid)}
+        schedules = [x for x in (schedules or []) if x in known]
         clash = next((x for x in self.applicants.values() if x.status == "open" and x.name.lower() == name.lower() and x.discord_id != discord_id), None)
         if clash:
             raise RegistryError(f"There is already an open application for {name}. If that character is yours, ask an officer.")
         existing = self.applicants.get(discord_id)
         if existing and existing.status == "open":
             raise RegistryError(f"You already have an open application for {existing.name}. An officer will get to it.")
-        a = Applicant(discord_id=discord_id, display_name=display_name, name=name, cls=cls, spec=spec, offspec=offspec, logs_url=(logs_url or "").strip() or None, availability=(availability or "").strip() or None, about=(about or "").strip() or None)
-        self.save_applicant(a, f"application from {display_name}: {name} ({cls} {spec})")
+        a = Applicant(discord_id=discord_id, display_name=display_name, name=name, cls=cls, spec=spec, offspec=offspec, logs_url=(logs_url or "").strip() or None,
+                      availability=(availability or "").strip() or None, about=(about or "").strip() or None, surname=surname, schedules=schedules, answers=answers, source=source)
+        self.save_applicant(a, f"application from {display_name}: {a.label} ({cls} {spec})")
         return a
+
+    def check_answers(self, answers: list[dict]) -> list[dict]:
+        """The answers as asked: every required question answered, each within ANSWER_MAX. Keyed by label, in the
+        guild's question order; an answer to a question that no longer exists is dropped."""
+        given = {str(x.get("label") or ""): str(x.get("answer") or "").strip() for x in answers}
+        out = []
+        for q in self.config.recruitment.questions:
+            ans = given.get(q.label, "")
+            if q.required and not ans:
+                raise RegistryError(f"Please answer “{q.label}”.")
+            if len(ans) > ANSWER_MAX:
+                raise RegistryError(f"“{q.label}” is limited to {ANSWER_MAX} characters.")
+            if ans:
+                out.append({"label": q.label, "answer": ans})
+        return out
+
+    # ---- recruitment settings (owner): open/closed, the note, the questions, the invite
+    def set_recruitment(self, by: str, *, open: bool | None = None, note: str | None = None, questions: list[dict] | None = None,
+                        invite_url: str | None = None, member_role_ids: list[int] | None = None) -> str:
+        """One validated write for any mix of the recruitment settings (the Config page, /gm config recruitment, plain text,
+        MCP). `note=""` / `invite_url=""` clear them. Nothing is saved when any part is refused."""
+        r = self.config.recruitment.model_copy(deep=True)
+        said = []
+        if open is not None:
+            r.open = bool(open)
+            said.append("applications " + ("open" if r.open else "closed"))
+        if note is not None:
+            note = note.strip()
+            if len(note) > 200:
+                raise RegistryError("The recruitment note is limited to 200 characters.")
+            r.note = note or None
+            said.append("note " + ("cleared" if not note else "set"))
+        if questions is not None:
+            r.questions = self._check_questions(questions)
+            said.append(f"{len(r.questions)} question(s)")
+        url = self.config.invite_url
+        if invite_url is not None:
+            url = invite_url.strip() or None
+            if url and not re.fullmatch(r"https://(discord\.gg|discord\.com/invite)/[A-Za-z0-9-]{2,32}", url):
+                raise RegistryError("An invite link looks like https://discord.gg/abc123.")
+            said.append("invite " + ("cleared" if not url else "set"))
+        roles = self.config.member_role_ids if member_role_ids is None else [int(x) for x in member_role_ids]
+        if member_role_ids is not None:
+            said.append(f"{len(roles)} member role(s)")
+        self.config.recruitment, self.config.invite_url, self.config.member_role_ids = r, url, roles
+        line = "recruitment: " + ", ".join(said) if said else "recruitment: no change"
+        self.save_config(f"{line} (by {by})")
+        return line
+
+    def _check_questions(self, questions: list[dict]) -> list[Question]:
+        if len(questions) > QUESTIONS_MAX:
+            raise RegistryError(f"At most {QUESTIONS_MAX} questions (three pages of five in Discord).")
+        out, seen = [], set()
+        for i, q in enumerate(questions):
+            label = str(q.get("label") or "").strip()
+            hint = str(q.get("hint") or "").strip() or None
+            if not label:
+                raise RegistryError(f"Question {i + 1} has no text.")
+            if len(label) > 45:
+                raise RegistryError(f"“{label[:45]}…” is over Discord's 45 characters; move the rest into the hint.")
+            if hint and len(hint) > 100:
+                raise RegistryError(f"The hint for “{label}” is over Discord's 100 characters.")
+            if label.lower() in seen:
+                raise RegistryError(f"“{label}” is asked twice.")
+            seen.add(label.lower())
+            qid = str(q.get("id") or "").strip() or re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:24] or f"q{i + 1}"
+            out.append(Question(id=qid, label=label, hint=hint, required=bool(q.get("required"))))
+        return out
+
+    def must_apply(self, discord_id: int, *, officer: bool, role_ids=()) -> bool:
+        """A newcomer applies instead of registering: nothing registered yet (no character, not even a planned one), not
+        an officer, holding none of the configured member roles, and no accepted application on file."""
+        if officer or set(int(r) for r in role_ids) & set(self.config.member_role_ids):
+            return False
+        m = self.members.get(discord_id)
+        if m and any(c.status in ("active", "planned") for c in m.characters):
+            return False
+        a = self.applicants.get(discord_id)
+        return not (a and a.status == "accepted")
 
     def open_applicants(self) -> list[Applicant]:
         return sorted([a for a in self.applicants.values() if a.status == "open"], key=lambda a: a.created_at)
@@ -802,7 +926,7 @@ class Registry:
         a.decided_by, a.decided_at, a.decision_note = by, now(), (note or "").strip() or None
         char = None
         if accept:
-            m, char = self.add_character(a.discord_id, a.display_name, a.name, a.cls, a.spec, a.offspec, True)
+            m, char = self.add_character(a.discord_id, a.display_name, a.name, a.cls, a.spec, a.offspec, True, surname=a.surname)
             char.confirmed_by, char.confirmed_at = by, now()
             self.save(m, f"{by} accepted {a.display_name} as {a.name}")
         self.save_applicant(a, f"{by} {a.status} application from {a.display_name} ({a.name})")
