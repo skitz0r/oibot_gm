@@ -79,7 +79,7 @@ def test_two_weekly_schedules_coexist_with_different_lock_hours(reg, rs):
     assert reg.schedule_def(RID, "default")["lock_hours_before"] == 24 and reg.schedule_def(RID, "alt")["lock_hours_before"] == 12
     ups = rc.upcoming(reg, RID, reg.now_local(), 24 * 14)
     assert {s["id"] for s, _t in ups} == {"default", "alt"}
-    tue = next(t for s, t in ups if s["id"] == "default")
+    tue = max(t for s, t in ups if s["id"] == "default")  # the latest in the window: a run days away keeps its cadence (a near one is squeezed by fit_cutoffs)
     assert (tue, "alt") in {(t, s["id"]) for s, t in ups}  # both schedules start that same minute …
     a = rc.open_run(reg, rs, RID, tue, by="t")
     b = rc.open_run(reg, rs, RID, tue, by="t", schedule="alt")
