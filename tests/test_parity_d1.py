@@ -111,6 +111,39 @@ def test_reply_private_follows_the_channels_readers(reg):
     assert not officer_only_channel(reg, types.SimpleNamespace(guild=None)), "anything unreadable counts as public"
 
 
+class Mem(discord.Member):
+    """A cached guild member stand-in (only what officer_only_channel reads)."""
+    id = property(lambda s: s._uid)
+    roles = property(lambda s: s._rs)
+    guild_permissions = property(lambda s: Perms())
+    __hash__ = object.__hash__
+
+    def __init__(self, uid, roles):
+        self._uid, self._rs = uid, roles
+
+
+def test_an_uncached_members_view_overwrite_makes_the_channel_public(reg):
+    """Without the members intent an uncached member's overwrite comes back as a discord.Object: it can't be shown to
+    be an officer, so a View Channel allowed to it reads as public (unknown never leaks). The owner's own id, an
+    officer Member and a denied overwrite keep the channel officer-only."""
+    guild, everyone, raider, officer = guild_with_roles()
+    allow, deny = discord.PermissionOverwrite(view_channel=True), discord.PermissionOverwrite(view_channel=False)
+    owner = reg.config.owner_discord_id
+
+    def chan(overwrites):
+        return Chan(ANALYTICS_CH, guild, visible_to={OFFICER_ROLE}, overwrites=overwrites)
+
+    assert officer_only_channel(reg, chan({})), "officer roles only"
+    assert not officer_only_channel(reg, chan({discord.Object(id=424_242, type=discord.User): allow})), "an uncached member let in"
+    assert not officer_only_channel(reg, chan({discord.Object(id=424_243, type=discord.Role): allow})), "an unresolvable role let in"
+    assert officer_only_channel(reg, chan({discord.Object(id=owner, type=discord.User): allow})), "the owner's own overwrite"
+    assert officer_only_channel(reg, chan({discord.Object(id=424_242, type=discord.User): deny})), "a deny lets nobody in"
+    assert officer_only_channel(reg, chan({Mem(424_244, [officer]): allow})), "a cached officer Member"
+    assert not officer_only_channel(reg, chan({Mem(424_245, [raider]): allow})), "a cached raider Member"
+    # a thread answers for its parent's overwrites
+    assert not officer_only_channel(reg, Chan(99, guild, parent=chan({discord.Object(id=424_242, type=discord.User): allow})))
+
+
 # handle_change on a real Message type: the parser context and the to_help snapshot follow the channel
 
 class Msg(discord.Message):
@@ -414,6 +447,48 @@ def test_after_a_stale_board_op_the_rest_of_the_request_cannot_overwrite(reg, rs
     assert ev.layout == theirs, "the other officer's move survives"
 
 
+def test_an_unrelated_op_first_does_not_absorb_someone_elses_board_change(reg, rs):
+    """[dm off, run_board]: the dm applies first, but the other officer's move made after the preview is not this
+    request's write — the run stays stale and the board op is refused (the rev is refreshed only when it was ours)."""
+    from test_parity_ops_board import PressBot, board_run, press
+
+    from oibot_gm.configops import ConfigOp
+
+    bot = PressBot(reg, rs)
+    ev, names = board_run(reg, rs)
+    ops = [ConfigOp(op="dm", member=names[5], value="off"),
+           ConfigOp(op="run_board", target=ev.key, value=f"{names[0]}, {names[1]} | {names[2]}")]
+    revs = configops.board_revs(reg, ops, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, names[3], (0, 0), by="someone else"))  # between the preview and Apply
+    theirs = [list(g) for g in ev.layout]
+    log = []
+    view = discord_policy.ConfigConfirmView(reg, ConfigRequest(kind="change", reply="", ops=ops), None, bot.ops, OWNER, "Owner", GENERAL_CH, revs=revs)
+    asyncio.run(view.apply.callback(press(bot, OWNER, log)))
+    assert log[0].count("changed since you looked") == 1, log[0]
+    assert "✅" in log[0], "the unrelated op still applies"
+    assert ev.layout == theirs, "the other officer's move survives"
+    assert view.revs == revs, "the held rev is never refreshed over someone else's change"
+
+
+def test_refresh_revs_follows_only_this_requests_own_write(reg, rs):
+    from test_parity_ops_board import board_run
+
+    from oibot_gm import raidcycle as rc
+
+    ev, names = board_run(reg, rs)
+    held = rc.board_rev(reg, ev)
+    revs, stale = {ev.key: held}, set()
+    before = configops.snapshot_revs(reg, revs, rs)
+    ev.pins[str(reg.test_members()[0].discord_id)] = "in"  # this op's own write
+    configops.refresh_revs(reg, revs, rs, stale, before)
+    assert revs[ev.key] == rc.board_rev(reg, ev) != held and not stale
+    ev.pins.clear()  # someone else, between two ops
+    before = configops.snapshot_revs(reg, revs, rs)
+    mine = revs[ev.key]
+    configops.refresh_revs(reg, revs, rs, stale, before)
+    assert revs[ev.key] == mine and stale == {ev.key}
+
+
 # ---------------------------------------------------------------- M4: one lock per run, and the board lock around it
 
 def slow_propose(delay=0.05):
@@ -514,6 +589,37 @@ def test_web_autofill_saves_through_save_board_with_its_rev(reg, rs, monkeypatch
     assert ev.layout[:2] == [names[:5], names[5:9]] and any("auto-filled" in line for line in ev.log)
 
 
+@pytest.mark.parametrize("why", ["busy", "locked"])
+def test_card_lock_button_answers_a_busy_or_locked_run_quietly(reg, rs, why):
+    """The card's Lock now while another lock solves (rc.SolverBusy) or after the run left open: the presser gets the
+    reason, not "lock failed: …", and nothing goes to the ops feed (as with the scheduler, the wizard and the site)."""
+    from conftest import open_test_run
+
+    from oibot_gm import raidcycle as rc
+    from oibot_gm.raid_buttons import RunButton
+
+    ev = open_test_run(reg, rs)
+    feed, log = Feed(), []
+
+    async def lock_run(reg_, rs_, ev_, by="scheduler"):
+        if why == "busy":
+            raise rc.SolverBusy()
+        raise configops.RegistryError(f"{ev_.key} is already locked")
+
+    async def is_officer_anywhere(reg_, uid):
+        return True
+
+    bot = types.SimpleNamespace(registries=types.SimpleNamespace(for_interaction=lambda i: reg), raids=types.SimpleNamespace(store=lambda r: rs),
+                                is_officer_anywhere=is_officer_anywhere, lock_run=lock_run, ops=feed)
+    inter = press(log, "Officer")
+    inter.client = bot
+    asyncio.run(RunButton(ev.key, "lock").callback(inter))
+    sent = [c for k, c, _ in log if k == "followup"]
+    assert sent and "lock failed" not in sent[0], sent
+    assert ("the solver is already working" in sent[0]) if why == "busy" else ("already locked" in sent[0])
+    assert feed.lines == [], feed.lines
+
+
 # ---------------------------------------------------------------- M6: MCP plain_change applies exactly what it previewed
 
 def test_plain_change_apply_uses_the_previewed_ops_and_revs_never_a_new_parse(reg, rs, monkeypatch):
@@ -557,6 +663,35 @@ def test_plain_change_apply_uses_the_previewed_ops_and_revs_never_a_new_parse(re
     d3 = c.post("/api/ops/change", json={"token": token, "apply": True}, headers=H).json()
     assert "changed since you looked" in d3.get("error", ""), d3
     assert names[0] not in (ev.layout or [[]])[0]
+
+
+def test_web_plain_change_an_unrelated_op_first_does_not_absorb_someone_elses_board_change(reg, rs, monkeypatch):
+    from conftest import join, open_test_run
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN, bearer
+    from test_parity_verbs import Bot
+
+    from oibot_gm.configops import ConfigOp
+    from oibot_gm.web import app as web
+
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    bot = Bot(reg, rs)
+    bot.ctx = types.SimpleNamespace(provider=object())
+    c = TestClient(web.create_app(bot))
+    ms = reg.test_members()
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, ms[:6])
+    names = [m.display_name for m in ms[:6]]
+    ops = [ConfigOp(op="dm", member=names[5], value="off"), ConfigOp(op="run_board", target=ev.key, value=f"{names[0]}, {names[1]} | {names[2]}")]
+    monkeypatch.setattr(configops, "parse", lambda *a, **k: ConfigRequest(kind="change", reply="", ops=ops))
+    token = c.post("/api/ops/change", json={"text": "dm off and set the groups"}, headers=bearer()).json()["token"]
+    asyncio.run(bot.board_move(reg, rs, ev, names[3], (0, 0), by="someone else"))
+    theirs = [list(g) for g in ev.layout]
+    d = c.post("/api/ops/change", json={"token": token, "apply": True}, headers=bearer()).json()
+    assert "changed since you looked" in d.get("error", ""), d
+    assert reg.members[ms[5].discord_id].dm_opt_out, "the unrelated op applied"
+    assert ev.layout == theirs, "the other officer's move survives"
 
 
 def test_mcp_plain_change_sends_the_token_on_apply(monkeypatch):

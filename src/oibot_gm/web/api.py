@@ -1643,6 +1643,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ps = PolicyStore(bot.registries.store, v.reg.key)
             for op in configops.coalesce(allowed):  # consecutive raid/schedule settings save as one write (as on Discord)
                 key = configops.op_run_key(v.reg, op, raids)
+                before = configops.snapshot_revs(v.reg, revs, raids)
                 try:
                     if op.op in configops.BOARD_OPS and key in stale:
                         raise rc.BoardChanged()
@@ -1652,7 +1653,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                     out["applied"].append(f"{op.op}: {e}")
                     out["error"] = str(e)
                     break
-                configops.refresh_revs(v.reg, revs, raids, stale)  # this request's own write is not someone else's change
+                configops.refresh_revs(v.reg, revs, raids, stale, before)  # this request's own write is not someone else's change
                 out["applied"].append(line)
                 await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
             return out

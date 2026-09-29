@@ -918,18 +918,33 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
     return out
 
 
-def refresh_revs(reg: Registry, revs: dict[str, str], raids, stale=()) -> None:
-    """After an op of this request applied: re-read the fingerprint of every board the request looks at (a pin, a
-    move — any op of its own — is not "someone else's change"). Runs marked stale (a BoardChanged earlier in the
-    request) keep their old rev, so the rest of the request can't overwrite that change either."""
+def snapshot_revs(reg: Registry, revs: dict[str, str], raids) -> dict[str, str]:
+    """rc.board_rev of every run in `revs` as it is right now — taken just before an op, so refresh_revs can tell this
+    op's own write from someone else's change made earlier."""
+    from . import raidcycle as rc
+
+    if raids is None:
+        return {}
+    return {k: rc.board_rev(reg, ev) for k in revs if (ev := raids.events.get(k)) is not None}
+
+
+def refresh_revs(reg: Registry, revs: dict[str, str], raids, stale: set, before: dict[str, str]) -> None:
+    """After an op of this request applied: a run whose board still matched the held rev just before the op (`before`
+    = snapshot_revs) takes its new rev — the change is this request's own (a pin, a move). A run that already differed
+    before the op was changed by someone else since the preview: it keeps the held rev and is marked stale, so no
+    later board op of this request (and no unrelated op in between) can absorb and overwrite that change."""
     from . import raidcycle as rc
 
     if raids is None:
         return
     for k in revs:
         ev = raids.events.get(k)
-        if ev is not None and k not in stale:
-            revs[k] = rc.board_rev(reg, ev)
+        if ev is None or k in stale:
+            continue
+        if before.get(k) != revs[k]:
+            stale.add(k)
+            continue
+        revs[k] = rc.board_rev(reg, ev)
 
 
 def op_run_key(reg: Registry, op: ConfigOp, raids=None) -> str | None:

@@ -232,8 +232,11 @@ ACT = "\x00act"  # help_answer's "this was a request to do something" (never sho
 
 def officer_only_channel(reg, channel) -> bool:
     """True when no non-officer can view `channel`: every guild role that isn't an officer role (nor Administrator /
-    Manage Server) is denied View Channel there, and no member-specific overwrite lets a non-officer in (the owner's
-    own overwrite is fine). Threads answer for their parent. Any error reads as False (public): unknown never leaks."""
+    Manage Server) is denied View Channel there, and no other overwrite lets a non-officer in. A non-Role overwrite
+    that allows View Channel is fine only for the owner's id or a cached Member who is an officer: the bot runs without
+    the members intent, so an uncached member's overwrite is a discord.Object nobody can vouch for and reads as public
+    (so does an overwrite for a role the guild no longer resolves). Threads answer for their parent. Any error reads
+    as False (public): unknown never leaks."""
     try:
         base = getattr(channel, "parent", None) or channel
         guild = channel.guild
@@ -245,10 +248,15 @@ def officer_only_channel(reg, channel) -> bool:
             if base.permissions_for(role).view_channel:
                 return False
         for target, ow in (getattr(base, "overwrites", None) or {}).items():
-            if isinstance(target, discord.Member) and ow.view_channel and target.id != owner:
+            if isinstance(target, discord.Role) or not ow.view_channel:  # a live role is judged above, whatever its overwrite
+                continue
+            if target.id == owner:
+                continue
+            if isinstance(target, discord.Member):
                 gp = target.guild_permissions
-                if not (gp.administrator or gp.manage_guild or reg.config.officer_by_roles(target.roles)):
-                    return False
+                if gp.administrator or gp.manage_guild or reg.config.officer_by_roles(target.roles):
+                    continue
+            return False  # a non-officer, or someone (or some role) that can't be resolved to check
         return True
     except Exception:  # noqa: BLE001
         return False

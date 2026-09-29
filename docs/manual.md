@@ -362,8 +362,8 @@ returns to the game defaults.
   at once — the buttons go, the diff reads *Applying…* and turns into the result when it is done, and a second press
   (or Cancel) by anyone is refused, so nothing applies twice. A board change (a move, the groups, auto-fill, using a
   proposal) is refused with *"the board changed since you looked"* when someone else changed that board between the
-  diff and your Apply — nothing is overwritten; the request's own earlier steps (a pin, a move) never count as a
-  change, and once one board step is refused the request's later board steps on that run are refused too. Absences
+  diff and your Apply — nothing is overwritten, even when an unrelated step of the request (a DM setting) comes first;
+  the request's own earlier steps (a pin, a move) never count as a change, and once one board step is refused the request's later board steps on that run are refused too. Absences
   entered this way are announced like `/me absent add`; channel changes post (or drop) their card like the Config page
   does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
   before" can't fail half way.
@@ -753,7 +753,8 @@ applications, ops, precedents, proposals or who holds which privilege.
 
 **Where you ask decides what the answer may carry.** The officer view goes only where only officers read the reply:
 a DM, `/ask` and `/gm change` (ephemeral), the ops, applications and roster channels, and any channel no non-officer
-role can see (the analytics channel when you made it officer-only). An officer who @mentions the bot anywhere else —
+role can see (the analytics channel when you made it officer-only; a channel where you let one member in by name
+counts as public unless that member is an officer the bot can check). An officer who @mentions the bot anywhere else —
 #general, a public analytics channel — gets the member view, because everyone there reads the answer, and the reply
 says so: ask in the ops channel or by DM for the officer view. The same holds when that message is a change: the
 bot's clarifying questions there are written from the member view too. Text people typed (news titles, applicants'

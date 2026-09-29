@@ -88,8 +88,13 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             await interaction.response.defer(ephemeral=True, thinking=True)
             try:
                 line = await bot.lock_run(reg, rs, ev, by=by)
-            except Exception as e:  # noqa: BLE001
-                line = f"lock failed: {e}"
+            except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open: nothing happened
+                await interaction.followup.send(str(e), ephemeral=True)
+                return
+            except Exception as e:  # noqa: BLE001 — lock_run reports solver failures itself; this is anything else
+                await interaction.followup.send(f"lock failed: {e}", ephemeral=True)
+                await bot.ops.emit(reg.config, "warn", f"{ev.key}: lock by {by} failed — {e}")
+                return
             await interaction.followup.send(line, ephemeral=True)
             if not ev.lock_error:
                 await bot.ops.emit(reg.config, "info", line)

@@ -175,6 +175,7 @@ class ConfigConfirmView(discord.ui.View):
             if op.op in configops.BOARD_OPS and key in stale:  # an earlier step found someone else's change on this board
                 refused.append(f"{configops.describe(self.reg, op, self.channel)} — {rc.BoardChanged()}")
                 continue
+            before = configops.snapshot_revs(self.reg, self.revs, raids)
             try:  # authorize() allowed it, so owner-only ops pass when the policy opens them
                 done.append(await configops.apply_async(self.reg, op, by, True, self.ps, bot=bot, by_id=interaction.user.id,
                                                         rev=self.revs.get(key) if op.op in configops.BOARD_OPS else None, channel_id=self.channel))
@@ -185,7 +186,7 @@ class ConfigConfirmView(discord.ui.View):
                 if isinstance(e, rc.BoardChanged) and key:
                     stale.add(key)  # keep the old rev: the rest of this request can't overwrite that change either
                 continue
-            configops.refresh_revs(self.reg, self.revs, raids, stale)  # this request's own write (a pin, a move…) is not someone else's change
+            configops.refresh_revs(self.reg, self.revs, raids, stale, before)  # this request's own write (a pin, a move…) is not someone else's change
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
         try:
             await interaction.edit_original_response(content=text[:1900] or "Nothing applied.", view=None, embed=None)
