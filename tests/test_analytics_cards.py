@@ -63,3 +63,13 @@ def test_every_comp_line_has_an_icon_and_the_raid_thumbnail_renders(reg):
     assert dp._comp_icon(ico, "Shaman") == "<class:Shaman>" and dp._comp_icon(ico, "Shaman:Restoration") == "<spec:Shaman:Restoration>"
     for rid, rd in reg.profile.raids.items():  # the card's thumbnail: a removed renderer once took a constant with it
         assert render.raid_thumb_png(rid, rd.get("name", rid), int(rd.get("size") or 0), 7)[:4] == b"\x89PNG"
+
+
+def test_pool_card_reads_comp_readiness(reg):
+    """The card and GET /api/readiness / MCP / /ask share one computation: same level, same headcount."""
+    from oibot_gm import comp
+    for rid in reg.profile.raids:
+        d = comp.readiness(reg, rid)
+        view, level = dp.pool_layout(reg, reg.raid_shell(rid), ico)
+        assert level == d["level"]
+        assert f"**{d['headcount']['mains']}** / {d['size']} mains" in text_of(view)

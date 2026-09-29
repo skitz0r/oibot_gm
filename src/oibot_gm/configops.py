@@ -469,7 +469,7 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
         try:
             start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=reg.tz)
         except ValueError:
-            raise RegistryError("time looks like 2026-12-10 19:30 (guild time)")
+            raise RegistryError("I couldn't tell which time you meant — name the day and the time, e.g. Thu 10 Dec 7:30 PM (guild time)")
         if sid is None:  # one of the raid's own upcoming runs: open it as that schedule's run, not a one-off
             sid = next((s["id"] for s, t in nxt if t == start), None)
         return start, sid
@@ -815,15 +815,16 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
     raise RegistryError("character field is add | spec | offspec | name | rank | main | retire | delete | flex")
 
 
-def _absence_start(m, start: str | None, today: str) -> str:
-    """The absence an absence_clear names: by start date, or their only upcoming one."""
+def _absence_start(reg: Registry, m, start: str | None, today: str) -> str:
+    """The absence an absence_clear names: by start date (ISO, from the parser), or their only upcoming one. Dates in a
+    refusal are the person-readable day labels."""
     s = (start or "").strip()
     if s:
         return s
     ups = m.upcoming_absences(today)
     if len(ups) == 1:
         return ups[0].start
-    raise RegistryError(f"{m.display_name} has {len(ups)} upcoming absences" + (f" ({', '.join(a.start for a in ups)}) — say which" if ups else ""))
+    raise RegistryError(f"{m.display_name} has {len(ups)} upcoming absences" + (f" ({', '.join(reg.span_label(a.start, a.end) for a in ups)}) — say which" if ups else ""))
 
 
 def _range(value: str | None) -> tuple[int | None, int | None]:
@@ -1558,11 +1559,11 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         return line
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)
-        start = _absence_start(m, op.start, reg.now_local().date().isoformat())
+        start = _absence_start(reg, m, op.start, reg.now_local().date().isoformat())
         a = next((a for a in m.absences if a.start == start), None)
         if a is None:
-            raise RegistryError(f"{m.display_name} has no absence starting {start}")
-        return f"{m.display_name}: clear absence {a.start}" + (f" → {a.end}" if a.end != a.start else "") + " — open sheets it had pre-filled re-open for them (a seat freed on a locked run is not handed back)"
+            raise RegistryError(f"{m.display_name} has no absence starting {reg.day_label(start)}")
+        return f"{m.display_name}: clear absence {reg.span_label(a.start, a.end)}" + " — open sheets it had pre-filled re-open for them (a seat freed on a locked run is not handed back)"
     if op.op == "dm":
         m = _need_member(reg, op.member)
         v = (op.value or "").strip().lower()
@@ -1845,9 +1846,9 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         return f"{who}: " + "; ".join(lines)
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)
-        start = _absence_start(m, op.start, reg.now_local().date().isoformat())
+        start = _absence_start(reg, m, op.start, reg.now_local().date().isoformat())
         a = reg.clear_absence(m.discord_id, start, by)
-        return f"{m.display_name}: cleared absence {a.start}" + (f" → {a.end}" if a.end != a.start else "")
+        return f"{m.display_name}: cleared absence {reg.span_label(a.start, a.end)}"
     if op.op == "dm":
         m = _need_member(reg, op.member)
         v = (op.value or "").strip().lower()
@@ -2060,10 +2061,10 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         return f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)
-        start = _absence_start(m, op.start, reg.now_local().date().isoformat())
+        start = _absence_start(reg, m, op.start, reg.now_local().date().isoformat())
         a = await asyncio.to_thread(reg.clear_absence, m.discord_id, start, by)
         lines = list(await bot.absence_cleared(reg, m, a, by) or [])
-        return f"{m.display_name}: cleared absence {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (" — " + "; ".join(lines) if lines else "")
+        return f"{m.display_name}: cleared absence {reg.span_label(a.start, a.end)}" + (" — " + "; ".join(lines) if lines else "")
     if op.op == "test":
         kind, arg = _test_op(op.value)
         if kind == "seed":

@@ -282,6 +282,21 @@ def test_readiness_route(c, reg):
     assert c.get("/api/readiness").status_code == 401
 
 
+def test_readiness_route_is_officers_only(reg, rs, monkeypatch):
+    """A signed-in member gets 403 (the pool plan is officer data); a signed-in officer gets the rows."""
+    from test_recruitment_web import MEMBER_UID, OFFICER_UID, SECRET, RecruitBot, as_user
+    monkeypatch.setenv("OIBOT_WEB_SECRET", SECRET)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    monkeypatch.delenv("OIBOT_WEB_SESSION_EPOCH", raising=False)
+    client = TestClient(web.create_app(RecruitBot(reg, rs)), follow_redirects=False)
+    as_user(client, MEMBER_UID)
+    r = client.get("/api/readiness")
+    assert r.status_code == 403, r.text
+    as_user(client, OFFICER_UID)
+    r = client.get("/api/readiness", params={"raid": "barrow_deeps"})
+    assert r.status_code == 200 and [x["raid"] for x in r.json()["raids"]] == ["barrow_deeps"]
+
+
 def test_raid_readiness_tool_hits_the_route(c):
     def handler(request: httpx.Request) -> httpx.Response:
         r = c.request(request.method, request.url.path, params=dict(request.url.params), headers=dict(request.headers))

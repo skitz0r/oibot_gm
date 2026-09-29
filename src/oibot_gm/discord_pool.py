@@ -15,7 +15,7 @@ import discord
 
 from . import comp as comp_mod
 from .discord_registry import registration_card, registration_view
-from .registry import Registry, pool_health_data
+from .registry import Registry
 
 from .constants import LEVEL_COLOUR, ROLES, TEAL  # noqa: E402
 DEBOUNCE_S = 5.0  # a burst of registrations re-posts the cards once
@@ -39,28 +39,24 @@ def _site(path: str) -> str | None:
 def pool_layout(reg: Registry, roster: dict, ico) -> tuple[discord.ui.LayoutView, str]:
     """One native card per raid: who the pool could field at this size (roles have/need, buffs nobody brings) and
     where the desired comp is short or over. Icons + numbers only; the Members and Raids pages hold the detail.
-    Returns (view, level)."""
+    Returns (view, level). The numbers are comp.readiness (one computation for the card, the API, MCP and /ask)."""
     ui = discord.ui
-    key, name = roster.get("key", "main"), roster.get("name") or roster.get("key", "main")
-    h = pool_health_data(reg, roster)
-    n, size, alts, _on = h["headcount"]
-    players = comp_mod.pool_players(reg)
-    ic = comp_mod.ideal_comp(reg.profile, size, players, roster.get("comp_targets") or {}, roster.get("instance"), reg)
-    short = [ln for ln in ic.lines if ln.level == "red" and ln.key not in ROLES]
-    over = [ln for ln in ic.lines if ln.max is not None and ln.have > ln.max]
-    levels = [h["headcount_level"]] + [r["level"] for r in h["roles"] if r["need"]] + (["red"] if short else [])
-    worst = "red" if "red" in levels else ("amber" if "amber" in levels or over else "green")
-    head = f"## {name}\n**{n}** / {size} mains" + (f" · {alts} alts" if alts else "") + (f" · {h['unnamed']} unnamed" if h.get("unnamed") else "")
+    key = roster.get("key", "main")
+    d = comp_mod.readiness(reg, roster.get("instance") or key)  # the same numbers GET /api/readiness, MCP and /ask read
+    name, size, worst, hc = d["name"], d["size"], d["level"], d["headcount"]
+    short = [c for c in d["comp"] if c["level"] == "red" and c["key"] not in ROLES]
+    over = d["over"]
+    head = f"## {name}\n**{hc['mains']}** / {size} mains" + (f" · {hc['alts']} alts" if hc["alts"] else "") + (f" · {hc['unnamed']} unnamed" if hc["unnamed"] else "")
     web = os.environ.get("OIBOT_WEB_URL", "")
     top = ui.Section(ui.TextDisplay(head), accessory=ui.Thumbnail(media=f"{web}/img/raid/{roster.get('instance') or key}.png")) if web.startswith("https") and (roster.get("instance") or key) in reg.profile.raids else ui.TextDisplay(head)
-    lines = ["   ".join(f"{ico('role', r['role'])} {r['have']}/{r['need']}" + (" ⚠" if r["level"] == "red" else "") for r in h["roles"] if r["need"])]
-    missing = [b for b in h["buffs"] if not b["providers"] and ico("buff", b["id"])]
+    lines = ["   ".join(f"{ico('role', r['role'])} {r['have']}/{r['need']}" + (" ⚠" if r["level"] == "red" else "") for r in d["roles"] if r["need"])]
+    missing = [b for b in d["missing_buffs"] if ico("buff", b["id"])]
     if missing:
         lines.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing[:12]))
     if short:
-        lines.append("**Short** " + "   ".join(f"{_comp_icon(ico, ln.key)} {ln.have}/{ln.want}" for ln in short[:8]))
+        lines.append("**Short** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['want']}" for c in short[:8]))
     if over:
-        lines.append("**Over cap** " + "   ".join(f"{_comp_icon(ico, ln.key)} {ln.have}/{ln.max}" for ln in over[:8]))
+        lines.append("**Over cap** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['max']}" for c in over[:8]))
     parts = [top, ui.Separator(), ui.TextDisplay("\n".join(x for x in lines if x.strip()) or "every slot filled")]
     links = [ui.Button(label=label, style=discord.ButtonStyle.link, url=url) for label, url in (("Members", _site("/app/members")), ("Raid rules", _site("/app/raids"))) if url]
     parts += [ui.Separator(), ui.TextDisplay(f"-# Change the ideals in plain text here: @mention me, e.g. “{roster.get('instance') or key}: we want 3 tanks”, “cap hunters at 3”.")]

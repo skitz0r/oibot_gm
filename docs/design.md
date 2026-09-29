@@ -466,7 +466,7 @@ schema); `raid_set field=cadence` expands `presets.preset_fields`. `describe` pr
 `TimezoneWizard` confirm uses it too), and shows slots and first-open in words. `test` gains `run <raid> [tempo] [dm]`
 (`presets.tempo_cutoffs`), `answer [<run>] join N bench N out N` (`rc.test_answer_mix`, which `TestAnswerWizard` now uses)
 and `seed all`; the parser's context says the bench size of `TEST_MAX` and, for officers, the plain-text policy.
-Reads: `GET /api/readiness[?raid=]` (officers) returns `comp.readiness` per raid; MCP `raid_readiness(raid=None)`.
+Reads: `GET /api/readiness[?raid=]` (officers) returns `comp.readiness` per raid; MCP `raid_readiness(raid=None)`. `discord_pool.pool_layout` draws the analytics card from the same `comp.readiness` dict (one computation for the card, the API, MCP and `/ask`).
 `flows_raid` raid_sheet calls `repost_sheet`; `/roster overview` takes no typed size (every raid's size at once); the
 application card's overflow line points at the bot and MCP, not a site page that doesn't exist. Tests:
 `tests/test_parity_ops_board.py`, `tests/test_parity_ops_setup.py`.

@@ -1368,7 +1368,7 @@ class Registry:
                 try:
                     t = _dt.fromisoformat(raw)
                 except ValueError:
-                    raise RegistryError("first_open looks like 2026-12-09T15:00 (guild timezone) or 2026-12-09T15:00-08:00")
+                    raise RegistryError("first_open must be a date and a time in the guild timezone (pick it on the Raids page)")
                 if t.tzinfo is None:
                     t = t.replace(tzinfo=_Z(self.config.timezone))
                 over["first_open"] = t.isoformat()

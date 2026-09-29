@@ -323,7 +323,8 @@ returns to the game defaults.
   line it explains.
 - The same readiness as data: MCP `raid_readiness` (one raid or all) and `GET /api/readiness` — headcount, each role's
   have/need with who could cover it, buffs nobody brings, every desired-comp line with its reason, what is short or
-  over cap, and the pool plan.
+  over cap, and the pool plan (officers only; a member's request gets 403). The analytics card reads the same numbers,
+  so the card, `/ask`, the API and MCP never disagree.
 - The **character bank** lives on the Members page and **groups** are built on the Rosters board (Auto-fill /
   Propose); the old bank, optimised-groups and comp images are gone.
 - `/roster overview` (no arguments) shows the plan summary on demand: every planned main by class, the role counts
@@ -515,7 +516,7 @@ of their characters. The bot reads each live run's board as it stands and each r
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
   raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "Marrow is back, clear her absence" (by start
-  date when she has several); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
+  date when she has several — the bot lists them as days, e.g. "Fri 01 Mar → Sun 03 Mar, Mon 10 Jun"); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
 - *Raids (owner):* "Barrow Deeps runs Tuesdays and Thursdays at 7:30 PM" (the diff shows the next runs it makes),
   "short-notice cadence for Barrow Deeps" (Standard, Short notice or Same week — the same presets as `/gm config
   raid`: when the sheet opens, the nudge, the lock and the confirmation deadline together), "lock Barrow Deeps 12 hours
