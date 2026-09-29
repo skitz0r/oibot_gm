@@ -512,3 +512,60 @@ def test_web_autofill_saves_through_save_board_with_its_rev(reg, rs, monkeypatch
     r = c.post(f"/api/run/{ev.key}/autofill", json={}, headers=bearer())
     assert r.status_code == 200, r.text
     assert ev.layout[:2] == [names[:5], names[5:9]] and any("auto-filled" in line for line in ev.log)
+
+
+# ---------------------------------------------------------------- M6: MCP plain_change applies exactly what it previewed
+
+def test_plain_change_apply_uses_the_previewed_ops_and_revs_never_a_new_parse(reg, rs, monkeypatch):
+    from conftest import join, open_test_run
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN, bearer
+    from test_parity_verbs import Bot
+
+    from oibot_gm.configops import ConfigOp
+    from oibot_gm.web import app as web
+
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    bot = Bot(reg, rs)
+    bot.ctx = types.SimpleNamespace(provider=object())
+    c = TestClient(web.create_app(bot))
+    ms = reg.test_members()
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, ms[:6])
+    parses = []
+
+    def parse(provider, reg_, text, by=None, officer=False):  # a nondeterministic parser: another member each call
+        parses.append(text)
+        who = ms[0] if len(parses) == 1 else ms[1]
+        return ConfigRequest(kind="change", reply="ok", ops=[ConfigOp(op="dm", member=who.display_name, value="off")])
+
+    monkeypatch.setattr(configops, "parse", parse)
+    H = bearer()
+    d = c.post("/api/ops/change", json={"text": "turn Kestrel's DMs off"}, headers=H).json()
+    assert d["token"] and d["expires_in"] > 0 and not d["applied"]
+    r = c.post("/api/ops/change", json={"text": "turn Kestrel's DMs off", "apply": True}, headers=H)
+    assert r.status_code == 400 and "token" in r.json()["error"], "apply never re-parses the text"
+    d2 = c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=H).json()
+    assert len(parses) == 1 and d2["applied"] and reg.members[ms[0].discord_id].dm_opt_out and not reg.members[ms[1].discord_id].dm_opt_out
+    assert c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=H).status_code == 400, "single use"
+    # a board op carries the rev it was previewed on
+    names = [m.display_name for m in ms[:6]]
+    monkeypatch.setattr(configops, "parse", lambda *a, **k: ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="run_move", target=ev.key, member=names[0], value="g1")]))
+    token = c.post("/api/ops/change", json={"text": "move"}, headers=H).json()["token"]
+    asyncio.run(bot.board_move(reg, rs, ev, names[1], (1, 0), by="someone else"))
+    d3 = c.post("/api/ops/change", json={"token": token, "apply": True}, headers=H).json()
+    assert "changed since you looked" in d3.get("error", ""), d3
+    assert names[0] not in (ev.layout or [[]])[0]
+
+
+def test_mcp_plain_change_sends_the_token_on_apply(monkeypatch):
+    from oibot_gm import mcp_server as msrv
+
+    sent = []
+    monkeypatch.setattr(msrv, "api", lambda: types.SimpleNamespace(post=lambda path, body: sent.append((path, body)) or {"ok": True}))
+    msrv.plain_change("make Kessa core")
+    msrv.plain_change(apply=True, token="abc")
+    assert sent == [("/api/ops/change", {"text": "make Kessa core"}), ("/api/ops/change", {"token": "abc", "apply": True})]
+    with pytest.raises(Exception, match="token"):
+        msrv.plain_change("make Kessa core", apply=True)

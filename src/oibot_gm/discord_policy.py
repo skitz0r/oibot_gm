@@ -185,11 +185,7 @@ class ConfigConfirmView(discord.ui.View):
                 if isinstance(e, rc.BoardChanged) and key:
                     stale.add(key)  # keep the old rev: the rest of this request can't overwrite that change either
                 continue
-            if raids is not None:  # this request's own write (a pin, a move, …) is not "someone else's change": every
-                for k in self.revs:  # board this request looks at is re-read after each step that succeeded
-                    ev = raids.events.get(k)
-                    if ev is not None and k not in stale:
-                        self.revs[k] = rc.board_rev(self.reg, ev)
+            configops.refresh_revs(self.reg, self.revs, raids, stale)  # this request's own write (a pin, a move…) is not someone else's change
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
         try:
             await interaction.edit_original_response(content=text[:1900] or "Nothing applied.", view=None, embed=None)

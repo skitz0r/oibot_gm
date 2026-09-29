@@ -919,6 +919,20 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
     return out
 
 
+def refresh_revs(reg: Registry, revs: dict[str, str], raids, stale=()) -> None:
+    """After an op of this request applied: re-read the fingerprint of every board the request looks at (a pin, a
+    move — any op of its own — is not "someone else's change"). Runs marked stale (a BoardChanged earlier in the
+    request) keep their old rev, so the rest of the request can't overwrite that change either."""
+    from . import raidcycle as rc
+
+    if raids is None:
+        return
+    for k in revs:
+        ev = raids.events.get(k)
+        if ev is not None and k not in stale:
+            revs[k] = rc.board_rev(reg, ev)
+
+
 def op_run_key(reg: Registry, op: ConfigOp, raids=None) -> str | None:
     """The live run a run op names (None when it names none)."""
     if op.op not in RUN_OPS or op.op == "run_open":

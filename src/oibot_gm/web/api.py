@@ -9,6 +9,7 @@ import asyncio
 import logging
 import contextlib
 import inspect
+import secrets
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -126,6 +127,9 @@ def application_json(reg, a) -> dict:
             "about": a.about, "logs_url": a.logs_url, "source": a.source, "status": a.status,
             "created": reg.local12(a.created_at), "decided": reg.local12(a.decided_at) if a.decided_at else None,
             "decided_by": a.decided_by, "note": a.decision_note}
+
+
+PREVIEW_TTL = 600  # seconds a plain_change preview token stays good (Discord's Apply view waits as long)
 
 
 def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
@@ -1607,15 +1611,51 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: created invite {url}")
         return {"invite_url": url, "message": f"invite created: {url} (save the section to use it)"}
 
+    previews: dict[str, dict] = {}  # plain_change preview token -> the authorized ops + board revs it showed (single use)
+
     @app.post("/api/ops/change")
     async def ops_change(request: Request):
-        """Plain-text configuration (what `/gm change` and the ops-channel @mention do): Claude parses the text into
-        whitelisted ConfigOps, `describe()` says current → new per op. Nothing is applied unless `apply: true`;
-        questions from the parser come back instead of ops, and owner-only ops need the owner."""
+        """Plain-text configuration (what `/gm change` and the ops-channel @mention do), in two calls like Discord's
+        diff + Apply. Preview `{text}`: Claude parses it into whitelisted ConfigOps, `authorize` keeps what this
+        caller may do, `describe()` says current → new per op; a change also returns `token` (single use, valid
+        PREVIEW_TTL seconds) holding exactly those ops and the boards' revs as shown. Apply `{token, apply: true}`:
+        those ops — never a re-parse — authorized again in code for the same caller and applied with the revs, so a
+        board someone changed since the preview is refused. Questions come back instead of ops."""
         from .. import configops
+        from ..configops import ConfigOp
         from ..policy import PolicyStore
 
         v, d = await body(request, officer=True)
+        now = time.monotonic()
+        for k in [k for k, p in previews.items() if p["expires"] < now]:
+            previews.pop(k, None)
+        raids = bot.raids.store(v.reg) if getattr(bot, "raids", None) is not None else None
+        if d.get("apply"):
+            held = previews.pop(str(d.get("token") or ""), None)
+            if held is None or held["uid"] != v.uid or held["guild"] != v.reg.key:
+                return JSONResponse({"error": "apply needs the token of a preview you made in the last "
+                                              f"{PREVIEW_TTL // 60} minutes — preview again (without apply) and apply that"}, status_code=400)
+            ops = [ConfigOp(**o) for o in held["ops"]]
+            allowed, refused = configops.authorize(v.reg, ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
+            out = {"kind": "change", "reply": held["reply"], "questions": [], "ops": [op.model_dump(exclude_none=True) for op in allowed],
+                   "describe": held["describe"], "applied": [], "refused": refused}
+            revs, stale = dict(held["revs"]), set()
+            ps = PolicyStore(bot.registries.store, v.reg.key)
+            for op in configops.coalesce(allowed):  # consecutive raid/schedule settings save as one write (as on Discord)
+                key = configops.op_run_key(v.reg, op, raids)
+                try:
+                    if op.op in configops.BOARD_OPS and key in stale:
+                        raise rc.BoardChanged()
+                    line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid, channel_id=PLAIN_WEB,  # authorize() allowed it
+                                                       rev=revs.get(key) if op.op in configops.BOARD_OPS else None)
+                except (RegistryError, ValueError) as e:
+                    out["applied"].append(f"{op.op}: {e}")
+                    out["error"] = str(e)
+                    break
+                configops.refresh_revs(v.reg, revs, raids, stale)  # this request's own write is not someone else's change
+                out["applied"].append(line)
+                await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+            return out
         text = str(d.get("text") or "").strip()
         if not text:
             return JSONResponse({"error": "text required"}, status_code=400)
@@ -1627,7 +1667,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         except Exception as e:  # noqa: BLE001 — provider/schema errors are 502s the caller can retry
             return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
         # the same policy check as Discord: the site (and MCP, as the owner) counts as a channel where plain text acts
-        allowed, refused = configops.authorize(v.reg, req.ops, v.uid, officer=v.officer, channel=PLAIN_WEB)
+        allowed, refused = configops.authorize(v.reg, req.ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
         req.ops = allowed
         ops = [op.model_dump(exclude_none=True) for op in req.ops]
         desc = []
@@ -1637,18 +1677,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             except Exception as e:  # noqa: BLE001
                 desc.append(f"{op.op}: {e}")
         out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": [], "refused": refused}
-        if not d.get("apply") or req.kind != "change" or not req.ops:
-            return out
-        ps = PolicyStore(bot.registries.store, v.reg.key)
-        for op in configops.coalesce(req.ops):  # consecutive raid/schedule settings save as one write (as on Discord)
-            try:
-                line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid, channel_id=PLAIN_WEB)  # authorize() allowed it
-            except (RegistryError, ValueError) as e:
-                out["applied"].append(f"{op.op}: {e}")
-                out["error"] = str(e)
-                break
-            out["applied"].append(line)
-            await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        if req.kind == "change" and req.ops:
+            token = secrets.token_urlsafe(16)
+            previews[token] = {"uid": v.uid, "guild": v.reg.key, "ops": ops, "describe": desc, "reply": req.reply,
+                               "revs": configops.board_revs(v.reg, req.ops, raids), "expires": now + PREVIEW_TTL}
+            out.update(token=token, expires_in=PREVIEW_TTL)
         return out
 
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)

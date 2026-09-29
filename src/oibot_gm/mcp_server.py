@@ -559,14 +559,20 @@ def test_bench(action: str, count: int = 20, raid: str | None = None, start_in: 
 
 
 @mcp.tool()
-def plain_change(text: str, apply: bool = False) -> dict:
+def plain_change(text: str = "", apply: bool = False, token: str = "") -> dict:
     """Configure in plain words, the way /gm change does ("lock Barrow Deeps 3 hours before", "make Kessa core",
-    "set the signup channel to #raids"). Claude parses it into whitelisted ops; `describe` shows current → new per op.
-    Nothing is applied unless `apply=true` — call once to show the person, again with apply after they agree.
-    Questions from the parser come back in `questions` instead of ops. Everything plain text does works here (board
-    moves, proposals — "another" / "use it" remember what this token was shown —, recruitment, the plain-text policy,
-    test tempos) except re-posting a sheet "here": use repost_sheet."""
-    return api().post("/api/ops/change", {"text": text, "apply": bool(apply)})
+    "set the signup channel to #raids"). Two calls, like Discord's diff + Apply: first `text` alone — Claude parses it
+    into whitelisted ops, `describe` shows current → new per op, and a change comes back with a `token` (single use,
+    ten minutes). Read the describe lines to the person; after they agree call `apply=true` with that `token` (no
+    text): exactly the ops they saw are applied — never a new parse — and a board someone changed since the preview
+    is refused. Questions from the parser come back in `questions` instead of ops. Everything plain text does works
+    here (board moves, proposals — "another" / "use it" remember what this token was shown —, recruitment, the
+    plain-text policy, test tempos) except re-posting a sheet "here": use repost_sheet."""
+    if apply:
+        if not token:
+            raise ToolError("apply needs the token from the preview: call plain_change(text) first, then apply=true with its token")
+        return api().post("/api/ops/change", {"token": token, "apply": True})
+    return api().post("/api/ops/change", {"text": text})
 
 
 @mcp.tool()

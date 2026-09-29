@@ -348,14 +348,18 @@ def test_web_plain_change_uses_the_same_check(web_client, g, monkeypatch):
     req = ConfigRequest(kind="change", reply="ok", ops=[ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="bring flasks"),
                                                          ConfigOp(op="dm", member=g.me.display_name, value="off")])
     monkeypatch.setattr(configops, "parse", lambda provider, reg, text, by=None, officer=False: req.model_copy(deep=True))
-    r = w.c.post("/api/ops/change", json={"text": "x", "apply": True}, headers=w.as_(w.officer))
+    r = w.c.post("/api/ops/change", json={"text": "x"}, headers=w.as_(w.officer))
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["refused"] == ["Only the owner can change raids & auras."] and [o["op"] for o in d["ops"]] == ["dm"]
+    r = w.c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=w.as_(w.officer))
+    assert r.status_code == 200, r.text
     assert g.reg.members[g.me.discord_id].dm_opt_out and "notes" not in g.reg.config.raids.get("barrow_deeps", {})
     assert w.c.post("/api/ops/change", json={"text": "x"}, headers=w.as_(w.member)).status_code == 403
     # MCP is the owner: everything
-    d = w.c.post("/api/ops/change", json={"text": "x", "apply": True}, headers={"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"}).json()
+    mcp = {"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"}
+    token = w.c.post("/api/ops/change", json={"text": "x"}, headers=mcp).json()["token"]
+    d = w.c.post("/api/ops/change", json={"token": token, "apply": True}, headers=mcp).json()
     assert d["refused"] == [] and g.reg.raid_def("barrow_deeps")["notes"] == "bring flasks"
 
 
