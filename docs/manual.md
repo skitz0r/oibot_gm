@@ -285,6 +285,10 @@ Fill seats · Cancel run — and cancelling asks *Keep the run* / *Cancel the ru
 share one edit mode: an Edit button in the header, then a footer with any reset far left and *Cancel* / *Save changes*
 on the right. Config saves each field as you change it and marks it *✓ saved*. Pages update on their own; *Refresh* in
 the left rail is the manual fallback. Every yes/no DM (confirmations and fill asks) reads **Confirm / Can't make it**.
+A run is locked once, whoever asks first — the site, a card, chat, MCP or the schedule: a second *Lock now* while the
+roster is being built is told the solver is already working on it. A move made while the lock (or *Auto-fill*) is
+solving waits, then is refused as *"the board changed since you looked"* instead of being lost; check the board and
+move again.
 
 ## 5. How groups are built
 

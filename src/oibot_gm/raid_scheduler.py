@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 from . import raidcycle as rc
 from .raid_views import ask_line, gaps_text, run_times, sheet_state
+from .registry import RegistryError
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +85,10 @@ class RaidSchedulerMixin:
                     tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
                     if ev.lock_error and tried and now - tried < timedelta(minutes=15):
                         continue  # failed recently; give the officers time to fix the board before trying again
-                    line = await self.lock_run(reg, rs, ev)
+                    try:
+                        line = await self.lock_run(reg, rs, ev)
+                    except RegistryError:  # someone is locking it right now (rc.SolverBusy), or it stopped being open
+                        continue
                     if not ev.lock_error:
                         await self.ops.emit(cfg, "info", line)
                     continue

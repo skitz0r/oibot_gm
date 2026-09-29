@@ -16,7 +16,7 @@ from . import raidcycle as rc
 from . import wizard_opts as wo
 from .constants import TEAL
 from .raid_views import ask_line, gaps_text, health_layout, raid_name, run_label, run_title, sheet_state
-from .registry import Registry
+from .registry import Registry, RegistryError
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
 
 LIVE = ("open", "locked")
@@ -433,7 +433,11 @@ async def open_raid_lock(interaction: discord.Interaction, reg: Registry, **_see
             return
         await wiz.working(i, "Locking…")
         bot = i.client
-        line = await bot.lock_run(reg, rs, ev, by=i.user.display_name)
+        try:
+            line = await bot.lock_run(reg, rs, ev, by=i.user.display_name)
+        except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open
+            await wiz.finish(i, str(e))
+            return
         await wiz.finish(i, line)
         await bot.ops.emit(reg.config, "info", line)
     await with_run(interaction, reg, title="Lock a sheet", then=body, states=("open",), officer=True)

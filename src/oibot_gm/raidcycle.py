@@ -1223,6 +1223,13 @@ class BoardChanged(RegistryError):
         super().__init__(msg)
 
 
+class SolverBusy(RegistryError):
+    """RaidMixin.solving: the solver is already working on this run (a lock, an auto-fill, a split preview)."""
+
+    def __init__(self, msg: str = "the solver is already working on this run — try again in a moment"):
+        super().__init__(msg)
+
+
 def board_rev(reg: Registry, ev: RaidEvent) -> str:
     """A fingerprint of the board (groups + pins + state). A whole-board write carrying an older one is stale."""
     import hashlib

@@ -412,3 +412,103 @@ def test_after_a_stale_board_op_the_rest_of_the_request_cannot_overwrite(reg, rs
     assert log[0].count("changed since you looked") == 2, log[0]
     assert "DMs" in log[0] or "dm" in log[0].lower(), "the unrelated op still applies"
     assert ev.layout == theirs, "the other officer's move survives"
+
+
+# ---------------------------------------------------------------- M4: one lock per run, and the board lock around it
+
+def slow_propose(delay=0.05):
+    import time as _time
+
+    from oibot_gm import raidcycle as rc
+
+    def propose(reg, rs, ev, save=True):
+        _time.sleep(delay)  # the solve, in its worker thread
+        names = [s.display_name for s in ev.signups.values() if s.status == "in"]
+        ev.rosters = rc.board_rosters(reg, ev, [names[:5], names[5:10]], rc.run_size(reg, ev))
+        ev.log.append("solver: proposed")
+        return [], None
+    return propose
+
+
+def test_two_locks_at_once_lock_once(reg, rs, monkeypatch):
+    from conftest import join, open_test_run
+    from test_parity_verbs import Bot
+
+    from oibot_gm import raidcycle as rc
+
+    monkeypatch.setattr(rc, "propose", slow_propose())
+    bot = Bot(reg, rs)
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:10])
+
+    async def go():
+        return await asyncio.gather(bot.lock_run(reg, rs, ev, by="chat"), bot.lock_run(reg, rs, ev, by="scheduler"), return_exceptions=True)
+
+    first, second = asyncio.run(go())
+    assert isinstance(first, str) and "locked by chat" in first, first
+    assert isinstance(second, rc.SolverBusy), second
+    assert ev.state == "locked" and ev.log.count("locked by chat") == 1 and "locked by scheduler" not in ev.log
+    with pytest.raises(configops.RegistryError, match="already locked"):
+        asyncio.run(bot.lock_run(reg, rs, ev, by="card"))
+
+
+def test_a_move_during_the_lock_solve_is_refused_not_lost_and_log_lines_survive(reg, rs, monkeypatch):
+    from conftest import join, open_test_run
+    from test_parity_verbs import Bot
+
+    from oibot_gm import raidcycle as rc
+
+    monkeypatch.setattr(rc, "propose", slow_propose(0.1))
+    bot = Bot(reg, rs)
+    ev = open_test_run(reg, rs)
+    ms = reg.test_members()[:10]
+    join(reg, rs, ev, ms)
+
+    async def move_later():
+        await asyncio.sleep(0.02)  # the lock is solving now
+        ev.log.append("someone: a line written during the solve")
+        return await bot.board_move(reg, rs, ev, ms[0].display_name, (1, 0), by="officer B")
+
+    async def go():
+        return await asyncio.gather(bot.lock_run(reg, rs, ev, by="chat"), move_later(), return_exceptions=True)
+
+    locked, moved = asyncio.run(go())
+    assert "locked by chat" in locked
+    assert isinstance(moved, rc.BoardChanged), "queued behind the lock, the move is refused as stale — not applied to the roster"
+    assert "someone: a line written during the solve" in ev.log and "solver: proposed" in ev.log
+
+
+def test_web_autofill_saves_through_save_board_with_its_rev(reg, rs, monkeypatch):
+    """A drag while the site's Auto-fill solves wins: the fill is refused (409) instead of overwriting it."""
+    from conftest import join, open_test_run
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN, bearer
+    from test_parity_verbs import Bot
+
+    from oibot_gm import raidcycle as rc
+    from oibot_gm.web import app as web
+
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    bot = Bot(reg, rs)
+    c = TestClient(web.create_app(bot))
+    ev = open_test_run(reg, rs)
+    ms = reg.test_members()[:10]
+    join(reg, rs, ev, ms)
+    names = [m.display_name for m in ms]
+    drag = {"on": True}
+
+    def autofill(reg_, rs_, ev_):
+        if drag["on"]:
+            ev.layout = [[], [names[9]]]  # officer B's drag lands while the solver runs
+        return [names[:5], names[5:9]]
+
+    monkeypatch.setattr(rc, "autofill", autofill)
+    r = c.post(f"/api/run/{ev.key}/autofill", json={}, headers=bearer())
+    assert r.status_code == 409, r.text
+    assert ev.layout == [[], [names[9]]], "officer B's drag survives"
+    assert not any("auto-filled" in line for line in ev.log)
+    drag["on"] = False
+    r = c.post(f"/api/run/{ev.key}/autofill", json={}, headers=bearer())
+    assert r.status_code == 200, r.text
+    assert ev.layout[:2] == [names[:5], names[5:9]] and any("auto-filled" in line for line in ev.log)

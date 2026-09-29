@@ -7,6 +7,7 @@ absence ripple. The rest of the surface lives next door and is re-exported here 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from datetime import datetime
 
@@ -347,31 +348,50 @@ class RaidMixin:
         cfg = reg.config
         return (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(cfg.ops_channel_id) if cfg.ops_channel_id else None)
 
+    @contextlib.asynccontextmanager
+    async def solving(self, key: str):
+        """Single flight for the solver per run, whoever asks (a lock from chat, MCP, the scheduler, the card or the
+        site; an auto-fill; a split preview): a second caller gets rc.SolverBusy instead of a second solve."""
+        lock = self.__dict__.setdefault("_solver_locks", {}).setdefault(key, asyncio.Lock())
+        if lock.locked():
+            raise rc.SolverBusy()
+        async with lock:
+            yield
+
     async def lock_run(self, reg, rs, ev, by: str = "scheduler") -> str:
         """Lock the sheet, build the roster(s) from the signups (pins honoured), show them on the sheet and in the
-        officer channel, and DM every rostered member for confirmation."""
+        officer channel, and DM every rostered member for confirmation. One lock per run at a time (solving: a second
+        caller gets rc.SolverBusy); the board lock is held from the snapshot to the state flip, so a move made during
+        the solve waits and is then refused as stale (never silently lost); a run no longer open is refused."""
         team = rc.run_team(reg, ev)
-        # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
-        # mid-way) leaves the sheet open rather than a locked run with no roster
-        trial = ev.model_copy(deep=True)
-        ev.lock_tried_at = rc.now()
-        try:
-            await asyncio.to_thread(rc.propose, reg, rs, trial, False)
-        except Exception as e:  # noqa: BLE001 — solver infeasible / timed out
-            why = rc.solver_error_text(e)
-            first = ev.lock_error != why
-            ev.lock_error = why
-            ev.log.append(f"lock ({by}) failed: {why}")
-            rs.save(ev, "lock failed")
-            if first:
-                await self.post_run_update(reg, ev, f"⚠️ lock by {by} failed — {why}. The sheet stays open; fix the board or the raid rules and lock again.")
-            await self.ops.emit(reg.config, "warn", f"{ev.key}: lock failed — {why}")
-            return f"{ev.key}: lock failed — {why}"
-        _, _, confirm = run_times(reg, ev, team)
-        ev.rosters, ev.log = trial.rosters, trial.log
-        ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat(), None
-        ev.log.append(f"locked by {by}")
-        rs.save(ev, f"locked by {by}")
+        async with self.solving(ev.key), self.board_lock(ev.key):
+            if ev.state != "open":
+                raise RegistryError(f"{ev.key} is already {ev.state}")
+            # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
+            # mid-way) leaves the sheet open rather than a locked run with no roster
+            trial = ev.model_copy(deep=True)
+            seen = len(trial.log)
+            ev.lock_tried_at = rc.now()
+            try:
+                await asyncio.to_thread(rc.propose, reg, rs, trial, False)
+            except Exception as e:  # noqa: BLE001 — solver infeasible / timed out
+                why = rc.solver_error_text(e)
+                first = ev.lock_error != why
+                ev.lock_error = why
+                ev.log.append(f"lock ({by}) failed: {why}")
+                rs.save(ev, "lock failed")
+                if first:
+                    await self.post_run_update(reg, ev, f"⚠️ lock by {by} failed — {why}. The sheet stays open; fix the board or the raid rules and lock again.")
+                await self.ops.emit(reg.config, "warn", f"{ev.key}: lock failed — {why}")
+                return f"{ev.key}: lock failed — {why}"
+            if ev.state != "open":  # cancelled while the roster was being built
+                raise RegistryError(f"{ev.key} was {ev.state} before the roster was ready — not locked")
+            _, _, confirm = run_times(reg, ev, team)
+            ev.rosters = trial.rosters
+            ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
+            ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat(), None
+            ev.log.append(f"locked by {by}")
+            rs.save(ev, f"locked by {by}")
         await self.refresh_sheet(reg, ev)
         ch = self.officer_channel(reg, ev)
         if ch:
@@ -465,8 +485,9 @@ class RaidMixin:
         """A whole-board write (the site's Clear / Use this split, MCP set_layout, plain text run_board). `rev` = the
         rc.board_rev the author was looking at: when the board changed since, rc.BoardChanged is raised and nothing is
         written. Only joiners count; returns the line to show."""
+        state = ev.state
         async with self.board_lock(ev.key):
-            if rev and rev != rc.board_rev(reg, ev):
+            if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state:  # a write queued behind a lock is stale
                 raise rc.BoardChanged()
             return await self._write_board(reg, rs, ev, groups, by)
 
@@ -476,8 +497,9 @@ class RaidMixin:
         someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined.
         `rev`: plain text's preview fingerprint — the move was worded against that board, so a changed one raises
         rc.BoardChanged (the site's drags pass none: they always act on the board as it is)."""
+        state = ev.state
         async with self.board_lock(ev.key):
-            if rev and rev != rc.board_rev(reg, ev):
+            if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state:  # a move queued behind a lock is stale
                 raise rc.BoardChanged()
             groups = rc.apply_move(reg, ev, name, to)
             return await self._write_board(reg, rs, ev, groups, by)

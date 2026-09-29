@@ -129,16 +129,15 @@ def application_json(reg, a) -> dict:
 
 
 def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
-    solver_locks: dict[str, asyncio.Lock] = {}  # one per run key: two officers can't solve the same run at once (S4)
-
     @contextlib.asynccontextmanager
     async def solving(key: str):
-        """Hold the run's solver lock for the block; a second caller gets a 409 instead of queueing."""
-        lock = solver_locks.setdefault(key, asyncio.Lock())
-        if lock.locked():
-            raise HTTPException(409, "the solver is already working on this run — try again in a moment")
-        async with lock:
-            yield
+        """The run's solver single-flight (RaidMixin.solving — shared with chat, MCP, the scheduler and the cards);
+        a second caller gets a 409 instead of queueing."""
+        try:
+            async with bot.solving(key):
+                yield
+        except rc.SolverBusy as e:
+            raise HTTPException(409, str(e))
 
     async def who(request: Request, officer: bool = False):
         v = await viewer(request)
@@ -730,15 +729,19 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if ev.state != "open":
             return JSONResponse({"error": "already locked — move people on the board instead"}, status_code=400)
         async with solving(key):
+            rev = rc.board_rev(v.reg, ev)  # the board the solve fills around: a drag during the solve wins (409), never lost
             try:
                 layout = await asyncio.to_thread(rc.autofill, v.reg, rs, ev)
             except RuntimeError as e:
                 return JSONResponse({"error": solver_text(e)}, status_code=409)
             except Exception as e:  # noqa: BLE001
                 return JSONResponse({"error": f"solver: {e}"}, status_code=400)
-            ev.layout = layout
             ev.log.append(f"{v.name}: auto-filled the board")
-            rs.save(ev, "board auto-filled")
+            try:  # the one board write (RaidMixin.save_board), as plain text's run_autofill
+                await bot.save_board(v.reg, rs, ev, layout, rev=rev, by=v.name)
+            except rc.BoardChanged:
+                ev.log.pop()
+                return stale(v, ev)
         return board_reply(v.reg, ev)
 
     @app.post("/api/run/{key}/pin")
@@ -789,11 +792,12 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
             return JSONResponse({"error": "already locked"}, status_code=400)
-        async with solving(key):
-            try:
-                line = await bot.lock_run(v.reg, rs, ev, by=v.name)
-            except RuntimeError as e:  # lock_run catches the solver itself; this is the belt to its braces
-                return JSONResponse({"error": solver_text(e)}, status_code=409)
+        try:  # lock_run holds the run's solver single-flight and board lock itself
+            line = await bot.lock_run(v.reg, rs, ev, by=v.name)
+        except RegistryError as e:  # rc.SolverBusy (someone else is locking it), or no longer open
+            return JSONResponse({"error": str(e)}, status_code=409)
+        except RuntimeError as e:  # lock_run catches the solver itself; this is the belt to its braces
+            return JSONResponse({"error": solver_text(e)}, status_code=409)
         if ev.lock_error:
             return JSONResponse({"error": solver_text(RuntimeError(ev.lock_error))}, status_code=409)
         await bot.ops.emit(v.reg.config, "info", f"[web] {line}")

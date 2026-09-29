@@ -209,7 +209,7 @@ def test_confirm_view_coalesces(reg, rs):
     async def nothing(*a, **kw):
         pass
 
-    it = types.SimpleNamespace(user=types.SimpleNamespace(id=OWNER, display_name="Owner"), client=bot, response=types.SimpleNamespace(defer=nothing),
+    it = types.SimpleNamespace(user=types.SimpleNamespace(id=OWNER, display_name="Owner"), client=bot, response=types.SimpleNamespace(edit_message=nothing),
                                edit_original_response=edit, followup=types.SimpleNamespace(send=nothing))
     view = discord_policy.ConfigConfirmView(reg, ConfigRequest(kind="change", reply="", ops=ops), None, bot.ops, OWNER, "Owner", OPS_CH)
     run(view.apply.callback(it))

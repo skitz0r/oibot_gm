@@ -2193,16 +2193,18 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_autofill":
         if ev.state != "open":
             raise RegistryError("already locked — move people on the board instead")
-        try:
-            layout = await asyncio.to_thread(rc.autofill, reg, rs, ev)
-        except RuntimeError as e:
-            raise RegistryError(rc.solver_error_text(e))
-        ev.log.append(f"{by}: auto-filled the board")
-        try:
-            await bot.save_board(reg, rs, ev, layout, rev=rev, by=by)
-        except RegistryError:
-            ev.log.pop()
-            raise
+        async with bot.solving(ev.key):  # the run's solver single-flight (RaidMixin.solving), as the site's Auto-fill
+            rev = rev or rc.board_rev(reg, ev)  # a drag during the solve wins: the fill is refused, never overwrites it
+            try:
+                layout = await asyncio.to_thread(rc.autofill, reg, rs, ev)
+            except RuntimeError as e:
+                raise RegistryError(rc.solver_error_text(e))
+            ev.log.append(f"{by}: auto-filled the board")
+            try:
+                await bot.save_board(reg, rs, ev, layout, rev=rev, by=by)
+            except RegistryError:
+                ev.log.pop()
+                raise
         return f"{ev.key}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
     # run_strategy, run_fill preview: registry/store only
     if op.op == "run_fill":
@@ -2231,7 +2233,8 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
     strategy = v or ((last or {}).get("strategy") if f == "another" else None) or ev.split_strategy or reg.raid_def(ev.instance).get("split_policy", "balanced")
     avoid = list((last or {}).get("layouts") or []) if f == "another" else []
     try:
-        layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, avoid or None)
+        async with bot.solving(ev.key):  # the run's solver single-flight (RaidMixin.solving), as the site's split
+            layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, avoid or None)
     except RuntimeError as e:
         raise RegistryError(rc.solver_error_text(e))
     seen[key] = {"strategy": strategy, "layouts": avoid + [layout]}
