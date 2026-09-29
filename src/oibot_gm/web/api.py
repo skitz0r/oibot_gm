@@ -812,7 +812,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/run/{key}/cancel")
     async def run_cancel(request: Request, key: str):
-        """Cancel the run the way /raid cancel does (sheet closed, everyone on it told); the line says what was done."""
+        """Cancel the run the way /raid cancel does: the sheet and officer cards show it cancelled, open confirmations are
+        withdrawn, a line goes to the run's thread and the ops feed. Rostered members are NOT told automatically; the
+        returned line says what was done."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         try:  # cancel_run re-renders the sheet and cards, withdraws open confirmations and writes the ops line itself

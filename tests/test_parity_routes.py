@@ -106,6 +106,38 @@ def test_sheet_repost_route(c, bot, reg, rs):
     assert c.post(f"/api/run/{ev.key}/sheet", json={"channel": "#nowhere"}, headers=H).status_code == 400
 
 
+def test_channel_names_resolve_on_the_sheet_and_invite_routes(c, bot, reg, rs):
+    """channel_ref: '#name', a bare name, an id and <#id> resolve; unknown and ambiguous names are 400s that say so."""
+    ev = open_test_run(reg, rs)
+    bot.channels[81] = Chan(81, "welcome")
+    bot.channels[82] = Chan(82, "general")
+    bot.guild_channels = lambda reg: [{"id": "81", "name": "welcome"}, {"id": "82", "name": "general"},
+                                      {"id": "83", "name": "general"}]
+    made: list[int] = []
+
+    async def create_invite(reg, cid):
+        made.append(cid)
+        return f"https://discord.gg/x{cid}"
+
+    bot.create_invite = create_invite
+    r = c.post("/api/admin/invite", json={"channel": "#welcome"}, headers=H)
+    assert r.status_code == 200 and r.json()["invite_url"] == "https://discord.gg/x81", r.text
+    assert c.post("/api/admin/invite", json={"channel": "Welcome"}, headers=H).status_code == 200
+    assert c.post("/api/admin/invite", json={"channel_id": "<#82>"}, headers=H).status_code == 200
+    assert made == [81, 81, 82]
+    r = c.post("/api/admin/invite", json={"channel": "#nowhere"}, headers=H)
+    assert r.status_code == 400 and "no channel named #nowhere" in r.text
+    r = c.post("/api/admin/invite", json={"channel": "#general"}, headers=H)
+    assert r.status_code == 400 and "several channels match" in r.text
+    assert c.post("/api/admin/invite", json={}, headers=H).status_code == 400 and made == [81, 81, 82]
+    r = c.post(f"/api/run/{ev.key}/sheet", json={"channel": "#welcome"}, headers=H)
+    assert r.status_code == 200 and ev.channel_id == 81, r.text
+    r = c.post(f"/api/run/{ev.key}/sheet", json={"channel": "#general"}, headers=H)
+    assert r.status_code == 400 and "several channels match" in r.text and ev.channel_id == 81
+    r = c.post(f"/api/run/{ev.key}/sheet", json={"channel": "#nowhere"}, headers=H)
+    assert r.status_code == 400 and "no channel named #nowhere" in r.text and ev.channel_id == 81
+
+
 def test_members_absence_says_which_sheets(c, reg, rs):
     ev = open_test_run(reg, rs, days=3)
     m = reg.test_members()[1]

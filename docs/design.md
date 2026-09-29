@@ -471,7 +471,7 @@ only), `channels` (channel id → mode), `dm`, `default`. Modes: `act` (any grou
 only), `answer` (questions only), `ignore` (no reply to @mentions). Defaults reproduce the old behaviour plus
 self-service: self → registered; members, runs, comp, test → officers; raids, setup → owner; the ops and analytics
 channels act unless listed; DMs and other channels are `self`. The site's box and MCP are `PLAIN_WEB`, which acts.
-The owner can always do everything (only `ignore` silences the bot for them).
+The owner can always do everything (only `ignore` silences the bot's @mention replies for them; `/gm change` still works there).
 
 **One check.** `Registry.may_plain(group, author_id, officer=, role_ids=, channel=, what=, fallback=)` returns None or
 the refusal line; `configops.authorize(reg, ops, author_id, …)` binds and checks every op and returns (allowed,

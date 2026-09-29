@@ -469,7 +469,8 @@ Who may change what through plain text, and where, is one policy on the **Ops** 
 *Plain-text permissions*; the owner presses **Edit permissions**, changes the table and presses one **Save**;
 officers see it read-only; MCP has `plain_permissions` / `set_plain_permissions`). It covers every plain-text
 path: @mentions, DMs, `/gm change`, and the site's plain-text box (which counts as a place where plain text acts).
-The owner can always do everything, anywhere the bot listens — an *Answers only* or *Ignored* channel included.
+The owner can always do everything, anywhere the bot listens — an *Answers only* channel included. In an *Ignored*
+channel the bot doesn't read @mentions at all, the owner's included; there the owner uses `/gm change`.
 
 **What** — seven capability groups; every plain-text operation belongs to exactly one:
 
