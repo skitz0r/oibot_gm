@@ -2067,7 +2067,7 @@ class Registry:
     # ---- the character table (Me page and the Members page save the same shape)
     def save_character_table(self, discord_id: int, rows: list[dict], by: str) -> list[str]:
         """One save for a member's table. Each row: {label?, cls, spec, offspec?, name?, surname?, main?: bool (or slot: "main"),
-        rank?, delete?: bool, retire?: bool}. A row whose label matches an active character updates it (spec/offspec,
+        rank?, flex?: [role, …] (extra roles; [] clears, absent keeps), delete?: bool, retire?: bool}. A row whose label matches an active character updates it (spec/offspec,
         a name for a planned one, rank when given); an unknown row adds a character (named) or a plan (unnamed);
         `main` on a row makes it the main. One commit; returns the change lines."""
         m = self.members.get(discord_id)
@@ -2114,6 +2114,14 @@ class Registry:
                 if rank and rank != cur.rank:
                     self.set_rank(cur.label, rank, by)
                     done.append(f"{cur.label}: rank {rank}")
+                if row.get("flex") is not None:  # extra roles (set_flex drops the ones the spec/offspec already give)
+                    fl = row["flex"]
+                    if not isinstance(fl, list):
+                        raise RegistryError("flex is a list of roles")
+                    before = list(cur.flex)
+                    cur = self.set_flex(discord_id, cur.label, [str(r).strip().lower() for r in fl if str(r).strip()])
+                    if cur.flex != before:
+                        done.append(f"{cur.label}: flex {', '.join(cur.flex) or 'none'}")
                 if is_main:
                     want_main = cur.label
             m = self.members.get(discord_id) or m

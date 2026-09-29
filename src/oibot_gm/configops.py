@@ -29,7 +29,15 @@ Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <ch
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
   team_member: add/remove <member> [character] to/from run <target=run key> (a seat on a specific run; defaults to their main).
   pin: target=<run key>, member, value=in (must be seated at lock) | out (kept on the bench) | clear — an officer decision the lock solver honours.
-Policy (officer): append a rule line to the loot or comp document (compiled separately with confirmation).
+Policy (officer): policy_append: doc=loot|comp, text=<one rule line> — appended as "- <line>".
+  policy: doc=loot|comp|persona, field=replace (text = the WHOLE new document) | remove (text = the line to take out, as
+  written in the doc) | compile (no text: re-read the current document, e.g. after a PR edit). After a write the bot compiles
+  the loot/comp text and shows its reading with Confirm / Discard (Discard puts the previous text back); the persona is
+  live as written. "add a loot rule: …" = policy_append; "drop the rule about …" = policy field=remove.
+News proposals (officer): proposal: target=<proposal id like 260927-a1b2 from the open proposals list>, value=approve|dismiss,
+  reason=<optional note>. Approve only records the decision (the apply job carries it out); a needs-developer one can only be dismissed.
+Jobs (owner only, never opened to anyone else): job: value=review|apply — start that local job now (the news review, or
+  applying approved proposals); refused when it is already running or not installed.
 Comp ideals (officer): comp_target: target=<raid id (barrow_deeps|hyjal_summit_forever|onyxias_lair) or run key>, field=<slot: a role tank|healer|melee|ranged, a class "Paladin",
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
   reason=<optional note, the justification shown on the desired-comp card>.
@@ -71,9 +79,18 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
     — before lock it is the layout the lock will use; after lock it is the roster itself (names added are asked to confirm, names dropped are freed).
   confirm_for: target, member, value=yes|no — on a LOCKED run, record someone's answer to their Confirm / Can't make it ask
     (they said so out of band: "Xanthe confirmed for tonight"; no = can't make it, the seat is freed and the fill engine looks for cover).
-Members (officer): character: member, character=<their character's name>, field=add|spec|offspec|name|rank|main|retire, value:
-    add: character = the new name, value = "Class Spec [Offspec]"; spec / offspec: the new spec (offspec "none" clears it);
-    name: the real name for a planned character; rank: trial|raider|core|alt|social; main / retire: no value. A class never changes: retire and add.
+Members (officer): character: member, character=<their character's name>, field=add|spec|offspec|name|rank|main|retire|delete|flex, value:
+    add: character = the new name, value = "Class Spec [Offspec]", text = main|alt (optional; "as my main" = main);
+      a PLANNED character (no name yet) is add with character EMPTY: "plan my main as a Holy Priest" → field=add,
+      character empty, value="Priest Holy", text=main ("plan an alt: Mage Frost" → text=alt; re-planning a main replaces it);
+    spec / offspec: the new spec (offspec "none" clears it); name: the real name for a planned character;
+    rank: trial|raider|core|alt|social; main / retire: no value; delete: no value — removes the character outright
+      (roster placements go; "delete"/"remove" ≠ "retire", which keeps its history);
+    flex: value = extra roles it can play beyond its spec/offspec, comma list of tank|healer|melee|ranged, or "none"
+      ("I can also tank on Xanthe" → flex, value "tank"; the whole list is replaced). A class never changes: retire and add.
+  application: member=<the applicant: display name, mention or their character's name from the open applications list>,
+    value=accept|decline, reason=<optional note sent to the applicant> — decide an open application (accept registers
+    their character as main, rank trial; either way they get a DM and the review card updates).
   absence_clear: member, start=<YYYY-MM-DD the absence starts; blank = their only upcoming absence> — back early; sheets it had pre-filled re-open for them.
   dm: member, value=on|off — whether the bot DMs them (off: never asked to fill, confirmations wait on the site).
 Test bench (officer): test: value="seed <N>" (puppet members) | "add <N> <Class> <Spec>[/<Offspec>], …" (puppets of exactly that mix)
@@ -83,26 +100,27 @@ Resolving a run: "tonight's run" / "the Barrow Deeps run" = the live run of that
 A member is named by display name, mention or one of their characters. A request with several parts becomes several ops, in the order asked.
 The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm"): leave member EMPTY — the bot fills in
   the requester itself. Who may do what, and where, is decided by the bot after you answer; write the ops as asked, never refuse or widen them.
-Not settable here (say so): standing rosters or availability (members answer each run's sheet instead), loot items, tiers, wishlists.
+Not settable here (say so): standing rosters or availability (members answer each run's sheet instead), loot items, tiers,
+  wishlists, the loot session itself (/raid loot), and handing the guild to a new owner (slash only, by design).
 """
 
 
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test, recruit")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, character, absence_clear, dm, test, recruit, application, proposal, job, policy")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|news_keywords|ask_audience|about")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset)")
-    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire; recruit: open|note|question_add|question_remove|invite")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; dm: on|off; test: 'seed N'|'run <raid>'|'clear')")
-    member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester")
-    character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer, team_member)")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal)")
+    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_remove|invite; policy: replace|remove|compile")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; dm: on|off; test: 'seed N'|'run <raid>'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply)")
+    member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
+    character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer, team_member); empty on character add = a planned character")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
     end: Optional[str] = None
     reason: Optional[str] = None
-    doc: Optional[str] = Field(default=None, description="for op=policy_append: loot|comp")
-    text: Optional[str] = None
+    doc: Optional[str] = Field(default=None, description="policy_append: loot|comp; policy: loot|comp|persona")
+    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional")
 
 
 class ConfigRequest(BaseModel):
@@ -139,6 +157,8 @@ def live_runs_text(reg: Registry, raids=None) -> str:
 def current_config_text(reg: Registry) -> str:
     cfg = reg.config.model_dump()
     cfg.pop("rosters", None)  # the ephemeral run rosters are noise here; live runs are listed on their own below
+    if cfg.get("member_role_ids"):  # role ids mean nothing to the parser (or the person it answers): the names from the role cache
+        cfg["member_roles"] = [reg.role_names.get(int(r), f"role:{r}") for r in cfg.pop("member_role_ids")]
     members = ", ".join(f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]"
                         + (f" away {', '.join(a.start + ('→' + a.end if a.end != a.start else '') for a in m.absences[-3:])}" if m.absences else "") for m in reg.members.values())
     raids = "\n".join(f"- {rid}: " + ", ".join(f"{k}={v}" for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "split_policy", "weights"))
@@ -147,7 +167,25 @@ def current_config_text(reg: Registry) -> str:
     return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n## Effective raid cadence (profile defaults + overrides)\n" + raids
             + f"\n## Now: {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} (guild time)\n## Live runs (run key: raid, start, state, answers)\n" + live_runs_text(reg)
             + f"\n## Test bench: {len(reg.test_members())} puppet member(s)"
+            + "\n## Open applications (applicant<@id>: character, class spec)\n" + applications_text(reg)
+            + "\n## News proposals waiting (id: title, kind, state)\n" + proposals_text(reg)
             + "\n## Members (name<@id> [characters*=main:rank] away dates)\n" + (members or "(none)"))
+
+
+def applications_text(reg: Registry) -> str:
+    """One line per open application, for the parser to resolve 'accept Nyx' onto the applicant (names are data)."""
+    return "\n".join(f"- {a.display_name}<@{a.discord_id}>: {a.label}, {a.cls} {a.spec}" for a in reg.open_applicants()) or "(none)"
+
+
+def proposals_text(reg: Registry) -> str:
+    """Proposed and failed news proposals (the ones an officer can still approve or dismiss)."""
+    from .news import ProposalStore
+
+    try:
+        rows = ProposalStore(reg.store, reg.key).all("proposed,failed")
+    except Exception:  # noqa: BLE001 — a bad proposal file must not break the parser's context
+        return "(unreadable)"
+    return "\n".join(f"- {p.id}: {p.title[:90]} ({p.kind}, {p.state})" for p in rows) or "(none)"
 
 
 def parse(provider: Provider, reg: Registry, text: str, by: str | None = None) -> ConfigRequest:
@@ -155,7 +193,10 @@ def parse(provider: Provider, reg: Registry, text: str, by: str | None = None) -
     return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg) + asker + "\n\n## Request\n<request>\n" + text.strip()[:2000] + "\n</request>", ConfigRequest)
 
 
-OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove"}
+OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove", "job"}
+# never opened to anyone else, whatever the plain-text policy says (authorize checks the owner's id): an officer must not
+# widen their own rights, and the local jobs run Claude on the host
+HARD_OWNER_OPS = {"plain": "Only the owner can change the plain-text permissions.", "job": "Only the owner can start the bot's local jobs."}
 CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel")
 
 
@@ -174,7 +215,8 @@ OP_GROUP = {
     "run_autofill": "runs", "run_board": "runs", "confirm_for": "runs", "team_member": "runs",
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
     "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
-    "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup",
+    "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup", "job": "setup",
+    "application": "members", "proposal": "comp", "policy": "comp",
     "test": "test",
 }
 APPLY_FIRST = "New here? Apply first with `/apply` (or *Apply to join* on the registration card) — the officers take it from there."
@@ -224,6 +266,10 @@ def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bo
     The allowed ones can still apply when others are refused."""
     allowed, refused = [], []
     for op in ops:
+        if op.op in HARD_OWNER_OPS and author_id != reg.config.owner_discord_id:
+            if HARD_OWNER_OPS[op.op] not in refused:
+                refused.append(HARD_OWNER_OPS[op.op])
+            continue
         group, bad = bind_self(reg, op, author_id)
         if (bad is None and group == "self" and op.op == "character" and (op.field or "").strip().lower() == "add"
                 and reg.must_apply(author_id, officer=officer, role_ids=role_ids)):
@@ -252,6 +298,19 @@ def _member(reg: Registry, ref: str | None):
         hit = reg.find(r)
         m = hit[0] if hit else None
     return m
+
+
+def _character_member(reg: Registry, op: ConfigOp):
+    """(discord id, Member | None) for a character op. Adding a character may start a record: a mention of someone the
+    registry doesn't know yet (bind_self pins the requester to theirs) is allowed for `add` only."""
+    m = _member(reg, op.member)
+    if m is not None:
+        return m.discord_id, m
+    ref = (op.member or "").strip()
+    digits = ref[2:-1].lstrip("!") if ref.startswith("<@") and ref.endswith(">") else ""
+    if (op.field or "").strip().lower() == "add" and digits.isdigit():
+        return int(digits), None
+    raise RegistryError(f"unknown member {ref or '?'}")
 
 
 def _need_member(reg: Registry, ref: str | None):
@@ -421,25 +480,58 @@ def _test_removals(reg: Registry, rows: list[dict]) -> list[int]:
     return out
 
 
+def _class_spec(reg: Registry, value: str) -> tuple[str, str, str | None]:
+    """'Priest Holy [Discipline]' → (class, spec, offspec) in the profile's spelling (the registry validates them)."""
+    parts = value.split()
+    if len(parts) < 2:
+        raise RegistryError('add needs value "Class Spec [Offspec]", e.g. "Priest Holy" (and the name in character, or none for a planned one)')
+    cls = next((c for c in reg.profile.classes if c.lower() == parts[0].lower()), parts[0])
+    specs = reg.profile.classes.get(cls, {})
+    spec = next((s for s in specs if s.lower() == parts[1].lower()), parts[1])
+    off = next((s for s in specs if s.lower() == parts[2].lower()), parts[2]) if len(parts) > 2 else None
+    return cls, spec, off
+
+
+ROLE_WORDS = {"tank": "tank", "tanks": "tank", "tanking": "tank", "healer": "healer", "healers": "healer", "heal": "healer", "heals": "healer",
+              "healing": "healer", "melee": "melee", "ranged": "ranged", "range": "ranged", "caster": "ranged", "casters": "ranged"}
+
+
+def _flex_roles(value: str) -> list[str]:
+    """'tank, healer' / 'tank and heal' → ['tank', 'healer']; 'none' / '' → []."""
+    words = [w for w in value.lower().replace(",", " ").replace("/", " ").replace("+", " ").split() if w not in ("and", "&", "or")]
+    if not words or words in (["none"], ["clear"], ["no"], ["-"]):
+        return []
+    bad = [w for w in words if w not in ROLE_WORDS]
+    if bad:
+        raise RegistryError(f"flex roles are {', '.join(ROLES)} (or none) — not {', '.join(bad)}")
+    return list(dict.fromkeys(ROLE_WORDS[w] for w in words))
+
+
 def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
     """The character op as rows for `Registry.save_character_table` (the verb the Me and Members pages use) and a
-    one-line description of the effect."""
+    one-line description of the effect. `m` may be None only for a planned add by someone with no record yet."""
     f = (op.field or "").strip().lower()
     label = (op.character or "").strip()
     value = (op.value or "").strip()
-    cur = next((c for c in m.active() if c.matches(label)), None) if label else None
+    who = m.display_name if m else "you"
+    cur = next((c for c in m.active() if c.matches(label)), None) if (label and m) else None
     if f == "add":
-        parts = value.split()
-        if not label or len(parts) < 2:
-            raise RegistryError('add needs the character name and value "Class Spec [Offspec]"')
-        cls = next((c for c in reg.profile.classes if c.lower() == parts[0].lower()), parts[0])
-        specs = reg.profile.classes.get(cls, {})
-        spec = next((s for s in specs if s.lower() == parts[1].lower()), parts[1])
-        off = next((s for s in specs if s.lower() == parts[2].lower()), parts[2]) if len(parts) > 2 else None
+        cls, spec, off = _class_spec(reg, value)
+        slot = (op.text or "").strip().lower()
+        if slot not in ("", "main", "alt"):
+            raise RegistryError("add's text is main | alt")
+        what = f"{cls} {spec}{'/' + off if off else ''}"
+        if not label:  # a planned character: no name yet (Registry.set_plan; a re-planned main keeps rosters and rank)
+            main = slot == "main" or (slot == "" and not (m and m.main))
+            prev = next((c for c in (m.characters if m else []) if c.status == "planned" and c.is_main == main), None)
+            return ([{"cls": cls, "spec": spec, "offspec": off, "main": main}],
+                    f"{who}: plan {what} ({'main' if main else 'alt'})" + (f" — replaces the planned {prev.cls} {prev.spec}" if prev else ""))
         name, _, surname = label.partition(" ")
-        return [{"name": name, "surname": surname.strip() or None, "cls": cls, "spec": spec, "offspec": off, "main": False}], f"{m.display_name}: add {label} ({cls} {spec}{'/' + off if off else ''}, alt)"
+        main = slot == "main"
+        return ([{"name": name, "surname": surname.strip() or None, "cls": cls, "spec": spec, "offspec": off, "main": main}],
+                f"{who}: add {label} ({what}, {'main' if main else 'alt'})")
     if cur is None:
-        raise RegistryError(f"{m.display_name} has no active character named {label or '?'} (theirs: {', '.join(c.label for c in m.active()) or 'none'})")
+        raise RegistryError(f"{who} has no active character named {label or '?'} (theirs: {', '.join(c.label for c in m.active()) if m else 'none'})")
     if f == "spec":
         return [{"label": cur.label, "cls": cur.cls, "spec": value, "offspec": cur.offspec}], f"{cur.label}: spec {cur.spec} → {value}"
     if f == "offspec":
@@ -449,18 +541,31 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
         if cur.name:
             raise RegistryError(f"{cur.label} already has a name — a character isn't renamed; retire it and add the new name")
         name, _, surname = value.partition(" ")
-        return [{"label": cur.label, "cls": cur.cls, "spec": cur.spec, "offspec": cur.offspec, "name": name, "surname": surname.strip() or None}], f"{m.display_name}: name the planned {cur.label} {value}"
+        return [{"label": cur.label, "cls": cur.cls, "spec": cur.spec, "offspec": cur.offspec, "name": name, "surname": surname.strip() or None}], f"{who}: name the planned {cur.label} {value}"
     if f == "rank":
         if value not in RANKS:
             raise RegistryError(f"rank is one of {', '.join(RANKS)}")
         return [{"label": cur.label, "rank": value}], f"{cur.label}: rank {cur.rank} → {value}"
     if f == "main":
-        return [{"label": cur.label, "main": True}], f"{m.display_name}: main {m.main.label if m.main else '—'} → {cur.label}"
+        return [{"label": cur.label, "main": True}], f"{who}: main {m.main.label if m.main else '—'} → {cur.label}"
     if f == "retire":
-        return [{"label": cur.label, "retire": True}], f"{m.display_name}: retire {cur.label}" + (" (their main; the next character becomes main)" if cur.is_main else "")
+        return [{"label": cur.label, "retire": True}], f"{who}: retire {cur.label}" + (" (their main; the next character becomes main)" if cur.is_main else "")
+    if f == "delete":
+        placed = f" and its {len(cur.rosters)} roster placement(s)" if cur.rosters else ""
+        return ([{"label": cur.label, "delete": True}],
+                f"{who}: DELETE {cur.label} outright{placed} — no history is kept (retire keeps it)"
+                + (" · it is their main: the next character becomes main" if cur.is_main else ""))
+    if f == "flex":
+        roles = _flex_roles(value)
+        own = {reg.profile.spec(cur.cls, cur.spec).role} | ({reg.profile.spec(cur.cls, cur.offspec).role} if cur.offspec else set())
+        new = sorted(set(roles) - own)
+        implied = sorted(set(roles) & own)
+        return ([{"label": cur.label, "flex": roles}],
+                f"{cur.label}: flex {', '.join(cur.flex) or 'none'} → {', '.join(new) or 'none'}"
+                + (f" ({', '.join(implied)} already comes from the spec)" if implied else ""))
     if f in ("cls", "class"):
         raise RegistryError(f"{cur.label}'s class is fixed — retire it and add the new character")
-    raise RegistryError("character field is add | spec | offspec | name | rank | main | retire")
+    raise RegistryError("character field is add | spec | offspec | name | rank | main | retire | delete | flex")
 
 
 def _absence_start(m, start: str | None, today: str) -> str:
@@ -560,6 +665,138 @@ def _recruit(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
     raise RegistryError(f"recruit field is one of {', '.join(RECRUIT_FIELDS)}")
 
 
+APPLICATION_VALUES = {"accept": True, "accepted": True, "approve": True, "yes": True, "decline": False, "declined": False, "reject": False, "no": False}
+PROPOSAL_VALUES = {"approve": "approved", "approved": "approved", "yes": "approved", "dismiss": "dismissed", "dismissed": "dismissed", "reject": "dismissed", "no": "dismissed"}
+POLICY_FIELDS = ("replace", "remove", "compile")
+
+
+def _applicant(reg: Registry, ref: str | None):
+    """The OPEN application a reference names: a mention or id, the applicant's display name, or their character's
+    name. Applicants aren't members yet, so `_member` can't find them."""
+    r = (ref or "").strip()
+    opens = reg.open_applicants()
+    listed = ", ".join(f"{a.display_name} ({a.label})" for a in opens) or "none"
+    if not r:
+        raise RegistryError(f"say whose application (open: {listed})")
+    digits = r[2:-1].lstrip("!") if r.startswith("<@") and r.endswith(">") else r
+    if digits.isdigit():
+        hit = [a for a in opens if a.discord_id == int(digits)]
+    else:
+        low = r.lower()
+        hit = [a for a in opens if low in (a.display_name.lower(), a.label.lower(), a.name.lower())]
+    if len(hit) > 1:
+        raise RegistryError(f"{r} could be {', '.join(f'{a.display_name} ({a.label})' for a in hit)} — say which")
+    if not hit:
+        raise RegistryError(f"no open application from {r} (open: {listed})")
+    return hit[0]
+
+
+def _application(reg: Registry, op: ConfigOp):
+    """(applicant, accept, note) for the application op."""
+    a = _applicant(reg, op.member or op.target)
+    v = (op.value or "").strip().lower()
+    if v not in APPLICATION_VALUES:
+        raise RegistryError("application is accept | decline")
+    return a, APPLICATION_VALUES[v], (op.reason or "").strip() or None
+
+
+def _proposal(reg: Registry, op: ConfigOp):
+    """(ProposalStore, proposal, new state) for the proposal op; refused like the card's buttons would be."""
+    from .news import OFFICER_MOVES, ProposalError, ProposalStore
+
+    state = PROPOSAL_VALUES.get((op.value or "").strip().lower())
+    if state is None:
+        raise RegistryError("proposal is approve | dismiss")
+    ps = ProposalStore(reg.store, reg.key)
+    try:
+        p = ps.get((op.target or "").strip())
+    except ProposalError as e:
+        raise RegistryError(str(e))
+    if (p.state, state) not in OFFICER_MOVES:
+        raise RegistryError(f"{p.id} is {p.state}: it can't become {state}")
+    if state == "approved" and p.kind == "needs_developer":
+        raise RegistryError("this one needs a developer: the apply job can't do it (dismiss it once it's handled)")
+    return ps, p, state
+
+
+def _job(op: ConfigOp) -> str:
+    from . import agents
+
+    j = (op.value or "").strip().lower().replace("news ", "").replace(" approved", "").replace("the ", "")
+    if j not in agents.JOBS:
+        raise RegistryError(f"job is one of {', '.join(agents.JOBS)}")
+    return j
+
+
+def _policy_store(reg: Registry, policy_store=None):
+    from .policy import PolicyStore
+
+    return policy_store if policy_store is not None else PolicyStore(reg.store, reg.key)
+
+
+def _norm_rule(line: str) -> str:
+    return line.strip().lstrip("-*•").strip().lstrip("0123456789").lstrip(".)").strip().lower()
+
+
+def _policy_edit(reg: Registry, op: ConfigOp, policy_store=None) -> tuple[str, str | None, str]:
+    """(doc, the new document text or None for compile, the line saying what happens) for policy / policy_append."""
+    from .policy import DOCS
+
+    ps = _policy_store(reg, policy_store)
+    doc = (op.doc or "").strip().lower()
+    docs = ("loot", "comp") if op.op == "policy_append" else DOCS
+    if doc not in docs:
+        raise RegistryError(f"doc is one of {', '.join(docs)}")
+    after = " — live at once (the persona has no compile step)" if doc == "persona" else " — I show my reading of it to confirm; Discard puts the previous text back"
+    cur = ps.read(doc)
+    text = (op.text or "").strip()
+    if op.op == "policy_append":
+        if not text:
+            raise RegistryError("say the rule to add")
+        return doc, cur.rstrip() + f"\n- {text}\n", f"append to the {doc} policy: “{text}”{after}"
+    f = (op.field or "").strip().lower()
+    if f == "compile":
+        if doc == "persona":
+            raise RegistryError("the persona has no compiled form: it is used as written")
+        return doc, None, f"{doc} policy: compile the current text and show my reading (Confirm makes it live; nothing changes until then)"
+    if f == "replace":
+        if not text:
+            raise RegistryError("replace needs the whole new text")
+        return doc, text, f"{doc} policy: replace the whole text ({len(cur.strip().splitlines())} → {len(text.splitlines())} lines){after}"
+    if f == "remove":
+        want = _norm_rule(text)
+        if not want:
+            raise RegistryError("say the line to remove, as it is written in the policy")
+        lines = cur.splitlines()
+        hit = [i for i, l in enumerate(lines) if _norm_rule(l) == want] or [i for i, l in enumerate(lines) if want in _norm_rule(l)]
+        if len(hit) != 1:
+            raise RegistryError((f"“{text}” matches {len(hit)} lines — quote more of it" if hit else f"no line like “{text}” in the {doc} policy"))
+        gone = lines.pop(hit[0])
+        return doc, "\n".join(lines) + "\n", f"{doc} policy: remove “{gone.strip()}”{after}"
+    raise RegistryError(f"policy field is one of {', '.join(POLICY_FIELDS)}")
+
+
+def _describe_new(reg: Registry, op: ConfigOp) -> str:
+    """describe() for the application, proposal, job and policy ops (raises RegistryError when it can't apply)."""
+    if op.op in ("policy", "policy_append"):
+        return _policy_edit(reg, op)[2]
+    if op.op == "application":
+        a, accept, note = _application(reg, op)
+        return (f"application from {a.display_name} ({a.label}, {a.cls} {a.spec}): open → {'accepted' if accept else 'declined'}"
+                + (f" — registers {a.label} as their main, rank trial" if accept else "") + (f"; note to them: “{note}”" if note else "")
+                + "; they get a DM and the review card updates")
+    if op.op == "proposal":
+        _, p, state = _proposal(reg, op)
+        return (f"news proposal {p.id} “{p.title}” ({p.kind}, {p.confidence}): {p.state} → {state}"
+                + (" — the apply job carries it out within 15 minutes" if state == "approved" else "") + (f"; note: {op.reason.strip()}" if (op.reason or "").strip() else ""))
+    from . import agents
+
+    job = _job(op)
+    if agents.read_status(job, agents.OUT)["state"] == "running":
+        raise RegistryError(f"{agents.JOBS[job]['name']} is already running")
+    return f"start the {agents.JOBS[job]['name']} job now (launchd runs it; the site's Agents page shows its steps)"
+
+
 def describe(reg: Registry, op: ConfigOp) -> str:
     """Human-readable 'current → new' for the diff, without applying."""
     cfg = reg.config
@@ -584,9 +821,13 @@ def describe(reg: Registry, op: ConfigOp) -> str:
     if op.op == "set_main":
         return f"{op.member}: main → {op.character}"
     if op.op == "absence":
-        return f"{op.member}: absent {op.start}" + (f" → {op.end}" if op.end else "") + (f" ({op.reason})" if op.reason else "")
-    if op.op == "policy_append":
-        return f"append to {op.doc} policy: “{op.text}”"
+        m = _member(reg, op.member)
+        return f"{m.display_name if m else op.member}: absent {reg.span_label(op.start or '?', op.end)}" + (f" ({op.reason})" if op.reason else "")
+    if op.op in ("policy_append", "policy", "application", "proposal", "job"):
+        try:
+            return _describe_new(reg, op)
+        except (RegistryError, ValueError) as e:
+            return f"{op.op} {op.doc or op.target or op.member or op.value or ''}: {e}".replace("  ", " ")
     if op.op == "team_member":
         return f"run {op.target or '?'}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
     if op.op == "pin":
@@ -719,7 +960,7 @@ def _describe_action(reg: Registry, op: ConfigOp) -> str:
         runs = [e.key for e in rs.live() if (cfg.roster(e.team) or {}).get("test")]
         return f"test bench: clear — cancel {len(runs)} test run(s){' (' + ', '.join(runs) + ')' if runs else ''} and delete {n} puppet member(s) and their placements"
     if op.op == "character":
-        m = _need_member(reg, op.member)
+        _, m = _character_member(reg, op)
         _, line = _character_rows(reg, m, op)
         return line
     if op.op == "absence_clear":
@@ -856,8 +1097,8 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         m = _member(reg, op.member)
         if not m:
             raise RegistryError(f"unknown member {op.member}")
-        reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
-        return f"{m.display_name} absent {op.start}"
+        _, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
+        return f"{m.display_name} absent {reg.span_label(a.start, a.end)}"
     if op.op == "team_member":
         m = _member(reg, op.member)
         if not m:
@@ -943,19 +1184,33 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         targets[slot] = {k: v for k, v in entry.items() if v is not None}
         reg.save_config(f"{key} comp target {slot} → {targets[slot]} (by {by})")
         return f"{key}: {slot} = {entry['min']}" + (f"–{entry['max']}" if entry["max"] is not None else "")
-    if op.op == "policy_append":
-        if policy_store is None or not op.doc or not op.text:
-            raise RegistryError("policy append needs a doc and text")
-        text = policy_store.read(op.doc).rstrip() + f"\n- {op.text.strip()}\n"
-        policy_store.write_draft(op.doc, text, by)
-        return f"appended to {op.doc} (compile pending)"
+    if op.op in ("policy_append", "policy"):
+        from . import policy as policy_mod
+
+        ps = _policy_store(reg, policy_store)
+        doc, text, _ = _policy_edit(reg, op, ps)
+        if text is None:
+            raise RegistryError(f"policy compile {NEEDS_BOT}")
+        policy_mod.begin_edit(ps, doc, text, by)  # remembers the text it replaced, so Discard can put it back
+        return "persona saved — live as written" if doc == "persona" else f"{doc} policy saved as a draft (compile pending)"
+    if op.op == "job":
+        from . import agents
+
+        ok, line = agents.start_job(_job(op))  # the Agents page's Run now and MCP run_job hit the same checks
+        if not ok:
+            raise RegistryError(line)
+        return line
+    if op.op in ("application", "proposal"):
+        raise RegistryError(f"{op.op} {NEEDS_BOT}")
     if op.op == "character":
-        m = _need_member(reg, op.member)
+        uid, m = _character_member(reg, op)
         rows, _ = _character_rows(reg, m, op)
-        lines = reg.save_character_table(m.discord_id, rows, by)
+        lines = reg.save_character_table(uid, rows, by)
+        m = reg.members.get(uid) or m
+        who = m.display_name if m else by
         if not lines:
-            raise RegistryError(f"{m.display_name}: nothing changed")
-        return f"{m.display_name}: " + "; ".join(lines)
+            raise RegistryError(f"{who}: nothing changed")
+        return f"{who}: " + "; ".join(lines)
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)
         start = _absence_start(m, op.start, reg.now_local().date().isoformat())
@@ -1042,8 +1297,12 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
     `by_id`: the requester's Discord id (a test run's pool is the puppets plus them)."""
     if op.op in OWNER_OPS and not is_owner:
         raise RegistryError(f"{op.op} needs the owner")
-    if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test")):
+    if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test", "application", "proposal")):
         return await _apply_with_bot(reg, op, by, bot, by_id)
+    if op.op == "job":  # launchctl: off the event loop
+        return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)
+    if bot is not None and op.op in ("policy", "policy_append"):
+        return await _apply_policy(reg, op, by, bot, _policy_store(reg, policy_store))
     if bot is not None and op.op == "set" and op.path in ("registration_channel", "analytics_channel", "absences_channel"):
         if not is_owner:
             raise RegistryError("set needs the owner")
@@ -1056,8 +1315,8 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
         if not m:
             raise RegistryError(f"unknown member {op.member}")
         m, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
-        await bot.announce_absence(reg, m, a, by)
-        return f"{m.display_name} absent {a.start}" + (f" → {a.end}" if a.end != a.start else "")
+        touched = await bot.announce_absence(reg, m, a, by) or []
+        return f"{m.display_name} absent {reg.span_label(a.start, a.end)}" + _sheets_words(reg, bot, touched)
     if bot is not None and op.op == "recruit":
         line = apply(reg, op, by, is_owner, policy_store)
         refresh = getattr(bot, "refresh_registration_card", None)
@@ -1074,10 +1333,63 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
     return apply(reg, op, by, is_owner, policy_store, raids=raids)
 
 
+def _sheets_words(reg: Registry, bot, keys) -> str:
+    """announce_absence's touched run keys as words: ' · off 2 sheets: Barrow Deeps Tue 6 Oct 7:30 PM, …'."""
+    if not keys:
+        return ""
+    from .raid_views import run_title
+
+    raids = getattr(bot, "raids", None)
+    events = raids.store(reg).events if raids is not None else {}
+    names = [run_title(reg, events[k]) if k in events else k for k in keys]
+    return f" · off {len(names)} sheet{'s' if len(names) != 1 else ''}: {', '.join(names)}"
+
+
+def compiled_count(compiled) -> int:
+    return len(getattr(compiled, "rules", None) or getattr(compiled, "constraints", None) or [])
+
+
+async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
+    """policy / policy_append with the bot: the write (policy.begin_edit, which remembers the previous text), then the
+    compile (the LLM call, off the loop) held as the pending reading — Discord shows it with Confirm / Discard
+    (ConfigConfirmView), the site and MCP confirm it with policy_confirm. The persona is live as written."""
+    from . import policy as policy_mod
+
+    doc, text, _ = _policy_edit(reg, op, ps)
+    line = await asyncio.to_thread(apply, reg, op, by, True, ps) if text is not None else f"{doc} policy: compiling the current text"
+    if doc == "persona":
+        return line
+    provider = getattr(getattr(bot, "ctx", None), "provider", None)
+    if provider is None:
+        return line + " — no LLM to compile it right now (/gm policy reload once there is)"
+    compiled, _ = await asyncio.to_thread(policy_mod.compile_pending, ps, doc, provider)
+    amb = len(getattr(compiled, "ambiguities", None) or [])
+    return (line.replace(" (compile pending)", "") + f" — my reading: {compiled_count(compiled)} item(s)" + (f", {amb} question(s)" if amb else "")
+            + ", waiting for Confirm or Discard")
+
+
 async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int | None) -> str:
     """The ops whose slash commands and web endpoints do Discord work: one branch per verb on the bot."""
     from . import raidcycle as rc
 
+    if op.op == "application":  # the card's Accept / Decline, /roster applicant, the web and MCP: one verb
+        a, accept, note = _application(reg, op)
+        return str(await bot.decide_application(reg, a.discord_id, accept, by, note))
+    if op.op == "proposal":  # the card's Approve / Dismiss and the Agents page: ProposalStore.move + the card + an ops line
+        from .news import ProposalError
+
+        ps, p, state = _proposal(reg, op)
+        try:
+            p = await asyncio.to_thread(ps.move, p.id, state, by, officer=True, job=False, by_id=by_id, note=(op.reason or "").strip() or None)
+        except (ProposalError, PermissionError) as e:
+            raise RegistryError(str(e))
+        update = getattr(bot, "proposal_card_update", None)
+        if update is not None:
+            await update(reg, p)
+        ops = getattr(bot, "ops", None)
+        if ops is not None:
+            await ops.emit(reg.config, "info", f"news proposal {p.id} {state} by {by}: {p.title}")
+        return f"news proposal {p.id} {state}: {p.title}"
     rs = bot.raids.store(reg)
     if op.op == "run_open":
         rid = op.target or ""

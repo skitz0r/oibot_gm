@@ -400,7 +400,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["register"](interaction, reg, slot="alt", plan_only=True)
 
-    @plan.command(name="roles", description="Extra roles your main can play besides its spec (flex); also on the website per character")
+    @plan.command(name="roles", description="Extra roles your main can play besides its spec (flex); or tell the bot, per character")
     @app_commands.choices(primary=ROLE_CHOICES, flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
     async def plan_roles(interaction: discord.Interaction, primary: app_commands.Choice[str], flex1: app_commands.Choice[str] | None = None, flex2: app_commands.Choice[str] | None = None, flex3: app_commands.Choice[str] | None = None):
         reg = await need(interaction)

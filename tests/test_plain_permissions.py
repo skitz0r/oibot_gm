@@ -485,6 +485,9 @@ class Resp:
     async def edit_message(self, content=None, **kw):
         self.log.append(("edit", content, kw))
 
+    async def defer(self, **kw):
+        self.log.append(("defer", None, kw))
+
 
 def interaction(uid, name, officer, log):
     async def plain_identity(reg, user):
@@ -493,8 +496,12 @@ def interaction(uid, name, officer, log):
     async def send(content=None, **kw):
         log.append(("followup", content, kw))
 
+    async def edit_original_response(content=None, **kw):  # Apply defers, then edits the diff message in place
+        log.append(("edit", content, kw))
+
     client = types.SimpleNamespace(plain_identity=plain_identity, raids=None)
-    return types.SimpleNamespace(user=types.SimpleNamespace(id=uid, display_name=name), client=client, response=Resp(log), followup=types.SimpleNamespace(send=send))
+    return types.SimpleNamespace(user=types.SimpleNamespace(id=uid, display_name=name), client=client, response=Resp(log), followup=types.SimpleNamespace(send=send),
+                                 edit_original_response=edit_original_response)
 
 
 def test_handle_change_and_apply(g):

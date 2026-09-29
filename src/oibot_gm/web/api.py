@@ -308,7 +308,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         role = reg.profile.spec(c.cls, c.spec).role
         off = reg.profile.spec(c.cls, c.offspec).role if c.offspec else None
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
-                "status": c.status, "rank": c.rank, "rosters": list(c.rosters), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off}
+                "status": c.status, "rank": c.rank, "rosters": list(c.rosters), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
+                "flex": list(c.flex)}
 
     def absence_json(a) -> dict:
         return {"start": a.start, "end": a.end, "reason": a.reason}

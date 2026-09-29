@@ -70,8 +70,8 @@ on the sheet in Discord.
 - **New here? Apply first.** Anyone can join the Discord server with the public invite; joining the guild is an
   application, made in Discord (§3a). Someone with nothing registered who presses *Register / plan my main* or
   *Add an alt*, or runs `/register`, `/me plan main|alt` or `/me char add`, is sent to the application with one line:
-  *"New here? Apply first — the officers take it from there."* Plain text ("add my alt …") says the same and points
-  to `/apply`. Officers, and anyone holding one of the guild's **member roles** (set by the owner, §8), register
+  *"New here? Apply first — the officers take it from there."* Plain text ("add my alt …", "plan my main as …") says
+  the same, with the **Apply to join** button on the reply while applications are open. Officers, and anyone holding one of the guild's **member roles** (set by the owner, §8), register
   directly; anyone already registered is never affected and keeps adding alts as below.
 - **Register / plan a main**: press *Register / plan my main* in #register (class → spec → optional
   offspec → first and last name; Forever characters have two-word names; leave them blank until the
@@ -81,14 +81,17 @@ on the sheet in Discord.
   character waits for an officer to confirm it.
 - **Alts**: *Add an alt* button, `/me char add` (first and last name, like the button), `/me plan alt`.
 - **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main` (or the crown on the website).
-  **Delete**: the bin icon on the website removes a character and its roster placements (`/me char retire`
-  keeps history instead).
+  **Delete**: the bin icon on the website, or telling the bot ("delete my alt Jonny"), removes a character and its
+  roster placements outright; if it was your main, your next character becomes main (`/me char retire` keeps history
+  instead).
 - **Name a planned character at launch**: `/me char name`: pick the planned character (skipped when there is
   only one), then type first and last name.
 - `/me char spec|main|retire` take no arguments: pick the character from your own list. Spec choices are always
   that character's class, and retire asks you to confirm. `/apply` is the application (§3a).
-- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` (or the per-character
-  flex toggles on the website) adds roles you'd play beyond that.
+- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` adds roles your main
+  would play beyond that, and telling the bot sets them on any of your characters ("I can also tank on Xanthe", "no
+  extra roles on Jonny"). The site has no flex toggles yet; officers can also set a character's flex list over MCP
+  (`save_characters`).
 - **Absences**: `/me absent list` shows yours with a **Clear** button on each; `/me absent clear` does the same.
 - **Away for a while**: press *I'll be away* on the card in the absences channel, or `/me absent add`, or the Me
   page. Nothing is typed: pick the **first day** (Today, Tomorrow, then the days after — *Later than this…* picks a
@@ -100,7 +103,9 @@ on the sheet in Discord.
 - **See everything the bot has on you**: `/me view` or the *My status* button.
 - All `/me` commands also work in a DM with the bot.
 - **Or just tell the bot.** DM it or @mention it: "I'll be away Nov 1–3", "back early, clear my absence",
-  "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "bench me for tonight",
+  "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "add Jonny as my main",
+  "plan my main as a Holy Priest" (a planned character, no name yet; saying it again replaces the plan and keeps
+  its rank and roster placement), "delete my alt Jonny", "I can also tank on Xanthe", "bench me for tonight",
   "I can't make tonight", "I confirm for tonight", "turn my DMs off". It shows what it will change and waits for
   your **Apply** — only you (or an officer) can press it. Plain text only ever changes *your own* record: a
   request about someone else is refused with who can do it, and the rest of what you asked still applies.
@@ -133,7 +138,10 @@ link, the schedules the applicant can make in words, and every answer as its own
 shortened on the card with "…" (with a link to the full answers on the site when the site is set up).
 **Accept** registers the character as the applicant's main, rank trial, already confirmed; **Decline…** takes an
 optional note. Either way the applicant gets a DM, the card updates to show the decision, and the ops channel logs
-it. The same decision is on `/roster applicant` and the site, through the same code. A declined applicant is never
+it. The same decision is on `/roster applicant`, in plain text ("accept Nyx", "decline nyxie: we're full on
+healers" — officers by default, and the note goes to the applicant) and over MCP (`decide_application`), all through
+the same code. A newcomer who tells the bot to register a character is refused with *"New here? Apply first"* and
+gets the **Apply to join** button on that reply. A declined applicant is never
 removed from the Discord server; they can stay and apply again later.
 
 ## 4. Raids, runs and the signup cycle
@@ -312,16 +320,22 @@ returns to the game defaults.
 - Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`. They take at most a member
   (Discord's own picker); the character, rank or roster is picked from a list and confirmed before anything saves.
   `/roster confirm` alone walks the unconfirmed characters.
-- Applications: `/roster applicants`, `/roster applicant`, or the Accept / Decline… buttons on the review card (§3a).
+- Applications: `/roster applicants`, `/roster applicant`, the Accept / Decline… buttons on the review card, or plain
+  text ("accept Nyx", "decline nyxie: full on healers") (§3a).
 - Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|end` (officers) and `/raid out` (anyone).
   They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
   and answer, then asks which character. `/raid cancel` asks for an optional reason in a box.
 - Policy: `/gm policy show|edit|reload`, `/gm rule loot|comp` (the bot shows the end of the current document; press
   **Write the rule** and write it in a paragraph box) — prose is compiled by Claude into rules and
-  an officer confirms the reading before it goes live.
+  an officer confirms the reading before it goes live. Plain text does the same: "add a loot rule: tanks first on
+  shields", "drop the loot rule about attendance", "recompile the comp policy", or a whole new text; after **Apply**
+  the bot shows its reading with **Confirm this reading** / **Discard edit** (Discard puts the previous text back).
+  The persona has no reading: it is live as written.
 - Plain-text config: `/gm change <text>`, or @mention the bot in the ops or analytics channel — the bot
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
-  question. Whoever presses Apply needs the rights for the change (§8c). Absences entered this way are announced
+  question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses
+  Apply needs the rights for the change (§8c); a slow change (a lock, fill DMs, a compile) is acknowledged at once and
+  the diff turns into the result when it is done. Absences entered this way are announced
   like `/me absent add`; channel changes post their card like the command does.
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, recent ops),
   `/gm config show`.
@@ -347,7 +361,8 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   **Failed — nothing changed** (the setting was refused, or the tests failed and the edit was undone; a failed one can
   be approved again), or **Reverted — the change was rolled back** (the bot did not come back healthy after a game
   data change, so the commit was undone and the bot restarted on the old version).
-- The same list, with Approve / Dismiss, is on the site's **Agents** page.
+- The same list, with Approve / Dismiss, is on the site's **Agents** page, and plain text does it too: "approve
+  proposal 260927-a1b2", "dismiss 260927-a1b2: handled by hand" (officers by default; the note is kept on the card).
 
 ## 8. Owner: setup
 
@@ -409,7 +424,9 @@ plain text) is where the Wowhead webhook posts; *News keywords* on the Config pa
 text) adds words that make a post relevant besides the game version's names and raid names. The review and apply
 jobs run on the host as their own launchd agents (`scripts/agents/README.md`; `sh scripts/agents/install.sh`), and the
 site's **Agents** page shows whether they are installed and running, what the current run is doing step by step,
-past runs, the news kept and the proposals; **Run review now** (owner) starts the review at once. A menu-bar item on
+past runs, the news kept and the proposals; **Run review now** (owner) starts the review at once — so does telling
+the bot "run the news review now" (or "apply the approved proposals now"), which only the owner can ever do, whatever
+the plain-text permissions say. A menu-bar item on
 the Mac mini (GM ✓ / ⟳ / ⚠ / ✕) shows the same at a glance, even when the bot is down.
 
 **Officer roles.** `/gm config officer-role role:@Officers` (add; `remove:true` to take one away), the Config page's
@@ -450,7 +467,10 @@ of their characters.
   "groups for bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the board — the layout the lock will use, or after
   lock the roster itself (names added are asked to confirm, names dropped are freed). Pins and per-run seats
   stay as before ("pin Ash to the roster", "keep Dusk on the bench").
-- *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`), "change Jonny to Fire",
+- *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
+  one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
+  rank and roster placement), "delete Jon's alt Jonny" (gone outright with its roster placements — the diff says so;
+  retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
   raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "Marrow is back, clear her absence" (by start
@@ -458,10 +478,17 @@ of their characters.
 - *Recruitment (owner):* "close applications", "open applications", "set the recruitment note to Looking for
   healers", "add a required question: Why us? — hint: a line or two is plenty", "remove the question Why us?" (or
   by number), "set the invite link to https://discord.gg/abc123" (op `recruit`).
+- *Applications (officers):* "accept Nyx", "decline nyxie: we're full on healers" — the applicant is named by
+  display name, @mention or character; the decision goes through the same code as the card (DM, card, ops line).
+- *Policy (officers):* "add a loot rule: …", "drop the comp rule about …", "replace the loot policy with: …",
+  "recompile the loot policy" — then the reading with Confirm / Discard.
+- *News (officers):* "approve proposal 260927-a1b2", "dismiss 260927-a1b2: already handled". *Jobs (owner only,
+  never opened to anyone else):* "run the news review now", "apply the approved proposals now".
 - *Test bench:* "seed 20 test members", "open a test Barrow Deeps run" (`/gm test run` preselects the Standard
   tempo: starts in 40 min, nudge 32, lock 25, confirm 15 min before; Quick is 20/16/12/8 and Slow 90/70/55/35), "clear the test bench".
 - Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
-  DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are still not settable anywhere.
+  DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are still not settable anywhere; the
+  loot session (`/raid loot`) and handing the guild to a new owner are slash commands only, by design.
 
 ## 8c. Plain-text permissions (owner sets, officers read)
 
@@ -476,17 +503,18 @@ channel the bot doesn't read @mentions at all, the owner's included; there the o
 
 | Group | Default | Someone could type |
 |---|---|---|
-| Own record — your absences, DMs, characters (add, spec, offspec, name, main, retire) and your own answer or confirmation on a run | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight" |
-| Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters | officers | "rank Jonny raider", "Mira is away next week" |
+| Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles) and your own answer or confirmation on a run | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight" |
+| Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters, deciding applications | officers | "rank Jonny raider", "Mira is away next week", "accept Nyx" |
 | Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, seats on a run, `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight" |
-| Comp & policy — comp targets and group layout, pins, appending a rule to the loot or comp policy | officers | "we want 3–4 healers in Barrow Deeps", "pin Jonny in tonight" |
+| Comp & policy — comp targets and group layout, pins, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "we want 3–4 healers in Barrow Deeps", "pin Jonny in tonight" |
 | Raids & auras — raid schedules and settings, buff and family facts | the owner | "Barrow Deeps runs Tue and Thu 7:30 pm" |
-| Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite) | the owner | "post raid sheets in #signups" |
+| Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite), starting the local jobs | the owner | "post raid sheets in #signups" |
 | Test bench | officers | "seed 20 puppets", "clear the test bench" |
 
 **Who** — per group, any mix of *everyone*, *registered members* (an active character), *officers*, *owner only*,
 and specific Discord roles (picked from the server's roles, stored by id, so renaming a role keeps it). An empty
-list means the owner only. Anyone allowed a group for other people may also do it for themselves.
+list means the owner only. Anyone allowed a group for other people may also do it for themselves. Two things stay
+the owner's whatever this table says: starting the local jobs and (when plain text can change it) this policy itself.
 
 **Where** — each channel is one of: **Acts** (anything the person's groups allow), **Own record only** (a member's
 own record; other requests are refused with where to go instead), **Answers only** (questions, no changes) or
@@ -496,7 +524,7 @@ only* — so a raider can tell the bot about their absence anywhere, while run a
 officer channels.
 
 **How it decides.** The bot reads a message's intent first: in a channel that acts, the sentence is parsed as a
-change straight away (a question gets a short answer from the live settings). Elsewhere the bot answers it like
+change straight away (a question is handed to the same answer as `/ask`, with its full snapshot). Elsewhere the bot answers it like
 `/ask`, and only when the message asks it to *do* something — and you could act there — does it turn it into a
 change for you to Apply. Who an operation is about is decided by the bot's code, not the model: leaving the
 person out ("I'll be away") means *you*; naming yourself by display name, @mention or one of your characters
@@ -564,7 +592,7 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened) |
-| `save_characters` · `set_member` · `set_dm` | character table rows · rank / confirm / main · DMs on or off |
+| `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off |
 | `set_channel` · `set_config` | a bot channel by name · timezone, ask audience, about, officer roles |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |

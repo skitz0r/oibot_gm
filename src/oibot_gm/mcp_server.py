@@ -479,8 +479,9 @@ def clear_absence(member: str, start: str) -> str:
 @mcp.tool()
 def save_characters(member: str, rows: list[dict]) -> str:
     """Edit someone's character table the way the Members page saves it. Each row: {label, name?, surname?, cls, spec,
-    offspec?, main: bool} for an existing character (label from get_member) or a new one (cls + spec, name optional
-    = planned), or {label, delete: true}. Only the rows you pass change."""
+    offspec?, main: bool, flex?: [tank|healer|melee|ranged] (extra roles beyond the spec/offspec; [] clears)} for an
+    existing character (label from get_member) or a new one (cls + spec, name optional = planned), or {label, delete: true}.
+    Only the rows you pass change."""
     deletes = [str(r.get("label")) for r in rows if isinstance(r, dict) and r.get("delete")]
     chars = [r for r in rows if isinstance(r, dict) and not r.get("delete")]
     return msg(api().post("/api/members/save", {"rows": [{"member": member, "deletes": deletes, "characters": chars}]}))
