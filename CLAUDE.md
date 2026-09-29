@@ -31,6 +31,7 @@ profiles/forever/      Classic-era buff matrix: `slot` = one totem per element p
 fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg, gitignored): REAL (BisCouncil ledger, WCL attendance/roster) + MOCK (tiers, wishlists, policy, ranks)
 src/oibot_gm/
   constants.py         ROLES / MARK / LEVEL_COLOUR / TEAL shared by Discord, web and render (no per-module copies)
+  presets.py           shared presets: raid cadence PRESETS (standard/short/same_week), test-run TEMPOS; used by the wizards, plain text and the web
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
