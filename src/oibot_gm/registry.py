@@ -1305,7 +1305,7 @@ class Registry:
         over = self.config.raids.setdefault(instance, {})
         if field == "slots":
             over["slots"] = parse_slots(value)
-            value = ", ".join(over["slots"]) or "none"
+            value = ", ".join(self.slot_label(x) for x in over["slots"]) or "none"  # the reply and change log read 12-hour
         elif field == "schedules":  # the whole stored list (the wizard's and set_schedule's one write); `default`'s slots go to the raid
             if not isinstance(value, list):
                 raise RegistryError("schedules must be a list of schedules")
@@ -1372,6 +1372,7 @@ class Registry:
                 if t.tzinfo is None:
                     t = t.replace(tzinfo=_Z(self.config.timezone))
                 over["first_open"] = t.isoformat()
+            value = self.local12(over["first_open"]) if over.get("first_open") else "none"  # stored ISO, shown in words
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
             role, bound = field.split("_")
             try:

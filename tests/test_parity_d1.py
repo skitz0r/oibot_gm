@@ -569,3 +569,28 @@ def test_mcp_plain_change_sends_the_token_on_apply(monkeypatch):
     assert sent == [("/api/ops/change", {"text": "make Kessa core"}), ("/api/ops/change", {"token": "abc", "apply": True})]
     with pytest.raises(Exception, match="token"):
         msrv.plain_change("make Kessa core", apply=True)
+
+
+# ---------------------------------------------------------------- M7: the raid_set Apply line reads in 12-hour words
+
+def test_raid_set_apply_line_and_change_log_read_in_12_hour_words(reg):
+    import re
+
+    from oibot_gm.configops import ConfigOp
+    from oibot_gm.registry import recent_changes
+
+    def military(text):
+        return re.search(r"\b([01]\d|2[0-3]):[0-5]\d\b(?! ?[AP]M)|\d{4}-\d\d-\d\dT", text)
+
+    line = configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Tue 19:30, Thu 20:00"), "Owner", True)
+    assert line == "barrow_deeps: slots = Tue 7:30 PM, Thu 8:00 PM", line
+    line = configops.apply(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="first_open", value="2026-12-09 15:00"), "Owner", True)
+    assert "3:00 PM" in line and not military(line), line
+    merged = configops.coalesce([ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Wed 21:15"),
+                                 ConfigOp(op="raid_set", target="barrow_deeps", field="first_open", value="2026-12-10 18:30")])
+    assert len(merged) == 1
+    line = configops.apply(reg, merged[0], "Owner", True)
+    assert "Wed 9:15 PM" in line and "6:30 PM" in line and not military(line), line
+    assert reg.config.raids["barrow_deeps"]["slots"] == ["Wed 21:15"], "the stored form stays 24-hour"
+    for row in recent_changes(reg.key, 10):
+        assert not military(row["text"]), row["text"]
