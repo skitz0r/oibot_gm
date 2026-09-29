@@ -365,7 +365,7 @@ def test_guild_state_reads(reg, rs):
     s = help_mod.guild_state(reg, rs, ms[0].discord_id, False)
     assert f"live run {ev.key}" in s and "TEST RUN" in s and "state open" in s and "nudge " in s and "lock " in s
     assert "answers: 6 joined / 2 bench / 0 no thanks / 8 not answered" in s and f"pinned in: {ms[0].display_name}" in s
-    assert f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec})" in s
+    assert f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec} {ms[0].main.cls})" in s
     assert f"absent that day: {ms[9].display_name}" in s and "wedding" not in s, "reasons are officer-only"
     assert "## Asker (member)" in s and f"on {ev.key}: in as {ms[0].main.label}" in s and "pinned in" in s
     assert "aura overrides: none" in s and "test bench: 16 puppet member(s)" in s and f"test runs {ev.key}" in s
@@ -382,7 +382,7 @@ def test_guild_state_reads(reg, rs):
     ev.fill_asks.append(rc.FillAsk(discord_id=ms[7].discord_id, display_name=ms[7].display_name, kind="sub", role="melee", character=ms[7].main.label, spec=ms[7].main.spec, reason="short 15", expires_at=ev.start.isoformat()))
     rs.save(ev, "ask")
     s = help_mod.guild_state(reg, rs, ms[0].discord_id, True)
-    assert "roster 1 (5 rostered): g1:" in s and f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec})" in s
+    assert "roster 1 (5 rostered): g1:" in s and f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec} {ms[0].main.cls}, " in s
     assert f"confirmations: confirmed {ms[0].display_name}" in s and ms[1].display_name in s.split("waiting")[1].split("declined")[0]
     assert f"fill asks outstanding: {ms[7].display_name} (sub: {ms[7].main.label} {ms[7].main.spec} for melee, short 15, deadline" in s
     assert f"bench after lock: {ms[5].display_name} · short: {rc.run_size(reg, ev) - 5} seat(s)" in s

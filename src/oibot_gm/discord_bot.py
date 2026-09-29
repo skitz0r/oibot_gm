@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 from . import configops, nl, render
 from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, register_policy_commands
-from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, guide_intro, guide_view, register_help_commands
+from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
 from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
@@ -1071,7 +1071,9 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         question gets the parser's own reply from the live config (one model call either way). Elsewhere (DMs and
         other channels): the help answer first, which also says whether the message asks the bot to DO something;
         only then, and only if the person could act here, is it parsed into a change — a plain question costs one call,
-        a change two. Outside the ask audience a person who may act on their own record is parsed directly."""
+        a change two. Outside the ask audience a person who may act on their own record is parsed directly. A newcomer
+        who must apply (Registry.must_apply) while applications are open gets the persistent Apply to join button on the
+        reply, so the application wizard opens straight from the chat (typed class/spec is never parsed)."""
         mode = reg.plain_mode(channel)
         if mode == "ignore":
             return
@@ -1085,22 +1087,26 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             return
         owner = reg.config.owner_discord_id == uid
         may_act = provider is not None and (owner or (mode == "self" and reg.may_plain("self", uid, officer=officer, role_ids=role_ids, channel=channel, fallback="members") is None))
+
+        def apply_button(base=None):  # a newcomer who must apply gets the Apply to join button (the wizard opens from here, DMs too)
+            return help_apply_view(reg, uid, officer=officer, role_ids=role_ids, base=base)
+
         async with message.channel.typing():
             if may_act and not reg.may_ask(uid, officer):
                 req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name)
                 if req.kind == "change" and req.ops:
                     await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req)
                 else:
-                    await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=quiet)
+                    await message.reply(guide_intro(reg), view=apply_button(guide_view()), allowed_mentions=quiet)
                 return
             answer = await self.help_answer(reg, uid, officer, text, may_act=may_act)
             if answer == HELP_ACT:
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
                 return
         if answer is None:  # outside the ask audience: static guide only
-            await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=quiet)
+            await message.reply(guide_intro(reg), view=apply_button(guide_view()), allowed_mentions=quiet)
         else:
-            await message.reply(answer, allowed_mentions=quiet)
+            await message.reply(answer, view=apply_button(), allowed_mentions=quiet)
 
     async def on_message(self, message: discord.Message):
         if await self.news_message(message):  # the news webhook (a bot) is read before the bot filter below
