@@ -557,6 +557,20 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v = await who(request, officer=True)
         return await asyncio.to_thread(rosters_data, v.reg)
 
+    @app.get("/api/readiness")
+    async def readiness(request: Request, raid: str | None = None):
+        """Pool readiness per raid (officers): what the analytics card draws plus the words behind it — headcount,
+        roles with who could cover, buffs nobody brings, the desired comp with its reasons, short / over lists and the
+        pool plan (comp.readiness; no solver). `raid` = one raid id; default every raid of the profile."""
+        from .. import comp
+
+        v = await who(request, officer=True)
+        ids = [raid] if raid else list(v.reg.profile.raids)
+        if raid and raid not in v.reg.profile.raids:
+            return JSONResponse({"error": f"unknown raid {raid} (one of {', '.join(v.reg.profile.raids)})"}, status_code=404)
+        rows = await asyncio.to_thread(lambda: [comp.readiness(v.reg, rid) for rid in ids])
+        return {"raids": rows}
+
     def live_event(reg, key: str):
         rs = bot.raids.store(reg)
         ev = find_live(reg, rs, key)
@@ -1615,16 +1629,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         desc = []
         for op in req.ops:
             try:
-                desc.append(configops.describe(v.reg, op))
+                desc.append(configops.describe(v.reg, op, PLAIN_WEB))
             except Exception as e:  # noqa: BLE001
                 desc.append(f"{op.op}: {e}")
         out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": [], "refused": refused}
         if not d.get("apply") or req.kind != "change" or not req.ops:
             return out
         ps = PolicyStore(bot.registries.store, v.reg.key)
-        for op in req.ops:
+        for op in configops.coalesce(req.ops):  # consecutive raid/schedule settings save as one write (as on Discord)
             try:
-                line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid)  # authorize() allowed it
+                line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid, channel_id=PLAIN_WEB)  # authorize() allowed it
             except (RegistryError, ValueError) as e:
                 out["applied"].append(f"{op.op}: {e}")
                 out["error"] = str(e)

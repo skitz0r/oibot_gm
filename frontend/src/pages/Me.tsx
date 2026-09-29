@@ -200,7 +200,7 @@ function AbsenceModal({ opened, onClose, onSaved }: { opened: boolean; onClose: 
       <Stack>
         <DateInput label="From" value={start} onChange={(v) => setStart(v ? new Date(v) : null)} required />
         <DateInput label="To" value={end} onChange={(v) => setEnd(v ? new Date(v) : null)} description="leave empty for a single day" />
-        <TextInput label="Reason" description="officers only" value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
+        <TextInput label="Reason" description="only you and the officers see it" value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
         <Group justify="flex-end"><Button variant="default" onClick={onClose}>Cancel</Button><Button disabled={!start} onClick={() => api.post("/api/me/absence", { start: iso(start), end: iso(end), reason }).then(() => { ok("absence added"); onSaved(); setStart(null); setEnd(null); setReason(""); }).catch(fail)}>Add</Button></Group>
       </Stack>
     </Modal>

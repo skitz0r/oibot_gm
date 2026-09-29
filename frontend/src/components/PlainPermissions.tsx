@@ -58,7 +58,7 @@ export function PlainPermissions() {
         action={data.owner && !editing ? <Button variant="default" size="sm" leftSection={<IconPencil size={15} />} onClick={start}>Edit permissions</Button> : null} />
       <Box p="md">
         <Text size="sm" c="dimmed" mb="sm">
-          Applies to @mentions, DMs, <Text span ff="monospace" size="sm">/gm change</Text> and the site's plain-text box. The bot always shows the change first and waits for Apply; the owner can always do everything.
+          Applies to @mentions, DMs, <Text span ff="monospace" size="sm">/gm change</Text> and MCP <Text span ff="monospace" size="sm">plain_change</Text> (which counts as a place where plain text acts). The bot always shows the change first and waits for Apply; the owner can always do everything. Only the owner changes these permissions, in chat too.
         </Text>
         <Table.ScrollContainer minWidth={560}>
           <Table verticalSpacing="xs">

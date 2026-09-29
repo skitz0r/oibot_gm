@@ -62,7 +62,7 @@ def interaction(uid, log, *, officer=False, edit_fails=False, **client_kw):
 def test_apply_defers_before_a_slow_op_and_edits_the_original(reg, monkeypatch):
     feed, log = Feed(), []
 
-    async def slow_apply(reg_, op, by, is_owner, ps=None, bot=None, by_id=None):
+    async def slow_apply(reg_, op, by, is_owner, ps=None, bot=None, by_id=None, **_kw):
         log.append(("applying", op.op, {}))
         await asyncio.sleep(0.05)  # stands in for a lock that takes longer than Discord's 3 seconds
         return "locked bd-x"

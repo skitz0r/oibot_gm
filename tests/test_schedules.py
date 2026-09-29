@@ -301,7 +301,7 @@ def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, ow
 
 def test_plain_text_schedule_ops_describe_in_words_and_apply(reg, store):
     op = ConfigOp(op="schedule_set", target=RID, field="alt.slots", value="Sat 20:00")
-    assert configops.describe(reg, op) == "Barrow Deeps: new schedule alt — Sat 8:00 PM"
+    assert configops.describe(reg, op).startswith("Barrow Deeps: new schedule alt — Sat 8:00 PM — after it: Barrow Deeps · Weekly: next Sat ")
     assert "20:00" not in configops.describe(reg, op)
     with pytest.raises(RegistryError, match="needs the owner"):
         configops.apply(reg, op, "Officer", is_owner=False)
@@ -313,7 +313,7 @@ def test_plain_text_schedule_ops_describe_in_words_and_apply(reg, store):
     assert configops.describe(reg, back).endswith("12 hours before → lock hours before: the raid's (24 hours before)")
     configops.apply(reg, ConfigOp(op="schedule_set", target=RID, field="alt.name", value="Alt run"), "Owner", is_owner=True)
     lk = ConfigOp(op="schedule_set", target=RID, field="reset.lockout", value="1, 3 at 20:00")
-    assert configops.describe(reg, lk) == "Barrow Deeps: new schedule reset — days of each lockout, day 1 and 3, 8:00 PM"
+    assert configops.describe(reg, lk).startswith("Barrow Deeps: new schedule reset — days of each lockout, day 1 and 3, 8:00 PM — after it: Barrow Deeps · ")
     configops.apply(reg, lk, "Owner", is_owner=True)
     assert next(s for s in reg.schedules(RID) if s["id"] == "reset")["days"] == [1, 3]
     rm = ConfigOp(op="schedule_remove", target=RID, field="alt")

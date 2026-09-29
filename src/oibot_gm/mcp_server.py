@@ -189,6 +189,15 @@ def get_raid(raid: str) -> dict:
 
 
 @mcp.tool()
+def raid_readiness(raid: str | None = None) -> dict:
+    """Pool readiness (what the analytics channel's card shows, with the reasons): per raid the headcount against its
+    size, each role's have/need/level with who could cover a shortfall (offspec, flex, alt), buffs nobody provides,
+    the desired comp lines (want/min/max, have, level, why, the officer's note and whether it is derived or officer-set),
+    what is short or over, and the pool plan. `raid` = a raid id for one raid; default every raid. Read-only."""
+    return api().get("/api/readiness", raid=raid)
+
+
+@mcp.tool()
 def list_members(filter: str | None = None) -> dict:
     """Every registered member with their characters (class/spec/offspec/role/rank/confirmed/rosters), upcoming absences,
     open placement asks, and privilege (owner/officer/member/outside/test). `filter` narrows by display name, character
@@ -554,7 +563,9 @@ def plain_change(text: str, apply: bool = False) -> dict:
     """Configure in plain words, the way /gm change does ("lock Barrow Deeps 3 hours before", "make Kessa core",
     "set the signup channel to #raids"). Claude parses it into whitelisted ops; `describe` shows current → new per op.
     Nothing is applied unless `apply=true` — call once to show the person, again with apply after they agree.
-    Questions from the parser come back in `questions` instead of ops."""
+    Questions from the parser come back in `questions` instead of ops. Everything plain text does works here (board
+    moves, proposals — "another" / "use it" remember what this token was shown —, recruitment, the plain-text policy,
+    test tempos) except re-posting a sheet "here": use repost_sheet."""
     return api().post("/api/ops/change", {"text": text, "apply": bool(apply)})
 
 

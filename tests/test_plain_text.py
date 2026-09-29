@@ -12,11 +12,18 @@ from conftest import join, lock_with_board, open_test_run
 
 from oibot_gm import configops, help as help_mod, raidcycle as rc
 from oibot_gm.configops import ConfigOp
+from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.registry import RegistryError
 
 
 class FakeBot:
     """Just the verbs configops.apply_async calls, each recording its call and doing the minimum to the store."""
+
+    # the board verbs are RaidMixin's own (plain text's run_board / run_move / run_autofill write through them)
+    board_lock = RaidMixin.board_lock
+    save_board = RaidMixin.save_board
+    board_move = RaidMixin.board_move
+    _write_board = RaidMixin._write_board
 
     def __init__(self, rs):
         self.calls: list[tuple] = []
@@ -148,7 +155,7 @@ def test_describe_member_and_test_ops(reg, rs):
     reg.add_absence(m.discord_id, "2030-03-01", "2030-03-03", None, "t")
     assert d(op="absence_clear", member=m.display_name) == f"{m.display_name}: clear absence 2030-03-01 → 2030-03-03 — open sheets it had pre-filled re-open for them (a seat freed on a locked run is not handed back)"
     assert "no absence starting 2030-04-01" in d(op="absence_clear", member=m.display_name, start="2030-04-01")
-    assert d(op="test", value="seed 5").startswith("test bench: seed 5 puppet member(s) (now 16)")
+    assert d(op="test", value="seed 5").startswith("test bench: seed 5 puppet member(s) (now 16 of 80")
     assert "compressed Barrow Deeps run" in d(op="test", value="run barrow_deeps")
     assert "unknown raid" in d(op="test", value="run nowhere")
     assert d(op="test", value="clear").startswith("test bench: clear — cancel 0 test run(s) and delete 16 puppet")
@@ -216,8 +223,8 @@ def test_run_strategy_and_board_open(reg, rs):
     assert rs.events[ev.key].layout == [[ms[0].display_name, ms[1].display_name], [ms[2].display_name]]
     with pytest.raises(RegistryError, match="not joined on this sheet: Nobody"):
         configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value="Nobody"), "officer", is_owner=False, raids=rs)
-    bot = FakeBot(rs)  # before lock the board is store-only: the bot isn't involved
-    assert run(configops.apply_async(reg, ConfigOp(op="run_board", target=ev.key, value=""), "Officer", False, bot=bot)) == f"{ev.key}: board = cleared"
+    bot = FakeBot(rs)  # before lock the board is store-only (RaidMixin.save_board): no Discord side effect
+    assert run(configops.apply_async(reg, ConfigOp(op="run_board", target=ev.key, value=""), "Officer", False, bot=bot)).endswith("board cleared (the lock uses it)")
     assert bot.calls == [] and rs.events[ev.key].layout is None
 
 
@@ -336,7 +343,7 @@ def test_test_bench(reg, rs):
 def test_owner_gating_unchanged(reg, rs):
     """The new ops are officer ops (like /raid, /gm test and the Members page); the owner set is untouched."""
     assert configops.OWNER_OPS == {"set", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset",
-                                   "schedule_set", "schedule_remove", "recruit", "job"}  # schedules are raid rules: owner, like raid_set; recruitment is setup; job is HARD_OWNER_OPS too
+                                   "schedule_set", "schedule_remove", "recruit", "job", "plain"}  # schedules are raid rules: owner, like raid_set; recruitment is setup; job and plain are HARD_OWNER_OPS too
     assert not (configops.RUN_OPS | {"character", "absence_clear", "dm", "test"}) & configops.OWNER_OPS
     bot = FakeBot(rs)
     with pytest.raises(RegistryError, match="needs the owner"):
@@ -349,7 +356,7 @@ def test_current_config_lists_live_runs(reg, rs):
     ev = open_test_run(reg, rs)
     text = configops.current_config_text(reg)
     assert "## Live runs" in text and f"- {ev.key}: Barrow Deeps" in text and "open" in text and "(test run)" in text
-    assert "## Test bench: 16 puppet" in text and "rosters:" not in text.split("## Effective")[0]
+    assert "## Test bench: 16 of 80 puppet" in text and "rosters:" not in text.split("## Effective")[0]
 
 
 # ---------------------------------------------------------------- reads: what /ask sees

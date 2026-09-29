@@ -1292,25 +1292,13 @@ class TimezoneWizard(OwnerWizard):
         new = ZoneInfo(zone)
         lines = [f"Change the guild's timezone from **{cur}** to **{zone}**?",
                  f"• Now: **{fmt12(datetime.now(new))}** there (it's {fmt12(self.reg.now_local())} in {cur})."]
-        from .raidcycle import next_raid_time
+        from . import raidcycle as rc
 
-        for rid in self.reg.profile.raids:
-            rd = self.reg.raid_def(rid)
-            slots = rd.get("slots") or []
-            if not slots:
-                continue
-            fo = self.reg.first_open(rid)
-            starts = []
-            for s in slots:
-                try:
-                    old_t = next_raid_time(s, cur, after=max(self.reg.now_local(), fo) if fo else None)
-                    new_t = next_raid_time(s, zone, after=max(datetime.now(new), fo) if fo else None)
-                except ValueError:
-                    continue
-                starts.append((new_t, old_t))
-            if starts:
-                new_t, old_t = min(starts)
-                lines.append(f"• {rd.get('name', rid)}'s next run: **{fmt12(new_t)}** {zone} · <t:{int(new_t.timestamp())}:f> your time (was <t:{int(old_t.timestamp())}:f>)")
+        try:  # the same preview plain text's `set timezone` shows (rc.timezone_preview: a shadow registry, nothing saved)
+            lines += [f"• {line}" for line in rc.timezone_preview(self.reg, zone)]
+        except RegistryError as e:
+            await self.refuse(i, str(e), self.start, "Pick another")
+            return
         lines.append("-# Run times keep their clock time (Tue 7:30 PM stays Tue 7:30 PM), so the real moment moves with the zone.")
         await self.show(i, "\n".join(lines), self._saver(zone), self.button("Pick another", self.start), self.button("Cancel", self.cancel))
 

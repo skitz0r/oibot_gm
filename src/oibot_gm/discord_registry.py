@@ -157,17 +157,11 @@ def _clip(text: str, n: int) -> str:
     return text if len(text) <= n else text[:max(0, n - 1)].rstrip() + "…"
 
 
-def _site_link(path: str) -> str | None:
-    import os
-
-    web = os.environ.get("OIBOT_WEB_URL", "")
-    return f"{web}{path}" if web.startswith("https") else None
-
-
 def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
     """The review card: full name, class/spec icons, logs, the schedules they can make (in words) and every answer as a
     field. Within Discord's limits (25 fields, 1024 per value, 6000 in all): long answers share what is left, each cut
-    with '…', and a link to the site's full answers is added only when there is a site to link to."""
+    with '…', and a last field says where the full answers are (the bot's own answer, MCP): the site has no
+    applications page."""
     from .wizard_opts import schedule_names
 
     ico = ico or (lambda kind, key: "")
@@ -185,7 +179,6 @@ def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
     answers = [(_clip(x.get("label") or "?", 256), str(x.get("answer") or "").strip() or "—") for x in (a.answers or [])]
     if a.about:
         answers.append(("Anything else", a.about))
-    link = _site_link("/app/members")
     room = FIELDS_MAX - len(fixed) - 1  # one field kept for the overflow / full-answers note
     shown, hidden = answers[:room], answers[room:]
     note_reserve = 200
@@ -205,7 +198,7 @@ def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
         e.add_field(name=n, value=_clip(v, caps[i]) or "…", inline=False)
     if cut:
         more = f"{len(hidden)} more answer(s) not shown. " if hidden else ""
-        e.add_field(name="…", value=(f"{more}Full answers on the site: {link}" if link else (more.strip() or "Long answers are shortened here.")), inline=False)
+        e.add_field(name="…", value=f"{more}Full answers: ask me (“show {_clip(a.name, 40)}'s application”) or MCP list_applications.", inline=False)
     e.set_footer(text=footer)
     return e
 
@@ -590,8 +583,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await FLOWS["roster_set_main"](interaction, reg, member=member)
 
     @roster.command(name="overview", description="Who is planning to play what: classes, roles, flexibility, buff coverage")
-    @app_commands.describe(size="raid size to check against (default: the first raid's size or 20)")
-    async def roster_plan(interaction: discord.Interaction, size: int | None = None):
+    async def roster_plan(interaction: discord.Interaction):
         reg = await need(interaction)
         if not reg:
             return
@@ -599,20 +591,24 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not s["mains"]:
             await interaction.response.send_message("Nobody has planned a main yet — point people at the registration card (`/gm config registration-channel`) or `/me plan main`.", ephemeral=True)
             return
-        team = reg.config.rosters[0] if reg.config.rosters else {}
-        n = size or int(team.get("size") or reg.raid_def(team.get("instance")).get("size") or 20)
-        bounds = reg.role_bounds(team.get("instance"), n)
         e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=TEAL)
         for cls, lines in sorted(s["by_class"].items(), key=lambda kv: -len(kv[1])):
             e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
-        role_lines = []
-        for r in ROLES:
-            have = s["by_role"].get(r, 0)
-            need_min = bounds.get(r, {}).get("min", 0)
-            flex = s["flex"].get(r, [])
-            mark = "🟢" if not need_min or have >= need_min else ("🟡" if have + len(flex) >= need_min else "🔴")
-            role_lines.append(f"{mark} {ico('role', r)} {r}: **{have}**" + (f" / need {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
-        e.add_field(name=f"Roles vs a {n}-man", value="\n".join(role_lines), inline=False)
+        # every raid's size at once (no typed size: the wizard rule); the recruiting ask is against the biggest
+        sized = sorted(((int(reg.raid_def(rid).get("size") or 20), rid) for rid in reg.profile.raids), reverse=True) or [(20, None)]
+        for n, rid in sized:
+            bounds = reg.role_bounds(rid, n)
+            role_lines = []
+            for r in ROLES:
+                have = s["by_role"].get(r, 0)
+                need_min = bounds.get(r, {}).get("min", 0)
+                flex = s["flex"].get(r, [])
+                mark = "🟢" if not need_min or have >= need_min else ("🟡" if have + len(flex) >= need_min else "🔴")
+                role_lines.append(f"{mark} {ico('role', r)} {r}: **{have}**" + (f" / need {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
+            name = reg.raid_def(rid).get("name", rid) if rid else "a raid"
+            e.add_field(name=f"Roles vs {name} ({n})", value="\n".join(role_lines), inline=True)
+        n, rid = sized[0]
+        bounds = reg.role_bounds(rid, n)
         ids = {b.short: b.id for b in reg.profile.party_buffs()}
         missing = [b for b, who in s["providers"].items() if not who]
         thin = [(b, who[0]) for b, who in s["providers"].items() if len(who) == 1]

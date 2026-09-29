@@ -444,6 +444,33 @@ Members never fill in standing availability. The unit of work is a **run**: one 
 
 **Parity in plain text, B1 (2026-09-28).** ConfigOp stays at 13 fields; the new ops reuse them. `character` gains a planned add (empty `character`, `value` "Class Spec [Offspec]", `text` main|alt → `set_plan` through `save_character_table`), a named add that is the main in one op (`text=main`), `delete` (hard, the diff warns) and `flex` (a row's `flex` list in `save_character_table`, so the site and MCP `save_characters` set it too). `application` (member = the applicant, resolved against the open applications by `_applicant`; accept|decline, reason = the note) applies only through `bot.decide_application`. `proposal` (target id, approve|dismiss, reason) is `ProposalStore.move` + `proposal_card_update` + an ops line, like the card. `job` (review|apply) is `agents.start_job`. `policy` (doc loot|comp|persona, field replace|remove|compile, text) and `policy_append` write through `policy.begin_edit` and, with the bot, compile through `policy.compile_pending`; Discord then shows the held reading with Confirm/Discard (`discord_policy.send_compiled`, the one rendering for `/gm policy` and plain text), the site and MCP confirm it with `policy_confirm`. `HARD_OWNER_OPS` (`plain`, `job`) are refused in `authorize` for anyone but the owner, whatever the policy grants. `ConfigConfirmView.apply` defers after the permission check, applies, then edits the original message (the ops line is written even when that edit fails). A plain question in an act channel or on `/gm change` goes to `help_answer`; the run_open diff line carries `<t:unix:f>` in Discord only; a newcomer's APPLY_FIRST refusal carries the Apply button. The parser's context lists member roles by name, open applications and the proposals still waiting — only when the requester is an officer (`parse(…, officer=)`, decided in code before the model call, so a member's clarifying question can't name an applicant); the member list, applications and proposal titles sit in `<data>` blocks the system prompt calls data. A compile that raises undoes that op's write and restores the pending state it found (a `RegistryError`: Discord lists it as refused, the web route reports it like any refused op instead of a 500). One `configops.sheets_words` for the chat reply and the web absence routes. Tests: `tests/test_parity_ops_chat.py`, `…_character.py`, `…_applications.py`, `…_owner.py`, `…_b1_fixes.py`.
 
+**Parity in plain text, B2 (2026-09-28).** Board ops: `run_move` (member, value `g<N>` | `<roster>.<group>` | bench |
+someone on the board = a swap) → `RaidMixin.board_move`; `run_board` and `run_autofill` → `save_board`; `run_propose`
+(value = strategy, field empty | another | use) runs `rc.split_preview` in a worker thread and remembers what it showed
+per (run, requester) in `bot._split_seen` (`configops.split_seen`; per process on purpose), feeding it back as `avoid`;
+`use` writes the last one through `save_board` and sets `ev.split_strategy`. `configops.board_revs` takes each board op's
+`rc.board_rev` when the diff is built; `ConfigConfirmView` passes it as `apply_async(rev=)` (`board_move` grew `rev=`) and
+refreshes it after each of the request's own ops, so only someone else's change is refused. `run_answer` no thanks with
+a `reason` is `RaidMixin.call_out`; `confirm_for` falls through to `answer_fill_for` when the member has a fill ask and
+no placement ask; `run_sheet` is `repost_sheet` into `apply_async(channel_id=)` (refused in DMs and on `PLAIN_WEB`). The
+parser's live-runs context carries each run's board (`board_text`) and each raid's next six unopened runs
+('YYYY-MM-DD HH:MM' + schedule id, machine context only); `_open_time` matches a listed start (or a bare 'HH:MM') to its
+schedule. Setup ops: `plain` (HARD_OWNER_OPS and OWNER_OPS; `_plain_patch` → `merge_plain_policy` → `set_plain_policy`;
+`describe(op, channel)` warns when it takes `act` from the channel it is made in); `recruit` gains `member_role_add|remove`,
+`question_edit` (id and position kept), `question_move`, `invite_create` (`bot.create_invite`, then `set_recruitment`
+and the card); a channel path with `none` clears it, and with a bot every channel path goes through `bot.set_channel`.
+`configops.coalesce(ops)` (Discord Apply and `/api/ops/change`) folds consecutive `raid_set` ops on one raid into one
+`set_raid_overrides`, and `schedule_set` ops on one schedule into one `set_schedule` (`MergedOp`, never in the parser's
+schema); `raid_set field=cadence` expands `presets.preset_fields`. `describe` previews run times through
+`rc.next_runs_preview` (slots, first_open, lockout days, schedule times) and `rc.timezone_preview` (set timezone; the
+`TimezoneWizard` confirm uses it too), and shows slots and first-open in words. `test` gains `run <raid> [tempo] [dm]`
+(`presets.tempo_cutoffs`), `answer [<run>] join N bench N out N` (`rc.test_answer_mix`, which `TestAnswerWizard` now uses)
+and `seed all`; the parser's context says the bench size of `TEST_MAX` and, for officers, the plain-text policy.
+Reads: `GET /api/readiness[?raid=]` (officers) returns `comp.readiness` per raid; MCP `raid_readiness(raid=None)`.
+`flows_raid` raid_sheet calls `repost_sheet`; `/roster overview` takes no typed size (every raid's size at once); the
+application card's overflow line points at the bot and MCP, not a site page that doesn't exist. Tests:
+`tests/test_parity_ops_board.py`, `tests/test_parity_ops_setup.py`.
+
 ### 5.25 Plain-text permissions: members act too, by role and channel (built 2026-09-22)
 
 **Why.** Plain text was routed by *channel*: an @mention in the ops or analytics channel parsed a change (officers
@@ -472,7 +499,8 @@ of theirs (except `character add`, which names a new one). Everything else goes 
 only), `channels` (channel id → mode), `dm`, `default`. Modes: `act` (any group the person holds), `self` (own record
 only), `answer` (questions only), `ignore` (no reply to @mentions). Defaults reproduce the old behaviour plus
 self-service: self → registered; members, runs, comp, test → officers; raids, setup → owner; the ops and analytics
-channels act unless listed; DMs and other channels are `self`. The site's box and MCP are `PLAIN_WEB`, which acts.
+channels act unless listed; DMs and other channels are `self`. `POST /api/ops/change` (MCP `plain_change`; the site
+has no plain-text box) is `PLAIN_WEB`, which acts.
 The owner can always do everything (only `ignore` silences the bot's @mention replies for them; `/gm change` still works there).
 
 **One check.** `Registry.may_plain(group, author_id, officer=, role_ids=, channel=, what=, fallback=)` returns None or
@@ -497,7 +525,9 @@ act on their own record is parsed directly and gets the static guide for anythin
 their effective mode, roles), `POST /api/admin/plain-permissions` (owner; `Registry.set_plain_policy` validates and
 commits one line); the Ops page's *Plain-text permissions* card (a who multi-select per group from the tiers and the
 server's roles, a mode per channel plus DMs and the default, the usual edit mode with one Save). MCP:
-`plain_permissions`, `set_plain_permissions`.
+`plain_permissions`, `set_plain_permissions`. Plain text: the `plain` op (`HARD_OWNER_OPS`: only the owner, whatever
+the policy says; target a group, a channel, `dm` or `default`; the diff warns when it takes `act` away from the
+channel it is made in), through the same `merge_plain_policy` + `set_plain_policy`.
 
 **`confirm_for`.** An op for "Xanthe confirmed for tonight": target = a locked run, member, value yes|no. It answers
 the member's open Confirm / Can't make it ask through `RaidMixin.answer_placement_for` — `Registry.answer_placement`

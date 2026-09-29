@@ -101,12 +101,15 @@ class PolicyEditModal(discord.ui.Modal):
 
 class ConfigConfirmView(discord.ui.View):
     """Apply / Cancel under a plain-text diff. The requester or an officer may press; the presser's rights decide
-    (the ops are authorized again for them, in the channel the request was made in)."""
+    (the ops are authorized again for them, in the channel the request was made in). `revs`: the board fingerprint of
+    each run a board op touches, as the diff showed it (configops.board_revs) — Apply refuses a board changed since."""
 
-    def __init__(self, reg: Registry, req: configops.ConfigRequest, ps: policy_mod.PolicyStore, ops: Ops, requester_id: int, requester: str, channel):
+    def __init__(self, reg: Registry, req: configops.ConfigRequest, ps: policy_mod.PolicyStore, ops: Ops, requester_id: int, requester: str, channel,
+                 revs: dict[str, str] | None = None):
         super().__init__(timeout=600)
         self.reg, self.req, self.ps, self.ops = reg, req, ps, ops
         self.requester_id, self.requester, self.channel = requester_id, requester, channel
+        self.revs = dict(revs or {})
 
     async def _may_press(self, interaction: discord.Interaction) -> tuple[bool, list[int]] | None:
         officer, role_ids = await interaction.client.plain_identity(self.reg, interaction.user)
@@ -128,13 +131,23 @@ class ConfigConfirmView(discord.ui.View):
         me = self.reg.members.get(interaction.user.id)
         by = me.display_name if me else interaction.user.display_name  # the registry's name: a member's own answer counts as theirs
         done, docs = [], []
-        for op in allowed:
+        bot = interaction.client
+        raids = bot.raids.store(self.reg) if getattr(bot, "raids", None) is not None else None
+        for op in configops.coalesce(allowed):  # consecutive raid/schedule settings save as one write
+            key = configops.op_run_key(self.reg, op, raids)
             try:  # authorize() allowed it, so owner-only ops pass when the policy opens them
-                done.append(await configops.apply_async(self.reg, op, by, True, self.ps, bot=interaction.client, by_id=interaction.user.id))
+                done.append(await configops.apply_async(self.reg, op, by, True, self.ps, bot=bot, by_id=interaction.user.id,
+                                                        rev=self.revs.get(key) if op.op in configops.BOARD_OPS else None, channel_id=self.channel))
                 if op.op in ("policy", "policy_append") and (op.doc or "").strip().lower() in ("loot", "comp"):
                     docs.append((op.doc or "").strip().lower())
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001
-                refused.append(f"{configops.describe(self.reg, op)} — {e}")
+                refused.append(f"{configops.describe(self.reg, op, self.channel)} — {e}")
+            if key in self.revs and raids is not None:  # this request's own write is not "someone else's change"
+                ev = raids.events.get(key)
+                if ev is not None:
+                    from . import raidcycle as rc
+
+                    self.revs[key] = rc.board_rev(self.reg, ev)
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
         self.stop()
         try:
@@ -210,18 +223,21 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         await send("⛔ " + "\n⛔ ".join(refused), ephemeral=True, **({"view": view} if view is not None else {}))
         return
     req.ops = allowed
-    lines = [f"• {preview_line(reg, op)}" for op in allowed] + [f"⛔ {r}" for r in refused]
+    lines = [f"• {preview_line(reg, op, channel)}" for op in allowed] + [f"⛔ {r}" for r in refused]
     e = discord.Embed(title="Proposed changes", colour=TEAL, description="\n".join(lines)[:4000])
     if any(op.op in configops.RUN_OPS or op.op == "test" for op in allowed):
         e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
-    view = apply_button(ConfigConfirmView(reg, req, ps, ops, author.id, name, channel))
+    raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
+    revs = configops.board_revs(reg, allowed, raids)  # the boards as this diff shows them
+    view = apply_button(ConfigConfirmView(reg, req, ps, ops, author.id, name, channel, revs=revs))
     await send(req.reply[:500] if req.reply else None, embed=e, view=view, ephemeral=True)
 
 
-def preview_line(reg: Registry, op: configops.ConfigOp) -> str:
+def preview_line(reg: Registry, op: configops.ConfigOp, channel=configops._UNSET) -> str:
     """describe() for the Discord diff. A run about to open also gets Discord's own <t:…:f> stamp, so each reader
-    sees the start in their own locale (here only: the site and MCP reuse describe() and would show the raw tag)."""
-    line = configops.describe(reg, op)
+    sees the start in their own locale (here only: the site and MCP reuse describe() and would show the raw tag).
+    `channel`: where it was asked (the plain op warns when it takes plain text away from there)."""
+    line = configops.describe(reg, op, channel)
     if op.op == "run_open":
         try:
             start, _ = configops._open_time(reg, op.target or "", op.value, op.field)

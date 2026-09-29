@@ -470,11 +470,15 @@ class RaidMixin:
                 raise rc.BoardChanged()
             return await self._write_board(reg, rs, ev, groups, by)
 
-    async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str) -> str:
+    async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None) -> str:
         """One move applied to the board as it is NOW (so two officers moving at once merge): `to` = (flat group
         index, position) — group index = roster × groups per roster + group — or None for the bank. Dropping on
-        someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined."""
+        someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined.
+        `rev`: plain text's preview fingerprint — the move was worded against that board, so a changed one raises
+        rc.BoardChanged (the site's drags pass none: they always act on the board as it is)."""
         async with self.board_lock(ev.key):
+            if rev and rev != rc.board_rev(reg, ev):
+                raise rc.BoardChanged()
             groups = rc.apply_move(reg, ev, name, to)
             return await self._write_board(reg, rs, ev, groups, by)
 

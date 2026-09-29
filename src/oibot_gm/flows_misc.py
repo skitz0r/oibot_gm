@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from datetime import timedelta
 
 import discord
@@ -193,16 +192,8 @@ class TestAnswerWizard(Wizard):
             await self.finish(interaction, "That run is no longer live; nothing was answered.")
             return
         await self.working(interaction, "Answering…")
-        pool = [m for m in self.reg.test_members() if str(m.discord_id) not in ev.signups]
-        random.shuffle(pool)
-        done = []
-        for st in ("in", "sub", "out"):
-            for _ in range(int(self.draft["counts"][st])):
-                if not pool:
-                    break
-                m = pool.pop()
-                rc.set_signup(self.reg, self.rs, ev, m, None, st, source="test")
-                done.append(f"{m.display_name} {rc.LABELS[st]}")
+        c = self.draft["counts"]  # the helper the site, MCP and plain text's `test answer` share
+        done = rc.test_answer_mix(self.reg, self.rs, ev, int(c["in"]), int(c["sub"]), int(c["out"]))
         await self.answered(interaction, ev, done)
 
     # ---- one member

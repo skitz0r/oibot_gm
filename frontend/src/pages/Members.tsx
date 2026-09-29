@@ -163,7 +163,7 @@ function AbsenceModal({ r, onClose, onSaved }: { r: MemberRow | null; onClose: (
       <Stack>
         <DateInput label="From" value={start} onChange={(v) => setStart(v ? new Date(v) : null)} required />
         <DateInput label="To" value={end} onChange={(v) => setEnd(v ? new Date(v) : null)} description="leave empty for a single day" />
-        <TextInput label="Reason" description="officers only" value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
+        <TextInput label="Reason" description="only they and the officers see it" value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
         <Text size="xs" c="dimmed">Sheets on those days get No thanks for them; if they're already rostered the seat is handed back and the bench is asked.</Text>
         <Group justify="flex-end"><Button variant="default" onClick={onClose}>Cancel</Button><Button disabled={!start} onClick={() => r && api.post<{ message: string }>("/api/members/absence", { uid: r.uid, start: iso(start), end: iso(end), reason }).then((x) => { ok(x.message); onSaved(); setStart(null); setEnd(null); setReason(""); }).catch(fail)}>Add</Button></Group>
       </Stack>

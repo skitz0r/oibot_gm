@@ -204,10 +204,8 @@ def test_the_review_card_stays_within_discords_limits(reg, monkeypatch):
     assert f"{reg.raid_def(RID)['name']} · " in can.value and "no longer scheduled" in can.value  # human labels, never '<raid>:<id>'
     answers = [f for f in e.fields if f.name.startswith("Question number")]
     assert len(answers) == 15 and all(f.value.endswith("…") for f in answers)
-    assert not any("site" in f.value for f in e.fields)  # no site: just truncated
-    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
-    e2 = application_embed(reg, a)
-    assert len(e2) <= 6000 and any("Full answers on the site: https://gm.example/app/members" in f.value for f in e2.fields)
+    assert not any("site" in f.value for f in e.fields)  # the site has no applications page: never pointed at
+    assert any("Full answers: ask me (“show Kessa's application”) or MCP list_applications." in f.value for f in e.fields)
 
 
 def test_a_short_application_card_is_whole(reg, monkeypatch):

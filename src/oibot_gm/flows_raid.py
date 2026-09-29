@@ -15,7 +15,7 @@ import discord
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .constants import TEAL
-from .raid_views import ask_line, gaps_text, health_layout, raid_name, run_label, run_title, sheet_message, sheet_state
+from .raid_views import ask_line, gaps_text, health_layout, raid_name, run_label, run_title, sheet_state
 from .registry import Registry
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
 
@@ -398,11 +398,7 @@ async def open_raid_sheet(interaction: discord.Interaction, reg: Registry, **_se
         if i.channel is None:
             await wiz.finish(i, "I can't post the sheet here — run /raid sheet in a server channel.")
             return
-        embed, view = sheet_message(reg, ev, run_team(reg, ev), i.client.ico)
-        msg = await i.channel.send(embed=embed, **({"view": view} if view else {}))
-        ev.channel_id, ev.message_id = msg.channel.id, msg.id
-        rs.save(ev, "sheet re-posted")
-        await wiz.finish(i, f"Re-posted the sheet for {run_label(reg, ev)} in this channel.")
+        await wiz.finish(i, await i.client.repost_sheet(reg, rs, ev, i.channel))  # the verb the site, MCP and plain text use
     await with_run(interaction, reg, title="Re-post a sheet", then=body)
 
 

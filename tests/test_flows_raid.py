@@ -44,6 +44,7 @@ class FakeBot:
     RaidMixin's own (the shared verb /raid out, the site and MCP use), so its ripple shows up as recorded calls."""
 
     call_out = RaidMixin.call_out
+    repost_sheet = RaidMixin.repost_sheet
 
     def __init__(self, rs):
         self.rs = rs

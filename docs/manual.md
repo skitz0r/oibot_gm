@@ -9,8 +9,9 @@ oibot_GM is the guild's raid administrator. It keeps the character registry, ope
 schedule, checks the roster's health, builds groups, fills freed seats by DM, and — once loot tables exist —
 runs a loot council whose recommendations an officer confirms or overrides. Code does the computing
 (solver, scoring, schedules); Claude only explains, judges against the written policy, and turns
-plain-text requests (members' about their own record, officers' about anything) into typed changes that are
-shown as a diff and confirmed before they apply.
+plain-text requests (members' about their own record, officers' about anything the site or a slash command can do,
+except handing the guild to a new owner and the loot session — §8) into typed changes that are shown as a diff and
+confirmed before they apply.
 Humans always decide: every roster, award and config change has an approve step, and overrides are
 stored with their reason as precedents.
 
@@ -60,10 +61,12 @@ log-out link, instead of an error; after joining they log in again. A logged-in 
 
 Log in with Discord. Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Ops** (the bot's log) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
+your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Ops** (the bot's recent actions, the plain-text permissions, and the loot
+**precedents** and **ledger** — read-only tables, newest first) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
-Pages refresh themselves every 45 s, so what you see is at most that old. Signing up for a raid is still done
-on the sheet in Discord.
+Me, Rosters, Members, Ops and Agents update live the moment something changes (a press on a sheet, a drag by another
+officer, a change in Discord); a 45-second refresh is only the fallback when the live connection drops. There is no
+standing signup: each run is answered on its sheet in Discord, or by telling the bot ("bench me for tonight").
 
 ## 3. Members: registering and keeping your record current
 
@@ -106,7 +109,8 @@ on the sheet in Discord.
   "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "add Jonny as my main",
   "plan my main as a Holy Priest" (a planned character, no name yet; saying it again replaces the plan and keeps
   its rank and roster placement), "delete my alt Jonny", "I can also tank on Xanthe", "bench me for tonight",
-  "I can't make tonight", "I confirm for tonight", "turn my DMs off". It shows what it will change and waits for
+  "I can't make tonight" ("… — work trip" adds a note only the officers see, like `/raid out`), "I confirm for
+  tonight" (also answers a fill ask the bot DMed you), "turn my DMs off". It shows what it will change and waits for
   your **Apply** — only you (or an officer) can press it. Plain text only ever changes *your own* record: a
   request about someone else is refused with who can do it, and the rest of what you asked still applies.
   Ranks are officers' (see §8c for who may do what, and where).
@@ -135,7 +139,8 @@ at a time; *My status* on the card tells you it is waiting.
 
 **Officers** get a review card in the applications channel: the full character name, class and spec icons, the logs
 link, the schedules the applicant can make in words, and every answer as its own line. A very long application is
-shortened on the card with "…" (with a link to the full answers on the site when the site is set up).
+shortened on the card with "…", and its last line says where the full answers are: ask the bot ("show Kessa's
+application", officers) or MCP `list_applications` — the site has no applications page.
 **Accept** registers the character as the applicant's main, rank trial, already confirmed; **Decline…** takes an
 optional note. Either way the applicant gets a DM, the card updates to show the decision, and the ops channel logs
 it. The same decision is on `/roster applicant`, in plain text ("accept Nyx", "decline nyxie: we're full on
@@ -149,7 +154,7 @@ removed from the Discord server; they can stay and apply again later.
 A **raid** is an instance and its rules: size, lockout cadence, expected duration, desired tank / healer /
 dps counts, and — what drives everything — its **slots** and **cadence**. At launch: **Barrow Deeps**
 (10-player, 3-day lockout guess), **Hyjal Summit** (20-player, weekly), **Onyxia's Lair** (40-player,
-5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 15:00 PST for all three); no
+5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 3:00 PM PST for all three); no
 sheet opens before it. The owner sets all of this with `/gm config raid`, on the Raids page, or in plain
 text (`raid_set`). There are no standing rosters: every run is built from its own sheet.
 
@@ -262,12 +267,15 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 
 Seat selection at lock is deterministic: role bounds from the raid's comp, buff synergy, the comp policy's
 standing instructions, officer pins, and the raid's **weights** — rank (core > raider > trial), main over
-alt, sat out last window, earlier signup. Officers tune the weights per raid on the Raids page.
+alt, sat out last window, earlier signup. The owner tunes the weights per raid (*Selection weights* in `/gm config
+raid`, the Raids page, or plain text: "weight rank 5 for Barrow Deeps"); officers read them, and the owner can open
+Raids & auras to others (§8c).
 
 If you can't make a run you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
 `/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
 lock this releases your seat immediately and the bench is asked. An officer who hears it out of band records the
-same callout, note included, with No thanks and a note on the site's answer menu or MCP `set_answer` with `note`.
+same callout, note included, with No thanks and a note on the site's answer menu, in plain text ("Kestrel can't
+make it tonight, her baby is sick") or MCP `set_answer` with `note`.
 
 **Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
 run* far left, then *Fill seats* and *Lock now* on the right; what does not apply yet is greyed with the reason
@@ -290,8 +298,8 @@ cast buffs (Fortitude, Spirit, Mark of the Wild, Arcane Intellect, one Greater B
 counted on the whole raid. Officer pins (Pin to roster / Keep on bench) and board placements are hard
 constraints; everything else is the objective.
 
-Every buff assumption carries a status — confirmed, reported, or assumed from Vanilla — printed on the
-cards, because WoW: Forever has not published totem scoping yet.
+Every buff assumption carries a status — confirmed, reported, or assumed from Vanilla — shown on the Auras page
+and in the board's aura tooltips, because WoW: Forever has not published totem scoping yet.
 
 **Auras page (officers read, the owner edits).** As the guild learns how Forever's buffs really behave, the
 owner records it here and the solver, the cards and the roster board follow. Each buff has a **scope**
@@ -310,10 +318,17 @@ returns to the game defaults.
   have/need for each role (⚠ = short), ⛔ followed by the buffs nobody in the pool brings, **Short** and **Over cap**
   lines from the desired comp (class or spec icon with have/want), and links to the Members and Raids pages.
 - **Desired comp** per raid is derived from the buff matrix and comp rules. Officers override targets in plain
-  text: "reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target".
+  text: "reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target". The reason you give
+  ("because Trueshot") is kept with the target and shown by `/ask` (readiness) and MCP `raid_readiness`, next to the
+  line it explains.
+- The same readiness as data: MCP `raid_readiness` (one raid or all) and `GET /api/readiness` — headcount, each role's
+  have/need with who could cover it, buffs nobody brings, every desired-comp line with its reason, what is short or
+  over cap, and the pool plan.
 - The **character bank** lives on the Members page and **groups** are built on the Rosters board (Auto-fill /
   Propose); the old bank, optimised-groups and comp images are gone.
-- `/roster overview` shows the readiness card on demand; `/roster members` lists a run's roster.
+- `/roster overview` (no arguments) shows the plan summary on demand: every planned main by class, the role counts
+  against each raid's size with who could flex in, buff coverage (nobody / only one), the alts, and the recruiting ask
+  against the biggest raid. `/roster members` lists a run's roster.
 
 ## 7. Officers: day-to-day commands
 
@@ -335,9 +350,13 @@ returns to the game defaults.
 - Plain-text config: `/gm change <text>`, or @mention the bot in the ops or analytics channel — the bot
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
   question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses
-  Apply needs the rights for the change (§8c); a slow change (a lock, fill DMs, a compile) is acknowledged at once and
-  the diff turns into the result when it is done. Absences entered this way are announced
-  like `/me absent add`; channel changes post their card like the command does.
+  Apply needs the rights for the change (§8c); a slow change (a lock, fill DMs, a compile, a proposal) is acknowledged
+  at once and the diff turns into the result when it is done. A board change (a move, the groups, auto-fill, using a
+  proposal) is refused with *"the board changed since you looked"* when someone else changed that board between the
+  diff and your Apply — nothing is overwritten; the request's own earlier steps never count as a change. Absences
+  entered this way are announced like `/me absent add`; channel changes post (or drop) their card like the Config page
+  does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
+  before" can't fail half way.
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, recent ops),
   `/gm config show`.
 
@@ -367,7 +386,9 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
 
 ## 8. Owner: setup
 
-`/gm config owner` (first claim needs the Discord server owner or Manage Server), then
+`/gm config owner` (first claim needs the Discord server owner or Manage Server). Handing the guild to a new owner
+is only ever this slash command, by design — not the site, plain text or MCP: an MCP token acts as the owner, so a
+transfer there would give the guild away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
 `signup-channel`, `absences-channel`, `applications-channel`, `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
 now and the next run become before saving) — or all of these on
@@ -399,7 +420,10 @@ before the bot) and the public **invite link** (https://discord.gg/…, what the
 question that breaks a rule is refused the moment you add it, with your text kept. Nothing is saved until **Save**,
 which writes every change at once (a bad invite link is refused there, draft kept) and updates the registration
 card. In plain text (`recruit`): "close applications", "set the recruitment note to Looking for healers", "add a
-required question: Why do you want to join us?", "remove question 2", "set the invite link to https://discord.gg/abc123".
+required question: Why do you want to join us?", "reword question 2 to Warcraft Logs link, make it required" (same
+question, same place, so answers already given still line up), "move the logs question to the top", "remove question
+2", "@Veterans can register without applying" (member roles), "set the invite link to https://discord.gg/abc123" or
+"create an invite to #welcome" (the bot makes a permanent invite there and saves it; the registration card follows).
 Recruitment is in the **Setup** group of §8c (owner by default).
 
 **Recruitment** (site: the Config page's **Recruitment** section; the owner presses **Edit recruitment**,
@@ -430,6 +454,11 @@ the bot "run the news review now" (or "apply the approved proposals now"), which
 the plain-text permissions say. A menu-bar item on
 the Mac mini (GM ✓ / ⟳ / ⚠ / ✕) shows the same at a glance, even when the bot is down.
 
+**Channels in plain text.** "post raid sheets in #signups", "use #away for absences" — the same as the Config page's
+pickers (the bot checks it can see the channel and posts that channel's card); "stop posting absences anywhere" or
+"clear the news channel" unsets one (its card is forgotten). "Set the timezone to America/New_York" shows, before
+you Apply, each raid's next run on the new clock and on today's.
+
 **Officer roles.** `/gm config officer-role role:@Officers` (add; `remove:true` to take one away), the Config page's
 role picker, or in plain text ("make @Council officers"). The bot remembers the *role itself* (its Discord id), not
 its name: renaming the role keeps its officers, and a new role someone creates with the same name grants nothing.
@@ -451,23 +480,34 @@ channel) covers every action on the Rosters, Raids, Members and Config pages, no
 the sentence into one or more operations, shows each as a one-line "what will happen" diff, and applies on
 **Apply** through exactly the code the slash command or page button would use — so a lock sends the same
 confirmation DMs and cards as `/raid lock`, a cancel withdraws the same confirmations, a cleared absence
-re-opens the same sheets. Who may do what, and in which channel, is the owner's plain-text policy (§8c): by
+re-opens the same sheets. The exceptions are handing the guild to a new owner (`/gm config owner` only, above) and
+the loot session (`/raid loot`). Who may do what, and in which channel, is the owner's plain-text policy (§8c): by
 default officer actions need an officer and raids, auras and guild setup need the owner. A run is
 named by its key (`bd-1209-1930`), or by raid and day ("tonight's Barrow Deeps", "the Hyjal run") when only one of
 that raid's runs is live — with two live, the bot asks which. A member is named by display name, @mention or one
-of their characters.
+of their characters. The bot reads each live run's board as it stands and each raid's next unopened runs, so
+"groups for tonight" and "open Saturday's alt run" start from the real thing.
 
-- *Runs:* "open Barrow Deeps for Thursday 19:30" (or "open the next Barrow Deeps") posts the sheet now;
-  "lock tonight's Barrow Deeps" builds the roster and DMs everyone rostered; "cancel bd-1209-1930, server
-  down"; "put Xanthe on the bench for bd-1209-1930" / "set Marrow to join as Marrowlite" / "Kestrel can't
-  make it" (after lock: join seats and asks to confirm, no thanks frees the seat and the fill engine looks for
-  cover); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked run: answers
-  their Confirm / Can't make it ask for them, when they told you out of band — exactly as if they had pressed the
-  button, so a no frees the seat and asks the bench); "who would fill ask next for tonight's run" (preview, nothing sent) and "send the fill asks"; "split
-  tonight's run first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock);
-  "groups for bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the board — the layout the lock will use, or after
-  lock the roster itself (names added are asked to confirm, names dropped are freed). Pins and per-run seats
-  stay as before ("pin Ash to the roster", "keep Dusk on the bench").
+- *Runs:* "open Barrow Deeps for Thursday 7:30 PM" (one of the raid's upcoming runs opens as that schedule's run;
+  "open the 8 PM Barrow Deeps" picks the next one at that time; any other time is a one-off; "open the next Barrow
+  Deeps") posts the sheet now; "lock tonight's Barrow Deeps" builds the roster and DMs everyone rostered; "cancel
+  bd-1209-1930, server down"; "put Xanthe on the bench for bd-1209-1930" / "set Marrow to join as Marrowlite" /
+  "Kestrel can't make it" (after lock: join seats and asks to confirm, no thanks frees the seat and the fill engine
+  looks for cover; with a reason — "Kestrel can't make it, work" — it is a callout like `/raid out`, the reason
+  kept for the officers); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked
+  run: answers their Confirm / Can't make it ask for them, or the fill ask the bot sent them, when they told you out
+  of band — exactly as if they had pressed the button, so a no frees the seat and asks the bench); "who would fill
+  ask next for tonight's run" (preview, nothing sent) and "send the fill asks"; "split tonight's run
+  first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock).
+- *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
+  one person, like a drag (after lock: in from the bank = asked to confirm, out to the bank = seat freed); "groups for
+  bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the whole board — the layout the lock will use, or after lock the roster
+  itself (names added are asked to confirm, names dropped are freed). "Propose a roster for tonight" (or "a rotation
+  split") shows the solver's layout — groups, synergy, who is left out, why there can't be more runs, whether leftovers
+  could make another — and saves nothing; "another one" shows a different one, "use it" puts the last one on the board
+  and remembers its strategy (the bot remembers what it showed you until it restarts). "Post the sheet here" re-posts
+  a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy). Pins and per-run
+  seats stay as before ("pin Ash to the roster", "keep Dusk on the bench").
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
   rank and roster placement), "delete Jon's alt Jonny" (gone outright with its roster placements — the diff says so;
@@ -476,27 +516,40 @@ of their characters.
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
   raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "Marrow is back, clear her absence" (by start
   date when she has several); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
+- *Raids (owner):* "Barrow Deeps runs Tuesdays and Thursdays at 7:30 PM" (the diff shows the next runs it makes),
+  "short-notice cadence for Barrow Deeps" (Standard, Short notice or Same week — the same presets as `/gm config
+  raid`: when the sheet opens, the nudge, the lock and the confirmation deadline together), "lock Barrow Deeps 12 hours
+  before", schedules (`schedule_set`, above). Settings that only make sense together are saved as one change.
 - *Recruitment (owner):* "close applications", "open applications", "set the recruitment note to Looking for
-  healers", "add a required question: Why us? — hint: a line or two is plenty", "remove the question Why us?" (or
-  by number), "set the invite link to https://discord.gg/abc123" (op `recruit`).
+  healers", "add a required question: Why us? — hint: a line or two is plenty", "reword question 2 …", "move the
+  logs question up", "remove the question Why us?" (or by number), "@Veterans can register without applying",
+  "set the invite link to https://discord.gg/abc123", "create an invite to #welcome" (op `recruit`).
+- *Channels (owner):* "post raid sheets in #signups", "stop posting absences anywhere".
+- *Plain-text permissions (owner only, whatever the policy says):* "only officers and @Raid Lead can change runs by
+  chat", "make #raid-chat answers only", "the bot ignores DMs" — §8c.
 - *Applications (officers):* "accept Nyx", "decline nyxie: we're full on healers" — the applicant is named by
   display name, @mention or character; the decision goes through the same code as the card (DM, card, ops line).
 - *Policy (officers):* "add a loot rule: …", "drop the comp rule about …", "replace the loot policy with: …",
   "recompile the loot policy" — then the reading with Confirm / Discard.
 - *News (officers):* "approve proposal 260927-a1b2", "dismiss 260927-a1b2: already handled". *Jobs (owner only,
   never opened to anyone else):* "run the news review now", "apply the approved proposals now".
-- *Test bench:* "seed 20 test members", "open a test Barrow Deeps run" (`/gm test run` preselects the Standard
-  tempo: starts in 40 min, nudge 32, lock 25, confirm 15 min before; Quick is 20/16/12/8 and Slow 90/70/55/35), "clear the test bench".
+- *Test bench:* "seed 20 test members" (or "seed all of them"), "open a quick test Barrow Deeps run" (the tempos of
+  `/gm test run`: Quick starts in 20 min, nudge 16, lock 12, confirm 8 min before; Standard 40/32/25/15, the default;
+  Slow 90/70/55/35 — add "and DM them" to DM every puppet when it opens, which reaches you), "test answer join 8 bench
+  2 out 1" (a random mix of puppets who haven't answered; name the run when several are live), "clear the test bench".
 - Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
-  DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are still not settable anywhere; the
+  DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are not settable anywhere; the
   loot session (`/raid loot`) and handing the guild to a new owner are slash commands only, by design.
 
 ## 8c. Plain-text permissions (owner sets, officers read)
 
 Who may change what through plain text, and where, is one policy on the **Ops** page of the site (card
 *Plain-text permissions*; the owner presses **Edit permissions**, changes the table and presses one **Save**;
-officers see it read-only; MCP has `plain_permissions` / `set_plain_permissions`). It covers every plain-text
-path: @mentions, DMs, `/gm change`, and the site's plain-text box (which counts as a place where plain text acts).
+officers see it read-only; MCP has `plain_permissions` / `set_plain_permissions`; the owner can also say it: "only
+officers can change runs by chat", "make #raid-chat answers only", "put #general back to the default"). It covers every
+plain-text path: @mentions, DMs, `/gm change`, and MCP `plain_change` (which counts as a place where plain text acts;
+the site has no plain-text box). When the owner's own change would stop plain text acting in the channel it is made
+in, or make the bot ignore @mentions there, the diff says so before Apply.
 The owner can always do everything, anywhere the bot listens — an *Answers only* channel included. In an *Ignored*
 channel the bot doesn't read @mentions at all, the owner's included; there the owner uses `/gm change`.
 
@@ -515,7 +568,8 @@ channel the bot doesn't read @mentions at all, the owner's included; there the o
 **Who** — per group, any mix of *everyone*, *registered members* (an active character), *officers*, *owner only*,
 and specific Discord roles (picked from the server's roles, stored by id, so renaming a role keeps it). An empty
 list means the owner only. Anyone allowed a group for other people may also do it for themselves. Two things stay
-the owner's whatever this table says: starting the local jobs and (when plain text can change it) this policy itself.
+the owner's whatever this table says: starting the local jobs and changing this policy itself — an officer given
+*Guild setup* still can't widen their own rights.
 
 **Where** — each channel is one of: **Acts** (anything the person's groups allow), **Own record only** (a member's
 own record; other requests are refused with where to go instead), **Answers only** (questions, no changes) or
@@ -557,7 +611,8 @@ with every puppet joined, never posted in Discord, and takes you to its board, w
 comp from that mix (Leftovers and "what a second run would need" included). Change the mix and try again; the old
 sandbox goes with the next clear. The members table hides test members unless you switch them on. Plain text does the
 same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 Warrior Protection", "comp sandbox for
-Barrow Deeps"), and so does MCP (`test_bench` compose / comp). The bench holds at most 80.
+Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps run and DM them", "test answer join 8 bench 2
+out 1"), and so does MCP (`test_bench` compose / comp). The bench holds at most 80.
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,
 rostered or asked to fill it, and the test sheet refuses presses from real members; setting a real member's
@@ -602,7 +657,9 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run / answer / clear / compose / comp, as `/gm test` |
 | `policy_get` · `policy_edit` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full · replace its text (a draft; the persona is live as written) · the bot's reading of it, nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
-| `plain_change` | text → the config ops it means, with current → new; applied only with `apply=true` |
+| `plain_change` | text → the config ops it means, with current → new; applied only with `apply=true` (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
+| `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default) |
+| `raid_readiness` | each raid's pool readiness (§6): headcount, roles with who could cover, buffs nobody brings, the desired comp with its reasons, short / over cap, the pool plan — one raid or all |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with guild overrides marked |
 | `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full, move its state |
 | `job_status` · `get_job_run` · `run_job` | the review and apply jobs: state, last and next run, launchd, recent runs · one run's steps · start a job now (refused when it is running or not installed) |
@@ -613,7 +670,9 @@ name when it has one live run. An ambiguous name comes back with the candidates 
 **Safety.** The server acts as the **guild owner** (owner-only settings included) and every change is logged
 as the owner via `mcp`. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
 put it in `.mcp.json` or a commit. Ask for a preview first (`propose_split`, `fill_seats` without send,
-`plain_change` without apply) and read the returned line back: it says what actually happened.
+`plain_change` without apply) and read the returned line back: it says what actually happened. There is no tool
+for handing the guild to a new owner, by design: the token *is* the owner, so a transfer through it would give the
+guild away and change whose rights the token carries — that stays `/gm config owner` in Discord.
 
 ## 9. Loot (when loot tables exist)
 
@@ -687,10 +746,12 @@ speaks to you: your application waiting, a past decision, or already a member.
 
 ## 11. Things the bot cannot do (yet)
 
-Loot: add or tier loot items, record wishlists, list or retire precedents, or show loot history — the
-loot council only runs on the demo data until Forever's loot tables exist. Splits: the **Loot-quality**
+Loot: add or tier loot items, record wishlists, retire a precedent, or see your own loot history on `/me` — the
+loot council only runs on the demo data until Forever's loot tables exist. The precedents and the loot ledger are
+read-only: the Ops page's tables, MCP `ops_log` (a member filter included) and `/ask` (officers) show them. Splits: the **Loot-quality**
 split philosophy is a greyed placeholder until wishlists exist (Balanced, Raid one first and Rotation
 work). Buff facts, comp bounds, cadence and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
-repository. There is no standing roster or availability to set, no attendance or loot view on `/me` yet,
-and no way to sign up for a run anywhere except its sheet. If you ask for one of these, say so plainly.
+repository. There is no standing roster, availability or standing signup to set and no attendance or loot view on
+`/me` yet: each run is answered on its own sheet (or by telling the bot, or an officer for you). If you ask for one
+of these, say so plainly.

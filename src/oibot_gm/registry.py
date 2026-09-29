@@ -170,11 +170,11 @@ PLAIN_WHO = ("everyone", "registered", "officers", "owner")  # plus "role:<disco
 # act = anything the person's groups allow · self = own record only (other requests are refused with where to go)
 # answer = questions only · ignore = the bot doesn't answer @mentions there at all
 PLAIN_MODES = ("act", "self", "answer", "ignore")
-PLAIN_WEB = "web"  # the site's plain-text box and the MCP server: not a Discord channel, always "act"
+PLAIN_WEB = "web"  # POST /api/ops/change (MCP plain_change): not a Discord channel, always "act"
 
 
 class PlainPolicy(BaseModel):
-    """Owner-set (web Ops page, MCP). Missing groups use their PLAIN_GROUPS default; unlisted channels use `default`,
+    """Owner-set (web Ops page, MCP set_plain_permissions, the owner's plain-text `plain` op). Missing groups use their PLAIN_GROUPS default; unlisted channels use `default`,
     except the ops and analytics channels, which act unless listed."""
     groups: dict[str, list[str]] = Field(default_factory=dict)
     channels: dict[str, str] = Field(default_factory=dict)  # channel id (as a string) -> mode
@@ -1700,8 +1700,8 @@ class Registry:
         return " or ".join(dict.fromkeys(out)) or "the owner"
 
     def may_plain(self, group: str, author_id: int, *, officer: bool, role_ids=(), channel=None, what: str | None = None, fallback: str | None = None) -> str | None:
-        """THE plain-text permission check, used by every plain-text path (Discord @mention and DMs, /gm change, the
-        site's box, MCP). `group`: the op's capability group ("self" when it acts on the author's own record, see
+        """THE plain-text permission check, used by every plain-text path (Discord @mention and DMs, /gm change, MCP
+        plain_change). `group`: the op's capability group ("self" when it acts on the author's own record, see
         configops.bind_self); `fallback`: the group that would allow it on anyone (an officer's own absence passes as
         "members" even if "self" were closed to them); `channel`: channel id, None = DMs, PLAIN_WEB. Returns None when
         allowed, otherwise the refusal line: who may, and where."""
