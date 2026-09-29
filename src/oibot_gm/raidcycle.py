@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 STATUSES = ("in", "sub", "out")  # Join / Bench / No thanks (legacy "tentative" is read as "in")
 LABELS = {"in": "Join", "sub": "Bench", "out": "No thanks"}
+# a member's own Join / Bench after lock: the sheet's SignupButton and plain text (configops.authorize) refuse it in these words
+LOCKED_JOIN = "The roster is locked — answer your confirmation DM, or press Can't make it on the sheet."
 STATES = ("open", "locked", "done", "cancelled")
 LEGACY_STATES = {"proposed": "locked", "accepted": "locked"}  # pre-2026-09 files
 MAX_ROSTERS_PER_SLOT = 4

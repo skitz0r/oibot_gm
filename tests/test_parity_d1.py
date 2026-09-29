@@ -192,3 +192,29 @@ def test_plain_text_mention_by_an_officer_in_a_public_channel_is_answered_public
     private["yes"] = True
     send(object())  # an officer-only channel
     assert helped == [(True, True), (True, False), (True, False)] and replies == ["an answer"] * 3
+
+
+# ---------------------------------------------------------------- M1: no self-rostering on a locked run by chat
+
+def test_member_join_after_lock_is_refused_with_the_sheets_words(reg, rs):
+    from conftest import join, lock_with_board, open_test_run
+
+    from oibot_gm import raidcycle as rc
+    from oibot_gm.configops import ConfigOp
+
+    ms = reg.test_members()
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, ms[:10])
+    me = ms[12]
+
+    def check(value, officer=False):
+        return configops.authorize(reg, [ConfigOp(op="run_answer", target=ev.key, value=value)], me.discord_id, officer=officer, channel=None, raids=rs)
+
+    assert check("join")[0] and check("bench")[0], "open: a member answers their own sheet"
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms[:10]])
+    for value in ("join", "bench"):
+        allowed, refused = check(value)
+        assert not allowed and refused == [rc.LOCKED_JOIN], value
+    assert check("no thanks")[0], "saying no stays self-service after lock"
+    assert check("join", officer=True)[0], "an officer may still seat themselves"
+    assert "Can't make it" in rc.LOCKED_JOIN

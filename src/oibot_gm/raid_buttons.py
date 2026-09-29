@@ -161,7 +161,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
             await bot.apply_signup(interaction, reg, rs, ev, m, None, "out")
             return
         if sheet_state(ev) != "open":
-            await interaction.response.send_message("The roster is locked — answer your confirmation DM, or press Can't make it on the sheet.", ephemeral=True)
+            await interaction.response.send_message(rc.LOCKED_JOIN, ephemeral=True)
             return
         chars = m.active()
         if len(chars) > 1 and self.status == "in":

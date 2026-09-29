@@ -352,9 +352,23 @@ def bind_self(reg: Registry, op: ConfigOp, author_id: int) -> tuple[str | None, 
     return "self", None
 
 
-def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bool, role_ids=(), channel=None) -> tuple[list[ConfigOp], list[str]]:
+def _locked_self_join(reg: Registry, op: ConfigOp, raids=None) -> str | None:
+    """A member's own Join / Bench on a run past its lock: refused as the sheet refuses it (rc.LOCKED_JOIN) — after
+    lock a seat comes from the fill engine, the officers or the board, never straight from set_answer. No thanks stays."""
+    from . import raidcycle as rc
+
+    try:
+        want = _answer_value(op.value)
+        _, ev = _live_event(reg, op.target, raids)
+    except RegistryError:
+        return None  # apply says what is wrong with it
+    return rc.LOCKED_JOIN if want in ("in", "sub") and ev.state != "open" else None
+
+
+def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bool, role_ids=(), channel=None, raids=None) -> tuple[list[ConfigOp], list[str]]:
     """Split parsed ops into (allowed, refusal lines) for this requester in this place — Registry.may_plain per op.
-    The allowed ones can still apply when others are refused."""
+    The allowed ones can still apply when others are refused. `raids`: the bot's RaidStore (a run's state is read
+    from it; None reads the store from disk) — a member's own Join / Bench after lock is refused like the sheet does."""
     allowed, refused = [], []
     for op in ops:
         if op.op in HARD_OWNER_OPS and author_id != reg.config.owner_discord_id:
@@ -365,6 +379,8 @@ def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bo
         if (bad is None and group == "self" and op.op == "character" and (op.field or "").strip().lower() == "add"
                 and reg.must_apply(author_id, officer=officer, role_ids=role_ids)):
             bad = APPLY_FIRST  # a newcomer's first character is an application (Registry.must_apply), and plain text can't open one
+        if bad is None and group == "self" and op.op == "run_answer" and not officer:
+            bad = _locked_self_join(reg, op, raids)
         if bad is None:
             own = group == "self"
             key = "rank" if op.op == "character" and (op.field or "").strip().lower() == "rank" else op.op

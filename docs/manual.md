@@ -570,7 +570,9 @@ channel the bot doesn't read @mentions at all, the owner's included; there the o
 and specific Discord roles (picked from the server's roles, stored by id, so renaming a role keeps it). An empty
 list means the owner only. Anyone allowed a group for other people may also do it for themselves. Two things stay
 the owner's whatever this table says: starting the local jobs and changing this policy itself — an officer given
-*Guild setup* still can't widen their own rights.
+*Guild setup* still can't widen their own rights. Your own answer follows the sheet's rules: once a run is locked,
+"I'm in" or "bench me" from a member is refused in the sheet's words (answer your confirmation DM, or press *Can't
+make it*) — after lock a seat comes from the fill engine or an officer; "I can't make it" still works.
 
 **Where** — each channel is one of: **Acts** (anything the person's groups allow), **Own record only** (a member's
 own record; other requests are refused with where to go instead), **Answers only** (questions, no changes) or

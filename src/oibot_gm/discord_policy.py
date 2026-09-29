@@ -125,14 +125,14 @@ class ConfigConfirmView(discord.ui.View):
             return
         officer, role_ids = who
         ops = [op.model_copy() for op in self.req.ops]
-        allowed, refused = configops.authorize(self.reg, ops, interaction.user.id, officer=officer, role_ids=role_ids, channel=self.channel)
+        bot = interaction.client
+        raids = bot.raids.store(self.reg) if getattr(bot, "raids", None) is not None else None
+        allowed, refused = configops.authorize(self.reg, ops, interaction.user.id, officer=officer, role_ids=role_ids, channel=self.channel, raids=raids)
         # a lock, a fill send or a compile takes longer than Discord's 3 seconds: acknowledge the press first, then edit
         await interaction.response.defer()
         me = self.reg.members.get(interaction.user.id)
         by = me.display_name if me else interaction.user.display_name  # the registry's name: a member's own answer counts as theirs
         done, docs = [], []
-        bot = interaction.client
-        raids = bot.raids.store(self.reg) if getattr(bot, "raids", None) is not None else None
         for op in configops.coalesce(allowed):  # consecutive raid/schedule settings save as one write
             key = configops.op_run_key(self.reg, op, raids)
             try:  # authorize() allowed it, so owner-only ops pass when the policy opens them
@@ -219,7 +219,8 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if not req.ops:
         await send(req.reply[:1900] or "Nothing to change.", ephemeral=True)
         return
-    allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel)
+    raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
+    allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)
 
     def apply_button(base=None):  # a newcomer refused with APPLY_FIRST gets the Apply to join button right on the reply
         if configops.APPLY_FIRST not in refused:
@@ -237,7 +238,6 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     e = discord.Embed(title="Proposed changes", colour=TEAL, description="\n".join(lines)[:4000])
     if any(op.op in configops.RUN_OPS or op.op == "test" for op in allowed):
         e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
-    raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
     revs = configops.board_revs(reg, allowed, raids)  # the boards as this diff shows them
     view = apply_button(ConfigConfirmView(reg, req, ps, ops, author.id, name, channel, revs=revs))
     await send(req.reply[:500] if req.reply else None, embed=e, view=view, ephemeral=True)
