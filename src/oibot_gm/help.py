@@ -513,11 +513,14 @@ def _loot(ask: Ask) -> list[str]:
         it = items.get(r.get("item_id")) if isinstance(items, dict) else None
         return r.get("item") or (getattr(it, "name", None) if it else None) or f"item {r.get('item_id')}"
 
+    def day(v):  # the clock rule: a person reads 'Tue 15 Sep', never the stored ISO date
+        return reg.day_label(str(v)[:10]) if v else "?"
+
     def p_line(r):
-        return f"{r.get('date', '?')} · {item(r)} · bot pick {r.get('bot') or '-'} → council {r.get('human') or '-'} · reason “{r.get('reason') or ''}” · by {r.get('by') or '?'} · {r.get('status', 'active')}"
+        return f"{day(r.get('date'))} · {item(r)} · bot pick {r.get('bot') or '-'} → council {r.get('human') or '-'} · reason “{r.get('reason') or ''}” · by {r.get('by') or '?'} · {r.get('status', 'active')}"
 
     def l_line(r):
-        return f"{r.get('received', '?')} · {r.get('raider', '?')} · {item(r)} · {r.get('tier', '?')}{' · offspec' if r.get('offspec') else ''} · {r.get('instance', '')} {r.get('boss', '')}".rstrip()
+        return f"{day(r.get('received'))} · {r.get('raider', '?')} · {item(r)} · {r.get('tier', '?')}{' · offspec' if r.get('offspec') else ''} · {r.get('instance', '')} {r.get('boss', '')}".rstrip()
 
     out = [f"### Loot (officers; read-only here): {len(prec)} precedent(s), {len(ledger)} ledger row(s)"]
     out.append("last precedents (newest last):")

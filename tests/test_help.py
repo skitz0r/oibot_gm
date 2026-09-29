@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import time
 import types
 from datetime import timedelta
@@ -262,6 +263,11 @@ def test_news_policy_loot_sections(reg, rs):
     reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {"raider": m.main.name, "item_id": 1, "tier": "BiS", "received": "2026-09-02", "instance": "bd", "boss": "Boss", "offspec": False})
     loot = state(reg, rs, OWNER, True, f"what loot did {m.main.name} get?")
     assert "### Loot" in loot and "for the member(s) named: 1 ledger row(s)" in loot
+    reg.store.append_jsonl(f"{reg.key}/precedents.jsonl", {"date": "2026-09-15", "item_id": 1, "bot": "A", "human": m.main.name, "reason": "r", "by": "Boss"})
+    loot = state(reg, rs, OWNER, True, f"what loot did {m.main.name} get?")
+    block = loot.split("### Loot")[1].split("\n### ")[0]
+    assert "Wed 02 Sep" in block and "Tue 15 Sep" in block
+    assert not re.search(r"\d{4}-\d{2}-\d{2}", block), "the clock rule: no ISO dates in the loot section"
 
 
 # ---------------------------------------------------------------- comp.readiness (JSON for the API and MCP later)
