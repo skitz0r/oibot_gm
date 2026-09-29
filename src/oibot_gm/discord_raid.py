@@ -21,7 +21,7 @@ from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _
                          _raidwide_line, _role_counts, ask_line, board_url, clock12, closed_layout, confirm_layout, fill_layout,
                          gaps_text, health_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
                          sheet_state)
-from .registry import Registry
+from .registry import Registry, RegistryError
 
 log = logging.getLogger(__name__)
 
@@ -57,12 +57,14 @@ class RaidMixin:
         m = reg.members.get(uid) if reg else None
         return bool(m and getattr(m, "test", False) and await self.is_officer_anywhere(reg, interaction.user.id))
 
-    async def send_member_dm(self, reg, m, text: str | None = None, view=None) -> bool:
+    async def send_member_dm(self, reg, m, text: str | None = None, view=None, ev=None) -> bool:
         """DM a member — text + buttons, or a layout card (`view` a LayoutView, `text` None). For a test member the same
-        goes to whoever is running the test, with the puppet's name in front. Returns True when delivered."""
+        goes to whoever is running the test (`ev`'s own tester when the DM is about a run, so two officers testing at
+        once each get their own puppets' DMs), with the puppet's name in front. Returns True when delivered."""
         target, prefix = m.discord_id, None
         if getattr(m, "test", False):
-            tester = next((t.get("test_by") for t in reg.config.rosters if t.get("test") and t.get("test_by")), None) or reg.config.owner_discord_id
+            own = (reg.config.team(ev.team) or {}).get("test_by") if ev is not None else None
+            tester = own or next((t.get("test_by") for t in reg.config.rosters if t.get("test") and t.get("test_by")), None) or reg.config.owner_discord_id
             if not tester:
                 return False
             target, prefix = int(tester), f"🧪 **{m.display_name}** would get:"
@@ -141,6 +143,9 @@ class RaidMixin:
         mine = by == m.display_name
         source = "member" if mine else "officer"
         team = rc.run_team(reg, ev)
+        if team.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(team.get("test_by") or ""):
+            # a rehearsal: its pool is the puppets plus the officer running it — never a real member (web, chat, MCP alike)
+            raise RegistryError(f"{run_title(reg, ev)} is a test run: only test members and the officer running it can answer it")
         label = run_label(reg, ev).replace("**", "")  # plain text: the line is shown in Discord replies and on the web alike
         who = "" if mine else f"{m.display_name}: "
         if sheet_state(ev) == "open":
@@ -219,7 +224,7 @@ class RaidMixin:
                 continue
             s = ev.signups.get(str(m.discord_id))
             status = f"You're pre-filled as **{rc.LABELS.get(s.status, s.status)}** on {s.character}" if s else "You haven't answered yet"
-            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key)):
+            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key), ev=ev):
                 sent += 1
         ev.log.append(f"open DMs sent to {sent}")
         rs.save(ev, f"open DMs {sent}")
@@ -237,7 +242,7 @@ class RaidMixin:
             targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
             _soft, hard, _confirm = run_times(reg, ev, team)
             for m in targets:  # same buttons as the sheet (and the open DM), so they can answer right here
-                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key)):
+                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key), ev=ev):
                     ev.nudged.append(m.discord_id)
             if targets:
                 rs.save(ev, f"nudged {len(targets)}")
@@ -264,7 +269,7 @@ class RaidMixin:
             ev.fill_asks.append(ask)
         for ask in batch:
             m = reg.members.get(ask.discord_id)
-            if m and await self.send_member_dm(reg, m, None, fill_layout(reg, ev, team, self.ico, ask)):
+            if m and await self.send_member_dm(reg, m, None, fill_layout(reg, ev, team, self.ico, ask), ev=ev):
                 sent.append(ask)
             else:
                 ask.answer, ask.answered_at = "expired", rc.now()
@@ -282,7 +287,7 @@ class RaidMixin:
         """Tell the other half of a tied pair the question is off."""
         m = reg.members.get(ask.discord_id)
         if m:
-            await self.send_member_dm(reg, m, f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}. Nothing to do.")
+            await self.send_member_dm(reg, m, f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}. Nothing to do.", ev=ev)
         await self.post_run_update(reg, ev, f"↩️ withdrew the ask to {ask.display_name} ({because})")
 
     async def after_fill_answer(self, reg, rs, ev, ask, line: str) -> None:
@@ -403,7 +408,7 @@ class RaidMixin:
         if m.dm_opt_out:
             return False
         team = rc.run_team(reg, ev)
-        return await self.send_member_dm(reg, m, None, confirm_layout(reg, ev, team, self.ico, sg, roster_i, group_i, m.discord_id))
+        return await self.send_member_dm(reg, m, None, confirm_layout(reg, ev, team, self.ico, sg, roster_i, group_i, m.discord_id), ev=ev)
 
     async def send_confirmations(self, reg, rs, ev, team, by: str) -> int:
         sent = 0
@@ -437,6 +442,84 @@ class RaidMixin:
                 await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
         await self.ops.emit(reg.config, "info", f"[web] {by} edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""))
 
+    # ---- the board: one writer at a time per run, whoever writes (the site's drags, MCP, plain text)
+    def board_lock(self, key: str) -> asyncio.Lock:
+        """One writer at a time per run's board: concurrent officers queue here (short), they never overwrite each other."""
+        return self.__dict__.setdefault("_board_locks", {}).setdefault(key, asyncio.Lock())
+
+    async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str) -> str:
+        """The one way a board is written (whole board, or the result of a single move); the caller holds board_lock.
+        Before lock the groups are the layout the lock will use; after lock they ARE the roster (someone brought in
+        from the bench is asked to confirm, someone taken out is freed and the fill engine asked)."""
+        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        groups = [[n for n in g if n in names] for g in groups]
+        if ev.state == "open":
+            ev.layout = groups if any(groups) else None
+            await asyncio.to_thread(rs.save, ev, f"board ({by})")
+            return f"{run_title(reg, ev)}: board " + ("saved" if ev.layout else "cleared") + " (the lock uses it)"
+        added, removed = await asyncio.to_thread(rc.apply_layout_locked, reg, rs, ev, groups)
+        await self.after_board_change(reg, rs, ev, rc.run_team(reg, ev), added, removed, by)
+        return ((f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "")).lstrip("; ") or "groups updated"
+
+    async def save_board(self, reg, rs, ev, groups: list[list[str]], *, rev: str | None = None, by: str) -> str:
+        """A whole-board write (the site's Clear / Use this split, MCP set_layout, plain text run_board). `rev` = the
+        rc.board_rev the author was looking at: when the board changed since, rc.BoardChanged is raised and nothing is
+        written. Only joiners count; returns the line to show."""
+        async with self.board_lock(ev.key):
+            if rev and rev != rc.board_rev(reg, ev):
+                raise rc.BoardChanged()
+            return await self._write_board(reg, rs, ev, groups, by)
+
+    async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str) -> str:
+        """One move applied to the board as it is NOW (so two officers moving at once merge): `to` = (flat group
+        index, position) — group index = roster × groups per roster + group — or None for the bank. Dropping on
+        someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined."""
+        async with self.board_lock(ev.key):
+            groups = rc.apply_move(reg, ev, name, to)
+            return await self._write_board(reg, rs, ev, groups, by)
+
+    # ---- a member's "can't make it" with a note, and fill answers from anywhere but the DM button
+    async def call_out(self, reg, rs, ev, m, note: str | None, by: str) -> str:
+        """Someone can't make a run, with an optional note for the officers (/raid out, the site's No thanks with a
+        note, MCP set_answer(note), plain text): recorded as a callout (hours before, late after the lock cutoff); a
+        rostered seat after lock is freed (drop_seated: DM, thread line, fill); otherwise the sheet is refreshed and
+        one line goes to the run's updates thread — never the note in the public channel. Returns the line to show."""
+        t = rc.run_team(reg, ev)
+        if t.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(t.get("test_by") or ""):
+            raise RegistryError(f"{run_title(reg, ev)} is a test run: only test members and the officer running it can answer it")
+        co = rc.callout(reg, rs, ev, m, t, note)
+        when = f"{co.hours_before:.0f}h before{', after lock' if co.late else ''}"
+        mine = by == m.display_name
+        line = (f"Noted: out for {run_label(reg, ev)} ({when}). Thanks for saying so." if mine
+                else f"{m.display_name} is out of {run_title(reg, ev)} ({when})" + (" — noted for the officers" if note else ""))
+        if sheet_state(ev) == "locked" and ev.seat_of(m.display_name):
+            await self.drop_seated(reg, rs, ev, t, m, "callout" if mine else "officer", note)
+            return line + " — seat freed"
+        await self.refresh_sheet(reg, ev)
+        await self.post_run_update(reg, ev, f"⚑ {m.display_name} ({co.character}) called out, {co.hours_before:.0f}h before" + ("" if mine else f" (by {by})"))
+        await self.ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {ev.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else "") + ("" if mine else f" (by {by})"))
+        return line
+
+    async def answer_fill_for(self, reg, rs, ev, m, yes: bool, by: str) -> str:
+        """A fill ask's Confirm / Can't make it from anywhere but the DM button (an officer on the site or MCP, plain
+        text's confirm_for): the button's two steps — rc.apply_fill_answer, then after_fill_answer (the tied partner
+        released on a no, the next batch asked, thread line, sheet and cards). RegistryError when nothing is waiting."""
+        ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.open), None)
+        if ask is None:
+            raise RegistryError(f"no open fill ask for {m.display_name} on {run_title(reg, ev)}")
+        line = rc.apply_fill_answer(reg, rs, ev, ask, bool(yes))
+        await self.after_fill_answer(reg, rs, ev, ask, line + ("" if by == m.display_name else f" (answered by {by})"))
+        return line
+
+    async def repost_sheet(self, reg, rs, ev, channel) -> str:
+        """Post a fresh copy of a live sheet in `channel` (/raid sheet, the site, MCP); the sheet's buttons and later
+        refreshes follow the new message. No open DMs (that was the first posting)."""
+        embed, view = sheet_message(reg, ev, rc.run_team(reg, ev), self.ico)
+        msg = await channel.send(embed=embed, **({"view": view} if view else {}))
+        ev.channel_id, ev.message_id = msg.channel.id, msg.id
+        rs.save(ev, "sheet re-posted")
+        return f"Re-posted the sheet for {run_title(reg, ev)} in #{getattr(channel, 'name', channel.id)}."
+
     async def answer_placement_for(self, reg, uid: int, roster: str, yes: bool, by: str) -> str:
         """A Confirm / Can't make it answer from anywhere but the DM button itself (the Me page, an officer on the
         site or MCP, plain text's confirm_for): the button's two steps — `Registry.answer_placement`, then
@@ -463,7 +546,7 @@ class RaidMixin:
     async def dm_seat_released(self, reg, ev, m, why: str) -> bool:
         """One short DM whenever a member's seat on a locked roster is released, whoever released it."""
         reason = RELEASE_WHY.get(why, why)
-        return await self.send_member_dm(reg, m, f"Your seat on {run_label(reg, ev)} was released ({reason}). Nothing else to do — if that's wrong, tell an officer.")
+        return await self.send_member_dm(reg, m, f"Your seat on {run_label(reg, ev)} was released ({reason}). Nothing else to do — if that's wrong, tell an officer.", ev=ev)
 
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True) -> None:
         """A rostered member is out after lock: free the seat, tell them, post it, ask the bench to fill."""
@@ -484,7 +567,9 @@ class RaidMixin:
     async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None) -> rc.RaidEvent:
         """Open (or find) the run for `instance` at `start` (from `schedule`, None = the raid's own cadence), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
-        place it), and say so on the ops feed."""
+        place it), and say so on the ops feed. A start more than a few minutes in the past is refused
+        (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts."""
+        rc.refuse_past_start(reg, start)
         ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:

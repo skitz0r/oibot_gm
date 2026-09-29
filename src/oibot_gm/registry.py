@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -272,6 +273,15 @@ class RegistryError(ValueError):
 
 
 SAVE_LISTENERS: list = []  # process-wide fn(reg, kind: "member"|"config", lines) after every commit (the web's event stream)
+CHANGES_KEEP = 200
+RECENT_CHANGES: "deque[tuple[str, str, str, str]]" = deque(maxlen=CHANGES_KEEP)  # (guild key, ISO time, kind, line) — every registry change line, newest last
+
+
+def recent_changes(guild_key: str | None = None, limit: int = 50) -> list[dict]:
+    """The last registry change lines (what the analytics change log posts), newest first: {time, kind, text}.
+    In memory only (since the bot started); the data repo's git log is the full audit trail."""
+    rows = [r for r in reversed(RECENT_CHANGES) if guild_key is None or r[0] == guild_key]
+    return [{"time": t, "kind": k, "text": text} for _, t, k, text in rows[:max(0, int(limit))]]
 RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1}
 RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before", "nudge_hours_before", "fill_ask_hours")
 RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm")  # true/false raid settings (command + API layers parse them the same way)
@@ -760,13 +770,31 @@ class Registry:
 
     def save_config(self, message: str, notify: bool = True) -> None:
         self.refresh_profile()
+        if getattr(self, "_shadow", False):  # a preview copy (Registry.shadow): validated, never written
+            return
         p = Path(self.key) / "guild.yaml"
         self.store.write_text(p, "# oibot_GM guild config — edit via /gm config or by PR.\n" + yaml.safe_dump(self.config.model_dump(), sort_keys=False))
         self.store.commit(f"{self.key}: {message}")
         if notify:
             self._notify("config", [message])
 
+    def shadow(self) -> "Registry":
+        """A throw-away copy for previews: its own deep-copied config (members shared, read-only by convention), whose
+        save_config validates and refreshes the profile but never writes, commits or notifies. Apply a change to it
+        with the normal verbs (set_raid_overrides, set_schedule, config.timezone = ...) and read the result."""
+        import copy
+
+        sh = copy.copy(self)
+        sh.config = self.config.model_copy(deep=True)
+        sh.listeners = []
+        sh._shadow = True
+        sh.refresh_profile()
+        return sh
+
     def _notify(self, kind: str, lines: list[str]) -> None:
+        stamp = now()
+        for line in lines or []:
+            RECENT_CHANGES.append((self.key, stamp, kind, str(line)))
         for fn in list(self.listeners) + list(SAVE_LISTENERS):
             try:
                 fn(self, kind, lines)
@@ -1686,11 +1714,28 @@ class Registry:
         if not (self.plain_allows(group, author_id, officer, role_ids) or (fallback and self.plain_allows(fallback, author_id, officer, role_ids))):
             hint = " — /register first" if group == "self" and "registered" in self.plain_who(group) and self.verification(author_id) == "unregistered" else ""
             return f"Only {self.plain_who_text(group)} can change {what}{hint}."  # who first: it holds in every channel
-        if mode == "ignore" or (mode == "answer" and not owner):
+        if mode in ("ignore", "answer") and not owner:  # the owner can always do everything, anywhere the bot listens
             return f"Plain text only answers questions {where} — {go}."
         if mode == "self" and group != "self" and not owner:
             return f"Plain text can't change {what} {where} — {go}."
         return None
+
+    def merge_plain_policy(self, patch: dict) -> dict:
+        """The whole policy with `patch` laid over the current one — what set_plain_policy takes. Patch keys:
+        `groups` {group: [who...]} (only the groups named change), `channels` (the WHOLE per-channel map, as the Ops page
+        sends it), `set_channels` {channel id: mode | None} (merged into the current map; None = back to the default),
+        `dm`, `default`. Anything left out keeps its value. Shared by the web route, MCP and plain text."""
+        cur = self.config.plain
+        patch = patch or {}
+        groups = {**{g: self.plain_who(g) for g in cur.groups}, **(patch.get("groups") or {})} if "groups" in patch else dict(cur.groups)
+        channels = dict(patch["channels"]) if "channels" in patch else dict(cur.channels)
+        for cid, mode in (patch.get("set_channels") or {}).items():
+            key = str(cid).strip("<#>")
+            if mode in (None, "", "clear", "default"):
+                channels.pop(key, None)
+            else:
+                channels[key] = mode
+        return {"groups": groups, "channels": channels, "dm": patch.get("dm") or cur.dm, "default": patch.get("default") or cur.default}
 
     def set_plain_policy(self, policy: dict, by: str) -> str:
         """Owner: replace the plain-text policy (validated: known groups, who tokens, modes). One commit."""

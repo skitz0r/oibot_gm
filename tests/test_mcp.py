@@ -17,6 +17,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from oibot_gm import mcp_server as ms
 from oibot_gm import raidcycle as rc
+from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.web import app as web
 
 TOKEN = "a" * 64
@@ -32,7 +33,13 @@ class FakeOps:
 
 
 class FakeBot:
-    """Just enough of OibotGM for create_app + the API: one registry, no Discord guild (the bearer path never needs one)."""
+    """Just enough of OibotGM for create_app + the API: one registry, no Discord guild (the bearer path never needs one).
+    The board verbs are RaidMixin's own (the routes call them; before lock they only touch the store)."""
+
+    board_lock = RaidMixin.board_lock
+    save_board = RaidMixin.save_board
+    board_move = RaidMixin.board_move
+    _write_board = RaidMixin._write_board
 
     def __init__(self, reg, rs):
         self.registries = type("R", (), {"by_discord": {reg.config.discord_guild_id: reg}, "store": reg.store})()
@@ -202,7 +209,7 @@ def mocked():
 
 def test_tools_read_through_the_api(mocked):
     out = ms.guild_overview()
-    assert out["guild"]["timezone"] == "America/Los_Angeles" and out["channels"]["signup"] == "raid-signups"
+    assert out["guild"]["timezone"] == "America/Los_Angeles" and out["channels"]["signup"] == {"id": "3", "name": "raid-signups", "missing": False}
     assert out["live_runs"][0]["key"] == RUN["key"] and out["raids"][0]["id"] == "barrow_deeps"
     assert ms.get_run("Barrow Deeps")["counts"]["in"] == 12
     assert ms.get_raid("barrow")["name"] == "Barrow Deeps"

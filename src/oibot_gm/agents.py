@@ -337,6 +337,23 @@ def kickstart(label: str, kill: bool = False, run=subprocess.run) -> tuple[bool,
     return r.returncode == 0, (r.stderr or r.stdout).strip()
 
 
+def start_job(job: str, out: Path | None = None) -> tuple[bool, str]:
+    """Start a local job now (the Agents page's Run now, MCP run_job, plain text): refused when the job is unknown,
+    already running or not installed with launchd; otherwise `launchctl kickstart` on the job's own LaunchAgent — the
+    bot never runs Claude itself. Returns (started, the line to show). Blocking (launchctl): call it off the loop."""
+    spec = JOBS.get(job)
+    if spec is None:
+        return False, f"job is one of {', '.join(JOBS)}"
+    if read_status(job, out or OUT)["state"] == "running":
+        return False, f"{spec['name']} is already running"
+    if not launchd_status(spec["label"])["loaded"]:
+        return False, f"{spec['name']} isn't installed on this Mac (scripts/agents/install.sh)"
+    ok, text = kickstart(spec["label"])
+    if not ok:
+        return False, f"launchd refused: {text[:200]}"
+    return True, f"{spec['name']} started"
+
+
 def overview(out: Path = OUT, tz=None, launchctl: Callable[[str], dict] | None = None) -> dict:
     """What the monitor shows per job: state + light, last run and outcome, next run, launchd."""
     launchctl = launchctl or launchd_status

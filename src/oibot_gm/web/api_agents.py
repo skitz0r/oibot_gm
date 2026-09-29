@@ -179,18 +179,11 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         job = str(d.get("job") or "review")
         if job not in agents.JOBS:
             raise HTTPException(400, f"job is one of {', '.join(agents.JOBS)}")
-        st = agents.read_status(job, agents.OUT)
-        if st["state"] == "running":
-            return JSONResponse({"error": f"{agents.JOBS[job]['name']} is already running"}, status_code=409)
-        label = agents.JOBS[job]["label"]
-        ld = await asyncio.to_thread(agents.launchd_status, label)
-        if not ld["loaded"]:
-            return JSONResponse({"error": f"{agents.JOBS[job]['name']} isn't installed on this Mac (scripts/agents/install.sh)"}, status_code=409)
-        ok, out = await asyncio.to_thread(agents.kickstart, label)
+        ok, line = await asyncio.to_thread(agents.start_job, job)  # the same checks MCP run_job and plain text hit
         if not ok:
-            return JSONResponse({"error": f"launchd refused: {out[:200]}"}, status_code=500)
-        await bot.ops.emit(v.reg.config, "info", f"{agents.JOBS[job]['name']} started by {v.name}")
-        return {"message": f"{agents.JOBS[job]['name']} started"}
+            return JSONResponse({"error": line}, status_code=409)
+        await bot.ops.emit(v.reg.config, "info", f"{line} by {v.name}")
+        return {"message": line}
 
 
 def effective_profile(reg, section: str | None = None) -> dict:

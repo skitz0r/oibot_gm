@@ -95,7 +95,8 @@ on the sheet in Discord.
   week further out) and **how long** (1 day up to 4 months), with an optional reason only officers see. A confirm
   screen shows the days in words and which live sheets it touches before anything is saved. Sheets on those days
   get *No thanks* for you, and if you were already rostered the seat is released (you get a DM saying so) and the
-  bench is asked. Officers record one for someone else with `/roster absent` and a member picker, same screens.
+  bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
+  someone else with `/roster absent` and a member picker, same screens.
 - **See everything the bot has on you**: `/me view` or the *My status* button.
 - All `/me` commands also work in a DM with the bot.
 - **Or just tell the bot.** DM it or @mention it: "I'll be away Nov 1–3", "back early, clear my absence",
@@ -181,7 +182,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    cadence). The confirm screen shows
    the time in guild time and in your own. A raid with no run times offers *Set this raid's run times →*. A run opened closer
    than its cadence assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
-   hours instead of inheriting a lock time that has already passed.
+   hours instead of inheriting a lock time that has already passed. A start more than five minutes in the past is
+   refused however the run is opened (the site, `/raid open`, plain text, MCP), with the time named in words.
 2. **Nudge** — at `nudge_hours_before` [halfway between open and lock: lock + (lead − lock) / 2, so 72 h for a
    sheet that opens 120 h out and locks at 24 h] the officer channel gets a health card (headcount, tank/healer
    tiles with who could cover via offspec/alt, buff coverage, non-responders, double-booked members) and mains
@@ -256,7 +258,8 @@ alt, sat out last window, earlier signup. Officers tune the weights per raid on 
 
 If you can't make a run you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
 `/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
-lock this releases your seat immediately and the bench is asked.
+lock this releases your seat immediately and the bench is asked. An officer who hears it out of band records the
+same callout, note included, with No thanks and a note on the site's answer menu or MCP `set_answer` with `note`.
 
 **Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
 run* far left, then *Fill seats* and *Lock now* on the right; what does not apply yet is greyed with the reason
@@ -466,7 +469,7 @@ Who may change what through plain text, and where, is one policy on the **Ops** 
 *Plain-text permissions*; the owner presses **Edit permissions**, changes the table and presses one **Save**;
 officers see it read-only; MCP has `plain_permissions` / `set_plain_permissions`). It covers every plain-text
 path: @mentions, DMs, `/gm change`, and the site's plain-text box (which counts as a place where plain text acts).
-The owner can always do everything, anywhere the bot listens.
+The owner can always do everything, anywhere the bot listens — an *Answers only* or *Ignored* channel included.
 
 **What** — seven capability groups; every plain-text operation belongs to exactly one:
 
@@ -524,9 +527,11 @@ same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 War
 Barrow Deeps"), and so does MCP (`test_bench` compose / comp). The bench holds at most 80.
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,
-rostered or asked to fill it, and the test sheet refuses presses from real members. Every DM the bot would
+rostered or asked to fill it, and the test sheet refuses presses from real members; setting a real member's
+answer on a test run is refused on every path too (the site, plain text, MCP). Every DM the bot would
 send a puppet (open, nudge, Confirm / Can't make it, fill asks) arrives in **your own DMs** with the puppet's
-name on it, and you can press its buttons on their behalf. What real members do see: the sheet itself in the
+name on it — the DMs of the officer who opened *that* test run, so two officers rehearsing at once each get their
+own — and you can press its buttons on their behalf. What real members do see: the sheet itself in the
 signup channel (marked as a test), the roster-channel cards, the ops lines, and the analytics cards pausing
 until `/gm test clear`.
 
@@ -545,28 +550,29 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 
 | Tool | Does |
 |---|---|
-| `guild_overview` | timezone, owner, officer roles, channels, raids' cadence, live runs, test bench |
-| `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (signups, board, confirmations, fill asks, absences that day, log) |
+| `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench |
+| `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (signups, board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
 | `list_raids` · `get_raid` | effective raid settings and overrides |
 | `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record |
-| `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status and the ops feed |
+| `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and ledger (up to 100), `member` narrowing both to one person |
 | `open_run` | open a sheet now (next slot, or a date and time; `schedule` = that schedule's next run, or a pickup template at `when`) |
-| `schedule_set` · `schedule_remove` | one setting of a raid's schedule (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
-| `set_answer` · `pin` · `confirm_for` | Join / Bench / No thanks for someone (character swap) · pin in/out for the lock · answer a Confirm ask for them |
-| `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups |
-| `lock_run` · `fill_seats` · `cancel_run` | lock now · preview the fill asks, `send=true` sends them · cancel with a reason |
-| `raid_set` · `raid_reset` | one raid setting (slots, hours, weights, comp bounds, first open…) · back to defaults |
+| `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
+| `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks with a `note` is a callout, the note for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
+| `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
+| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview the fill asks, `send=true` sends them · cancel with a reason (rostered members are not told automatically: say so in the channel) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
+| `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened) |
 | `save_characters` · `set_member` · `set_dm` | character table rows · rank / confirm / main · DMs on or off |
 | `set_channel` · `set_config` | a bot channel by name · timezone, ask audience, about, officer roles |
-| `recruitment` · `set_recruitment` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list) |
+| `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
-| `test_bench` | seed / run / answer / clear, as `/gm test` |
+| `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run / answer / clear / compose / comp, as `/gm test` |
+| `policy_get` · `policy_edit` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full · replace its text (a draft; the persona is live as written) · the bot's reading of it, nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
 | `plain_change` | text → the config ops it means, with current → new; applied only with `apply=true` |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with guild overrides marked |
 | `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full, move its state |
-| `job_status` | the review and apply jobs: state, last and next run, launchd, recent runs |
+| `job_status` · `get_job_run` · `run_job` | the review and apply jobs: state, last and next run, launchd, recent runs · one run's steps · start a job now (refused when it is running or not installed) |
 
 Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.

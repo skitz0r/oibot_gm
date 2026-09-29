@@ -415,6 +415,97 @@ def open_comp_sandbox(reg: Registry, rs: "RaidStore", instance: str, by: str, te
     return ev
 
 
+def test_answer_mix(reg: Registry, rs: "RaidStore", ev: "RaidEvent", join: int = 0, bench: int = 0, out: int = 0, rng=None) -> list[str]:
+    """The test bench's random answers (/gm test answer, the web's test bench, MCP test_bench, plain text): puppets
+    who haven't answered this sheet yet, shuffled; `join` of them Join, `bench` Bench, `out` No thanks — fewer when
+    the bench runs out. Returns '<name> <label>' lines; the caller refreshes the sheet."""
+    import random
+
+    counts = (("in", int(join or 0)), ("sub", int(bench or 0)), ("out", int(out or 0)))
+    if any(n < 0 for _, n in counts):
+        raise RegistryError("answer counts can't be negative")
+    pool = [m for m in reg.test_members() if str(m.discord_id) not in ev.signups]
+    (rng or random).shuffle(pool)
+    done = []
+    for st, n in counts:
+        for _ in range(n):
+            if not pool:
+                break
+            m = pool.pop()
+            set_signup(reg, rs, ev, m, None, st, source="test")
+            done.append(f"{m.display_name} {LABELS[st]}")
+    return done
+
+
+test_answer_mix.__test__ = False  # a helper, not a pytest test (its name starts with test_)
+
+PAST_GRACE_MINUTES = 5  # an on-demand open may start this close to now, not earlier
+
+
+def refuse_past_start(reg: Registry, start: datetime, now_: datetime | None = None) -> None:
+    """Refuse a run start more than PAST_GRACE_MINUTES ago: a mistyped year or a stale pick would open a run the
+    scheduler closes at once. Every on-demand open (web, plain text, MCP, /raid open) passes through
+    RaidMixin.open_run_and_post, which calls this; the scheduler only opens starts from upcoming() (never past) and
+    the comp sandbox opens two weeks out."""
+    ref = now_ or reg.now_local()
+    if start < ref - timedelta(minutes=PAST_GRACE_MINUTES):
+        raise RegistryError(f"{reg.local12(start)} is in the past — pick a time from now on")
+
+
+def next_runs_preview(reg: Registry, instance: str, *, fields: dict | None = None, schedule: str | None = None, schedule_fields: dict | None = None,
+                      timezone: str | None = None, n: int = 3, now_: datetime | None = None) -> list[dict]:
+    """What a raid's next runs WOULD be after a change, without saving it (a Registry.shadow): `fields` = raid
+    settings as set_raid_overrides takes them (slots, first_open, lockout_days, cadence hours…), `schedule` +
+    `schedule_fields` = one schedule's settings as set_schedule takes them, `timezone` = the guild's new zone.
+    Returns one row per active schedule except pickup templates: {id, name, starts: [aware datetimes], labels:
+    ['Tue 6 Oct 7:30 PM', …]} — labels in the (new) guild time, 12-hour. A refused change raises RegistryError with
+    the message the save would give. Used by describe() previews and TimezoneWizard-style confirmations."""
+    if instance not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {instance or '?'} (one of {', '.join(reg.profile.raids)})")
+    sh = reg.shadow()
+    if timezone:
+        try:
+            ZoneInfo(timezone)
+        except Exception:  # noqa: BLE001 — ZoneInfoNotFoundError / ValueError on odd input
+            raise RegistryError(f"unknown timezone {timezone} (an IANA name like America/New_York)") from None
+        sh.config.timezone = timezone
+    if fields:
+        sh.set_raid_overrides(instance, dict(fields), "preview")
+    if schedule and schedule_fields:
+        sh.set_schedule(instance, schedule, dict(schedule_fields), "preview")
+    ref = (now_ or sh.now_local()).astimezone(sh.tz)
+    out = []
+    for s in sh.schedules(instance):
+        if not s.get("active", True) or s["kind"] == "pickup":
+            continue
+        starts = next_runs_of(sh, instance, s, n, ref)
+        out.append({"id": s["id"], "name": s.get("name") or s["id"], "starts": starts, "labels": [sh.local12(t) for t in starts]})
+    return out
+
+
+def next_runs_lines(reg: Registry, instance: str, **kw) -> list[str]:
+    """next_runs_preview as one line per schedule: 'Barrow Deeps · Default: next Tue 6 Oct 7:30 PM, Thu 8 Oct 7:30 PM'."""
+    name = reg.raid_def(instance).get("name", instance)
+    rows = next_runs_preview(reg, instance, **kw)
+    return [f"{name}" + (f" · {r['name']}" if len(rows) > 1 or r["id"] != DEFAULT_SCHEDULE else "") + ": next " + (", ".join(r["labels"]) or "none (no run times yet)")
+            for r in rows]
+
+
+def timezone_preview(reg: Registry, zone: str, now_: datetime | None = None) -> list[str]:
+    """What a timezone change does to each raid's next run, in words (run times keep their clock time, so the real
+    moment moves): 'Barrow Deeps: next Tue 6 Oct 7:30 PM America/New_York — Tue 6 Oct 4:30 PM on today's clock'.
+    One line per raid with run times; a bad zone raises RegistryError."""
+    lines = []
+    for rid in reg.profile.raids:
+        new = next_runs_preview(reg, rid, timezone=zone, n=1, now_=now_)
+        firsts = sorted((r["starts"][0], r["labels"][0]) for r in new if r["starts"])
+        if not firsts:
+            continue
+        t, label = firsts[0]
+        lines.append(f"{reg.raid_def(rid).get('name', rid)}: next {label} {zone} — {reg.local12(t)} on today's clock ({reg.config.timezone})")
+    return lines
+
+
 def run_rosters(reg: Registry, ev: "RaidEvent") -> int:
     """How many rosters the run expects up front (its schedule's `rosters`, 1 for a plain run)."""
     return max(1, int((reg.config.team(ev.team) or {}).get("rosters") or 1))
@@ -1121,6 +1212,13 @@ def board_layout(reg: Registry, ev: RaidEvent) -> list[list[str]]:
         flat = [list(g) for g in (ev.layout or [])]
     want = max(n, -(-len(flat) // n) * n)
     return flat + [[] for _ in range(want - len(flat))]
+
+
+class BoardChanged(RegistryError):
+    """A whole-board write made on a board that changed since its author looked (its `rev` is stale)."""
+
+    def __init__(self, msg: str = "The board changed since you looked (someone else moved people) — check it and try again."):
+        super().__init__(msg)
 
 
 def board_rev(reg: Registry, ev: RaidEvent) -> str:

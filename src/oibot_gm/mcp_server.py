@@ -29,6 +29,7 @@ DEFAULT_URL = "http://127.0.0.1:8788"
 TOKEN_ENV, URL_ENV = "OIBOT_MCP_TOKEN", "OIBOT_MCP_URL"
 HEADERS = {"X-Requested-With": "oibot", "Accept": "application/json"}
 STATUSES = ("in", "sub", "out")
+POLICY_TEXT_MAX = 1500  # guild_overview's excerpt of each policy document (policy_get has the whole text)
 RAID_FIELDS = ("slots", "signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "lockout_days", "duration_hours",
                "notes", "split_policy", "nudge", "autofill", "open_dm", "first_open")
 
@@ -72,6 +73,9 @@ class Api:
     def post(self, path: str, body: dict | None = None) -> Any:
         return self._send("POST", path, json=body or {})
 
+    def put(self, path: str, body: dict | None = None) -> Any:
+        return self._send("PUT", path, json=body or {})
+
 
 _api: Api | None = None
 
@@ -106,6 +110,12 @@ def msg(data: Any) -> str:
     return str(data)
 
 
+def excerpt(text: str | None, n: int = POLICY_TEXT_MAX) -> str | None:
+    if text is None:
+        return None
+    return text if len(text) <= n else text[:n].rstrip() + " … (truncated; policy_get has the whole text)"
+
+
 def run_summary(ev: dict) -> dict:
     return {"key": ev["key"], "raid": ev.get("raid"), "run": ev.get("run"), "when": ev.get("when"), "rel": ev.get("rel"), "state": ev.get("state"), "fill_state": ev.get("fill_state"),
             "size": ev.get("size"), "counts": ev.get("counts"), "rostered": ev.get("rostered"), "n_rosters": ev.get("n_rosters")}
@@ -115,7 +125,9 @@ def run_summary(ev: dict) -> dict:
 
 @mcp.tool()
 def guild_overview() -> dict:
-    """The guild at a glance: name, timezone, owner, officer roles, the channels the bot uses, each raid's cadence and
+    """The guild at a glance: name, timezone, owner, officer roles, member roles (holders register without applying),
+    news keywords, the channels the bot uses ({id, name, missing}: missing = set but no longer a channel the bot can
+    see), the policy documents (compiled or not, summary, the text up to 1500 characters), each raid's cadence and
     live-run count, the live runs (key, when, state, counts), and the test bench (puppets, test runs). Start here."""
     cfg = api().get("/api/config")
     raids = api().get("/api/raids")
@@ -123,9 +135,10 @@ def guild_overview() -> dict:
     live = [run_summary(e) for r in rosters.get("raids", []) for e in r.get("open", []) + r.get("locked", [])] + [run_summary(e) for e in rosters.get("orphans", [])]
     return {
         "guild": {"timezone": cfg["settings"].get("timezone"), "owner_id": cfg["settings"].get("owner_id"), "about": cfg["settings"].get("about"), "ask_audience": cfg["settings"].get("ask_audience"),
-                  "officer_roles": [r["name"] for r in cfg["settings"].get("officer_roles", [])], "officer_roles_pending": cfg["settings"].get("officer_roles_pending")},
-        "channels": {k: v.get("name") for k, v in cfg.get("channels", {}).items()},
-        "policy_docs": {k: {"compiled": v.get("compiled"), "summary": v.get("summary")} for k, v in cfg.get("docs", {}).items()},
+                  "officer_roles": [r["name"] for r in cfg["settings"].get("officer_roles", [])], "officer_roles_pending": cfg["settings"].get("officer_roles_pending"),
+                  "member_roles": [r["name"] for r in cfg["settings"].get("member_roles", [])], "news_keywords": cfg["settings"].get("news_keywords", [])},
+        "channels": {k: {"id": v.get("id"), "name": v.get("name"), "missing": bool(v.get("missing"))} for k, v in cfg.get("channels", {}).items()},
+        "policy_docs": {k: {"compiled": v.get("compiled"), "summary": v.get("summary"), "text": excerpt(v.get("text"))} for k, v in cfg.get("docs", {}).items()},
         "raids": [{"id": r["id"], "name": r["name"], "size": r["size"], "slots": r["slots"], "lockout_days": r["lockout_days"], "signup_lead_hours": r["signup_lead_hours"],
                    "lock_hours_before": r["lock_hours_before"], "confirm_hours_before": r["confirm_hours_before"], "split_policy": r["split_policy"], "opened": r["opened"], "live": r["live"],
                    "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "next": s.get("next", [])} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
@@ -149,8 +162,10 @@ def list_runs() -> dict:
 def get_run(run: str) -> dict:
     """One run in full: timeline (nudge / lock / confirm), counts, every signup with character/spec/role/status/pin,
     who has not answered, absences that day, double-booked members, what the roster still needs, the board (bank and
-    rosters with their groups; after lock the actual rosters), confirmations, fill asks, callouts, split settings and
-    the run's log. `run` = run key, roster key, or the raid's name when it has exactly one live run."""
+    rosters with their groups; after lock the actual rosters), confirmations, fill asks, callouts (with the member's
+    note), split settings, the run's log, `rev` (pass it to set_layout) and, for an open sheet, `health` (headcount
+    against the seats, per role have/need/level with who could cover, party buffs nobody provides). `run` = run key,
+    roster key, or the raid's name when it has exactly one live run."""
     return api().get(f"/api/run/{run}")
 
 
@@ -207,13 +222,17 @@ def list_auras() -> dict:
 
 
 @mcp.tool()
-def ops_log(limit: int = 40) -> dict:
-    """The bot's status (data-repo head, push, LLM usage, loot feed, uptime) and the last `limit` ops-feed lines
-    (newest first), plus recent precedents and ledger rows."""
-    data = api().get("/api/ops")
+def ops_log(limit: int = 40, precedents_limit: int = 10, ledger_limit: int = 10, member: str | None = None, changes_limit: int = 20) -> dict:
+    """The bot's status (data-repo head, push, LLM usage, loot feed, uptime), the last `limit` ops-feed lines (newest
+    first), the last `changes_limit` registry change lines (the analytics change log, since the bot started), and the
+    loot precedents (council overrides of the bot's pick, up to 50) and ledger rows (awards, up to 100), newest first.
+    `member` (name, character or id) narrows precedents and ledger to that member's characters."""
+    data = api().get("/api/ops", precedents_limit=max(0, min(int(precedents_limit), 50)), ledger_limit=max(0, min(int(ledger_limit), 100)),
+                     member=member or None, changes_limit=max(0, min(int(changes_limit), 200)))
     n = max(1, min(int(limit), 500))
     return {"head": data.get("head"), "push": data.get("push"), "llm": data.get("llm"), "feed": data.get("feed"), "up_seconds": data.get("up"),
-            "rows": data.get("rows", [])[:n], "precedents": data.get("precedents", [])[:10], "ledger": data.get("ledger", [])[:10]}
+            "rows": data.get("rows", [])[:n], "changes": data.get("changes", []), "precedents": data.get("precedents", []), "ledger": data.get("ledger", []),
+            "member": data.get("member")}
 
 
 # ---------------------------------------------------------------- writes: runs
@@ -229,27 +248,36 @@ def open_run(raid: str, when: str | None = None, schedule: str | None = None) ->
 
 
 @mcp.tool()
-def set_answer(run: str, member: str, status: str, character: str | None = None) -> str:
+def set_answer(run: str, member: str, status: str, character: str | None = None, note: str | None = None) -> str:
     """Answer a sheet for someone: status in (Join) / sub (Bench) / out (No thanks); `character` swaps which character
-    they play. After lock, `in` seats them and asks them to confirm, `out` frees the seat and starts filling it."""
+    they play. After lock, `in` seats them and asks them to confirm, `out` frees the seat and starts filling it.
+    `note` (with out only) records it as a callout with the reason, like /raid out: officers see the note (get_run
+    callouts, the run's updates thread), the public sheet never does."""
     if status not in STATUSES:
         raise ToolError(f"status must be one of {', '.join(STATUSES)} (in = Join, sub = Bench, out = No thanks)")
-    return msg(api().post(f"/api/run/{run}/set", {"member": member, "status": status, "character": character}))
+    body: dict[str, Any] = {"member": member, "status": status, "character": character}
+    if note:
+        body["note"] = note
+    return msg(api().post(f"/api/run/{run}/set", body))
 
 
 @mcp.tool()
-def set_layout(run: str, groups: list[list[str]]) -> dict:
+def set_layout(run: str, groups: list[list[str]], rev: str | None = None) -> dict:
     """Set the board: `groups` = lists of display names per group (only members who answered Join count). Before lock it
     is the layout the lock will use; after lock it edits the roster (someone added from the bench is asked to confirm,
-    someone removed is freed). Returns the board and the roster's needs."""
-    data = api().post(f"/api/run/{run}/layout", {"groups": groups})
+    someone removed is freed). Pass `rev` from get_run: when someone changed the board since, nothing is written and
+    the error says so (read it again). Returns the board and the roster's needs."""
+    body: dict[str, Any] = {"groups": groups}
+    if rev:
+        body["rev"] = rev
+    data = api().post(f"/api/run/{run}/layout", body)
     return {"message": data.get("message", "layout saved"), "needs": data.get("needs"), "board": data.get("board")}
 
 
 @mcp.tool()
 def propose_split(run: str, strategy: str | None = None, avoid: list[list[list[str]]] | None = None) -> dict:
     """PREVIEW only (nothing saved): a fresh layout for an open run — one roster, or several under `strategy`
-    (balanced | stacked | …; see list_raids split_policies). `avoid` = layouts already shown, to get a different one.
+    (balanced | first | rotation; see list_raids split_policies). `avoid` = layouts already shown, to get a different one.
     Apply the layout you like with set_layout, or remember the strategy with set_strategy. When the tanks/healers
     allow fewer runs than the headcount, `why_not_more` says what another run is short, `leftovers` lists the joiners
     the roster left out and `another_run` says whether leftovers + bench + pool could make one (offspecs/alts)."""
@@ -300,7 +328,9 @@ def fill_seats(run: str, send: bool = False) -> dict:
 
 @mcp.tool()
 def cancel_run(run: str, reason: str | None = None) -> str:
-    """Cancel a live run the way /raid cancel does: sheet closed, everyone on it told, open confirmations withdrawn."""
+    """Cancel a live run the way /raid cancel does: the sheet and officer cards show it cancelled, open confirmations
+    are withdrawn, a line goes to the run's thread and the ops feed. Rostered members are NOT told automatically —
+    say so in the channel (the returned line reminds you)."""
     return msg(api().post(f"/api/run/{run}/cancel", {"reason": reason or ""}))
 
 
@@ -311,34 +341,59 @@ def confirm_for(run: str, member: str, yes: bool = True) -> str:
     return msg(api().post("/api/admin/placement", {"member": member, "run": run, "answer": "yes" if yes else "no"}))
 
 
+@mcp.tool()
+def fill_answer(run: str, member: str, yes: bool = True) -> str:
+    """Answer a member's FILL ask (the seat or swap question the fill engine DMed them after lock) on their behalf:
+    yes = they take it (seated the way they were asked), no = they can't (a tied partner's ask is withdrawn and the
+    next person is asked). The fill DM buttons' own verb; for the Confirm / Can't make it ask a lock sends, use
+    confirm_for. get_run's fill_asks lists who is being asked."""
+    return msg(api().post("/api/admin/fill-answer", {"run": run, "member": member, "yes": bool(yes)}))
+
+
+@mcp.tool()
+def repost_sheet(run: str, channel: str | None = None) -> str:
+    """Post a fresh copy of a live sheet (/raid sheet): in `channel` (a name like #raids, or an id), default the
+    signup channel. The buttons and later updates follow the new message."""
+    return msg(api().post(f"/api/run/{run}/sheet", {"channel": channel or ""}))
+
+
 # ---------------------------------------------------------------- writes: raids and auras (owner)
 
 @mcp.tool()
-def raid_set(raid: str, field: str, value: str) -> str:
-    """Override one raid setting for the guild (owner): field = slots ('Tue 19:30, Thu 19:30'), signup_lead_hours,
-    nudge_hours_before, lock_hours_before, confirm_hours_before, fill_ask_hours, lockout_days, duration_hours, notes,
-    split_policy, nudge/autofill/open_dm (true|false), first_open ('YYYY-MM-DDTHH:MM' guild time),
-    weight_<key> (see list_raids weight_keys), or tank_min/tank_max/healer_min/healer_max/dps_min/dps_max."""
+def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None) -> str:
+    """Override raid settings for the guild (owner): one `field` + `value`, or several at once as `fields`
+    {field: value} — ONE validated write, so settings that are only legal together (signup lead and nudge raised
+    together) go through, and a refusal leaves the raid as it was. field = slots ('Tue 19:30, Thu 19:30'),
+    signup_lead_hours, nudge_hours_before, lock_hours_before, confirm_hours_before, fill_ask_hours, lockout_days,
+    duration_hours, notes, split_policy, nudge/autofill/open_dm (true|false), first_open ('YYYY-MM-DDTHH:MM' guild
+    time), weight_<key> (see list_raids weight_keys), or tank_min/tank_max/healer_min/healer_max/dps_min/dps_max."""
     rid = get_raid(raid)["id"]
-    f, v = field.strip(), value
+    want = dict(fields or {})
+    if field:
+        want[field] = value
+    if not want:
+        raise ToolError("give a field and value, or fields = {field: value, …}")
     body: dict[str, Any] = {"instance": rid}
-    if f.startswith("weight_"):
-        body["weights"] = {f[7:]: v}
-    elif f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max"):
-        role, bound = f.split("_", 1)
-        body["comp"] = {role: {bound: v}}
-    elif f in ("nudge", "autofill", "open_dm"):
-        body[f] = str(v).strip().lower() in ("1", "true", "yes", "on")
-    elif f in RAID_FIELDS:
-        body[f] = v
-    else:
-        raise ToolError(f"unknown raid field {field}; one of " + ", ".join(RAID_FIELDS) + ", weight_<key>, <role>_min/<role>_max")
+    for raw, v in want.items():
+        f = str(raw).strip()
+        if f.startswith("weight_"):
+            body.setdefault("weights", {})[f[7:]] = v
+        elif f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max"):
+            role, bound = f.split("_", 1)
+            body.setdefault("comp", {}).setdefault(role, {})[bound] = v
+        elif f in ("nudge", "autofill", "open_dm"):
+            body[f] = v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")
+        elif f in RAID_FIELDS:
+            body[f] = v
+        else:
+            raise ToolError(f"unknown raid field {raw}; one of " + ", ".join(RAID_FIELDS) + ", weight_<key>, <role>_min/<role>_max")
     return msg(api().post("/api/admin/raid", body))
 
 
 @mcp.tool()
-def schedule_set(raid: str, schedule: str, field: str, value: Any) -> str:
-    """Change one setting of a raid's schedule (owner) — or create the schedule with its first setting. Schedules are
+def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None) -> str:
+    """Change settings of a raid's schedule (owner) — or create the schedule. One `field` + `value`, or several at
+    once as `fields` {field: value} in ONE validated write (a new schedule's kind and run times together). Schedules are
     listed per raid by list_raids / get_raid (`schedules`: id, name, kind, plain-words label, next runs); `default` is
     the raid's own weekly slots. field = kind (weekly|lockout|pickup) | name | active (true|false) | rosters (1-4) |
     slots ('Sat 20:00, Sun 20:00') | days ('1, 3' = days of each lockout, 1 = reset day) | time ('20:00') |
@@ -346,7 +401,12 @@ def schedule_set(raid: str, schedule: str, field: str, value: Any) -> str:
     autofill | open_dm | split_policy. A cadence field set to 'inherit' goes back to the raid's value. A new schedule
     starts with its kind, slots, or days/time."""
     rid = get_raid(raid)["id"]
-    return msg(api().post("/api/admin/raid/schedule", {"instance": rid, "id": schedule, "fields": {field.strip(): value}}))
+    want = {str(k).strip(): v for k, v in (fields or {}).items()}
+    if field:
+        want[field.strip()] = value
+    if not want:
+        raise ToolError("give a field and value, or fields = {field: value, …}")
+    return msg(api().post("/api/admin/raid/schedule", {"instance": rid, "id": schedule, "fields": want}))
 
 
 @mcp.tool()
@@ -461,7 +521,8 @@ def set_config(field: str, value: Any) -> str:
 def test_bench(action: str, count: int = 20, raid: str | None = None, start_in: int = 40, lock_in: int = 25, confirm_in: int = 15, nudge_in: int = 32, dm_open: bool = False,
                run: str | None = None, join: int = 0, bench: int = 0, out: int = 0, member: str | None = None, status: str | None = None,
                add: list[dict] | None = None, remove: list[str] | None = None) -> str:
-    """The test bench (/gm test): action = seed (`count` puppet members), run (`raid`, minute cadence start_in > nudge_in
+    """The test bench (/gm test): action = seed (`count` puppet members from the built-in test roster — existing ones
+    are kept, a count above the roster's size is capped to it, count=0 = the whole roster), run (`raid`, minute cadence start_in > nudge_in
     > lock_in > confirm_in), answer (`run` + a random mix join/bench/out, or one `member` with `status`), clear (cancel
     test runs, delete every puppet), compose (`add` = [{cls, spec, offspec?, count}] puppets of exactly that mix, `remove`
     = puppet ids from get_member/list_members), comp (`raid`: every puppet joined to a sandbox run two weeks out, not
@@ -471,7 +532,7 @@ def test_bench(action: str, count: int = 20, raid: str | None = None, start_in: 
         raise ToolError("action must be seed, run, answer, clear, compose or comp")
     body: dict[str, Any] = {"action": action}
     if action == "seed":
-        body["count"] = count
+        body["count"] = max(0, int(count))
     elif action == "run":
         if not raid:
             raise ToolError("run needs a raid")
@@ -568,6 +629,20 @@ def set_recruitment(open: bool | None = None, note: str | None = None, questions
 
 
 @mcp.tool()
+def create_invite(channel: str, save: bool = False) -> dict:
+    """Create a permanent, unlimited-use Discord invite to `channel` (a name like #welcome, or an id) — the homepage's
+    Join our Discord button (owner). Needs the bot's Create Invite permission there. Returned, not saved, unless
+    `save=true`: then it becomes the recruitment invite link (the homepage and registration card follow)."""
+    data = api().post("/api/admin/invite", {"channel": channel})
+    url = data.get("invite_url")
+    out = {"invite_url": url, "message": data.get("message")}
+    if save and url:
+        out["message"] = msg(api().post("/api/admin/recruitment", {"invite_url": url}))
+        out["saved"] = True
+    return out
+
+
+@mcp.tool()
 def list_applications() -> dict:
     """Applications made in Discord: the open ones (oldest first) and the last 20 decided, each with the applicant's
     character (label, class/spec), the raid schedules they can make, their answers to the guild's questions, when
@@ -650,6 +725,51 @@ def job_status() -> dict:
     """The local agent jobs (news review, apply): state, last run and outcome, next run, whether launchd has them
     loaded, and the recent runs."""
     return api().get("/api/agents")
+
+
+@mcp.tool()
+def get_job_run(run_id: str) -> dict:
+    """One job run in full (ids from job_status `runs` or a job's `run_id`): whether it is still running, its outcome,
+    and every step (tool calls, results, the runner's own lines) with 12-hour times."""
+    return api().get(f"/api/agents/run/{run_id}")
+
+
+@mcp.tool()
+def run_job(job: str = "review") -> str:
+    """Start a local job now (owner): review (the news review) or apply (apply approved proposals). launchd starts it;
+    refused when it is already running or not installed. Check job_status / get_job_run afterwards."""
+    return msg(api().post("/api/agents/run", {"job": job}))
+
+
+# ---------------------------------------------------------------- policy documents (loot, comp, persona)
+
+@mcp.tool()
+def policy_get(doc: str) -> dict:
+    """A policy document in full: doc = loot | comp | persona. Its text, whether a compiled reading is live (and its
+    summary), and whether an edit is pending confirmation."""
+    return api().get(f"/api/policy/{doc}")
+
+
+@mcp.tool()
+def policy_edit(doc: str, text: str) -> dict:
+    """Replace a policy document's text (officers; the WHOLE text — read policy_get first and edit it). loot/comp: saved
+    as a draft, the live reading is unchanged until policy_compile + policy_confirm; persona: live as written."""
+    return api().put(f"/api/policy/{doc}", {"text": text})
+
+
+@mcp.tool()
+def policy_compile(doc: str) -> dict:
+    """The bot's reading of a policy document as it is now (an LLM call; nothing goes live): `reading` = the numbered
+    loot rules or comp constraints in words, plus questions it could not settle. Show it to the person, then
+    policy_confirm (confirm=true makes it live, false discards the pending edit and restores the previous text)."""
+    return api().post(f"/api/policy/{doc}/compile")
+
+
+@mcp.tool()
+def policy_confirm(doc: str, confirm: bool = True) -> str:
+    """After policy_compile: confirm=true makes that reading the live compiled policy; confirm=false discards the
+    pending edit (the text before it comes back; the live reading never changed)."""
+    return msg(api().post(f"/api/policy/{doc}/{'confirm' if confirm else 'discard'}"))
 
 
 # ---------------------------------------------------------------- entry point

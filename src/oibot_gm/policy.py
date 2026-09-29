@@ -122,6 +122,82 @@ class PolicyStore:
         return out
 
 
+# ---------------------------------------------------------------- edit → compile → confirm | discard, without Discord
+# The /gm policy edit flow keeps the previous text and the compiled reading on its Confirm/Discard view. The site, MCP
+# and plain text have no view to hold them, so the pending edit lives here, per guild and doc, in memory: begin_edit
+# writes the draft (remembering the text it replaced), compile_pending shows the reading, confirm_pending makes it
+# live, discard_pending restores the text. A restart forgets the pending reading (the draft text stays; compile again).
+PENDING: dict[tuple[str, str], dict] = {}
+
+
+class PolicyPendingError(ValueError):
+    pass
+
+
+def _check_doc(doc: str) -> None:
+    if doc not in DOCS:
+        raise PolicyPendingError(f"doc is one of {', '.join(DOCS)}")
+
+
+def begin_edit(ps: PolicyStore, doc: str, text: str, by: str) -> str:
+    """Write `text` as the doc's draft; the first pending edit remembers the text it replaced (Discard goes back to
+    it, however many edits follow). Returns the line to show."""
+    _check_doc(doc)
+    text = (text or "").strip()
+    if not text:
+        raise PolicyPendingError("the policy text is empty")
+    key = (ps.key, doc)
+    previous = PENDING[key]["previous"] if key in PENDING else ps.read(doc)
+    ps.write_draft(doc, text, by)
+    PENDING[key] = {"previous": previous, "compiled": None, "by": by}
+    if doc == "persona":
+        PENDING.pop(key, None)  # the persona has no compiled form: it is live as written
+        return "persona saved (no compile step)"
+    return f"{doc} policy saved as a draft — compile it to see the bot's reading, then confirm or discard"
+
+
+def pending(ps: PolicyStore, doc: str) -> dict | None:
+    return PENDING.get((ps.key, doc))
+
+
+def compile_pending(ps: PolicyStore, doc: str, provider: Provider) -> tuple[BaseModel | None, str]:
+    """Compile the doc's current text (the LLM call — run it off the event loop) and hold the reading for
+    confirm_pending. Works on a saved-but-unconfirmed text too (a PR edit: what /gm policy reload does).
+    Returns (compiled, the reading as text)."""
+    _check_doc(doc)
+    if doc == "persona":
+        return None, "The persona has no compiled form: it is used as written."
+    if provider is None:
+        raise PolicyPendingError("the LLM provider is off (ANTHROPIC_API_KEY unset): nothing can compile the policy now")
+    compiled = ps.compile(doc, provider)
+    key = (ps.key, doc)
+    PENDING.setdefault(key, {"previous": ps.read(doc), "compiled": None, "by": None})["compiled"] = compiled
+    return compiled, render_compiled(doc, compiled)
+
+
+def confirm_pending(ps: PolicyStore, doc: str, by: str) -> str:
+    """Make the held reading the live compiled form (one commit). Refused when nothing was compiled."""
+    _check_doc(doc)
+    p = PENDING.get((ps.key, doc))
+    if not p or p.get("compiled") is None:
+        raise PolicyPendingError(f"no compiled reading of the {doc} policy is waiting — compile it first")
+    ps.confirm(doc, p["compiled"], by)
+    PENDING.pop((ps.key, doc), None)
+    n = len(getattr(p["compiled"], "rules", getattr(p["compiled"], "constraints", [])))
+    return f"{doc} policy is live with this reading ({n} item(s))"
+
+
+def discard_pending(ps: PolicyStore, doc: str, by: str) -> str:
+    """Drop the pending edit: the text it replaced is restored (one commit); the live compiled form never changed."""
+    _check_doc(doc)
+    p = PENDING.pop((ps.key, doc), None)
+    if not p:
+        raise PolicyPendingError(f"no pending edit of the {doc} policy")
+    if ps.read(doc) != p["previous"]:
+        ps.revert(doc, p["previous"], by)
+    return f"edit to the {doc} policy discarded; the previous text is back"
+
+
 def render_compiled(doc: str, compiled: BaseModel) -> str:
     if isinstance(compiled, LootCompiled):
         lines = [f"**{r.id}** ({r.kind}) {r.text}" for r in compiled.rules]

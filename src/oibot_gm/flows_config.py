@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo, available_timezones
 
 import discord
 
+from .presets import PRESETS  # (key, name, opens, nudge, lock, confirm), shared with plain text
 from .registry import (CLOCK12, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
                        RegistryError, parse_slots, schedule_def_of, schedule_value, schedules_of)
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, hour_opts, minute_opts, week_opts, when_fields, when_note
@@ -115,11 +116,6 @@ class OwnerWizard(Wizard):
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before")
-PRESETS = [  # (key, name, opens, nudge, lock, confirm) — each legal by construction: confirm ≤ lock ≤ nudge ≤ opens
-    ("standard", "Standard", 120, 72, 24, 6),
-    ("short", "Short notice", 48, 36, 24, 12),
-    ("same_week", "Same week", 72, 48, 24, 6),
-]
 ROLES = ("tank", "healer", "dps")
 ROLE_WORDS = {"tank": "tanks", "healer": "healers", "dps": "dps"}
 WEIGHTS = tuple(RAID_WEIGHT_DEFAULTS)

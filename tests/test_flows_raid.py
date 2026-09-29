@@ -12,6 +12,7 @@ from conftest import join, lock_with_board, open_test_run
 from oibot_gm import discord_registry
 from oibot_gm import flows_raid  # noqa: F401 — registers the flows
 from oibot_gm import raidcycle as rc
+from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.wizard import FLOWS
 from wizard_harness import Harness
 
@@ -39,7 +40,10 @@ class FakeChannel:
 
 
 class FakeBot:
-    """The client methods the flows call, recording each call; the Registry/RaidStore underneath are real."""
+    """The client methods the flows call, recording each call; the Registry/RaidStore underneath are real. call_out is
+    RaidMixin's own (the shared verb /raid out, the site and MCP use), so its ripple shows up as recorded calls."""
+
+    call_out = RaidMixin.call_out
 
     def __init__(self, rs):
         self.rs = rs

@@ -284,9 +284,10 @@ class AbsencesMixin:
         except Exception:  # noqa: BLE001
             pass
 
-    async def announce_absence(self, reg: Registry, m, a, by: str) -> None:
-        """Public line (no reason), sheets updated, card refreshed, ops line with the reason."""
-        span = a.start + (f" → {a.end}" if a.end != a.start else "")
+    async def announce_absence(self, reg: Registry, m, a, by: str) -> list[str]:
+        """Public line (no reason), sheets updated, card refreshed, ops line with the reason. Returns the keys of the
+        live sheets it touched (answered No thanks, or a rostered seat freed) so every caller can say which."""
+        span = reg.span_label(a.start, a.end)  # people read it: "Sat 1 Nov → Mon 3 Nov", never ISO
         touched = await self.after_absence(reg, m, a.start, a.end, by)
         ch = self.get_channel(reg.config.absences_channel_id) if reg.config.absences_channel_id else None
         if ch:
@@ -296,11 +297,12 @@ class AbsencesMixin:
                 pass
         await self.refresh_absences_card(reg)
         await self.ops.emit(reg.config, "info", f"{m.display_name} absent {span}" + (f" — {a.reason}" if a.reason else "") + (f" (by {by})" if by != m.display_name else "") + (f" · sheets: {', '.join(touched)}" if touched else ""))
+        return touched
 
     async def absence_cleared(self, reg: Registry, m, a, by: str) -> list[str]:
         """After Registry.clear_absence: the cleared span ripples into the live sheets (after_absence_cleared), the
         card is refreshed, one ops line. Returns the member-facing lines (which sheets they can answer again)."""
-        span = a.start + (f" → {a.end}" if a.end != a.start else "")
+        span = reg.span_label(a.start, a.end)  # people read it: "Sat 1 Nov → Mon 3 Nov", never ISO
         lines = await self.after_absence_cleared(reg, m, a)
         await self.refresh_absences_card(reg)
         await self.ops.emit(reg.config, "info", f"{m.display_name} cleared absence {span}" + (f" (by {by})" if by != m.display_name else "") + (f" · {len(lines)} sheet(s) touched" if lines else ""))

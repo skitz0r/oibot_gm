@@ -246,6 +246,12 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             out.append({**row, "main": main, "slot": "main" if main else "alt"})
         return out
 
+    def sheets_touched(reg, keys) -> str:
+        """announce_absence's touched run keys as words: ' · off 2 sheets: Barrow Deeps Tue 6 Oct 7:30 PM, …'."""
+        rs = bot.raids.store(reg)
+        names = [dr.run_title(reg, rs.events[k]) if k in rs.events else k for k in (keys or [])]
+        return f" · off {len(names)} sheet{'s' if len(names) != 1 else ''}: {', '.join(names)}" if names else ""
+
     async def clear_absence(v, uid: int, start: str):
         """Registry clears it, the bot re-opens the sheets it had answered for them; the lines say what changed."""
         reg = v.reg
@@ -257,7 +263,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         lines = list(await maybe_await(bot.absence_cleared(reg, m, a, v.name)) or [])
-        head = f"{m.display_name} back: cleared {a.start}" + (f" → {a.end}" if a.end != a.start else "")
+        head = f"{m.display_name} back: cleared {reg.span_label(a.start, a.end)}"
         await bot.ops.emit(reg.config, "info", f"[web] {v.name}: {head}" + (" — " + "; ".join(lines) if lines else ""))
         return {"message": "\n".join([head, *lines]), "lines": lines}
 
@@ -372,8 +378,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             m, a = await asyncio.to_thread(v.reg.add_absence, v.uid, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, v.name)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.announce_absence(v.reg, m, a, v.name)
-        return {"message": f"away {v.reg.span_label(a.start, a.end)}"}
+        touched = await bot.announce_absence(v.reg, m, a, v.name)
+        return {"message": f"away {v.reg.span_label(a.start, a.end)}" + sheets_touched(v.reg, touched), "sheets": list(touched or [])}
 
     @app.post("/api/me/absence/clear")
     async def me_absence_clear(request: Request):
@@ -510,7 +516,17 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "split": split_json(reg, ev) if live else {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"), "runs": 1, "reason": None, "reason_text": None},
                 "confirmations": conf_rows,
                 "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer, "expires_at": a.expires_at, "pair": a.pair} for a in ev.fill_asks],
-                "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late} for c in ev.callouts], "log": list(ev.log)}
+                "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late, "note": c.note} for c in ev.callouts], "log": list(ev.log),
+                "health": health_json(reg, ev, t) if ev.state == "open" else None}
+
+    def health_json(reg, ev, t) -> dict:
+        """The open sheet's health card as data (MCP get_run, the help context): headcount against the seats the run
+        expects, per role have/need/level with who could cover a shortfall, and the party buffs nobody on it provides."""
+        h = rc.health_data(reg, ev, t)
+        n, size, _legacy, subs = h["headcount"]
+        return {"headcount": {"in": n, "seats": size, "bench": subs, "level": h["headcount_level"]},
+                "roles": [{k: r[k] for k in ("role", "have", "need", "level", "hint")} for r in h["roles"]],
+                "no_provider": [b["name"] for b in h["buffs"] if not b["providers"]], "unanswered": len(h["unresponsive"]), "rosters": h["rosters"]}
 
     def rosters_data(reg) -> dict:
         rs = bot.raids.store(reg)
@@ -566,55 +582,44 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, ev.layout or [], rc.run_size(reg, ev))
         return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else []), "needs": rc.needs(reg, ev, t), "rev": rc.board_rev(reg, ev)}
 
-    board_locks: dict[str, asyncio.Lock] = {}
-
-    def board_lock(key: str) -> asyncio.Lock:
-        """One writer at a time per run's board: concurrent officers queue here (short), they never overwrite each other."""
-        return board_locks.setdefault(key, asyncio.Lock())
-
-    async def save_board(v, rs, ev, t, groups: list[list[str]]):
-        """The one way a board is written (whole-board or after a single move)."""
-        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
-        groups = [[n for n in g if n in names] for g in groups]
-        if ev.state == "open":
-            ev.layout = groups if any(groups) else None
-            await asyncio.to_thread(rs.save, ev, f"board ({v.name})")
-            return board_reply(v.reg, ev)
-        added, removed = await asyncio.to_thread(rc.apply_layout_locked, v.reg, rs, ev, groups)
-        await bot.after_board_change(v.reg, rs, ev, t, added, removed, v.name)
-        return {**board_reply(v.reg, ev), "message": (f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "") or "groups updated"}
-
     def stale(v, ev):
         return JSONResponse({"error": "Someone else changed this board a moment ago — it has been reloaded; check it and try again.", **board_reply(v.reg, ev)}, status_code=409)
+
+    def board_written(v, ev, was_open: bool, line: str) -> dict:
+        """The board after a write; after lock the line says who was asked / freed (before lock the drag speaks for itself)."""
+        return board_reply(v.reg, ev) if was_open else {**board_reply(v.reg, ev), "message": line}
 
     @app.post("/api/run/{key}/layout")
     async def run_layout(request: Request, key: str):
         """The board after a drag: before lock it is saved as the layout the lock will use; after lock it is the roster
-        (group moves are free, someone dragged in from the bench is asked to confirm, someone dragged out is freed)."""
+        (group moves are free, someone dragged in from the bench is asked to confirm, someone dragged out is freed).
+        The write is RaidMixin.save_board — the verb MCP and plain text use; a stale `rev` is refused (409)."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         groups = [[str(n) for n in g] for g in (d.get("groups") or [])]
-        async with board_lock(key):
-            # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
-            if d.get("rev") and d["rev"] != rc.board_rev(v.reg, ev):
-                return stale(v, ev)
-            return await save_board(v, rs, ev, t, groups)
+        was_open = ev.state == "open"
+        try:  # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
+            line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name)
+        except rc.BoardChanged:
+            return stale(v, ev)
+        return board_written(v, ev, was_open, line)
 
     @app.post("/api/run/{key}/move")
     async def run_move(request: Request, key: str):
         """One drag, applied to the board as it is NOW: {member, to: {r, g, i} | null (= bank)}. Two officers dragging
-        at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat freed)."""
+        at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat freed).
+        The write is RaidMixin.board_move."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         name, to = str(d.get("member") or ""), d.get("to")
-        async with board_lock(key):
-            n = rc.groups_per_roster(v.reg, rc.run_size(v.reg, ev))
-            try:
-                target = None if not to else (as_int(to.get("r"), "to.r") * n + as_int(to.get("g"), "to.g"), as_int(to.get("i", 99), "to.i"))
-                groups = rc.apply_move(v.reg, ev, name, target)
-            except ValueError as e:
-                return JSONResponse({"error": str(e)[:1].upper() + str(e)[1:], **board_reply(v.reg, ev)}, status_code=409)
-            return await save_board(v, rs, ev, t, groups)
+        n = rc.groups_per_roster(v.reg, rc.run_size(v.reg, ev))
+        target = None if not to else (as_int(to.get("r"), "to.r") * n + as_int(to.get("g"), "to.g"), as_int(to.get("i", 99), "to.i"))
+        was_open = ev.state == "open"
+        try:
+            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)[:1].upper() + str(e)[1:], **board_reply(v.reg, ev)}, status_code=409)
+        return board_written(v, ev, was_open, line)
 
     # ---- live updates: one event stream per open page; a run save anywhere (site, Discord, scheduler) wakes them
     subscribers: set[asyncio.Queue] = set()
@@ -751,8 +756,14 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         status = d.get("status")
         if status not in rc.STATUSES:
             return JSONResponse({"error": f"status must be one of {', '.join(rc.STATUSES)}"}, status_code=400)
-        try:  # set_answer refreshes the sheet and cards and writes the ops line itself; its reply is Discord-flavoured
-            line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name))
+        note = str(d.get("note") or "").strip()[:300] or None
+        if note and status != "out":
+            return JSONResponse({"error": "a note goes with No thanks (status out): it is the reason they can't make it"}, status_code=400)
+        try:  # set_answer / call_out refresh the sheet and cards and write the ops line themselves; the reply is Discord-flavoured
+            if note:  # No thanks with a reason: a callout, the note for the officers only (/raid out's verb)
+                line = await bot.call_out(v.reg, rs, ev, m, note, v.name)
+            else:
+                line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line.replace("**", "").removeprefix("✅ ")}
@@ -841,8 +852,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 sid = sched["id"]
         except ValueError:
             return JSONResponse({"error": "that date and time didn't parse — pick one with the picker"}, status_code=400)
-        if start < now - timedelta(minutes=5):  # a mistyped year would open a run the scheduler may close at once
-            return JSONResponse({"error": f"{reg.local12(start)} is in the past — pick a time from now on"}, status_code=400)
+        try:  # a mistyped year would open a run the scheduler may close at once (open_run_and_post checks it too)
+            rc.refuse_past_start(reg, start, now)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         rs = bot.raids.store(reg)
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
             ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, **rc.schedule_kw(sid)))
@@ -869,6 +882,52 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} answered for {m.display_name}: {line}")
         return {"message": line}
 
+    @app.post("/api/admin/fill-answer")
+    async def admin_fill_answer(request: Request):
+        """Officer answers a FILL ask (the seat / swap question the fill engine DMed) on someone's behalf:
+        {run, member, yes} → RaidMixin.answer_fill_for, the fill DM buttons' own verb (tied partner released on a no,
+        the next batch asked, thread line, sheet and cards)."""
+        v, d = await body(request, officer=True)
+        m = resolve_member(v.reg, member_ref(d))
+        rs, ev, t = live_event(v.reg, str(d.get("run") or ""))
+        if "yes" not in d:
+            return JSONResponse({"error": "yes: true (they take it) or false (they can't)"}, status_code=400)
+        try:
+            line = await bot.answer_fill_for(v.reg, rs, ev, m, d.get("yes") in (True, "true", "yes", 1), v.name)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} answered a fill ask for {m.display_name}: {line}")
+        return {"message": line}
+
+    def channel_ref(reg, value) -> int | None:
+        """A channel given as an id, <#id> or a name (#raids) → its id; None when empty. Unknown / ambiguous → 400."""
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        if raw.strip("<#>").isdigit():
+            return int(raw.strip("<#>"))
+        want = raw.lstrip("#").lower()
+        hits = [c for c in bot.guild_channels(reg) if c["name"].lower() == want]
+        if len(hits) != 1:
+            raise HTTPException(400, f"no channel named #{want}" if not hits else f"#{want}: several channels match")
+        return int(hits[0]["id"])
+
+    @app.post("/api/run/{key}/sheet")
+    async def run_sheet(request: Request, key: str):
+        """Re-post a live sheet (/raid sheet's verb, RaidMixin.repost_sheet): {channel?} = a channel id or name,
+        default the signup channel. The sheet's buttons and later refreshes follow the new message."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        cid = channel_ref(v.reg, d.get("channel")) or v.reg.config.signup_channel_id
+        if not cid:
+            return JSONResponse({"error": "no signup channel is set: name the channel to post in"}, status_code=400)
+        channel = bot.get_channel(int(cid))
+        if channel is None:
+            return JSONResponse({"error": "I can't see that channel"}, status_code=400)
+        line = await bot.repost_sheet(v.reg, rs, ev, channel)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        return {"message": line}
+
     @app.post("/api/admin/test")
     async def admin_test(request: Request):
         """The test bench over HTTP — the same steps as /gm test seed|run|answer|clear (discord_registry.py)."""
@@ -876,7 +935,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         reg, action = v.reg, str(d.get("action") or "")
         rs = bot.raids.store(reg)
         if action == "seed":
-            made = await asyncio.to_thread(reg.seed_test_members, as_int(d.get("count", 20), "count"), v.name)
+            count = as_int(d.get("count", 20), "count")  # 0 = the whole built-in roster; above it is capped to it
+            made = await asyncio.to_thread(reg.seed_test_members, count if count > 0 else len(reg.test_roster()), v.name)
             total = len(reg.test_members())
             await bot.ops.emit(reg.config, "warn", f"test bench: {len(made)} test members seeded by {v.name} ({total} total)")
             return {"message": f"{len(made)} test member(s) created, {total} in total: " + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30])}
@@ -912,18 +972,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 else:
                     s = rc.set_signup(reg, rs, ev, m, None, status, source="test")
                     done.append(f"{m.display_name} {rc.LABELS[s.status]}")
-            else:
-                import random
-
-                pool = [m for m in reg.test_members() if str(m.discord_id) not in ev.signups]
-                random.shuffle(pool)
-                for st, n in (("in", as_int(d.get("join", 0), "join")), ("sub", as_int(d.get("bench", 0), "bench")), ("out", as_int(d.get("out", 0), "out"))):
-                    for _ in range(n):
-                        if not pool:
-                            break
-                        m = pool.pop()
-                        rc.set_signup(reg, rs, ev, m, None, st, source="test")
-                        done.append(f"{m.display_name} {rc.LABELS[st]}")
+            else:  # a random mix of the puppets who haven't answered (the helper chat and /gm test answer share)
+                try:
+                    done += rc.test_answer_mix(reg, rs, ev, as_int(d.get("join", 0), "join"), as_int(d.get("bench", 0), "bench"), as_int(d.get("out", 0), "out"))
+                except RegistryError as e:
+                    return JSONResponse({"error": str(e)}, status_code=400)
             await bot.refresh_sheet(reg, ev)
             await bot.ops.emit(reg.config, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {v.name}")
             return {"message": ("; ".join(done)) if done else "nobody left to answer (seed more, or they've all answered)", "key": ev.key}
@@ -1215,8 +1268,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             m, a = await asyncio.to_thread(v.reg.add_absence, m0.discord_id, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, m0.display_name)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.announce_absence(v.reg, m, a, v.name)
-        return {"message": f"{m.display_name} away {v.reg.span_label(a.start, a.end)}"}
+        touched = await bot.announce_absence(v.reg, m, a, v.name)
+        return {"message": f"{m.display_name} away {v.reg.span_label(a.start, a.end)}" + sheets_touched(v.reg, touched), "sheets": list(touched or [])}
 
     @app.post("/api/members/absence/clear")
     async def members_absence_clear(request: Request):
@@ -1227,16 +1280,29 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     # ---- ops, config (read-only)
     @app.get("/api/ops")
-    async def ops(request: Request):
+    async def ops(request: Request, precedents_limit: int = 50, ledger_limit: int = 100, member: str | None = None, changes_limit: int = 50):
+        """Status, the ops feed, the registry change lines (`changes`, newest first, since the bot started — the
+        analytics channel's change log), and the loot precedents and ledger (newest first). `member` narrows the
+        precedents and ledger to one member's characters; the limits cap at 50 precedents and 100 ledger rows."""
+        from ..registry import recent_changes
+
         v = await who(request, officer=True)
-        st, prov, feed = bot.registries.store, bot.ctx.provider, getattr(bot, "feed", None)
-        precedents = st.read_jsonl(Path(v.reg.key) / "precedents.jsonl")[-50:]
-        ledger = st.read_jsonl(Path(v.reg.key) / "ledger.jsonl")[-100:]
+        st, prov, feed = bot.registries.store, getattr(getattr(bot, "ctx", None), "provider", None), getattr(bot, "feed", None)
+        precedents = st.read_jsonl(Path(v.reg.key) / "precedents.jsonl")
+        ledger = st.read_jsonl(Path(v.reg.key) / "ledger.jsonl")
+        if member:
+            m = resolve_member(v.reg, member)
+            names = {m.display_name.lower(), *((c.name or "").lower() for c in m.characters if c.name)}
+            precedents = [p for p in precedents if str(p.get("human") or "").lower() in names or str(p.get("bot") or "").lower() in names]
+            ledger = [r for r in ledger if str(r.get("raider") or "").lower() in names]
+        pl, ll = max(0, min(int(precedents_limit), 50)), max(0, min(int(ledger_limit), 100))
         started = float(getattr(bot, "started_at", STARTED))
         return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed.status() if feed else "disabled",
                 "up": int(time.time() - started), "started_at": started,
                 "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent)],
-                "precedents": list(reversed(precedents)), "ledger": list(reversed(ledger))}
+                "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))],
+                "precedents": list(reversed(precedents[-pl:] if pl else [])), "ledger": list(reversed(ledger[-ll:] if ll else [])),
+                "member": m.display_name if member else None}
 
     @app.get("/api/config")
     async def config(request: Request):
@@ -1257,11 +1323,101 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         officer_roles = [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.officer_role_ids]
         return {"yaml": yaml.safe_dump(cfg.model_dump(), sort_keys=False),
                 "docs": {d: {"text": ps.read(d), "compiled": bool(ps.compiled(d)), "summary": ((ps.compiled(d) or {}).get("summary") if isinstance(ps.compiled(d), dict) else None)} for d in ("loot", "comp", "persona")},
-                "channels": {k: {"id": str(getattr(cfg, attr)) if getattr(cfg, attr) else None, "name": chans.get(str(getattr(cfg, attr)))} for k, attr in CHANNEL_KINDS.items()},
+                # `missing`: set, but not a channel the bot can see any more (deleted, or its permissions changed)
+                "channels": {k: {"id": str(getattr(cfg, attr)) if getattr(cfg, attr) else None, "name": chans.get(str(getattr(cfg, attr))),
+                                 "missing": bool(getattr(cfg, attr)) and guild is not None and str(getattr(cfg, attr)) not in chans} for k, attr in CHANNEL_KINDS.items()},
                 "guild_channels": bot.guild_channels(reg), "guild_roles": guild_roles,
                 "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles, "news_keywords": list(cfg.news_keywords),
-                             "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None},
+                             "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None,
+                             "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids]},
                 "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner}
+
+    # ---- policy documents (loot, comp, persona): edit → compile → confirm | discard, what /gm policy edit does
+    def policy_store(reg):
+        from ..policy import PolicyStore
+
+        return PolicyStore(bot.registries.store, reg.key)
+
+    def policy_doc(doc: str) -> str:
+        from ..policy import DOCS
+
+        if doc not in DOCS:
+            raise HTTPException(400, f"doc is one of {', '.join(DOCS)}")
+        return doc
+
+    def policy_json(reg, doc: str) -> dict:
+        from .. import policy as pol
+
+        ps = policy_store(reg)
+        c = ps.compiled(doc)
+        p = pol.pending(ps, doc)
+        return {"doc": doc, "text": ps.read(doc), "compiled": bool(c), "summary": c.get("summary") if isinstance(c, dict) else None,
+                "pending": bool(p), "pending_compiled": bool(p and p.get("compiled") is not None)}
+
+    @app.get("/api/policy/{doc}")
+    async def policy_get(request: Request, doc: str):
+        """One policy document: its text, whether a compiled reading is live (and its summary), and whether an edit is pending."""
+        v = await who(request, officer=True)
+        return policy_json(v.reg, policy_doc(doc))
+
+    @app.put("/api/policy/{doc}")
+    async def policy_put(request: Request, doc: str):
+        """Officers: {text} replaces the document as a DRAFT (the live compiled reading is unchanged until confirmed;
+        the persona is live as written). Next: compile, then confirm or discard (policy.begin_edit)."""
+        from .. import policy as pol
+
+        v, d = await body(request, officer=True)
+        doc = policy_doc(doc)
+        try:
+            line = await asyncio.to_thread(pol.begin_edit, policy_store(v.reg), doc, str(d.get("text") or ""), v.name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        return {"message": line, **policy_json(v.reg, doc)}
+
+    @app.post("/api/policy/{doc}/compile")
+    async def policy_compile(request: Request, doc: str):
+        """Officers: the bot's reading of the document as it is now (an LLM call; nothing goes live). `reading` is the
+        rules/constraints in words plus the questions it could not settle; confirm makes it live, discard reverts."""
+        from .. import policy as pol
+
+        v, _ = await body(request, officer=True)
+        doc = policy_doc(doc)
+        provider = getattr(getattr(bot, "ctx", None), "provider", None)
+        try:
+            compiled, reading = await asyncio.to_thread(pol.compile_pending, policy_store(v.reg), doc, provider)
+        except pol.PolicyPendingError as e:
+            return JSONResponse({"error": str(e)}, status_code=400 if doc == "persona" or provider is not None else 503)
+        except Exception as e:  # noqa: BLE001 — provider/schema errors: the caller can retry
+            return JSONResponse({"error": f"could not compile the {doc} policy: {e}"}, status_code=502)
+        return {"doc": doc, "reading": reading, "compiled": compiled.model_dump() if compiled is not None else None,
+                "message": "confirm to make this reading live, or discard the edit" if compiled is not None else reading}
+
+    @app.post("/api/policy/{doc}/confirm")
+    async def policy_confirm(request: Request, doc: str):
+        from .. import policy as pol
+
+        v, _ = await body(request, officer=True)
+        doc = policy_doc(doc)
+        try:
+            line = await asyncio.to_thread(pol.confirm_pending, policy_store(v.reg), doc, v.name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} confirmed the compiled {doc} policy: {line}")
+        return {"message": line, **policy_json(v.reg, doc)}
+
+    @app.post("/api/policy/{doc}/discard")
+    async def policy_discard(request: Request, doc: str):
+        from .. import policy as pol
+
+        v, _ = await body(request, officer=True)
+        doc = policy_doc(doc)
+        try:
+            line = await asyncio.to_thread(pol.discard_pending, policy_store(v.reg), doc, v.name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        return {"message": line, **policy_json(v.reg, doc)}
 
     @app.post("/api/admin/config")
     async def admin_config(request: Request):
@@ -1326,18 +1482,17 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/admin/plain-permissions")
     async def plain_set(request: Request):
-        """Owner: the whole policy — {groups: {group: [who…]}, channels: {channel id: mode}, dm, default}. Groups or
-        fields left out keep their current value."""
+        """Owner: the whole policy — {groups: {group: [who…]}, channels: {channel id: mode}, dm, default}; or
+        `set_channels` {channel id: mode | null} to change some channels and keep the rest. Groups or fields left out
+        keep their current value."""
         v, d = await body(request, officer=True)
         need_owner(v)
         guild = bot.get_guild(v.reg.config.discord_guild_id)
         if guild is not None:
             v.reg.cache_roles(guild)
-        cur = v.reg.config.plain
-        want = {"groups": {**{g: v.reg.plain_who(g) for g in cur.groups}, **(d.get("groups") or {})} if "groups" in d else dict(cur.groups),
-                "channels": d["channels"] if "channels" in d else dict(cur.channels), "dm": d.get("dm") or cur.dm, "default": d.get("default") or cur.default}
-        try:
-            msg = await asyncio.to_thread(v.reg.set_plain_policy, want, v.name)
+        patch = {k: d[k] for k in ("groups", "channels", "set_channels", "dm", "default") if k in d}
+        try:  # the merge plain text's `plain` op uses too (Registry.merge_plain_policy), then one validated write
+            msg = await asyncio.to_thread(v.reg.set_plain_policy, v.reg.merge_plain_policy(patch), v.name)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e).splitlines()[0]}, status_code=400)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
@@ -1380,6 +1535,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             msg = await asyncio.to_thread(v.reg.set_recruitment, v.name, **kw)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        refresh = getattr(bot, "refresh_registration_card", None)
+        if refresh is not None:  # open/closed and the note show on the registration card, as with /gm config recruitment
+            await maybe_await(refresh(v.reg))
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
         return {"message": msg, **recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": True}
 
@@ -1418,7 +1576,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         puts it in the invite field and the owner saves the section."""
         v, d = await body(request, officer=True)
         need_owner(v)
-        cid = as_int(str(d.get("channel_id") or "").strip("<#>"), "channel id")
+        cid = channel_ref(v.reg, d.get("channel_id") or d.get("channel"))  # an id, <#id> or a name (MCP names channels)
+        if cid is None:
+            return JSONResponse({"error": "channel_id: which channel should the invite open?"}, status_code=400)
         try:
             url = await maybe_await(bot.create_invite(v.reg, cid))
         except (RegistryError, ValueError) as e:

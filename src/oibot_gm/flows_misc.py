@@ -16,18 +16,12 @@ from datetime import timedelta
 import discord
 
 from . import wizard_opts
+from .presets import DEFAULT_TEMPO, TEMPOS  # name → (label, start_in, nudge_in, lock_in, confirm_in), shared with plain text
 from .registry import Registry
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, flow
 
 log = logging.getLogger(__name__)
 
-# name → (label, start_in, nudge_in, lock_in, confirm_in), all minutes; each row holds start > nudge > lock > confirm ≥ 0
-TEMPOS: dict[str, tuple[str, int, int, int, int]] = {
-    "quick": ("Quick", 20, 16, 12, 8),
-    "standard": ("Standard", 40, 32, 25, 15),
-    "slow": ("Slow", 90, 70, 55, 35),
-}
-DEFAULT_TEMPO = "standard"
 ANSWER_COUNTS = (0, 1, 2, 3, 5, 8, 10, 15, 20)
 SEED_COUNTS = (5, 10, 20)
 STATUS_BUTTONS = (("in", "Join", discord.ButtonStyle.success), ("sub", "Bench", discord.ButtonStyle.primary), ("out", "No thanks", discord.ButtonStyle.secondary))

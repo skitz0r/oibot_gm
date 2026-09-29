@@ -537,18 +537,14 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
             if not cur or cur.state in ("done", "cancelled") or not m:
                 await wiz.finish(si, "That run closed — nothing to call out of.")
                 return
-            note = v.get("note") or None
-            t = run_team(reg, cur)
-            bot = si.client
-            co = rc.callout(reg, rs, cur, m, t, note)
-            await wiz.finish(si, f"Noted: out for {run_label(reg, cur)} ({co.hours_before:.0f}h before{', after lock' if co.late else ''}). Thanks for saying so.")
-            if sheet_state(cur) == "locked" and cur.seat_of(m.display_name):
-                await bot.drop_seated(reg, rs, cur, t, m, "callout", note)
-                return
-            await bot.refresh_sheet(reg, cur)
-            # the note is for the officers only: nothing in the public signup channel, one line in the run's updates thread
-            await bot.post_run_update(reg, cur, f"⚑ {m.display_name} ({co.character}) called out, {co.hours_before:.0f}h before")
-            await bot.ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {cur.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else ""))
+            await wiz.working(si, "Noting it…")
+            # the shared verb (the site, MCP and plain text call it too): callout, seat freed after lock, the note for
+            # the officers only (the run's updates thread and the ops feed, never the public signup channel)
+            try:
+                line = await si.client.call_out(reg, rs, cur, m, v.get("note") or None, by=m.display_name)
+            except ValueError as e:
+                line = f"❌ {e}"
+            await wiz.finish(si, line)
 
         form = Form(f"Out · {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
             Field("note", "Note for the officers (optional)", required=False, paragraph=True, max_length=300,
