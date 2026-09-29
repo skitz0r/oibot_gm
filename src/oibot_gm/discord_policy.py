@@ -178,14 +178,14 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     author = interaction_or_message.author if is_msg else interaction_or_message.user
     me = reg.members.get(author.id)
     name = me.display_name if me else author.display_name
+    officer, role_ids = await bot.plain_identity(reg, author)  # decided in code, before the parser sees anything
     if req is None:
-        req = await asyncio.to_thread(configops.parse, provider, reg, text, name)
+        req = await asyncio.to_thread(configops.parse, provider, reg, text, name, officer=officer)
     if req.kind == "ignore":
         return
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
         to_help = not is_msg or reg.plain_mode(channel) == "act"
     if req.kind == "question" and not req.ops and not req.questions and to_help and getattr(bot, "help_answer", None) is not None:
-        officer, _ = await bot.plain_identity(reg, author)
         answer = await bot.help_answer(reg, author.id, officer, text)
         if answer:
             await send(answer[:1950], ephemeral=True)
@@ -196,7 +196,6 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if not req.ops:
         await send(req.reply[:1900] or "Nothing to change.", ephemeral=True)
         return
-    officer, role_ids = await bot.plain_identity(reg, author)
     allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel)
 
     def apply_button(base=None):  # a newcomer refused with APPLY_FIRST gets the Apply to join button right on the reply

@@ -129,7 +129,7 @@ def test_needs_developer_can_only_be_dismissed(reg):
     with pytest.raises(RegistryError, match="needs a developer"):
         asyncio.run(configops.apply_async(reg, ConfigOp(op="proposal", target=p.id, value="approve"), "Officer", False, bot=Bot()))
     assert "no proposal" in configops.describe(reg, ConfigOp(op="proposal", target="260101-ffff", value="approve"))
-    assert f"- {p.id}: Barrow Deeps resets weekly (needs_developer, proposed)" in configops.current_config_text(reg)
+    assert f"- {p.id}: Barrow Deeps resets weekly (needs_developer, proposed)" in configops.current_config_text(reg, officer=True)
 
 
 def test_proposals_are_officers_by_default(reg):

@@ -184,7 +184,7 @@ def test_question_in_an_act_channel_goes_to_help(reg):
 def test_current_config_text_names_member_roles(reg):
     reg.role_names = {777: "Raider", 778: "Guest"}
     reg.set_recruitment("t", member_role_ids=[777, 999])
-    text = configops.current_config_text(reg)
+    text = configops.current_config_text(reg, officer=True)
     assert "member_roles:\n- Raider\n- role:999" in text and "member_role_ids" not in text
     assert "## Open applications" in text and "## News proposals waiting" in text
 

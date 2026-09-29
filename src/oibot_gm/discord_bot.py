@@ -1093,7 +1093,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
         async with message.channel.typing():
             if may_act and not reg.may_ask(uid, officer):
-                req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name)
+                req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name, officer=officer)
                 if req.kind == "change" and req.ops:
                     await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req)
                 else:

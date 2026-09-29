@@ -330,7 +330,8 @@ returns to the game defaults.
   an officer confirms the reading before it goes live. Plain text does the same: "add a loot rule: tanks first on
   shields", "drop the loot rule about attendance", "recompile the comp policy", or a whole new text; after **Apply**
   the bot shows its reading with **Confirm this reading** / **Discard edit** (Discard puts the previous text back).
-  The persona has no reading: it is live as written.
+  If the reading can't be made right then (Claude unavailable), the change is refused and the text is put back as it
+  was — nothing is left half-done. The persona has no reading: it is live as written.
 - Plain-text config: `/gm change <text>`, or @mention the bot in the ops or analytics channel — the bot
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
   question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses
@@ -532,6 +533,9 @@ means you; a name that could also be someone else (two people with that name, or
 character) counts as someone else; a character you name must be one of yours. Refusals say who may and where:
 *"Only officers can change someone else's absence."*, *"Plain text can't change runs in #general — use
 #officer-ops."* Every applied plain-text change is logged in the ops channel with who asked and where.
+What the bot reads your sentence against depends on who you are, decided before it reads it: an officer's request is
+matched against the open applications, the news proposals waiting and the member-role names too; a member's never
+is, so a question the bot asks a member back can't name an applicant.
 
 ## 8a. Rehearsing with the test bench (officers)
 

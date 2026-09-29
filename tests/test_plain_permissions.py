@@ -347,7 +347,7 @@ def test_web_plain_change_uses_the_same_check(web_client, g, monkeypatch):
     w.bot.ctx = types.SimpleNamespace(provider=object())
     req = ConfigRequest(kind="change", reply="ok", ops=[ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="bring flasks"),
                                                          ConfigOp(op="dm", member=g.me.display_name, value="off")])
-    monkeypatch.setattr(configops, "parse", lambda provider, reg, text, by=None: req.model_copy(deep=True))
+    monkeypatch.setattr(configops, "parse", lambda provider, reg, text, by=None, officer=False: req.model_copy(deep=True))
     r = w.c.post("/api/ops/change", json={"text": "x", "apply": True}, headers=w.as_(w.officer))
     assert r.status_code == 200, r.text
     d = r.json()

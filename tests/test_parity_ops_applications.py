@@ -95,7 +95,7 @@ def test_only_officers_decide_by_default(reg, app):
 
 
 def test_the_parser_sees_open_applications(reg, app):
-    text = configops.current_config_text(reg)
+    text = configops.current_config_text(reg, officer=True)
     assert f"- nyxie<@{NYX}>: Nyx Starfall, Priest Holy" in text
     reg.decide(NYX, False, "t")
-    assert "## Open applications (applicant<@id>: character, class spec)\n(none)" in configops.current_config_text(reg)
+    assert "## Open applications (applicant<@id>: character, class spec)\n<data>\n(none)\n</data>" in configops.current_config_text(reg, officer=True)

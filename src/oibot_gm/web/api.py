@@ -247,10 +247,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         return out
 
     def sheets_touched(reg, keys) -> str:
-        """announce_absence's touched run keys as words: ' · off 2 sheets: Barrow Deeps Tue 6 Oct 7:30 PM, …'."""
-        rs = bot.raids.store(reg)
-        names = [dr.run_title(reg, rs.events[k]) if k in rs.events else k for k in (keys or [])]
-        return f" · off {len(names)} sheet{'s' if len(names) != 1 else ''}: {', '.join(names)}" if names else ""
+        """announce_absence's touched run keys as words — the same words the chat reply uses (configops.sheets_words)."""
+        from ..configops import sheets_words
+
+        return sheets_words(reg, bot, keys)
 
     async def clear_absence(v, uid: int, start: str):
         """Registry clears it, the bot re-opens the sheets it had answered for them; the lines say what changed."""
@@ -1605,7 +1605,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if provider is None:
             return JSONResponse({"error": "the LLM provider is off (ANTHROPIC_API_KEY unset)"}, status_code=503)
         try:
-            req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name)
+            req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name, officer=v.officer)
         except Exception as e:  # noqa: BLE001 — provider/schema errors are 502s the caller can retry
             return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
         # the same policy check as Discord: the site (and MCP, as the owner) counts as a channel where plain text acts
