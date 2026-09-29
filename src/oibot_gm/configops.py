@@ -2033,6 +2033,8 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
         return line + " — no LLM to compile it right now (/gm policy reload once there is)"
     try:
         compiled, _ = await asyncio.to_thread(policy_mod.compile_pending, ps, doc, provider)
+    except policy_mod.PolicyPendingError as e:  # someone edited the doc while it compiled: their text stays, compile again
+        raise RegistryError(str(e))
     except Exception as e:  # noqa: BLE001 — the LLM call failed: undo this op's write, leave no stray draft behind
         log.warning("policy compile failed for %s/%s", reg.key, doc, exc_info=True)
         if ps.read(doc) != before:

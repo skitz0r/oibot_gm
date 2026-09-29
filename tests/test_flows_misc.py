@@ -292,8 +292,8 @@ def test_rule_shows_the_tail_and_takes_the_compile_path(reg, rs, ps, officer, mo
     client, calls = make_client(reg, rs, ps)
     got = {}
 
-    async def fake_compile(interaction, reg_, ps_, doc, previous, provider, ops, followup=False):
-        got.update(doc=doc, previous=previous, provider=provider, followup=followup, draft=ps_.read(doc))
+    async def fake_compile(interaction, reg_, ps_, doc, provider, ops, followup=False):
+        got.update(doc=doc, previous=policy_mod.pending(ps_, doc)["previous"], provider=provider, followup=followup, draft=ps_.read(doc))
     monkeypatch.setattr(discord_policy, "compile_and_confirm", fake_compile)
     before = ps.read("loot")
     h = Harness(reg, rs, client=client)

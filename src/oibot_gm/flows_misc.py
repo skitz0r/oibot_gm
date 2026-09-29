@@ -14,7 +14,7 @@ from datetime import timedelta
 
 import discord
 
-from . import wizard_opts
+from . import policy as policy_mod, wizard_opts
 from .presets import DEFAULT_TEMPO, TEMPOS  # name → (label, start_in, nudge_in, lock_in, confirm_in), shared with plain text
 from .registry import Registry
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, flow
@@ -373,10 +373,10 @@ class RuleWizard(Wizard):
             return
         await self.working(interaction, "Reading the rule…")
         client = interaction.client
-        previous = self.ps.read(self.doc)
-        self.ps.write_draft(self.doc, previous.rstrip() + "\n" + as_bullet(text), interaction.user.display_name)
+        # the one pending edit per doc (policy.begin_edit, as the site, MCP and plain text): Discard restores the text before it
+        policy_mod.begin_edit(self.ps, self.doc, self.ps.read(self.doc).rstrip() + "\n" + as_bullet(text), interaction.user.display_name)
         provider = getattr(getattr(client, "ctx", None), "provider", None)
-        await discord_policy.compile_and_confirm(interaction, self.reg, self.ps, self.doc, previous, provider, client.ops, followup=True)
+        await discord_policy.compile_and_confirm(interaction, self.reg, self.ps, self.doc, provider, client.ops, followup=True)
         await self.finish(interaction, f"Added to the {RULE_DOCS[self.doc]} draft:\n> {text[:1500]}\n-# Confirm or discard my reading below.")
 
 

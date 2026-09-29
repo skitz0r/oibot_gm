@@ -28,57 +28,80 @@ class PolicyContext:
 # ---------------------------------------------------------------- compile-and-confirm
 
 class CompileConfirmView(discord.ui.View):
-    """Confirm / Discard under the bot's reading of a policy edit. `previous` is the text before the edit (Discard puts
-    it back); a pending edit held in policy.PENDING (plain text, the site, MCP) is settled here too."""
+    """Confirm / Discard under the bot's reading of a policy edit. Every Discord policy edit is the one pending edit
+    in policy.PENDING (begin_edit / compile_pending — the site, MCP and plain text share it). `text` is the exact
+    text the reading was compiled from: both buttons refuse once the document no longer reads that way (someone
+    edited it since — this reading is stale); `previous` is the text before the edit, Discard's fallback when the
+    pending entry is gone."""
 
-    def __init__(self, ps: policy_mod.PolicyStore, doc: str, compiled, previous: str, ops: Ops, reg: Registry):
+    def __init__(self, ps: policy_mod.PolicyStore, doc: str, compiled, previous: str, ops: Ops, reg: Registry, text: str | None = None):
         super().__init__(timeout=900)
         self.ps, self.doc, self.compiled, self.previous, self.ops, self.reg = ps, doc, compiled, previous, ops, reg
+        self.text = text if text is not None else ps.read(doc)
+
+    async def _stale(self, interaction: discord.Interaction) -> bool:
+        if self.ps.read(self.doc) == self.text:
+            return False
+        await interaction.response.edit_message(content=f"The {self.doc} policy changed since this reading — nothing done. Compile it again "
+                                                        f"(`/gm policy reload`, or ask me to) and confirm that reading.", embed=None, view=None)
+        self.stop()
+        return True
 
     @discord.ui.button(label="Confirm this reading", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if await self._stale(interaction):
+            return
         self.ps.confirm(self.doc, self.compiled, interaction.user.display_name)
-        p = policy_mod.pending(self.ps, self.doc)
-        if p is not None and p.get("compiled") is self.compiled:
-            policy_mod.PENDING.pop((self.ps.key, self.doc), None)
+        policy_mod.PENDING.pop((self.ps.key, self.doc), None)  # the text now has a live reading: nothing left pending
         await interaction.response.edit_message(content=f"✅ {self.doc} policy is live with this reading.", embed=None, view=None)
         await self.ops.emit(self.reg.config, "info", f"{interaction.user.display_name} confirmed the compiled {self.doc} policy ({configops.compiled_count(self.compiled)} items)")
         self.stop()
 
     @discord.ui.button(label="Discard edit", style=discord.ButtonStyle.secondary)
     async def discard(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if self.ps.read(self.doc) != self.previous:
-            self.ps.revert(self.doc, self.previous, interaction.user.display_name)
-        policy_mod.PENDING.pop((self.ps.key, self.doc), None)
+        if await self._stale(interaction):
+            return
+        held = policy_mod.PENDING.pop((self.ps.key, self.doc), None)
+        previous = held["previous"] if held else self.previous
+        if self.ps.read(self.doc) != previous:
+            self.ps.revert(self.doc, previous, interaction.user.display_name)
         await interaction.response.edit_message(content=f"Edit to {self.doc} discarded; previous text restored.", embed=None, view=None)
         self.stop()
 
 
-async def send_compiled(send, reg: Registry, ps: policy_mod.PolicyStore, doc: str, compiled, previous: str, ops: Ops, **kw):
+async def send_compiled(send, reg: Registry, ps: policy_mod.PolicyStore, doc: str, compiled, previous: str, ops: Ops, text: str | None = None, **kw):
     """The reading embed + Confirm / Discard through any `send` (an interaction response or followup, a channel or a
-    message reply): the one rendering for /gm policy edit|reload, /gm rule and a plain-text policy change."""
+    message reply): the one rendering for /gm policy edit|reload, /gm rule and a plain-text policy change.
+    `text`: what the reading was compiled from (the view refuses once the document differs)."""
     e = discord.Embed(title=f"My reading of the {doc} policy", colour=TEAL, description=policy_mod.render_compiled(doc, compiled)[:4000])
     e.set_footer(text="Confirm to make this the live compiled form; Discard restores the previous text. Questions above need an edit, not a guess.")
-    return await send(embed=e, view=CompileConfirmView(ps, doc, compiled, previous, ops, reg), **kw)
+    return await send(embed=e, view=CompileConfirmView(ps, doc, compiled, previous, ops, reg, text=text), **kw)
 
 
-async def compile_and_confirm(interaction: discord.Interaction, reg: Registry, ps: policy_mod.PolicyStore, doc: str, previous: str, provider, ops: Ops, followup: bool = False):
+async def compile_and_confirm(interaction: discord.Interaction, reg: Registry, ps: policy_mod.PolicyStore, doc: str, provider, ops: Ops, followup: bool = False):
+    """/gm policy edit|reload and /gm rule after their write (policy.begin_edit): compile the doc's current text as the
+    pending reading (policy.compile_pending, off the loop) and show it with Confirm / Discard."""
     send = interaction.followup.send if followup or interaction.response.is_done() else interaction.response.send_message
     if doc == "persona" or provider is None:
         note = "Persona saved (no compile step)." if doc == "persona" else "Saved. No LLM available to compile; run `/gm policy reload` when it is."
         await send(note, ephemeral=True)
         return
-    compiled = await asyncio.to_thread(ps.compile, doc, provider)
-    await send_compiled(send, reg, ps, doc, compiled, previous, ops, ephemeral=True)
+    try:
+        await asyncio.to_thread(policy_mod.compile_pending, ps, doc, provider)
+    except policy_mod.PolicyPendingError as e:
+        await send(f"⛔ {e}", ephemeral=True)
+        return
+    if not await pending_reading(send, reg, ps, doc, ops, ephemeral=True):
+        await send(f"The {doc} policy changed while I was reading it — run `/gm policy reload`.", ephemeral=True)
 
 
 async def pending_reading(send, reg: Registry, ps: policy_mod.PolicyStore, doc: str, ops: Ops, **kw) -> bool:
-    """After a plain-text policy change: the reading configops held (policy.compile_pending) with Confirm / Discard.
-    False when nothing is waiting (the persona, or no LLM)."""
+    """The reading held in policy.PENDING (compile_pending) with Confirm / Discard. False when nothing is waiting
+    (the persona, no LLM, or an edit since the compile)."""
     p = policy_mod.pending(ps, doc)
     if not p or p.get("compiled") is None:
         return False
-    await send_compiled(send, reg, ps, doc, p["compiled"], p["previous"], ops, **kw)
+    await send_compiled(send, reg, ps, doc, p["compiled"], p["previous"], ops, text=p.get("text"), **kw)
     return True
 
 
@@ -91,10 +114,13 @@ class PolicyEditModal(discord.ui.Modal):
         self.text.default = ps.read(doc)[:4000]
 
     async def on_submit(self, interaction: discord.Interaction):
-        previous = self.ps.read(self.doc)
-        self.ps.write_draft(self.doc, str(self.text.value), interaction.user.display_name)
+        try:  # the one pending edit per doc (policy.begin_edit): remembers the text before it, for Discard
+            policy_mod.begin_edit(self.ps, self.doc, str(self.text.value), interaction.user.display_name)
+        except policy_mod.PolicyPendingError as e:
+            await interaction.response.send_message(f"⛔ {e}", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await compile_and_confirm(interaction, self.reg, self.ps, self.doc, previous, self.provider, self.ops, followup=True)
+        await compile_and_confirm(interaction, self.reg, self.ps, self.doc, self.provider, self.ops, followup=True)
 
 
 # ---------------------------------------------------------------- plain-text config
@@ -307,8 +333,7 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         if not reg:
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        ps = pctx.store(reg)
-        await compile_and_confirm(interaction, reg, ps, doc.value, ps.read(doc.value), bot.ctx.provider, ops, followup=True)
+        await compile_and_confirm(interaction, reg, pctx.store(reg), doc.value, bot.ctx.provider, ops, followup=True)
 
 
     @rule.command(name="comp", description="Add a standing composition instruction in plain English")

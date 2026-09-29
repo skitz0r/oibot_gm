@@ -24,6 +24,16 @@ OFFICER_ROLE = 200_000_000_000_000_001  # the fixture guild's officer role id (o
 TEST_MEMBERS = 16  # 2 tanks, 5 healers, 9 dps from Registry.TEST_MIX
 
 
+@pytest.fixture(autouse=True)
+def _no_pending_policy_edits():
+    """policy.PENDING is process-wide (one pending edit per guild and doc): every test starts and ends without one."""
+    from oibot_gm import policy
+
+    policy.PENDING.clear()
+    yield
+    policy.PENDING.clear()
+
+
 @pytest.fixture(scope="session")
 def profile() -> GameProfile:
     return GameProfile.load(ROOT / "profiles" / "forever")

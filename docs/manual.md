@@ -347,7 +347,10 @@ returns to the game defaults.
   shields", "drop the loot rule about attendance", "recompile the comp policy", or a whole new text; after **Apply**
   the bot shows its reading with **Confirm this reading** / **Discard edit** (Discard puts the previous text back).
   If the reading can't be made right then (Claude unavailable), the change is refused and the text is put back as it
-  was — nothing is left half-done. The persona has no reading: it is live as written.
+  was — nothing is left half-done. The persona has no reading: it is live as written. A document has one edit
+  waiting at a time, whoever started it and wherever (Discord, the site, plain text, MCP): Discard goes back to the
+  text before that edit. A reading only goes live against the text it read — if anyone changed the document after
+  it was compiled, Confirm (and a stale Discard) refuses and asks for a fresh compile.
 - Plain-text config: `/gm change <text>`, or @mention the bot in the ops or analytics channel — the bot
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
   question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses

@@ -78,7 +78,12 @@ class PolicyStore:
         return p.read_text() if p.exists() else DEFAULTS[doc]
 
     def write_draft(self, doc: str, text: str, by: str) -> None:
+        """Every draft write, whoever makes it: a reading held for this doc (PENDING) no longer matches the text, so it
+        is dropped (the remembered previous text stays for Discard); confirm_pending needs a fresh compile."""
         self.store.write_text(self.path(doc), text.rstrip() + "\n")
+        held = PENDING.get((self.key, doc))
+        if held is not None:
+            held["compiled"], held["text"] = None, None
         self.store.commit(f"{self.key}: policy {doc} edited by {by} (pending confirmation)")
 
     def compiled(self, doc: str) -> dict | None:
@@ -127,6 +132,9 @@ class PolicyStore:
 # and plain text have no view to hold them, so the pending edit lives here, per guild and doc, in memory: begin_edit
 # writes the draft (remembering the text it replaced), compile_pending shows the reading, confirm_pending makes it
 # live, discard_pending restores the text. A restart forgets the pending reading (the draft text stays; compile again).
+# Discord's /gm policy edit|reload and /gm rule go through the same functions (one pending edit per doc, whoever made
+# it). An entry: {previous: text before the edit, compiled: the held reading or None, text: the exact text that reading
+# was compiled from, by}. A reading only ever goes live against the text it read (confirm_pending checks).
 PENDING: dict[tuple[str, str], dict] = {}
 
 
@@ -149,7 +157,7 @@ def begin_edit(ps: PolicyStore, doc: str, text: str, by: str) -> str:
     key = (ps.key, doc)
     previous = PENDING[key]["previous"] if key in PENDING else ps.read(doc)
     ps.write_draft(doc, text, by)
-    PENDING[key] = {"previous": previous, "compiled": None, "by": by}
+    PENDING[key] = {"previous": previous, "compiled": None, "text": None, "by": by}
     if doc == "persona":
         PENDING.pop(key, None)  # the persona has no compiled form: it is live as written
         return "persona saved (no compile step)"
@@ -169,9 +177,15 @@ def compile_pending(ps: PolicyStore, doc: str, provider: Provider) -> tuple[Base
         return None, "The persona has no compiled form: it is used as written."
     if provider is None:
         raise PolicyPendingError("the LLM provider is off (ANTHROPIC_API_KEY unset): nothing can compile the policy now")
-    compiled = ps.compile(doc, provider)
     key = (ps.key, doc)
-    PENDING.setdefault(key, {"previous": ps.read(doc), "compiled": None, "by": None})["compiled"] = compiled
+    start, text = PENDING.get(key), ps.read(doc)
+    compiled = ps.compile(doc, provider, text)
+    # a slow compile never lands on a newer edit: another begin_edit / discard / confirm or draft write meanwhile wins
+    if PENDING.get(key) is not start or ps.read(doc) != text:
+        raise PolicyPendingError(f"the {doc} policy changed while I was reading it — compile again")
+    entry = start if start is not None else {"previous": text, "compiled": None, "text": None, "by": None}
+    entry["compiled"], entry["text"] = compiled, text
+    PENDING[key] = entry
     return compiled, render_compiled(doc, compiled)
 
 
@@ -181,6 +195,9 @@ def confirm_pending(ps: PolicyStore, doc: str, by: str) -> str:
     p = PENDING.get((ps.key, doc))
     if not p or p.get("compiled") is None:
         raise PolicyPendingError(f"no compiled reading of the {doc} policy is waiting — compile it first")
+    if ps.read(doc) != p.get("text"):
+        p["compiled"], p["text"] = None, None
+        raise PolicyPendingError(f"the {doc} policy text changed since that reading was compiled — compile again")
     ps.confirm(doc, p["compiled"], by)
     PENDING.pop((ps.key, doc), None)
     n = len(getattr(p["compiled"], "rules", getattr(p["compiled"], "constraints", [])))

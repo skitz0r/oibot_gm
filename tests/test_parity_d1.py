@@ -218,3 +218,112 @@ def test_member_join_after_lock_is_refused_with_the_sheets_words(reg, rs):
     assert check("no thanks")[0], "saying no stays self-service after lock"
     assert check("join", officer=True)[0], "an officer may still seat themselves"
     assert "Can't make it" in rc.LOCKED_JOIN
+
+
+# ---------------------------------------------------------------- M2: a reading goes live only against the text it read
+
+from oibot_gm import policy as policy_mod  # noqa: E402
+from oibot_gm.policy import LootCompiled, LootRule, PolicyPendingError, PolicyStore  # noqa: E402
+
+
+class Reader:
+    """A compile that reads the text it was handed; `during` runs mid-compile (another officer's edit)."""
+
+    def __init__(self, during=None):
+        self.during, self.seen = during, []
+
+    def complete(self, workload, system, user, schema):
+        self.seen.append(user)
+        if self.during:
+            self.during()
+            self.during = None
+        rule = user.split("\n1. ", 1)[1].split("\n")[0] if "\n1. " in user else "?"
+        return LootCompiled(rules=[LootRule(id="R1", text=rule, kind="ordering")], summary=rule)
+
+
+def test_confirm_refuses_a_reading_of_other_text(reg):
+    ps = PolicyStore(reg.store, reg.key)
+    policy_mod.begin_edit(ps, "loot", "# Loot\n\n1. A rule", "Officer A")
+    policy_mod.compile_pending(ps, "loot", Reader())
+    ps.store.write_text(ps.path("loot"), "# Loot\n\n1. B rule\n")  # a PR edit: under the pending reading's feet
+    with pytest.raises(PolicyPendingError, match="changed since that reading was compiled"):
+        policy_mod.confirm_pending(ps, "loot", "Officer A")
+    assert ps.compiled("loot") is None
+    # the stage C repro: a draft written the Discord way (/gm policy edit) drops the held reading
+    policy_mod.begin_edit(ps, "loot", "# Loot\n\n1. A rule", "Officer A")
+    policy_mod.compile_pending(ps, "loot", Reader())
+    ps.write_draft("loot", "# Loot\n\n1. B rule", "Officer B")
+    with pytest.raises(PolicyPendingError, match="compile it first"):
+        policy_mod.confirm_pending(ps, "loot", "Officer A")
+    policy_mod.compile_pending(ps, "loot", Reader())
+    assert policy_mod.confirm_pending(ps, "loot", "Officer A").startswith("loot policy is live")
+    assert ps.compiled("loot")["summary"] == "B rule", "the live reading is of the live text"
+
+
+def test_a_slow_compile_never_lands_on_a_newer_edit(reg):
+    ps = PolicyStore(reg.store, reg.key)
+    original = ps.read("loot")
+    policy_mod.begin_edit(ps, "loot", "# Loot\n\n1. A rule", "Officer A")
+    slow = Reader(during=lambda: policy_mod.begin_edit(ps, "loot", "# Loot\n\n1. B rule", "Officer B"))
+    with pytest.raises(PolicyPendingError, match="changed while I was reading it"):
+        policy_mod.compile_pending(ps, "loot", slow)
+    held = policy_mod.pending(ps, "loot")
+    assert held["compiled"] is None and held["previous"] == original and ps.read("loot") == "# Loot\n\n1. B rule\n"
+
+
+class Resp:
+    def __init__(self, log):
+        self.log = log
+
+    async def send_message(self, content=None, **kw):
+        self.log.append(("send", content, kw))
+
+    async def edit_message(self, content=None, **kw):
+        self.log.append(("edit_message", content, kw))
+
+    async def defer(self, **kw):
+        self.log.append(("defer", None, kw))
+
+    def is_done(self):
+        return any(k == "defer" for k, _, _ in self.log)
+
+
+class Feed:
+    def __init__(self):
+        self.lines = []
+
+    async def emit(self, cfg, level, text, exc=None):
+        self.lines.append((level, text))
+
+
+def press(log, name="Officer"):
+    async def followup(content=None, **kw):
+        log.append(("followup", content, kw))
+
+    return types.SimpleNamespace(user=types.SimpleNamespace(id=OWNER, display_name=name), response=Resp(log), followup=types.SimpleNamespace(send=followup))
+
+
+def test_discord_policy_edit_is_the_one_pending_edit_and_a_stale_view_does_nothing(reg):
+    ps, log, feed = PolicyStore(reg.store, reg.key), [], Feed()
+    original = ps.read("loot")
+
+    async def go():
+        modal = discord_policy.PolicyEditModal(reg, ps, "loot", Reader(), feed)
+        modal.text._value = "# Loot\n\n1. A rule"
+        await modal.on_submit(press(log, "Officer A"))
+        view_a = log[-1][2]["view"]
+        assert isinstance(view_a, discord_policy.CompileConfirmView) and policy_mod.pending(ps, "loot")["compiled"] is view_a.compiled
+        # officer B edits on the site / MCP / chat meanwhile: A's reading is now of old text
+        policy_mod.begin_edit(ps, "loot", "# Loot\n\n1. B rule", "Officer B")
+        await view_a.confirm.callback(press(log, "Officer A"))
+        assert "changed since this reading" in log[-1][1] and ps.compiled("loot") is None
+        await view_a.discard.callback(press(log, "Officer A"))
+        assert ps.read("loot") == "# Loot\n\n1. B rule\n", "a stale Discard doesn't wipe B's newer draft"
+        assert policy_mod.pending(ps, "loot")["previous"] == original, "B's pending edit keeps the text to go back to"
+        # B compiles through Discord reload and confirms: live, and nothing left pending
+        await discord_policy.compile_and_confirm(press(log, "Officer B"), reg, ps, "loot", Reader(), feed, followup=True)
+        view_b = log[-1][2]["view"]
+        await view_b.confirm.callback(press(log, "Officer B"))
+        assert ps.compiled("loot")["summary"] == "B rule" and policy_mod.pending(ps, "loot") is None
+
+    asyncio.run(go())
