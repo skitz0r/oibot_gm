@@ -516,8 +516,9 @@ of their characters. The bot reads each live run's board as it stands and each r
   split") shows the solver's layout — groups, synergy, who is left out, why there can't be more runs, whether leftovers
   could make another — and saves nothing; "another one" shows a different one, "use it" puts the last one on the board
   and remembers its strategy (the bot remembers what it showed you until it restarts). "Post the sheet here" re-posts
-  a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy). Pins and per-run
-  seats stay as before ("pin Ash to the roster", "keep Dusk on the bench").
+  a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy). Pins stay as
+  before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on a run is someone's answer ("put Ash in for
+  tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
   rank and roster placement), "delete Jon's alt Jonny" (gone outright with its roster placements — the diff says so;
@@ -569,7 +570,7 @@ channel the bot doesn't read @mentions at all, the owner's included; there the o
 |---|---|---|
 | Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles) and your own answer or confirmation on a run | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight" |
 | Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters, deciding applications | officers | "rank Jonny raider", "Mira is away next week", "accept Nyx" |
-| Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, seats on a run, `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight" |
+| Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight" |
 | Comp & policy — comp targets and group layout, pins, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "we want 3–4 healers in Barrow Deeps", "pin Jonny in tonight" |
 | Raids & auras — raid schedules and settings, buff and family facts | the owner | "Barrow Deeps runs Tue and Thu 7:30 pm" |
 | Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite), starting the local jobs | the owner | "post raid sheets in #signups" |

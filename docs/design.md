@@ -480,7 +480,7 @@ for members too, with who-may-do-what-where configurable on the web's Ops page.
 
 **Capability groups.** Every configops op is in exactly one group (`configops.OP_GROUP`; a test asserts the op list
 and the map agree): *members* (absence, absence_clear, dm, character, set_main, rank, confirm), *runs* (run_open,
-run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for, team_member),
+run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for; `team_member` was removed in stage C M8 — it refused the run keys the parser is shown and never seated anyone: a seat is `run_answer` or a board op),
 *comp* (comp_target, comp_target_clear, comp_groups, pin, policy_append), *raids* (raid_set, raid_reset, aura_set,
 family_set, aura_reset), *setup* (set, role_add, role_remove), *test* (test). The seventh group, *self*, is not a
 set of ops but a scope: an op in `SELF_OPS` (absence, absence_clear, dm, character, set_main, run_answer,

@@ -41,7 +41,6 @@ Plain-text permissions (owner only, never opened to anyone else): plain: target=
     "clear" = a listed channel goes back to the default) — "only officers can run runs by chat" = target=runs, value=officers.
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
-  team_member: add/remove <member> [character] to/from run <target=run key> (a seat on a specific run; defaults to their main).
   pin: target=<run key>, member, value=in (must be seated at lock) | out (kept on the bench) | clear — an officer decision the lock solver honours.
 Policy (officer): policy_append: doc=loot|comp, text=<one rule line> — appended as "- <line>".
   policy: doc=loot|comp|persona, field=replace (text = the WHOLE new document) | remove (text = the line to take out, as
@@ -139,13 +138,13 @@ Not settable here (say so): the loot session itself (/raid loot) and handing the
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, team_member, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, character, absence_clear, dm, test, recruit, application, proposal, job, policy, plain")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, character, absence_clear, dm, test, recruit, application, proposal, job, policy, plain")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|news_keywords|ask_audience|about")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, comp_target*, comp_groups), run key (run_*, team_member, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain)")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain)")
     field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none)")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
-    character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer, team_member); empty on character add = a planned character")
+    character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
     end: Optional[str] = None
@@ -303,7 +302,7 @@ ANSWER_VALUES = {"in": "in", "join": "in", "joined": "in", "yes": "in", "sub": "
 OP_GROUP = {
     "absence": "members", "absence_clear": "members", "dm": "members", "character": "members", "set_main": "members", "rank": "members", "confirm": "members",
     "run_open": "runs", "run_answer": "runs", "run_lock": "runs", "run_cancel": "runs", "run_fill": "runs", "run_strategy": "runs",
-    "run_autofill": "runs", "run_board": "runs", "run_move": "runs", "run_propose": "runs", "run_sheet": "runs", "confirm_for": "runs", "team_member": "runs",
+    "run_autofill": "runs", "run_board": "runs", "run_move": "runs", "run_propose": "runs", "run_sheet": "runs", "confirm_for": "runs",
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
     "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
     "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup", "job": "setup", "plain": "setup",
@@ -1417,8 +1416,6 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             return _describe_new(reg, op)
         except (RegistryError, ValueError) as e:
             return f"{op.op} {op.doc or op.target or op.member or op.value or ''}: {e}".replace("  ", " ")
-    if op.op == "team_member":
-        return f"run {op.target or '?'}: {'add' if (op.value or 'add') != 'remove' else 'remove'} {op.member}"
     if op.op == "pin":
         m = _member(reg, op.member)
         name = m.display_name if m else (op.member or "?")
@@ -1760,18 +1757,6 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             raise RegistryError(f"unknown member {op.member}")
         _, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
         return f"{m.display_name} absent {reg.span_label(a.start, a.end)}"
-    if op.op == "team_member":
-        m = _member(reg, op.member)
-        if not m:
-            raise RegistryError(f"unknown member {op.member}")
-        key = op.target or ""
-        if not cfg.roster(key):
-            raise RegistryError(f"no run {key or '?'} (give the run key, e.g. hs-1209-1930)")
-        if (op.value or "add") == "remove":
-            reg.roster_remove(m.discord_id, key, by)
-            return f"{m.display_name} removed from {key}"
-        _, c = reg.roster_add(m.discord_id, key, by, op.character)
-        return f"{m.display_name} ({c.label}) added to {key}"
     if op.op == "pin":
         from . import raidcycle as rc
 

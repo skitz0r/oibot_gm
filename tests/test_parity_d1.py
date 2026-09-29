@@ -594,3 +594,16 @@ def test_raid_set_apply_line_and_change_log_read_in_12_hour_words(reg):
     assert reg.config.raids["barrow_deeps"]["slots"] == ["Wed 21:15"], "the stored form stays 24-hour"
     for row in recent_changes(reg.key, 10):
         assert not military(row["text"]), row["text"]
+
+
+# ---------------------------------------------------------------- M8: team_member is gone (a seat is an answer or a board op)
+
+def test_team_member_is_not_a_plain_text_op(reg):
+    from oibot_gm.configops import ConfigOp
+
+    assert "team_member" not in configops.SCHEMA_TEXT and "team_member" not in configops.OP_GROUP
+    assert "team_member" not in ConfigOp.model_fields["op"].description
+    allowed, refused = configops.authorize(reg, [ConfigOp(op="team_member", target="bd-1", member="Ashvane")], OWNER, officer=True)
+    assert not allowed and refused == ["team_member isn't something plain text can do"]
+    with pytest.raises(configops.RegistryError):
+        configops.apply(reg, ConfigOp(op="team_member", target="bd-1", member="Ashvane"), "Owner", True)
