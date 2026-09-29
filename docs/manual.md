@@ -109,7 +109,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "add Jonny as my main",
   "plan my main as a Holy Priest" (a planned character, no name yet; saying it again replaces the plan and keeps
   its rank and roster placement), "delete my alt Jonny", "I can also tank on Xanthe", "bench me for tonight",
-  "I can't make tonight" ("… — work trip" adds a note only the officers see, like `/raid out`), "I confirm for
+  "I can't make tonight" (a callout like `/raid out`; "… — work trip" adds a note only the officers see), "I confirm for
   tonight" (also answers a fill ask the bot DMed you), "turn my DMs off". It shows what it will change and waits for
   your **Apply** — only you (or an officer) can press it. Plain text only ever changes *your own* record: a
   request about someone else is refused with who can do it, and the rest of what you asked still applies.
@@ -275,7 +275,10 @@ If you can't make a run you joined: press *No thanks* on an open sheet, *Can't m
 `/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
 lock this releases your seat immediately and the bench is asked. An officer who hears it out of band records the
 same callout, note included, with No thanks and a note on the site's answer menu, in plain text ("Kestrel can't
-make it tonight, her baby is sick") or MCP `set_answer` with `note`.
+make it tonight, her baby is sick") or MCP `set_answer` with `note`. Your own "I can't make tonight" in plain text is a
+callout too, note or not (hours before, late after the lock, the line in the updates thread), and so is MCP
+`set_answer` with status `out`; an officer who only sets someone else's answer to No thanks without a reason changes
+the answer, no callout.
 
 **Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
 run* far left, then *Fill seats* and *Lock now* on the right; what does not apply yet is greyed with the reason
@@ -504,7 +507,7 @@ of their characters. The bot reads each live run's board as it stands and each r
   bd-1209-1930, server down"; "put Xanthe on the bench for bd-1209-1930" / "set Marrow to join as Marrowlite" /
   "Kestrel can't make it" (after lock: join seats and asks to confirm, no thanks frees the seat and the fill engine
   looks for cover; with a reason — "Kestrel can't make it, work" — it is a callout like `/raid out`, the reason
-  kept for the officers); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked
+  kept for the officers; your own "I can't make it" is always a callout, reason or not); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked
   run: answers their Confirm / Can't make it ask for them, or the fill ask the bot sent them, when they told you out
   of band — exactly as if they had pressed the button, so a no frees the seat and asks the bench); "who would fill
   ask next for tonight's run" (preview, nothing sent) and "send the fill asks"; "split tonight's run
@@ -516,7 +519,8 @@ of their characters. The bot reads each live run's board as it stands and each r
   split") shows the solver's layout — groups, synergy, who is left out, why there can't be more runs, whether leftovers
   could make another — and saves nothing; "another one" shows a different one, "use it" puts the last one on the board
   and remembers its strategy (the bot remembers what it showed you until it restarts). "Post the sheet here" re-posts
-  a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy). Pins stay as
+  a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy) — like `/raid
+  sheet`, anyone registered may ask, in any channel where plain text acts on their own record. Pins stay as
   before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on a run is someone's answer ("put Ash in for
   tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
@@ -525,12 +529,16 @@ of their characters. The bot reads each live run's board as it stands and each r
   retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
-  raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "Marrow is back, clear her absence" (by start
+  raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
+  unconfirmed character at once — the diff lists them; officers' requests are read against that list); "Mira is away
+  Nov 1–3" (the diff lists the live sheets those days touch — No thanks, or a rostered seat freed — before anything is
+  saved); "Marrow is back, clear her absence" (by start
   date when she has several — the bot lists them as days, e.g. "Fri 01 Mar → Sun 03 Mar, Mon 10 Jun"); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
 - *Raids (owner):* "Barrow Deeps runs Tuesdays and Thursdays at 7:30 PM" (the diff shows the next runs it makes),
   "short-notice cadence for Barrow Deeps" (Standard, Short notice or Same week — the same presets as `/gm config
   raid`: when the sheet opens, the nudge, the lock and the confirmation deadline together), "lock Barrow Deeps 12 hours
-  before", schedules (`schedule_set`, above). Settings that only make sense together are saved as one change.
+  before", schedules (`schedule_set`, above), "put Barrow Deeps back to the defaults" (the diff lists the overrides it
+  drops in words: run times, first open, hours). Settings that only make sense together are saved as one change.
 - *Recruitment (owner):* "close applications", "open applications", "set the recruitment note to Looking for
   healers", "add a required question: Why us? — hint: a line or two is plenty", "reword question 2 …", "move the
   logs question up", "remove the question Why us?" (or by number), "@Veterans can register without applying",
@@ -568,7 +576,7 @@ channel the bot doesn't read @mentions at all, the owner's included; there the o
 
 | Group | Default | Someone could type |
 |---|---|---|
-| Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles) and your own answer or confirmation on a run | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight" |
+| Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles) and your own answer or confirmation on a run; re-posting a live sheet here (it touches nobody's record, like `/raid sheet`) | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight", "post tonight's sheet here" |
 | Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters, deciding applications | officers | "rank Jonny raider", "Mira is away next week", "accept Nyx" |
 | Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight" |
 | Comp & policy — comp targets and group layout, pins, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "we want 3–4 healers in Barrow Deeps", "pin Jonny in tonight" |
@@ -601,8 +609,12 @@ character) counts as someone else; a character you name must be one of yours. Re
 *"Only officers can change someone else's absence."*, *"Plain text can't change runs in #general — use
 #officer-ops."* Every applied plain-text change is logged in the ops channel with who asked and where.
 What the bot reads your sentence against depends on who you are, decided before it reads it: an officer's request is
-matched against the open applications, the news proposals waiting and the member-role names too; a member's never
-is, so a question the bot asks a member back can't name an applicant.
+matched against the open applications, the news proposals waiting, the unconfirmed characters and the member-role
+names too; a member's never is, so a question the bot asks a member back can't name an applicant. Names people chose
+(members, characters, applicants, the boards, news titles) reach it only as quoted data, and every time it sees comes
+with the same time in 12-hour words beside it, so a question it asks back reads "Tue 6 Oct 7:30 PM", never 19:30.
+Someone who has left the Discord server counts as unregistered for plain text, even with a record still on file:
+a DM from them gets the static guide, never a change (an Apply left on an old diff refuses them too).
 
 ## 8a. Rehearsing with the test bench (officers)
 
@@ -660,19 +672,19 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and ledger (up to 100), `member` narrowing both to one person |
 | `open_run` | open a sheet now (next slot, or a date and time; `schedule` = that schedule's next run, or a pickup template at `when`) |
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
-| `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks with a `note` is a callout, the note for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
+| `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview the fill asks, `send=true` sends them · cancel with a reason (rostered members are not told automatically: say so in the channel) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
-| `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened) |
+| `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off |
 | `set_channel` · `set_config` | a bot channel by name · timezone, ask audience, about, officer roles |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run / answer / clear / compose / comp, as `/gm test` |
 | `policy_get` · `policy_edit` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full · replace its text (a draft; the persona is live as written) · the bot's reading of it, nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
-| `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
+| `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview; like Discord's Apply, an op that fails is listed in `refused` with why and the rest still apply (`applied` is what landed, `error` the first failure) (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
 | `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default) |
 | `raid_readiness` | each raid's pool readiness (§6): headcount, roles with who could cover, buffs nobody brings, the desired comp with its reasons, short / over cap, the pool plan — one raid or all |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with guild overrides marked |

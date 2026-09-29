@@ -493,19 +493,28 @@ def next_runs_lines(reg: Registry, instance: str, **kw) -> list[str]:
             for r in rows]
 
 
-def timezone_preview(reg: Registry, zone: str, now_: datetime | None = None) -> list[str]:
-    """What a timezone change does to each raid's next run, in words (run times keep their clock time, so the real
-    moment moves): 'Barrow Deeps: next Tue 6 Oct 7:30 PM America/New_York — Tue 6 Oct 4:30 PM on today's clock'.
-    One line per raid with run times; a bad zone raises RegistryError."""
-    lines = []
+def timezone_preview_rows(reg: Registry, zone: str, now_: datetime | None = None) -> list[dict]:
+    """timezone_preview with the moments behind each line: {line, start (aware, the next run under the new zone),
+    was (aware, the next run under the current zone, or None)} — Discord adds <t:unix:f> stamps from them (the
+    TimezoneWizard), so every reader sees the before and after in their own locale."""
+    rows = []
     for rid in reg.profile.raids:
         new = next_runs_preview(reg, rid, timezone=zone, n=1, now_=now_)
         firsts = sorted((r["starts"][0], r["labels"][0]) for r in new if r["starts"])
         if not firsts:
             continue
         t, label = firsts[0]
-        lines.append(f"{reg.raid_def(rid).get('name', rid)}: next {label} {zone} — {reg.local12(t)} on today's clock ({reg.config.timezone})")
-    return lines
+        cur = sorted(r["starts"][0] for r in next_runs_preview(reg, rid, n=1, now_=now_) if r["starts"])
+        rows.append({"line": f"{reg.raid_def(rid).get('name', rid)}: next {label} {zone} — {reg.local12(t)} on today's clock ({reg.config.timezone})",
+                     "start": t, "was": cur[0] if cur else None})
+    return rows
+
+
+def timezone_preview(reg: Registry, zone: str, now_: datetime | None = None) -> list[str]:
+    """What a timezone change does to each raid's next run, in words (run times keep their clock time, so the real
+    moment moves): 'Barrow Deeps: next Tue 6 Oct 7:30 PM America/New_York — Tue 6 Oct 4:30 PM on today's clock'.
+    One line per raid with run times; a bad zone raises RegistryError."""
+    return [r["line"] for r in timezone_preview_rows(reg, zone, now_)]
 
 
 def run_rosters(reg: Registry, ev: "RaidEvent") -> int:
@@ -625,6 +634,26 @@ def pin_summary(ev: RaidEvent) -> str:
         if names:
             parts.append(f"pinned {pin}: {', '.join(names)}")
     return " · ".join(parts) or "no pins"
+
+
+def runs_in_span(reg: Registry, rs: RaidStore, start: str, end: str) -> list[RaidEvent]:
+    """The live runs whose day (guild time) falls inside an absence's ISO days: the sheets it touches."""
+    return [ev for ev in rs.live() if start <= ev.start.astimezone(reg.tz).date().isoformat() <= end]
+
+
+def absence_effects(reg: Registry, rs: RaidStore, m: Member | None, start: str, end: str) -> list[tuple[RaidEvent, str]]:
+    """What recording an absence would do to each live sheet in the span, without doing it (RaidMixin.after_absence
+    does it): 'seat freed' (locked and rostered: the fill engine looks for cover) | 'No thanks' | 'already No thanks'."""
+    out = []
+    for ev in runs_in_span(reg, rs, start, end):
+        sg = ev.signups.get(str(m.discord_id)) if m is not None else None
+        if m is not None and ev.state != "open" and ev.seat_of(m.display_name):
+            out.append((ev, "seat freed"))
+        elif sg is not None and sg.status == "out":
+            out.append((ev, "already No thanks"))
+        else:
+            out.append((ev, "No thanks"))
+    return out
 
 
 def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, note: str | None) -> Callout:

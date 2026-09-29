@@ -119,7 +119,7 @@ def test_run_open_preview_has_a_discord_stamp_but_describe_does_not(reg):
 def test_absence_describe_uses_words_not_iso(reg):
     m = reg.test_members()[0]
     line = configops.describe(reg, ConfigOp(op="absence", member=m.display_name, start="2030-03-01", end="2030-03-03", reason="holiday"))
-    assert line == f"{m.display_name}: absent {reg.span_label('2030-03-01', '2030-03-03')} (holiday)"
+    assert line == f"{m.display_name}: absent {reg.span_label('2030-03-01', '2030-03-03')} (holiday) · no live sheet on those days"
     assert "2030-03-01" not in line and "Mar" in line
 
 

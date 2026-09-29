@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from . import configops, nl, render
 from .discord_feed import FeedMixin
-from .discord_policy import PolicyContext, handle_change, register_policy_commands
+from .discord_policy import PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, feed_config
@@ -1065,6 +1065,14 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         officer = reg.config.owner_discord_id == user.id or (member is not None and self.officiates(member, guild))
         return officer, ([r.id for r in member.roles] if member is not None else [])
 
+    async def in_guild(self, reg, user) -> bool:
+        """Whether `user` is a member of the guild's Discord server now (the gateway cache, else one cached fetch: a
+        404 is remembered). The web treats server membership as the whitelist; plain text does too (discord_policy.left_server)."""
+        guild = self.get_guild(reg.config.discord_guild_id)
+        if isinstance(user, discord.Member) and guild is not None and user.guild.id == guild.id:
+            return True
+        return await self.cached_member(guild, user.id) is not None
+
     async def plain_text(self, message: discord.Message, reg, text: str, channel) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
         An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
@@ -1078,9 +1086,12 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         if mode == "ignore":
             return
         uid = message.author.id
+        quiet = discord.AllowedMentions.none()
+        if await left_server(self, reg, message.author):  # a DM from someone no longer in the server: unregistered, whatever the registry holds
+            await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=quiet)
+            return
         officer, role_ids = await self.plain_identity(reg, message.author)
         provider, ps = self.ctx.provider, self.policies.store(reg)
-        quiet = discord.AllowedMentions.none()
         if mode == "act" and provider is not None:
             async with message.channel.typing():
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)

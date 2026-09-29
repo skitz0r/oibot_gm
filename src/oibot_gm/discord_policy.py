@@ -125,6 +125,17 @@ class PolicyEditModal(discord.ui.Modal):
 
 # ---------------------------------------------------------------- plain-text config
 
+LEFT_SERVER = "You're no longer in this guild's Discord server, so plain text can't change anything for you."
+
+
+async def left_server(bot, reg: Registry, user) -> bool:
+    """Someone no longer in the guild's Discord server (a DM still reaches the bot through an old channel) is treated as
+    unregistered by every plain-text path, whatever record the registry still holds — as the web treats server
+    membership as the whitelist. The owner never is; a client without `in_guild` (tests, offline) counts everyone in."""
+    check = getattr(bot, "in_guild", None)
+    return check is not None and reg.config.owner_discord_id != user.id and not await check(reg, user)
+
+
 class ConfigConfirmView(discord.ui.View):
     """Apply / Cancel under a plain-text diff. The requester or an officer may press; the presser's rights decide
     (the ops are authorized again for them, in the channel the request was made in). `revs`: the board fingerprint of
@@ -141,6 +152,9 @@ class ConfigConfirmView(discord.ui.View):
         self.busy = False  # set by the first Apply, never cleared: this diff applies once
 
     async def _may_press(self, interaction: discord.Interaction) -> tuple[bool, list[int]] | None:
+        if await left_server(interaction.client, self.reg, interaction.user):
+            await interaction.response.send_message(LEFT_SERVER, ephemeral=True)
+            return None
         officer, role_ids = await interaction.client.plain_identity(self.reg, interaction.user)
         if interaction.user.id != self.requester_id and not officer:
             await interaction.response.send_message(f"Only {self.requester} or an officer can apply this.", ephemeral=True)
@@ -237,6 +251,9 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         await send("Plain-text changes need the LLM; use the slash commands or the site.", ephemeral=True)
         return
     author = interaction_or_message.author if is_msg else interaction_or_message.user
+    if await left_server(bot, reg, author):
+        await send(LEFT_SERVER, ephemeral=True)
+        return
     me = reg.members.get(author.id)
     name = me.display_name if me else author.display_name
     officer, role_ids = await bot.plain_identity(reg, author)  # decided in code, before the parser sees anything
@@ -370,8 +387,9 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         if reg is None:
             await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
             return
-        if reg.plain_mode(interaction.channel_id) == "ignore" and not is_owner(interaction, reg):
-            await interaction.response.send_message("Plain text is switched off in this channel.", ephemeral=True)
+        where = None if interaction.guild_id is None else interaction.channel_id  # a DM is the policy's DMs entry, not an unlisted channel (stage C L9)
+        if reg.plain_mode(where) == "ignore" and not is_owner(interaction, reg):
+            await interaction.response.send_message("Plain text is switched off " + ("in DMs." if where is None else "in this channel."), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        await handle_change(interaction, reg, pctx.store(reg), bot.ctx.provider, ops, text, bot=bot, channel=interaction.channel_id)
+        await handle_change(interaction, reg, pctx.store(reg), bot.ctx.provider, ops, text, bot=bot, channel=where)

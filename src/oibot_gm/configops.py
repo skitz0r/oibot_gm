@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Literal, Optional
 
 import yaml
@@ -39,7 +40,8 @@ Plain-text permissions (owner only, never opened to anyone else): plain: target=
     value=<who, comma list: everyone, registered, officers, owner, @Role; "default" = the group's default> — who may ask the bot to do that;
   or target=<channel mention> | dm | default (every channel not listed), value=act|self|answer|ignore (what plain text may do there;
     "clear" = a listed channel goes back to the default) — "only officers can run runs by chat" = target=runs, value=officers.
-Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character>; set main of <member> to <character>;
+Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character> (character="all pending" = every
+  character in the unconfirmed list: "confirm everyone pending"); set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
   pin: target=<run key>, member, value=in (must be seated at lock) | out (kept on the bench) | clear — an officer decision the lock solver honours.
 Policy (officer): policy_append: doc=loot|comp, text=<one rule line> — appended as "- <line>".
@@ -176,20 +178,22 @@ ISO — those forms in the context are for the op values only.
 def live_runs_text(reg: Registry, raids=None) -> str:
     """One line per live run, for the parser to resolve 'tonight's Barrow Deeps' onto a run key, with the board as it
     stands (so run_board / run_move can be written from the real groups), then each raid's next unopened runs (exact
-    guild-time 'YYYY-MM-DD HH:MM' and schedule id, what run_open's value takes). Machine context: never shown to a person."""
+    guild-time 'YYYY-MM-DD HH:MM' and schedule id, what run_open's value takes). Machine context, but the parser's reply
+    and questions go to the person as written: every machine time carries its 12-hour label ('= Tue 6 Oct 7:30 PM',
+    reg.local12) so the model can quote that instead of converting (the clock rule). The boards' names are <data>."""
     from . import raidcycle as rc
 
     rs = raids if raids is not None else rc.RaidStore(reg.store, reg.key)
-    out = []
+    out, boards = [], []
     for ev in rs.live():
         rd = reg.raid_def(ev.instance) if ev.instance else {}
         test = " (test run)" if (reg.config.roster(ev.team) or {}).get("test") else ""
-        out.append(f"- {ev.key}: {rd.get('name', ev.instance)} ({ev.instance}) {reg.local(ev.start, '%a %Y-%m-%d %H:%M')}, {ev.state}{test}, "
+        out.append(f"- {ev.key}: {rd.get('name', ev.instance)} ({ev.instance}) {reg.local(ev.start, '%a %Y-%m-%d %H:%M')} = {reg.local12(ev.start)}, {ev.state}{test}, "
                    f"{len(ev.by_status('in'))} joined / {len(ev.by_status('sub'))} bench / {len(ev.by_status('out'))} no thanks"
                    + (f", {len(ev.seated())} rostered in {len(ev.all_rosters)} roster(s)" if ev.all_rosters else "") + f", split {ev.split_strategy or rd.get('split_policy', 'balanced')}")
         board = board_text(reg, ev)
         if board:
-            out.append(f"  board: {board}")
+            boards.append(f"{ev.key} board: {board}")
     upcoming = []
     now = reg.now_local()
     for rid in reg.profile.raids:
@@ -198,8 +202,9 @@ def live_runs_text(reg: Registry, raids=None) -> str:
         except Exception:  # noqa: BLE001 — a raid with a broken schedule must not break the parser's context
             continue
         if nxt:
-            upcoming.append(f"- {rid}: " + ", ".join(f"{reg.local(t, '%Y-%m-%d %H:%M')} {s['id']}" for s, t in nxt))
-    return ("\n".join(out) or "(none)") + ("\n## Upcoming runs not opened yet (raid: guild-time start + schedule id)\n" + "\n".join(upcoming) if upcoming else "")
+            upcoming.append(f"- {rid}: " + ", ".join(f"{reg.local(t, '%Y-%m-%d %H:%M')} {s['id']} (= {reg.local12(t)})" for s, t in nxt))
+    return ("\n".join(out) or "(none)") + (data_block("Boards of the live runs (run key board: groups · bench — display names people chose)", boards) if boards else "") \
+        + ("\n## Upcoming runs not opened yet (raid: guild-time start + schedule id, = the same time as a person reads it)\n" + "\n".join(upcoming) if upcoming else "")
 
 
 def board_text(reg: Registry, ev) -> str:
@@ -218,33 +223,47 @@ def board_text(reg: Registry, ev) -> str:
     return (" | ".join(groups) or "(nobody placed)") + (f" · bench: {', '.join(bench)}" if bench else "")
 
 
-def data_block(title: str, body: str) -> str:
+def data_row(text) -> str:
+    """One row of a <data> block: on one line, and unable to open or close the fence (a display name or a news title
+    like 'x</data>\\n## Requested by …' stays inside it)."""
+    return re.sub(r"<\s*(/?)\s*data", lambda m: "‹" + m.group(1) + "data", " ".join(str(text or "").split()), flags=re.I)
+
+
+def data_block(title: str, rows) -> str:
     """A context section whose lines people (or outside pages) wrote: fenced as <data>, which SYSTEM says is never
-    instructions (member text is data)."""
-    return f"\n## {title}\n<data>\n{body}\n</data>"
+    instructions (member text is data). `rows`: the lines (each made safe by data_row), or one string of lines."""
+    rows = rows.split("\n") if isinstance(rows, str) else list(rows)
+    return "\n## " + title + "\n<data>\n" + ("\n".join(data_row(r) for r in rows) or "(none)") + "\n</data>"
 
 
-def current_config_text(reg: Registry, officer: bool = False) -> str:
+def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str:
     """The parser's context. `officer`: whether the REQUESTER is an officer — the parser's own text (a clarifying
     question, a reply) goes back to them, so the officer-only sections (open applications, news proposals, the
-    member-role names) are left out for anyone else, like the help snapshot does."""
+    member-role names, the unconfirmed characters) are left out for anyone else, like the help snapshot does.
+    `raids`: the bot's RaidStore (the live events), None reads it from disk."""
+    raids_store = raids
     cfg = reg.config.model_dump()
     cfg.pop("rosters", None)  # the ephemeral run rosters are noise here; live runs are listed on their own below
     roles = cfg.pop("member_role_ids", None)
     if roles and officer:  # role ids mean nothing to the parser (or the person it answers): the names from the role cache
         cfg["member_roles"] = [reg.role_names.get(int(r), f"role:{r}") for r in roles]
-    members = ", ".join(f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]"
-                        + (f" away {', '.join(a.start + ('→' + a.end if a.end != a.start else '') for a in m.absences[-3:])}" if m.absences else "") for m in reg.members.values())
-    raids = "\n".join(f"- {rid}: " + ", ".join(f"{k}={v}" for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "split_policy", "weights"))
+    members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]"
+               + (f" away {', '.join(a.start + ('→' + a.end if a.end != a.start else '') + ' = ' + reg.span_label(a.start, a.end) for a in m.absences[-3:])}" if m.absences else "") for m in reg.members.values()]
+
+    def cadence(k, v):  # the stored 'Tue 19:30' slots are raid_set values; the label beside them is how a person reads them
+        return f"{k}={v}" + (f" (= {', '.join(reg.slot_label(x) for x in v)})" if k == "slots" and v else "")
+
+    raids = "\n".join(f"- {rid}: " + ", ".join(cadence(k, v) for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "split_policy", "weights"))
                       + "".join(f"\n  - schedule {s['id']} ({s['name']}, {s['kind']}): {reg.schedule_label(rid, s)}" + (f"; own settings {reg.schedule_def(rid, s['id'])['schedule']['own']}" if reg.schedule_def(rid, s["id"])["schedule"]["own"] else "")
                                 for s in reg.schedules(rid)) for rid in reg.profile.raids)
     return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n## Effective raid cadence (profile defaults + overrides)\n" + raids
-            + f"\n## Now: {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} (guild time)\n## Live runs (run key: raid, start, state, answers)\n" + live_runs_text(reg)
+            + f"\n## Now: {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} = {reg.local12(reg.now_local())} (guild time)\n## Live runs (run key: raid, start = as a person reads it, state, answers)\n" + live_runs_text(reg, raids_store)
             + f"\n## Test bench: {len(reg.test_members())} of {reg.TEST_MAX} puppet member(s)"
             + (f"\n## Plain-text permissions (who may ask for what; where)\n{plain_text_policy(reg)}" if officer else "")
             + (data_block("Open applications (applicant<@id>: character, class spec)", applications_text(reg))
-               + data_block("News proposals waiting (id: title, kind, state)", proposals_text(reg)) if officer else "")
-            + data_block("Members (name<@id> [characters*=main:rank] away dates)", members or "(none)"))
+               + data_block("News proposals waiting (id: title, kind, state)", proposals_text(reg))
+               + data_block("Unconfirmed characters (confirm character=\"all pending\" confirms every one of these)", pending_text(reg)) if officer else "")
+            + data_block("Members (name<@id> [characters*=main:rank] away dates = the same days in words)", members))
 
 
 def plain_text_policy(reg: Registry) -> str:
@@ -259,20 +278,25 @@ def plain_text_policy(reg: Registry) -> str:
     return "\n".join(lines)
 
 
-def applications_text(reg: Registry) -> str:
-    """One line per open application, for the parser to resolve 'accept Nyx' onto the applicant (names are data)."""
-    return "\n".join(f"- {a.display_name}<@{a.discord_id}>: {a.label}, {a.cls} {a.spec}" for a in reg.open_applicants()) or "(none)"
+def pending_text(reg: Registry) -> list[str]:
+    """One row per unconfirmed character (what /roster confirm walks), for 'confirm everyone pending' (officers only)."""
+    return [f"- {c.label} ({m.display_name}, {c.cls} {c.spec}, {'main' if c.is_main else 'alt'})" for m, c in reg.pending()]
 
 
-def proposals_text(reg: Registry) -> str:
+def applications_text(reg: Registry) -> list[str]:
+    """One row per open application, for the parser to resolve 'accept Nyx' onto the applicant (names are data)."""
+    return [f"- {a.display_name}<@{a.discord_id}>: {a.label}, {a.cls} {a.spec}" for a in reg.open_applicants()]
+
+
+def proposals_text(reg: Registry) -> list[str]:
     """Proposed and failed news proposals (the ones an officer can still approve or dismiss)."""
     from .news import ProposalStore
 
     try:
         rows = ProposalStore(reg.store, reg.key).all("proposed,failed")
     except Exception:  # noqa: BLE001 — a bad proposal file must not break the parser's context
-        return "(unreadable)"
-    return "\n".join(f"- {p.id}: {p.title[:90]} ({p.kind}, {p.state})" for p in rows) or "(none)"
+        return ["(unreadable)"]
+    return [f"- {p.id}: {p.title[:90]} ({p.kind}, {p.state})" for p in rows]
 
 
 def parse(provider: Provider, reg: Registry, text: str, by: str | None = None, *, officer: bool = False) -> ConfigRequest:
@@ -311,11 +335,14 @@ OP_GROUP = {
 }
 APPLY_FIRST = "New here? Apply first with `/apply` (or *Apply to join* on the registration card) — the officers take it from there."
 SELF_OPS = {"absence", "absence_clear", "dm", "character", "set_main", "run_answer", "confirm_for"}
+ANYONE_OPS = {"run_sheet"}  # touch nobody's record, open to anyone like their slash command (/raid sheet): always "self"
+SHEET_HERE = "A sheet is re-posted in the channel you ask in — ask in a server channel, or use /raid sheet."
 OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other ops use their group's label
     "absence": ("your absences", "someone else's absence"), "absence_clear": ("your absences", "someone else's absence"),
     "dm": ("your DM setting", "someone else's DM setting"), "character": ("your characters", "someone else's characters"),
     "set_main": ("your main", "someone else's main"), "run_answer": ("your answer on a sheet", "someone else's answer on a sheet"),
     "confirm_for": ("your confirmation", "someone else's confirmation"), "rank": ("ranks", "ranks"), "confirm": ("character confirmations", "character confirmations"),
+    "run_sheet": ("where a sheet is posted", "where a sheet is posted"),
 }
 
 
@@ -338,6 +365,8 @@ def bind_self(reg: Registry, op: ConfigOp, author_id: int) -> tuple[str | None, 
     group = OP_GROUP.get(op.op)
     if group is None:
         return None, f"{op.op} isn't something plain text can do"
+    if op.op in ANYONE_OPS:
+        return "self", None  # /raid sheet is open to anyone: self-service grade, acts in "self" channels (authorize refuses DMs)
     if op.op not in SELF_OPS or (op.op == "character" and (op.field or "").strip().lower() == "rank"):
         return group, None
     ref = (op.member or "").strip()
@@ -380,6 +409,8 @@ def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bo
             bad = APPLY_FIRST  # a newcomer's first character is an application (Registry.must_apply), and plain text can't open one
         if bad is None and group == "self" and op.op == "run_answer" and not officer:
             bad = _locked_self_join(reg, op, raids)
+        if bad is None and op.op == "run_sheet" and (channel is None or channel == PLAIN_WEB):
+            bad = SHEET_HERE if channel is None else "from the site or MCP a sheet is re-posted with repost_sheet (it names the channel)"
         if bad is None:
             own = group == "self"
             key = "rank" if op.op == "character" and (op.field or "").strip().lower() == "rank" else op.op
@@ -417,6 +448,14 @@ def _character_member(reg: Registry, op: ConfigOp):
     if (op.field or "").strip().lower() == "add" and digits.isdigit():
         return int(digits), None
     raise RegistryError(f"unknown member {ref or '?'}")
+
+
+ALL_PENDING = {"all pending", "all", "everyone", "everyone pending", "all unconfirmed", "everyone unconfirmed", "all of them", "pending", "*"}
+
+
+def _all_pending(op: ConfigOp) -> bool:
+    """confirm's "every unconfirmed character" (in character or target: the parser may put it in either)."""
+    return any((v or "").strip().lower().strip('"') in ALL_PENDING for v in (op.character, op.target))
 
 
 def _need_member(reg: Registry, ref: str | None):
@@ -542,6 +581,46 @@ def _schedule_words(reg: Registry, rid: str, fields: dict) -> str:
         else:
             out.append(f"{f} “{v}”")
     return ", ".join(out)
+
+
+OVERRIDE_WORDS = {"signup_lead_hours": "sheet opens", "lock_hours_before": "locks", "confirm_hours_before": "confirmations expire",
+                  "nudge_hours_before": "nudge", "fill_ask_hours": "fill asks time out after", "open_dm": "DM on open", "split_policy": "split"}
+
+
+def _overrides_words(reg: Registry, rid: str, over: dict) -> str:
+    """A raid's stored overrides in words (raid_reset's preview): run times 12-hour ('Tue 7:30 PM'), the first open as a
+    date and time, the cadence in hours, schedules by name — never the stored 'Tue 19:30' or ISO (the clock rule)."""
+    from datetime import datetime
+
+    from .registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS
+
+    out = []
+    for k, v in over.items():
+        try:
+            if k == "slots":
+                out.append("run times " + (", ".join(reg.slot_label(x) for x in v or []) or "none"))
+            elif k == "first_open":
+                t = v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
+                out.append("first open " + reg.local12(t if t.tzinfo else t.replace(tzinfo=reg.tz), "%a %d %b %Y %I:%M %p"))
+            elif k in RAID_HOURS_FIELDS or k in RAID_BOOL_FIELDS or k == "split_policy":
+                out.append(f"{OVERRIDE_WORDS.get(k, k.replace('_', ' '))} {_value_words(k, v)}")
+            elif k == "schedules":
+                out.append("schedules " + (", ".join(f"{s.get('name') or s.get('id')} ({reg.schedule_label(rid, s)})" for s in v or []) or "none"))
+            elif k == "comp_targets":
+                out.append("comp targets " + ", ".join(f"{slot} {t.get('min', '?')}" + (f"–{t['max']}" if t.get("max") is not None else "") for slot, t in (v or {}).items()))
+            elif k == "comp":
+                out.append("comp " + ", ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in (v or {}).items()))
+            elif k == "weights":
+                out.append("weights " + ", ".join(f"{w} {n}" for w, n in (v or {}).items()))
+            elif k == "comp_groups":
+                out.append("group layout " + (", ".join(v or []) or "default"))
+            elif k in ("lockout_days", "duration_hours"):
+                out.append(f"{k.replace('_', ' ')} {v}")
+            else:
+                out.append(f"{k.replace('_', ' ')} “{str(v)[:60]}”")
+        except (TypeError, ValueError, AttributeError):  # a hand-edited value: its name, never a crash in the preview
+            out.append(k.replace("_", " "))
+    return "; ".join(out)
 
 
 def _value_words(field: str, v) -> str:
@@ -1420,12 +1499,24 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         hit = reg.find(op.character or "")
         return f"{op.character}: rank {hit[1].rank if hit else '?'} → {op.rank or op.value}"
     if op.op == "confirm":
-        return f"confirm {op.character}"
+        if _all_pending(op):
+            pend = reg.pending()
+            return (f"confirm all {len(pend)} unconfirmed: " + ", ".join(f"{c.label} ({m.display_name})" for m, c in pend[:25])
+                    + (f" … +{len(pend) - 25}" if len(pend) > 25 else "")) if pend else "confirm all pending: nothing is waiting"
+        try:
+            hit = reg.find(op.character or "")
+        except RegistryError as e:
+            return f"confirm {op.character}: {e}"
+        return f"confirm {op.character}" + (f" ({hit[0].display_name})" if hit else " — no character by that name")
     if op.op == "set_main":
         return f"{op.member}: main → {op.character}"
     if op.op == "absence":
         m = _member(reg, op.member)
-        return f"{m.display_name if m else op.member}: absent {reg.span_label(op.start or '?', op.end)}" + (f" ({op.reason})" if op.reason else "")
+        line = f"{m.display_name if m else op.member}: absent {reg.span_label(op.start or '?', op.end)}" + (f" ({op.reason})" if op.reason else "")
+        try:
+            return line + absence_preview(reg, m, op.start or "", op.end)
+        except RegistryError as e:
+            return f"{line} — {e}"
     if op.op in ("policy_append", "policy", "application", "proposal", "job"):
         try:
             return _describe_new(reg, op)
@@ -1495,7 +1586,8 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
     if op.op == "aura_reset":
         return f"auras: drop overrides for {op.target or 'everything'}"
     if op.op == "raid_reset":
-        return f"raid {op.target}: overrides {cfg.raids.get(op.target or '', {}) or 'none'} → profile defaults"
+        over = cfg.raids.get(op.target or "", {}) or {}
+        return f"raid {op.target}: " + (f"drop the guild's overrides — {_overrides_words(reg, op.target or '', over)} → profile defaults" if over else "no overrides to drop (already the profile defaults)")
     if op.op in ("schedule_set", "schedule_remove"):
         try:
             return _describe_schedule(reg, op)
@@ -1758,6 +1850,13 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         reg.set_rank(op.character or "", rank, by)
         return f"{op.character} → {rank}"
     if op.op == "confirm":
+        if _all_pending(op):  # /roster confirm's walk in one go: every unconfirmed character, one commit
+            pend = reg.pending()
+            if not pend:
+                raise RegistryError("nothing is waiting for a confirmation")
+            with reg.store.batch(f"{reg.key}: {by} confirmed {len(pend)} character(s)"):
+                done = [reg.confirm(c.label, by)[1].label for _m, c in pend]
+            return f"confirmed {len(done)}: {', '.join(done)}"
         reg.confirm(op.character or "", by)
         return f"confirmed {op.character}"
     if op.op == "set_main":
@@ -2013,6 +2112,21 @@ async def _warm_roles(reg: Registry, bot) -> None:
         await asyncio.to_thread(reg.resolve_officer_roles, guild)
 
 
+def absence_preview(reg: Registry, m, start: str, end: str | None, raids=None) -> str:
+    """Before anything is saved: the live sheets an absence would touch, in words (' · sheets it touches: Barrow Deeps
+    Tue 6 Oct 7:30 PM (seat freed), …' or ' · no live sheet on those days'). RegistryError on dates add_absence refuses.
+    The diff, MCP add_absence(preview=true) and POST /api/members/absence {preview} say it this way."""
+    from . import raidcycle as rc
+    from .raid_views import run_title
+
+    s, e = reg.absence_span(start, end)
+    rs = raids if raids is not None else rc.RaidStore(reg.store, reg.key)
+    hits = rc.absence_effects(reg, rs, m, s, e)
+    if not hits:
+        return " · no live sheet on those days"
+    return f" · sheet{'s' if len(hits) != 1 else ''} it touches: " + ", ".join(f"{run_title(reg, ev)} ({what})" for ev, what in hits)
+
+
 def sheets_words(reg: Registry, bot, keys) -> str:
     """announce_absence's touched run keys as words: ' · off 2 sheets: Barrow Deeps Tue 6 Oct 7:30 PM, …'
     (the chat reply and the web absence routes both say it this way)."""
@@ -2136,8 +2250,9 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         m = _need_member(reg, op.member)
         want = _answer_value(op.value)
         note = (op.reason or "").strip()
-        if want == "out" and note:  # a callout with its reason: /raid out, the site's No thanks with a note, MCP set_answer(note)
-            return await bot.call_out(reg, rs, ev, m, note, by)
+        own = by_id is not None and m.discord_id == by_id
+        if want == "out" and (note or own):  # a callout (/raid out's verb): anyone's with a reason, and every "I can't make it" of one's own
+            return await bot.call_out(reg, rs, ev, m, note or None, by)
         try:
             line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by)
         except ValueError as e:

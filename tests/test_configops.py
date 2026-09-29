@@ -19,7 +19,7 @@ def test_raid_set_describe_and_apply(reg):
     assert configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="healer_max", value="4")) == "raid barrow_deeps healer_max: 3 → 4"
     slots = configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="slots", value="Tue 19:30"))
     assert slots.startswith("raid barrow_deeps slots: none → Tue 7:30 PM — after it: Barrow Deeps: next Tue ") and "19:30" not in slots
-    assert configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps")) == "raid barrow_deeps: overrides {'lock_hours_before': 12} → profile defaults"
+    assert configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps")) == "raid barrow_deeps: drop the guild's overrides — locks 12 hours before → profile defaults"
     configops.apply(reg, ConfigOp(op="raid_reset", target="barrow_deeps"), "owner", is_owner=True)
     assert reg.raid_def("barrow_deeps")["lock_hours_before"] == 24
     with pytest.raises(RegistryError, match="nudge must fall"):

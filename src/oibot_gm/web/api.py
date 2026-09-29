@@ -782,7 +782,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if note and status != "out":
             return JSONResponse({"error": "a note goes with No thanks (status out): it is the reason they can't make it"}, status_code=400)
         try:  # set_answer / call_out refresh the sheet and cards and write the ops line themselves; the reply is Discord-flavoured
-            if note:  # No thanks with a reason: a callout, the note for the officers only (/raid out's verb)
+            if note or (status == "out" and d.get("callout")):  # a callout (/raid out's verb): with a reason (officers only), or MCP's No thanks
                 line = await bot.call_out(v.reg, rs, ev, m, note, v.name)
             else:
                 line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name))
@@ -1286,6 +1286,17 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         """Officer records an absence for someone (same ripple as the member doing it)."""
         v, d = await body(request, officer=True)
         m0 = resolve_member(v.reg, member_ref(d))
+        if d.get("preview"):  # what it would touch, nothing written (MCP add_absence preview=true): the diff's words
+            from .. import configops
+
+            try:
+                s0, e0 = v.reg.absence_span(d.get("start") or "", d.get("end") or None)
+                words = configops.absence_preview(v.reg, m0, s0, e0, raids=bot.raids.store(v.reg))
+            except (RegistryError, ValueError) as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            rs0 = bot.raids.store(v.reg)
+            return {"message": f"preview — nothing saved: {m0.display_name} away {v.reg.span_label(s0, e0)}{words}", "preview": True,
+                    "sheets": [{"key": ev.key, "effect": what} for ev, what in rc.absence_effects(v.reg, rs0, m0, s0, e0)]}
         try:
             m, a = await asyncio.to_thread(v.reg.add_absence, m0.discord_id, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, m0.display_name)
         except (RegistryError, ValueError) as e:
@@ -1635,21 +1646,32 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ops = [ConfigOp(**o) for o in held["ops"]]
             allowed, refused = configops.authorize(v.reg, ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
             out = {"kind": "change", "reply": held["reply"], "questions": [], "ops": [op.model_dump(exclude_none=True) for op in allowed],
-                   "describe": held["describe"], "applied": [], "refused": refused}
+                   "describe": held["describe"], "applied": [], "refused": refused, "error": None}
             revs, stale = dict(held["revs"]), set()
             ps = PolicyStore(bot.registries.store, v.reg.key)
+
+            def failed(op, e) -> None:  # as Discord's Apply: listed with what it was, and the rest of the request still applies
+                out["refused"].append(f"{configops.describe(v.reg, op, PLAIN_WEB)} — {e}")
+                out["error"] = out["error"] or str(e)
+
             for op in configops.coalesce(allowed):  # consecutive raid/schedule settings save as one write (as on Discord)
                 key = configops.op_run_key(v.reg, op, raids)
+                if op.op in configops.BOARD_OPS and key in stale:  # an earlier step found someone else's change on this board
+                    failed(op, rc.BoardChanged())
+                    continue
                 before = configops.snapshot_revs(v.reg, revs, raids)
                 try:
-                    if op.op in configops.BOARD_OPS and key in stale:
-                        raise rc.BoardChanged()
                     line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid, channel_id=PLAIN_WEB,  # authorize() allowed it
                                                        rev=revs.get(key) if op.op in configops.BOARD_OPS else None)
                 except (RegistryError, ValueError) as e:
-                    out["applied"].append(f"{op.op}: {e}")
-                    out["error"] = str(e)
-                    break
+                    failed(op, e)
+                    if isinstance(e, rc.BoardChanged) and key:
+                        stale.add(key)  # keep the old rev: the rest of this request can't overwrite that change either
+                    continue
+                except Exception as e:  # noqa: BLE001 — Discord or the solver: never a 500 after a partial apply; the caller sees what landed
+                    log.exception("plain change %s failed", op.op)
+                    failed(op, f"{type(e).__name__}: {e}")
+                    continue
                 configops.refresh_revs(v.reg, revs, raids, stale, before)  # this request's own write is not someone else's change
                 out["applied"].append(line)
                 await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")

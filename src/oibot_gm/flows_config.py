@@ -1294,8 +1294,10 @@ class TimezoneWizard(OwnerWizard):
                  f"• Now: **{fmt12(datetime.now(new))}** there (it's {fmt12(self.reg.now_local())} in {cur})."]
         from . import raidcycle as rc
 
-        try:  # the same preview plain text's `set timezone` shows (rc.timezone_preview: a shadow registry, nothing saved)
-            lines += [f"• {line}" for line in rc.timezone_preview(self.reg, zone)]
+        try:  # the same words plain text's `set timezone` shows (a shadow registry, nothing saved), plus Discord's own
+            # <t:…:f> stamps so each reader sees the new and the old moment in their own locale (the clock rule)
+            lines += [f"• {r['line']} · <t:{int(r['start'].timestamp())}:f> your time" + (f" (was <t:{int(r['was'].timestamp())}:f>)" if r["was"] else "")
+                      for r in rc.timezone_preview_rows(self.reg, zone)]
         except RegistryError as e:
             await self.refuse(i, str(e), self.start, "Pick another")
             return

@@ -260,13 +260,16 @@ def open_run(raid: str, when: str | None = None, schedule: str | None = None) ->
 def set_answer(run: str, member: str, status: str, character: str | None = None, note: str | None = None) -> str:
     """Answer a sheet for someone: status in (Join) / sub (Bench) / out (No thanks); `character` swaps which character
     they play. After lock, `in` seats them and asks them to confirm, `out` frees the seat and starts filling it.
-    `note` (with out only) records it as a callout with the reason, like /raid out: officers see the note (get_run
-    callouts, the run's updates thread), the public sheet never does."""
+    `out` is always a callout, like /raid out (hours before, late after the lock cutoff, the updates-thread line);
+    `note` (with out only) is its reason: officers see it (get_run callouts, the run's updates thread), the public
+    sheet never does."""
     if status not in STATUSES:
         raise ToolError(f"status must be one of {', '.join(STATUSES)} (in = Join, sub = Bench, out = No thanks)")
     body: dict[str, Any] = {"member": member, "status": status, "character": character}
     if note:
         body["note"] = note
+    if status == "out":
+        body["callout"] = True  # /raid out's verb (RaidMixin.call_out), note or not
     return msg(api().post(f"/api/run/{run}/set", body))
 
 
@@ -472,10 +475,15 @@ def aura_reset(id: str | None = None) -> str:
 # ---------------------------------------------------------------- writes: members
 
 @mcp.tool()
-def add_absence(member: str, start: str, end: str | None = None, reason: str | None = None) -> str:
+def add_absence(member: str, start: str, end: str | None = None, reason: str | None = None, preview: bool = False) -> str:
     """Record that someone is away (dates YYYY-MM-DD, `end` defaults to `start`): the sheets in that window get their
-    No thanks and the absences card updates — what the member's own 'I'll be away' does."""
-    return msg(api().post("/api/members/absence", {"member": member, "start": start, "end": end, "reason": reason}))
+    No thanks (a rostered seat after lock is freed and filled) and the absences card updates — what the member's own
+    'I'll be away' does. `preview=true` writes nothing and says which live sheets it would touch and how: show the
+    person that line first, then call again without preview."""
+    body: dict[str, Any] = {"member": member, "start": start, "end": end, "reason": reason}
+    if preview:
+        body["preview"] = True
+    return msg(api().post("/api/members/absence", body))
 
 
 @mcp.tool()
@@ -565,7 +573,9 @@ def plain_change(text: str = "", apply: bool = False, token: str = "") -> dict:
     into whitelisted ops, `describe` shows current → new per op, and a change comes back with a `token` (single use,
     ten minutes). Read the describe lines to the person; after they agree call `apply=true` with that `token` (no
     text): exactly the ops they saw are applied — never a new parse — and a board someone changed since the preview
-    is refused. Questions from the parser come back in `questions` instead of ops. Everything plain text does works
+    is refused. The apply result lists `applied` (what landed), `refused` (each op that didn't, with why — the rest
+    of the request still applies, as on Discord) and `error` (the first failure, or null): never retry what is in
+    `applied`. Questions from the parser come back in `questions` instead of ops. Everything plain text does works
     here (board moves, proposals — "another" / "use it" remember what this token was shown —, recruitment, the
     plain-text policy, test tempos) except re-posting a sheet "here": use repost_sheet."""
     if apply:

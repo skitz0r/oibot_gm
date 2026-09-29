@@ -660,10 +660,7 @@ class RaidMixin:
         """Mark every live sheet inside the absence: open → out; locked and rostered → seat freed + fill."""
         rs = self.raids.store(reg)
         touched = []
-        for ev in rs.live():
-            day = ev.start.astimezone(reg.tz).date().isoformat()
-            if not (start <= day <= end):
-                continue
+        for ev in rc.runs_in_span(reg, rs, start, end):  # the same runs describe(absence) and MCP's preview list
             team = rc.run_team(reg, ev)
             sg = ev.signups.get(str(m.discord_id))
             if ev.state != "open" and ev.seat_of(m.display_name):

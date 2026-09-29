@@ -451,7 +451,7 @@ per (run, requester) in `bot._split_seen` (`configops.split_seen`; per process o
 `use` writes the last one through `save_board` and sets `ev.split_strategy`. `configops.board_revs` takes each board op's
 `rc.board_rev` when the diff is built; `ConfigConfirmView` passes it as `apply_async(rev=)` (`board_move` grew `rev=`) and
 refreshes it after each of the request's own ops, so only someone else's change is refused. `run_answer` no thanks with
-a `reason` is `RaidMixin.call_out`; `confirm_for` falls through to `answer_fill_for` when the member has a fill ask and
+a `reason`, and every self-bound no thanks (stage C D2), is `RaidMixin.call_out`; `confirm_for` falls through to `answer_fill_for` when the member has a fill ask and
 no placement ask; `run_sheet` is `repost_sheet` into `apply_async(channel_id=)` (refused in DMs and on `PLAIN_WEB`). The
 parser's live-runs context carries each run's board (`board_text`) and each raid's next six unopened runs
 ('YYYY-MM-DD HH:MM' + schedule id, machine context only); `_open_time` matches a listed start (or a bare 'HH:MM') to its
@@ -491,6 +491,27 @@ each job's past runs; the bank puts the unconfirmed list first so the section ca
 carry their hints; `applicant_line(officer=)` names the deciding officer to officers only. Keywords: "overrid…" reaches
 loot, "go through / reverted / was applied" reaches news, "change log" reaches status, "desired" reaches readiness.
 
+**Stage C D2, plain text and the verbs (2026-09-29).** The parser's context: `configops.data_block(title, rows)` runs
+every row through `data_row` (one line, `<data` / `</data` defused), the live boards sit in their own data block, and
+every machine time carries its 12-hour label (`= reg.local12(...)` beside live-run starts, upcoming runs and Now;
+`span_label` beside absence dates; `slot_label` beside the raid slots). Officers' context adds the unconfirmed
+characters (`pending_text`); `confirm` takes `character="all pending"` (`ALL_PENDING`, character or target) and confirms
+`reg.pending()` in one batch commit. `describe(absence)` appends `configops.absence_preview` (the live runs in the span,
+`rc.runs_in_span` — which `RaidMixin.after_absence` walks too — with `rc.absence_effects`: No thanks / seat freed /
+already No thanks); `POST /api/members/absence {preview: true}` returns the same without writing and MCP
+`add_absence(preview=True)` sends it. `raid_reset`'s preview words each override (`_overrides_words`). A self-bound
+no thanks is `call_out(note or None)`, and MCP `set_answer` with status out sends `callout: true`, which the
+`/api/run/{key}/set` route routes to `call_out`. `RaidMixin.open_test_run(…, channel=None)` is the one test-run opener
+(signup channel, else the asking channel; the ops warn line) for `/gm test run`, plain text and `/api/admin/test`.
+`_write_board` applies a locked board on the event loop (never a worker thread next to the loop's own writers).
+`/api/ops/change` apply goes on past a failed op like Discord (each in `refused` with why, `error` = the first, an
+unexpected exception logged, never a 500 after a partial apply). `/gm change` in a DM passes `channel=None` (the DMs
+entry). `discord_help.asker_identity` reads officer and role ids from the guild member in DMs (the guide's Apply
+button, `/ask`, `/help`). `discord_policy.left_server(bot, reg, user)` (`OibotGM.in_guild`: the gateway cache, else one
+cached fetch) makes someone no longer in the server unregistered on every plain-text path — `plain_text` answers
+with the static guide, `handle_change` and the diff's Apply refuse — the owner excepted. The TimezoneWizard's confirm
+adds `<t:unix:f>` stamps (new and old moment) from `rc.timezone_preview_rows`.
+
 ### 5.25 Plain-text permissions: members act too, by role and channel (built 2026-09-22)
 
 **Why.** Plain text was routed by *channel*: an @mention in the ops or analytics channel parsed a change (officers
@@ -500,7 +521,7 @@ for members too, with who-may-do-what-where configurable on the web's Ops page.
 
 **Capability groups.** Every configops op is in exactly one group (`configops.OP_GROUP`; a test asserts the op list
 and the map agree): *members* (absence, absence_clear, dm, character, set_main, rank, confirm), *runs* (run_open,
-run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for; `team_member` was removed in stage C M8 — it refused the run keys the parser is shown and never seated anyone: a seat is `run_answer` or a board op),
+run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, confirm_for; `run_sheet` is in `ANYONE_OPS`: it touches nobody's record, so `bind_self` makes it *self* for everyone, like `/raid sheet`, and `authorize` refuses it in DMs and on `PLAIN_WEB`; `team_member` was removed in stage C M8 — it refused the run keys the parser is shown and never seated anyone: a seat is `run_answer` or a board op),
 *comp* (comp_target, comp_target_clear, comp_groups, pin, policy_append), *raids* (raid_set, raid_reset, aura_set,
 family_set, aura_reset), *setup* (set, role_add, role_remove), *test* (test). The seventh group, *self*, is not a
 set of ops but a scope: an op in `SELF_OPS` (absence, absence_clear, dm, character, set_main, run_answer,

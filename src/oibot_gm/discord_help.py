@@ -146,8 +146,21 @@ class GuideSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"guide:me
             await interaction.response.send_message("Not configured here.", ephemeral=True)
             return
         key = self.item.values[0]
-        view = apply_view(reg, interaction.user.id, officer=is_officer(interaction, reg), role_ids=[r.id for r in getattr(interaction.user, "roles", None) or []]) if key == "apply" else None
+        if key == "apply":
+            officer, role_ids = await asker_identity(interaction, reg)
+            view = apply_view(reg, interaction.user.id, officer=officer, role_ids=role_ids)
+        else:
+            view = None
         await interaction.response.send_message(guide_text(reg, key, interaction.user.id)[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none(), **({"view": view} if view else {}))
+
+
+async def asker_identity(interaction: discord.Interaction, reg) -> tuple[bool, list[int]]:
+    """(officer, role ids) of whoever pressed or typed. In the server the interaction's Member has them; in a DM Discord
+    hands over a bare User with no roles, so they come from the guild member, as plain text reads them
+    (OibotGM.plain_identity) — else an officer or a member-role holder with no character got the Apply button."""
+    if interaction.guild_id is None and getattr(interaction.client, "plain_identity", None) is not None:
+        return await interaction.client.plain_identity(reg, interaction.user)
+    return is_officer(interaction, reg), [r.id for r in getattr(interaction.user, "roles", None) or []]
 
 
 def guide_view() -> discord.ui.View:
@@ -184,7 +197,7 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
     @app_commands.choices(topic=TOPIC_CHOICES)
     async def help_cmd(interaction: discord.Interaction, topic: app_commands.Choice[str] | None = None):
         reg = guilds.for_interaction(interaction)
-        officer = bool(reg and is_officer(interaction, reg))
+        officer = bool(reg and (await asker_identity(interaction, reg))[0])  # in a DM too: the tiers follow the guild's roles
         if topic:
             text = manual_section(TOPICS[topic.value][0])
             if not text:
@@ -217,9 +230,9 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if not reg:
             await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
             return
-        officer = is_officer(interaction, reg)
+        officer, role_ids = await asker_identity(interaction, reg)
         if not reg.may_ask(interaction.user.id, officer):
-            view = apply_view(reg, interaction.user.id, officer=officer, role_ids=[r.id for r in getattr(interaction.user, "roles", None) or []], base=guide_view())
+            view = apply_view(reg, interaction.user.id, officer=officer, role_ids=role_ids, base=guide_view())
             await interaction.response.send_message(guide_intro(reg), view=view, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)

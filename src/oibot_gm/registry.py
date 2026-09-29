@@ -2026,20 +2026,26 @@ class Registry:
             self.roster_remove(discord_id, roster, by)
         return f"{m.display_name} can't make {roster} — seat re-opened"
 
-    def add_absence(self, discord_id: int, start: str, end: str | None, reason: str | None, by: str, display_name: str | None = None) -> tuple[Member, Absence]:
+    @staticmethod
+    def absence_span(start: str, end: str | None) -> tuple[str, str]:
+        """An absence's (start, end) as ISO days, validated the way add_absence stores it (the previews use it too)."""
         from datetime import date as _d
 
         try:
-            s = _d.fromisoformat(start)
-            e = _d.fromisoformat(end) if end else s
+            s = _d.fromisoformat(str(start or "").strip())
+            e = _d.fromisoformat(str(end).strip()) if end else s
         except ValueError:
             raise RegistryError("Dates are YYYY-MM-DD.")
         if e < s:
             raise RegistryError("End is before start.")
         if (e - s).days > MAX_ABSENCE_DAYS:
             raise RegistryError(f"Absences longer than {MAX_ABSENCE_DAYS} days: ask an officer to take you off the roster instead.")
+        return s.isoformat(), e.isoformat()
+
+    def add_absence(self, discord_id: int, start: str, end: str | None, reason: str | None, by: str, display_name: str | None = None) -> tuple[Member, Absence]:
+        s, e = self.absence_span(start, end)
         m = self.member(discord_id, display_name, create=display_name is not None)
-        a = Absence(start=s.isoformat(), end=e.isoformat(), reason=(reason or "").strip() or None, by=by)
+        a = Absence(start=s, end=e, reason=(reason or "").strip() or None, by=by)
         m.absences = [x for x in m.absences if not (x.start == a.start and x.end == a.end)] + [a]
         self.save(m, f"{m.display_name} absent {a.start}" + (f"→{a.end}" if a.end != a.start else "") + (f" (by {by})" if by != m.display_name else ""))
         return m, a
