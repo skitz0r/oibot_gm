@@ -479,6 +479,18 @@ request's own: a `pin`, a move). A board that already differed — someone else 
 an unrelated op such as `dm` ran first — keeps the held rev and is marked stale, as is a run whose board op raised
 `rc.BoardChanged`; the request's later board ops on a stale run are refused.
 
+**Stage C D2, the help snapshot (2026-09-29).** `help.roster_aura_lines` is one roster's aura line for an open draft
+board (`rc.board_rosters` on the officers' layout) and a locked roster alike: every raid-wide buff with its provider
+count (`groups_summary` `n`), each group's missing party auras and totem picks, the synergy; the solver's advisories
+follow for officers only. Double-booked is listed for every live run. A closed run is shown in full when the question
+names it by key or in words (`_mentions_closed_run`: its weekday or date, "yesterday", "the last <raid>"; the newest
+match). The status section adds `registry.recent_changes(key, 10)` (the analytics change log) before the commit
+subjects; readiness adds the over-cap reason and a whole desired-comp line (met targets, source, justification); news
+lists every proposal state (waiting first) and, through `HelpExtras.agent_runs` (`agents.list_runs`, three per job),
+each job's past runs; the bank puts the unconfirmed list first so the section cap never cuts it; recruitment questions
+carry their hints; `applicant_line(officer=)` names the deciding officer to officers only. Keywords: "overrid…" reaches
+loot, "go through / reverted / was applied" reaches news, "change log" reaches status, "desired" reaches readiness.
+
 ### 5.25 Plain-text permissions: members act too, by role and channel (built 2026-09-22)
 
 **Why.** Plain text was routed by *channel*: an @mention in the ops or analytics channel parsed a change (officers

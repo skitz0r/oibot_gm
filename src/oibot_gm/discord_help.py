@@ -293,6 +293,7 @@ class HelpMixin:
 
         x.agents = lambda: agents.overview(tz=reg.tz)
         x.agent_steps = lambda run_id: agents.steps(agents.read_run(run_id))
+        x.agent_runs = lambda job: [{**r, "started_label": agents.clock12(r["started"], reg.tz)} for r in agents.list_runs(job)[:3]]  # the Agents page's past runs
         return x
 
     def help_privilege(self, reg, guild) -> tuple[dict[int, str], list[str]]:

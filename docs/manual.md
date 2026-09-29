@@ -721,29 +721,36 @@ guide** instead — a menu with *About the guild*, *Raid schedule*, *How to regi
 What `/ask` knows comes from one bounded snapshot the bot builds in code when you ask (it summarises, it never
 dumps; long lists are cut short). Always in it: the guild's channels (a channel the bot can no longer see is marked
 *not found*), officer roles, owner and ask audience; the *about* text, the invite link and the news keywords;
-recruitment (applications open or closed, the note, the guild's questions); every raid's schedules (in words, with
+recruitment (applications open or closed, the note, the guild's questions with their hints); every raid's schedules (in words, with
 their own settings and next runs — *Raid schedule* in the static guide lists each schedule's next three runs too),
 cadence (slots, when sheets open, nudge, lock and confirmation times, `fill_ask_hours`, `autofill`, `open_dm`, split
 policy, weights, comp bounds, comp targets and group layout, which settings are overridden), the raid's notes and the
 lockout window it is in now; the guild's aura and family overrides; the test bench; and every live run as the Raids
 page has it — state, nudge / lock / confirmation-expiry times, split strategy, the schedule it came from and how many
 rosters it expects, who joined (character, spec and class) and how many per role, bench, no thanks, who hasn't
-answered, pins, the board before lock (per roster, with who is still in the bank), what the run is short and who
-could cover it, auras nobody brings, people In on another run that evening, the rostered groups after lock (each
-seat's spec and role, the group's missing auras and totems, the top advisories) with confirmed / waiting / declined,
+answered, pins, the board before lock (per roster, with who is still in the bank and the same aura line as after
+lock), what the run is short and who could cover it, auras nobody brings, people In on another run that evening
+(before and after lock), the rostered groups after lock (each seat's spec and role) with confirmed / waiting /
+declined, and per roster its auras: every raid-wide buff with how many bring it, each group's missing auras and
+totems, the synergy (the solver's top advisories are for officers only),
 the bench after lock, leftovers and whether they could make another run, fill asks outstanding and recent answers,
 members absent that day, callouts, and the last log lines (more of the log when your question names the run, its
-raid or "tonight"). Also the last few finished or cancelled runs per raid (with the cancel reason) and when the next
-sheet opens. And your own record — characters, roles, DMs, upcoming absences with your own reasons, confirmations
-and fill asks waiting on you, your answer and seat on each live run — or, if you applied, your application's status.
+raid or "tonight"). Also the last few finished or cancelled runs per raid (with the cancel reason) — a past run you
+name by key or in words ("last Tuesday", "the last Barrow Deeps") in full, who joined and who was rostered — and when
+the next sheet opens. And your own record — characters, roles, DMs, upcoming absences with your own reasons,
+confirmations and fill asks waiting on you, your answer and seat on each live run — or, if you applied, your
+application's status and the note sent to you (never which officer decided).
 
 Officers get more, only when the question is about it (a few keywords decide; "status", "overview" or "what's going
 on" brings the main ones): **status** (data repo and push, LLM spend, the loot feed, uptime, the last ops lines, the
-last data changes), **applications** (open ones oldest first with the schedules they can make, the last five
+last ten registry change lines — the analytics change log's from → to — and the last data commits), **applications** (open ones oldest first with the schedules they can make, the last five
 decisions; an applicant's own answers only when you name them), **absences** (the next 30 days, with reasons),
-**readiness** (each raid's pool against its desired comp: roles, missing auras, where the comp is short or over cap),
-**news** (the last kept items, proposals waiting, the review jobs), **loot** (the last precedents and ledger rows, or a
-named member's), **bank** (every member's characters, rank, unconfirmed ones, who is an officer), **policy** (each doc,
+**readiness** (each raid's pool against its desired comp: roles, missing auras, where the comp is short or over cap
+with the reason, and the whole desired comp — met targets too — each with its justification), **news** (the last kept
+items, every proposal and its state — waiting ones first, then applied, reverted or dismissed with the commit — and the
+review jobs with their last three runs), **loot** (the last precedents and ledger rows, or a named member's; "why did we
+override …" brings it too), **bank** (the unconfirmed characters first, then every member's characters and rank, who is
+an officer), **policy** (each doc,
 compiled or not; the text when you name it), **auras** (the full effective matrix — members get this one too) and the
 **test bench**. An officer's snapshot always carries one index line with counts (open applications, proposals to
 decide, unconfirmed characters, unanswered confirmations, fill asks, who is away this week) and says which sections

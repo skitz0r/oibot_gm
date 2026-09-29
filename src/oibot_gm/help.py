@@ -122,6 +122,7 @@ class HelpExtras:
     privilege: dict[int, str] = field(default_factory=dict)  # discord id -> owner | officer | member | outside (only those resolved)
     agents: Callable[[], dict] | None = None  # agents.overview, called in the worker thread only for the news section
     agent_steps: Callable[[str], list[dict]] | None = None  # run id -> agents.steps(read_run(run id))
+    agent_runs: Callable[[str], list[dict]] | None = None  # job -> its last 3 runs, newest first ({id, started_label, outcome}: agents.list_runs)
 
 
 @dataclass
@@ -241,14 +242,15 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
     return out
 
 
-def applicant_line(reg: Registry, user_id: int) -> str | None:
-    """An applicant's own status (shown to them, or to an officer): label, state, since when, the decision note."""
+def applicant_line(reg: Registry, user_id: int, officer: bool = False) -> str | None:
+    """An applicant's own status (shown to them, or to an officer): label, state, since when, the decision note. Who
+    decided is internal review data: named for an officer only (the decision DM never names them either)."""
     a = reg.applicants.get(user_id)
     if not a:
         return None
     when = a.decided_at if a.status != "open" and a.decided_at else a.created_at
     return (f"application: {a.label} ({a.cls} {a.spec}) {a.status} since {reg.local12(when)}"
-            + (f" · decided by {a.decided_by}" if a.decided_by and a.status != "open" else "")
+            + (f" · decided by {a.decided_by}" if officer and a.decided_by and a.status != "open" else "")
             + (f" · note to the applicant “{_safe(a.decision_note)[:200]}”" if a.decision_note else "")
             + (" · waiting for an officer" if a.status == "open" else ""))
 
@@ -267,13 +269,57 @@ def _mentions_run(reg: Registry, ev, q: str) -> bool:
     return bool(re.search(r"\btonight\b|\btoday\b", q)) and ev.start.astimezone(reg.tz).date() == reg.now_local().date()
 
 
+def _mentions_closed_run(reg: Registry, ev, q: str) -> bool:
+    """The question names this past run: its key, or its day in words ("last Tuesday", "Thursday's run", "yesterday",
+    "15 Sep") — or "the last <raid>" — and, when it names a raid, this run's raid. The caller takes the newest match."""
+    if not q:
+        return False
+    if ev.key.lower() in q:
+        return True
+    rd = reg.raid_def(ev.instance)
+    raids = {rid: (rid, rid.replace("_", " "), reg.raid_def(rid).get("name", "")) for rid in reg.profile.raids}
+    named = [rid for rid, terms in raids.items() if _words(q, *terms)]
+    if named and ev.instance not in named:
+        return False
+    d = ev.start.astimezone(reg.tz)
+    today = reg.now_local().date()
+    day_words = (d.strftime("%A").lower(), f"{d.day} {d.strftime('%b').lower()}", f"{d.strftime('%b').lower()} {d.day}")
+    if any(re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?:'?s)?(?![a-z0-9])", q) for w in day_words):
+        return True
+    if re.search(r"\byesterday\b", q) and d.date() == today - timedelta(days=1):
+        return True
+    return bool(named and re.search(r"\b(last|previous|past)\b", q)) and _words(q, rd.get("name", ""), ev.instance or "", (ev.instance or "").replace("_", " "))
+
+
+def roster_aura_lines(reg: Registry, i: int, r, is_officer: bool = False) -> list[str]:
+    """One roster's aura coverage (the site's board summary, open draft board or locked roster alike): every raid-wide
+    buff with its provider count ('Fortitude ×2 · Kings ×1 · Spirit none'), each group's missing party auras with its
+    totem picks, the synergy — and, for an officer, the solver's top advisories (members never saw them: they read as
+    the officers' ranking of who should have gone)."""
+    from . import comp as comp_mod
+    from .roster import coverage as cov_mod
+
+    out = []
+    try:
+        cov = cov_mod.compute(reg.profile, list(r.selected), r) if r.groups else None
+        gs = comp_mod.groups_summary(reg, list(r.selected), r if cov else None, cov)
+    except Exception:  # noqa: BLE001 — a stale roster must not break the snapshot
+        gs = None
+    if gs:
+        raid = [f"{b['name']} ×{b['n']}" if b["n"] else f"{b['name']} none" for b in gs["raid"]]
+        per_group = [f"g{g['n']} missing {', '.join(b['name'] for b in g['missing'][:4]) or 'nothing'}" + (f" (totems {', '.join(g['picks'])})" if g["picks"] else "") for g in gs["groups"]]
+        out.append(f"  roster {i + 1} auras: raid-wide {' · '.join(raid) or 'none'}" + (" · " + " · ".join(per_group) if per_group else "")
+                   + (f" · synergy {gs['synergy']}" if gs.get("synergy") is not None else ""))
+    if is_officer and getattr(r, "advisories", None):
+        out.append(f"  roster {i + 1} advisories (officers): " + " | ".join(r.advisories[:3]))
+    return out
+
+
 def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = False) -> list[str]:
     """Everything the Raids page shows for one run, as a few lines. `is_officer`: absence reasons and callout notes;
     `detail`: the question names this run, so the log goes back further."""
-    from . import comp as comp_mod
     from . import raidcycle as rc
     from .raid_views import run_times
-    from .roster import coverage as cov_mod
 
     team = rc.run_team(reg, ev)
     rd = reg.raid_def(ev.instance)
@@ -311,6 +357,8 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
             out.append("  board (layout the lock will use): " + " ; ".join(f"roster {ri + 1}: " + (" | ".join(f"g{gi + 1}: {', '.join(g)}" for gi, g in enumerate(ch) if g) or "empty") for ri, ch in enumerate(chunks)))
             rosters = rc.board_rosters(reg, ev, layout, size)
             out.append(f"  bank (joined, not on the board): {_names(p.signup_name for p in (rosters[0].benched if rosters else []))}")
+            for i, r in enumerate(rosters):  # the draft board's auras, as the site's board shows them
+                out += roster_aura_lines(reg, i, r, is_officer)
         nd = rc.needs(reg, ev, team)
         if nd["headcount"] or nd["roles"]:
             out.append(f"  short: {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else ""))
@@ -321,27 +369,12 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         missing = [b["name"] for b in hd["buffs"] if not b["providers"]]
         if missing:
             out.append(f"  no provider for: {_names(missing, 12)}")
-        clash = rc.conflicts(rs, ev) if rs is not None else {}
-        booked = [f"{s.display_name} (also in {clash[s.discord_id]})" for s in ins if s.discord_id in clash]
-        if booked:
-            out.append(f"  double-booked: {_names(booked, 10)}")
     elif rosters:
         conf = {c["display_name"]: c for c in rc.confirmations(reg, ev)}
         for i, r in enumerate(rosters):
             groups = " | ".join(f"g{gi + 1}: " + ", ".join(f"{p.signup_name} ({p.character} {p.spec} {p.cls}, {p.role})" for p in (next((x for x in r.selected if x.signup_name == n), None) for n in g) if p) for gi, g in enumerate(r.groups) if g)
             out.append(f"  roster {i + 1} ({len(r.selected)} rostered): {groups or 'empty'}")
-            try:
-                cov = cov_mod.compute(reg.profile, list(r.selected), r) if r.groups else None
-                gs = comp_mod.groups_summary(reg, list(r.selected), r if cov else None, cov)
-            except Exception:  # noqa: BLE001 — a stale roster must not break the snapshot
-                gs = None
-            if gs:
-                raid_missing = [b["name"] for b in gs["raid"] if b["ok"] == "red"]
-                per_group = [f"g{g['n']} missing {', '.join(b['name'] for b in g['missing'][:4]) or 'nothing'}" + (f" (totems {', '.join(g['picks'])})" if g["picks"] else "") for g in gs["groups"]]
-                out.append(f"  roster {i + 1} auras: raid-wide missing {_names(raid_missing, 8)}" + (" · " + " · ".join(per_group) if per_group else "")
-                           + (f" · synergy {gs['synergy']}" if gs.get("synergy") is not None else ""))
-            if r.advisories:
-                out.append(f"  roster {i + 1} advisories: " + " | ".join(r.advisories[:3]))
+            out += roster_aura_lines(reg, i, r, is_officer)
         by = {"yes": [], "no": [], None: []}
         for n, c in conf.items():
             by.setdefault(c.get("answer"), []).append(n)
@@ -349,6 +382,11 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         bench = [p.signup_name for p in (rosters[0].benched or [])]
         nd = rc.needs(reg, ev, team)
         out.append(f"  bench after lock: {_names(bench, 20)} · short: {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else ""))
+    if live:  # open or locked: the same double-booking the site's run card shows
+        clash = rc.conflicts(rs, ev) if rs is not None else {}
+        booked = [f"{s.display_name} (also in {clash[s.discord_id]})" for s in ins if s.discord_id in clash]
+        if booked:
+            out.append(f"  double-booked: {_names(booked, 10)}")
     if live and rosters:
         lo = rc.leftovers(reg, ev, rosters)
         if lo:
@@ -424,7 +462,8 @@ def runs_block(ask: Ask, budget: int) -> list[str]:
     if rs is None:
         return []
     tail = closed_run_lines(reg, rs) + next_sheet_lines(reg, rs)
-    named_closed = [e for e in rs.events.values() if e.state in ("done", "cancelled") and e.key.lower() in ask.q][:1]
+    closed = sorted((e for e in rs.events.values() if e.state in ("done", "cancelled")), key=lambda e: e.starts_at, reverse=True)
+    named_closed = [e for e in closed if _mentions_closed_run(reg, e, ask.q)][:1]  # the newest one the question names
     for e in named_closed:
         tail += run_lines(reg, rs, e, ask.officer, detail=True)
     tail = _clip(tail, min(2_500, budget // 3))
@@ -488,6 +527,12 @@ def _status(ask: Ask) -> list[str]:
         out += [f"  {t} {lvl} {text[:140]}" for t, lvl, text in reversed(x.ops[-15:])]
     elif x is not None:
         out.append("recent ops lines: none since the bot started")
+    from .registry import recent_changes
+
+    changes = recent_changes(reg.key, 10)  # what the analytics change log posts: the from → to lines, registry changes only
+    if changes:
+        out.append("recent registry changes (the analytics change log, newest first):")
+        out += _block("changes", [f"{reg.local12(c['time'])} {c['kind']}: {str(c['text'])[:160]}" for c in changes])
     commits = []
     if getattr(st, "is_repo", False):
         try:
@@ -541,6 +586,10 @@ def _bank(ask: Ask) -> list[str]:
     reg, x = ask.reg, ask.extras
     priv = x.privilege if x else {}
     out = ["### Members and characters (officers): name [privilege] · characters as Label Spec Class role (* main, ? unconfirmed, planned = no name yet) · rank"]
+    pend = reg.pending()  # first: a long member list is clipped at the section cap and must never cut these lines
+    out.append(f"unconfirmed ({len(pend)}): {_names((f'{c.label} ({m.display_name})' for m, c in pend), 25)}")
+    if x is not None:
+        out.append(f"officers seen in Discord: {_names(x.officers, 20) if x.officers else 'none resolved yet (the bot has not cached them)'} · officer roles {', '.join(reg.officer_role_names()) or 'none (Manage Server counts)'}")
     for m in sorted(reg.members.values(), key=lambda m: (m.test, m.display_name.lower())):
         chars = [c for c in m.active()]
         if not chars and not m.test:
@@ -548,10 +597,6 @@ def _bank(ask: Ask) -> list[str]:
         tag = priv.get(m.discord_id) or ("owner" if m.discord_id == reg.config.owner_discord_id else None)
         cs = "; ".join(f"{_char(reg, c)}{'*' if c.is_main else ''}{'?' if not c.confirmed_by and c.status != 'planned' else ''}{' planned' if c.status == 'planned' else ''} {c.rank}" for c in chars)
         out.append(f"- {m.display_name}{' [' + tag + ']' if tag else ''}{' (test puppet)' if m.test else ''}: {cs or 'no characters'}")
-    pend = reg.pending()
-    out.append(f"unconfirmed ({len(pend)}): {_names((f'{c.label} ({m.display_name})' for m, c in pend), 25)}")
-    if x is not None:
-        out.append(f"officers seen in Discord: {_names(x.officers, 20) if x.officers else 'none resolved yet (the bot has not cached them)'} · officer roles {', '.join(reg.officer_role_names()) or 'none (Manage Server counts)'}")
     return out
 
 
@@ -613,7 +658,10 @@ def _readiness(ask: Ask) -> list[str]:
         if d["short"]:
             out.append("  desired comp short: " + " · ".join(f"{c['key']} {c['have']}/{c['want']} ({c['why'][:90]})" for c in d["short"][:8]))
         if d["over"]:
-            out.append("  over cap: " + " · ".join(f"{c['key']} {c['have']}/{c['max']}" for c in d["over"][:8]))
+            out.append("  over cap: " + " · ".join(f"{c['key']} {c['have']}/{c['max']} ({c['why'][:90]})" for c in d["over"][:8]))
+        if d["comp"]:  # the whole desired comp, met targets too, each with its justification ("what is X's desired comp and why")
+            out.append("  desired comp: " + " · ".join(f"{c['key']} {c['have']} of {c['want']}" + (f"–{c['max']}" if c["max"] is not None else "+") + f" {c['level']}"
+                                                       + (" (officer)" if c["source"] == "officer" else "") + f" ({(c['note'] or c['why'])[:90]})" for c in d["comp"][:14]))
     if plan:
         out.append("pool: mains by role " + " · ".join(f"{r} {n}" for r, n in plan["by_role"].items())
                    + (" · flex " + "; ".join(f"{r}: {_names(v, 6)}" for r, v in plan["flex"].items()) if plan["flex"] else "")
@@ -633,12 +681,16 @@ def _news(ask: Ask) -> list[str]:
     out.append(f"kept news items (last {len(items)}):")
     out += _block("news", [f"{reg.day_label(str(r.get('posted_at') or r.get('ingested_at') or '')[:10])} · {str(r.get('title') or '')[:150]} · matched {', '.join(r.get('matched') or []) or '-'}" for r in items]) or ["  none"]
     try:
-        props = ProposalStore(reg.store, reg.key).all("proposed,approved,failed,applying")
+        props = ProposalStore(reg.store, reg.key).all()  # every state, as the Agents page lists them: "did it go through?" needs applied / reverted
     except Exception:  # noqa: BLE001
         props = []
-    out.append(f"proposals waiting or unfinished ({len(props)}):")
+    waiting = [p for p in props if p.state in ("proposed", "approved", "failed", "applying")]
+    done = [p for p in props if p.state not in ("proposed", "approved", "failed", "applying")]
+    shown = waiting[-8:] + done[-(12 - len(waiting[-8:])):]
+    counts = " · ".join(f"{st} {n}" for st in ("proposed", "approved", "applying", "failed", "applied", "reverted", "dismissed") if (n := sum(1 for p in props if p.state == st)))
+    out.append(f"proposals ({len(props)}: {counts or 'none'}), waiting or unfinished first, then the latest decided:")
     out += _block("proposals", [f"{p.id} “{p.title[:120]}” · {p.kind} · confidence {p.confidence} · {p.state}" + (f" · decided by {p.decided_by}" if p.decided_by else "")
-                                 + (f" · commit {p.commit}" if p.commit else "") + (f" · note “{p.note[:100]}”" if p.note else "") for p in props[-10:]]) or ["  none"]
+                                 + (f" · commit {p.commit}" if p.commit else "") + (f" · note “{p.note[:100]}”" if p.note else "") for p in shown]) or ["  none"]
     if x and x.agents:
         try:
             ov = x.agents()
@@ -646,6 +698,10 @@ def _news(ask: Ask) -> list[str]:
                 ld = j.get("launchd") or {}
                 out.append(f"job {j['job']} ({j.get('name')}): {j.get('state')} ({j.get('light')})" + (f" · step {j['step']}" if j.get("step") else "")
                            + f" · last result {j.get('result') or '-'} {('at ' + j['finished_label']) if j.get('finished_label') else ''} · next {j.get('next_label') or '?'} ({j.get('schedule')}) · launchd {'loaded' if ld.get('loaded') else 'not loaded'}")
+                if x.agent_runs:
+                    past = x.agent_runs(j["job"])
+                    if past:
+                        out.append(f"  last runs of {j['job']}: " + " ; ".join(f"{r.get('started_label') or '?'} {str(r.get('outcome') or '-')[:100]}" for r in past[:3]))
                 if j.get("state") == "running" and j.get("run_id") and x.agent_steps:
                     steps = x.agent_steps(j["run_id"])[-5:]
                     out += _block("job-steps", [f"{s.get('kind')}: {s.get('title', '')[:140]}" for s in steps])
@@ -674,7 +730,7 @@ def _policy(ask: Ask) -> list[str]:
 def _applications(ask: Ask) -> list[str]:
     reg = ask.reg
     rows = reg.open_applicants()
-    out = [f"### Applications (officers): {len(rows)} open, oldest first — decide with the card's buttons, /roster applicant, the site or MCP"]
+    out = [f"### Applications (officers): {len(rows)} open, oldest first — decide with the card's buttons, /roster applicant, plain text ('accept X') or MCP"]
     for a in rows:
         out.append(f"- {a.display_name}: {a.label} ({a.cls} {a.spec}{'/' + a.offspec if a.offspec else ''}) · applied {reg.local12(a.created_at)} · can make {_names((schedule_choice_label(reg, s) for s in a.schedules), 4) if a.schedules else 'no schedule picked'}")
     decided = sorted((a for a in reg.applicants.values() if a.status != "open"), key=lambda a: a.decided_at or a.created_at)[-5:]
@@ -713,12 +769,12 @@ GENERIC = re.compile(r"\b(status|overview|what'?s (going on|up|new|happening)|su
 
 # key -> (question keywords, builder, character cap, officer only). Order = priority when a generic question fills the budget.
 SECTIONS: dict[str, tuple[re.Pattern, Callable[[Ask], list[str]], int, bool]] = {
-    "status": (re.compile(r"\b(status|spend|spent|budget|cost|feed|companion|push(ed)?|uptime|online|restart\w*|ops|logs?|did the bot|what changed|changes|commits?|audit|errors?|warnings?)\b"), _status, 3_200, True),
+    "status": (re.compile(r"\b(status|spend|spent|budget|cost|feed|companion|push(ed)?|uptime|online|restart\w*|ops|logs?|did the bot|what changed|changes|commits?|audit|errors?|warnings?|change ?log)\b"), _status, 4_800, True),
     "applications": (re.compile(r"\b(applic\w*|apply|applied|applicants?|recruit\w*|newcomers?)\b"), _applications, 3_000, True),
     "absences": (re.compile(r"\b(away|absen\w*|out on|next week|vacation|holiday|leave|missing (the|a) raid)\b"), _absences, 2_000, True),
-    "readiness": (re.compile(r"\b(ready|readiness|short|comp|composition|missing|over ?cap|overview|analytics|pool|need more|shortfall)\b"), _readiness, 3_000, True),
-    "news": (re.compile(r"\b(news|proposals?|jobs?|review|agents?|patch(es)?|hotfix\w*|blue ?posts?)\b"), _news, 2_500, True),
-    "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear)\b"), _loot, 2_500, True),
+    "readiness": (re.compile(r"\b(ready|readiness|short|comp|composition|missing|over ?cap|overview|analytics|pool|need more|shortfall|desired)\b"), _readiness, 4_000, True),
+    "news": (re.compile(r"\b(news|proposals?|jobs?|review|agents?|patch(es)?|hotfix\w*|blue ?posts?|go(ne)? through|went through|revert\w*|(was|were|been|got|it) applied)\b"), _news, 2_500, True),
+    "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear|overrid\w*|overrode|overruled?)\b"), _loot, 2_500, True),
     "bank": (re.compile(r"\b(list|who|healers?|tanks?|melee|ranged|dps|unconfirmed|confirm\w*|officers?|alts?|mains?|members?|bank|characters?|ranks?|privilege)\b"), _bank, 4_000, True),
     "policy": (re.compile(r"\b(polic(y|ies)|loot rules?|comp rules?|persona|standing instructions?)\b"), _policy, 3_000, True),
     "auras": (re.compile(r"\b(auras?|buffs?|stacks?|stacking|totems?|provides?|providers?|famil(y|ies)|blessings?)\b"), _auras, 4_000, False),
@@ -794,9 +850,9 @@ def core_lines(ask: Ask) -> list[str]:
     about = (cfg.about or "").strip()
     lines.append(f"about: {'“' + _safe(about)[:300] + ('…' if len(about) > 300 else '') + '”' if about else 'not set'} · invite {cfg.invite_url or 'not set'} · news keywords {', '.join(cfg.news_keywords) or 'none (the game profile’s only)'}")
     rec = cfg.recruitment
-    qs = " ".join(f"{i}. {q.label}{'*' if q.required else ''}" for i, q in enumerate(rec.questions, 1))
+    qs = " ".join(f"{i}. {q.label}{'*' if q.required else ''}" + (f" [hint “{_safe(q.hint)[:100]}”]" if q.hint else "") for i, q in enumerate(rec.questions, 1))
     lines.append(f"recruitment: applications {'open' if rec.open else 'closed'}" + (f" · note “{_safe(rec.note)[:200]}”" if rec.note else "")
-                 + f" · {len(rec.questions)} question(s)" + (f" ({qs}; * = required)" if qs else "")
+                 + f" · {len(rec.questions)} question(s)" + (f" ({qs}; * = required" + (", [hint] = the line shown under it" if any(q.hint for q in rec.questions) else "") + ")" if qs else "")
                  + (f" · member roles (register without applying): {', '.join(reg.role_names.get(int(r), f'role:{r}') for r in cfg.member_role_ids) or 'none'}" if ask.officer else ""))
     from .registry import PLAIN_GROUPS
 
@@ -886,7 +942,7 @@ def people_lines(ask: Ask) -> list[str]:
         lines.extend(member_lines(reg, rs, m, f"## Asker ({who})", officer_view=True))
     else:
         lines.append(f"## Asker: <@{ask.user_id}> ({who}) · not registered")
-    own = applicant_line(reg, ask.user_id)
+    own = applicant_line(reg, ask.user_id, officer=ask.officer)
     if own and not (m and m.active()):
         lines.append("  " + own)
     if ask.officer and ask.question:
@@ -897,7 +953,7 @@ def people_lines(ask: Ask) -> list[str]:
                     lines.append(f"  privilege: {ask.extras.privilege[other.discord_id]}")
         for a in mentioned_applicants(reg, ask.question):
             if a.discord_id != ask.user_id and not (a.discord_id in reg.members and reg.members[a.discord_id].active()):
-                lines.append(f"## Applicant named in the question: {a.display_name} · {applicant_line(reg, a.discord_id)}")
+                lines.append(f"## Applicant named in the question: {a.display_name} · {applicant_line(reg, a.discord_id, officer=True)}")
     return lines
 
 

@@ -324,7 +324,7 @@ def test_locked_run_rosters_carry_seat_roles_and_auras(reg, rs):
     m = ms[0]
     role = reg.profile.spec(m.main.cls, m.main.spec).role
     assert f"{m.display_name} ({m.main.label} {m.main.spec} {m.main.cls}, {role})" in s
-    assert "roster 1 auras: raid-wide missing " in s and "g1 missing " in s
+    assert "roster 1 auras: raid-wide " in s and "g1 missing " in s
 
 
 # ---------------------------------------------------------------- the ceiling
