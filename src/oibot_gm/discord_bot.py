@@ -1085,6 +1085,9 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             async with message.channel.typing():
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
             return
+        # the snapshot and the parser context follow who can READ the reply: an officer asking where members read it
+        # gets the member view (help_answer adds where the officer view is)
+        public = not self.reply_private(reg, message.channel if message.guild else None)
         owner = reg.config.owner_discord_id == uid
         may_act = provider is not None and (owner or (mode == "self" and reg.may_plain("self", uid, officer=officer, role_ids=role_ids, channel=channel, fallback="members") is None))
 
@@ -1093,13 +1096,13 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
         async with message.channel.typing():
             if may_act and not reg.may_ask(uid, officer):
-                req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name, officer=officer)
+                req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name, officer=officer and not public)
                 if req.kind == "change" and req.ops:
                     await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req)
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view()), allowed_mentions=quiet)
                 return
-            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act)
+            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public)
             if answer == HELP_ACT:
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
                 return

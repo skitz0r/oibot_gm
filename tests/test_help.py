@@ -80,7 +80,7 @@ def test_about_recruitment_channels_and_raid_lines(reg, rs):
     reg.set_raid_override("barrow_deeps", "first_open", (reg.now_local() - timedelta(days=1)).replace(microsecond=0).isoformat(), "t")
     line = next(l for l in state(reg, rs, OWNER, True).splitlines() if l.startswith("raid barrow_deeps"))
     window = line.split("current lockout ")[1].split(",")[0]
-    assert " → " in window and ("PM" in window or "AM" in window) and "T" not in window
+    assert " → " in window and ("PM" in window or "AM" in window) and not re.search(r"\dT\d|\d\d:\d\d:\d\d", window)
 
 
 # ---------------------------------------------------------------- batch 4: applications (read side)
@@ -158,7 +158,7 @@ def test_plain_text_reply_to_a_newcomer_carries_the_apply_button(reg, monkeypatc
     replies = []
     says = {"answer": None}
 
-    async def help_answer(reg_, uid, off, text, may_act=False):
+    async def help_answer(reg_, uid, off, text, may_act=False, public=False):
         return says["answer"]
 
     async def plain_identity(reg_, user):
@@ -168,10 +168,10 @@ def test_plain_text_reply_to_a_newcomer_carries_the_apply_button(reg, monkeypatc
         replies.append((content, kw.get("view")))
 
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
-                                 help_answer=help_answer, plain_identity=plain_identity)
+                                 help_answer=help_answer, plain_identity=plain_identity, reply_private=lambda r, ch: ch is None)
 
     def send(uid, text="how do I join?"):
-        msg = types.SimpleNamespace(author=types.SimpleNamespace(id=uid, display_name="x"), channel=Channel(), reply=reply)
+        msg = types.SimpleNamespace(author=types.SimpleNamespace(id=uid, display_name="x"), channel=Channel(), reply=reply, guild=None)
         asyncio.run(db.OibotGM.plain_text(stub, msg, reg, text, None))  # a DM
 
     send(42)  # outside the ask audience: the static guide + Apply to join
@@ -402,7 +402,7 @@ def test_help_extras_and_help_answer_plumbing(reg, rs, monkeypatch):
     # help_answer hands the extras to help.answer (which runs in the worker thread)
     got = {}
 
-    def fake_answer(provider, tree, reg_, rs_, uid, officer, question, extras=None):
+    def fake_answer(provider, tree, reg_, rs_, uid, officer, question, extras=None, public=False):
         got["extras"], got["officer"] = extras, officer
         return help_mod.HelpAnswer(answer="ok")
 

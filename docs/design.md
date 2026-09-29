@@ -521,6 +521,16 @@ person could act there (self allowed, or the owner) is the text parsed into a ch
 costs one call anywhere; a change outside the act channels costs two. Outside the ask audience, a person who may
 act on their own record is parsed directly and gets the static guide for anything that isn't a change.
 
+**The reply's readers decide the context (stage C H1).** An officer's help snapshot (absences with reasons,
+applications, ops, precedents …) and the parser's officer-only context (open applications, news proposals, the
+plain-text policy, member-role names) go only into replies only officers read. `HelpMixin.reply_private(reg, channel)`
+is true for a DM, the ops / applications / roster channels (and their threads), and any channel no non-officer role or
+member overwrite can view (`discord_help.officer_only_channel`; unknown = public). A Message reply anywhere else is
+public: `plain_text` and `handle_change` pass `public=True` to `help_answer` (→ `help.guild_state(public=True)`: the
+member-level snapshot, no officer index, a "Reply audience" line; `help_answer` appends where the officer view is) and
+parse with `officer=False`, so neither the answer nor a clarifying question carries officer data. Interactions
+(`/ask`, `/gm change`) are ephemeral and keep the officer view.
+
 **Surfaces.** Web: `GET /api/plain-permissions` (officers; groups with who, ops and example, the guild's channels with
 their effective mode, roles), `POST /api/admin/plain-permissions` (owner; `Registry.set_plain_policy` validates and
 commits one line); the Ops page's *Plain-text permissions* card (a who multi-select per group from the tiers and the

@@ -417,7 +417,7 @@ def router(reg, monkeypatch, help_says, officer=False):
 
     monkeypatch.setattr(db, "handle_change", fake_change)
 
-    async def help_answer(reg_, uid, off, text, may_act=False):
+    async def help_answer(reg_, uid, off, text, may_act=False, public=False):
         seen["help"].append((text, may_act))
         return db.HELP_ACT if (may_act and help_says == "act") else "an answer"
 
@@ -425,13 +425,13 @@ def router(reg, monkeypatch, help_says, officer=False):
         return officer or user.id == OWNER, []
 
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
-                                 help_answer=help_answer, plain_identity=plain_identity)
+                                 help_answer=help_answer, plain_identity=plain_identity, reply_private=lambda r, ch: ch is None)
 
     async def reply(content=None, **kw):
         seen["replies"].append(content)
 
     def send(author_id, channel, text="hi"):
-        msg = types.SimpleNamespace(author=types.SimpleNamespace(id=author_id, display_name="x"), channel=Channel(), reply=reply)
+        msg = types.SimpleNamespace(author=types.SimpleNamespace(id=author_id, display_name="x"), channel=Channel(), reply=reply, guild=None if channel is None else object())
         asyncio.run(db.OibotGM.plain_text(stub, msg, reg, text, channel))
 
     return seen, send

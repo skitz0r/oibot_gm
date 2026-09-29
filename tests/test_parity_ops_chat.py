@@ -150,7 +150,7 @@ def test_apply_async_absence_names_the_sheets_it_touched(reg, rs):
 def test_question_in_an_act_channel_goes_to_help(reg):
     log, asked = [], []
 
-    async def help_answer(reg_, uid, officer, text, may_act=False):
+    async def help_answer(reg_, uid, officer, text, may_act=False, public=False):
         asked.append((uid, officer, text, may_act))
         return "the full answer"
 

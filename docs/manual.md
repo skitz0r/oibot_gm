@@ -737,7 +737,14 @@ compiled or not; the text when you name it), **auras** (the full effective matri
 decide, unconfirmed characters, unanswered confirmations, fill asks, who is away this week) and says which sections
 were left out, so the answer can tell you what to ask for. An officer who names a member (display name or character)
 or an applicant gets their record too, absence reasons included. Members never get other people's reasons,
-applications, ops, precedents, proposals or who holds which privilege. Text people typed (news titles, applicants'
+applications, ops, precedents, proposals or who holds which privilege.
+
+**Where you ask decides what the answer may carry.** The officer view goes only where only officers read the reply:
+a DM, `/ask` and `/gm change` (ephemeral), the ops, applications and roster channels, and any channel no non-officer
+role can see (the analytics channel when you made it officer-only). An officer who @mentions the bot anywhere else —
+#general, a public analytics channel — gets the member view, because everyone there reads the answer, and the reply
+says so: ask in the ops channel or by DM for the officer view. The same holds when that message is a change: the
+bot's clarifying questions there are written from the member view too. Text people typed (news titles, applicants'
 answers, reasons) is handed to the model as quoted data, never as instructions. The answer only ever *points* at
 commands — a change is a separate step you Apply (plain text, §8c).
 

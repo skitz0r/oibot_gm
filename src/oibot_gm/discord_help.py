@@ -230,6 +230,30 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
 ACT = "\x00act"  # help_answer's "this was a request to do something" (never shown)
 
 
+def officer_only_channel(reg, channel) -> bool:
+    """True when no non-officer can view `channel`: every guild role that isn't an officer role (nor Administrator /
+    Manage Server) is denied View Channel there, and no member-specific overwrite lets a non-officer in (the owner's
+    own overwrite is fine). Threads answer for their parent. Any error reads as False (public): unknown never leaks."""
+    try:
+        base = getattr(channel, "parent", None) or channel
+        guild = channel.guild
+        owner = reg.config.owner_discord_id
+        for role in guild.roles:
+            perms = role.permissions
+            if perms.administrator or perms.manage_guild or reg.config.officer_by_roles([role]):
+                continue
+            if base.permissions_for(role).view_channel:
+                return False
+        for target, ow in (getattr(base, "overwrites", None) or {}).items():
+            if isinstance(target, discord.Member) and ow.view_channel and target.id != owner:
+                gp = target.guild_permissions
+                if not (gp.administrator or gp.manage_guild or reg.config.officer_by_roles(target.roles)):
+                    return False
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class HelpMixin:
     """Needs self.ctx.provider, self.tree, self.raids, self.ops (and, when present: feed, started_at, get_guild,
     officiates — the running client)."""
@@ -291,10 +315,31 @@ class HelpMixin:
                 names.add(dm.display_name)
         return priv, sorted(names, key=str.lower)
 
-    async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False):
+    def reply_private(self, reg, channel) -> bool:
+        """Can only officers read a reply posted in `channel`? True for a DM (None, or a channel without a guild), the
+        ops, applications and roster channels (and threads in them), and any channel no non-officer role or member can
+        view (the analytics channel when the owner made it officer-only). Anything unknown counts as public.
+        The help snapshot and the parser context follow this, not the asker's rank (design §5.25)."""
+        if channel is None or getattr(channel, "guild", None) is None:
+            return True
+        cfg = reg.config
+        ids = {getattr(channel, "id", None), getattr(channel, "parent_id", None)} - {None}
+        if ids & ({cfg.ops_channel_id, cfg.applications_channel_id, cfg.roster_channel_id} - {None}):
+            return True
+        return officer_only_channel(reg, channel)
+
+    def private_note(self, reg) -> str:
+        """The line under an officer's answer in a public channel: where the officer view is."""
+        where = f"<#{reg.config.ops_channel_id}>" if reg.config.ops_channel_id else "the ops channel"
+        return f"-# Posted where members read it, so this is the member view — officers can ask in {where} or by DM for the officer view."
+
+    async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False, public: bool = False):
         """The answer text; None outside the ask audience (the caller shows the static guide). `may_act`: plain text
         may act for this person here — a message the model reads as a request to DO something returns ACT instead
-        (the caller hands it to the change flow), so a plain question costs one model call."""
+        (the caller hands it to the change flow), so a plain question costs one model call. `public`: the reply is
+        posted where members read it (not reply_private) — an officer then gets the member-level snapshot (no
+        officer sections, no officer index, no other people's reasons) and a line saying where the officer view is."""
+        public = bool(public and officer)
         if not reg.may_ask(user_id, officer):
             return None  # caller shows the static guide
         provider = self.ctx.provider
@@ -302,11 +347,11 @@ class HelpMixin:
             return "I can't answer free-form questions right now (no LLM configured). `/help` lists what I do."
         rs = self.raids.store(reg)
         try:
-            extras = self.help_extras(reg, officer)
+            extras = self.help_extras(reg, officer and not public)
         except Exception:  # noqa: BLE001 — the snapshot still works without the bot-side lines
             extras = None
         try:
-            ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras)
+            ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, public)
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             return "Something went wrong answering that; the officers have been told. `/help` lists what I do."
@@ -317,4 +362,7 @@ class HelpMixin:
             text += "\n\n" + " · ".join(f"`{c}`" for c in ans.commands[:4])
         if ans.for_officer:
             text += "\n-# This needs an officer."
+        if public:
+            note = self.private_note(reg)
+            return text[:1950 - len(note) - 1] + "\n" + note
         return text[:1950]

@@ -133,6 +133,7 @@ class Ask:
     officer: bool
     question: str
     extras: HelpExtras | None = None
+    public: bool = False  # an officer asked where members read the reply: `officer` is False (member-level snapshot)
 
     @property
     def q(self) -> str:
@@ -876,7 +877,11 @@ def people_lines(ask: Ask) -> list[str]:
     reg, rs = ask.reg, ask.rs
     lines = []
     m = reg.members.get(ask.user_id)
-    who = "officer" if ask.officer else "member"
+    who = "officer" if ask.officer or ask.public else "member"
+    if ask.public:
+        lines.append("## Reply audience: a channel members can read. The asker is an officer, but this snapshot is the member view on "
+                     "purpose (no officer sections, no other people's reasons or records): for officer data, say they can ask in the ops "
+                     "channel or by DM for the officer view — never guess it.")
     if m:
         lines.extend(member_lines(reg, rs, m, f"## Asker ({who})", officer_view=True))
     else:
@@ -896,13 +901,17 @@ def people_lines(ask: Ask) -> list[str]:
     return lines
 
 
-def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str = "", extras: HelpExtras | None = None) -> str:
+def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str = "", extras: HelpExtras | None = None, public: bool = False) -> str:
     """The live snapshot `/ask` answers from: settings, recruitment, every raid's cadence and schedules, every live run
     (what the Raids page shows), recent closed runs and the next sheet, the asker's own record — and, for an officer,
     the record of anyone the question names, an index line and the officer sections the question asks about.
     `extras` carries what only the running bot knows (HelpMixin.help_extras); None leaves those lines out.
-    Bounded (MAX_STATE_CHARS): every part has its own cap; lists are truncated, never dumped."""
-    ask = Ask(reg, rs, user_id, is_officer, question or "", extras)
+    Bounded (MAX_STATE_CHARS): every part has its own cap; lists are truncated, never dumped.
+    `public`: the reply is posted where members read it (a channel that isn't officer-only) — the snapshot level follows
+    who can READ the reply, not who asked: an officer gets the member-level snapshot there (design §5.25)."""
+    public = bool(public and is_officer)
+    is_officer = is_officer and not public
+    ask = Ask(reg, rs, user_id, is_officer, question or "", extras, public=public)
     core = _clip(core_lines(ask), CORE_CAP)
     people = _clip(people_lines(ask), PEOPLE_CAP)
     sections, included, skipped = section_lines(ask)
@@ -914,6 +923,7 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str
     return text if len(text) <= MAX_STATE_CHARS else text[: MAX_STATE_CHARS - 24] + "\n(snapshot truncated)"
 
 
-def answer(provider, tree, reg: Registry, rs, user_id: int, is_officer: bool, question: str, extras: HelpExtras | None = None) -> HelpAnswer:
+def answer(provider, tree, reg: Registry, rs, user_id: int, is_officer: bool, question: str, extras: HelpExtras | None = None,
+           public: bool = False) -> HelpAnswer:
     # the asker line above comes from the registry (code); the question itself is delimited data
-    return provider.complete("help", system_prompt(tree), guild_state(reg, rs, user_id, is_officer, question, extras) + "\n\n## Question\n<question>\n" + question.strip()[:1500] + "\n</question>", HelpAnswer)
+    return provider.complete("help", system_prompt(tree), guild_state(reg, rs, user_id, is_officer, question, extras, public=public) + "\n\n## Question\n<question>\n" + question.strip()[:1500] + "\n</question>", HelpAnswer)
