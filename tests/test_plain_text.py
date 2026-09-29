@@ -24,11 +24,17 @@ class FakeBot:
     save_board = RaidMixin.save_board
     board_move = RaidMixin.board_move
     _write_board = RaidMixin._write_board
+    open_test_run = RaidMixin.open_test_run  # the one test-run opener (the wizard and the site call it too)
 
     def __init__(self, rs):
         self.calls: list[tuple] = []
         self.raids = types.SimpleNamespace(store=lambda reg: rs)
         self.ico = lambda kind, key: ""
+        self.ops_lines: list[tuple[str, str]] = []
+        self.ops = types.SimpleNamespace(emit=self._emit)
+
+    async def _emit(self, cfg, level, text, exc=None):
+        self.ops_lines.append((level, text))
 
     async def set_answer(self, reg, rs, ev, m, status, character, by):
         self.calls.append(("set_answer", ev.key, m.display_name, status, character, by))

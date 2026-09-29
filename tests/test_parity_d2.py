@@ -156,3 +156,68 @@ def test_an_applicant_never_learns_who_decided(reg, rs):
     own = state(reg, rs, uid, False, "why was I declined?")
     assert "not now" in own and "Officer Grim" not in own
     assert "Officer Grim" in state(reg, rs, OWNER, True, "what about Newname's application?")
+
+
+# ---------------------------------------------------------------- L7: one test-run opener
+
+def test_plain_text_test_run_posts_where_it_was_asked_without_a_signup_channel(reg, rs):
+    from test_plain_text import FakeBot
+
+    class Bot(FakeBot):
+        def get_channel(self, cid):
+            return types.SimpleNamespace(id=cid, mention=f"<#{cid}>")
+
+    bot = Bot(rs)
+    out = asyncio.run(configops.apply_async(reg, ConfigOp(op="test", value="run barrow_deeps quick"), "Officer", False, bot=bot, by_id=42, channel_id=777))
+    ev = rs.live()[0]
+    assert ("post_sheet", ev.key) in bot.calls and "sheet in <#777>" in out, "the wizard's fallback: the channel it was asked in"
+    assert any(level == "warn" and f"opened test run {ev.key}" in line for level, line in bot.ops_lines), "the wizard's ops line"
+
+
+def test_the_sites_test_run_goes_through_the_one_opener(reg, rs, monkeypatch):
+    from fastapi.testclient import TestClient
+    from test_mcp import TOKEN, bearer
+    from test_parity_verbs import Bot
+
+    from oibot_gm.discord_raid import RaidMixin
+    from oibot_gm.web import app as web
+
+    seen = []
+    real = RaidMixin.open_test_run
+
+    async def spy(self, *a, **kw):
+        seen.append(kw)
+        return await real(self, *a, **kw)
+
+    monkeypatch.setattr(RaidMixin, "open_test_run", spy)
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    client = TestClient(web.create_app(Bot(reg, rs)))
+    r = client.post("/api/admin/test", json={"action": "run", "raid": "barrow_deeps"}, headers=bearer())
+    assert r.status_code == 200, r.text
+    assert len(seen) == 1 and seen[0]["lock_in"] == 25 and seen[0]["by_id"] == OWNER
+
+
+# ---------------------------------------------------------------- L3: a locked board is applied on the loop
+
+def test_a_locked_board_write_runs_on_the_event_loop(reg, rs, monkeypatch):
+    import threading
+
+    from test_plain_text import FakeBot
+
+    ms = reg.test_members()
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, ms[:12])
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms[:10]])
+    threads = []
+    real = rc.apply_layout_locked
+
+    def spy(*a, **kw):
+        threads.append(threading.current_thread())
+        return real(*a, **kw)
+
+    monkeypatch.setattr(rc, "apply_layout_locked", spy)
+    bot = FakeBot(rs)
+    layout = [[m.display_name for m in ms[:5]], [m.display_name for m in ms[5:9]] + [ms[10].display_name]]
+    asyncio.run(bot.save_board(reg, rs, ev, layout, by="Officer"))
+    assert threads == [threading.main_thread()], "not in a worker thread next to the loop's own writers"

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
 
 import discord
 
@@ -90,8 +89,6 @@ class TestRunWizard(Wizard):
         await self.start(interaction)
 
     async def open(self, interaction: discord.Interaction) -> None:
-        from . import raidcycle as rc
-
         raid, dm = self.draft["raid"], self.draft["dm"]
         _, start_in, nudge_in, lock_in, confirm_in = TEMPOS[self.draft["tempo"]]
         if raid not in self.reg.profile.raids:  # re-read: the profile may have been reloaded
@@ -99,17 +96,12 @@ class TestRunWizard(Wizard):
             return
         await self.working(interaction, "Opening the test run…")
         reg, client = self.reg, interaction.client
-        start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
-        rs = client.raids.store(reg)
-        ev = rc.open_run(reg, rs, raid, start, by=interaction.user.display_name,
-                         cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": dm, "test_by": interaction.user.id})
-        channel = client.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else interaction.channel
-        if not ev.message_id:
-            await client.post_sheet(reg, rs, ev, channel)
-        where = f" in {channel.mention}" if channel is not None else ""
+        # RaidMixin.open_test_run: the one opener (plain text and the site too) — signup channel, else this one; the ops line
+        ev, channel = await client.open_test_run(reg, client.raids.store(reg), raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in,
+                                                 dm=dm, by=interaction.user.display_name, by_id=interaction.user.id, channel=interaction.channel)
+        where = f" in {channel.mention}" if channel is not None and getattr(channel, "mention", None) else ""
         await self.finish(interaction, f"🧪 Test run {ev.key} open{where}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, "
                                        f"confirm by {confirm_in} min before. Next: `/gm test answer`; the puppets' DMs arrive in *your* DMs with their name on them.")
-        await _ops(interaction, reg, "warn", f"test bench: {interaction.user.display_name} opened test run {ev.key} (lock in {start_in - lock_in} min)")
 
 
 @flow("test_run")

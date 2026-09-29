@@ -2121,20 +2121,15 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         if kind == "comp":
             ev = await asyncio.to_thread(rc.open_comp_sandbox, reg, rs, arg, by, by_id)
             return f"comp sandbox {ev.key}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp"
-        from datetime import timedelta
-
-        from .presets import TEMPOS, tempo_cutoffs
+        from .presets import TEMPOS
 
         raid, tempo, dm = _test_run_args(reg, arg)  # the /gm test run recipe: a real sheet with minute-level cadence, the pool = puppets + the tester
-        start_in, cutoffs = tempo_cutoffs(tempo, open_dm=dm, test_by=by_id)
-        start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
-        ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs=cutoffs)
-        channel = bot.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
-        if channel is not None and not ev.message_id:
-            await bot.post_sheet(reg, rs, ev, channel)
-        _, _, nudge_in, lock_in, confirm_in = TEMPOS[tempo]
+        _, start_in, nudge_in, lock_in, confirm_in = TEMPOS[tempo]
+        here = bot.get_channel(int(channel_id)) if channel_id not in (None, PLAIN_WEB) else None  # no signup channel: the sheet lands where it was asked for
+        ev, posted = await bot.open_test_run(reg, rs, raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in, dm=dm, by=by, by_id=by_id, channel=here)
         return (f"test run {ev.key} open ({tempo}): starts {reg.local12(ev.start, '%I:%M %p')}, nudge {nudge_in}, lock {lock_in} min before, confirm by {confirm_in} min before"
-                + (", every puppet DMed (to you)" if dm else "") + ("" if ev.message_id else " (no signup channel set — sheet not posted)"))
+                + (", every puppet DMed (to you)" if dm else "") + (f" — sheet in <#{posted.id}>" if posted is not None and getattr(posted, "id", None) else "")
+                + ("" if ev.message_id else " (no signup channel set — sheet not posted)"))
     rs, ev = _live_event(reg, op.target, rs)
     team = rc.run_team(reg, ev)
     if op.op == "run_answer":

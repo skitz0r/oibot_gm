@@ -972,12 +972,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             start_in, lock_in, confirm_in, nudge_in = (as_int(d.get(k, dflt), k) for k, dflt in (("start_in", 40), ("lock_in", 25), ("confirm_in", 15), ("nudge_in", 32)))
             if not (start_in > lock_in > confirm_in >= 0) or nudge_in <= lock_in:
                 return JSONResponse({"error": "need start_in > nudge_in > lock_in > confirm_in ≥ 0 (all minutes)"}, status_code=400)
-            start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
-            ev = await asyncio.to_thread(rc.open_run, reg, rs, rid, start, by=v.name, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(d.get("dm_open")), "test_by": v.uid})
-            channel = bot.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
-            if not ev.message_id and channel is not None:
-                await bot.post_sheet(reg, rs, ev, channel)
-            await bot.ops.emit(reg.config, "warn", f"test bench: {v.name} opened test run {ev.key} (lock in {start_in - lock_in} min)")
+            # RaidMixin.open_test_run: the wizard's and plain text's opener (the site has no channel of its own: signup channel or none)
+            ev, _posted = await bot.open_test_run(reg, rs, rid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in,
+                                                  dm=bool(d.get("dm_open")), by=v.name, by_id=v.uid)
             return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before" + ("" if ev.message_id else " (no signup channel set — sheet not posted)"), "key": ev.key}
         if action == "answer":
             ev = find_live(reg, rs, str(d.get("run") or "")) if d.get("run") else next(iter(rs.live()), None)

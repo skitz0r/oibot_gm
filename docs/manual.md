@@ -609,7 +609,9 @@ is, so a question the bot asks a member back can't name an applicant.
 `/gm test seed` asks how many puppet members to create (5, 10, 20 or the whole bench; fake Discord ids, a
 realistic class mix and ranks, mains confirmed). `/gm test run` is one screen: the raid (when there is more than
 one), a tempo (Quick, Standard or Slow) and whether to DM everyone when it opens, then **Open the test run**. It
-opens a real sheet for that raid in the signup channel with minute-level cadence, so the unchanged scheduler goes through nudge →
+opens a real sheet for that raid in the signup channel (with no signup channel set: in the channel you asked in —
+the same for plain text's "open a quick test run"; the site's test bench needs the signup channel) with minute-level
+cadence, so the unchanged scheduler goes through nudge →
 lock → confirmations → expiry → fill → close within the hour. `/gm test answer` offers **Random mix** (how many
 Join, Bench and No thanks) or **One member** (pick a puppet, then Join, Bench or No thanks), and stays open so you
 can answer again; after lock a puppet's *No thanks* is a

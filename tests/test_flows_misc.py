@@ -1,11 +1,13 @@
 """The test bench wizards (/gm test run|answer|seed) and /gm rule, driven end to end through fake interactions."""
 import asyncio
+import functools
 from types import SimpleNamespace
 
 import pytest
 
 from oibot_gm import discord_policy, discord_registry
 from oibot_gm import flows_misc as fm
+from oibot_gm.discord_raid import RaidMixin
 from oibot_gm import policy as policy_mod
 from oibot_gm.wizard import FLOWS
 from conftest import lock_with_board, open_test_run
@@ -35,6 +37,7 @@ def make_client(reg, rs, ps=None):
     client = SimpleNamespace(raids=SimpleNamespace(store=lambda _r: rs), post_sheet=post_sheet, refresh_sheet=refresh_sheet, drop_seated=drop_seated,
                              get_channel=lambda _id: None, ops=FakeOps(), policies=SimpleNamespace(store=lambda _r: ps),
                              ctx=SimpleNamespace(provider="llm"), ico=lambda kind, key: "")
+    client.open_test_run = functools.partial(RaidMixin.open_test_run, client)  # the real opener on the recording client
     return client, calls
 
 
@@ -61,13 +64,14 @@ def cutoff_minutes(reg, ev):
 def test_run_default_press_opens_todays_standard_run(reg, rs, officer):
     client, calls = make_client(reg, rs)
     h = Harness(reg, rs, client=client)
+    h.channel = SimpleNamespace(id=5, mention="<#5>")  # no signup channel set: the sheet goes where the command was used
 
     async def go():
         await FLOWS["test_run"](h.command(), reg)
         assert "Standard" in h.text and "Open the test run" in h.buttons()
         before = reg.now_local()
         await h.press("Open the test run")
-        assert "🧪 Test run" in h.text and h.screen["view"] is None
+        assert "🧪 Test run" in h.text and " open in <#5>" in h.text and h.screen["view"] is None
         ev = only_run(rs)
         start_in = (ev.start - before).total_seconds() / 60
         assert 39 <= start_in <= 40

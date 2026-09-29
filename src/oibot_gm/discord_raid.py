@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import discord
 
@@ -477,7 +477,9 @@ class RaidMixin:
             ev.layout = groups if any(groups) else None
             await asyncio.to_thread(rs.save, ev, f"board ({by})")
             return f"{run_title(reg, ev)}: board " + ("saved" if ev.layout else "cleared") + " (the lock uses it)"
-        added, removed = await asyncio.to_thread(rc.apply_layout_locked, reg, rs, ev, groups)
+        # on the loop, not a worker thread (stage C L3): a Can't make it, a fill yes or the scheduler's expiry changes the
+        # same rosters on the loop, and a thread could put a seat freed meanwhile back; list work plus one batch commit
+        added, removed = rc.apply_layout_locked(reg, rs, ev, groups)
         await self.after_board_change(reg, rs, ev, rc.run_team(reg, ev), added, removed, by)
         return ((f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "")).lstrip("; ") or "groups updated"
 
@@ -602,6 +604,21 @@ class RaidMixin:
             await self.post_sheet(reg, rs, ev, channel)
         await self.ops.emit(reg.config, "info", f"{by} opened {ev.key} ({len(ev.signups)} pre-filled out from absences)" + ("" if ev.message_id else " — no signup channel: sheet not posted"))
         return ev
+
+    async def open_test_run(self, reg, rs, raid: str, *, start_in: int, nudge_in: int, lock_in: int, confirm_in: int, dm: bool, by: str, by_id: int | None,
+                            channel=None) -> tuple[rc.RaidEvent, object]:
+        """The one test-run opener (/gm test run, plain text's `test run …`, the site's test bench and so MCP): a real
+        sheet with minute-level cadence (`*_in` = minutes; start > nudge > lock > confirm), the pool = puppets + the
+        tester (`by_id`), `dm` = DM every puppet when it opens (the DMs reach the tester). The sheet goes to the signup
+        channel, else to `channel` (where it was asked for; None = nowhere, e.g. the site); the ops feed gets the warn
+        line. Returns (the run, the channel it was posted in or None)."""
+        start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
+        ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(dm), "test_by": by_id})
+        target = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else channel
+        if target is not None and not ev.message_id:
+            await self.post_sheet(reg, rs, ev, target)
+        await self.ops.emit(reg.config, "warn", f"test bench: {by} opened test run {ev.key} (lock in {start_in - lock_in} min)")
+        return ev, target
 
     async def cancel_run(self, reg, rs, ev, by: str, reason: str | None) -> str:
         """Cancel a run: state, sheet + officer cards re-rendered, open confirmations withdrawn, thread line, ops warn."""

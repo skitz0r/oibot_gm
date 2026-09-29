@@ -55,7 +55,7 @@ class FakeInteraction:
         self.h, self.type, self.user, self.client = h, kind, h.user, h.client
         self.message = SimpleNamespace(id=message_id) if message_id is not None else None
         self.response = FakeResponse(h, self)
-        self.guild_id, self.guild, self.channel = 1, None, None
+        self.guild_id, self.guild, self.channel = 1, None, getattr(h, "channel", None)
         self._sent_id: int | None = None
         self.followup = SimpleNamespace(send=self._followup)
 
@@ -77,6 +77,7 @@ class Harness:
         self.announced: list = []
         self.client = client or SimpleNamespace(raids=SimpleNamespace(store=lambda _reg: rs), announce_absence=self._announce, ico=lambda kind, key: "")
         self.modal = None
+        self.channel = None  # the channel the command is used in (None = unknown); a test sets it when a flow posts there
         self.screens: list[dict] = []  # every render: {"text", "view", "message_id"}
 
     async def _announce(self, reg, m, a, by):
