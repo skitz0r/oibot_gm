@@ -92,7 +92,7 @@ on the sheet in Discord.
 - **Absences**: `/me absent list` shows yours with a **Clear** button on each; `/me absent clear` does the same.
 - **Away for a while**: press *I'll be away* on the card in the absences channel, or `/me absent add`, or the Me
   page. Nothing is typed: pick the **first day** (Today, Tomorrow, then the days after — *Later than this…* picks a
-  week further out) and **how long** (1 day up to 4 months), with an optional reason only officers see. A confirm
+  week further out) and **how long** (1 day up to 4 months), with an optional reason only you and the officers see. A confirm
   screen shows the days in words and which live sheets it touches before anything is saved. Sheets on those days
   get *No thanks* for you, and if you were already rostered the seat is released (you get a DM saying so) and the
   bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
@@ -595,7 +595,7 @@ for data discovered in game.
 ## 10. Data, privacy, cost
 
 Guild state lives in a private git repository (one commit per change, so every edit has an author and a
-time). Absence reasons and officer notes are officer-only. The bot DMs only for sheets, nudges, confirmations,
+time). An absence reason is seen by you and the officers, nobody else. The bot DMs only for sheets, nudges, confirmations,
 released seats and fill asks; switch DMs off on the **Me** page if you'd rather not get them — with DMs off
 you are never asked to fill, and a confirmation ask is shown on the Me page instead and counts as pending
 until you answer it there. **My absences** on the absences card lists yours with a **Clear** button each; clearing
@@ -614,20 +614,44 @@ registered members, or everyone; default registered). Anyone outside that audien
 guide** instead — a menu with *About the guild*, *Raid schedule*, *How to register*, *How signups work*,
 *How to apply*, *Who to contact* — built from the guild's settings, no AI involved.
 
-What `/ask` knows is what the site shows, in one bounded snapshot taken when you ask: the guild's channels,
-officer roles, owner and ask audience; every raid's schedules (in words, with their own settings and next runs —
-*Raid schedule* in the static guide lists each schedule's next three runs too) and cadence (slots, when sheets open, nudge, lock and
-confirmation times, `fill_ask_hours`, `autofill`, `open_dm`, split policy, weights, comp bounds, comp targets
-and group layout, which settings are overridden); the guild's aura and family overrides; the test bench (puppets,
-test runs); and every live run as the Raids page has it — state, nudge / lock / confirmation-expiry times, split
-strategy, who joined (with character and spec), bench, no thanks, who hasn't answered, pins, the board before
-lock, the rostered groups after lock with confirmed / waiting / declined, the bench after lock, what the run is
-short, fill asks outstanding (who, for what, deadline) and recent answers, members absent that day, callouts, and
-the last log lines. It also knows your own record — characters, roles, DMs, upcoming absences, confirmations
-waiting on you, and your answer and seat on each live run. An officer who names a member (display name or
-character) in the question gets that member's record too, absence reasons included; members asking about
-others don't. Long lists are cut short rather than dumped, and the answer only ever *points* at commands —
-a change is a separate step you Apply (plain text, §8c).
+What `/ask` knows comes from one bounded snapshot the bot builds in code when you ask (it summarises, it never
+dumps; long lists are cut short). Always in it: the guild's channels (a channel the bot can no longer see is marked
+*not found*), officer roles, owner and ask audience; the *about* text, the invite link and the news keywords;
+recruitment (applications open or closed, the note, the guild's questions); every raid's schedules (in words, with
+their own settings and next runs — *Raid schedule* in the static guide lists each schedule's next three runs too),
+cadence (slots, when sheets open, nudge, lock and confirmation times, `fill_ask_hours`, `autofill`, `open_dm`, split
+policy, weights, comp bounds, comp targets and group layout, which settings are overridden), the raid's notes and the
+lockout window it is in now; the guild's aura and family overrides; the test bench; and every live run as the Raids
+page has it — state, nudge / lock / confirmation-expiry times, split strategy, the schedule it came from and how many
+rosters it expects, who joined (character, spec and class) and how many per role, bench, no thanks, who hasn't
+answered, pins, the board before lock (per roster, with who is still in the bank), what the run is short and who
+could cover it, auras nobody brings, people In on another run that evening, the rostered groups after lock (each
+seat's spec and role, the group's missing auras and totems, the top advisories) with confirmed / waiting / declined,
+the bench after lock, leftovers and whether they could make another run, fill asks outstanding and recent answers,
+members absent that day, callouts, and the last log lines (more of the log when your question names the run, its
+raid or "tonight"). Also the last few finished or cancelled runs per raid (with the cancel reason) and when the next
+sheet opens. And your own record — characters, roles, DMs, upcoming absences with your own reasons, confirmations
+and fill asks waiting on you, your answer and seat on each live run — or, if you applied, your application's status.
+
+Officers get more, only when the question is about it (a few keywords decide; "status", "overview" or "what's going
+on" brings the main ones): **status** (data repo and push, LLM spend, the loot feed, uptime, the last ops lines, the
+last data changes), **applications** (open ones oldest first with the schedules they can make, the last five
+decisions; an applicant's own answers only when you name them), **absences** (the next 30 days, with reasons),
+**readiness** (each raid's pool against its desired comp: roles, missing auras, where the comp is short or over cap),
+**news** (the last kept items, proposals waiting, the review jobs), **loot** (the last precedents and ledger rows, or a
+named member's), **bank** (every member's characters, rank, unconfirmed ones, who is an officer), **policy** (each doc,
+compiled or not; the text when you name it), **auras** (the full effective matrix — members get this one too) and the
+**test bench**. An officer's snapshot always carries one index line with counts (open applications, proposals to
+decide, unconfirmed characters, unanswered confirmations, fill asks, who is away this week) and says which sections
+were left out, so the answer can tell you what to ask for. An officer who names a member (display name or character)
+or an applicant gets their record too, absence reasons included. Members never get other people's reasons,
+applications, ops, precedents, proposals or who holds which privilege. Text people typed (news titles, applicants'
+answers, reasons) is handed to the model as quoted data, never as instructions. The answer only ever *points* at
+commands — a change is a separate step you Apply (plain text, §8c).
+
+A newcomer who writes to the bot (a DM or an @mention) while applications are open gets the **Apply to join** button
+on the reply; it opens the same application as the registration card, right there. *How to apply* in the static guide
+speaks to you: your application waiting, a past decision, or already a member.
 
 ## 11. Things the bot cannot do (yet)
 

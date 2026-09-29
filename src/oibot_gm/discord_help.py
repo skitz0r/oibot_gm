@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import discord
 from discord import app_commands
@@ -68,8 +69,9 @@ GUIDE_OPTIONS = [
 ]
 
 
-def guide_text(reg, key: str) -> str:
-    """Static answers for people who may not ask free-form questions: config + manual excerpts, no LLM."""
+def guide_text(reg, key: str, user_id: int | None = None) -> str:
+    """Static answers for people who may not ask free-form questions: config + manual excerpts, no LLM. `user_id`
+    makes *How to apply* speak to the asker (already a member · an application waiting · a past decision)."""
     cfg = reg.config
     if key == "about":
         raids = ", ".join(f"{rd.get('name', rid)} ({rd.get('size')}-player{''.join(', ' + reg.schedule_label(rid, s) for s in reg.schedules(rid) if s['kind'] != 'pickup' and s.get('active', True))})" for rid in reg.profile.raids for rd in [reg.raid_def(rid)]) or "no raids configured yet"
@@ -104,11 +106,21 @@ def guide_text(reg, key: str) -> str:
         return (parts[0] + ("\n\n-# The rest: `/help` → topic *Raids, sheets, lock, confirm and fill*." if len(parts) > 1 else "")) if parts else "See `/help` → topic *Raids, sheets, lock, confirm and fill*."
     if key == "apply":
         rec = cfg.recruitment
+        m = reg.members.get(user_id) if user_id else None
+        a = reg.applicants.get(user_id) if user_id else None
+        if m and m.active():
+            return "**Applying**\nYou're already a member — nothing to apply for. Add characters with **Register / plan my main** or **Add an alt** on the registration card, or `/me char add`."
+        if a and a.status == "open":
+            return (f"**Applying**\nYour application for **{a.label}** ({a.cls} {a.spec}) is waiting for an officer — sent {reg.local12(a.created_at)}. "
+                    "You'll get a DM either way; there is nothing else to fill in.")
+        if a and a.status == "accepted":
+            return f"**Applying**\nYour application for **{a.label}** was accepted — no need to apply again. Register your characters with **Register / plan my main** on the registration card."
         if not rec.open:
             return f"**Applying**\n{cfg.name} isn't taking applications right now. Ask an officer if you'd like to be told when it opens."
         where = f" (or **Apply to join** on the card in <#{cfg.registration_channel_id}>)" if cfg.registration_channel_id else ""
         asks = f", then {len(rec.questions)} question(s) from the officers" if rec.questions else ""
-        return (f"**Applying**\nNew here? Use `/apply`{where}: class and spec, your character's first and last name and a logs link, "
+        before = (f"Your last application ({a.label}) was {a.status}" + (f": “{a.decision_note}”" if a.decision_note else "") + ". You can apply again.\n") if a else ""
+        return (f"**Applying**\n{before}New here? Use `/apply`{where}: class and spec, your character's first and last name and a logs link, "
                 f"the raid schedules you can make{asks}, then a review screen before you submit. Officers review it on a card and "
                 "you'll get a DM with the decision. Accepted applicants are registered as trial." + (f"\n> {rec.note}" if rec.note else ""))
     if key == "contact":
@@ -133,7 +145,9 @@ class GuideSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"guide:me
         if not reg:
             await interaction.response.send_message("Not configured here.", ephemeral=True)
             return
-        await interaction.response.send_message(guide_text(reg, self.item.values[0])[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        key = self.item.values[0]
+        view = apply_view(reg, interaction.user.id, officer=is_officer(interaction, reg), role_ids=[r.id for r in getattr(interaction.user, "roles", None) or []]) if key == "apply" else None
+        await interaction.response.send_message(guide_text(reg, key, interaction.user.id)[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none(), **({"view": view} if view else {}))
 
 
 def guide_view() -> discord.ui.View:
@@ -145,7 +159,23 @@ def guide_view() -> discord.ui.View:
 def guide_intro(reg) -> str:
     aud = reg.config.ask_audience
     who = {"officers": "officers", "confirmed": "members with a confirmed character", "registered": "registered members", "everyone": "everyone"}[aud]
-    return f"Hi — I'm the {reg.config.name} raid bot. Pick a topic below. (Free-form questions are open to {who}; register in <#{reg.config.registration_channel_id}> to unlock them.)" if reg.config.registration_channel_id else f"Hi — I'm the {reg.config.name} raid bot. Pick a topic below. (Free-form questions are open to {who}.)"
+    where = f" in <#{reg.config.registration_channel_id}>" if reg.config.registration_channel_id else ""
+    unlock = f"; new here? apply{where} (**Apply to join**, or `/apply`) — members register there — to unlock them" if aud != "officers" else ""
+    return f"Hi — I'm the {reg.config.name} raid bot. Pick a topic below. (Free-form questions are open to {who}{unlock}.)"
+
+
+def apply_view(reg, user_id: int, *, officer: bool, role_ids=(), base: discord.ui.View | None = None) -> discord.ui.View | None:
+    """`base` (or a new view) with the persistent **Apply to join** button (RegisterButton "apply", custom_id reg:apply —
+    it opens the application wizard from a DM too) when this person must apply first, applications are open and they
+    have no application waiting; else `base` unchanged (None when there was none). Typed class/spec is never parsed."""
+    from .discord_registry import RegisterButton
+
+    a = reg.applicants.get(user_id)
+    if not reg.config.recruitment.open or (a and a.status == "open") or not reg.must_apply(user_id, officer=officer, role_ids=role_ids):
+        return base
+    view = base or discord.ui.View(timeout=None)
+    view.add_item(RegisterButton("apply"))
+    return view
 
 
 def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: Ops, bot) -> None:
@@ -189,7 +219,8 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             return
         officer = is_officer(interaction, reg)
         if not reg.may_ask(interaction.user.id, officer):
-            await interaction.response.send_message(guide_intro(reg), view=guide_view(), ephemeral=True)
+            view = apply_view(reg, interaction.user.id, officer=officer, role_ids=[r.id for r in getattr(interaction.user, "roles", None) or []], base=guide_view())
+            await interaction.response.send_message(guide_intro(reg), view=view, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         text = await bot.help_answer(reg, interaction.user.id, officer, question)
@@ -200,7 +231,65 @@ ACT = "\x00act"  # help_answer's "this was a request to do something" (never sho
 
 
 class HelpMixin:
-    """Needs self.ctx.provider, self.tree, self.raids, self.ops."""
+    """Needs self.ctx.provider, self.tree, self.raids, self.ops (and, when present: feed, started_at, get_guild,
+    officiates — the running client)."""
+
+    def help_extras(self, reg, officer: bool) -> help_mod.HelpExtras:
+        """What only the running bot knows, collected on the event loop (cheap, no I/O) before help.answer's thread hop.
+        A member's extras carry the visible channels only; ops, spend, feed, uptime, privilege and the jobs are for officers."""
+        x = help_mod.HelpExtras()
+        get_guild = getattr(self, "get_guild", None)
+        guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
+        if guild is not None:
+            me = getattr(guild, "me", None)
+            try:
+                x.channels = {c.id for c in guild.channels if me is None or c.permissions_for(me).view_channel} or None
+            except Exception:  # noqa: BLE001 — unknown beats wrong: no "(not found)" marks
+                x.channels = None
+        if not officer:
+            return x
+        ops = getattr(self, "ops", None)
+        x.ops = list(getattr(ops, "recent", None) or [])[-15:]
+        provider = getattr(getattr(self, "ctx", None), "provider", None)
+        x.llm = provider.summary() if provider is not None else "LLM off"
+        feed = getattr(self, "feed", None)
+        x.feed = feed.status() if feed is not None else "disabled"
+        started = getattr(self, "started_at", None)
+        x.uptime_s = int(time.time() - started) if started else None
+        x.privilege, x.officers = self.help_privilege(reg, guild)
+        from . import agents
+
+        x.agents = lambda: agents.overview(tz=reg.tz)
+        x.agent_steps = lambda run_id: agents.steps(agents.read_run(run_id))
+        return x
+
+    def help_privilege(self, reg, guild) -> tuple[dict[int, str], list[str]]:
+        """owner | officer | member | outside per registered member, the web's privilege() rule, from what the client
+        already has: the gateway cache and cached_member's recent fetches (a 404 cached there = outside). Members the bot
+        hasn't seen are left out rather than guessed. Also the officers' display names."""
+        owner = reg.config.owner_discord_id
+        priv: dict[int, str] = {owner: "owner"} if owner else {}
+        officiates = getattr(self, "officiates", None)
+        if guild is None or officiates is None:
+            return priv, []
+        cache = self.__dict__.get("_member_cache", {})
+        for uid, m in reg.members.items():
+            if m.test or uid == owner:
+                continue
+            dm = guild.get_member(uid)
+            if dm is None:
+                hit = cache.get((guild.id, uid))
+                if hit is None:
+                    continue
+                dm = hit[1]
+            priv[uid] = "outside" if dm is None else ("officer" if officiates(dm, guild) else "member")
+        names = {reg.members[uid].display_name for uid, p in priv.items() if p in ("owner", "officer") and uid in reg.members}
+        for dm in getattr(guild, "members", None) or []:  # officers who never registered, if the cache has them
+            if len(names) >= 20:
+                break
+            if not getattr(dm, "bot", False) and officiates(dm, guild):
+                names.add(dm.display_name)
+        return priv, sorted(names, key=str.lower)
 
     async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False):
         """The answer text; None outside the ask audience (the caller shows the static guide). `may_act`: plain text
@@ -213,7 +302,11 @@ class HelpMixin:
             return "I can't answer free-form questions right now (no LLM configured). `/help` lists what I do."
         rs = self.raids.store(reg)
         try:
-            ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question)
+            extras = self.help_extras(reg, officer)
+        except Exception:  # noqa: BLE001 — the snapshot still works without the bot-side lines
+            extras = None
+        try:
+            ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras)
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             return "Something went wrong answering that; the officers have been told. `/help` lists what I do."

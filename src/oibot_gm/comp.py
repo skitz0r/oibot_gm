@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from .constants import ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import Registry
+from .registry import Registry, pool_health_data
 from .roster import coverage as cov_mod, solver
 
 def roster_size(reg: Registry, roster: dict) -> int:
@@ -357,5 +357,46 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
     ic.lines.sort(key=lambda l: (0 if l.key in order else 1, order.get(l.key, 0), -l.want, l.key))
     ic.notes = ([f"offspec flexibility ({len(swaps)}): " + ", ".join(swaps[:8]) + ("…" if len(swaps) > 8 else "")] if swaps else ["offspec flexibility: nobody has registered an offspec in another role"]) + profile.buff_assumptions()
     return ic
+
+
+# ---------------------------------------------------------------- readiness (one raid, JSON)
+
+def readiness(reg: Registry, rid: str) -> dict:
+    """One raid's pool readiness as plain JSON (lists, dicts, str, int, None): what the analytics card draws, with the
+    words behind it. The help snapshot's readiness section reads it; GET /api/readiness and MCP raid_readiness can
+    return it as is. No solver: the pool (every planned/active main) against the raid's size, desired comp and buffs.
+
+    {raid, name, size, level (green|amber|red),
+     headcount: {mains, size, alts, on_roster, unnamed, level},
+     roles: [{role, have, need, level, hint, cover: {offspec: [..], flex: [..], alt: [..]}}],
+     buffs: [{id, name, providers: [names]}], missing_buffs: [{id, name}],
+     comp: [{key, want, min, max, have, level, why, note, source, flex, flex_who}],
+     short: [{key, have, want, why}], over: [{key, have, max, why}], notes: [str],
+     plan: {mains, by_role: {role: n}, flex: {role: [names]}, single_provider: [{buff, who}], no_provider: [buff names]}}"""
+    if rid not in reg.profile.raids:
+        raise KeyError(f"unknown raid {rid!r}")
+    roster = reg.raid_shell(rid)
+    h = pool_health_data(reg, roster)
+    n, size, alts, on_roster = h["headcount"]
+    targets = roster.get("comp_targets") or {}
+    ic = ideal_comp(reg.profile, size, pool_players(reg), targets, rid, reg)
+    comp = [{"key": ln.key, "want": ln.want, "min": ln.want, "max": ln.max, "have": ln.have, "level": ln.level, "why": ln.why,
+             "note": (targets.get(ln.key) or {}).get("note") if ln.source == "officer" else None, "source": ln.source,
+             "flex": ln.flex, "flex_who": list(ln.flex_who)} for ln in ic.lines]
+    short = [{"key": c["key"], "have": c["have"], "want": c["want"], "why": c["why"]} for c in comp if c["have"] < c["want"]]
+    over = [{"key": c["key"], "have": c["have"], "max": c["max"], "why": c["why"]} for c in comp if c["max"] is not None and c["have"] > c["max"]]
+    missing = [{"id": b["id"], "name": b["name"]} for b in h["buffs"] if not b["providers"]]
+    roles = [{"role": r["role"], "have": r["have"], "need": r["need"], "level": r["level"], "hint": r["hint"],
+              "cover": {k: list(v) for k, v in r["cover"].items()}} for r in h["roles"]]
+    plan = reg.plan_summary()
+    levels = [h["headcount_level"]] + [r["level"] for r in roles if r["need"]] + (["red"] if any(c["level"] == "red" and c["key"] not in ROLES for c in comp) else [])
+    level = "red" if "red" in levels else ("amber" if "amber" in levels or over else "green")
+    return {"raid": rid, "name": roster.get("name") or rid, "size": size, "level": level,
+            "headcount": {"mains": n, "size": size, "alts": alts, "on_roster": on_roster, "unnamed": int(h.get("unnamed") or 0), "level": h["headcount_level"]},
+            "roles": roles, "buffs": [{"id": b["id"], "name": b["name"], "providers": list(b["providers"])} for b in h["buffs"]], "missing_buffs": missing,
+            "comp": comp, "short": short, "over": over, "notes": list(ic.notes),
+            "plan": {"mains": plan["mains"], "by_role": dict(plan["by_role"]), "flex": {r: list(v) for r, v in plan["flex"].items() if v},
+                     "single_provider": [{"buff": b, "who": who[0]} for b, who in plan["providers"].items() if len(who) == 1],
+                     "no_provider": [b for b, who in plan["providers"].items() if not who]}}
 
 
