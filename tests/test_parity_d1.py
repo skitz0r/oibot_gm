@@ -327,3 +327,88 @@ def test_discord_policy_edit_is_the_one_pending_edit_and_a_stale_view_does_nothi
         assert ps.compiled("loot")["summary"] == "B rule" and policy_mod.pending(ps, "loot") is None
 
     asyncio.run(go())
+
+
+# ---------------------------------------------------------------- M3: Apply is single-flight
+
+def test_a_second_apply_or_a_cancel_mid_apply_does_nothing(reg, monkeypatch):
+    from oibot_gm.configops import ConfigOp
+
+    applied, log = [], []
+
+    async def slow_apply(reg_, op, by, is_owner, ps=None, bot=None, by_id=None, **_kw):
+        applied.append(op.op)
+        await asyncio.sleep(0.05)  # a lock's solve
+        return "locked"
+
+    monkeypatch.setattr(configops, "apply_async", slow_apply)
+
+    async def plain_identity(reg_, user):
+        return True, []
+
+    def presser():
+        async def edit_original_response(content=None, **kw):
+            log.append(("edit", content))
+
+        async def send_message(content=None, **kw):
+            log.append(("send", content))
+
+        async def edit_message(content=None, **kw):
+            log.append(("ack", content, kw.get("view", "kept")))
+
+        return types.SimpleNamespace(user=types.SimpleNamespace(id=OWNER, display_name="Owner"), client=types.SimpleNamespace(plain_identity=plain_identity, raids=None),
+                                     response=types.SimpleNamespace(edit_message=edit_message, send_message=send_message), edit_original_response=edit_original_response,
+                                     followup=types.SimpleNamespace(send=send_message))
+
+    async def go():
+        view = discord_policy.ConfigConfirmView(reg, ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", value="off")]), None, Feed(), OWNER, "Owner", GENERAL_CH)
+        await asyncio.gather(view.apply.callback(presser()), view.apply.callback(presser()), view.cancel.callback(presser()))
+
+    asyncio.run(go())
+    assert applied == ["dm"], "applied once"
+    assert ("ack", "⏳ Applying…", None) in log, "the buttons go at once"
+    sends = [c for k, c, *_ in log if k == "send"]
+    assert any("Already applying" in c for c in sends) and any("Too late to cancel" in c for c in sends)
+    assert not any(k == "ack" and c == "Cancelled." for k, c, *_ in log)
+
+
+# ---------------------------------------------------------------- M5: board revs follow this request's own writes only
+
+def test_a_pin_before_a_board_op_is_this_requests_own_change(reg, rs):
+    from test_parity_ops_board import PressBot, board_run, press
+
+    from oibot_gm import raidcycle as rc
+    from oibot_gm.configops import ConfigOp
+
+    bot = PressBot(reg, rs)
+    ev, names = board_run(reg, rs)
+    ops = [ConfigOp(op="pin", target=ev.key, member=names[0], value="in"),
+           ConfigOp(op="run_board", target=ev.key, value=f"{names[0]}, {names[1]} | {names[2]}")]
+    log = []
+    view = discord_policy.ConfigConfirmView(reg, ConfigRequest(kind="change", reply="", ops=ops), None, bot.ops, OWNER, "Owner", GENERAL_CH,
+                                            revs=configops.board_revs(reg, ops, rs))
+    asyncio.run(view.apply.callback(press(bot, OWNER, log)))
+    assert "⛔" not in log[0], log[0]
+    assert ev.layout[:2] == [[names[0], names[1]], [names[2]]] and list(ev.pins.values()) == ["in"]
+    assert view.revs[ev.key] == rc.board_rev(reg, ev)
+
+
+def test_after_a_stale_board_op_the_rest_of_the_request_cannot_overwrite(reg, rs):
+    from test_parity_ops_board import PressBot, board_run, press
+
+    from oibot_gm.configops import ConfigOp
+
+    bot = PressBot(reg, rs)
+    ev, names = board_run(reg, rs)
+    ops = [ConfigOp(op="run_move", target=ev.key, member=names[0], value="g2"),
+           ConfigOp(op="dm", member=names[5], value="off"),
+           ConfigOp(op="run_board", target=ev.key, value=f"{names[0]}, {names[1]}")]
+    revs = configops.board_revs(reg, ops, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, names[3], (0, 0), by="someone else"))  # between the preview and Apply
+    theirs = [list(g) for g in ev.layout]
+    log = []
+    view = discord_policy.ConfigConfirmView(reg, ConfigRequest(kind="change", reply="", ops=ops), None, bot.ops, OWNER, "Owner", GENERAL_CH, revs=revs)
+    asyncio.run(view.apply.callback(press(bot, OWNER, log)))
+    assert log[0].count("changed since you looked") == 2, log[0]
+    assert "DMs" in log[0] or "dm" in log[0].lower(), "the unrelated op still applies"
+    assert ev.layout == theirs, "the other officer's move survives"

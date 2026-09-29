@@ -123,14 +123,14 @@ def press(bot, uid, log):
     async def edit(content=None, **kw):
         log.append(content)
 
-    async def defer(**kw):
+    async def acknowledge(content=None, **kw):  # Apply's "Applying…" edit (not logged)
         pass
 
     async def followup(content=None, **kw):
         log.append(content)
 
     return types.SimpleNamespace(user=types.SimpleNamespace(id=uid, display_name="Officer"), client=bot,
-                                 response=types.SimpleNamespace(defer=defer), edit_original_response=edit, followup=types.SimpleNamespace(send=followup))
+                                 response=types.SimpleNamespace(edit_message=acknowledge), edit_original_response=edit, followup=types.SimpleNamespace(send=followup))
 
 
 def test_confirm_view_passes_the_preview_rev_and_tracks_its_own_writes(reg, rs):

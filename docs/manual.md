@@ -355,9 +355,11 @@ returns to the game defaults.
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
   question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses
   Apply needs the rights for the change (§8c); a slow change (a lock, fill DMs, a compile, a proposal) is acknowledged
-  at once and the diff turns into the result when it is done. A board change (a move, the groups, auto-fill, using a
+  at once — the buttons go, the diff reads *Applying…* and turns into the result when it is done, and a second press
+  (or Cancel) by anyone is refused, so nothing applies twice. A board change (a move, the groups, auto-fill, using a
   proposal) is refused with *"the board changed since you looked"* when someone else changed that board between the
-  diff and your Apply — nothing is overwritten; the request's own earlier steps never count as a change. Absences
+  diff and your Apply — nothing is overwritten; the request's own earlier steps (a pin, a move) never count as a
+  change, and once one board step is refused the request's later board steps on that run are refused too. Absences
   entered this way are announced like `/me absent add`; channel changes post (or drop) their card like the Config page
   does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
   before" can't fail half way.

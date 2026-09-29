@@ -227,7 +227,7 @@ def test_apply_then_discard_restores_the_previous_text(reg):
         req = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="policy_append", doc="loot", text="Tanks first on shields.")])
         view = discord_policy.ConfigConfirmView(reg, req, ps, feed, OWNER, "Owner", OPS_CH)
         await view.apply.callback(owner_interaction(log, bot))
-        assert [k for k, _, _ in log] == ["defer", "edit", "followup"]
+        assert [k for k, _, _ in log] == ["edit_message", "edit", "followup"]
         assert "my reading: 2 item(s)" in log[1][1]
         kw = log[2][2]
         assert kw["ephemeral"] and kw["embed"].title == "My reading of the loot policy" and "R1" in kw["embed"].description

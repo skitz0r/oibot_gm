@@ -128,7 +128,9 @@ class PolicyEditModal(discord.ui.Modal):
 class ConfigConfirmView(discord.ui.View):
     """Apply / Cancel under a plain-text diff. The requester or an officer may press; the presser's rights decide
     (the ops are authorized again for them, in the channel the request was made in). `revs`: the board fingerprint of
-    each run a board op touches, as the diff showed it (configops.board_revs) — Apply refuses a board changed since."""
+    each run a board op touches, as the diff showed it (configops.board_revs) — Apply refuses a board changed since.
+    Single-flight: the first Apply claims the view before anything awaits (buttons gone, "Applying…"); a second press
+    (a double click, another officer) and a Cancel mid-apply are refused, so nothing is applied twice."""
 
     def __init__(self, reg: Registry, req: configops.ConfigRequest, ps: policy_mod.PolicyStore, ops: Ops, requester_id: int, requester: str, channel,
                  revs: dict[str, str] | None = None):
@@ -136,6 +138,7 @@ class ConfigConfirmView(discord.ui.View):
         self.reg, self.req, self.ps, self.ops = reg, req, ps, ops
         self.requester_id, self.requester, self.channel = requester_id, requester, channel
         self.revs = dict(revs or {})
+        self.busy = False  # set by the first Apply, never cleared: this diff applies once
 
     async def _may_press(self, interaction: discord.Interaction) -> tuple[bool, list[int]] | None:
         officer, role_ids = await interaction.client.plain_identity(self.reg, interaction.user)
@@ -150,17 +153,28 @@ class ConfigConfirmView(discord.ui.View):
         if who is None:
             return
         officer, role_ids = who
+        if self.busy:  # checked and claimed with no await in between: one Apply per diff, whoever presses
+            await interaction.response.send_message("Already applying (or applied) — each change applies once.", ephemeral=True)
+            return
+        self.busy = True
+        self.stop()
+        from . import raidcycle as rc
+
         ops = [op.model_copy() for op in self.req.ops]
         bot = interaction.client
         raids = bot.raids.store(self.reg) if getattr(bot, "raids", None) is not None else None
         allowed, refused = configops.authorize(self.reg, ops, interaction.user.id, officer=officer, role_ids=role_ids, channel=self.channel, raids=raids)
-        # a lock, a fill send or a compile takes longer than Discord's 3 seconds: acknowledge the press first, then edit
-        await interaction.response.defer()
+        # a lock, a fill send or a compile takes longer than Discord's 3 seconds: acknowledge the press first (the
+        # buttons go, so nobody presses again), then edit the result in
+        await interaction.response.edit_message(content="⏳ Applying…", view=None)
         me = self.reg.members.get(interaction.user.id)
         by = me.display_name if me else interaction.user.display_name  # the registry's name: a member's own answer counts as theirs
-        done, docs = [], []
+        done, docs, stale = [], [], set()
         for op in configops.coalesce(allowed):  # consecutive raid/schedule settings save as one write
             key = configops.op_run_key(self.reg, op, raids)
+            if op.op in configops.BOARD_OPS and key in stale:  # an earlier step found someone else's change on this board
+                refused.append(f"{configops.describe(self.reg, op, self.channel)} — {rc.BoardChanged()}")
+                continue
             try:  # authorize() allowed it, so owner-only ops pass when the policy opens them
                 done.append(await configops.apply_async(self.reg, op, by, True, self.ps, bot=bot, by_id=interaction.user.id,
                                                         rev=self.revs.get(key) if op.op in configops.BOARD_OPS else None, channel_id=self.channel))
@@ -168,14 +182,15 @@ class ConfigConfirmView(discord.ui.View):
                     docs.append((op.doc or "").strip().lower())
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001
                 refused.append(f"{configops.describe(self.reg, op, self.channel)} — {e}")
-            if key in self.revs and raids is not None:  # this request's own write is not "someone else's change"
-                ev = raids.events.get(key)
-                if ev is not None:
-                    from . import raidcycle as rc
-
-                    self.revs[key] = rc.board_rev(self.reg, ev)
+                if isinstance(e, rc.BoardChanged) and key:
+                    stale.add(key)  # keep the old rev: the rest of this request can't overwrite that change either
+                continue
+            if raids is not None:  # this request's own write (a pin, a move, …) is not "someone else's change": every
+                for k in self.revs:  # board this request looks at is re-read after each step that succeeded
+                    ev = raids.events.get(k)
+                    if ev is not None and k not in stale:
+                        self.revs[k] = rc.board_rev(self.reg, ev)
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
-        self.stop()
         try:
             await interaction.edit_original_response(content=text[:1900] or "Nothing applied.", view=None, embed=None)
         except discord.HTTPException:  # the change is made either way; the ops line below still records it
@@ -192,6 +207,9 @@ class ConfigConfirmView(discord.ui.View):
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
         if await self._may_press(interaction) is None:
+            return
+        if self.busy:
+            await interaction.response.send_message("Too late to cancel — it is already being applied.", ephemeral=True)
             return
         await interaction.response.edit_message(content="Cancelled.", view=None, embed=None)
         self.stop()

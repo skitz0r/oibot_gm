@@ -2148,6 +2148,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         name, to, _ = _move_plan(reg, ev, op)
         try:
             line = await bot.board_move(reg, rs, ev, name, to, by, rev=rev)
+        except rc.BoardChanged:
+            raise  # kept as itself: Apply marks the run stale so the rest of the request can't overwrite that change
         except ValueError as e:
             raise RegistryError(str(e))
         return f"{ev.key}: {line}"

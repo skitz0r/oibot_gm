@@ -59,7 +59,7 @@ def interaction(uid, log, *, officer=False, edit_fails=False, **client_kw):
 
 # ---- batch 1: Apply defers, then edits; the ops line is written either way
 
-def test_apply_defers_before_a_slow_op_and_edits_the_original(reg, monkeypatch):
+def test_apply_acknowledges_before_a_slow_op_and_edits_the_original(reg, monkeypatch):
     feed, log = Feed(), []
 
     async def slow_apply(reg_, op, by, is_owner, ps=None, bot=None, by_id=None, **_kw):
@@ -75,7 +75,7 @@ def test_apply_defers_before_a_slow_op_and_edits_the_original(reg, monkeypatch):
         view = discord_policy.ConfigConfirmView(reg, req, None, feed, me.discord_id, me.display_name, OPS_CH)
         await view.apply.callback(interaction(me.discord_id, log))
         kinds = [k for k, _, _ in log]
-        assert kinds == ["defer", "applying", "edit"], kinds
+        assert kinds == ["edit_message", "applying", "edit"], kinds
         assert log[-1][1] == "✅ locked bd-x" and log[-1][2]["view"] is None
         assert feed.lines and "plain-text change" in feed.lines[-1][1] and "locked bd-x" in feed.lines[-1][1]
         # the edit fails (the interaction expired): the ops line still records the change
@@ -83,7 +83,7 @@ def test_apply_defers_before_a_slow_op_and_edits_the_original(reg, monkeypatch):
         feed.lines.clear()
         view = discord_policy.ConfigConfirmView(reg, req, None, feed, me.discord_id, me.display_name, OPS_CH)
         await view.apply.callback(interaction(me.discord_id, log, edit_fails=True))
-        assert [k for k, _, _ in log] == ["defer", "applying"] and "locked bd-x" in feed.lines[-1][1]
+        assert [k for k, _, _ in log] == ["edit_message", "applying"] and "locked bd-x" in feed.lines[-1][1]
 
     asyncio.run(go())
 
