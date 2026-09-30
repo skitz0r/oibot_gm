@@ -119,6 +119,18 @@ def test_news_lists_every_proposal_state_and_the_jobs_past_runs(reg, rs):
     assert "last runs of review: Sun 27 Sep 9:00 AM 2 proposals ; Sat 26 Sep 9:00 AM nothing new" in s
 
 
+def test_the_officer_index_counts_failed_proposals_as_still_to_decide(reg, rs):
+    from oibot_gm.news import Proposal, ProposalStore, new_id
+
+    ps = ProposalStore(reg.store, reg.key)
+    for st in ("proposed", "failed", "applied"):
+        p = Proposal(id=new_id(), title=f"t {st}", affects="guild setting", kind="guild_setting", change="x")
+        p.state = st
+        ps.save(p, "t")
+    s = state(reg, rs, OWNER, True, "hello")
+    assert "proposals to decide 2 " in s, "the same set the parser lists as waiting (proposed + failed)"
+
+
 def test_help_extras_pass_the_agents_past_runs(reg, rs):
     from oibot_gm import discord_help
 

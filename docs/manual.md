@@ -767,7 +767,7 @@ override …" brings it too), **bank** (the unconfirmed characters first, then e
 an officer), **policy** (each doc,
 compiled or not; the text when you name it), **auras** (the full effective matrix — members get this one too) and the
 **test bench**. An officer's snapshot always carries one index line with counts (open applications, proposals to
-decide, unconfirmed characters, unanswered confirmations, fill asks, who is away this week) and says which sections
+decide (proposed or failed), unconfirmed characters, unanswered confirmations, fill asks, who is away this week) and says which sections
 were left out, so the answer can tell you what to ask for. An officer who names a member (display name or character)
 or an applicant gets their record too, absence reasons included. Members never get other people's reasons,
 applications, ops, precedents, proposals or who holds which privilege.

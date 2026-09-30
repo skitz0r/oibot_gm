@@ -905,7 +905,7 @@ def officer_index(ask: Ask, included: list[str], skipped: list[str]) -> str:
     try:
         from .news import ProposalStore
 
-        waiting = len(ProposalStore(reg.store, reg.key).all("proposed"))
+        waiting = len(ProposalStore(reg.store, reg.key).all("proposed,failed"))  # what an officer can still approve or dismiss (configops.proposals_text)
     except Exception:  # noqa: BLE001
         waiting = 0
     fill_open = sum(len([a for a in ev.fill_asks if a.open]) for ev in (ask.rs.live() if ask.rs is not None else []))
