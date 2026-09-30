@@ -243,10 +243,20 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
 ACT = "\x00act"  # help_answer's "this was a request to do something" (never shown)
 
 
+def _bot_role(role) -> bool:
+    """A role Discord made for a bot integration (the bot's own role, or another bot's): only that bot can hold it.
+    Other managed roles (Server Booster, a Twitch/YouTube integration) hold people, so they still count."""
+    try:
+        return bool(role.is_bot_managed())
+    except Exception:  # noqa: BLE001 — can't tell: judge it like any other role
+        return False
+
+
 def officer_only_channel(reg, channel) -> bool:
     """True when no non-officer can view `channel`: every guild role that isn't an officer role (nor Administrator /
-    Manage Server) is denied View Channel there, and no other overwrite lets a non-officer in. A non-Role overwrite
-    that allows View Channel is fine only for the owner's id or a cached Member who is an officer: the bot runs without
+    Manage Server, nor a bot's own managed role) is denied View Channel there, and no other overwrite lets a non-officer
+    in. A non-Role overwrite that allows View Channel is fine only for the owner's id, the bot itself, a cached bot
+    Member or a cached Member who is an officer: the bot runs without
     the members intent, so an uncached member's overwrite is a discord.Object nobody can vouch for and reads as public
     (so does an overwrite for a role the guild no longer resolves). Threads answer for their parent. Any error reads
     as False (public): unknown never leaks."""
@@ -254,18 +264,23 @@ def officer_only_channel(reg, channel) -> bool:
         base = getattr(channel, "parent", None) or channel
         guild = channel.guild
         owner = reg.config.owner_discord_id
+        me = getattr(guild, "me", None)
         for role in guild.roles:
             perms = role.permissions
             if perms.administrator or perms.manage_guild or reg.config.officer_by_roles([role]):
+                continue
+            if _bot_role(role):  # a bot's own managed role holds only that bot: no member reads through it
                 continue
             if base.permissions_for(role).view_channel:
                 return False
         for target, ow in (getattr(base, "overwrites", None) or {}).items():
             if isinstance(target, discord.Role) or not ow.view_channel:  # a live role is judged above, whatever its overwrite
                 continue
-            if target.id == owner:
+            if target.id == owner or (me is not None and target.id == me.id):
                 continue
             if isinstance(target, discord.Member):
+                if getattr(target, "bot", False):  # a bot's own overwrite (the owner let the bot in): not a member
+                    continue
                 gp = target.guild_permissions
                 if gp.administrator or gp.manage_guild or reg.config.officer_by_roles(target.roles):
                     continue

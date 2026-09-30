@@ -1268,6 +1268,19 @@ def board_rev(reg: Registry, ev: RaidEvent) -> str:
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
+LOCK_SOLVES = 3  # lock_run solves again when the answers or pins moved under it; after this many it gives up (sheet stays open)
+
+
+def solve_inputs(ev: RaidEvent) -> str:
+    """What the lock solve reads from the run (every answer's status, character, class, spec and role; the pins; the
+    board; the split strategy). lock_run compares it before and after the solve: an answer or pin written meanwhile
+    (a sheet press, set_answer, the site's pin) takes no lock while the run is open, so the roster is solved again."""
+    import json
+
+    sgs = sorted((k, s.display_name, s.character, s.cls, s.spec, s.offspec, s.role, s.status) for k, s in ev.signups.items())
+    return json.dumps([sgs, sorted(ev.pins.items()), ev.layout, ev.split_strategy])
+
+
 def apply_move(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int] | None) -> list[list[str]]:
     """One drag applied to the CURRENT board (so concurrent officers merge instead of overwriting each other):
     `to` = (flat group index, position) or None for the bank. Dropping on someone swaps (they take the mover's old

@@ -219,7 +219,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    for a different one, and *Use this layout on the board* seeds the builder; **Auto-fill empty seats** lets
    the solver seat whoever is left in the bank around what you placed; **Clear** empties the board after a
    confirmation. Whatever is on the board when the sheet locks is the roster, with the solver filling any
-   empty seats. More Join answers than a raid needs → the board shows a second (third…) roster for the same
+   empty seats. An answer or pin that changes while the lock is building the roster (someone presses *No thanks*,
+   you keep someone on the bench) makes the lock build it again from the sheet as it now is, so nobody is rostered
+   from an answer they already took back; if the sheet keeps changing, the lock fails, the sheet stays open and
+   you lock again in a moment. More Join answers than a raid needs → the board shows a second (third…) roster for the same
    slot while a full run with its tank/healer minimums is possible, and the button becomes **Propose
    splits**: pick a philosophy — **Balanced** (both runs equal in synergy, tanks, healers and seat quality),
    **Raid one first** (roster 1 gets the best, roster 2 the rest), **Rotation** (whoever sat out or was in
@@ -777,8 +780,9 @@ applications, ops, precedents, proposals or who holds which privilege.
 
 **Where you ask decides what the answer may carry.** The officer view goes only where only officers read the reply:
 a DM, `/ask` and `/gm change` (ephemeral), the ops, applications and roster channels, and any channel no non-officer
-role can see (the analytics channel when you made it officer-only; a channel where you let one member in by name
-counts as public unless that member is an officer the bot can check). An officer who @mentions the bot anywhere else —
+role can see (the analytics channel when you made it officer-only — the bot's own role, or the bot let in by name,
+doesn't count as a member; a channel where you let one member in by name counts as public unless that member is an
+officer the bot can check). An officer who @mentions the bot anywhere else —
 #general, a public analytics channel — gets the member view, because everyone there reads the answer, and the reply
 says so: ask in the ops channel or by DM for the officer view. The same holds when that message is a change: the
 bot's clarifying questions there are written from the member view too. Text people typed (news titles, applicants'

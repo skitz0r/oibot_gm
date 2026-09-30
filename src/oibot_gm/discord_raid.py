@@ -362,20 +362,32 @@ class RaidMixin:
         """Lock the sheet, build the roster(s) from the signups (pins honoured), show them on the sheet and in the
         officer channel, and DM every rostered member for confirmation. One lock per run at a time (solving: a second
         caller gets rc.SolverBusy); the board lock is held from the snapshot to the state flip, so a move made during
-        the solve waits and is then refused as stale (never silently lost); a run no longer open is refused."""
+        the solve waits and is then refused as stale (never silently lost); a run no longer open is refused. Answers
+        and pins take no lock while the sheet is open, so one written during the solve (a No thanks, a pin out) makes
+        the lock solve again on the live run (rc.solve_inputs), up to rc.LOCK_SOLVES times; still moving after that,
+        the lock fails and the sheet stays open — nobody is rostered from answers they already changed."""
         team = rc.run_team(reg, ev)
         async with self.solving(ev.key), self.board_lock(ev.key):
             if ev.state != "open":
                 raise RegistryError(f"{ev.key} is already {ev.state}")
             # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
             # mid-way) leaves the sheet open rather than a locked run with no roster
-            trial = ev.model_copy(deep=True)
-            seen = len(trial.log)
-            ev.lock_tried_at = rc.now()
-            try:
-                await asyncio.to_thread(rc.propose, reg, rs, trial, False)
-            except Exception as e:  # noqa: BLE001 — solver infeasible / timed out
-                why = rc.solver_error_text(e)
+            for _ in range(rc.LOCK_SOLVES):
+                trial = ev.model_copy(deep=True)
+                seen, inputs = len(trial.log), rc.solve_inputs(trial)
+                ev.lock_tried_at = rc.now()
+                try:
+                    await asyncio.to_thread(rc.propose, reg, rs, trial, False)
+                except Exception as e:  # noqa: BLE001 — solver infeasible / timed out
+                    why = rc.solver_error_text(e)
+                    break
+                why = None
+                if ev.state != "open" or rc.solve_inputs(ev) == inputs:
+                    break
+                ev.log.append(f"lock ({by}): answers or pins changed during the solve — solving again")
+            else:
+                why = "the answers or pins kept changing while the roster was being built; lock again in a moment"
+            if why is not None:
                 first = ev.lock_error != why
                 ev.lock_error = why
                 ev.log.append(f"lock ({by}) failed: {why}")
