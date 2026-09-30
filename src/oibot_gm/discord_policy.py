@@ -192,7 +192,8 @@ class ConfigConfirmView(discord.ui.View):
             before = configops.snapshot_revs(self.reg, self.revs, raids)
             try:  # authorize() allowed it, so owner-only ops pass when the policy opens them
                 done.append(await configops.apply_async(self.reg, op, by, True, self.ps, bot=bot, by_id=interaction.user.id,
-                                                        rev=self.revs.get(key) if op.op in configops.BOARD_OPS else None, channel_id=self.channel))
+                                                        rev=self.revs.get(key) if op.op in configops.BOARD_OPS else None, channel_id=self.channel,
+                                                        self_id=self.requester_id))
                 if op.op in ("policy", "policy_append") and (op.doc or "").strip().lower() in ("loot", "comp"):
                     docs.append((op.doc or "").strip().lower())
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001

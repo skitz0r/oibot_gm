@@ -276,7 +276,8 @@ If you can't make a run you joined: press *No thanks* on an open sheet, *Can't m
 lock this releases your seat immediately and the bench is asked. An officer who hears it out of band records the
 same callout, note included, with No thanks and a note on the site's answer menu, in plain text ("Kestrel can't
 make it tonight, her baby is sick") or MCP `set_answer` with `note`. Your own "I can't make tonight" in plain text is a
-callout too, note or not (hours before, late after the lock, the line in the updates thread), and so is MCP
+callout too, note or not (hours before, late after the lock, the line in the updates thread) — also when an officer
+presses Apply on your request for you — and so is MCP
 `set_answer` with status `out`; an officer who only sets someone else's answer to No thanks without a reason changes
 the answer, no callout.
 
@@ -530,7 +531,8 @@ of their characters. The bot reads each live run's board as it stands and each r
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
   raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
-  unconfirmed character at once — the diff lists them; officers' requests are read against that list); "Mira is away
+  unconfirmed character at once — the diff lists them; officers' requests are read against that list; a character
+really called All or Pending is confirmed alone); "Mira is away
   Nov 1–3" (the diff lists the live sheets those days touch — No thanks, or a rostered seat freed — before anything is
   saved); "Marrow is back, clear her absence" (by start
   date when she has several — the bot lists them as days, e.g. "Fri 01 Mar → Sun 03 Mar, Mon 10 Jun"); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
@@ -614,7 +616,8 @@ names too; a member's never is, so a question the bot asks a member back can't n
 (members, characters, applicants, the boards, news titles) reach it only as quoted data, and every time it sees comes
 with the same time in 12-hour words beside it, so a question it asks back reads "Tue 6 Oct 7:30 PM", never 19:30.
 Someone who has left the Discord server counts as unregistered for plain text, even with a record still on file:
-a DM from them gets the static guide, never a change (an Apply left on an old diff refuses them too).
+a DM from them gets the static guide, never a change (an Apply left on an old diff, and `/gm change`, refuse them too).
+Only Discord saying they are gone counts: a Discord outage never locks a member out.
 
 ## 8a. Rehearsing with the test bench (officers)
 

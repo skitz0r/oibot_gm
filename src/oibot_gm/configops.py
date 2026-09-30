@@ -245,6 +245,11 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     cfg = reg.config.model_dump()
     cfg.pop("rosters", None)  # the ephemeral run rosters are noise here; live runs are listed on their own below
     roles = cfg.pop("member_role_ids", None)
+    overrides = cfg.pop("raids", None) or {}  # the stored overrides get their own section below, each value beside its words
+    hour = cfg.pop("auto_propose_hour", None)
+    legacy = cfg.pop("slots", None)
+    clock = ([f"auto_propose_hour: {hour} (= {reg.time_label(f'{int(hour):02d}:00')})"] if hour is not None else []) \
+        + ([f"slots (legacy poll): {', '.join(legacy)} (= {', '.join(reg.slot_label(x) for x in legacy)})"] if legacy else [])
     if roles and officer:  # role ids mean nothing to the parser (or the person it answers): the names from the role cache
         cfg["member_roles"] = [reg.role_names.get(int(r), f"role:{r}") for r in roles]
     members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]"
@@ -253,10 +258,20 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     def cadence(k, v):  # the stored 'Tue 19:30' slots are raid_set values; the label beside them is how a person reads them
         return f"{k}={v}" + (f" (= {', '.join(reg.slot_label(x) for x in v)})" if k == "slots" and v else "")
 
+    def own_settings(rid, sid):  # a schedule's own cadence overrides, stored form + the same in words
+        own = reg.schedule_def(rid, sid)["schedule"]["own"]
+        return f"; own settings {own} (= {_schedule_words(reg, rid, own)})" if own else ""
+
+    def stored(rid, over):  # one raid's stored overrides: each value as stored (what raid_set writes) = as a person reads it
+        return f"- {rid}: " + ", ".join(f"{k}={_stored_value(v)} (= {_overrides_words(reg, rid, {k: v})})" for k, v in over.items())
+
     raids = "\n".join(f"- {rid}: " + ", ".join(cadence(k, v) for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "split_policy", "weights"))
-                      + "".join(f"\n  - schedule {s['id']} ({s['name']}, {s['kind']}): {reg.schedule_label(rid, s)}" + (f"; own settings {reg.schedule_def(rid, s['id'])['schedule']['own']}" if reg.schedule_def(rid, s["id"])["schedule"]["own"] else "")
+                      + "".join(f"\n  - schedule {s['id']} ({s['name']}, {s['kind']}): {reg.schedule_label(rid, s)}" + own_settings(rid, s["id"])
                                 for s in reg.schedules(rid)) for rid in reg.profile.raids)
-    return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n## Effective raid cadence (profile defaults + overrides)\n" + raids
+    over_text = "\n".join(stored(rid, over) for rid, over in overrides.items() if over) or "(none)"
+    return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n" + "".join(c + "\n" for c in clock)
+            + "## Guild raid overrides (raid id: setting=stored value (= as a person reads it); raid_set / raid_reset change these)\n" + over_text
+            + "\n## Effective raid cadence (profile defaults + overrides)\n" + raids
             + f"\n## Now: {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} = {reg.local12(reg.now_local())} (guild time)\n## Live runs (run key: raid, start = as a person reads it, state, answers)\n" + live_runs_text(reg, raids_store)
             + f"\n## Test bench: {len(reg.test_members())} of {reg.TEST_MAX} puppet member(s)"
             + (f"\n## Plain-text permissions (who may ask for what; where)\n{plain_text_policy(reg)}" if officer else "")
@@ -264,6 +279,15 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
                + data_block("News proposals waiting (id: title, kind, state)", proposals_text(reg))
                + data_block("Unconfirmed characters (confirm character=\"all pending\" confirms every one of these)", pending_text(reg)) if officer else "")
             + data_block("Members (name<@id> [characters*=main:rank] away dates = the same days in words)", members))
+
+
+def _stored_value(v) -> str:
+    """A stored override value on one line: 'Tue 19:30' lists comma-joined, anything else as its JSON."""
+    import json
+
+    if isinstance(v, list) and all(isinstance(x, str) for x in v):
+        return ", ".join(v) or "[]"
+    return v if isinstance(v, str) else json.dumps(v, default=str)
 
 
 def plain_text_policy(reg: Registry) -> str:
@@ -453,9 +477,15 @@ def _character_member(reg: Registry, op: ConfigOp):
 ALL_PENDING = {"all pending", "all", "everyone", "everyone pending", "all unconfirmed", "everyone unconfirmed", "all of them", "pending", "*"}
 
 
-def _all_pending(op: ConfigOp) -> bool:
-    """confirm's "every unconfirmed character" (in character or target: the parser may put it in either)."""
-    return any((v or "").strip().lower().strip('"') in ALL_PENDING for v in (op.character, op.target))
+def _all_pending(reg: Registry, op: ConfigOp) -> bool:
+    """confirm's "every unconfirmed character" (in character or target: the parser may put it in either) — unless the
+    character field names a real character ("confirm All" for someone called All confirms just them)."""
+    if not any((v or "").strip().lower().strip('"') in ALL_PENDING for v in (op.character, op.target)):
+        return False
+    try:
+        return not (op.character and reg.find(op.character))
+    except RegistryError:  # several characters share that name: a name, not "everyone"
+        return False
 
 
 def _need_member(reg: Registry, ref: str | None):
@@ -1499,7 +1529,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         hit = reg.find(op.character or "")
         return f"{op.character}: rank {hit[1].rank if hit else '?'} → {op.rank or op.value}"
     if op.op == "confirm":
-        if _all_pending(op):
+        if _all_pending(reg, op):
             pend = reg.pending()
             return (f"confirm all {len(pend)} unconfirmed: " + ", ".join(f"{c.label} ({m.display_name})" for m, c in pend[:25])
                     + (f" … +{len(pend) - 25}" if len(pend) > 25 else "")) if pend else "confirm all pending: nothing is waiting"
@@ -1850,7 +1880,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         reg.set_rank(op.character or "", rank, by)
         return f"{op.character} → {rank}"
     if op.op == "confirm":
-        if _all_pending(op):  # /roster confirm's walk in one go: every unconfirmed character, one commit
+        if _all_pending(reg, op):  # /roster confirm's walk in one go: every unconfirmed character, one commit
             pend = reg.pending()
             if not pend:
                 raise RegistryError("nothing is waiting for a confirmation")
@@ -2053,17 +2083,19 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
 
 
 async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, bot=None, by_id: int | None = None,
-                      rev: str | None = None, channel_id: int | None = None) -> str:
+                      rev: str | None = None, channel_id: int | None = None, self_id: int | None = None) -> str:
     """`apply`, plus the Discord side effects the slash commands have: every channel setting goes through
     `bot.set_channel` (SetupMixin: visibility checked, cards posted or dropped), an absence is announced with
     `bot.announce_absence` like `/me absent add`, and the run / member / test-bench ops go through the same RaidMixin
     verbs as `/raid …`, the board and `/gm test …`. `by_id`: the requester's Discord id (a test run's pool is the
     puppets plus them). `rev`: the board fingerprint the requester saw (board ops refuse a board changed since).
-    `channel_id`: the channel the request was made in (run_sheet posts there; None = DMs or the site)."""
+    `channel_id`: the channel the request was made in (run_sheet posts there; None = DMs or the site). `self_id`: who
+    ASKED, when someone else applies their diff (an officer pressing Apply on a member's request): an op on the asker's
+    own record is still theirs (their own No thanks is a callout)."""
     if op.op in OWNER_OPS and not is_owner:
         raise RegistryError(f"{op.op} needs the owner")
     if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test", "application", "proposal")):
-        return await _apply_with_bot(reg, op, by, bot, by_id, rev=rev, channel_id=channel_id)
+        return await _apply_with_bot(reg, op, by, bot, by_id, rev=rev, channel_id=channel_id, self_id=self_id)
     if op.op == "job":  # launchctl: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)
     if bot is not None and op.op in ("policy", "policy_append"):
@@ -2177,7 +2209,8 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
             + ", waiting for Confirm or Discard")
 
 
-async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int | None, rev: str | None = None, channel_id: int | None = None) -> str:
+async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int | None, rev: str | None = None, channel_id: int | None = None,
+                          self_id: int | None = None) -> str:
     """The ops whose slash commands and web endpoints do Discord work: one branch per verb on the bot."""
     from . import raidcycle as rc
 
@@ -2250,7 +2283,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         m = _need_member(reg, op.member)
         want = _answer_value(op.value)
         note = (op.reason or "").strip()
-        own = by_id is not None and m.discord_id == by_id
+        own = m.discord_id in {by_id, self_id} - {None}  # the presser's own, or the asker's own when someone else applies their diff
         if want == "out" and (note or own):  # a callout (/raid out's verb): anyone's with a reason, and every "I can't make it" of one's own
             return await bot.call_out(reg, rs, ev, m, note or None, by)
         try:

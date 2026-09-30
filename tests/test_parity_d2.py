@@ -602,3 +602,204 @@ def test_a_member_who_left_the_server_gets_the_guide_not_a_change(reg, monkeypat
     press = types.SimpleNamespace(user=types.SimpleNamespace(id=me.discord_id), client=stub, response=types.SimpleNamespace(send_message=send_message))
     asyncio.run(view.apply.callback(press))
     assert said == [discord_policy.LEFT_SERVER] and not view.busy
+
+
+def test_gm_change_refuses_a_member_who_left_the_server(reg):
+    """handle_change is /gm change's path (and the router's): someone who left is refused before the parser runs."""
+    from oibot_gm import discord_policy
+
+    me = reg.test_members()[0]
+    sent, parsed = [], []
+
+    async def in_guild(reg_, user):
+        return False
+
+    async def plain_identity(reg_, user):
+        parsed.append("identity")
+        return False, []
+
+    async def followup_send(content=None, **kw):
+        sent.append(content)
+
+    bot = types.SimpleNamespace(in_guild=in_guild, plain_identity=plain_identity)
+    itx = types.SimpleNamespace(user=types.SimpleNamespace(id=me.discord_id, display_name=me.display_name),
+                                followup=types.SimpleNamespace(send=followup_send))
+    req = configops.ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", value="off")])
+    asyncio.run(discord_policy.handle_change(itx, reg, None, object(), None, "DMs off", bot=bot, channel=None, req=req))
+    assert sent == [discord_policy.LEFT_SERVER] and not parsed, "refused before anything reads the request"
+
+
+# ---------------------------------------------------------------- L6: /ask and /help read the guild member's roles in a DM
+
+def _help_tree(reg, identity):
+    import discord
+    from discord import app_commands
+
+    from oibot_gm import discord_help
+
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    guilds = types.SimpleNamespace(for_interaction=lambda i: reg)
+
+    async def help_answer(*a, **k):
+        return "answer"
+
+    discord_help.register_help_commands(tree, guilds, None, types.SimpleNamespace(help_answer=help_answer))
+    said = []
+
+    async def plain_identity(reg_, user):
+        return identity
+
+    async def send_message(content=None, **kw):
+        said.append((content, kw))
+
+    async def defer(**kw):
+        pass
+
+    async def followup_send(content=None, **kw):
+        said.append((content, kw))
+
+    def dm(uid):  # a DM: guild_id None and a bare User (no roles) — the roles are the guild member's
+        return types.SimpleNamespace(guild_id=None, guild=None, user=types.SimpleNamespace(id=uid), client=types.SimpleNamespace(plain_identity=plain_identity),
+                                     response=types.SimpleNamespace(send_message=send_message, defer=defer), followup=types.SimpleNamespace(send=followup_send))
+
+    cmds = {c.name: c for c in tree.get_commands()}
+    return cmds, dm, said
+
+
+def test_ask_in_a_dm_never_offers_apply_to_a_member_role_holder(reg):
+    reg.set_recruitment("t", open=True, member_role_ids=[4242])
+    reg.config.ask_audience = "officers"  # a member may not ask: they get the guide — without Apply, since they hold the member role
+    cmds, dm, said = _help_tree(reg, (False, [4242]))
+    asyncio.run(cmds["ask"].callback(dm(555_000_000_000_000_778), "how do I sign up?"))
+    (content, kw), = said
+    view = kw.get("view")
+    assert view is not None and not any(getattr(i, "custom_id", "") == "reg:apply" for i in view.children), "the guide only, no Apply to join"
+
+
+def test_help_in_a_dm_shows_an_officer_the_officer_tiers(reg):
+    cmds, dm, said = _help_tree(reg, (True, []))
+    asyncio.run(cmds["help"].callback(dm(555_000_000_000_000_779)))
+    (_content, kw), = said
+    assert {f.name for f in kw["embed"].fields} == {"Everyone", "Officers", "Owner"}
+
+
+def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
+    """Split 3 continued: the raw '## Current config' yaml carried a raid's first_open and slots with no label."""
+    reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30", "first_open": "2026-12-09T15:00:00-08:00", "lock_hours_before": 12}, "t")
+    reg.set_schedule("barrow_deeps", "late", {"slots": "Thu 21:00", "lock_hours_before": 30}, "t")
+    reg.config.auto_propose_hour = 13
+    text = configops.current_config_text(reg, officer=True)
+    dump = text.split("```yaml\n", 1)[1].split("```", 1)[0]
+    assert "first_open" not in dump and "19:30" not in dump, "raid overrides leave the bare dump"
+    line = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: ") and "first_open=" in l)
+    assert "first_open=2026-12-09T15:00:00-08:00 (= first open Wed 09 Dec 2026 3:00 PM)" in line
+    assert "(= run times Tue 7:30 PM)" in line and "(= locks 12 hours before)" in line
+    own = next(l for l in text.splitlines() if "schedule late" in l)
+    assert "own settings {" in own and "(= lock hours before: 30 hours before)" in own
+    assert "auto_propose_hour: 13 (= 1:00 PM)" in text
+
+
+def test_an_officer_applying_a_members_own_no_thanks_diff_is_still_their_callout(reg, rs):
+    """The diff binds to whoever ASKED (bind_self pinned their mention): an officer pressing Apply on a member's own
+    'I can't make it' makes the member's callout, not a bare No thanks."""
+    from test_parity_verbs import Bot
+
+    from oibot_gm import discord_policy
+
+    bot = Bot(reg, rs)
+
+    async def plain_identity(reg_, user):
+        return user.id == OWNER, []
+
+    bot.plain_identity = plain_identity
+    ev = open_test_run(reg, rs, test_by=OWNER)
+    me = reg.test_members()[0]
+    join(reg, rs, ev, [me])
+    req = configops.ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="run_answer", target=ev.key, member=f"<@{me.discord_id}>", value="no thanks")])
+    view = discord_policy.ConfigConfirmView(reg, req, None, bot.ops, me.discord_id, me.display_name, 910_777)
+    edits = []
+
+    async def edit_message(**kw):
+        edits.append(kw)
+
+    async def edit_original_response(**kw):
+        edits.append(kw)
+
+    press = types.SimpleNamespace(user=types.SimpleNamespace(id=OWNER, display_name="Owner"), client=bot,
+                                  response=types.SimpleNamespace(edit_message=edit_message, send_message=edit_message),
+                                  edit_original_response=edit_original_response)
+    asyncio.run(view.apply.callback(press))
+    assert " is out of " in edits[-1]["content"], edits
+    assert [c.display_name for c in ev.callouts] == [me.display_name] and ev.signups[str(me.discord_id)].source == "callout"
+
+
+def test_in_guild_is_false_only_on_discords_own_unknown_member(reg):
+    """left_server fails open: an uncached guild or a transient fetch error is not 'left the server' (only a 404 is),
+    and the transient miss is not remembered as one."""
+    import functools
+
+    import discord
+
+    from oibot_gm import discord_bot as db
+
+    uid = 555_000_000_000_000_880
+    raised = {"exc": None}
+
+    class Guild:
+        id = reg.config.discord_guild_id
+
+        def get_member(self, _uid):
+            return None
+
+        async def fetch_member(self, _uid):
+            raise raised["exc"]
+
+    guild = {"g": None}
+    stub = types.SimpleNamespace(get_guild=lambda gid: guild["g"])
+    stub.cached_member = functools.partial(db.OibotGM.cached_member, stub)
+    user = types.SimpleNamespace(id=uid)
+
+    def check():
+        return asyncio.run(db.OibotGM.in_guild(stub, reg, user))
+
+    assert check() is True, "the guild isn't in the gateway cache: unknown, not gone"
+    guild["g"] = Guild()
+    raised["exc"] = discord.HTTPException(types.SimpleNamespace(status=503, reason="Service Unavailable"), "try later")
+    assert check() is True, "a 503 is not a departure"
+    assert check() is True, "nor is the cached miss it left behind"
+    stub.__dict__.pop("_member_cache", None)
+    raised["exc"] = discord.NotFound(types.SimpleNamespace(status=404, reason="Not Found"), {"code": 10007, "message": "Unknown Member"})
+    assert check() is False, "Discord's Unknown Member: they left"
+    assert check() is False, "remembered for the cache's lifetime"
+
+
+def test_confirm_a_character_really_named_all_confirms_just_them(reg):
+    reg.add_character(700_000_000_000_000_311, "All", "All", "Mage", "Frost", None, True)
+    reg.add_character(700_000_000_000_000_312, "Newc", "Newc", "Priest", "Holy", None, True)
+    op = ConfigOp(op="confirm", character="All")
+    assert configops.describe(reg, op).startswith("confirm All ("), "a real character's name is that character"
+    configops.apply(reg, op, "Officer", is_owner=False)
+    assert reg.find("All")[1].confirmed_by == "Officer" and not reg.find("Newc")[1].confirmed_by
+    d = configops.describe(reg, ConfigOp(op="confirm", character="all pending"))
+    assert d.startswith("confirm all ") and "Newc (Newc)" in d, "the phrase nobody is called still means everyone"
+
+
+def test_a_test_run_opens_on_the_event_loop_like_every_open(reg, rs, monkeypatch):
+    """The site's test bench used to open in asyncio.to_thread; the one opener adds the run on the loop, as
+    open_run_and_post does (the live events are the loop's; a worker thread next to them is L3's race)."""
+    import threading
+
+    from test_parity_verbs import Bot
+
+    threads = []
+    real = rc.open_run
+
+    def spy(*a, **kw):
+        threads.append(threading.current_thread())
+        return real(*a, **kw)
+
+    monkeypatch.setattr(rc, "open_run", spy)
+    bot = Bot(reg, rs)
+    asyncio.run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=30, nudge_in=20, lock_in=10, confirm_in=5, dm=False, by="Owner", by_id=OWNER))
+    assert threads == [threading.main_thread()]

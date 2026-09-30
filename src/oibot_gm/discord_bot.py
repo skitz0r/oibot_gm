@@ -977,13 +977,21 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         now = time.time()
         if hit and now - hit[0] < max_age:
             return hit[1]
+        gone: set[tuple[int, int]] = self.__dict__.setdefault("_member_gone", set())  # misses that were Discord's own 404
         try:
             m = await guild.fetch_member(uid)
-        except Exception:  # noqa: BLE001 — not a member (404) or transient
+        except Exception as e:  # noqa: BLE001 — not a member (404) or transient
             m = None
+            if isinstance(e, discord.NotFound):
+                gone.add(key)
+            else:
+                gone.discard(key)
+        else:
+            gone.discard(key)
         if len(cache) > 4096:  # bounded: drop what has aged out
             for k in [k for k, (t, _) in cache.items() if now - t >= max_age]:
                 cache.pop(k, None)
+                gone.discard(k)
         cache[key] = (now, m)
         return m
 
@@ -1067,11 +1075,17 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
     async def in_guild(self, reg, user) -> bool:
         """Whether `user` is a member of the guild's Discord server now (the gateway cache, else one cached fetch: a
-        404 is remembered). The web treats server membership as the whitelist; plain text does too (discord_policy.left_server)."""
+        404 is remembered). The web treats server membership as the whitelist; plain text does too (discord_policy.left_server).
+        Fails open: False only on Discord's own Unknown Member (404) — a guild missing from the gateway cache or a
+        transient fetch error (a 5xx, a timeout) is not a departure, so a member is never locked out by an outage."""
         guild = self.get_guild(reg.config.discord_guild_id)
-        if isinstance(user, discord.Member) and guild is not None and user.guild.id == guild.id:
+        if guild is None:
             return True
-        return await self.cached_member(guild, user.id) is not None
+        if isinstance(user, discord.Member) and user.guild.id == guild.id:
+            return True
+        if await self.cached_member(guild, user.id) is not None:
+            return True
+        return (guild.id, user.id) not in self.__dict__.get("_member_gone", set())
 
     async def plain_text(self, message: discord.Message, reg, text: str, channel) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).

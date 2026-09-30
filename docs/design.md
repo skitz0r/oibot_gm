@@ -494,22 +494,29 @@ loot, "go through / reverted / was applied" reaches news, "change log" reaches s
 **Stage C D2, plain text and the verbs (2026-09-29).** The parser's context: `configops.data_block(title, rows)` runs
 every row through `data_row` (one line, `<data` / `</data` defused), the live boards sit in their own data block, and
 every machine time carries its 12-hour label (`= reg.local12(...)` beside live-run starts, upcoming runs and Now;
-`span_label` beside absence dates; `slot_label` beside the raid slots). Officers' context adds the unconfirmed
+`span_label` beside absence dates; `slot_label` beside the raid slots). The guild's raid overrides leave the raw config
+dump for their own section, each `setting=stored value (= _overrides_words)` (first open, run times, cadence), a
+schedule's own settings carry `_schedule_words`, and `auto_propose_hour` / the legacy `slots` their 12-hour labels. Officers' context adds the unconfirmed
 characters (`pending_text`); `confirm` takes `character="all pending"` (`ALL_PENDING`, character or target) and confirms
-`reg.pending()` in one batch commit. `describe(absence)` appends `configops.absence_preview` (the live runs in the span,
+`reg.pending()` in one batch commit — unless the character field names a real character (`reg.find`: someone called
+All is confirmed alone). `describe(absence)` appends `configops.absence_preview` (the live runs in the span,
 `rc.runs_in_span` — which `RaidMixin.after_absence` walks too — with `rc.absence_effects`: No thanks / seat freed /
 already No thanks); `POST /api/members/absence {preview: true}` returns the same without writing and MCP
 `add_absence(preview=True)` sends it. `raid_reset`'s preview words each override (`_overrides_words`). A self-bound
-no thanks is `call_out(note or None)`, and MCP `set_answer` with status out sends `callout: true`, which the
+no thanks is `call_out(note or None)` — self-bound for the presser or, when an officer applies a member's diff, for
+the asker (`apply_async(self_id=)`, which `ConfigConfirmView` passes as the requester), and MCP `set_answer` with status out sends `callout: true`, which the
 `/api/run/{key}/set` route routes to `call_out`. `RaidMixin.open_test_run(…, channel=None)` is the one test-run opener
-(signup channel, else the asking channel; the ops warn line) for `/gm test run`, plain text and `/api/admin/test`.
+(signup channel, else the asking channel; the ops warn line) for `/gm test run`, plain text and `/api/admin/test`;
+it opens on the event loop like `open_run_and_post` (the live events are the loop's), one short git commit included.
 `_write_board` applies a locked board on the event loop (never a worker thread next to the loop's own writers).
 `/api/ops/change` apply goes on past a failed op like Discord (each in `refused` with why, `error` = the first, an
 unexpected exception logged, never a 500 after a partial apply). `/gm change` in a DM passes `channel=None` (the DMs
 entry). `discord_help.asker_identity` reads officer and role ids from the guild member in DMs (the guide's Apply
 button, `/ask`, `/help`). `discord_policy.left_server(bot, reg, user)` (`OibotGM.in_guild`: the gateway cache, else one
 cached fetch) makes someone no longer in the server unregistered on every plain-text path — `plain_text` answers
-with the static guide, `handle_change` and the diff's Apply refuse — the owner excepted. The TimezoneWizard's confirm
+with the static guide, `handle_change` (so `/gm change`) and the diff's Apply refuse — the owner excepted. It fails
+open: only Discord's own Unknown Member (404, remembered with the fetch cache) is a departure; a guild missing from
+the gateway cache or a transient fetch error is not. The TimezoneWizard's confirm
 adds `<t:unix:f>` stamps (new and old moment) from `rc.timezone_preview_rows`.
 
 ### 5.25 Plain-text permissions: members act too, by role and channel (built 2026-09-22)

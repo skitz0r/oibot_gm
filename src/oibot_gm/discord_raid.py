@@ -611,7 +611,9 @@ class RaidMixin:
         sheet with minute-level cadence (`*_in` = minutes; start > nudge > lock > confirm), the pool = puppets + the
         tester (`by_id`), `dm` = DM every puppet when it opens (the DMs reach the tester). The sheet goes to the signup
         channel, else to `channel` (where it was asked for; None = nowhere, e.g. the site); the ops feed gets the warn
-        line. Returns (the run, the channel it was posted in or None)."""
+        line. Returns (the run, the channel it was posted in or None). rc.open_run runs on the event loop, as in
+        open_run_and_post: it adds to the live events the loop's handlers iterate, so never from a worker thread (L3);
+        its one git commit is the same short block every on-demand open has."""
         start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
         ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(dm), "test_by": by_id})
         target = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else channel
