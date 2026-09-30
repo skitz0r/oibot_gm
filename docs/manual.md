@@ -785,7 +785,8 @@ doesn't count as a member; a channel where you let one member in by name counts 
 officer the bot can check). An officer who @mentions the bot anywhere else —
 #general, a public analytics channel — gets the member view, because everyone there reads the answer, and the reply
 says so: ask in the ops channel or by DM for the officer view. The same holds when that message is a change: the
-bot's clarifying questions there are written from the member view too. Text people typed (news titles, applicants'
+bot's clarifying questions there are written from the member view too. Anyone who asks where others read the reply
+also gets their *own* absence reasons left out of it (ask by DM to see them). Text people typed (news titles, applicants'
 answers, reasons) is handed to the model as quoted data, never as instructions. The answer only ever *points* at
 commands — a change is a separate step you Apply (plain text, §8c).
 

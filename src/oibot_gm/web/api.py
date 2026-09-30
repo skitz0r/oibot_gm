@@ -701,7 +701,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
         avoid = d.get("avoid") if isinstance(d.get("avoid"), list) else None
-        async with solving(key):
+        async with solving(ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
             try:
                 layout, rosters = await asyncio.to_thread(rc.split_preview, v.reg, rs, ev, strategy, avoid or None)
             except RuntimeError as e:
@@ -721,7 +721,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         b = parse(d, StrategyBody)
         if b.strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": "unknown strategy"}, status_code=400)
-        async with solving(key):
+        async with solving(ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
             ev.split_strategy = b.strategy
             rs.save(ev, f"split strategy {b.strategy}")
         return {"message": f"split strategy: {b.strategy}"}
@@ -732,7 +732,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
             return JSONResponse({"error": "already locked — move people on the board instead"}, status_code=400)
-        async with solving(key):
+        async with solving(ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
             rev = rc.board_rev(v.reg, ev)  # the board the solve fills around: a drag during the solve wins (409), never lost
             try:
                 layout = await asyncio.to_thread(rc.autofill, v.reg, rs, ev)

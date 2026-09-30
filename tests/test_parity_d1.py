@@ -41,7 +41,9 @@ def test_public_officer_snapshot_is_the_member_view(reg, rs, secret):
     assert "## Asker: <@%d> (officer)" % OWNER in public and "## Reply audience: a channel members can read" in public
     # a member's snapshot is unchanged by the flag
     uid = reg.test_members()[0].discord_id
-    assert help_mod.guild_state(reg, rs, uid, False, q, public=True) == help_mod.guild_state(reg, rs, uid, False, q)
+    strip = lambda t: "\n".join(ln for ln in t.splitlines() if not ln.startswith("## Reply audience: a channel others can read"))  # noqa: E731
+    # a member's snapshot is the same wherever they ask, except that a public reply leaves out their own reasons
+    assert strip(help_mod.guild_state(reg, rs, uid, False, q, public=True)) == help_mod.guild_state(reg, rs, uid, False, q)
 
 
 class HelpBot(HelpMixin):

@@ -168,7 +168,7 @@ class ConfigConfirmView(discord.ui.View):
             return
         officer, role_ids = who
         if self.busy:  # checked and claimed with no await in between: one Apply per diff, whoever presses
-            await interaction.response.send_message("Already applying (or applied) — each change applies once.", ephemeral=True)
+            await interaction.response.send_message("Already applying, applied or cancelled — each change applies once.", ephemeral=True)
             return
         self.busy = True
         self.stop()
@@ -223,8 +223,9 @@ class ConfigConfirmView(discord.ui.View):
         if self.busy:
             await interaction.response.send_message("Too late to cancel — it is already being applied.", ephemeral=True)
             return
-        await interaction.response.edit_message(content="Cancelled.", view=None, embed=None)
+        self.busy = True  # claimed like Apply claims it (no await in between): an Apply press still checking permissions now refuses
         self.stop()
+        await interaction.response.edit_message(content="Cancelled.", view=None, embed=None)
 
 
 def _reply_private(bot, reg: Registry, message: discord.Message) -> bool:

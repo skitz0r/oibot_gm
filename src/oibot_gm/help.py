@@ -135,6 +135,7 @@ class Ask:
     question: str
     extras: HelpExtras | None = None
     public: bool = False  # an officer asked where members read the reply: `officer` is False (member-level snapshot)
+    audience_public: bool = False  # anyone asked where others read the reply: even their own absence reasons stay out
 
     @property
     def q(self) -> str:
@@ -938,8 +939,10 @@ def people_lines(ask: Ask) -> list[str]:
         lines.append("## Reply audience: a channel members can read. The asker is an officer, but this snapshot is the member view on "
                      "purpose (no officer sections, no other people's reasons or records): for officer data, say they can ask in the ops "
                      "channel or by DM for the officer view — never guess it.")
-    if m:
-        lines.extend(member_lines(reg, rs, m, f"## Asker ({who})", officer_view=True))
+    if ask.audience_public and not ask.public:
+        lines.append("## Reply audience: a channel others can read — the asker's own absence reasons are left out on purpose.")
+    if m:  # their own reasons are theirs — but not in a reply others can read
+        lines.extend(member_lines(reg, rs, m, f"## Asker ({who})", officer_view=not ask.audience_public))
     else:
         lines.append(f"## Asker: <@{ask.user_id}> ({who}) · not registered")
     own = applicant_line(reg, ask.user_id, officer=ask.officer)
@@ -965,9 +968,10 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str
     Bounded (MAX_STATE_CHARS): every part has its own cap; lists are truncated, never dumped.
     `public`: the reply is posted where members read it (a channel that isn't officer-only) — the snapshot level follows
     who can READ the reply, not who asked: an officer gets the member-level snapshot there (design §5.25)."""
+    audience_public = bool(public)
     public = bool(public and is_officer)
     is_officer = is_officer and not public
-    ask = Ask(reg, rs, user_id, is_officer, question or "", extras, public=public)
+    ask = Ask(reg, rs, user_id, is_officer, question or "", extras, public=public, audience_public=audience_public)
     core = _clip(core_lines(ask), CORE_CAP)
     people = _clip(people_lines(ask), PEOPLE_CAP)
     sections, included, skipped = section_lines(ask)

@@ -141,3 +141,31 @@ def test_answers_that_keep_changing_fail_the_lock_and_leave_the_sheet_open(reg, 
     line = asyncio.run(Bot(reg, rs).lock_run(reg, rs, ev, by="chat"))
     assert "lock failed" in line and "kept changing" in line, line
     assert len(calls) == rc.LOCK_SOLVES and ev.state == "open" and not ev.rosters and ev.lock_error
+
+
+def test_a_members_own_reason_stays_out_of_a_public_reply(reg, rs):
+    """Asking where others read the reply: the snapshot leaves out even the asker's own absence reason (in a DM or a
+    private channel it is theirs to see)."""
+    from datetime import timedelta
+
+    from oibot_gm import help as help_mod
+    m = reg.test_members()[0]
+    day = (reg.now_local().date() + timedelta(days=5)).isoformat()
+    reg.add_absence(m.discord_id, day, day, "dentist appointment", "t")
+    private = help_mod.guild_state(reg, rs, m.discord_id, False, "when am I away?")
+    public = help_mod.guild_state(reg, rs, m.discord_id, False, "when am I away?", public=True)
+    assert "dentist" in private and "dentist" not in public and "left out on purpose" in public
+
+
+def test_cancel_claims_the_diff_so_a_pending_apply_refuses():
+    from types import SimpleNamespace
+
+    from oibot_gm import discord_policy as dp
+    view = dp.ConfigConfirmView.__new__(dp.ConfigConfirmView)
+    view.busy = False
+    assert not view.busy
+    # the Cancel handler sets busy before its first await on the edit: Apply's own check then refuses
+    import inspect
+    src = inspect.getsource(dp.ConfigConfirmView.cancel)
+    assert src.index("self.busy = True") < src.index("await interaction.response.edit_message")
+    _ = SimpleNamespace
