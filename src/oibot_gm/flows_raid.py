@@ -641,11 +641,9 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
         opt = st.options[k] if k < len(st.options) else st.options[0]
         seats.append((f"{n + 1}. {what}: " + " + ".join(rc._ask_words(a) for a in opt) + (" (alternate)" if k else ""), opt[0].why or ""))
     batch = ["", "**A Send would DM:**" if show_only else "**Send DMs exactly these:**"] + (rc.batch_preview(plan, picks) if chosen else [f"Still short if everyone says yes: {rc.still_short_words(plan)}"])
-    text = "\n".join(lines + [ln + (f"\n   -# {why}" if why else "") for ln, why in seats] + batch)
-    if len(text) > 1900:  # long: the reasons go first, the batch Send DMs always shows
-        text = "\n".join(lines + [ln for ln, _why in seats] + batch)
+    text, whole = fit_suggestions(lines, seats, batch)
     if show_only:
-        await wiz.finish(i, text[:1900])
+        await wiz.finish(i, text)
         return
     items = []
     for n, st in enumerate(plan.seats):
@@ -677,9 +675,36 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
         n_send = len(rc.send_batch(plan, picks)[0]) if chosen else 0
     except RegistryError:  # the cap is full: Send stays off (the batch block says why)
         n_send = 0
+    if not whole:  # the batch didn't fit on the screen: Send never DMs anyone the screen didn't show
+        n_send = 0
     items.append(wiz.button(f"Send {n_send} ask{'s' if n_send != 1 else ''}", send, discord.ButtonStyle.success, disabled=not n_send))
     items.append(wiz.button("Cancel", wiz.cancel))
-    await wiz.show(i, text[:1900], *items)
+    await wiz.show(i, text, *items)
+
+
+SUGGEST_TEXT_MAX = 1900  # what a wizard screen holds (Discord's 2000 less room for the wizard's own lines)
+
+
+def fit_suggestions(lines: list[str], seats: list[tuple[str, str]], batch: list[str], limit: int = SUGGEST_TEXT_MAX) -> tuple[str, bool]:
+    """The suggestions screen's text within `limit`, the batch Send DMs kept whole: first the seats' reasons go, then
+    seat lines from the end ("+N more seats"). Returns (text, whole): `whole` False = even the batch alone doesn't fit,
+    so the screen says so and Send stays off — a Send never DMs anyone the screen didn't show."""
+    full = "\n".join(lines + [ln + (f"\n   -# {why}" if why else "") for ln, why in seats] + batch)
+    if len(full) <= limit:
+        return full, True
+    bare = [ln for ln, _why in seats]
+    for keep in range(len(bare), -1, -1):
+        more = [f"-# +{len(bare) - keep} more seat{'s' if len(bare) - keep != 1 else ''} — the selects below and the site list them all"] if keep < len(bare) else []
+        text = "\n".join(lines + bare[:keep] + more + batch)
+        if len(text) <= limit:
+            return text, True
+    warn = "⚠️ Too many asks to show here, so Send stays off — send them from the site's Raids page (Suggest)."
+    out = "\n".join(lines)
+    for ln in batch:
+        if len(out) + len(ln) + len(warn) + 2 > limit:
+            break
+        out += "\n" + ln
+    return (out + "\n" + warn)[:limit], False
 
 
 @flow("raid_suggest")

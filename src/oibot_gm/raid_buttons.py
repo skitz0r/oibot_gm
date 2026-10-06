@@ -49,7 +49,8 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
         if self.action == "ask":  # the card's suggestions as drawn — refused (and the card redrawn) when the plan moved
             await interaction.response.defer(ephemeral=True, thinking=True)
             try:
-                sent, plan = await bot.send_plan(reg, rs, ev, rev=self.rev or "", by=by)
+                # only the seats the card draws (SUGGEST_LINES) — never one it left under "+N more"
+                sent, plan = await bot.send_plan(reg, rs, ev, rev=self.rev or "", by=by, limit=SUGGEST_LINES)
             except rc.PlanChanged as e:
                 await bot.refresh_cards(reg, ev)
                 lock_cards = {mid for k, mid in ev.cards.items() if k.startswith("lock:")}
@@ -278,4 +279,4 @@ def sheet_view(key: str) -> discord.ui.View:
 
 # text helpers the callbacks format with; imported last so `raid_views` (which places these buttons and imports them at
 # its own bottom) always finds the classes above bound, whichever module is imported first
-from .raid_views import run_label, sheet_state  # noqa: E402
+from .raid_views import SUGGEST_LINES, run_label, sheet_state  # noqa: E402

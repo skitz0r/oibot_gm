@@ -330,13 +330,14 @@ class RaidMixin:
         """One officer send per run at a time (two presses of Ask never ask anyone twice)."""
         return self.__dict__.setdefault("_plan_locks", {}).setdefault(key, asyncio.Lock())
 
-    async def send_plan(self, reg, rs, ev, *, rev: str, by: str, picks: dict | None = None) -> tuple[list, "rc.Plan"]:
+    async def send_plan(self, reg, rs, ev, *, rev: str, by: str, picks: dict | None = None, limit: int | None = None) -> tuple[list, "rc.Plan"]:
         """An officer's Ask: send the planner's suggestions (each seat's suggestion, or the alternate in `picks` =
         {seat index: option index}) as DMs — the one path for the health / lock card's Ask, the Suggest wizard,
         /raid fill on an open run, the site's Suggest, plain text and MCP. `rev` = the plan fingerprint the officer was
         shown (rc.plan_rev): when the plan is different now, rc.PlanChanged is raised carrying the current plan and
         nothing is sent. Before lock: pre-lock asks (one per member per run, expire at lock; a yes changes the signup
-        and seats nobody). After lock: fill asks the officer approved — role swaps included (D3). Returns (sent, plan)."""
+        and seats nobody). After lock: fill asks the officer approved — role swaps included (D3). `limit`: only the first
+        that many seats (the card's Ask: the seats the card draws, never one it left under "+N more"). Returns (sent, plan)."""
         async with self.plan_lock(ev.key):
             if ev.state not in ("open", "locked"):
                 raise RegistryError(f"{run_title(reg, ev)} is {ev.state}")
@@ -345,7 +346,7 @@ class RaidMixin:
                 raise rc.PlanChanged(plan)
             # exactly the batch the officer was shown (rc.send_batch: after lock the FILL_MAX_OPEN cap, which is part of
             # the rev, so the preview listed these same asks)
-            asks, plan.held_back = rc.send_batch(plan, picks)
+            asks, plan.held_back = rc.send_batch(plan, picks, limit)
             if not asks:
                 return [], plan
             team = rc.run_team(reg, ev)

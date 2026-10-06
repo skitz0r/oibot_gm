@@ -264,8 +264,9 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 - **Two alternates** per short seat, so you can ask someone else without typing a name, and a **Still short if all say
   yes** line ("nothing", or what to recruit).
 - **Where.** The officer **health card** gets a *Suggested* block (up to three seats; one member per line, the spec
-  icon they'd play and the character) with **Ask** (sends what the card shows) and **Suggest…** (every seat with its
-  alternates in a select, then *Send*). The block, the regulars who haven't answered and the buttons are for
+  icon they'd play and the character) with **Ask** (sends what the card shows — only those seats: when more are short
+  the card says *+N more* and Ask leaves them alone) and **Suggest…** (every seat with its alternates in a select, then
+  *Send*). The block, the regulars who haven't answered and the buttons are for
   officers: a member who runs `/raid health` sees the counts, what is short and the missing buffs only. On a recurring schedule with
   regulars the health card is posted **as soon as the sheet opens** when the regulars (minus anyone away) can't cover a
   minimum — an early warning — and posted again, rebuilt, at reminder time. On the site, **Suggest** beside the sheet's
@@ -399,7 +400,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    swap marked **SWAP** (with the role it leaves) and its tied backfill named; what waits under the 3-at-a-time cap;
    what stays short — then *Send N asks* or *Cancel*. Send sends only what was shown: if the board or the answers
    changed the plan meanwhile, nothing is sent and the batch is shown again as it is now. An officer's Send includes
-   the role swaps it lists. `/raid fill preview:true` shows the same batch without a Send button. With `autofill` off
+   the role swaps it lists. On a very long list the reasons go first, then the last seat lines ("+N more seats"); the
+   batch itself always shows in full — if even it can't fit, *Send* stays off and the site's Suggest sends it.
+   `/raid fill preview:true` shows the same batch without a Send button. With `autofill` off
    nothing is asked until an officer presses Fill seats.
 7. **Raid** — `/raid loot` opens the loot council thread (when loot tables exist for the game version).
 8. **Close** — 3 h after its scheduled end (start + the raid's length) the run is **done** and the sheet says so.
@@ -905,7 +908,8 @@ lockout window it is in now; the guild's aura and family overrides; the test ben
 page has it — state, nudge / lock / confirmation-expiry times, split strategy, the schedule it came from and how many
 rosters it expects, who joined (character, spec and class) and how many per role, bench, no thanks, who hasn't
 answered, pins, the board before lock (per roster, with who is still in the bank and the same aura line as after
-lock), what the run is short and who could cover it, auras nobody brings, people In on another run that evening
+lock), what the run is short and who could cover it (a member gets the counts — "+1 offspec" — not the names),
+auras nobody brings, people In on another run that evening
 (before and after lock), the rostered groups after lock (each seat's spec and role) with confirmed / waiting /
 declined, and per roster its auras: every raid-wide buff with how many bring it, each group's missing auras and
 totems, the synergy (the solver's top advisories are for officers only),

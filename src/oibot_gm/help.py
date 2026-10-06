@@ -335,8 +335,9 @@ def member_log(lines) -> list[str]:
 
 
 def _own_ask_words(reg: Registry, a, fmt: str) -> str:
-    """The asker's own open ask, as their DM put it: what it asks, for which role, until when — never who else is
-    asked (a tied swap's partner stays unnamed) or the officers' reasoning (`why`)."""
+    """The asker's own open ask, as their DM put it: what it asks, for which role, until when — never more than that
+    DM said (raid_views.fill_layout): no other asks, not the officers' reasoning (`why`). A backfill's member-facing
+    reason names whose seat it covers ("covering Kael's tank seat") — their DM names that partner too, so nothing new."""
     if a.kind in ("offspec", "flex"):
         what = f"switch to {a.spec} on {a.character}"
     elif a.kind == "alt":
@@ -410,9 +411,15 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         if nd["headcount"] or nd["roles"]:
             out.append(f"  short: {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else ""))
         hd = rc.health_data(reg, ev, team)
-        # the names of who could cover but hasn't signed are the "not answered" list again: officers only (D1)
-        hint = lambda h: h if is_officer or not h.startswith("not on sheet") else "members not on the sheet could cover"  # noqa: E731
-        covers = [f"{r['role']} {r['have']}/{r['need']} ({hint(r['hint'])})" for r in hd["roles"] if r["need"] and r["have"] < r["need"] and r["hint"]]
+        # WHO could cover (offspec, flex, alt, bench — or members not on the sheet, the "not answered" list again) is
+        # the planner's suggestion, officer-facing like the health card: a member snapshot gets the counts only
+        def hint(r: dict) -> str:
+            if is_officer:
+                return r["hint"]
+            if r["hint"].startswith("not on sheet"):
+                return "members not on the sheet could cover"
+            return " · ".join(f"+{len(v)} {k}" for k, v in r["cover"].items() if v) or r["hint"]
+        covers = [f"{r['role']} {r['have']}/{r['need']} ({hint(r)})" for r in hd["roles"] if r["need"] and r["have"] < r["need"] and r["hint"]]
         if covers:
             out.append("  cover for short roles: " + " · ".join(covers))
         missing = [b["name"] for b in hd["buffs"] if not b["providers"]]

@@ -1393,14 +1393,19 @@ def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = 
     return [a for a in batch if a.pair is None or a.pair in ids]
 
 
-def pick_asks(plan: Plan, picks: dict | None = None) -> list[FillAsk]:
+def pick_asks(plan: Plan, picks: dict | None = None, limit: int | None = None) -> list[FillAsk]:
     """The asks an officer sends: each seat's suggestion, or the alternate they picked (`picks` = {seat index: option
-    index}, 0 = the suggestion). Refuses a pick that asks one person for two seats."""
+    index}, 0 = the suggestion). `limit`: only the first that many seats someone can cover (a card's Ask sends the
+    seats the card draws, raid_views.SUGGEST_LINES). Refuses a pick that asks one person for two seats."""
     out: list[FillAsk] = []
     seen: set[int] = set()
+    shown = 0
     for i, st in enumerate(plan.seats):
         if not st.options:
             continue
+        if limit is not None and shown >= limit:
+            break
+        shown += 1
         k = int((picks or {}).get(i, (picks or {}).get(str(i), 0)) or 0)
         if not 0 <= k < len(st.options):
             raise RegistryError(f"seat {i + 1} has no option {k + 1}")
@@ -1412,13 +1417,13 @@ def pick_asks(plan: Plan, picks: dict | None = None) -> list[FillAsk]:
     return out
 
 
-def send_batch(plan: Plan, picks: dict | None = None) -> tuple[list[FillAsk], int]:
+def send_batch(plan: Plan, picks: dict | None = None, limit: int | None = None) -> tuple[list[FillAsk], int]:
     """Exactly what an officer's send of this plan (with `picks`, pick_asks) DMs now, and how many of the picked asks
     wait: before lock all of them; after lock at most `plan.room` (FILL_MAX_OPEN out at once), never a swap without
     its tied backfill. The preview screens (the wizard, the plain-text diff, the site and MCP) show this list and
     RaidMixin.send_plan sends it — the cap is part of the plan's rev, so what was shown is what goes. RegistryError
-    when nothing can go out now."""
-    asks = pick_asks(plan, picks)
+    when nothing can go out now. `limit`: only the first that many seats (pick_asks — a card's Ask)."""
+    asks = pick_asks(plan, picks, limit)
     if plan.phase == "prelock" or not asks:
         return asks, 0
     if plan.room == 0:

@@ -17,7 +17,7 @@ import discord
 
 from . import raidcycle as rc
 from .constants import MARK, ROLES, TEAL
-from .registry import Registry
+from .registry import Registry, RegistryError
 
 CLOCK12 = "%a %d %b %I:%M %p"  # plain-text stamps (thread names, autocomplete) where Discord can't render <t:…>
 
@@ -282,15 +282,18 @@ def suggested_block(reg: Registry, ico, plan) -> str:
         alts = " · ".join(" + ".join(a.display_name for a in opt) for opt in st.options[1:])
         lines.append("-# " + why + (f" · alternates: {alts}" if alts else ""))
     if len(seats) > SUGGEST_LINES:
-        lines.append(f"-# +{len(seats) - SUGGEST_LINES} more — Suggest… lists them all")
+        lines.append(f"-# +{len(seats) - SUGGEST_LINES} more — Ask sends only the {SUGGEST_LINES} above; Suggest… lists them all")
     lines.append(f"Still short if all say yes: {still_short_md(ico, plan)}")
     return "\n".join(lines)
 
 
 def suggest_row(ev: rc.RaidEvent, plan):
-    """Ask (sends what the card shows — refused and refreshed if the plan changed since: the rev rides in its id) and
-    Suggest… (every seat with its alternates, pick and send)."""
-    n = len(plan.asks)
+    """Ask (sends what the card shows — the first SUGGEST_LINES seats, after lock within the cap; refused and refreshed
+    if the plan changed since: the rev rides in its id) and Suggest… (every seat with its alternates, pick and send)."""
+    try:
+        n = len(rc.send_batch(plan, limit=SUGGEST_LINES)[0])
+    except RegistryError:  # after lock with the cap full: nothing can go out now
+        n = 0
     return discord.ui.ActionRow(RunButton(ev.key, "ask", rev=plan.rev, label=f"Ask these {n}" if n > 1 else "Ask this one" if n else "Ask", disabled=not n),
                                 RunButton(ev.key, "suggest"))
 
