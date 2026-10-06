@@ -319,24 +319,23 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
     """The health check as a card: joined vs size, role have/need with the short role marked, who could cover,
     nobody-brings icons, no-answer count, double-booked; officer buttons."""
     ui = discord.ui
-    h = rc.health_data(reg, ev, team)
-    n, seats, _t, subs = h["headcount"]
-    per, want = rc.run_size(reg, ev), h.get("rosters", 1)  # health_data measures against the rosters the run expects
+    h = rc.health_data(reg, ev, team)  # role have/need = rc.gaps, the same numbers needs() and the fill engine read
+    n, seats, _t, subs = h["headcount"]  # seats = what the run advertises (size × the rosters its schedule expects)
+    per, want = rc.run_size(reg, ev), h.get("rosters", 1)
     players = rc.players_for(reg, ev)
     runs = max(want, rc.how_many_rosters(reg, players, per, reg.role_bounds(ev.instance, per), want=want))
-    size = seats  # the seats the run advertises (size × the rosters its schedule expects)
     roles = []
     for r in h["roles"]:
-        have, need = r["have"], r["need"] // want
-        roles.append(f"{ico('role', r['role'])} " + (f"**{have}**/{need * max(1, runs)}" if need and have < need * max(1, runs) else f"{have}" + (f"/{need * max(1, runs)}" if need else "")))
-    head = _header(reg, ev, f"Roster health · {reg.raid_def(ev.instance).get('name', ev.instance)}", [f"**{n}** / {size}" + (f" · {runs} runs" if runs > 1 else "") + (f" · {subs} bench" if subs else "") + "   " + "   ".join(roles)])
+        have, need = r["have"], r["need"]
+        roles.append(f"{ico('role', r['role'])} " + (f"**{have}**/{need}" if need and have < need else f"{have}" + (f"/{need}" if need else "")))
+    head = _header(reg, ev, f"Roster health · {reg.raid_def(ev.instance).get('name', ev.instance)}", [f"**{n}** / {seats}" + (f" · {runs} runs" if runs > 1 else "") + (f" · {subs} bench" if subs else "") + "   " + "   ".join(roles)])
     body = []
-    reason = rc.split_reason(reg, players, size, reg.role_bounds(ev.instance, size))
+    reason = rc.split_reason(reg, players, per, reg.role_bounds(ev.instance, per))  # per run, as rc.run_split_reason
     if reason:  # the headcount allows more runs than the tanks/healers do (or not even one meets its minimums)
         body.append(rc.split_reason_text(reason, lambda role, k: f"{ico('role', role)} {k}"))
-    short = [r for r in h["roles"] if r["need"] and r["have"] < r["need"] // want * max(1, runs)]
+    short = [r for r in h["roles"] if r["need"] and r["have"] < r["need"]]
     if short:
-        body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] // want * max(1, runs) - r['have']}" for r in short))
+        body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] - r['have']}" for r in short))
         hints = [r["hint"] for r in short if r["hint"]]
         if hints:
             body.append("-# " + " · ".join(hints))  # `-#` only renders at the start of a line

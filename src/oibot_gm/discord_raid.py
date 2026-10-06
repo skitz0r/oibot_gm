@@ -155,6 +155,8 @@ class RaidMixin:
             line = f"✅ {who}{s.character} {rc.LABELS[s.status]} for {label}" + (f" — {s.note}" if s.note and s.status != status else "")
         elif status == "out":
             if ev.seat_of(m.display_name):
+                if mine:  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
+                    rc.callout(reg, rs, ev, m, team, None)
                 await self.drop_seated(reg, rs, ev, team, m, "callout" if mine else "officer", None)
                 line = f"✅ {who or 'you are '}off the {label} roster — seat freed" + ("; the bot is looking for a replacement" if rc.team_setting(team, "autofill") else "")
             else:
@@ -305,11 +307,7 @@ class RaidMixin:
         await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
         if ask.answer == "yes" and ev.state != "open":
             m = reg.members.get(ask.discord_id)
-            if m:
-                try:
-                    reg.roster_add(m.discord_id, ev.team, "fill", ask.character if ask.kind == "alt" else None)
-                except Exception:  # noqa: BLE001
-                    pass
+            if m and ev.seat_of(m.display_name):  # a yes that found no free seat is a Join, not a rostered seat
                 a = reg.add_placement_ask(m.discord_id, ev.team, ask.character, "fill")
                 a["answer"], a["answered_at"] = "yes", rc.now()
                 reg.save(m, f"{m.display_name} rostered on {ev.team} via fill")
@@ -326,7 +324,8 @@ class RaidMixin:
         return bool(m) and self.officiates(m, guild)
 
     async def cleanup_ephemeral(self, reg, rs) -> None:
-        """Drop run rosters whose sheet is done/cancelled, and their memberships."""
+        """Drop run rosters whose sheet is done/cancelled (who held a seat stays in the run file; no member file
+        carries a run key any more)."""
         cfg = reg.config
         gone = []
         for t in list(cfg.rosters):
@@ -334,9 +333,6 @@ class RaidMixin:
                 continue
             evs = [e for e in rs.events.values() if e.team == t["key"]]
             if evs and all(e.state in ("done", "cancelled") for e in evs):
-                for m in list(reg.members.values()):
-                    if reg.on_roster(m, t["key"]):
-                        reg.roster_remove(m.discord_id, t["key"], "cleanup")
                 cfg.rosters = [x for x in cfg.rosters if x["key"] != t["key"]]
                 gone.append(t["key"])
         if gone:
@@ -432,10 +428,7 @@ class RaidMixin:
         m = reg.members.get(sg.discord_id)
         if not m:
             return False
-        try:
-            reg.roster_add(m.discord_id, ev.team, by, sg.character)
-        except Exception:  # noqa: BLE001
-            pass
+        # the seat itself is in the run file (ev.rosters); the member file only gets the confirmation ask
         reg.add_placement_ask(m.discord_id, ev.team, sg.character, by, channel="web" if m.dm_opt_out else "dm")
         if m.dm_opt_out:
             return False
@@ -460,10 +453,6 @@ class RaidMixin:
             seat = ev.seat_of(sg.display_name)
             gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if sg.display_name in g), 0) if seat else 0
             await self.confirm_one(reg, ev, sg, seat[0] if seat else 0, gi, by)
-        for name in removed:
-            m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
-            if m and reg.on_roster(m, ev.team):
-                reg.roster_remove(m.discord_id, ev.team, by)
         if added or removed:
             await self.post_run_update(reg, ev, f"✏️ board by {by}: " + (f"in {', '.join(s.display_name for s in added)} (asked to confirm)" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
         await self.refresh_sheet(reg, ev)
@@ -591,8 +580,6 @@ class RaidMixin:
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True) -> None:
         """A rostered member is out after lock: free the seat, tell them, post it, ask the bench to fill."""
         rc.free_seat(reg, rs, ev, m.display_name, why)
-        if reg.on_roster(m, ev.team):
-            reg.roster_remove(m.discord_id, ev.team, why)
         await self.dm_seat_released(reg, ev, m, why)
         if announce:
             await self.post_run_update(reg, ev, f"↩️ {m.display_name} is out ({why}{f': {note}' if note else ''}) — seat freed")

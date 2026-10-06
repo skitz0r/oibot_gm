@@ -307,11 +307,19 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         ev = evs[0]
         return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else team_key, "when": t12(reg, ev.starts_at), "key": ev.key}
 
-    def char_json(reg, c) -> dict:
+    def seat_runs(reg, rs, m) -> dict[str, list[str]]:
+        """character label -> the locked live runs it holds a seat on (from the run files: rc.rostered_runs)."""
+        out: dict[str, list[str]] = {}
+        for ev, char in (rc.rostered_runs(reg, rs, m) if m else []):
+            out.setdefault(char, []).append(ev.team)
+        return out
+
+    def char_json(reg, c, runs: dict[str, list[str]] | None = None) -> dict:
+        """`rosters` = the runs this character is rostered on (seat_runs), shown by the delete confirmations."""
         role = reg.profile.spec(c.cls, c.spec).role
         off = reg.profile.spec(c.cls, c.offspec).role if c.offspec else None
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
-                "status": c.status, "rank": c.rank, "rosters": list(c.rosters), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
+                "status": c.status, "rank": c.rank, "rosters": list((runs or {}).get(c.label, [])), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
                 "flex": list(c.flex)}
 
     def absence_json(a) -> dict:
@@ -336,7 +344,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         return {
             "display_name": m.display_name if m else v.name, "registered": m is not None,
             "must_apply": must_apply(v),  # a newcomer: the page points to the Discord application instead of the character table
-            "characters": [char_json(reg, c) for c in (m.active() if m else [])],
+            "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in (m.active() if m else [])],
             "roles": {"primary": primary, "flex": list(flex)},
             "absences": [absence_json(a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
@@ -571,7 +579,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         ids = [raid] if raid else list(v.reg.profile.raids)
         if raid and raid not in v.reg.profile.raids:
             return JSONResponse({"error": f"unknown raid {raid} (one of {', '.join(v.reg.profile.raids)})"}, status_code=404)
-        rows = await asyncio.to_thread(lambda: [comp.readiness(v.reg, rid) for rid in ids])
+        rs = bot.raids.store(v.reg)
+        rows = await asyncio.to_thread(lambda: [comp.readiness(v.reg, rid, rs) for rid in ids])
         return {"raids": rows}
 
     def live_event(reg, key: str):
@@ -1190,7 +1199,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             if not chars:
                 continue
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else p,
-                         "characters": [char_json(reg, c) for c in chars], "absences": [absence_json(a) for a in m.upcoming_absences(today)],
+                         "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in chars], "absences": [absence_json(a) for a in m.upcoming_absences(today)],
                          "asks": [{"roster": a["roster"], "answer": a.get("answer"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-3:] if a.get("answer") is None]})
         return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone}
 
@@ -1226,7 +1235,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         primary, flex = reg.roles_of(m)
         return {"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else await privilege(reg, m.discord_id),
                 "test": bool(m.test), "dm": not m.dm_opt_out, "roles": {"primary": primary, "flex": list(flex)},
-                "characters": [char_json(reg, c) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))],
+                "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))],
                 "absences": [absence_json(a) for a in sorted(m.absences, key=lambda a: a.start)],
                 "asks": [{"roster": a["roster"], "answer": a.get("answer"), "asked_at": a.get("asked_at"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-5:]],
                 "sheets": [{"key": e.key, "status": e.signups[str(m.discord_id)].status, "character": e.signups[str(m.discord_id)].character} for e in rs.live() if str(m.discord_id) in e.signups]}

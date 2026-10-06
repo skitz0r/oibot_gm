@@ -33,6 +33,7 @@ class Player(BaseModel):
 
     signup_name: str
     pos: int
+    discord_id: Optional[int] = None  # the member behind a run's signup: identity across runs (display names change)
     status: str  # signed | bench | tentative
     cls: str
     spec: str

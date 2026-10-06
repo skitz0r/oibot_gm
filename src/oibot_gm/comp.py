@@ -361,7 +361,17 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
 
 # ---------------------------------------------------------------- readiness (one raid, JSON)
 
-def readiness(reg: Registry, rid: str) -> dict:
+def placed_on_runs(rs, rid: str) -> set[int]:
+    """discord ids holding a seat on a locked live run of raid `rid` (the run files; `rs` a raidcycle.RaidStore or
+    None, then nobody): readiness's "on roster" count."""
+    if rs is None:
+        return set()
+    from . import raidcycle as rc
+
+    return {u for ev in rs.live() if ev.instance == rid and ev.state != "open" for p in ev.seated() if (u := rc.player_uid(ev, p)) is not None}
+
+
+def readiness(reg: Registry, rid: str, rs=None) -> dict:
     """One raid's pool readiness as plain JSON (lists, dicts, str, int, None): what the analytics card draws, with the
     words behind it. The help snapshot's readiness section reads it; GET /api/readiness and MCP raid_readiness can
     return it as is. No solver: the pool (every planned/active main) against the raid's size, desired comp and buffs.
@@ -376,7 +386,7 @@ def readiness(reg: Registry, rid: str) -> dict:
     if rid not in reg.profile.raids:
         raise KeyError(f"unknown raid {rid!r}")
     roster = reg.raid_shell(rid)
-    h = pool_health_data(reg, roster)
+    h = pool_health_data(reg, roster, placed_on_runs(rs, rid))
     n, size, alts, on_roster = h["headcount"]
     targets = roster.get("comp_targets") or {}
     ic = ideal_comp(reg.profile, size, pool_players(reg), targets, rid, reg)

@@ -221,8 +221,12 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
     """One member's record as the asker (or an officer asking about them) sees it: characters, DMs, absences,
     open confirmation asks, open fill asks, and their answer on every live run. `officer_view` shows absence
     reasons: an officer asking, or the member asking about their own record."""
+    from . import raidcycle as rc
+
     primary, flex = reg.roles_of(m)
-    chars = "; ".join(f"{c.label} ({c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''}, {'main' if c.is_main else 'alt'}, {c.status}, rank {c.rank}{', runs ' + ','.join(c.rosters) if c.rosters else ''}{'' if c.confirmed_by else ', unconfirmed'})" for c in m.active())
+    held = rc.rostered_runs(reg, rs, m) if rs is not None else []  # seats on locked runs, from the run files
+    runs_of = {c.label: [ev.team for ev, char in held if char == c.label] for c in m.active()}
+    chars = "; ".join(f"{c.label} ({c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''}, {'main' if c.is_main else 'alt'}, {c.status}, rank {c.rank}{', runs ' + ','.join(runs_of[c.label]) if runs_of[c.label] else ''}{'' if c.confirmed_by else ', unconfirmed'})" for c in m.active())
     today = reg.now_local().date().isoformat()
     ups = m.upcoming_absences(today)
     absences = "; ".join(reg.span_label(a.start, a.end) + (f" (reason “{_safe(a.reason)[:120]}”)" if a.reason and officer_view else "") for a in ups[:4]) or "none"
@@ -646,7 +650,7 @@ def _readiness(ask: Ask) -> list[str]:
     plan = None
     for rid in reg.profile.raids:
         try:
-            d = comp_mod.readiness(reg, rid)
+            d = comp_mod.readiness(reg, rid, ask.rs)
         except Exception as e:  # noqa: BLE001
             out.append(f"{rid}: readiness unavailable ({type(e).__name__})")
             continue

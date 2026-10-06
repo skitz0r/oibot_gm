@@ -594,9 +594,8 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     c = (next((c for c in m.active() if c.label.lower() == want), None) or next((c for c in m.active() if (c.name or "").lower() == want), None)) if want else m.main
     if not c:
         raise ValueError("no such active character")
-    team = run_team(reg, ev)
-    if status == "in" and reg.roster_members(team["key"]) and not reg.on_roster(m, team["key"]) and source == "member":
-        status, note = "sub", "not on this roster; subs are picked when needed"
+    # no curated-roster demotion here (roster redesign Phase 0): it keyed on the run key, which lock used to fill with
+    # the seated, so a member's own Join after lock was stored as Bench and then seated anyway
     s = _signup(reg, m, c, status, source, note)
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"{m.display_name} {status} as {c.label} ({source})")
@@ -689,24 +688,29 @@ def conflicts(rs: RaidStore, ev: RaidEvent, window_hours: float = CONFLICT_WINDO
     return out
 
 
-def needs(reg: Registry, ev: RaidEvent, team: dict) -> dict:
-    """What the sheet is short: headcount and per-role minimums. Before lock: Join signups vs the raid size times the
-    rosters the run expects. After lock: freed seats across the locked roster(s)."""
+def gaps(reg: Registry, ev: RaidEvent) -> dict:
+    """The ONE role-need calculation — the health card, health_data, needs() (so the fill engine) and would_short all
+    read it: seats and the tank/healer minimums times the rosters in play. Before lock that is the rosters the run
+    expects up front (its schedule's `rosters`) and the players are the Join answers (their signed role); after lock
+    it is the locked rosters and the seated players (their seat's role — the solver may have switched an offspec).
+    {size, rosters, seats, have{role}, need{role}, roles{tank|healer: short}, headcount (free seats), locked}"""
     size = run_size(reg, ev)
-    if ev.state != "open" and ev.all_rosters:
-        bounds = reg.role_bounds(ev.instance, size)
-        seated = ev.seated()
-        n = len(ev.all_rosters)
-        role_short = {}
-        for role in ("tank", "healer"):
-            have = sum(1 for p in seated if p.role == role)
-            if bounds[role]["min"] * n > have:
-                role_short[role] = bounds[role]["min"] * n - have
-        return {"headcount": max(0, size * n - len(seated)), "roles": role_short, "size": size}
-    h = health_data(reg, ev, team)
-    n_in, seats, _legacy, _subs = h["headcount"]
-    role_short = {r["role"]: r["need"] - r["have"] for r in h["roles"] if r["need"] and r["have"] < r["need"]}
-    return {"headcount": max(0, seats - n_in), "roles": role_short, "size": size}
+    locked = ev.state != "open" and bool(ev.all_rosters)
+    n = len(ev.all_rosters) if locked else run_rosters(reg, ev)
+    bounds = reg.role_bounds(ev.instance, size)
+    players = ev.seated() if locked else ev.by_status("in")
+    have = {r: sum(1 for p in players if p.role == r) for r in ROLES}
+    need = {r: int(bounds[r]["min"]) * n if r in ("tank", "healer") else 0 for r in ROLES}
+    short = {r: need[r] - have[r] for r in ("tank", "healer") if need[r] > have[r]}
+    return {"size": size, "rosters": n, "seats": size * n, "have": have, "need": need, "roles": short,
+            "headcount": max(0, size * n - len(players)), "locked": locked}
+
+
+def needs(reg: Registry, ev: RaidEvent, team: dict | None = None) -> dict:
+    """What the sheet is short (rc.gaps): headcount and per-role minimums. Before lock: Join signups vs the raid size
+    times the rosters the run expects. After lock: freed seats across the locked roster(s)."""
+    g = gaps(reg, ev)
+    return {"headcount": g["headcount"], "roles": g["roles"], "size": g["size"]}
 
 
 def _rank_key(reg: Registry, m: Member) -> tuple:
@@ -723,10 +727,10 @@ def ask_deadline(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> da
 
 def would_short(reg: Registry, ev: RaidEvent, team: dict, role: str) -> bool:
     """Would losing one `role` player (a Join before lock, a seated player after) drop that role under its minimum?"""
-    size = run_size(reg, ev)
-    n = len(ev.all_rosters) or run_rosters(reg, ev)
-    bounds = reg.role_bounds(ev.instance, size)
-    players = ev.seated() if ev.state != "open" and ev.all_rosters else ev.by_status("in")
+    g = gaps(reg, ev)
+    n = g["rosters"]
+    bounds = reg.role_bounds(ev.instance, g["size"])
+    players = ev.seated() if g["locked"] else ev.by_status("in")
     key = "dps" if role in ("melee", "ranged") else role
     have = sum(1 for p in players if (p.role in ("melee", "ranged") if key == "dps" else p.role == role))
     return have - 1 < int(bounds.get(key, {}).get("min") or 0) * n
@@ -751,6 +755,16 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
     benched_joiners = [s for s in ev.by_status("in") if locked and s.display_name not in seated_names]
     out: list[FillAsk] = []
     used: set[int] = set()
+    # after lock a new body needs a free seat (seat_player): a role gap on a full roster is only covered by a swap in
+    # place, and a swap's backfill takes a seat too; before lock the lock decides, so bodies are not capped
+    free = [nd["headcount"] if locked else None]
+
+    def seat_left() -> bool:
+        return free[0] is None or free[0] > 0
+
+    def take_seat() -> None:
+        if free[0] is not None:
+            free[0] -= 1
 
     def ok(m: Member) -> bool:
         return m.discord_id not in asked and m.discord_id not in used and not m.dm_opt_out and not m.absent_on(day) and m.discord_id not in busy
@@ -777,11 +791,12 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
         got = 0
         for kind, cands in tiers:
             for m, c in cands:
-                if got >= short:
+                if got >= short or not seat_left():
                     break
                 if ok(m) and role_of(c) == role:
                     out.append(FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind=kind, role=role, character=c.label, spec=c.spec, reason=f"short {short} {role}"))
                     used.add(m.discord_id)
+                    take_seat()
                     got += 1
         # switches by people already In: offspec, then an alt of the right role
         for sid in ins:
@@ -789,33 +804,37 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
                 break
             m = reg.members.get(sid)
             s = ev.signups.get(str(sid))
-            if not m or not s or not ok(m) or s.role == role:
+            # after lock compare with the seat as it is: the solver may already have switched them to that offspec
+            seat = ev.seat_of(s.display_name)[1] if (locked and s and ev.seat_of(s.display_name)) else None
+            cur_role, cur_spec = (seat.role, seat.spec) if seat else ((s.role, s.spec) if s else (None, None))
+            if not m or not s or not ok(m) or cur_role == role:
                 continue
             ask = None
-            if s.offspec and reg.profile.spec(s.cls, s.offspec).role == role:
-                ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="offspec", role=role, character=s.character, spec=s.offspec, reason=f"short {short} {role}", vacates=s.role)
+            if s.offspec and s.offspec != cur_spec and reg.profile.spec(s.cls, s.offspec).role == role:
+                ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="offspec", role=role, character=s.character, spec=s.offspec, reason=f"short {short} {role}", vacates=cur_role)
             else:
                 alt = next((a for a in m.active() if a.label != s.character and role_of(a) == role), None)
                 if alt:
-                    ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="alt", role=role, character=alt.label, spec=alt.spec, reason=f"short {short} {role}", vacates=s.role)
+                    ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="alt", role=role, character=alt.label, spec=alt.spec, reason=f"short {short} {role}", vacates=cur_role)
             if not ask:
                 continue
             # look ahead: does the swap open a hole where they are now? then it only goes out with a backfill tied to it
-            if would_short(reg, ev, team, s.role):
-                back = first_of(s.role, skip=sid)
+            if would_short(reg, ev, team, cur_role):
+                back = first_of(cur_role, skip=sid) if seat_left() else None
                 if not back:
                     continue
                 bk, bm, bc = back
                 ask.pair = bm.discord_id
                 out.append(ask)
-                out.append(FillAsk(discord_id=bm.discord_id, display_name=bm.display_name, kind=bk, role=s.role, character=bc.label, spec=bc.spec, reason=f"covering {m.display_name}'s {s.role} seat", pair=sid))
+                out.append(FillAsk(discord_id=bm.discord_id, display_name=bm.display_name, kind=bk, role=cur_role, character=bc.label, spec=bc.spec, reason=f"covering {m.display_name}'s {cur_role} seat", pair=sid))
                 used.update({sid, bm.discord_id})
+                take_seat()
             else:
                 out.append(ask)
                 used.add(sid)
             got += 1
-    # 2. headcount (role-gap asks that bring a new body count towards it)
-    remaining = nd["headcount"] - sum(1 for a in out if not a.swap and not a.pair)
+    # 2. headcount (role-gap asks that bring a new body count towards it; after lock, the seats still free)
+    remaining = free[0] if locked else nd["headcount"] - sum(1 for a in out if not a.swap and not a.pair)
     for kind, cands in tiers:
         for m, c in cands:
             if remaining <= 0:
@@ -904,8 +923,11 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
     s = _signup(reg, m, c, "in", "fill", "filled in at request" if ask.kind != "alt" else f"swapped to {c.label} at request")
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"fill: {ask.display_name} in as {c.label} ({ask.kind})")
-    if ev.state != "open" and ev.all_rosters and not _reseat(ev, s):
-        seat_player(reg, ev, s)
+    if ev.state != "open" and ev.all_rosters and not _reseat(ev, s) and seat_player(reg, ev, s) is None:
+        # every seat was taken meanwhile: a Join, not rostered (the board can move them in); never reported as seated
+        ev.log.append(f"fill: no free seat for {ask.display_name}")
+        rs.save(ev, f"fill {ask.display_name} in, no seat")
+        return f"{ask.display_name} said yes as {c.label} ({ask.role}), but there is no free seat — not rostered (move them in on the board)"
     rs.save(ev, f"fill {ask.display_name} in")
     return f"{ask.display_name} {'swaps to' if ask.kind == 'alt' else 'is in as'} {c.label} ({ask.role})"
 
@@ -917,12 +939,9 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
     rosters (its schedule's `rosters`) is measured against N × the seats and N × each role minimum."""
     profile = reg.profile
     ins, subs = ev.by_status("in"), ev.by_status("sub")
-    n_rosters = run_rosters(reg, ev)
-    per = run_size(reg, ev)
-    size = per * n_rosters
-    bounds = reg.role_bounds(ev.instance, per)
+    g = gaps(reg, ev)  # the one role-need calculation (seats and minimums × the rosters in play)
+    n_rosters, size, need = g["rosters"], g["seats"], g["need"]
     counts = {r: sum(1 for s in ins if s.role == r) for r in ROLES}
-    need = {"tank": bounds["tank"]["min"] * n_rosters, "healer": bounds["healer"]["min"] * n_rosters, "melee": 0, "ranged": 0}
     roles = []
     for r in ROLES:
         have, n = counts[r], need[r]
@@ -987,17 +1006,38 @@ def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
             alt = next((c for c in (m.active() if m else []) if not c.is_main and reg.profile.spec(c.cls, c.spec).role == "tank"), None)
             if alt:
                 tank_alt = f"{alt.label} ({alt.cls} {alt.spec})"
-        players.append(Player(signup_name=s.display_name, pos=i + 1, status="signed" if s.status == "in" else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, rank=rank, tank_capable_main=tank_alt))
+        players.append(Player(signup_name=s.display_name, discord_id=s.discord_id, pos=i + 1, status="signed" if s.status == "in" else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, rank=rank, tank_capable_main=tank_alt))
     return players
 
 
-def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player]) -> dict[str, int]:
-    """Per-player selection bonus from the raid's weights: rank, main over alt, sat out last window, signup order."""
-    w = reg.raid_def(ev.instance)["weights"]
+def player_uid(ev: RaidEvent, p: Player) -> int | None:
+    """Who a seat belongs to: the Player's discord_id, else (files from before it was stored) the run's own signup
+    under the name it was seated with — display names change, ids don't."""
+    if p.discord_id is not None:
+        return p.discord_id
+    sg = signup_by_name(ev, p.signup_name)
+    return sg.discord_id if sg else None
+
+
+def last_window(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[RaidEvent]:
+    """Done runs of the same raid within one lockout before this one: what sat-out credit and rotation look back on."""
     lockout = int(reg.raid_def(ev.instance)["lockout_days"])
-    prev = [e for e in rs.events.values() if e.instance == ev.instance and e.key != ev.key and e.state == "done" and ev.start - timedelta(days=lockout) <= e.start < ev.start]
-    seated_prev = {p.signup_name for e in prev for p in e.seated()}
-    signed_prev = {sg.display_name for e in prev for sg in e.signups.values() if sg.status == "in"}
+    return [e for e in rs.events.values() if e.instance == ev.instance and e.key != ev.key and e.state == "done" and ev.start - timedelta(days=lockout) <= e.start < ev.start]
+
+
+def sat_out_last_window(reg: Registry, rs: RaidStore, ev: RaidEvent, first_only: bool = False) -> set[int]:
+    """discord ids who Joined a run of the last window but were not seated (in roster 1 only, with `first_only`)."""
+    prev = last_window(reg, rs, ev)
+    seated = {player_uid(e, p) for e in prev for p in ((e.all_rosters[0].selected if e.all_rosters else []) if first_only else e.seated())}
+    signed = {sg.discord_id for e in prev for sg in e.signups.values() if sg.status == "in"}
+    return signed - seated
+
+
+def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player]) -> dict[str, int]:
+    """Per-player selection bonus from the raid's weights: rank, main over alt, sat out last window, signup order.
+    Keyed by this run's signup names (the solver's handle); sat-out is matched on discord ids, so a rename keeps it."""
+    w = reg.raid_def(ev.instance)["weights"]
+    sat = sat_out_last_window(reg, rs, ev)
     n = max(1, len(players))
     out = {}
     for p in players:
@@ -1005,7 +1045,7 @@ def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player
         found = reg.find(p.character) if p.character else None
         if found and found[1].is_main:
             b += int(w.get("main", 0))
-        if p.signup_name in signed_prev and p.signup_name not in seated_prev:
+        if player_uid(ev, p) in sat:
             b += int(w.get("sat_out", 0))
         b += round(int(w.get("signup_order", 0)) * (n - p.pos) / n)
         out[p.signup_name] = b
@@ -1137,6 +1177,12 @@ def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]
     return f"Leftovers, bench and pool ({len(any_role)}) could make another run{how}."
 
 
+def merged_role_min(rb: dict, policy: dict[str, int] | None) -> dict[str, int]:
+    """The lock's role minimums: the raid's tank/healer minimums (role_bounds) with the comp policy's role_min laid
+    over them PER ROLE — a policy line about healers never drops the tank minimum."""
+    return {**{r: int(rb[r]["min"]) for r in ("tank", "healer") if rb.get(r, {}).get("min")}, **{r: int(n) for r, n in (policy or {}).items()}}
+
+
 def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None = None, avoid: list[dict[str, int]] | None = None, time_limit: float = SOLVE_TIME_LIMIT_S, whatif: bool = True, avoid_groups: list[dict[str, int]] | None = None) -> tuple[list[Player], list[RosterResult], int]:
     """The joint solve behind propose(), autofill() and split previews: as many rosters as the signups support,
     the officers' layout as hard pins, weights as seat bonuses, the strategy shaping the objective."""
@@ -1162,11 +1208,8 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     roster_bonus = None
     if strategy == "rotation":
         w = int(rd["weights"].get("sat_out", 2))
-        lockout = int(rd["lockout_days"])
-        prev = [e for e in rs.events.values() if e.instance == ev.instance and e.key != ev.key and e.state == "done" and ev.start - timedelta(days=lockout) <= e.start < ev.start]
-        seated_first = {p.signup_name for e in prev for p in (e.all_rosters[0].selected if e.all_rosters else [])}
-        signed_prev = {sg.display_name for e in prev for sg in e.signups.values() if sg.status == "in"}
-        roster_bonus = {0: {p.signup_name: 3 * w for p in players if p.signup_name in signed_prev and p.signup_name not in seated_first}}
+        missed_first = sat_out_last_window(reg, rs, ev, first_only=True)
+        roster_bonus = {0: {p.signup_name: 3 * w for p in players if player_uid(ev, p) in missed_first}}
     pool = {p.signup_name for p in players}
     opts = solver.SolveOptions(
         time_limit_s=time_limit, raid_size=size,
@@ -1176,7 +1219,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] if x and x in pool and x not in placed),
         pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
-        role_min=cc["role_min"] or {r: rb[r]["min"] for r in ("tank", "healer") if rb[r]["min"]} or None,
+        role_min=merged_role_min(rb, cc["role_min"]) or None,
         role_max={r: rb[r]["max"] for r in ("tank", "healer") if rb[r].get("max")},
         bonus=bonus,
     )
@@ -1185,7 +1228,8 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     # bench what-ifs re-solve the model per benched player (the bench hangs off rosters[0]): capped by explain.WHATIF_*,
     # only at lock (never for previews), skipped for big splits / sheets
     do_whatif = whatif and explain.whatif_allowed(n_rosters, len(players))
-    rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=do_whatif and i == 0) for i, r in enumerate(rosters)]
+    tank_min = (opts.role_min or {}).get("tank", 0)
+    rosters = [explain.annotate(reg.profile, players, raid_id, r, whatif=do_whatif and i == 0, tank_min=tank_min) for i, r in enumerate(rosters)]
     return players, rosters, n_rosters
 
 
@@ -1431,7 +1475,7 @@ def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
     """Put a signup into the first roster with a free seat (after a fill yes or an officer add). Returns the roster index."""
     size = run_size(reg, ev)
     found = reg.find(sg.character)
-    p = Player(signup_name=sg.display_name, pos=len(ev.signups), status="signed", cls=sg.cls, spec=sg.spec, role=sg.role, offspec=sg.offspec, character=sg.character, rank=found[1].rank if found else "unknown")
+    p = Player(signup_name=sg.display_name, discord_id=sg.discord_id, pos=len(ev.signups), status="signed", cls=sg.cls, spec=sg.spec, role=sg.role, offspec=sg.offspec, character=sg.character, rank=found[1].rank if found else "unknown")
     for i, r in enumerate(ev.all_rosters):
         if len(r.selected) < size:
             r.selected.append(p)
@@ -1444,6 +1488,20 @@ def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
             ev.log.append(f"seated {sg.display_name} in roster {i + 1}")
             return i
     return None
+
+
+def rostered_runs(reg: Registry, rs: RaidStore, m: Member) -> list[tuple[RaidEvent, str]]:
+    """The live locked runs where `m` holds a seat, with the character seated — read from the run files (the member
+    file keeps no per-run membership: RegisteredCharacter.rosters is for regular series, roster redesign Phase 0).
+    Shown by /me view, the registration card's status, help and the site's member JSON."""
+    out = []
+    for ev in rs.live():
+        if ev.state == "open":
+            continue
+        p = next((p for p in ev.seated() if player_uid(ev, p) == m.discord_id), None)
+        if p is not None:
+            out.append((ev, p.character or p.signup_name))
+    return out
 
 
 def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[str]:
@@ -1459,8 +1517,6 @@ def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[st
                 if ask:
                     ask["answer"], ask["answered_at"] = "expired", now()
                     reg.save(m, f"{m.display_name} didn't confirm {ev.team} in time")
-                if reg.on_roster(m, ev.team) if m else False:
-                    reg.roster_remove(m.discord_id, ev.team, "no-confirm")
                 free_seat(reg, rs, ev, row["display_name"], "no-confirm")
                 gone.append(row["display_name"])
     return gone

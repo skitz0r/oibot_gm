@@ -42,7 +42,7 @@ class RegisteredCharacter(BaseModel):
     is_main: bool = False
     rank: str = "trial"
     status: str = "active"  # planned | active | retired
-    rosters: list[str] = Field(default_factory=list)  # officer-curated roster membership, per character
+    rosters: list[str] = Field(default_factory=list)  # regular-series keys "<raid>:<schedule>" (seats on runs live in the run files)
     flex: list[str] = Field(default_factory=list)  # extra roles this character can play besides its spec/offspec
     confirmed_by: Optional[str] = None
     confirmed_at: Optional[str] = None
@@ -550,15 +550,15 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
     return lines
 
 
-def pool_health_data(reg: "Registry", roster: dict) -> dict:
+def pool_health_data(reg: "Registry", roster: dict, placed: set[int] | None = None) -> dict:
     """Readiness of the *potential* pool (every planned/active main) against a roster's size, in the same
-    shape as raidcycle.health_data (the analytics cards read it). No sheet involved."""
+    shape as raidcycle.health_data (the analytics cards read it). No sheet involved. `placed` = discord ids holding a
+    seat on a locked live run of this raid (comp.readiness reads them from the run files); "on roster" counts them."""
     profile = reg.profile
     size = int(roster.get("size") or reg.raid_def(roster.get("instance")).get("size") or DEFAULT_RAID_SIZE)
-    key = roster.get("key", "main")
-    keys = reg.run_keys(roster.get("instance")) | {key}  # placed on this roster, or on any run of the same raid
+    placed = placed or set()
     mains = [(m, m.main) for m in reg.members.values() if m.main]
-    on_roster = [(m, c) for m, c in mains if keys & set(c.rosters)]
+    on_roster = [(m, c) for m, c in mains if m.discord_id in placed]
     alts = [(m, c) for m in reg.members.values() for c in m.active() if not c.is_main]
     bounds = reg.role_bounds(roster.get("instance"), size)
 
@@ -600,7 +600,7 @@ def pool_health_data(reg: "Registry", roster: dict) -> dict:
             continue
         providers = [m.display_name for m, c in mains if b.provided_by(profile.spec(c.cls, c.spec))]
         buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
-    not_on_roster = [m.display_name for m, c in mains if not (keys & set(c.rosters))]
+    not_on_roster = [m.display_name for m, c in mains if m.discord_id not in placed]
     unnamed = sum(1 for m, c in mains if not c.name)
     hc_level = "green" if len(mains) >= size else ("amber" if len(mains) + len(alts) >= size else "red")
     return {"headcount": (len(mains), size, len(alts), len(on_roster)), "headcount_level": hc_level, "roles": roles, "buffs": buffs,
@@ -1092,10 +1092,6 @@ class Registry:
         over = self.config.raids.get(instance, {})
         return {"key": instance, "name": rd.get("name", instance), "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "instance": instance,
                 "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or []}
-
-    def run_keys(self, instance: str | None) -> set[str]:
-        """Roster keys (standing or dated runs) of an instance."""
-        return {t["key"] for t in self.config.rosters if t.get("instance") == instance}
 
     def first_open(self, instance: str | None):
         """Anchor datetime (aware) for the instance's lockout windows, or None."""
@@ -1971,6 +1967,29 @@ class Registry:
         self.save(m, f"{by} removed {m.display_name} from roster {roster}")
         return m
 
+    def migrate_rosters_to_series(self, by: str = "migrate", dry_run: bool = False) -> list[str]:
+        """Roster redesign D11 (Phase 0): RegisteredCharacter.rosters keeps regular-series keys only
+        ("<raid>:<schedule>", which always hold a ':'); every other entry is dropped — the phantom "main" left by the
+        old teams migration and any run key ("bd-0917-1937") the lock used to write before seats moved to the run files.
+        Retired characters too. Idempotent (a second run finds nothing and commits nothing); one commit for the lot
+        ("migrate: rosters = regular series only"). `dry_run` changes nothing. Returns one line per member touched.
+        Run it with scripts/migrate_rosters.py while the bot is stopped (the bot keeps members in memory)."""
+        lines: list[str] = []
+        with self.store.batch(f"{self.key}: migrate: rosters = regular series only ({by})"):
+            for m in sorted(self.members.values(), key=lambda x: x.display_name.lower()):
+                dropped = []
+                for c in m.characters:
+                    gone = [k for k in c.rosters if ":" not in k]
+                    if gone:
+                        dropped.append(f"{c.label} ({c.status}): {', '.join(gone)}")
+                        if not dry_run:
+                            c.rosters = [k for k in c.rosters if ":" in k]
+                if dropped:
+                    lines.append(f"{m.display_name}: dropped " + "; ".join(dropped))
+                    if not dry_run:
+                        self.save(m, f"migrate: {m.display_name} rosters = regular series only")
+        return lines
+
     def roster_members(self, roster: str) -> list[tuple[Member, RegisteredCharacter]]:
         out = []
         for m in self.members.values():
@@ -2012,7 +2031,7 @@ class Registry:
         return [a for a in (m.placement_asks if m else []) if a.get("answer") is None]
 
     def answer_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> str:
-        """Yes: keep the seat. No: give the seat back (roster_remove) and note it."""
+        """Yes: keep the seat. No: note it (RaidMixin.after_placement_answer frees the seat in the run file)."""
         m = self.member(discord_id)
         ask = next((a for a in m.placement_asks if a["roster"] == roster and a.get("answer") is None), None)
         if not ask:
@@ -2022,8 +2041,6 @@ class Registry:
             self.save(m, f"{m.display_name} confirmed {ask['character']} on {roster}")
             return f"{m.display_name} confirmed {ask['character']} on {roster}"
         self.save(m, f"{m.display_name} declined {roster}")
-        if self.on_roster(m, roster):
-            self.roster_remove(discord_id, roster, by)
         return f"{m.display_name} can't make {roster} — seat re-opened"
 
     @staticmethod

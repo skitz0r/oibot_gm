@@ -200,7 +200,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 2. **Nudge** — at `nudge_hours_before` [halfway between open and lock: lock + (lead − lock) / 2, so 72 h for a
    sheet that opens 120 h out and locks at 24 h] the officer channel gets a health card (headcount, tank/healer
    tiles with who could cover via offspec/alt, buff coverage, non-responders, double-booked members) and mains
-   who haven't answered are nudged once by DM. `nudge` [on] switches the DM off per raid; the health card
+   who haven't answered are nudged once by DM. The tiles count against the seats and tank/healer minimums of the
+   rosters the run expects (1, or its schedule's *rosters per run*) — the same numbers Fill works from; when the
+   joiners could make more runs than that, the "Enough people for 2 runs …" line says what another run is short. `nudge` [on] switches the DM off per raid; the health card
    still comes.
 3. **Officers shape the roster** (Rosters page, before lock): the sheet shows every answer by class, Bench
    and No thanks rows, absences that day, and the **board** — a bank of everyone who joined and the groups
@@ -253,30 +255,34 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    counts as out; their seat is released and they are DMed that it was.
 6. **Fill** — only after lock, never on an open sheet. Whenever a seat frees (decline, callout, absence, missed
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people: joiners the solver
-   left off and *Bench* answers first → mains not on the sheet → **swaps** (a rostered player's offspec or alt in
-   the needed role). A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
+   left off and *Bench* answers first → mains who haven't answered the sheet → **swaps** (a rostered player's offspec
+   or alt in the needed role; never the spec the lock already moved them to). A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
    for a bench or pool member of that role and sends both asks tied together — the swap and its backfill — and
    a no (or silence) from either withdraws the other with a "never mind" DM. It asks the shortfall + 1 at a
    time, never more than 3 outstanding, and never asks someone who is rostered on another raid within 4 hours,
    absent, or has DMs off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
    it was sent, never later than the run start; the updates thread logs the timeout and the next person is
-   asked. A yes goes straight into the freed seat (a swap changes the seat in place). Officers can run a batch
+   asked. A yes goes straight into the freed seat (a swap changes the seat in place). A roster that is full but
+   short a tank or healer has no seat for a newcomer, so only swaps are asked for it; a yes that finds every seat
+   taken meanwhile is a Join, not rostered, and the bot says so (move them in on the board). Officers can run a batch
    by hand: **Fill seats** on the Rosters page (locked runs only) or on the lock card in the roster channel
    shows a preview — exactly what is short, who is still being waited on and who would be DMed now — then
    *Send N asks* or *Cancel*; `/raid fill` does the same. With `autofill` off nothing is asked until an officer
    presses Fill seats.
 7. **Raid** — `/raid loot` opens the loot council thread (when loot tables exist for the game version).
-8. **Close** — 6 h after start the run is **done** and the sheet says so.
+8. **Close** — 3 h after its scheduled end (start + the raid's length) the run is **done** and the sheet says so.
 
 Seat selection at lock is deterministic: role bounds from the raid's comp, buff synergy, the comp policy's
 standing instructions, officer pins, and the raid's **weights** — rank (core > raider > trial), main over
-alt, sat out last window, earlier signup. The owner tunes the weights per raid (*Selection weights* in `/gm config
+alt, sat out last window (matched by member, so a Discord rename keeps it), earlier signup. A comp-policy line such
+as "at least 3 healers" raises that role's minimum and leaves the others (the raid's tank minimum stays). The owner tunes the weights per raid (*Selection weights* in `/gm config
 raid`, the Raids page, or plain text: "weight rank 5 for Barrow Deeps"); officers read them, and the owner can open
 Raids & auras to others (§8c).
 
 If you can't make a run you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
 `/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
-lock this releases your seat immediately and the bench is asked. An officer who hears it out of band records the
+lock this releases your seat immediately and the bench is asked; *Can't make it* is recorded as a callout like `/raid
+out` (hours before, late after the lock). An officer who hears it out of band records the
 same callout, note included, with No thanks and a note on the site's answer menu, in plain text ("Kestrel can't
 make it tonight, her baby is sick") or MCP `set_answer` with `note`. Your own "I can't make tonight" in plain text is a
 callout too, note or not (hours before, late after the lock, the line in the updates thread) — also when an officer

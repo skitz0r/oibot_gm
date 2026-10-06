@@ -50,6 +50,15 @@ class Guilds:
         return None
 
 
+def rostered_on(bot, reg: Registry, m) -> list:
+    """(run, character) for every locked live run `m` holds a seat on — from the run files (raidcycle.rostered_runs);
+    [] when the client has no raid store (bare test clients)."""
+    from . import raidcycle as rc
+
+    raids = getattr(bot, "raids", None)
+    return rc.rostered_runs(reg, raids.store(reg), m) if raids is not None else []
+
+
 def is_officer(interaction: discord.Interaction, reg: Registry) -> bool:
     if interaction.user.id == reg.config.owner_discord_id:
         return True
@@ -114,9 +123,9 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
             primary, flex = reg.roles_of(m)
             lines = [char_line(bot.ico, c) for c in m.active()]
             lines.append(f"Roles: {primary or '?'}" + (f" (+{', '.join(flex)})" if flex else ""))
-            rosters = sorted({k for c in m.active() for k in c.rosters})
-            if rosters:
-                lines.append("Rosters: " + ", ".join(rosters))
+            held = rostered_on(bot, reg, m)
+            if held:
+                lines.append("Rosters: " + ", ".join(ev.team for ev, _ in held))
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
         if self.action == "apply":
@@ -514,9 +523,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         today = reg.now_local().date().isoformat()
         e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=TEAL)
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
-        rosters = sorted({k for c in m.active() for k in c.rosters})
-        if rosters:
-            e.add_field(name="Rosters", value=", ".join(f"{k} ({next(c.label for c in m.active() if k in c.rosters)})" for k in rosters), inline=True)
+        held = rostered_on(interaction.client, reg, m)
+        if held:
+            e.add_field(name="Rosters", value=", ".join(f"{ev.team} ({char})" for ev, char in held), inline=True)
         primary, flex = reg.roles_of(m)
         e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me plan roles` to add more", inline=True)
         e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)

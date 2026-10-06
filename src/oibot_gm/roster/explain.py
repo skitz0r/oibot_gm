@@ -22,19 +22,22 @@ def whatif_allowed(n_rosters: int, n_players: int) -> bool:
 
 
 def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: RosterResult, whatif: bool = True,
-             whatif_limit: int = WHATIF_MAX_BENCH, whatif_time_s: float = WHATIF_TIME_LIMIT_S) -> RosterResult:
+             whatif_limit: int = WHATIF_MAX_BENCH, whatif_time_s: float = WHATIF_TIME_LIMIT_S, tank_min: int | None = None) -> RosterResult:
+    """`tank_min` = the run's tank minimum as the lock used it (Registry.role_bounds merged with the comp policy —
+    raidcycle passes it, so guild comp overrides count); None (the /mock and demo paths, which have no guild) falls
+    back to the profile's `tank_needs` note count."""
     raid = profile.raids[raid_id]
     adv: list[str] = []
     details: list[str] = []
 
-    need = raid.get("tank_needs", {}).get("count")
+    need = tank_min if tank_min is not None else raid.get("tank_needs", {}).get("count")
     have = result.role_counts.get("tank", 0)
     if need and have < need:
         options = [p for p in players if p.tank_capable_main and p.role != "tank"]
         fix = ("; ".join(f"{p.signup_name} → {p.tank_capable_main}" for p in options[:2])
                or "no tank-capable main/offspec on the sheet")
         adv.append(f"{'🔴' if have < need - 1 else '🟡'} Tanks {have}/{need} · {fix}")
-        if raid["tank_needs"].get("note"):
+        if (raid.get("tank_needs") or {}).get("note"):
             details.append(f"Tanks: {raid['tank_needs']['note'].strip()}")
 
     unk = [p for p in result.selected if p.unmapped]
