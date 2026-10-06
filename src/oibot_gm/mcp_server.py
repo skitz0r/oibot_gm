@@ -141,7 +141,7 @@ def guild_overview() -> dict:
         "policy_docs": {k: {"compiled": v.get("compiled"), "summary": v.get("summary"), "text": excerpt(v.get("text"))} for k, v in cfg.get("docs", {}).items()},
         "raids": [{"id": r["id"], "name": r["name"], "size": r["size"], "slots": r["slots"], "lockout_days": r["lockout_days"], "signup_lead_hours": r["signup_lead_hours"],
                    "lock_hours_before": r["lock_hours_before"], "confirm_hours_before": r["confirm_hours_before"], "split_policy": r["split_policy"], "opened": r["opened"], "live": r["live"],
-                   "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "next": s.get("next", [])} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
+                   "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "class": s.get("class"), "regulars": s.get("regulars", 0), "next": s.get("next", [])} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
         "live_runs": live,
         "test_bench": cfg.get("test_bench"),
     }
@@ -161,7 +161,9 @@ def list_runs() -> dict:
 @mcp.tool()
 def get_run(run: str) -> dict:
     """One run in full: timeline (nudge / lock / confirm), counts, every signup with character/spec/role/status/pin,
-    who has not answered, absences that day, double-booked members, what the roster still needs, the board (bank and
+    `kind` (recurring | adhoc) and `series`, `not_answered` = who the bot expects and hasn't heard from (the series'
+    regulars; `expected_from` says regulars | everyone (no regulars set) | test | none (ad hoc)), `regulars` = each regular
+    with what they answered, absences that day, double-booked members, what the roster still needs, the board (bank and
     rosters with their groups; after lock the actual rosters), confirmations, fill asks, callouts (with the member's
     note), split settings, the run's log, `rev` (pass it to set_layout) and, for an open sheet, `health` (headcount
     against the seats, per role have/need/level with who could cover, party buffs nobody provides). `run` = run key,
@@ -173,7 +175,8 @@ def get_run(run: str) -> dict:
 def list_raids() -> dict:
     """Every raid of the game profile with the guild's effective cadence: size, slots, lockout, signup lead, nudge/lock/
     confirm hours, fill-ask hours, weights, split policy, comp bounds, which fields the guild overrides, live-run count,
-    and its schedules (id, name, kind, a plain-words label, own cadence overrides vs the effective values, the next runs)."""
+    and its schedules (id, name, kind, class recurring|adhoc, series key, regulars count, a plain-words label, own cadence
+    overrides vs the effective values with where each comes from (own | raid | adhoc defaults), seat weights, the next runs)."""
     return api().get("/api/raids")
 
 
@@ -248,10 +251,11 @@ def ops_log(limit: int = 40, precedents_limit: int = 10, ledger_limit: int = 10,
 
 @mcp.tool()
 def open_run(raid: str, when: str | None = None, schedule: str | None = None) -> str:
-    """Open a signup sheet now for `raid` (id or name): its next scheduled run, or a one-off start `when` as
-    'YYYY-MM-DD HH:MM' in guild time. `schedule` (an id from get_raid's schedules) picks that schedule's next run, or
-    with `when` its settings — a pickup template always needs `when`. Posts the sheet in the signup channel (and DMs
-    members if the raid says so)."""
+    """Open a signup sheet now for `raid` (id or name): its next scheduled run, or a start `when` as 'YYYY-MM-DD
+    HH:MM' in guild time — one of its upcoming runs at that exact time opens as that run, any other time is a one-off
+    AD HOC run (first come, no regulars, no reminder, no confirmations, locks 2 h before). `schedule` (an id from
+    get_raid's schedules) picks that schedule's next run, or with `when` its settings — a pickup template (ad hoc)
+    always needs `when`. Posts the sheet in the signup channel (and DMs members if the schedule says so)."""
     rid = get_raid(raid)["id"]
     return msg(api().post(f"/api/raid/{rid}/open", {"when": when or "", "schedule": schedule or ""}))
 
@@ -516,6 +520,17 @@ def set_member(member: str, character: str | None = None, rank: str | None = Non
 def set_dm(member: str, on: bool) -> str:
     """Switch a member's DMs from the bot on or off (off = they answer asks on the site only)."""
     return msg(api().post("/api/members/dm", {"member": member, "on": bool(on)}))
+
+
+@mcp.tool()
+def set_regular(raid: str, member: str, on: bool = True, schedule: str | None = None, character: str | None = None) -> str:
+    """Add (`on` true) or remove a REGULAR of a recurring schedule: `raid` id or name, `schedule` id from get_raid's
+    schedules (default "default" = the raid's own run times; weekly or lockout only — pickup templates and one-offs are
+    ad hoc and have no regulars), `member` (name, character or id), `character` = which of theirs raids there (default
+    their main; one per member per schedule). Regulars are expected on every sheet of the schedule (get_run's
+    not_answered lists the ones who haven't answered; the reminder goes to them) and weigh more at lock; nothing is
+    answered for them. Same route as the Rosters page."""
+    return msg(api().post("/api/admin/raid/regulars", {"raid": raid, "schedule": schedule or "default", "member": member, "character": character or "", "on": bool(on)}))
 
 
 # ---------------------------------------------------------------- writes: config (owner) and the test bench

@@ -156,14 +156,15 @@ dps counts, and — what drives everything — its **slots** and **cadence**. At
 (10-player, 3-day lockout guess), **Hyjal Summit** (20-player, weekly), **Onyxia's Lair** (40-player,
 5-day like Classic). Each raid has a **first opens at** (seeded 9 Dec 2026, 3:00 PM PST for all three); no
 sheet opens before it. The owner sets all of this with `/gm config raid`, on the Raids page, or in plain
-text (`raid_set`). There are no standing rosters: every run is built from its own sheet.
+text (`raid_set`). Every run is built from its own sheet; a recurring schedule also has **regulars** (below) — the
+people expected each week — but nobody's answer is ever filled in for them.
 
 A **slot** is a recurring run time in the guild's timezone (US Pacific), e.g. Tue 7:30 PM (on the site and in Discord you pick the weekday and time; nothing is typed). A raid can have
 several. One **run** = one slot occurrence = one sheet. A run is **open**, then **locked**, then **done**
 (or **cancelled**). Members never keep standing availability; they answer each sheet.
 
 **Schedules** say *when* a raid runs; the raid itself keeps what it is (size, comp, lockout, weights) and its
-cadence as the defaults. A raid's own run times are its first schedule (*Regular nights*); it can have more, each
+cadence as the defaults. A raid's own run times are its first schedule (*Raid nights*); it can have more, each
 with a name, and each can set its own cadence (when its sheet opens, nudges, locks, confirms, how long fill asks
 wait, autofill, DM on open, split policy) — anything it doesn't set follows the raid's. Three kinds:
 - **Weekly nights** — run times like the raid's own ("Saturdays 8:00 PM"). A Tuesday main night and a Saturday alt
@@ -171,13 +172,54 @@ wait, autofill, DM on open, split policy) — anything it doesn't set follows th
 - **Days of each lockout** — "Day 1 of each 3-day lockout, 8:00 PM": day 1 is the day the lockout resets, counted
   from the raid's first opening every `lockout_days`, so a 3- or 5-day reset is followed exactly (and daylight saving
   never moves the wall-clock time; a time the clocks skip that night moves past the gap).
-- **Pickup template** — never opens by itself. `/raid open` offers *Open Pickup — pick a time*, the Rosters page has it
-  in the schedule picker beside the date and time; the run gets the template's settings.
+- **Pickup template** — never opens by itself. `/raid open` → *Ad hoc run…* offers it (*Pickup — pick a time*), the
+  Rosters page has it in *Start ad hoc run*'s template picker beside the date and time; the run gets the template's
+  settings.
 Each schedule also says how many **rosters** a run expects (1–4). With 2, the sheet advertises 2 × the raid's size
 (20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock aims
 for two — as far as the tanks and healers who joined allow (it never builds a roster its minimums can't fill). A
 schedule can be **paused** (nothing opens from it). Runs from a schedule other than the raid's own run times carry
 its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same minute are two runs.
+
+**Recurring and ad hoc.** Every run is one or the other, and nobody sets it by hand — it follows the schedule's kind:
+- **Recurring** — weekly nights and days of each lockout (the raid's own run times included). Opens by itself on its
+  cadence, has **regulars**, and its lock weighs being a regular (below). Confirmations on by default.
+- **Ad hoc** — a pickup template, or a **one-off** run at a time an officer picks (*Ad hoc run…* in `/raid open`,
+  *Start ad hoc run* on the Rosters page, or plain text / MCP with a time that is none of the raid's upcoming runs).
+  It takes the raid's size, comp, lockout and length but none of its recurring timing — its own lighter defaults: no
+  reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
+  **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in signup order take
+  the seats, except that a seat still needed for a tank or healer minimum is kept for the first later joiner who plays
+  that role). Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. A one-off's
+  key ends in `-adhoc` (`bd-1212-2100-adhoc`). The Raids page shows each schedule's class, and for a pickup template
+  the editor hides the fields that mean nothing there (signup lead, reminder, DM on open); every value it inherits says
+  where from (*raid* or *ad hoc default*). The owner can change any of them per schedule, including **confirmations**
+  (on/off) and the **seat order** weights.
+
+**Regulars** (recurring schedules only). Officers keep, per recurring schedule, a list of **regulars**: one member and
+the one character they raid on there. Regulars are the people the bot *expects* on every sheet of that schedule:
+- **Nothing is answered for them.** A regular starts every sheet unanswered like everyone else and presses Join, Bench
+  or No thanks. Anyone with a recorded absence covering the day — regular or not — is marked away (No thanks, the
+  *Away* row) automatically: when the sheet opens, and on a sheet already open when the absence is recorded; clearing
+  the absence puts them back to unanswered.
+- **Officers see who hasn't answered**: the sheet card on the Rosters page lists *Regulars who haven't answered* (one
+  per line, spec icon + character; the member's name on hover) with how the other regulars answered; the officer
+  health card's **No answer** names them; MCP `get_run` and `/ask` carry the same list.
+- **The reminder** (the nudge DM) goes to the regulars who haven't answered. While a schedule has no regulars yet,
+  every main counts as expected (exactly as before regulars existed).
+- **At lock** being a regular on your regular character is a seat weight (`regular`, 4 by default — more than one rank
+  step): between equals the regular sits, but a much better fit for the comp can still win a seat. A non-regular's Join
+  stays a Join; they are seated after regulars and are the first asked when a seat frees.
+- **Fill** asks the regulars who haven't answered before other members.
+- Officers edit regulars on the Rosters page (*Regulars* tab: one card per recurring schedule — role icons with counts
+  against the minimums, the regulars one per line, *Add* a member and character, × to remove), with `/roster add`,
+  `/roster remove` and `/roster members` (pick the schedule, then the member, then the character), in plain text ("make
+  Ana a Tuesday Barrow Deeps regular with Anabelle") or MCP `set_regular`. One character per member per schedule; the
+  same character on two schedules of one raid is allowed with a warning (one lockout). A test puppet is never a
+  regular — a test run treats every puppet as one. Removing a schedule never strips its regulars silently: the Rosters
+  page lists them to clear.
+- **Members** see *My regular raids* on the Me page and *Regular on* in `/me view`; **Step down** (either place)
+  takes you off a schedule's regulars. Becoming a regular is an officer's call — ask one.
 
 Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
 
@@ -185,22 +227,23 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
    out after answering). With more than one character you pick which one. Anyone with a registered absence that day
    is listed under **Away** instead (names only, the first 15 then "+N"; reasons stay with officers): they aren't
-   nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. With `open_dm` on [off] every main is also
-   DMed when the sheet opens. Officers can open a sheet early from the
-   Rosters page: pick a date and time with the picker beside the raid's name, or press the button with nothing picked
-   to take the raid's next scheduled slot (with several schedules, a picker beside it chooses which schedule, or a
-   pickup template, which needs the date and time). `/raid open` does the same in Discord: pick the raid, then press *Open the next slot*, pick another upcoming
-   run (each labelled with its schedule's name when there are several), press *Open <template> — pick a time* for a
-   pickup template, or choose *Another day and time…* (day, hour and minutes from lists; nothing typed; the raid's own
-   cadence). The confirm screen shows
+   nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. With `open_dm` on [off] everyone
+   the sheet is for (the schedule's regulars, or every main while it has none) is also DMed when it opens. Officers can
+   open a sheet early from the Rosters page: **Open next run** takes the raid's next scheduled run (with several
+   recurring schedules, a picker beside it chooses which), and **Start ad hoc run** opens a one-off (or a pickup
+   template, picked beside it) at the date and time you pick. `/raid open` does the same in Discord: pick the raid,
+   then **Next run — <time>**, **Another upcoming run…** (each labelled with its schedule's name when there are several)
+   or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes from lists; nothing
+   typed; ad hoc defaults). The confirm screen shows
    the time in guild time and in your own. A raid with no run times offers *Set this raid's run times →*. A run opened closer
    than its cadence assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
    hours instead of inheriting a lock time that has already passed. A start more than five minutes in the past is
    refused however the run is opened (the site, `/raid open`, plain text, MCP), with the time named in words.
 2. **Nudge** — at `nudge_hours_before` [halfway between open and lock: lock + (lead − lock) / 2, so 72 h for a
    sheet that opens 120 h out and locks at 24 h] the officer channel gets a health card (headcount, tank/healer
-   tiles with who could cover via offspec/alt, buff coverage, non-responders, double-booked members) and mains
-   who haven't answered are nudged once by DM. The tiles count against the seats and tank/healer minimums of the
+   tiles with who could cover via offspec/alt, buff coverage, **No answer** — the regulars who haven't answered, one per
+   line — and double-booked members) and those regulars (every main while the schedule has none) are nudged once by
+   DM. An ad hoc run reminds nobody; its health card comes an hour before its lock. The tiles count against the seats and tank/healer minimums of the
    rosters the run expects (1, or its schedule's *rosters per run*) — the same numbers Fill works from; when the
    joiners could make more runs than that, the "Enough people for 2 runs …" line says what another run is short. `nudge` [on] switches the DM off per raid; the health card
    still comes.
@@ -248,14 +291,16 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. Every rostered member gets a DM: **Confirm** /
-   **Can't make it**. The Me page shows the same ask. After lock the board stays editable: moving people
+   **Can't make it**. The Me page shows the same ask. With confirmations off (the ad hoc default) nobody is asked and
+   no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable: moving people
    between groups changes nothing else; dragging someone in from the bank is a substitution (they get the
    confirmation DM); dragging someone out releases the seat (they get a DM) and the bench is asked.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and they are DMed that it was.
 6. **Fill** — only after lock, never on an open sheet. Whenever a seat frees (decline, callout, absence, missed
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people: joiners the solver
-   left off and *Bench* answers first → mains who haven't answered the sheet → **swaps** (a rostered player's offspec
+   left off and *Bench* answers first → the schedule's regulars who haven't answered (every main while it has none;
+   on an ad hoc run, every main) → other members → **swaps** (a rostered player's offspec
    or alt in the needed role; never the spec the lock already moved them to). A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
    for a bench or pool member of that role and sends both asks tied together — the swap and its backfill — and
    a no (or silence) from either withdraws the other with a "never mind" DM. It asks the shortfall + 1 at a
@@ -273,8 +318,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 8. **Close** — 3 h after its scheduled end (start + the raid's length) the run is **done** and the sheet says so.
 
 Seat selection at lock is deterministic: role bounds from the raid's comp, buff synergy, the comp policy's
-standing instructions, officer pins, and the raid's **weights** — rank (core > raider > trial), main over
-alt, sat out last window (matched by member, so a Discord rename keeps it), earlier signup. A comp-policy line such
+standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
+rank (core > raider > trial), main over alt, sat out last window (matched by member, so a Discord rename keeps it),
+earlier signup, and being one of the schedule's **regulars** on their regular character. An ad hoc run is first come
+instead (see *Recurring and ad hoc* above). A comp-policy line such
 as "at least 3 healers" raises that role's minimum and leaves the others (the raid's tank minimum stays). The owner tunes the weights per raid (*Selection weights* in `/gm config
 raid`, the Raids page, or plain text: "weight rank 5 for Barrow Deeps"); officers read them, and the owner can open
 Raids & auras to others (§8c).
@@ -346,13 +393,16 @@ returns to the game defaults.
   Propose); the old bank, optimised-groups and comp images are gone.
 - `/roster overview` (no arguments) shows the plan summary on demand: every planned main by class, the role counts
   against each raid's size with who could flex in, buff coverage (nobody / only one), the alts, and the recruiting ask
-  against the biggest raid. `/roster members` lists a run's roster.
+  against the biggest raid. `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
 
 ## 7. Officers: day-to-day commands
 
 - Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`. They take at most a member
-  (Discord's own picker); the character, rank or roster is picked from a list and confirmed before anything saves.
+  (Discord's own picker); the character, rank or schedule is picked from a list and confirmed before anything saves.
   `/roster confirm` alone walks the unconfirmed characters.
+- Regulars: `/roster add` (pick the recurring schedule, then the member — or name them in the command — then the
+  character), `/roster remove`, `/roster members` (a schedule's regulars by role, one per line). Same list as the
+  Rosters page's *Regulars* tab, plain text and MCP `set_regular` (§4 *Regulars*).
 - Applications: `/roster applicants`, `/roster applicant`, the Accept / Decline… buttons on the review card, or plain
   text ("accept Nyx", "decline nyxie: full on healers") (§3a).
 - Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|end` (officers) and `/raid out` (anyone).
@@ -678,11 +728,12 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | Tool | Does |
 |---|---|
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench |
-| `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (signups, board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
-| `list_raids` · `get_raid` | effective raid settings and overrides |
+| `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
+| `list_raids` · `get_raid` | effective raid settings and overrides; each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
+| `set_regular` | add or remove a regular of a recurring schedule (member, character, schedule; the Rosters page's route) |
 | `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record |
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and ledger (up to 100), `member` narrowing both to one person |
-| `open_run` | open a sheet now (next slot, or a date and time; `schedule` = that schedule's next run, or a pickup template at `when`) |
+| `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
@@ -812,6 +863,7 @@ read-only: the Ops page's tables, MCP `ops_log` (a member filter included) and `
 split philosophy is a greyed placeholder until wishlists exist (Balanced, Raid one first and Rotation
 work). Buff facts, comp bounds, cadence and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
-repository. There is no standing roster, availability or standing signup to set and no attendance or loot view on
+repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
+standing signup to set and no attendance or loot view on
 `/me` yet: each run is answered on its own sheet (or by telling the bot, or an officer for you). If you ask for one
 of these, say so plainly.

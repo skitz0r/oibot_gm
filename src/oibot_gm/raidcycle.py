@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
-from .registry import DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, RAID_DEFAULTS, Member, Registry, RegisteredCharacter, RegistryError, now
+from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
+                       RegisteredCharacter, RegistryError, now, schedule_class, series_key)
 from .roster import explain, solver
 from .store import GitStore
 
@@ -96,7 +97,12 @@ class RaidEvent(BaseModel):
     key: str  # <run roster key>-<YYYY-MM-DD>
     team: str  # roster key; for cadence runs an ephemeral roster named like the run (bd-1209-1930)
     instance: Optional[str] = None
-    schedule: Optional[str] = None  # the schedule id it was opened from (None: the raid's own run times, or a one-off)
+    schedule: Optional[str] = None  # the schedule id it was opened from (None: the raid's own run times; "adhoc": a one-off)
+    # stamped at open from the run dict (roster redesign Phase 1), so a later schedule edit never changes a run in flight:
+    series: Optional[str] = None  # recurring: "<raid>:<schedule>" (whose regulars are expected); ad hoc: None
+    kind: Optional[Literal["recurring", "adhoc"]] = None  # None = a file from before classes (read by run_kind as its schedule says)
+    test: bool = False  # a test-bench run (puppets + the tester), identifiable after its run dict is cleaned up
+    regulars: list[int] = Field(default_factory=list)  # the series' regulars when the sheet opened (history; behaviour reads them live)
     starts_at: str  # ISO with offset
     state: Literal["open", "locked", "done", "cancelled"] = "open"
     signups: dict[str, Signup] = Field(default_factory=dict)  # discord_id -> signup
@@ -363,6 +369,11 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     t = {"key": key, "name": f"{rd.get('name', instance)} {reg.local12(start)}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
          "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
          "reminders": "dm" if c.get("nudge", rd["nudge"]) else "none", "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True}
+    # every run carries its class and series (roster redesign Phase 1): a one-off (ADHOC_SCHEDULE) and a pickup template
+    # are ad hoc; anything else is a run of a recurring series whose regulars it expects
+    kind = rd.get("class") or schedule_class(sched.get("kind"))
+    t.update({"schedule_id": sched["id"], "kind": kind, "series": series_key(instance, sched["id"]) if kind == "recurring" else None,
+              "confirm": True if cutoffs else bool(rd.get("confirm", True))})  # a test run rehearses the confirmations
     if sched["id"] != DEFAULT_SCHEDULE or sched.get("own") or int(sched.get("rosters") or 1) > 1:
         # the run carries its schedule's settings (the raid's are read live, as before, for a plain run)
         t.update({"schedule_id": sched["id"], "rosters": int(sched.get("rosters") or 1), "fill_ask_hours": float(rd["fill_ask_hours"]), "split_policy": rd.get("split_policy") or "balanced"})
@@ -560,27 +571,146 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
     key = f"{team['key']}-{starts_at.date().isoformat()}"
     if key in rs.events:
         return rs.events[key]
-    ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=team.get("schedule_id"), starts_at=starts_at.isoformat())
+    sid = team.get("schedule_id")
+    ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=None if sid in (None, DEFAULT_SCHEDULE) else sid,
+                   series=team.get("series"), kind=team.get("kind"), test=bool(team.get("test")), starts_at=starts_at.isoformat())
     prefill(reg, ev, team)
-    ev.log.append(f"opened; {len(ev.signups)} pre-filled from absences")
+    ev.log.append(f"opened ({run_kind(reg, ev)}); {len(ev.signups)} marked away from absences")
     rs.save(ev, "opened")
     return ev
 
 
 def prefill(reg: Registry, ev: RaidEvent, team: dict) -> None:
-    """Absences (and curated roster membership) seed the sheet so people act on exceptions."""
-    day = ev.start.date().isoformat()
-    explicit = bool(reg.roster_members(team["key"]))
-    for m, main in reg.roster_pool(team["key"]):
-        if not main:
-            continue
+    """Absences seed the sheet: anyone the sheet could expect (every main, a regular with their regular character; a
+    test run: the puppets and the tester) with a recorded absence covering the run's day is No thanks (source
+    "absence", the sheet's Away row). Nobody is pre-filled Join (owner decision D1: a regular starts unanswered like
+    everyone else; officers see who hasn't answered). The series' regulars are snapshotted on the run for history."""
+    day = ev.start.astimezone(reg.tz).date().isoformat()
+    for m, c in absence_pool(reg, ev, team):
         if m.absent_on(day):
-            status, source = "out", "absence"
-        elif explicit:
-            status, source = "in", "prefill"  # members of a curated roster default in
-        else:
-            continue  # open pool: they must respond
-        ev.signups[str(m.discord_id)] = _signup(reg, m, main, status, source)
+            ev.signups[str(m.discord_id)] = _signup(reg, m, c, "out", "absence")
+    ev.regulars = [m.discord_id for m, _ in reg.regulars(ev.series)] if ev.series and not ev.test else []
+
+
+# ---------------------------------------------------------------- who a run is for (roster redesign Phase 1)
+
+def run_kind(reg: Registry, ev: RaidEvent) -> str:
+    """'recurring' | 'adhoc'. Stamped at open; a file from before classes reads as its schedule says (a pickup or a
+    one-off → ad hoc; the raid's own run times or another weekly / lockout schedule → recurring)."""
+    if ev.kind:
+        return ev.kind
+    team = reg.config.team(ev.team) or {}
+    if team.get("kind"):
+        return team["kind"]
+    sid = team.get("schedule_id") or ev.schedule
+    if sid == ADHOC_SCHEDULE:
+        return "adhoc"
+    s = next((x for x in reg.schedules(ev.instance) if x["id"] == (sid or DEFAULT_SCHEDULE)), None) if ev.instance in reg.profile.raids else None
+    return schedule_class(s["kind"]) if s else "recurring"
+
+
+def run_series(reg: Registry, ev: RaidEvent) -> str | None:
+    """The recurring series a run belongs to ('<raid>:<schedule>'), None for an ad hoc run."""
+    if run_kind(reg, ev) != "recurring" or not ev.instance:
+        return None
+    if ev.series:
+        return ev.series
+    team = reg.config.team(ev.team) or {}
+    return team.get("series") or series_key(ev.instance, team.get("schedule_id") or ev.schedule or DEFAULT_SCHEDULE)
+
+
+def is_test_run(reg: Registry, ev: RaidEvent) -> bool:
+    return ev.test or bool((reg.config.team(ev.team) or {}).get("test"))
+
+
+def _test_pool(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
+    tester = (reg.config.team(ev.team) or {}).get("test_by")
+    return [(m, m.main) for m in reg.members.values() if m.main and (m.test or m.discord_id == tester)]
+
+
+def run_regulars(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
+    """The regulars a run expects, with their regular character: its series' regulars (recurring); a test run treats
+    every puppet (and the tester) as a virtual regular — no real membership is read or written; ad hoc: nobody."""
+    if is_test_run(reg, ev):
+        return _test_pool(reg, ev)
+    series = run_series(reg, ev)
+    return reg.regulars(series) if series else []
+
+
+def run_pool(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
+    """Who a run is FOR, with the character each would bring: a test run → the puppets + the tester; a recurring run
+    whose series has regulars → those regulars; otherwise (ad hoc, or a series nobody curated yet) → every main.
+    Keyed on the series, never the run key, so it doesn't change at lock. The fill engine's first tier after the
+    bench, health's "not on sheet", another_run_hint and the open DMs read it."""
+    if is_test_run(reg, ev):
+        return _test_pool(reg, ev)
+    regs = run_regulars(reg, ev)
+    return regs if regs else [(m, m.main) for m in reg.members.values() if m.main]
+
+
+def expected(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
+    """Who the bot expects an answer from (officers' "No answer" list, the nudge): recurring → run_pool (the regulars,
+    or every main while the series has none); ad hoc → nobody (the sheet is posted and people come; no reminder)."""
+    return run_pool(reg, ev) if run_kind(reg, ev) == "recurring" else []
+
+
+def expected_from(reg: Registry, ev: RaidEvent) -> str:
+    """Where `expected` comes from, for the officer surfaces: regulars | everyone (a recurring series with no regulars
+    yet) | test | none (ad hoc)."""
+    if is_test_run(reg, ev):
+        return "test"
+    if run_kind(reg, ev) != "recurring":
+        return "none"
+    return "regulars" if run_regulars(reg, ev) else "everyone"
+
+
+def not_answered(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
+    """The expected people with no answer on the sheet (an absence-marked No thanks counts as an answer), by name."""
+    return sorted([(m, c) for m, c in expected(reg, ev) if c and str(m.discord_id) not in ev.signups], key=lambda mc: mc[0].display_name.lower())
+
+
+def regular_answers(reg: Registry, ev: RaidEvent) -> list[dict]:
+    """Every regular of the run with what they answered: {uid, display_name, character, cls, spec, role, status|None,
+    source}. Officer-facing (the web sheet card, MCP get_run, help)."""
+    out = []
+    for m, c in run_regulars(reg, ev) if not is_test_run(reg, ev) else []:
+        sg = ev.signups.get(str(m.discord_id))
+        out.append({"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec,
+                    "role": reg.profile.spec(c.cls, c.spec).role, "status": sg.status if sg else None, "source": sg.source if sg else None,
+                    "signed_as": sg.character if sg else None})
+    return out
+
+
+def absence_pool(reg: Registry, ev: RaidEvent, team: dict | None = None) -> list[tuple[Member, RegisteredCharacter]]:
+    """Everyone a recorded absence marks away on this run: a test run's puppets + tester; otherwise every member with a
+    main, a regular with their regular character."""
+    if is_test_run(reg, ev):
+        return _test_pool(reg, ev)
+    regs = {m.discord_id: c for m, c in run_regulars(reg, ev)}
+    return [(m, regs.get(m.discord_id) or m.main) for m in reg.members.values() if m.main or m.discord_id in regs]
+
+
+def expected_character(reg: Registry, ev: RaidEvent, m: Member) -> RegisteredCharacter | None:
+    """The character `m` would bring to this run: their regular character on its series, else their main."""
+    return next((c for mm, c in run_regulars(reg, ev) if mm.discord_id == m.discord_id), None) or m.main
+
+
+def run_confirms(reg: Registry, ev: RaidEvent) -> bool:
+    """Does the lock ask the rostered to Confirm / Can't make it? Recurring default yes; ad hoc default no (D5: Join is
+    the commitment). Frozen on the run dict at open; files from before read yes."""
+    return bool((reg.config.team(ev.team) or {}).get("confirm", True))
+
+
+def open_schedule(reg: Registry, instance: str, start: datetime, sid: str | None) -> str | None:
+    """Which schedule an on-demand open at `start` belongs to (web, plain text, MCP): `sid` when named; else one of the
+    raid's upcoming runs at exactly that start (its schedule id, None for the raid's own run times); else a one-off →
+    ADHOC_SCHEDULE. The /raid open wizard asks instead (Next run · Another upcoming run · Ad hoc run…)."""
+    if sid:
+        return None if sid == DEFAULT_SCHEDULE else sid
+    hit = next((s["id"] for s, t in upcoming(reg, instance, reg.now_local(), 24 * OPEN_HORIZON_DAYS) if t == start), None)
+    if hit is not None:
+        return None if hit == DEFAULT_SCHEDULE else hit
+    return ADHOC_SCHEDULE
 
 
 def _signup(reg: Registry, m: Member, c: RegisteredCharacter, status: str, source: str, note: str | None = None) -> Signup:
@@ -772,11 +902,12 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
     def role_of(c: RegisteredCharacter) -> str:
         return reg.profile.spec(c.cls, c.spec).role
 
-    pool_ids = {m.discord_id for m, _ in reg.roster_pool(team["key"])}
+    pool = run_pool(reg, ev)  # the regulars of the series (or every main), keyed on the series — the same before and after lock
+    pool_ids = {m.discord_id for m, _ in pool}
     # bench tier: joiners the solver left off, then Bench answers — never someone already seated (the solver may seat a Bench answer)
     subs = [(m, c) for s in benched_joiners + ev.by_status("sub") if s.display_name not in seated_names and (m := reg.members.get(s.discord_id)) and (c := next((c for c in m.active() if c.label == s.character), m.main))]
-    unresponsive = [(m, c) for m, c in reg.roster_pool(team["key"]) if str(m.discord_id) not in ev.signups and c]
-    others = [] if team.get("test") else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups], key=lambda mc: _rank_key(reg, mc[0]))
+    unresponsive = [(m, c) for m, c in pool if str(m.discord_id) not in ev.signups and c]
+    others = [] if is_test_run(reg, ev) else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups], key=lambda mc: _rank_key(reg, mc[0]))
     tiers = [("sub", subs), ("pool", unresponsive), ("other_roster", others)]
 
     def first_of(role: str, skip: int | None = None):
@@ -960,17 +1091,18 @@ def health_data(reg: Registry, ev: RaidEvent, team: dict) -> dict:
         level = "green" if not n or have >= n else ("amber" if have + coverable >= n else "red")
         hint = " · ".join(f"+{len(v)} {k}: {', '.join(x.split(' (')[0] for x in v[:3])}" for k, v in cover.items() if v) if (n and have < n) else ""
         if n and have < n and not coverable:
-            off = [m.display_name for m in reg.team_pool(team["key"]) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
+            off = [m.display_name for m, _c in run_pool(reg, ev) if str(m.discord_id) not in ev.signups and any(profile.spec(c.cls, c.spec).role == r for c in m.active())]
             hint = ("not on sheet: " + ", ".join(off[:3])) if off else "nobody can cover → recruit"
         roles.append({"role": r, "have": have, "need": n, "level": level, "hint": hint, "cover": cover})
     buffs = []
     for b in profile.party_buffs():
         providers = [s.display_name for s in ins if b.provided_by(profile.spec(s.cls, s.spec))]
         buffs.append({"id": b.id, "abbr": b.abbr, "colour": b.colour, "name": b.short, "providers": providers})
-    unresp = [m.display_name for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups]
+    unresp = [m.display_name for m, _c in not_answered(reg, ev)]  # the expected (regulars) who haven't answered; ad hoc: nobody
     hc_level = "green" if len(ins) >= size else ("amber" if len(ins) + len(subs) >= size else "red")
     # headcount is a 4-tuple (in, size, 0 [was tentative], sub): the cards and the pool data share the shape
-    return {"headcount": (len(ins), size, 0, len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp, "rosters": n_rosters}
+    return {"headcount": (len(ins), size, 0, len(subs)), "headcount_level": hc_level, "roles": roles, "buffs": buffs, "unresponsive": unresp, "rosters": n_rosters,
+            "expected_from": expected_from(reg, ev), "kind": run_kind(reg, ev)}
 
 
 def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
@@ -1033,11 +1165,28 @@ def sat_out_last_window(reg: Registry, rs: RaidStore, ev: RaidEvent, first_only:
     return signed - seated
 
 
+def run_weights(reg: Registry, ev: RaidEvent) -> dict[str, int]:
+    """The seat weights a run's lock uses: its schedule's (own weights over the raid's — ad hoc: over ADHOC_WEIGHTS),
+    read live like the raid's always were. A schedule removed since falls back by class."""
+    team = reg.config.team(ev.team) or {}
+    sid = team.get("schedule_id") or ev.schedule
+    try:
+        return dict(reg.schedule_def(ev.instance, sid)["weights"])
+    except RegistryError:
+        base = ADHOC_WEIGHTS if run_kind(reg, ev) == "adhoc" else reg.raid_def(ev.instance)["weights"]
+        return {**RAID_WEIGHT_DEFAULTS, **base}
+
+
 def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player]) -> dict[str, int]:
-    """Per-player selection bonus from the raid's weights: rank, main over alt, sat out last window, signup order.
-    Keyed by this run's signup names (the solver's handle); sat-out is matched on discord ids, so a rename keeps it."""
-    w = reg.raid_def(ev.instance)["weights"]
-    sat = sat_out_last_window(reg, rs, ev)
+    """Per-player selection bonus from the run's weights: rank, main over alt, sat out last window, signup order, and
+    being a REGULAR of the run's series signed with their regular character (D9: a weight above one rank step, so a
+    strong outsider can still win a role seat). Ad hoc runs are first come: signup order counts per position (each
+    earlier joiner `signup_order` points ahead of the next), rank and sat-out don't count by default.
+    Keyed by this run's signup names (the solver's handle); sat-out and regulars match discord ids, so a rename keeps them."""
+    w = run_weights(reg, ev)
+    adhoc = run_kind(reg, ev) == "adhoc"
+    sat = sat_out_last_window(reg, rs, ev) if int(w.get("sat_out", 0)) else set()
+    regs = {} if adhoc or is_test_run(reg, ev) else {m.discord_id: c.label for m, c in run_regulars(reg, ev)}
     n = max(1, len(players))
     out = {}
     for p in players:
@@ -1045,9 +1194,12 @@ def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player
         found = reg.find(p.character) if p.character else None
         if found and found[1].is_main:
             b += int(w.get("main", 0))
-        if player_uid(ev, p) in sat:
+        uid = player_uid(ev, p)
+        if uid in sat:
             b += int(w.get("sat_out", 0))
-        b += round(int(w.get("signup_order", 0)) * (n - p.pos) / n)
+        if uid in regs and regs[uid] == p.character:
+            b += int(w.get("regular", 0))
+        b += int(w.get("signup_order", 0)) * (n - p.pos) if adhoc else round(int(w.get("signup_order", 0)) * (n - p.pos) / n)
         out[p.signup_name] = b
     return out
 
@@ -1167,7 +1319,7 @@ def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]
     for sg in ev.by_status("sub"):
         if sg.display_name not in seated:
             add(reg.members.get(sg.discord_id), sg.role, {role_of(sg.cls, sg.offspec)} if sg.offspec else set())
-    for m, c in reg.roster_pool(run_team(reg, ev)["key"]):
+    for m, c in run_pool(reg, ev):
         if c and str(m.discord_id) not in ev.signups and not m.absent_on(day):
             add(m, role_of(c.cls, c.spec))
     need = [r for r in ("tank", "healer") for _ in range(int(rb[r]["min"] or 0))]
@@ -1175,6 +1327,41 @@ def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]
         return None
     how = "" if _can_cover(main_only, need) else " with offspecs or alts"
     return f"Leftovers, bench and pool ({len(any_role)}) could make another run{how}."
+
+
+def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], role_max: dict[str, int], fixed: set[str]) -> set[str]:
+    """Ad hoc seating is first come, first rostered (D4): the joiners in signup order take the seats, except that a seat
+    still needed for a tank/healer minimum is kept for the first later joiner who plays that role (and a role at its
+    maximum takes no more). `fixed` (pinned in / placed on the board) are seated first. Returns the joiners who come
+    too late — the lock benches them (hard), the solver only arranges the groups of the rest."""
+    signed = sorted((p for p in players if p.status == "signed"), key=lambda p: p.pos)
+    have = {r: 0 for r in set(role_min) | set(role_max)}
+    taken: list[str] = []
+    for p in signed:
+        if p.signup_name in fixed:
+            taken.append(p.signup_name)
+            if p.role in have:
+                have[p.role] += 1
+    out: set[str] = set()
+    rest = [p for p in signed if p.signup_name not in fixed]
+    for i, p in enumerate(rest):
+        free = seats - len(taken)
+        if free <= 0:
+            out.add(p.signup_name)
+            continue
+        if p.role in role_max and have.get(p.role, 0) >= role_max[p.role]:
+            out.add(p.signup_name)
+            continue
+        fills = p.role in role_min and have.get(p.role, 0) < role_min[p.role]
+        later = rest[i + 1:]
+        reserved = sum(min(max(0, n - have.get(r, 0)), sum(1 for q in later if q.role == r)) for r, n in role_min.items())
+        if not fills and free <= reserved:
+            out.add(p.signup_name)
+            continue
+        taken.append(p.signup_name)
+        if p.role in have:
+            have[p.role] += 1
+    return out
 
 
 def merged_role_min(rb: dict, policy: dict[str, int] | None) -> dict[str, int]:
@@ -1211,15 +1398,20 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         missed_first = sat_out_last_window(reg, rs, ev, first_only=True)
         roster_bonus = {0: {p.signup_name: 3 * w for p in players if player_uid(ev, p) in missed_first}}
     pool = {p.signup_name for p in players}
+    role_min = merged_role_min(rb, cc["role_min"])
+    late: set[str] = set()
+    if run_kind(reg, ev) == "adhoc":  # first come, first rostered: the late joiners are benched before the solve
+        late = first_come_out(players, size * n_rosters, {r: n * n_rosters for r, n in role_min.items()},
+                              {r: int(rb[r]["max"]) * n_rosters for r in ("tank", "healer") if rb[r].get("max")}, set(pin_in) | set(placed))
     opts = solver.SolveOptions(
         time_limit_s=time_limit, raid_size=size,
         keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
         keep_apart=tuple((resolve(a), resolve(b)) for a, b in cc["keep_apart"] if resolve(a) and resolve(b)),
         force_in=tuple(x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out),
-        force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] if x and x in pool and x not in placed),
+        force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] + sorted(late) if x and x in pool and x not in placed),
         pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
-        role_min=merged_role_min(rb, cc["role_min"]) or None,
+        role_min=role_min or None,
         role_max={r: rb[r]["max"] for r in ("tank", "healer") if rb[r].get("max")},
         bonus=bonus,
     )

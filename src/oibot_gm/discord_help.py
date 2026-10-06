@@ -89,7 +89,10 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
             lines.append(f"• **{rd.get('name', rid)}** ({rd.get('size')}-player)")
             for s in scheds:  # every schedule, with its real next runs (Discord stamps render in the reader's own zone)
                 sd = reg.schedule_def(rid, s["id"])
-                head = f"  ◦ {s['name']}: {reg.schedule_label(rid, s)}" + ("" if s["kind"] == "pickup" else f" ({cfg.timezone})")
+                me = reg.members.get(user_id) if user_id else None
+                mine = next((c.label for c in (me.active() if me else []) if f"{rid}:{s['id']}" in c.rosters), None)
+                head = (f"  ◦ {s['name']} ({'ad hoc: first come' if s['kind'] == 'pickup' else 'recurring'}): {reg.schedule_label(rid, s)}"
+                        + ("" if s["kind"] == "pickup" else f" ({cfg.timezone})") + (f" — you're a regular ({mine})" if mine else ""))
                 if s["kind"] == "pickup" or not s.get("active", True):
                     lines.append(head)
                     continue

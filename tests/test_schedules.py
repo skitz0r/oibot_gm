@@ -63,7 +63,9 @@ def test_a_raid_with_only_slots_is_the_default_schedule_and_nothing_changes(reg,
     ev = rc.open_run(reg, rs, RID, t, by="t")
     team = reg.config.roster(ev.team)
     assert ev.key == rc.event_key(RID, t) and ev.schedule is None
-    assert "schedule_id" not in team and "rosters" not in team  # the run's roster dict is exactly what it was
+    # Phase 1: every run dict names its schedule, class and series; nothing else about a plain run changed
+    assert (team["schedule_id"], team["kind"], team["series"]) == ("default", "recurring", f"{RID}:default") and "rosters" not in team
+    assert (ev.kind, ev.series) == ("recurring", f"{RID}:default")
     assert rc.run_rosters(reg, ev) == 1 and reg.config.raids[RID].get("schedules") is None
     # the scheduler's own view (each schedule within its signup lead) is the old slot_starts at the raid's lead
     lead = float(reg.raid_def(RID)["signup_lead_hours"])
@@ -247,7 +249,7 @@ def test_config_schedules_add_edit_and_save_in_one_commit(reg, store, owner):
         await h.pick("Rosters per run", "2")
         assert "2 rosters" in h.text and "20 seats" in h.text
         await h.press("All schedules")
-        assert "Regular nights" in h.text and "Alt run" in h.text and h.selects() == ["Pick a schedule"]
+        assert "Raid nights" in h.text and "Alt run" in h.text and h.selects() == ["Pick a schedule"]
         await h.press("Add a schedule")
         await h.pick("What kind of schedule?", "lockout")
         await submit_multi(h, name="Reset night", days=["1"], hour="21", minute="0")
@@ -416,7 +418,7 @@ def test_help_schedule_lists_the_real_upcoming_runs_per_schedule(reg):
     reg.set_raid_override(RID, "slots", "Tue 19:30", "t")
     reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
     text = discord_help.guide_text(reg, "schedule")
-    assert "Regular nights: Tuesdays 7:30 PM" in text and "Alt run: Saturdays 8:00 PM" in text
+    assert "Raid nights (recurring): Tuesdays 7:30 PM" in text and "Alt run (recurring): Saturdays 8:00 PM" in text
     for s in reg.schedules(RID):
         for t in rc.next_runs_of(reg, RID, s):
             assert f"<t:{int(t.timestamp())}:f>" in text
@@ -448,11 +450,12 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", RID)
         s0, t0 = ups[0]
-        assert f"Open the next slot — {reg.local12(t0)} · {s0['name']}" in h.buttons() and "Open Pickup — pick a time" in h.buttons()
-        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Or another upcoming run")
+        assert h.buttons() == [f"Next run — {reg.local12(t0)} · {s0['name']}", "Another upcoming run…", "Ad hoc run…", "Cancel"]
+        await h.press("Another upcoming run…")
+        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run")
         alt_opt = next(o for o in sel.options if o.value.endswith("|alt"))
         assert alt_opt.description.startswith("Alt run · ") and "20:00" not in alt_opt.label
-        await h.pick("Or another upcoming run", alt_opt.value)
+        await h.pick("Pick the run", alt_opt.value)
         assert "**Barrow Deeps** · Alt run" in h.text
         await h.press("Open")
     asyncio.run(go())
@@ -465,10 +468,12 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
     async def go2():
         await FLOWS["raid_open"](h2.command(), reg)
         await h2.pick("Pick the raid", RID)
-        await h2.press("Open Pickup — pick a time")
+        await h2.press("Ad hoc run…")
+        assert h2.buttons() == ["Pickup — pick a time", "One-off — pick a day and time", "Back", "Cancel"]
+        await h2.press("Pickup — pick a time")
         assert h2.modal.title == "Open Pickup"
         await h2.submit(h2.modal, day=day, hour="21", minute="0")
-        assert "Pickup" in h2.text and "9:00 PM" in h2.text
+        assert "Pickup" in h2.text and "9:00 PM" in h2.text and "Ad hoc: first come" in h2.text
         await h2.press("Open")
     asyncio.run(go2())
     opens = [c for c in bot.calls if c[0] == "open_run_and_post"]

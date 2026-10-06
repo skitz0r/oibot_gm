@@ -1,7 +1,8 @@
 """Officer roster wizards: `/roster confirm` (walk the unconfirmed characters), `/roster rank`, `/roster set-main`,
-`/roster add` and `/roster remove`. The member comes from the slash command's native picker; everything else — which
-character, which rank, which roster — is picked here from what the registry holds, so nothing is typed and nothing
-can name a character or roster that doesn't exist.
+and the REGULARS of a recurring schedule: `/roster add`, `/roster remove`, `/roster members` (schedule → member →
+character), plus a member's own Step down (/me view). The member comes from the slash command's native picker (or a
+picker here); everything else — which character, which rank, which schedule — is picked from what the registry holds,
+so nothing is typed and nothing can name a character or schedule that doesn't exist.
 
 Every flow is officer-only (checked at entry and on every press) and writes nothing before the final Confirm; the
 save re-reads the registry, because another officer may have confirmed, retired or moved the character meanwhile."""
@@ -420,186 +421,311 @@ async def open_roster_set_main(interaction: discord.Interaction, reg: Registry, 
     await SetMainWizard(reg, interaction.user.id, member).start(interaction)
 
 
-# ---------------------------------------------------------------- /roster add
+# ---------------------------------------------------------------- regulars: /roster add · remove · members, Step down
+# A recurring series ("<raid>:<schedule>") has REGULARS: officers pick the schedule, then the member (the slash command's
+# optional member widget skips that step), then the character. Nothing is typed (the wizard rule); the save re-reads the
+# registry and goes through Registry.regular_add / regular_remove — the verbs the site, plain text and MCP call too.
 
-class RosterAddWizard(MemberWizard):
-    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User):
-        super().__init__(reg, owner_id, member, title="Add to a roster")
+def _spec_line(ico, c: RegisteredCharacter) -> str:
+    """One member per line: spec icon + character (the iconography rule — the icon stands for role + spec)."""
+    return ((ico("spec", f"{c.cls}:{c.spec}") + " ") if ico else "") + c.label
+
+
+class RegularsWizard(OfficerWizard):
+    """Schedule → member → character → confirm. `member` (a discord user, optional) is pre-picked."""
+
+    verb = "add"
+
+    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User | None, *, title: str):
+        super().__init__(reg, owner_id, title=title + (f" · {member.display_name}" if member else ""))
+        self.member_id = member.id if member else None
+        self.preset = member is not None
         self.page = 0
 
-    def roster_opts(self) -> list[Opt]:
-        m = self.member()
-        on = {k for c in (m.active() if m else []) for k in c.rosters}
-        return [Opt(k, roster_name(self.reg, k)[:100], "already on it" if k in on else None, default=k == self.draft.get("roster"))
-                for k in self.reg.config.roster_keys()]
+    # ---- shared
+    def member(self) -> Member | None:
+        return self.reg.members.get(self.member_id) if self.member_id else None
 
-    async def start(self, interaction: discord.Interaction) -> None:
-        if not self.indexed():
-            await self.finish(interaction, f"{self.member_name} has no registered characters — they register first (the registration card or /register).")
-            return
-        keys = self.reg.config.roster_keys()
-        self.draft["many_rosters"] = len(keys) > 1
-        if len(keys) == 1:
-            self.draft["roster"] = keys[0]
-            await self.pick_char(interaction)
-            return
-        await self.pick_roster(interaction)
+    def label(self) -> str:
+        return self.reg.series_label(self.draft["series"])
 
-    async def pick_roster(self, interaction: discord.Interaction) -> None:
-        await self.show(interaction, "Which roster?",
-                        *self.paged("Pick the roster", self.roster_opts(), self.page, self.roster_picked, self.to_page),
+    def series_opts(self) -> list[Opt]:
+        out = []
+        for key, label in self.reg.series("recurring"):
+            n = len(self.reg.regulars(key))
+            m = self.member()
+            on = next((c.label for c in (m.active() if m else []) if key in c.rosters), None)
+            out.append(Opt(key, label[:100], (f"already a regular as {on} · " if on else "") + f"{n} regular{'s' if n != 1 else ''}", default=key == self.draft.get("series")))
+        return out
+
+    def to_page(self, screen):
+        def make(page: int):
+            async def go(interaction: discord.Interaction) -> None:
+                self.page = page
+                await screen(interaction)
+            return go
+        return make
+
+    async def pick_series(self, interaction: discord.Interaction) -> None:
+        opts = self.series_opts()
+        if not opts:
+            await self.finish(interaction, "No recurring schedule yet — the owner adds weekly run times on the Raids page (or /gm config raid). "
+                                           "Ad hoc runs (pickup templates, one-offs) have no regulars: first come, first rostered.")
+            return
+        if len(opts) == 1:
+            await self.series_picked(interaction, [opts[0].value])
+            return
+        self.draft["many_series"] = True
+        await self.show(interaction, "Which recurring schedule?", *self.paged("Pick the schedule", opts, self.page, self.series_picked, self.to_page(self.pick_series)),
                         self.button("Cancel", self.cancel))
 
-    def to_page(self, page: int):
-        async def go(interaction: discord.Interaction) -> None:
-            self.page = page
-            await self.pick_roster(interaction)
-        return go
+    async def series_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["series"] = values[0]
+        self.page = 0
+        if self.preset:
+            await self.after_member(interaction)
+        else:
+            await self.pick_member(interaction)
 
-    async def roster_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["roster"] = values[0]
-        await self.pick_char(interaction)
+    def back_to_series(self):
+        return self.pick_series if self.draft.get("many_series") else None
 
-    async def pick_char(self, interaction: discord.Interaction) -> None:
-        chars = self.indexed()
+
+class RegularAddWizard(RegularsWizard):
+    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User | None):
+        super().__init__(reg, owner_id, member, title="Add a regular")
+
+    async def start(self, interaction: discord.Interaction) -> None:
+        m = self.member()
+        if self.preset and (m is None or not m.active()):
+            await self.finish(interaction, "They have no registered characters — they register first (the registration card or /register).")
+            return
+        await self.pick_series(interaction)
+
+    def member_opts(self, ico) -> list[Opt]:
+        key = self.draft["series"]
+        rows = sorted((m for m in self.reg.members.values() if not m.test and m.active()), key=lambda m: m.display_name.lower())
+        out = []
+        for m in rows:
+            on = next((c for c in m.active() if key in c.rosters), None)
+            main = m.main or m.active()[0]
+            out.append(Opt(str(m.discord_id), m.display_name[:100], (f"regular as {on.label}" if on else f"{main.label} · {main.cls} {main.spec}")[:100],
+                           emoji=ico("class", main.cls) if ico else None))
+        return out
+
+    async def pick_member(self, interaction: discord.Interaction) -> None:
+        opts = self.member_opts(_ico(interaction))
+        if not opts:
+            await self.finish(interaction, "Nobody has registered a character yet.")
+            return
+        items = self.paged("Pick the member", opts, self.page, self.member_picked, self.to_page(self.pick_member))
+        back = self.back_to_series()
+        await self.show(interaction, f"Who becomes a regular of **{self.label()}**?", *items, *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
+
+    async def member_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.member_id = int(values[0])
+        await self.after_member(interaction)
+
+    async def after_member(self, interaction: discord.Interaction) -> None:
+        m = self.member()
+        chars = sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower())) if m else []
+        if not chars:
+            await self.refuse(interaction, "They have no registered characters any more.", self.pick_series, "Start over")
+            return
         if len(chars) == 1:
-            await self.char_picked(interaction, [str(chars[0][0])])
+            await self.char_picked(interaction, [chars[0].label])
             return
         self.draft["many_chars"] = True
-        m = self.member()
-        main_idx = next((i for i, c in chars if c is m.main), None)
-        items = [self.select("Pick the character", self.char_opts(chars, _ico(interaction), self.draft.get("idx", main_idx)), self.char_picked),
-                 self.button(f"Their main ({m.main.label})" if m.main else "Their main", self.main_picked, discord.ButtonStyle.primary, disabled=main_idx is None)]
-        if self.draft.get("many_rosters"):
-            items.append(self.button("Back", self.pick_roster))
-        items.append(self.button("Cancel", self.cancel))
-        await self.show(interaction, f"Which of {self.member_name}'s characters raids on **{roster_name(self.reg, self.draft['roster'])}**? Usually the main.", *items)
+        ico = _ico(interaction)
+        opts = [Opt(c.label, c.label, _char_desc(c), emoji=ico("class", c.cls) if ico else None, default=c.label == self.draft.get("char")) for c in chars][:MAX_OPTIONS]
+        items = [self.select("Pick the character", opts, self.char_picked)]
+        if m.main:
+            items.append(self.button(f"Their main ({m.main.label})", self._main, discord.ButtonStyle.primary))
+        back = self.pick_member if not self.preset else self.back_to_series()
+        await self.show(interaction, f"Which of {m.display_name}'s characters raids on **{self.label()}**? Usually the main.",
+                        *items, *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
 
-    async def main_picked(self, interaction: discord.Interaction) -> None:
-        m = self.member()
-        idx = next(i for i, c in enumerate(m.characters) if c is m.main)
-        await self.char_picked(interaction, [str(idx)])
+    async def _main(self, interaction: discord.Interaction) -> None:
+        await self.char_picked(interaction, [self.member().main.label])
 
     async def char_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        idx = int(values[0])
         m = self.member()
-        c = m.characters[idx]
-        key = self.draft["roster"]
-        self.draft.update(idx=idx, label=c.label)
-        name = roster_name(self.reg, key)
-        back = self.pick_char if self.draft.get("many_chars") else (self.pick_roster if self.draft.get("many_rosters") else None)
-        if key in c.rosters:
-            items = [self.button("Back", back)] if back else []
-            await self.show(interaction, f"**{c.label}** is already on **{name}** — nothing to add.", *items, self.button("Cancel", self.cancel))
+        c = next((x for x in m.active() if x.label == values[0]), None) if m else None
+        if c is None:
+            await self.refuse(interaction, f"{values[0]} is no longer registered to them.", self.pick_series, "Start over")
             return
-        lines = [f"Add **{c.label}** · {c.cls} {c.spec} ({self.member_name}) to **{name}**?"]
+        self.draft["char"] = c.label
+        key = self.draft["series"]
+        back = self.after_member if self.draft.get("many_chars") else (self.pick_member if not self.preset else self.back_to_series())
+        if key in c.rosters:
+            await self.show(interaction, f"**{c.label}** is already a regular of **{self.label()}** — nothing to add.",
+                            *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
+            return
+        lines = [f"Make **{c.label}** · {c.cls} {c.spec} ({m.display_name}) a regular of **{self.label()}**?",
+                 "-# Regulars are expected on every sheet of it: officers see who hasn't answered, the reminder goes to them, and they're seated ahead of others at lock. Nothing is answered for them."]
         other = next((x for x in m.active() if x is not c and key in x.rosters), None)
         if other:
-            lines.append(f"-# One character per member per roster: this replaces **{other.label}** there.")
-        items = [self.button("Confirm", self.save, discord.ButtonStyle.success)]
-        if back:
-            items.append(self.button("Back", back))
-        items.append(self.button("Cancel", self.cancel))
-        await self.show(interaction, "\n".join(lines), *items)
+            lines.append(f"-# One character per member per schedule: this replaces **{other.label}** there.")
+        rid = key.partition(":")[0]
+        twin = [k for k in c.rosters if k != key and k.partition(":")[0] == rid]
+        if twin:
+            lines.append(f"-# ⚠️ {c.label} is also a regular of {', '.join(self.reg.series_label(k) for k in twin)} — the same raid, so the same lockout.")
+        await self.show(interaction, "\n".join(lines), self.button("Confirm", self.save, discord.ButtonStyle.success),
+                        *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
 
     async def save(self, interaction: discord.Interaction) -> None:
-        key, by = self.draft["roster"], interaction.user.display_name
-        try:
-            if key not in self.reg.config.roster_keys():
-                raise RegistryError(f"The roster {roster_name(self.reg, key)} is gone (the run ended or was cancelled).")
-            m, c = self.reread()
-            if key in c.rosters:
-                raise RegistryError(f"{c.label} is already on {roster_name(self.reg, key)}.")
-            self.check_unique_on_member(m, c)
-        except RegistryError as e:
-            await self.refuse(interaction, str(e), self.start, "Start over")
-            return
+        key, by = self.draft["series"], interaction.user.display_name
         await self.working(interaction, "Saving…")
         try:
-            m, c = self.reg.roster_add(self.member_id, key, by, c.label, display_name=self.member_name)
+            m, c, warn = self.reg.regular_add(self.member_id, key, by, self.draft["char"])
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), self.pick_series, "Start over")
+            return
+        await _emit(interaction, self.reg, f"{by} made {m.display_name} ({c.label}) a regular of {self.label()}")
+        n = len(self.reg.regulars(key))
+        await self.finish(interaction, f"✅ **{c.label}** ({m.display_name}) is a regular of **{self.label()}** ({n} regular{'s' if n != 1 else ''})."
+                          + "".join(f"\n-# ⚠️ {w}" for w in warn))
+
+
+class RegularRemoveWizard(RegularsWizard):
+    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User | None, *, self_service: bool = False):
+        super().__init__(reg, owner_id, member, title="Step down" if self_service else "Remove a regular")
+        self.self_service = self_service
+
+    def held(self) -> list[tuple[str, str]]:
+        """(series key, label) to pick from: the preset member's series (orphans included), else every series with regulars."""
+        m = self.member()
+        if self.preset:
+            return [(k, self.reg.series_label(k)) for k, _c in (self.reg.regular_series_of(m) if m else [])]
+        keys = {k for k, _l in self.reg.series("recurring") if self.reg.regulars(k)} | {k for k, _m, _c in self.reg.orphan_regulars()}
+        return [(k, self.reg.series_label(k)) for k in sorted(keys, key=lambda k: self.reg.series_label(k).lower())]
+
+    def series_opts(self) -> list[Opt]:
+        m = self.member()
+        on = dict(self.reg.regular_series_of(m)) if m else {}
+        return [Opt(k, label[:100], (f"as {on[k].label}" if k in on else f"{len(self.reg.roster_members(k))} regular(s)"), default=k == self.draft.get("series")) for k, label in self.held()]
+
+    async def start(self, interaction: discord.Interaction) -> None:
+        if not self.held():
+            who = "You aren't" if self.self_service else (f"{self.member().display_name} isn't" if self.member() else "Nobody is")
+            await self.finish(interaction, f"{who} a regular of any recurring raid — nothing to remove.")
+            return
+        await self.pick_series(interaction)
+
+    async def pick_member(self, interaction: discord.Interaction) -> None:
+        key = self.draft["series"]
+        ico = _ico(interaction)
+        opts = [Opt(str(m.discord_id), m.display_name[:100], f"{c.label} · {c.cls} {c.spec}"[:100], emoji=ico("class", c.cls) if ico else None)
+                for m, c in sorted(self.reg.roster_members(key), key=lambda mc: mc[0].display_name.lower())]
+        if not opts:
+            await self.refuse(interaction, f"{self.label()} has no regulars any more.", self.pick_series, "Start over")
+            return
+        back = self.back_to_series()
+        await self.show(interaction, f"Who comes off the regulars of **{self.label()}**?", *self.paged("Pick the regular", opts, self.page, self.member_picked, self.to_page(self.pick_member)),
+                        *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
+
+    async def member_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.member_id = int(values[0])
+        await self.after_member(interaction)
+
+    async def after_member(self, interaction: discord.Interaction) -> None:
+        m = self.member()
+        key = self.draft["series"]
+        c = next((x for x in (m.characters if m else []) if key in x.rosters), None)
+        back = self.pick_member if not self.preset else self.back_to_series()
+        who = "you" if self.self_service else m.display_name if m else "they"
+        text = (f"Step down from the regulars of **{self.label()}**" + (f" ({c.label})" if c else "") + "?\n-# You can still Join any sheet; you just won't be expected (or reminded) any more. To come back, ask an officer."
+                if self.self_service else
+                f"Take **{who}**" + (f" ({c.label})" if c else "") + f" off the regulars of **{self.label()}**?\n-# They can still Join any sheet; they're just not expected (or reminded) any more.")
+        await self.show(interaction, text, self.button("Step down" if self.self_service else "Confirm", self.save, discord.ButtonStyle.danger),
+                        *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
+
+    async def save(self, interaction: discord.Interaction) -> None:
+        key, by = self.draft["series"], interaction.user.display_name
+        await self.working(interaction, "Saving…")
+        try:
+            m = self.reg.regular_remove(self.member_id, key, by)  # raises when they're no longer on it
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.start, "Start over")
             return
-        name = roster_name(self.reg, key)
-        await _emit(interaction, self.reg, f"{by} added {m.display_name} ({c.label}) to roster {name}")
-        await self.finish(interaction, f"✅ **{c.label}** ({m.display_name}) → **{name}** ({len(self.reg.roster_members(key))} characters).")
+        await _emit(interaction, self.reg, f"{by}: {m.display_name} off the regulars of {self.label()}" + (" (stepped down)" if self.self_service else ""))
+        await self.finish(interaction, (f"✅ You stepped down from **{self.label()}**. You can still Join its sheets." if self.self_service
+                                        else f"✅ {m.display_name} is no longer a regular of **{self.label()}**. They can still Join its sheets."))
 
 
 @flow("roster_add")
-async def open_roster_add(interaction: discord.Interaction, reg: Registry, *, member: discord.abc.User) -> None:
+async def open_roster_add(interaction: discord.Interaction, reg: Registry, *, member: discord.abc.User | None = None) -> None:
     if await _stop_at_entry(interaction, reg):
         return
-    await RosterAddWizard(reg, interaction.user.id, member).start(interaction)
-
-
-# ---------------------------------------------------------------- /roster remove
-
-class RosterRemoveWizard(MemberWizard):
-    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User):
-        super().__init__(reg, owner_id, member, title="Remove from a roster")
-        self.page = 0
-
-    def on(self) -> list[tuple[str, str]]:
-        """(roster key, the character on it) for every roster the member is on."""
-        m = self.member()
-        out: dict[str, str] = {}
-        for c in (m.characters if m else []):
-            for k in c.rosters:
-                out.setdefault(k, c.label)
-        return sorted(out.items(), key=lambda kv: roster_name(self.reg, kv[0]).lower())
-
-    async def start(self, interaction: discord.Interaction) -> None:
-        on = self.on()
-        if not on:
-            await self.finish(interaction, f"{self.member_name} isn't on any roster — nothing to remove.")
-            return
-        self.draft["many"] = len(on) > 1
-        if len(on) == 1:
-            await self.roster_picked(interaction, [on[0][0]])
-            return
-        await self.pick_roster(interaction)
-
-    async def pick_roster(self, interaction: discord.Interaction) -> None:
-        opts = [Opt(k, roster_name(self.reg, k)[:100], f"as {label}") for k, label in self.on()]
-        await self.show(interaction, f"Which roster should {self.member_name} come off?",
-                        *self.paged("Pick the roster", opts, self.page, self.roster_picked, self.to_page),
-                        self.button("Cancel", self.cancel))
-
-    def to_page(self, page: int):
-        async def go(interaction: discord.Interaction) -> None:
-            self.page = page
-            await self.pick_roster(interaction)
-        return go
-
-    async def roster_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        key = values[0]
-        self.draft["roster"] = key
-        label = dict(self.on()).get(key, "?")
-        items = [self.button("Confirm", self.save, discord.ButtonStyle.danger)]
-        if self.draft.get("many"):
-            items.append(self.button("Back", self.pick_roster))
-        items.append(self.button("Cancel", self.cancel))
-        await self.show(interaction, f"Remove **{self.member_name}** ({label}) from **{roster_name(self.reg, key)}**?\n-# They can still sign up as a sub.", *items)
-
-    async def save(self, interaction: discord.Interaction) -> None:
-        key, by = self.draft["roster"], interaction.user.display_name
-        name = roster_name(self.reg, key)
-        await self.working(interaction, "Saving…")
-        try:
-            m = self.reg.roster_remove(self.member_id, key, by)  # raises on an unknown roster or a member not on it
-        except RegistryError as e:
-            await self.refuse(interaction, str(e), self.start, "Start over")
-            return
-        await _emit(interaction, self.reg, f"{by} removed {m.display_name} from roster {name}")
-        await self.finish(interaction, f"✅ {m.display_name} removed from **{name}**. They can still sign up as a sub.")
+    await RegularAddWizard(reg, interaction.user.id, member).start(interaction)
 
 
 @flow("roster_remove")
-async def open_roster_remove(interaction: discord.Interaction, reg: Registry, *, member: discord.abc.User) -> None:
+async def open_roster_remove(interaction: discord.Interaction, reg: Registry, *, member: discord.abc.User | None = None) -> None:
     if await _stop_at_entry(interaction, reg):
         return
-    await RosterRemoveWizard(reg, interaction.user.id, member).start(interaction)
+    await RegularRemoveWizard(reg, interaction.user.id, member).start(interaction)
 
 
-__all__ = ["ConfirmWizard", "RankWizard", "SetMainWizard", "RosterAddWizard", "RosterRemoveWizard", "confirm_pending_view", "roster_name",
-           "open_roster_confirm", "open_roster_rank", "open_roster_set_main", "open_roster_add", "open_roster_remove"]
+@flow("regular_step_down")
+async def open_regular_step_down(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """A member steps down from a series' regulars (D7) — /me view's Step down button. Self-service: no officer check."""
+    m = reg.members.get(interaction.user.id)
+    if m is None:
+        await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
+        return
+
+    class _Self(RegularRemoveWizard):
+        def __init__(self):
+            super().__init__(reg, interaction.user.id, interaction.user, self_service=True)
+            self.guard = None  # their own record: no officer check on the presses
+
+    await _Self().start(interaction)
+
+
+class RegularListWizard(RegularsWizard):
+    """/roster members: pick the schedule (only when several), then its regulars by role, one member per line."""
+
+    def __init__(self, reg: Registry, owner_id: int):
+        super().__init__(reg, owner_id, None, title="Regulars")
+
+    async def start(self, interaction: discord.Interaction) -> None:
+        self.preset = True  # no member step: the listing comes straight after the schedule
+        await self.pick_series(interaction)
+
+    async def after_member(self, interaction: discord.Interaction) -> None:
+        key = self.draft["series"]
+        ico = _ico(interaction)
+        regs = self.reg.regulars(key)
+        rid, sid = key.split(":", 1)
+        rd = self.reg.raid_def(rid)
+        if not regs:
+            text = (f"**{self.label()}** has no regulars yet — until it does, every registered main counts as expected on its sheets."
+                    "\n-# `/roster add` picks them (or the Rosters page).")
+        else:
+            by_role: dict[str, list[str]] = {}
+            for m, c in regs:
+                by_role.setdefault(self.reg.profile.spec(c.cls, c.spec).role, []).append(_spec_line(ico, c) + f" · {m.display_name}")
+            bounds = self.reg.role_bounds(rid, int(rd.get("size") or 20))
+            head = f"**{self.label()}** · {len(regs)} regular{'s' if len(regs) != 1 else ''} for {rd.get('size', '?')} seats"
+            counts = "   ".join(f"{(ico('role', r) if ico else r)} {len(by_role.get(r, []))}" + (f"/{bounds[r]['min']}" if r in ("tank", "healer") and bounds[r]["min"] else "") for r in ("tank", "healer", "melee", "ranged"))
+            lines = [head, counts] + [ln for r in ("tank", "healer", "melee", "ranged") for ln in by_role.get(r, [])]
+            text = "\n".join(lines)
+        back = self.back_to_series()
+        if back:
+            await self.show(interaction, text[:1900], self.button("Another schedule", back), self.button("Done", self.cancel))
+        else:
+            await self.finish(interaction, text[:1900])
+
+
+@flow("roster_members")
+async def open_roster_members(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """Read-only, open to members (help's MEMBER_PATHS lists it): the regulars of a schedule, by role."""
+    wiz = RegularListWizard(reg, interaction.user.id)
+    if not _is_officer(interaction, reg):
+        wiz.guard = None
+    await wiz.start(interaction)
+
+
+__all__ = ["ConfirmWizard", "RankWizard", "SetMainWizard", "RegularAddWizard", "RegularRemoveWizard", "RegularListWizard", "confirm_pending_view", "roster_name",
+           "open_roster_confirm", "open_roster_rank", "open_roster_set_main", "open_roster_add", "open_roster_remove", "open_roster_members", "open_regular_step_down"]

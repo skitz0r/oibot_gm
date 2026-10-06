@@ -179,8 +179,9 @@ class RaidMixin:
                     rs.save(ev, f"{m.display_name} rostered by {by}")
                     gi = next((k for k, g in enumerate(ev.all_rosters[i].groups) if m.display_name in g), 0)
                     sent = await self.confirm_one(reg, ev, s, i, gi, by)
-                    await self.post_run_update(reg, ev, f"✏️ {by} rostered {m.display_name} ({s.character})" + (" — asked to confirm" if sent else " — DMs off, the ask waits on the site" if m.dm_opt_out else ""))
-                    line = f"✅ {who}{s.character} rostered for {label}" + (" — asked to confirm by DM" if sent else " — DMs off: the confirmation waits on the site" if m.dm_opt_out else "")
+                    asks = rc.run_confirms(reg, ev)
+                    await self.post_run_update(reg, ev, f"✏️ {by} rostered {m.display_name} ({s.character})" + ("" if not asks else " — asked to confirm" if sent else " — DMs off, the ask waits on the site" if m.dm_opt_out else ""))
+                    line = f"✅ {who}{s.character} rostered for {label}" + ("" if not asks else " — asked to confirm by DM" if sent else " — DMs off: the confirmation waits on the site" if m.dm_opt_out else "")
             await self.refresh_sheet(reg, ev)
             await self.refresh_cards(reg, ev)
         else:  # sub after lock: the signup only; a rostered member keeps the seat until set out
@@ -218,15 +219,16 @@ class RaidMixin:
             await self.dm_on_open(reg, rs, ev, team)
 
     async def dm_on_open(self, reg, rs, ev, team) -> int:
-        """Optional per-run: DM every registered raider when the sheet opens, with the same buttons."""
+        """Optional per-run: DM everyone the sheet is for (rc.run_pool: the series' regulars, or every main) when it
+        opens, with the same buttons."""
         unix = int(ev.start.timestamp())
         _soft, hard, _confirm = run_times(reg, ev, team)
         sent = 0
-        for m in reg.team_pool(team["key"]):
+        for m, _c in rc.run_pool(reg, ev):
             if not m.main or m.dm_opt_out:
                 continue
             s = ev.signups.get(str(m.discord_id))
-            status = f"You're pre-filled as **{rc.LABELS.get(s.status, s.status)}** on {s.character}" if s else "You haven't answered yet"
+            status = f"You're marked **{rc.LABELS.get(s.status, s.status)}** ({'away that day' if s.source == 'absence' else s.source})" if s else "You haven't answered yet"
             if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key), ev=ev):
                 sent += 1
         ev.log.append(f"open DMs sent to {sent}")
@@ -242,7 +244,9 @@ class RaidMixin:
             except Exception as e:  # noqa: BLE001
                 log.warning("health card failed (%s): %s", ev.key, e)
         if nudge and rc.team_setting(team, "reminders") != "none":
-            targets = [m for m in reg.team_pool(team["key"]) if m.main and str(m.discord_id) not in ev.signups and m.discord_id not in ev.nudged and not m.dm_opt_out]
+            # the expected who haven't answered: a recurring run's regulars (every main while the series has none);
+            # an ad hoc run expects nobody (and its reminder is off by default)
+            targets = [m for m, _c in rc.not_answered(reg, ev) if m.discord_id not in ev.nudged and not m.dm_opt_out]
             _soft, hard, _confirm = run_times(reg, ev, team)
             for m in targets:  # same buttons as the sheet (and the open DM), so they can answer right here
                 if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key), ev=ev):
@@ -395,9 +399,10 @@ class RaidMixin:
             if ev.state != "open":  # cancelled while the roster was being built
                 raise RegistryError(f"{ev.key} was {ev.state} before the roster was ready — not locked")
             _, _, confirm = run_times(reg, ev, team)
+            confirms = rc.run_confirms(reg, ev)  # off (ad hoc): no confirmation DMs and no deadline — no seat ever expires
             ev.rosters = trial.rosters
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
-            ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat(), None
+            ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
             ev.log.append(f"locked by {by}")
             rs.save(ev, f"locked by {by}")
         await self.refresh_sheet(reg, ev)
@@ -412,11 +417,13 @@ class RaidMixin:
             rs.save(ev, "lock cards")
         else:
             await self.ops.emit(reg.config, "warn", f"{ev.key}: no roster/ops channel set — lock cards not posted")
-        sent = await self.send_confirmations(reg, rs, ev, team, by)
+        sent = await self.send_confirmations(reg, rs, ev, team, by) if confirms else 0
         sig = self.get_channel(ev.channel_id) if ev.channel_id else None
         if sig and sig is not ch:
+            then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
+                    else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
             try:
-                await sig.send(f"🔒 {run_label(reg, ev)} is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + ". Rostered? confirm in your DMs. Not rostered? nothing to do.", allowed_mentions=discord.AllowedMentions.none())
+                await sig.send(f"🔒 {run_label(reg, ev)} is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
             except Exception as e:  # noqa: BLE001
                 log.warning("lock line failed (%s): %s", ev.key, e)
         return f"{ev.key}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)"
@@ -426,7 +433,7 @@ class RaidMixin:
         Me page (channel "web"). Never auto-confirmed: the tally counts them as waiting until they answer, and an
         unanswered ask expires like any other. Returns True when a DM went out."""
         m = reg.members.get(sg.discord_id)
-        if not m:
+        if not m or not rc.run_confirms(reg, ev):  # confirmations off (ad hoc, D5): Join is the commitment, nothing to ask
             return False
         # the seat itself is in the run file (ev.rosters); the member file only gets the confirmation ask
         reg.add_placement_ask(m.discord_id, ev.team, sg.character, by, channel="web" if m.dm_opt_out else "dm")
@@ -667,8 +674,9 @@ class RaidMixin:
             if ev.state != "open" and ev.seat_of(m.display_name):
                 await self.drop_seated(reg, rs, ev, team, m, "absence", None)
             elif not sg or sg.status != "out":
-                if m.main:
-                    rc.set_signup(reg, rs, ev, m, None, "out", source="absence")
+                c = rc.expected_character(reg, ev, m)  # a regular is marked away on their regular character
+                if c:
+                    rc.set_signup(reg, rs, ev, m, c.label, "out", source="absence")
                     await self.refresh_sheet(reg, ev)
             touched.append(ev.key)
         return touched

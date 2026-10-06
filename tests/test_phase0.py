@@ -52,12 +52,10 @@ def test_single_field_path_still_checks_the_whole(reg):
 
 def test_roster_remove_refuses_unknown_roster_and_non_members(reg):
     m = reg.test_members()[0]
-    with pytest.raises(RegistryError, match="No roster called"):
+    with pytest.raises(RegistryError, match="isn't a regular"):
         reg.roster_remove(m.discord_id, "no-such-roster", "t")
-    key = reg.config.roster_keys()[0] if reg.config.roster_keys() else None
-    if key:
-        with pytest.raises(RegistryError, match="isn't on"):
-            reg.roster_remove(m.discord_id, key, "t")
+    with pytest.raises(RegistryError, match="isn't a regular"):
+        reg.roster_remove(m.discord_id, "barrow_deeps:default", "t")
 
 
 # ---- an absence is the same day however it is written

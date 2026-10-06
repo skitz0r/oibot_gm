@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo, available_timezones
 import discord
 
 from .presets import PRESETS  # (key, name, opens, nudge, lock, confirm), shared with plain text
-from .registry import (CLOCK12, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
+from .registry import (ADHOC_DEFAULTS, CLOCK12, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
                        RegistryError, parse_slots, schedule_def_of, schedule_value, schedules_of)
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, hour_opts, minute_opts, week_opts, when_fields, when_note
 
@@ -119,9 +119,9 @@ CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "conf
 ROLES = ("tank", "healer", "dps")
 ROLE_WORDS = {"tank": "tanks", "healer": "healers", "dps": "dps"}
 WEIGHTS = tuple(RAID_WEIGHT_DEFAULTS)
-WEIGHT_LABEL = {"rank": "Rank", "main": "Main over alt", "sat_out": "Sat out last time", "signup_order": "Signed up early"}
+WEIGHT_LABEL = {"rank": "Rank", "main": "Main over alt", "sat_out": "Sat out last time", "signup_order": "Signed up early", "regular": "Regular of the series"}
 WEIGHT_HINT = {"rank": "core > raider > trial", "main": "a main is picked over an alt", "sat_out": "benched in the last lockout",
-               "signup_order": "an earlier signup"}  # the Raids page's WEIGHT_HINT, in words
+               "signup_order": "an earlier signup", "regular": "being one of the series' regulars (on their regular character)"}  # the Raids page's WEIGHT_HINT, in words
 WEIGHT_WORDS = {0: "doesn't count", 1: "a little", 2: "some", 3: "a lot", 4: "more", 5: "the most"}
 SPLIT_WORDS = {"balanced": ("Balanced", "both runs equal in synergy, tanks, healers and seats"),
                "first": ("Raid one first", "roster 1 gets the best, roster 2 the rest"),
@@ -583,10 +583,12 @@ class RaidConfigWizard(OwnerWizard):
         sd = schedule_def_of(self.sview(), self.sid)
         own, view = sd["schedule"]["own"], self.sview()
         lines = [note] if note else []
-        lines.append(f"**{sd['schedule']['name']}** · behaviour — pick one to change; “the raid's” follows the raid's own setting.")
+        adhoc = sd.get("class") == "adhoc"  # a pickup template inherits the ad hoc defaults, not the raid's cadence
+        lines.append(f"**{sd['schedule']['name']}** · behaviour — pick one to change; " + ("“default” follows the ad hoc defaults (no reminder, no confirmations, first come)." if adhoc else "“the raid's” follows the raid's own setting."))
+        base = {**view, **ADHOC_DEFAULTS} if adhoc else view
         items: list = []
         for f, w in BOOL_WORDS.items():
-            opts = [Opt("inherit", f"{w}: the raid's ({'on' if view[f] else 'off'})", default=f not in own),
+            opts = [Opt("inherit", f"{w}: {'default' if adhoc else 'the raid’s'} ({'on' if base[f] else 'off'})", default=f not in own),
                     Opt("on", f"{w}: on", default=own.get(f) is True), Opt("off", f"{w}: off", default=own.get(f) is False)]
             items.append(self.select(w, opts, self._behaviour_setter(f)))
         split = [Opt("inherit", f"Split: the raid's ({SPLIT_WORDS.get(view.get('split_policy') or 'balanced', ('?',))[0]})", default="split_policy" not in own)]
@@ -821,7 +823,7 @@ class RaidConfigWizard(OwnerWizard):
         fields = []
         for k in WEIGHTS:
             cur = int(self.cur(f"weight_{k}"))
-            vals = sorted(set(range(6)) | {cur})
+            vals = sorted(set(range(7)) | {cur})
             fields.append(Field(k, WEIGHT_LABEL[k], [Opt(str(n), f"{n} · {WEIGHT_WORDS.get(n, 'even more')}", default=n == cur) for n in vals],
                                 description=f"how much {WEIGHT_HINT[k]} counts when seats are short"))
         await self.open_form(i, Form("Selection weights", fields, self.weights_submitted))

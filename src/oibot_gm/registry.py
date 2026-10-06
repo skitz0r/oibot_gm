@@ -247,7 +247,9 @@ class GuildConfig(BaseModel):
 
     # canonical names
     def roster_keys(self) -> list[str]:
-        return [t["key"] for t in self.rosters] or ["main"]
+        """The per-run roster dicts' keys (live runs). No "main" fallback any more: regular rosters are series keys
+        (Registry.series), never a config roster."""
+        return [t["key"] for t in self.rosters]
 
     def roster(self, key: str) -> Optional[dict]:
         return next((t for t in self.rosters if t["key"] == key), None)
@@ -282,12 +284,26 @@ def recent_changes(guild_key: str | None = None, limit: int = 50) -> list[dict]:
     In memory only (since the bot started); the data repo's git log is the full audit trail."""
     rows = [r for r in reversed(RECENT_CHANGES) if guild_key is None or r[0] == guild_key]
     return [{"time": t, "kind": k, "text": text} for _, t, k, text in rows[:max(0, int(limit))]]
-RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1}
+# seat weights at lock (raidcycle.seat_bonus). `regular`: a regular of the run's series signed with their regular character
+# (roster redesign D9: a weight worth more than one rank step — the rank term moves in steps of `rank` = 3 — so a strong
+# outsider can still win a role seat, but between equals the regular sits)
+RAID_WEIGHT_DEFAULTS = {"rank": 3, "main": 2, "sat_out": 2, "signup_order": 1, "regular": 4}
 RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_before", "nudge_hours_before", "fill_ask_hours")
-RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm")  # true/false raid settings (command + API layers parse them the same way)
+# true/false raid settings (command + API layers parse them the same way). `confirm`: the lock asks everyone rostered to
+# Confirm / Can't make it (off: Join is the commitment, nobody is asked and no seat expires — the ad hoc default, D5)
+RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm", "confirm")
 # effective defaults under profiles/<game>/raids.yaml and guild overrides (nudge_hours_before is derived: halfway between open and lock)
 RAID_DEFAULTS = {"lockout_days": 7, "duration_hours": 3, "signup_lead_hours": 120, "lock_hours_before": 24, "confirm_hours_before": 6,
-                 "split_policy": "balanced", "nudge": True, "fill_ask_hours": 4, "autofill": True, "open_dm": False}
+                 "split_policy": "balanced", "nudge": True, "fill_ask_hours": 4, "autofill": True, "open_dm": False, "confirm": True}
+# ---- ad hoc (roster redesign §2, D4/D5/D17): a pickup template or a one-off run takes the raid's IDENTITY (size, comp,
+# lockout, duration, first opening) but none of its recurring timing — Barrow Deeps' 24 h lock and 36 h reminder are
+# Tuesday decisions. These are guild habits, not game data, so they live here next to RAID_DEFAULTS (not in profiles/).
+# No reminder, no open DM, no confirmations, lock 2 h before, fill asks 1 h, first come first seated (signup order is
+# the weight that counts; seat_bonus reads it per position for an ad hoc run).
+ADHOC_DEFAULTS = {"signup_lead_hours": 168, "nudge_hours_before": 3, "lock_hours_before": 2, "confirm_hours_before": 1, "fill_ask_hours": 1,
+                  "nudge": False, "open_dm": False, "confirm": False, "autofill": True, "split_policy": "balanced"}
+ADHOC_WEIGHTS = {"rank": 0, "main": 1, "sat_out": 0, "signup_order": 6, "regular": 0}
+RAID_IDENTITY = ("name", "size", "comp", "lockout_days", "duration_hours", "first_open", "notes", "comp_targets", "comp_groups", "slots", "schedules")
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
 CLOCK12 = "%a %d %b %I:%M %p"  # the one human-facing clock format; %H:%M is for machines
 TRUE_WORDS = ("true", "yes", "on", "1")
@@ -330,11 +346,42 @@ def parse_slots(text) -> list[str]:
 DEFAULT_SCHEDULE = "default"
 SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of each lockout · a template opened on demand
 SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
-                    "nudge", "autofill", "open_dm", "split_policy")  # unset = the raid's value
-SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters") + SCHEDULE_CADENCE
+                    "nudge", "autofill", "open_dm", "confirm", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
+# `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
+SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights") + SCHEDULE_CADENCE
 MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
 SCHEDULE_NAMES = {"weekly": "Weekly", "lockout": "Lockout days", "pickup": "Pickup"}
-DEFAULT_SCHEDULE_NAME = "Regular nights"
+DEFAULT_SCHEDULE_NAME = "Raid nights"  # D10: members see "regulars", so the raid's own run times are no longer "Regular nights"
+# ---- classes (roster redesign §2): derived from the kind, never set by hand. Recurring = weekly or lockout (opens on its
+# own, has REGULARS, counts toward fairness); ad hoc = a pickup template or a one-off run (opened by an officer at a
+# picked time, no regulars, first come, ADHOC_DEFAULTS).
+SCHEDULE_CLASS = {"weekly": "recurring", "lockout": "recurring", "pickup": "adhoc"}
+CLASSES = ("recurring", "adhoc")
+CLASS_WORDS = {"recurring": "Recurring", "adhoc": "Ad hoc"}
+# A one-off run ("Another day and time…", a picked time that is none of the upcoming runs) comes from this VIRTUAL schedule:
+# schedule_def_of knows it (ad hoc defaults), schedules_of never lists it (listings, wizards, the config dump don't change),
+# and run_key gives it the '-adhoc' suffix, so a one-off is never mistaken for a run of the raid's own run times.
+ADHOC_SCHEDULE = "adhoc"
+ADHOC_SCHEDULE_NAME = "Ad hoc"
+
+
+def schedule_class(kind: str | None) -> str:
+    """'recurring' | 'adhoc' for a schedule kind (weekly / lockout → recurring, pickup → ad hoc)."""
+    return SCHEDULE_CLASS.get(kind or "weekly", "recurring")
+
+
+def series_key(instance: str, sid: str | None) -> str:
+    """A recurring series' key: '<raid id>:<schedule id>' — what RegisteredCharacter.rosters (regulars), Applicant.schedules
+    and wizard_opts.schedules store. Run keys never contain ':', so the two key spaces can't collide."""
+    return f"{instance}:{sid or DEFAULT_SCHEDULE}"
+
+
+def parse_series(key: str) -> tuple[str, str]:
+    """'<raid id>:<schedule id>' → (raid id, schedule id)."""
+    rid, sep, sid = str(key or "").partition(":")
+    if not sep or not rid or not sid:
+        raise RegistryError(f"{key or '?'} isn't a series (raid:schedule)")
+    return rid, sid
 INHERIT_WORDS = ("", "inherit", "raid", "default", "same", "clear", "none")  # a cadence override set to one of these goes back to the raid's
 _SCHED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?\s*(am|pm)?$", re.I)  # a picker may add :ss
@@ -372,6 +419,8 @@ def schedule_value(field: str, value):
     """One schedule setting, validated and in its stored form. None = not set (a cadence field then inherits the raid's)."""
     if field in SCHEDULE_CADENCE and (value is None or str(value).strip().lower() in INHERIT_WORDS):
         return None
+    if field == "weights":
+        return schedule_weights(value)
     if field == "name":
         return str(value or "").strip()[:40] or None
     if field == "kind":
@@ -411,6 +460,41 @@ def schedule_value(field: str, value):
     raise RegistryError(f"unknown schedule setting {field} (one of {', '.join(SCHEDULE_FIELDS)})")
 
 
+def schedule_weights(value) -> dict | None:
+    """A schedule's own seat weights: a partial {rank, main, sat_out, signup_order, regular} map of whole numbers ≥ 0
+    (a key set to 'inherit' / None / '' drops out and follows the raid's — or, ad hoc, ADHOC_WEIGHTS). Text like
+    'regular 6, rank 0' works too. None = nothing of its own."""
+    if value is None or (isinstance(value, str) and value.strip().lower() in INHERIT_WORDS):
+        return None
+    if isinstance(value, str):
+        pairs = {}
+        for part in value.replace(";", ",").split(","):
+            bits = part.replace("=", " ").replace(":", " ").split()
+            if not bits:
+                continue
+            if len(bits) != 2:
+                raise RegistryError(f"weights look like 'regular 6, rank 0' (got {part.strip()!r})")
+            pairs[bits[0]] = bits[1]
+        value = pairs
+    if not isinstance(value, dict):
+        raise RegistryError("weights is a map of seat weights, e.g. {regular: 6, rank: 0}")
+    out = {}
+    for k, v in value.items():
+        k = str(k).strip().lower().removeprefix("weight_")
+        if k not in RAID_WEIGHT_DEFAULTS:
+            raise RegistryError(f"unknown seat weight {k} (one of {', '.join(RAID_WEIGHT_DEFAULTS)})")
+        if v is None or str(v).strip().lower() in INHERIT_WORDS:
+            continue
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            raise RegistryError(f"weight {k} must be a whole number")
+        if n < 0:
+            raise RegistryError(f"weight {k} can't be negative")
+        out[k] = n
+    return out or None
+
+
 def norm_schedule(row: dict) -> dict:
     """A stored schedule entry, validated: id + only the settings that are set. The ordering rules that need the raid
     (cadence, lockout days, slots) are Registry._check_raid's, on the merged result."""
@@ -426,6 +510,8 @@ def norm_schedule(row: dict) -> dict:
         nv = schedule_value(k, v)
         if nv is not None and not ((k == "active" and nv is True) or (k == "rosters" and nv == 1)):  # the defaults aren't stored
             out[k] = nv
+    if sid == ADHOC_SCHEDULE:
+        raise RegistryError(f"schedule id {ADHOC_SCHEDULE!r} is kept for one-off runs; pick another id")
     if sid == DEFAULT_SCHEDULE:
         if out.pop("kind", "weekly") != "weekly":
             raise RegistryError("the default schedule is the raid's own weekly run times; add another schedule for other kinds")
@@ -454,21 +540,45 @@ def schedules_of(rd: dict) -> list[dict]:
 
 def schedule_def_of(rd: dict, sid: str | None) -> dict:
     """The raid definition as one schedule sees it: the raid's fields with the schedule's cadence overrides on top, and
-    the schedule itself under "schedule" (its overrides under "schedule"]["own"]). A schedule that moves the opening or
-    the lock without its own nudge gets the nudge halfway again. None / "" / "default" = the raid's own cadence."""
+    the schedule itself under "schedule" (its overrides under ["schedule"]["own"], where each cadence value comes from
+    under ["schedule"]["source"]: own | raid | adhoc). A schedule that moves the opening or the lock without its own
+    nudge gets the nudge halfway again. None / "" / "default" = the raid's own cadence.
+    The CLASS follows the kind (eff["class"]): a recurring schedule resolves own → the raid's (profile + guild override →
+    RAID_DEFAULTS) as before; an ad hoc one (a pickup template, or ADHOC_SCHEDULE = a one-off) resolves own →
+    ADHOC_DEFAULTS, and takes only the raid's identity (size, comp, lockout, duration, first opening) — never its
+    recurring timing. Weights merge per key the same way (raid weights, or ADHOC_WEIGHTS, then the schedule's own)."""
     sid = sid or DEFAULT_SCHEDULE
     s = next((x for x in schedules_of(rd) if x["id"] == sid), None)
     if s is None:
-        if sid != DEFAULT_SCHEDULE:
+        if sid == ADHOC_SCHEDULE:
+            s = {"id": ADHOC_SCHEDULE, "name": ADHOC_SCHEDULE_NAME, "kind": "pickup", "active": True, "rosters": 1, "slots": [], "days": [], "time": None, "virtual": True}
+        elif sid != DEFAULT_SCHEDULE:
             raise RegistryError(f"no schedule {sid} on {rd.get('name', 'this raid')}")
-        s = {"id": DEFAULT_SCHEDULE, "name": DEFAULT_SCHEDULE_NAME, "kind": "weekly", "active": True, "rosters": 1, "slots": list(rd.get("slots") or []), "days": [], "time": None}
+        else:
+            s = {"id": DEFAULT_SCHEDULE, "name": DEFAULT_SCHEDULE_NAME, "kind": "weekly", "active": True, "rosters": 1, "slots": list(rd.get("slots") or []), "days": [], "time": None}
+    cls = schedule_class(s.get("kind"))
     own = {k: s[k] for k in SCHEDULE_CADENCE if s.get(k) is not None}
-    eff = {**rd, **own}
+    own_w = dict(s.get("weights") or {})
+    if cls == "adhoc":
+        eff = {**rd, **ADHOC_DEFAULTS, **own}
+        base_w, inherited = ADHOC_WEIGHTS, "adhoc"
+    else:
+        eff = {**rd, **own}
+        base_w, inherited = dict(rd.get("weights") or RAID_WEIGHT_DEFAULTS), "raid"
+    for k, v in RAID_DEFAULTS.items():  # a hand-built rd (a wizard's draft) may lack a newer default
+        eff.setdefault(k, v)
     if "nudge_hours_before" not in own and ("signup_lead_hours" in own or "lock_hours_before" in own):
-        eff["nudge_hours_before"] = default_nudge_hours(eff["signup_lead_hours"], eff["lock_hours_before"])
+        if cls == "adhoc":  # ad hoc: the officer card an hour before the lock (never past the opening)
+            eff["nudge_hours_before"] = min(float(eff["lock_hours_before"]) + 1, float(eff["signup_lead_hours"]))
+        else:
+            eff["nudge_hours_before"] = default_nudge_hours(eff["signup_lead_hours"], eff["lock_hours_before"])
     for k in RAID_BOOL_FIELDS:
         eff[k] = parse_bool(eff[k])
-    eff["schedule"] = {**s, "own": own}
+    eff["weights"] = {**RAID_WEIGHT_DEFAULTS, **base_w, **own_w}
+    eff["class"] = cls
+    source = {k: ("own" if k in own else inherited) for k in SCHEDULE_CADENCE}
+    source["weights"] = {k: ("own" if k in own_w else inherited) for k in RAID_WEIGHT_DEFAULTS}
+    eff["schedule"] = {**s, "own": own, "own_weights": own_w, "class": cls, "source": source}
     return eff
 
 
@@ -1180,6 +1290,15 @@ class Registry:
             if entry is None:
                 entry = {"id": sid}
                 stored.append(entry)
+            if f == "weights" and isinstance(v, dict):  # per key: a key set to inherit / None drops back to the default
+                cur = dict(entry.get("weights") or {})
+                for k, val in v.items():
+                    k = str(k).strip().lower().removeprefix("weight_")
+                    if val is None or str(val).strip().lower() in INHERIT_WORDS:
+                        cur.pop(k, None)
+                    else:
+                        cur.update(schedule_weights({k: val}) or {})
+                v = cur or None
             nv = schedule_value(f, v)
             if nv is None:
                 entry.pop(f, None)
@@ -1937,35 +2056,100 @@ class Registry:
         m, c, old = self.set_main(discord_id, name)
         return m, c, old
 
-    # ---- roster membership (curated, per character)
-    def roster_add(self, discord_id: int, roster: str, by: str, character: str | None = None, display_name: str | None = None) -> tuple[Member, RegisteredCharacter]:
-        if roster not in self.config.roster_keys():
-            raise RegistryError(f"Unknown roster {roster}. Rosters: {', '.join(self.config.roster_keys())}.")
-        m = self.member(discord_id, display_name, create=display_name is not None)
+    # ---- regulars (roster redesign Phase 1): officer-curated, per recurring SERIES "<raid>:<schedule>", one character per
+    # member per series, stored on the character (RegisteredCharacter.rosters). Regulars are expected on every sheet of the
+    # series (officers see who hasn't answered; the nudge goes to them), weigh more at lock, and are asked first by the
+    # fill engine. Nothing is pre-filled (owner decision D1): a regular starts unanswered like everyone else.
+    def series(self, cls: str | None = "recurring") -> list[tuple[str, str]]:
+        """(series key, label) for every schedule of every raid of class `cls` (None = all), in profile order:
+        ('barrow_deeps:default', 'Barrow Deeps · Raid nights'). Paused schedules are included (they keep their regulars)."""
+        out = []
+        for rid in self.profile.raids:
+            name = self.raid_def(rid).get("name", rid)
+            for s in self.schedules(rid):
+                if cls is None or schedule_class(s["kind"]) == cls:
+                    out.append((series_key(rid, s["id"]), f"{name} · {s.get('name') or s['id']}"))
+        return out
+
+    def series_label(self, key: str) -> str:
+        """A series key as a person reads it ('Barrow Deeps · Raid nights'); a removed schedule reads as its raid + id."""
+        hit = next((label for k, label in self.series(None) if k == key), None)
+        if hit:
+            return hit
+        rid, _, sid = str(key).partition(":")
+        return f"{self.raid_def(rid).get('name', rid) if rid in self.profile.raids else rid} · {sid} (removed schedule)"
+
+    def _recurring_series(self, key: str) -> str:
+        key = str(key or "").strip()
+        known = dict(self.series("recurring"))
+        if key not in known:
+            if key in dict(self.series("adhoc")):
+                raise RegistryError(f"{self.series_label(key)} is ad hoc (a pickup template): ad hoc runs have no regulars — first come, first rostered")
+            raise RegistryError(f"no recurring schedule {key or '?'}" + (f" (recurring: {', '.join(known.values())})" if known else " — add a weekly or lockout schedule first"))
+        return key
+
+    def regulars(self, key: str) -> list[tuple[Member, RegisteredCharacter]]:
+        """The series' regulars with the character each raids on (active characters only: a retired one drops off),
+        real members only (test puppets are never regulars), by display name."""
+        out = [(m, c) for m in self.members.values() if not m.test for c in m.active() if key in c.rosters]
+        return sorted(out, key=lambda mc: mc[0].display_name.lower())
+
+    def regular_series_of(self, m: Member) -> list[tuple[str, RegisteredCharacter]]:
+        """(series key, character) for every series `m` is a regular on (orphans of a removed schedule included)."""
+        return [(k, c) for c in m.active() for k in c.rosters if ":" in k]
+
+    def regular_add(self, discord_id: int, key: str, by: str, character: str | None = None) -> tuple[Member, RegisteredCharacter, list[str]]:
+        """Make a member a regular of a recurring series with one of their characters (default the main). One character
+        per member per series: picking another replaces it. Returns (member, character, warnings) — D15: the same
+        character as a regular on another series of the same raid is allowed with a warning (one lockout, one save)."""
+        key = self._recurring_series(key)
+        m = self.members.get(discord_id)
+        if m is None or not m.active():
+            raise RegistryError("they have no registered characters yet — they register first")
+        if m.test:
+            raise RegistryError(f"{m.display_name} is a test puppet: a test run treats every puppet as a regular already")
         c = next((c for c in m.active() if c.matches(character)), None) if character else m.main
         if not c:
-            raise RegistryError(f"{m.display_name} has no {'character named ' + character if character else 'main'} yet.")
-        for other in m.active():  # one character per member per roster
-            if other is not c and roster in other.rosters:
-                other.rosters.remove(roster)
-        if roster not in c.rosters:
-            c.rosters.append(roster)
-            self.save(m, f"{by} added {m.display_name} ({c.label}) to roster {roster}")
+            raise RegistryError(f"{m.display_name} has no {'character named ' + character if character else 'main'} yet")
+        before = next((x for x in m.active() if key in x.rosters), None)
+        if before is c:
+            raise RegistryError(f"{c.label} is already a regular on {self.series_label(key)}")
+        for other in m.active():
+            if key in other.rosters:
+                other.rosters.remove(key)
+        c.rosters.append(key)
+        rid = key.partition(":")[0]
+        warn = [f"{c.label} is also a regular on {self.series_label(k)} — the same raid's lockout: one save covers both nights"
+                for k in c.rosters if k != key and k.partition(":")[0] == rid]
+        self.save(m, f"{by}: {m.display_name} ({c.label}) regular on {key}" + (f" (was {before.label})" if before else ""))
+        return m, c, warn
+
+    def regular_remove(self, discord_id: int, key: str, by: str) -> Member:
+        """Take a member off a series' regulars (an officer, or the member stepping down). Works on any series key they
+        hold — a removed schedule's leftovers too (the Rosters page lists those as orphaned)."""
+        m = self.members.get(discord_id)
+        key = str(key or "").strip()
+        hit = [c for c in (m.characters if m else []) if key in c.rosters]
+        if not hit:
+            raise RegistryError(f"{m.display_name if m else 'they'} isn't a regular on {self.series_label(key) if ':' in key else key or '?'}")
+        for c in hit:
+            c.rosters.remove(key)
+        self.save(m, f"{by}: {m.display_name} off the regulars of {key}")
+        return m
+
+    # older names (Discord wizards before Phase 1, tests): the same verbs on series keys
+    def roster_add(self, discord_id: int, roster: str, by: str, character: str | None = None, display_name: str | None = None) -> tuple[Member, RegisteredCharacter]:
+        m, c, _warn = self.regular_add(discord_id, roster, by, character)
         return m, c
 
     def roster_remove(self, discord_id: int, roster: str, by: str) -> Member:
-        if roster not in self.config.roster_keys():
-            raise RegistryError(f"No roster called {roster}.")
-        m = self.member(discord_id)
-        changed = False
-        for c in m.characters:
-            if roster in c.rosters:
-                c.rosters.remove(roster)
-                changed = True
-        if not changed:
-            raise RegistryError(f"{m.display_name} isn't on {roster}.")
-        self.save(m, f"{by} removed {m.display_name} from roster {roster}")
-        return m
+        return self.regular_remove(discord_id, roster, by)
+
+    def orphan_regulars(self) -> list[tuple[str, Member, RegisteredCharacter]]:
+        """(key, member, character) for every regular of a series whose schedule no longer exists (or is ad hoc now):
+        never stripped silently — the Rosters page lists them with a remove button."""
+        known = dict(self.series("recurring"))
+        return [(k, m, c) for m in self.members.values() for c in m.active() for k in c.rosters if ":" in k and k not in known]
 
     def migrate_rosters_to_series(self, by: str = "migrate", dry_run: bool = False) -> list[str]:
         """Roster redesign D11 (Phase 0): RegisteredCharacter.rosters keeps regular-series keys only
@@ -1991,29 +2175,8 @@ class Registry:
         return lines
 
     def roster_members(self, roster: str) -> list[tuple[Member, RegisteredCharacter]]:
-        out = []
-        for m in self.members.values():
-            for c in m.active():
-                if roster in c.rosters:
-                    out.append((m, c))
-        return out
-
-    def roster_pool(self, roster: str) -> list[tuple[Member, RegisteredCharacter]]:
-        """Who a sheet expects, with the character they raid on: the roster if curated, else every main.
-        A test run's pool is the puppets plus the officer who opened it — real members are never involved."""
-        t = self.config.roster(roster) or {}
-        if t.get("test"):
-            tester = t.get("test_by")
-            return [(m, m.main) for m in self.members.values() if m.main and (m.test or m.discord_id == tester)]
-        members = self.roster_members(roster)
-        return members if members else [(m, m.main) for m in self.members.values() if m.main]
-
-    def on_roster(self, m: Member, roster: str) -> bool:
-        return any(roster in c.rosters for c in m.active())
-
-    def team_pool(self, team: str) -> list[Member]:
-        """Members of roster_pool (older call sites in discord_raid.py / raidcycle.py)."""
-        return [m for m, _ in self.roster_pool(team)]
+        """The regulars of a series key (Registry.regulars, puppets included for old call sites)."""
+        return [(m, c) for m in self.members.values() for c in m.active() if roster in c.rosters]
 
     # ---- placement confirmations (after a roster build is approved)
     def add_placement_ask(self, discord_id: int, roster: str, character: str, by: str, channel: str = "dm") -> dict:

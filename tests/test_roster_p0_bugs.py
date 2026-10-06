@@ -89,7 +89,7 @@ def test_fill_pool_after_lock_holds_the_unanswered(reg, rs):
     silent = [m for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups]
     assert silent
     assert all(not c.rosters for m in seated for c in m.characters), "lock writes no run-key membership"
-    pool = {m.discord_id for m, _ in reg.roster_pool(ev.team)}
+    pool = {m.discord_id for m, _ in rc.run_pool(reg, ev)}
     assert {m.discord_id for m in silent} <= pool, "the pool after lock is still everyone, not the seated"
     dps = next(p for p in ev.roster.selected if p.role in ("melee", "ranged"))
     rc.free_seat(reg, rs, ev, dps.signup_name, "declined")

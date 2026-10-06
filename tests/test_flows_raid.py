@@ -60,9 +60,9 @@ class FakeBot:
     async def _emit(self, cfg, level, text, *a):
         self.calls.append(("emit", level, text))
 
-    async def open_run_and_post(self, reg, rs, instance, start, by):
-        ev = rc.open_run(reg, rs, instance, start, by=by)
-        self.calls.append(("open_run_and_post", instance, start, by))
+    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None):
+        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
+        self.calls.append(("open_run_and_post", instance, start, by) + ((schedule,) if schedule else ()))
         return ev
 
     async def post_sheet(self, reg, rs, ev, channel):
@@ -140,8 +140,8 @@ def test_open_next_slot_is_one_press_after_the_raid(reg, rs, officer, channel):
         await FLOWS["raid_open"](h.command(), reg)
         assert h.selects() == ["Pick the raid"]
         await h.pick("Pick the raid", "barrow_deeps")
-        label = f"Open the next slot — {reg.local12(want)}"
-        assert label in h.buttons() and "Or another upcoming run" in h.selects()
+        label = f"Next run — {reg.local12(want)}"
+        assert h.buttons() == [label, "Another upcoming run…", "Ad hoc run…", "Cancel"]
         assert "19:30" not in h.text and "19:30" not in label
         await h.press(label)
         assert f"<t:{int(want.timestamp())}:f>" in h.text and reg.local12(want) in h.text
@@ -162,10 +162,11 @@ def test_open_another_upcoming_run_from_the_select(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Or another upcoming run")
+        await h.press("Another upcoming run…")
+        sel = next(s for s in h._items() if getattr(s, "placeholder", None) == "Pick the run")
         assert [o.value for o in sel.options] == [t.isoformat() for t in starts[1:23]]
         assert all(":" in o.label and ("AM" in o.label or "PM" in o.label) for o in sel.options)
-        await h.pick("Or another upcoming run", starts[2].isoformat())
+        await h.pick("Pick the run", starts[2].isoformat())
         await h.press("Open")
     asyncio.run(go())
     assert bot.calls[0][2] == starts[2]
@@ -180,7 +181,7 @@ def test_open_existing_run_is_named_on_confirm(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press(f"Open the next slot — {reg.local12(first)}")
+        await h.press(f"Next run — {reg.local12(first)}")
         assert "already exists" in h.text
     asyncio.run(go())
 
@@ -194,7 +195,7 @@ def test_open_dst_gap_shows_the_note_and_opens_3_30(reg, rs, officer, channel, m
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         assert "no run times yet" in h.text  # the profile has none: the one-off path
-        await h.press("Another day and time…")
+        await h.press("Ad hoc run…")  # no pickup template: straight to the day · hour · minute form
         form = h.modal
         assert [o.value for o in form._items["day"].options][7] == "2026-03-08"
         await h.submit(form, day="2026-03-08", hour="2", minute="30")
@@ -204,6 +205,7 @@ def test_open_dst_gap_shows_the_note_and_opens_3_30(reg, rs, officer, channel, m
     start = bot.calls[0][2]
     assert (start.year, start.month, start.day, start.hour, start.minute) == (2026, 3, 8, 3, 30)
     assert start.utcoffset() == timedelta(hours=-7)
+    assert bot.calls[0][4] == "adhoc", "a one-off is ad hoc, never a run of the raid's own run times"
 
 
 def test_open_no_slots_says_why_and_offers_run_times(reg, rs, officer, channel, monkeypatch):
@@ -214,7 +216,7 @@ def test_open_no_slots_says_why_and_offers_run_times(reg, rs, officer, channel, 
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
         assert "no run times yet" in h.text
-        assert h.buttons() == ["Set this raid's run times →", "Another day and time…", "Cancel"]
+        assert h.buttons() == ["Set this raid's run times →", "Ad hoc run…", "Cancel"]
         await h.press("Set this raid's run times →")
         assert "Raids page" in h.text
     asyncio.run(go())
@@ -247,7 +249,7 @@ def test_open_refuses_the_past_and_cancel_writes_nothing(reg, rs, officer, chann
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Another day and time…")
+        await h.press("Ad hoc run…")
         await h.submit(day=today, hour="0", minute="0")  # midnight today: already gone
         assert "already passed" in h.text and "Pick again" in h.buttons()
         await h.press("Pick again")
@@ -275,7 +277,7 @@ def test_open_later_than_the_window_narrows_by_week(reg, rs, officer, channel):
     async def go():
         await FLOWS["raid_open"](h.command(), reg)
         await h.pick("Pick the raid", "barrow_deeps")
-        await h.press("Another day and time…")
+        await h.press("Ad hoc run…")
         await h.submit(day="later", hour="19", minute="30")
         week = got["week"] = h._items()[0].options[2].value
         await h.pick("Pick the week", week)

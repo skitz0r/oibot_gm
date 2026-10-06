@@ -232,7 +232,9 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
     ups = m.upcoming_absences(today)
     absences = "; ".join(reg.span_label(a.start, a.end) + (f" (reason “{_safe(a.reason)[:120]}”)" if a.reason and officer_view else "") for a in ups[:4]) or "none"
     asks = [f"{a['roster']} ({a['character']}, via {a.get('channel', 'dm')})" for a in reg.open_placement_asks(m.discord_id)]
+    regular = "; ".join(f"{reg.series_label(k)} ({c.label})" for k, c in reg.regular_series_of(m))
     out = [f"{head}: {m.display_name}{' (test puppet)' if m.test else ''} · roles {primary or '?'}{' +' + ','.join(flex) if flex else ''} · characters: {chars or 'none'} · DMs {'off' if m.dm_opt_out else 'on'} · upcoming absences {absences}"
+           + f" · regular on: {regular or 'nothing (not a regular of any recurring raid)'}"
            + (f" · confirmations waiting: {', '.join(asks)}" if asks else "")]
     if rs is not None:
         for ev in rs.live():
@@ -341,16 +343,25 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     players = rc.players_for(reg, ev)
     rb = reg.role_bounds(ev.instance, size)
     runs_now = rc.how_many_rosters(reg, players, size, rb, want=n_rosters) if live else len(ev.all_rosters)
-    head += f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else "")
+    kind = rc.run_kind(reg, ev)
+    series = rc.run_series(reg, ev)
+    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" (series {reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
+             + ("" if rc.run_confirms(reg, ev) else " · no confirmations (Join is the commitment)")
+             + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else ""))
     out = [head]
-    pool = reg.team_pool(team["key"])
-    unanswered = [m.display_name for m in pool if m.main and str(m.discord_id) not in ev.signups]
+    # "not answered" = who the bot expects an answer from (the series' regulars; every main while it has none; ad hoc: nobody)
+    unanswered = [m.display_name for m, _c in rc.not_answered(reg, ev)]
+    whose = {"regulars": "regulars", "everyone": "everyone — no regulars set", "test": "test bench", "none": "ad hoc: nobody expected"}[rc.expected_from(reg, ev)]
     ins = ev.by_status("in")
-    out.append(f"  answers: {len(ins)} joined / {len(ev.by_status('sub'))} bench / {len(ev.by_status('out'))} no thanks / {len(unanswered)} not answered · {rc.pin_summary(ev)}")
+    out.append(f"  answers: {len(ins)} joined / {len(ev.by_status('sub'))} bench / {len(ev.by_status('out'))} no thanks / {len(unanswered)} not answered ({whose}) · {rc.pin_summary(ev)}")
     out.append("  joined by role: " + " · ".join(f"{r} {sum(1 for s in ins if s.role == r)}" for r in ROLES))
     out.append(f"  joined: {_names((f'{s.display_name} ({spec_of[s.display_name]})' for s in ins), max(MAX_LIST, size * n_rosters))}")
     outs = [s.display_name + (f" ({s.source})" if s.source != "member" else "") for s in ev.by_status("out")]
-    out.append(f"  bench: {_names(s.display_name for s in ev.by_status('sub'))} · no thanks: {_names(outs, 15)} · not answered: {_names(unanswered, 15)}")
+    out.append(f"  bench: {_names(s.display_name for s in ev.by_status('sub'))} · no thanks: {_names(outs, 15)} · not answered ({whose}): {_names(unanswered, 15)}")
+    if is_officer and live and rc.expected_from(reg, ev) == "regulars":  # officer-facing: each regular and what they answered
+        regs = rc.regular_answers(reg, ev)
+        out.append("  regulars: " + _names((f"{r['display_name']} ({r['character']}) {rc.LABELS.get(r['status'], 'no answer') if r['status'] else 'no answer'}"
+                                            + (" — away" if r["source"] == "absence" else "") for r in regs), 30))
     reason = rc.run_split_reason(reg, ev) if live else None
     if reason:  # computed in code: the headcount allows more runs than the tank/healer minimums do
         out.append(f"  why not more runs: {rc.split_reason_text(reason)}")
@@ -888,7 +899,12 @@ def core_lines(ask: Ask) -> list[str]:
             from .raidcycle import next_runs_of
 
             nxt = [reg.local12(t) for t in next_runs_of(reg, rid, s)] if s["kind"] != "pickup" else []
-            lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}): {reg.schedule_label(rid, s)}" + (f"; own settings {own}" if own else "; the raid's cadence")
+            from .registry import schedule_class, series_key
+
+            cls = schedule_class(s["kind"])
+            regs = reg.regulars(series_key(rid, s["id"])) if cls == "recurring" else []
+            lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}, {cls}): {reg.schedule_label(rid, s)}" + (f"; own settings {own}" if own else ("; the raid's cadence" if cls == "recurring" else "; the ad hoc defaults (no reminder, no confirmations, lock 2h before, first come)"))
+                         + (f"; regulars {len(regs)}" + (f" ({_names((f'{m.display_name} ({c.label})' for m, c in regs), 12)})" if regs and ask.officer else "") if cls == "recurring" else "")
                          + (f"; next runs {', '.join(nxt)}" if nxt else ""))
     if cfg.buffs or cfg.families:
         auras = "; ".join(f"{bid} {ov}" for bid, ov in (cfg.buffs or {}).items())

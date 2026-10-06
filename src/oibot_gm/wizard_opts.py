@@ -63,8 +63,9 @@ def ranks(*, current: str | None = None) -> list[Opt]:
     return [Opt(r, r, default=r == current) for r in RANKS]
 
 
-def rosters(reg: Registry, *, current: str | None = None) -> list[Opt]:
-    return [Opt(k, (reg.config.roster(k) or {}).get("name") or k, default=k == current) for k in reg.config.roster_keys()][:MAX_OPTIONS]
+def series(reg: Registry, *, current: str | None = None) -> list[Opt]:
+    """The recurring series (schedules that have regulars) as '<raid>:<schedule>' values, labelled 'Barrow Deeps · Raid nights'."""
+    return [Opt(k, label[:100], f"{len(reg.regulars(k))} regular(s)", default=k == current) for k, label in reg.series("recurring")][:MAX_OPTIONS]
 
 
 def schedules(reg: Registry, *, current: list[str] | None = None) -> list[Opt]:

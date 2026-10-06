@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, raid_views as dr, raidcycle as rc, render
-from ..registry import MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
+from ..registry import ADHOC_SCHEDULE, CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 
 HERE = Path(__file__).parent
@@ -316,12 +316,18 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         return out
 
     def char_json(reg, c, runs: dict[str, list[str]] | None = None) -> dict:
-        """`rosters` = the runs this character is rostered on (seat_runs), shown by the delete confirmations."""
+        """`rosters` = the runs this character is rostered on (seat_runs), shown by the delete confirmations;
+        `regular_on` = the recurring schedules it is a regular of, in words ('Barrow Deeps · Raid nights')."""
         role = reg.profile.spec(c.cls, c.spec).role
         off = reg.profile.spec(c.cls, c.offspec).role if c.offspec else None
         return {"label": c.label, "name": c.name, "surname": c.surname, "cls": c.cls, "spec": c.spec, "offspec": c.offspec, "is_main": c.is_main,
                 "status": c.status, "rank": c.rank, "rosters": list((runs or {}).get(c.label, [])), "confirmed": bool(c.confirmed_by), "role": role, "off_role": off,
-                "flex": list(c.flex)}
+                "flex": list(c.flex), "regular_on": [reg.series_label(k) for k in c.rosters if ":" in k]}
+
+    def regulars_json(reg, m) -> list[dict]:
+        """A member's regular series: {series, label, character, cls, spec, role} (the Me page's My regular raids)."""
+        return [{"series": k, "label": reg.series_label(k), "character": c.label, "cls": c.cls, "spec": c.spec, "role": reg.profile.spec(c.cls, c.spec).role}
+                for k, c in (reg.regular_series_of(m) if m else [])]
 
     def absence_json(a) -> dict:
         return {"start": a.start, "end": a.end, "reason": a.reason}
@@ -339,7 +345,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             seat = ev.seat_of(m.display_name) if m and ev.state != "open" else None
             sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "state": ev.state,
                            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
-                           "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None})
+                           "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None, "kind": rc.run_kind(reg, ev),
+                           "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
+                           "confirms": rc.run_confirms(reg, ev)})
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {
@@ -350,6 +358,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             "absences": [absence_json(a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
             "sheets": sheets,
+            "regulars": regulars_json(reg, m),  # the recurring raids they're a regular of (Step down on the Me page)
             # `channel` says where the ask went: "dm" / "web" (DMs off, so the Me page is the only place to answer)
             "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at"), "channel": a.get("channel"), **run_label(reg, rs, a["roster"])} for a in reg.open_placement_asks(v.uid)],
         }
@@ -411,6 +420,40 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
         return {"message": line}
 
+    @app.post("/api/me/regular/remove")
+    async def me_regular_remove(request: Request):
+        """Step down from a series' regulars (D7: a member may step down; volunteering is a request to officers).
+        The same registry verb as an officer's removal (Registry.regular_remove)."""
+        def go(v, d):
+            key = str(d.get("series") or "").strip()
+            v.reg.regular_remove(v.uid, key, v.name)
+            return f"stepped down from {v.reg.series_label(key)}"
+        return await run(request, go)
+
+    @app.post("/api/admin/raid/regulars")
+    async def admin_regulars(request: Request):
+        """Officers add or remove a regular of a recurring schedule: {raid, schedule (default "default"), member | uid,
+        character (default their main), on (true = add, false = remove)}. The one path for the Rosters page, Discord's
+        /roster add|remove wizards (same verbs), plain text's op=regular and MCP set_regular."""
+        def go(v, d):
+            reg = v.reg
+            rid = str(d.get("raid") or "").strip()
+            if rid not in reg.profile.raids:
+                n = rid.lower()
+                hits = [r for r in reg.profile.raids if reg.raid_def(r).get("name", r).lower() == n]
+                if len(hits) != 1:
+                    raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
+                rid = hits[0]
+            sid = str(d.get("schedule") or "default").strip().lower()
+            key = series_key(rid, sid)
+            m = resolve_member(reg, member_ref(d))
+            if d.get("on", True) in (False, "false", "off", "remove", 0):
+                reg.regular_remove(m.discord_id, key, v.name)
+                return f"{m.display_name} is no longer a regular of {reg.series_label(key)}"
+            mm, c, warn = reg.regular_add(m.discord_id, key, v.name, str(d.get("character") or "").strip() or None)
+            return f"{mm.display_name} ({c.label}) is a regular of {reg.series_label(key)}" + "".join(f" — warning: {w}" for w in warn)
+        return await run(request, go, officer=True)
+
     @app.post("/api/me/dm")
     async def me_dm(request: Request):
         def go(v, d):
@@ -445,11 +488,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         time a person reads already in words (`label`, `slot_labels`, `time_label`, `next`) — no page formats a clock."""
         sd = reg.schedule_def(rid, s["id"])
         size = int(sd.get("size") or 20)
-        return {"id": s["id"], "name": s.get("name") or s["id"], "kind": s["kind"], "active": bool(s.get("active", True)), "rosters": int(s.get("rosters") or 1),
+        cls = schedule_class(s["kind"])
+        key = series_key(rid, s["id"])
+        return {"id": s["id"], "name": s.get("name") or s["id"], "kind": s["kind"], "class": cls, "class_label": CLASS_WORDS[cls],
+                "series": key if cls == "recurring" else None, "regulars": len(reg.regulars(key)) if cls == "recurring" else 0,
+                "source": dict(sd["schedule"]["source"]), "own_weights": dict(sd["schedule"].get("own_weights") or {}), "weights": dict(sd["weights"]),
+                "active": bool(s.get("active", True)), "rosters": int(s.get("rosters") or 1),
                 "seats": size * int(s.get("rosters") or 1), "slots": list(s.get("slots") or []), "slot_labels": [reg.slot_label(x) for x in s.get("slots") or []],
                 "days": list(s.get("days") or []), "time": s.get("time") or "", "time_label": reg.time_label(s.get("time")) if s.get("time") else "",
                 "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]), "is_default": s["id"] == "default",
-                "effective": {k: sd[k] for k in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "nudge", "autofill", "open_dm", "split_policy")},
+                "effective": {k: sd[k] for k in SCHEDULE_CADENCE},
                 "next": [t12(reg, t) for t in rc.next_runs_of(reg, rid, s)]}
 
     def signup_json(s, pins: dict) -> dict:
@@ -507,7 +555,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         day = ev.start.astimezone(reg.tz).date().isoformat()
         base = {"key": ev.key, "run": ev.team, "name": t.get("name") or t["key"], "size": rc.run_size(reg, ev), "instance": ev.instance, "raid": rd.get("name", ev.instance),
                 "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "rel": rel(reg, ev.start), "state": ev.state, "live": live, "fill_state": ev.fill_state,
-                "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters), "schedule": ev.schedule, "rosters_expected": rc.run_rosters(reg, ev)}
+                "counts": {st: len(ev.by_status(st)) for st in rc.STATUSES}, "rostered": len(ev.seated()) if ev.all_rosters else 0, "n_rosters": len(ev.all_rosters), "schedule": ev.schedule, "rosters_expected": rc.run_rosters(reg, ev),
+                "kind": rc.run_kind(reg, ev), "series": rc.run_series(reg, ev), "series_name": reg.series_label(rc.run_series(reg, ev)) if rc.run_series(reg, ev) else None,
+                "confirms": rc.run_confirms(reg, ev), "test": rc.is_test_run(reg, ev)}
         if not full:
             return base
         from ..raid_views import run_times
@@ -519,10 +569,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                     for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
         busy = rc.conflicts(rs, ev) if live else {}
         return {**base,
-                "timeline": {"nudge": t12(reg, soft), "lock": t12(reg, hard), "confirm": clock12(reg, confirm) if confirm.date() == ev.start.astimezone(reg.tz).date() else t12(reg, confirm), "locked_at": clock12(reg, ev.locked_at) if ev.locked_at else None},
+                "timeline": {"nudge": t12(reg, soft) if rc.team_setting(t, "reminders") != "none" else None, "lock": t12(reg, hard),
+                             "confirm": (clock12(reg, confirm) if confirm.date() == ev.start.astimezone(reg.tz).date() else t12(reg, confirm)) if rc.run_confirms(reg, ev) else None,
+                             "locked_at": clock12(reg, ev.locked_at) if ev.locked_at else None},
                 "signups": [signup_json(s, ev.pins) for s in sorted(ev.signups.values(), key=lambda s: (rc.STATUSES.index(s.status) if s.status in rc.STATUSES else 9, s.updated_at))],
-                "not_answered": [{"uid": str(m.discord_id), "display_name": m.display_name, "character": m.main.label, "cls": m.main.cls, "spec": m.main.spec, "role": reg.profile.spec(m.main.cls, m.main.spec).role}
-                                 for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups] if live else [],
+                # officer-facing: who the bot expects an answer from and hasn't heard from — a recurring run's regulars
+                # (every main while its series has none: `expected_from` says which); an ad hoc run expects nobody
+                "not_answered": [{"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec, "role": reg.profile.spec(c.cls, c.spec).role}
+                                 for m, c in rc.not_answered(reg, ev)] if live else [],
+                "expected_from": rc.expected_from(reg, ev),
+                "regulars": rc.regular_answers(reg, ev),  # each regular and what they answered (status None = no answer)
                 "absences": absences, "double_booked": [reg.members[u].display_name for u in busy if u in reg.members],
                 "needs": rc.needs(reg, ev, t) if live else None,
                 "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
@@ -539,7 +595,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         n, size, _legacy, subs = h["headcount"]
         return {"headcount": {"in": n, "seats": size, "bench": subs, "level": h["headcount_level"]},
                 "roles": [{k: r[k] for k in ("role", "have", "need", "level", "hint")} for r in h["roles"]],
-                "no_provider": [b["name"] for b in h["buffs"] if not b["providers"]], "unanswered": len(h["unresponsive"]), "rosters": h["rosters"]}
+                "no_provider": [b["name"] for b in h["buffs"] if not b["providers"]], "unanswered": len(h["unresponsive"]), "not_answered": list(h["unresponsive"]),
+                "expected_from": h.get("expected_from"), "rosters": h["rosters"]}
 
     def rosters_data(reg) -> dict:
         rs = bot.raids.store(reg)
@@ -557,12 +614,34 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             upcoming = [{"slot": (s["name"] if many else reg.slot_label(start.astimezone(reg.tz).strftime("%a %H:%M"))), "schedule": s["id"], "schedule_name": s["name"], "start": t12(reg, start),
                          "opens": t12(reg, start - timedelta(hours=float(reg.schedule_def(rid, s["id"])["signup_lead_hours"])))}
                         for s, start in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if rc.event_key(rid, start, s["id"]) not in rs.events][:6]
+            series = []
+            for s in scheds:  # one card per recurring series: its regulars (one member per line on the page) against the minimums
+                if schedule_class(s["kind"]) != "recurring":
+                    continue
+                key = series_key(rid, s["id"])
+                sd = reg.schedule_def(rid, s["id"])
+                size = int(sd.get("size") or 20) * int(s.get("rosters") or 1)
+                regs = reg.regulars(key)
+                bounds = reg.role_bounds(rid, int(sd.get("size") or 20))
+                counts = {r: sum(1 for _m, c in regs if reg.profile.spec(c.cls, c.spec).role == r) for r in ROLES}
+                series.append({"key": key, "id": s["id"], "name": s["name"], "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True)), "seats": size,
+                               "regulars": [{"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec,
+                                             "role": reg.profile.spec(c.cls, c.spec).role} for m, c in regs],
+                               "counts": counts, "need": {r: int(bounds[r]["min"]) * int(s.get("rosters") or 1) for r in ("tank", "healer")}})
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
-                        "schedules": [{"id": s["id"], "name": s["name"], "kind": s["kind"], "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True))} for s in scheds],
+                        "schedules": [{"id": s["id"], "name": s["name"], "kind": s["kind"], "class": schedule_class(s["kind"]), "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True))} for s in scheds],
+                        "series": series,
+                        "orphan_regulars": [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec}
+                                            for k, m, c in reg.orphan_regulars() if k.partition(":")[0] == rid],
                         "opened": bool(fo and fo <= now), "first_open": reg.local12(fo, "%a %d %b %Y %I:%M %p") if fo else None,
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "upcoming": upcoming})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
-        return {"raids": out, "orphans": orphans, "tz": reg.config.timezone}
+        # who can be made a regular (the Rosters page's member and character pickers): real members with active characters
+        people = [{"uid": str(m.discord_id), "display_name": m.display_name,
+                   "characters": [{"label": c.label, "cls": c.cls, "spec": c.spec, "role": reg.profile.spec(c.cls, c.spec).role, "is_main": c.is_main}
+                                  for c in sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))]}
+                  for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower()) if not m.test and m.active()]
+        return {"raids": out, "orphans": orphans, "people": people, "tz": reg.config.timezone}
 
     @app.get("/api/rosters")
     async def rosters(request: Request):
@@ -858,8 +937,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
 
     @app.post("/api/raid/{rid}/open")
     async def raid_open(request: Request, rid: str):
-        """Open a sheet now: the raid's next run (of `schedule` when given, else of any schedule), or a one-off
-        'YYYY-MM-DD HH:MM' in guild time from the picker (with `schedule`: that schedule's settings, e.g. a pickup template)."""
+        """Open a sheet now: the raid's next run (of `schedule` when given, else of any schedule), or a picked
+        'YYYY-MM-DD HH:MM' in guild time (with `schedule`: that schedule's settings, e.g. a pickup template; without one:
+        the upcoming run at exactly that time if there is one, else a one-off — ad hoc, rc.open_schedule)."""
         v, d = await body(request, officer=True)
         reg = v.reg
         if rid not in reg.profile.raids:
@@ -867,12 +947,15 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         now, rd = reg.now_local(), reg.raid_def(rid)
         when = (d.get("when") or "").strip()
         sid = (d.get("schedule") or "").strip() or None
-        sched = next((s for s in reg.schedules(rid) if s["id"] == sid), None) if sid else None
-        if sid and sched is None:
+        sched = next((s for s in reg.schedules(rid) if s["id"] == sid), None) if sid and sid != ADHOC_SCHEDULE else None
+        if sid and sid != ADHOC_SCHEDULE and sched is None:
             return JSONResponse({"error": f"{rd.get('name', rid)} has no schedule {sid}"}, status_code=400)
+        if sid == ADHOC_SCHEDULE and not (d.get("when") or "").strip():
+            return JSONResponse({"error": "an ad hoc run starts at the day and time you pick — pick one"}, status_code=400)
         try:
             if when:
                 start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=ZoneInfo(reg.config.timezone))
+                sid = rc.open_schedule(reg, rid, start, sid)
             elif sched is not None and sched["kind"] == "pickup":
                 return JSONResponse({"error": f"{sched['name']} is a pickup template: pick the date and time it starts"}, status_code=400)
             else:
@@ -1052,7 +1135,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ws, we = reg.lockout_window(rid, now)
             out.append({"id": rid, "name": eff.get("name", rid), "size": int(eff.get("size") or 20), "lockout_days": eff["lockout_days"], "duration_hours": eff["duration_hours"],
                         "slots": list(eff["slots"]), "slot_labels": [reg.slot_label(x) for x in eff["slots"]], "signup_lead_hours": eff["signup_lead_hours"], "lock_hours_before": eff["lock_hours_before"], "confirm_hours_before": eff["confirm_hours_before"],
-                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "autofill": bool(eff.get("autofill", True)), "open_dm": bool(eff.get("open_dm", False)), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
+                        "weights": dict(eff["weights"]), "split_policy": eff.get("split_policy", "balanced"), "nudge": bool(eff.get("nudge", True)), "nudge_hours_before": eff["nudge_hours_before"], "fill_ask_hours": eff["fill_ask_hours"], "autofill": bool(eff.get("autofill", True)), "open_dm": bool(eff.get("open_dm", False)), "confirm": bool(eff.get("confirm", True)), "notes": eff.get("notes") or "", "comp": {r: dict((eff.get("comp") or {}).get(r) or {}) for r in ("tank", "healer", "dps")},
                         "overridden": sorted(k for k in over if k not in ("comp", "weights")) + [f"{r}_{b}" for r, bb in ((over.get("comp") or {}).items()) for b in bb] + [f"weight_{k}" for k in (over.get("weights") or {})],
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),

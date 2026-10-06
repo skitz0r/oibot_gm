@@ -42,9 +42,22 @@ def officer(monkeypatch):
     return state
 
 
+REAL = 300_000_000_000_000_000  # real (non-puppet) members: test puppets are never regulars
+
+
+def real_member(reg, n: int, cls: str = "Priest", spec: str = "Holy", name: str | None = None):
+    """A registered (non-test) member with a main; regulars are real members only."""
+    uid = REAL + n
+    names = ["Anabelle", "Brannoc", "Corwin", "Delphine", "Elowen", "Fintan"]
+    reg.add_character(uid, f"Member{n}", name or names[n % len(names)], cls, spec, None, True)
+    return reg.members[uid]
+
+
 @pytest.fixture
 def rosters(reg):
-    reg.config.rosters = [{"key": "alpha", "name": "Alpha team"}, {"key": "bravo", "name": "Bravo team"}]
+    """Two recurring schedules on Barrow Deeps: its own run times (Raid nights) and an Alt run."""
+    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    reg.set_schedule("barrow_deeps", "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
     return reg
 
 
@@ -207,69 +220,123 @@ def test_set_main_with_no_other_character_says_so(reg, rs, officer):
     assert "no other character" in h.text and h.screen["view"] is None
 
 
-# ---- /roster add + remove
+# ---- /roster add + remove: the regulars of a recurring schedule (schedule → member → character)
 
 def test_add_then_remove_round_trip(reg, rs, officer, rosters):
-    m = reg.test_members()[0]
+    m = real_member(reg, 0)
     reg.add_character(m.discord_id, m.display_name, "Rosteralt", "Mage", "Fire", None, False)
     h = harness(reg, rs)
 
     async def go():
         await FLOWS["roster_add"](h.command(), reg, member=user(m))
-        assert [o.label for o in h._items()[0].options] == ["Alpha team", "Bravo team"]
-        await h.pick("Pick the roster", "bravo")
+        assert [o.label for o in h._items()[0].options] == ["Barrow Deeps · Raid nights", "Barrow Deeps · Alt run"]
+        await h.pick("Pick the schedule", "barrow_deeps:alt")
         assert any(b.startswith("Their main") for b in h.buttons())
         await h.press(next(b for b in h.buttons() if b.startswith("Their main")))
-        assert "to **Bravo team**" in h.text
+        assert "a regular of **Barrow Deeps · Alt run**" in h.text and "Nothing is answered for them" in h.text
         await h.press("Confirm")
-        assert "→ **Bravo team**" in h.text
+        assert "is a regular of **Barrow Deeps · Alt run**" in h.text
     run(go())
-    assert "bravo" in reg.members[m.discord_id].main.rosters
+    assert "barrow_deeps:alt" in reg.members[m.discord_id].main.rosters
 
     h2 = harness(reg, rs)
 
     async def back():
-        await FLOWS["roster_remove"](h2.command(), reg, member=user(m))  # on one roster: straight to confirm
-        assert "from **Bravo team**" in h2.text
+        await FLOWS["roster_remove"](h2.command(), reg, member=user(m))  # on one schedule: straight to confirm
+        assert "off the regulars of **Barrow Deeps · Alt run**" in h2.text
         await h2.press("Confirm")
-        assert "removed from **Bravo team**" in h2.text
+        assert "no longer a regular of **Barrow Deeps · Alt run**" in h2.text
     run(back())
-    assert not any("bravo" in c.rosters for c in reg.members[m.discord_id].characters)
+    assert not any("barrow_deeps:alt" in c.rosters for c in reg.members[m.discord_id].characters)
+
+
+def test_add_without_a_member_picks_one_in_the_wizard(reg, rs, officer, rosters):
+    m = real_member(reg, 1, "Warrior", "Protection")
+    h = harness(reg, rs)
+
+    async def go():
+        await FLOWS["roster_add"](h.command(), reg)  # no member widget: schedule → member → character
+        await h.pick("Pick the schedule", "barrow_deeps:default")
+        sel = next(s for s in h._items() if getattr(s, "placeholder", "") == "Pick the member")
+        assert [o.value for o in sel.options] == [str(m.discord_id)], "puppets are never offered as regulars"
+        await h.pick("Pick the member", str(m.discord_id))  # one character: straight to confirm
+        await h.press("Confirm")
+    run(go())
+    assert reg.regulars("barrow_deeps:default") == [(reg.members[m.discord_id], reg.members[m.discord_id].main)]
 
 
 def test_remove_when_on_no_roster_says_so(reg, rs, officer, rosters):
-    m = reg.test_members()[5]
+    m = real_member(reg, 2)
     h = harness(reg, rs)
     run(FLOWS["roster_remove"](h.command(), reg, member=user(m)))
-    assert "isn't on any roster" in h.text and h.screen["view"] is None
+    assert "isn't a regular of any recurring raid" in h.text and h.screen["view"] is None
 
 
 def test_remove_from_a_roster_they_left_meanwhile_refuses(reg, rs, officer, rosters):
-    m = reg.test_members()[6]
-    reg.roster_add(m.discord_id, "alpha", "t")
-    reg.roster_add(m.discord_id, "bravo", "t")
+    m = real_member(reg, 3)
+    reg.regular_add(m.discord_id, "barrow_deeps:default", "t")
+    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
     h = harness(reg, rs)
 
     async def go():
         await FLOWS["roster_remove"](h.command(), reg, member=user(m))
-        await h.pick("Pick the roster", "alpha")
-        reg.roster_remove(m.discord_id, "alpha", "Other Officer")  # meanwhile
+        await h.pick("Pick the schedule", "barrow_deeps:default")
+        reg.regular_remove(m.discord_id, "barrow_deeps:default", "Other Officer")  # meanwhile
         await h.press("Confirm")
-        assert "❌" in h.text and "isn't on alpha" in h.text
+        assert "❌" in h.text and "isn't a regular" in h.text
     run(go())
-    assert "bravo" in reg.members[m.discord_id].main.rosters
+    assert "barrow_deeps:alt" in reg.members[m.discord_id].main.rosters
 
 
 def test_add_cancel_writes_nothing(reg, rs, officer, rosters):
-    m = reg.test_members()[7]
+    m = real_member(reg, 4)
     h = harness(reg, rs)
 
     async def go():
         await FLOWS["roster_add"](h.command(), reg, member=user(m))
-        await h.pick("Pick the roster", "alpha")  # one character: straight to confirm
+        await h.pick("Pick the schedule", "barrow_deeps:default")  # one character: straight to confirm
         await h.press("Cancel")
     run(go())
     assert not any(c.rosters for c in reg.members[m.discord_id].characters)
+
+
+def test_add_with_no_recurring_schedule_says_so(reg, rs, officer):
+    m = real_member(reg, 5)
+    h = harness(reg, rs)
+    run(FLOWS["roster_add"](h.command(), reg, member=user(m)))
+    assert "No recurring schedule yet" in h.text and "first come" in h.text and h.screen["view"] is None
+
+
+def test_members_lists_the_regulars_by_role_one_per_line(reg, rs, officer, rosters):
+    a, b = real_member(reg, 0), real_member(reg, 1, "Warrior", "Protection")
+    reg.regular_add(a.discord_id, "barrow_deeps:default", "t")
+    reg.regular_add(b.discord_id, "barrow_deeps:default", "t")
+    h = harness(reg, rs)
+
+    async def go():
+        await FLOWS["roster_members"](h.command(), reg)
+        await h.pick("Pick the schedule", "barrow_deeps:default")
+        lines = h.text.splitlines()
+        assert any(ln.endswith(f"{b.main.label} · {b.display_name}") for ln in lines)
+        assert any(ln.endswith(f"{a.main.label} · {a.display_name}") for ln in lines)
+        assert sum(1 for ln in lines if a.main.label in ln or b.main.label in ln) == 2  # one member per line
+    run(go())
+
+
+def test_step_down_is_self_service(reg, rs, officer, rosters):
+    m = real_member(reg, 2)
+    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    officer["officer"] = False  # a member, not an officer
+    h = harness(reg, rs)
+    h.user.id, h.user.display_name = m.discord_id, m.display_name
+
+    async def go():
+        await FLOWS["regular_step_down"](h.command(), reg)
+        assert "Step down from the regulars of **Barrow Deeps · Alt run**" in h.text
+        await h.press("Step down")
+        assert "You stepped down" in h.text
+    run(go())
+    assert not reg.members[m.discord_id].main.rosters
 
 
 # ---- officers only

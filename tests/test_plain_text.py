@@ -67,9 +67,9 @@ class FakeBot:
         self.calls.append(("absence_cleared", m.display_name, a.start, by))
         return ["sheet re-opened"]
 
-    async def open_run_and_post(self, reg, rs, instance, start, by):
-        self.calls.append(("open_run_and_post", instance, start.isoformat(), by))
-        return rc.open_run(reg, rs, instance, start, by=by)
+    async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None):
+        self.calls.append(("open_run_and_post", instance, start.isoformat(), by) + ((schedule,) if schedule else ()))
+        return rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
 
     async def test_bench_clear(self, reg, by):
         self.calls.append(("test_bench_clear", by))
@@ -142,7 +142,7 @@ def test_describe_run_ops(reg, rs):
     assert "not joined on this sheet: Nobody" in d(op="run_board", target=ev.key, value="Nobody")
     assert "no live run bd-0101-0000" in d(op="run_lock", target="bd-0101-0000")
     o = d(op="run_open", target="barrow_deeps", value="2030-01-08 19:30")
-    assert o.startswith("open Barrow Deeps") and "bd-0108-1930-2030-01-08" in o and "no signup channel" in o
+    assert o.startswith("open Barrow Deeps") and "bd-0108-1930-adhoc-2030-01-08" in o and "no signup channel" in o
     assert "unknown raid" in d(op="run_open", target="nowhere")
     bad = d(op="run_open", target="barrow_deeps", value="tonight")
     assert "couldn't tell which time" in bad and "7:30 PM" in bad and "19:30" not in bad and "2026-" not in bad
@@ -214,9 +214,11 @@ def test_run_open(reg, rs):
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="run_open", target="barrow_deeps", value="2030-01-08 19:30"), "officer", is_owner=False)
     out = run(configops.apply_async(reg, ConfigOp(op="run_open", target="barrow_deeps", value="2030-01-08 19:30"), "Officer", False, bot=bot))
-    assert out.startswith("opened bd-0108-1930-2030-01-08") and "no signup channel" in out
-    assert bot.calls[0][:2] == ("open_run_and_post", "barrow_deeps") and bot.calls[0][2].startswith("2030-01-08T19:30")
-    assert rs.for_team("bd-0108-1930").state == "open"
+    # a time that is none of the raid's upcoming runs is a one-off: ad hoc (roster redesign Phase 1)
+    assert out.startswith("opened bd-0108-1930-adhoc-2030-01-08") and "no signup channel" in out
+    assert bot.calls[0][:2] == ("open_run_and_post", "barrow_deeps") and bot.calls[0][2].startswith("2030-01-08T19:30") and bot.calls[0][4] == "adhoc"
+    ev = rs.for_team("bd-0108-1930-adhoc")
+    assert ev.state == "open" and ev.kind == "adhoc" and ev.series is None
     with pytest.raises(RegistryError, match="no slots yet"):
         run(configops.apply_async(reg, ConfigOp(op="run_open", target="barrow_deeps"), "Officer", False, bot=bot))
 

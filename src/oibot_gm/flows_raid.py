@@ -16,7 +16,7 @@ from . import raidcycle as rc
 from . import wizard_opts as wo
 from .constants import TEAL
 from .raid_views import ask_line, gaps_text, health_layout, raid_name, run_label, run_title, sheet_state
-from .registry import Registry, RegistryError
+from .registry import ADHOC_SCHEDULE, ADHOC_SCHEDULE_NAME, Registry, RegistryError, schedule_class
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
 
 LIVE = ("open", "locked")
@@ -90,8 +90,9 @@ async def with_run(interaction: discord.Interaction, reg: Registry, *, title: st
 # ---------------------------------------------------------------- /raid open
 
 class OpenWizard(Wizard):
-    """Raid → the shortlist (next run as one button, the other upcoming runs of every schedule in a select, a pickup
-    template's own button, or 'Another day and time…') → confirm with both clocks → open and post."""
+    """Raid → Next run · Another upcoming run… (a select of the other upcoming runs of every recurring schedule) ·
+    Ad hoc run… (a pickup template, or a one-off — then day · hour · minute selects; roster redesign §5) → confirm with
+    both clocks → open and post. A one-off is ADHOC_SCHEDULE: ad hoc defaults, never a run of the raid's own times."""
 
     def __init__(self, reg: Registry, rs, owner_id: int):
         super().__init__(reg, owner_id, title="Open a run", guard=officer_guard(reg))
@@ -120,11 +121,19 @@ class OpenWizard(Wizard):
         return len([s for s in self.reg.schedules(self.rid) if s["kind"] != "pickup"]) > 1
 
     def sched_name(self, sid: str | None) -> str:
+        if sid == ADHOC_SCHEDULE:
+            return ADHOC_SCHEDULE_NAME
         s = next((x for x in self.reg.schedules(self.rid) if x["id"] == (sid or "default")), None)
         return (s or {}).get("name") or ""
 
     def template_buttons(self) -> list[discord.ui.Item]:
-        return [self.button(f"Open {s['name']} — pick a time", self._template(s["id"])) for s in self.templates()[:3]]
+        return [self.button(f"{s['name']} — pick a time", self._template(s["id"])) for s in self.templates()[:3]]
+
+    def is_adhoc(self, sid: str | None) -> bool:
+        if sid == ADHOC_SCHEDULE:
+            return True
+        s = next((x for x in self.reg.schedules(self.rid) if x["id"] == (sid or "default")), None)
+        return bool(s) and schedule_class(s["kind"]) == "adhoc"
 
     def _template(self, sid: str):
         async def go(interaction: discord.Interaction) -> None:
@@ -144,7 +153,7 @@ class OpenWizard(Wizard):
         self.draft["raid"] = values[0]
         await self.shortlist(interaction)
 
-    # ---- layer 1: the shortlist
+    # ---- layer 1: Next run · Another upcoming run… · Ad hoc run…
     async def shortlist(self, interaction: discord.Interaction) -> None:
         ups = self.upcoming()
         self.draft["day0"] = self.reg.now_local().date()
@@ -152,23 +161,38 @@ class OpenWizard(Wizard):
         many = self.many()
         if not ups:
             await self.show(interaction, f"**{self.name()}** has no upcoming run to open: {self.no_slot_reason()}\n"
-                            "-# Set its run times, or open a one-off run at a day and time you pick.",
+                            "-# Set its run times, or open an ad hoc run at a day and time you pick.",
                             self.button("Set this raid's run times →", self.to_run_times, discord.ButtonStyle.primary),
-                            *self.template_buttons(),
-                            self.button("Another day and time…", self.open_when),
+                            self.button("Ad hoc run…", self.adhoc),
                             self.button("Cancel", self.cancel))
             return
-        items: list[discord.ui.Item] = []
-        others = ups[1:1 + OTHER_STARTS]
-        if others:  # the value names the schedule only when it isn't the raid's own run times (old values stay ISO)
-            items.append(self.select("Or another upcoming run", [Opt(t.isoformat() + ("" if s["id"] == "default" else f"|{s['id']}"), self.reg.local12(t),
-                                                                     (f"{s['name']} · " if many else "") + when_relative(self.reg, t)) for s, t in others], self.start_picked))
         s0, t0 = ups[0]
-        items += [self.button(f"Open the next slot — {self.reg.local12(t0)}" + (f" · {s0['name']}" if many else ""), self.next_picked, discord.ButtonStyle.primary),
-                  *self.template_buttons(),
-                  self.button("Another day and time…", self.open_when),
-                  self.button("Cancel", self.cancel)]
-        await self.show(interaction, f"**{self.name()}** — which run?", *items)
+        items: list[discord.ui.Item] = [self.button(f"Next run — {self.reg.local12(t0)}" + (f" · {s0['name']}" if many else ""), self.next_picked, discord.ButtonStyle.primary)]
+        if len(ups) > 1:
+            items.append(self.button("Another upcoming run…", self.another))
+        items += [self.button("Ad hoc run…", self.adhoc), self.button("Cancel", self.cancel)]
+        await self.show(interaction, f"**{self.name()}** — which run?\n-# Ad hoc = a pickup or a one-off at a time you pick: first come, no regulars, no reminder.", *items)
+
+    async def another(self, interaction: discord.Interaction) -> None:
+        """The other upcoming runs of every recurring schedule (the value names the schedule unless it is the raid's own)."""
+        ups = self.upcoming()
+        others = ups[1:1 + OTHER_STARTS]
+        if not others:
+            await self.shortlist(interaction)
+            return
+        many = self.many()
+        opts = [Opt(t.isoformat() + ("" if s["id"] == "default" else f"|{s['id']}"), self.reg.local12(t), (f"{s['name']} · " if many else "") + when_relative(self.reg, t)) for s, t in others]
+        await self.show(interaction, f"**{self.name()}** — which upcoming run?", self.select("Pick the run", opts, self.start_picked),
+                        self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
+
+    async def adhoc(self, interaction: discord.Interaction) -> None:
+        """An ad hoc run: one of the raid's pickup templates (its own settings) or a one-off; both then pick a day and time."""
+        if not self.templates():
+            await self.open_when(interaction)
+            return
+        await self.show(interaction, f"**{self.name()}** · an ad hoc run — first come, no regulars, no reminder. From a template, or a one-off?",
+                        *self.template_buttons(), self.button("One-off — pick a day and time", self.open_when),
+                        self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
 
     def no_slot_reason(self) -> str:
         if not [s for s in self.reg.schedules(self.rid) if s["kind"] != "pickup" and s.get("active", True)]:
@@ -207,7 +231,7 @@ class OpenWizard(Wizard):
         starts = self.starts()
         usual = starts[0] if starts else None
         tpl = self.draft.get("schedule")
-        title = f"Open {self.sched_name(tpl) or self.name()}" if tpl else f"Open {self.name()}"
+        title = f"Open {self.sched_name(tpl) or self.name()}" if tpl and tpl != ADHOC_SCHEDULE else f"Open {self.name()}"
         return Form(title, when_fields(self.reg, day0=self.draft["day0"], default=usual, day_note=self._day_note), self.when_submitted)
 
     def _day_note(self, day: date) -> str | None:
@@ -215,7 +239,7 @@ class OpenWizard(Wizard):
         return f"{self.name()} run time {self.reg.local12(hits[0], '%I:%M %p')}" if hits else None
 
     async def open_when(self, interaction: discord.Interaction) -> None:
-        self.draft["schedule"] = None  # a one-off at a picked time: the raid's own cadence
+        self.draft["schedule"] = ADHOC_SCHEDULE  # a one-off at a picked time: ad hoc (its own defaults, never the raid's run times)
         await self.open_form(interaction, self.when_form())
 
     async def when_submitted(self, interaction: discord.Interaction, v: dict[str, str]) -> None:
@@ -246,6 +270,10 @@ class OpenWizard(Wizard):
         sid = self.draft.get("schedule")
         label = f"**{self.name()}**" + (f" · {self.sched_name(sid)}" if sid and (sid != "default" or self.many()) else "")
         lines = [f"Open {label} at {both_clocks(self.reg, start)}?"]
+        if self.is_adhoc(sid):
+            sd = self.reg.schedule_def(self.rid, sid)
+            lines.append(f"-# Ad hoc: first come, first rostered; no regulars, no reminder" + ("" if sd.get("confirm") else ", no confirmations (Join is the commitment)")
+                         + f"; locks {sd['lock_hours_before']:g} h before.")
         if sid:
             sd = self.reg.schedule_def(self.rid, sid)
             n = int(sd["schedule"].get("rosters") or 1)

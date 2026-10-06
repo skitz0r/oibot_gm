@@ -134,6 +134,9 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
             held = rostered_on(bot, reg, m)
             if held:
                 lines.append("Rosters: " + rostered_text(reg, held))
+            regular = reg.regular_series_of(m)
+            if regular:
+                lines.append("Regular on: " + "; ".join(f"{reg.series_label(k)} ({c.label})" for k, c in regular) + " — `/me view` to step down")
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
         if self.action == "apply":
@@ -473,10 +476,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
 
     # ---------------- /me absent, /me
-    async def roster_autocomplete(interaction: discord.Interaction, current: str):
-        reg = guilds.for_interaction(interaction)
-        return [app_commands.Choice(name=t, value=t) for t in (reg.config.roster_keys() if reg else []) if current.lower() in t.lower()][:25]
-
     absent = app_commands.Group(name="absent", description="Future absences (reason is officer-only)", parent=me)
 
     @absent.command(name="add", description="Say you'll be away: pick the first day and how long")
@@ -534,13 +533,25 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         held = rostered_on(interaction.client, reg, m)
         if held:
             e.add_field(name="Rosters", value=rostered_text(reg, held, with_char=True), inline=True)
+        regular = reg.regular_series_of(m)
+        if regular:  # the recurring schedules they're a regular of, as a person reads them (never a series key)
+            e.add_field(name="Regular on", value="\n".join(f"{reg.series_label(k)} ({c.label})" for k, c in regular)[:1000], inline=False)
         primary, flex = reg.roles_of(m)
         e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me plan roles` to add more", inline=True)
         e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(reg.span_label(a.start, a.end) for a in ups) or "none", inline=True)
         e.set_footer(text="Sheets: answer each run in the signup channel (Join / Bench / No thanks). Attendance and loot history appear here once the raid ledger is live.")
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        view = None
+        if regular:  # D7: a member can step down from a series' regulars themselves (volunteering is a request to officers)
+            view = discord.ui.View(timeout=600)
+            btn = discord.ui.Button(label="Step down from a regular raid…", style=discord.ButtonStyle.secondary)
+
+            async def step_down(i: discord.Interaction) -> None:
+                await FLOWS["regular_step_down"](i, reg)
+            btn.callback = step_down
+            view.add_item(btn)
+        await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
 
     tree.add_command(me)
 
@@ -642,43 +653,28 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
         await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
 
-    @roster.command(name="add", description="Add a member's character to a roster: pick the roster and character")
-    @app_commands.describe(member="who to add")
-    async def roster_add(interaction: discord.Interaction, member: discord.User):
+    @roster.command(name="add", description="Make someone a regular of a recurring schedule: pick the schedule, member and character")
+    @app_commands.describe(member="who to add (optional: pick them in the wizard)")
+    async def roster_add(interaction: discord.Interaction, member: discord.User | None = None):
         reg = await officer(interaction)
         if not reg:
             return
         await FLOWS["roster_add"](interaction, reg, member=member)
 
-    @roster.command(name="remove", description="Take a member off a roster: pick one they're on (they can still sign as sub)")
-    @app_commands.describe(member="who to remove")
-    async def roster_remove(interaction: discord.Interaction, member: discord.User):
+    @roster.command(name="remove", description="Take someone off a schedule's regulars (they can still Join its sheets)")
+    @app_commands.describe(member="who to remove (optional: pick them in the wizard)")
+    async def roster_remove(interaction: discord.Interaction, member: discord.User | None = None):
         reg = await officer(interaction)
         if not reg:
             return
         await FLOWS["roster_remove"](interaction, reg, member=member)
 
-    @roster.command(name="members", description="A roster's characters by role")
-    @app_commands.autocomplete(roster=roster_autocomplete)
-    async def roster_members_cmd(interaction: discord.Interaction, roster: str | None = None):
+    @roster.command(name="members", description="A recurring schedule's regulars by role: pick the schedule")
+    async def roster_members_cmd(interaction: discord.Interaction):
         reg = await need(interaction)
         if not reg:
             return
-        key = roster or reg.config.roster_keys()[0]
-        members = reg.roster_members(key)
-        if not members:
-            await interaction.response.send_message(f"Roster **{key}** has no curated members yet, so every registered main counts. `/roster add @member` to curate it.", ephemeral=True)
-            return
-        by_role: dict[str, list[str]] = {}
-        for m, c in members:
-            role = reg.roles_of(m)[0] or reg.profile.spec(c.cls, c.spec).role
-            by_role.setdefault(role, []).append(f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · {m.display_name}")
-        cfg = reg.config.roster(key) or {}
-        e = discord.Embed(title=f"Roster {key} · {len(members)}/{cfg.get('size', '?')} · {cfg.get('schedule') or 'no schedule'}", colour=TEAL)
-        for r in ROLES:
-            if by_role.get(r):
-                e.add_field(name=f"{ico('role', r)} {r} ({len(by_role[r])})", value="\n".join(by_role[r])[:1000], inline=True)
-        await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
+        await FLOWS["roster_members"](interaction, reg)
 
     @roster.command(name="absences", description="Upcoming absences across the guild (with reasons)")
     @app_commands.describe(days="How far ahead to look (default 30)")
@@ -1003,7 +999,6 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     tree.add_command(gm)
     # exported for other command modules
     register_commands.member_char_autocomplete = member_char_autocomplete  # type: ignore[attr-defined]
-    register_commands.roster_autocomplete = roster_autocomplete  # type: ignore[attr-defined]
 
 
 LEVEL = ops_mod.LEVEL_ICON

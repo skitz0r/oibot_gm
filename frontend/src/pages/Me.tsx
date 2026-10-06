@@ -3,7 +3,7 @@ import { ActionIcon, Badge, Box, Button, Card, Group, Select, Stack, Switch, Tab
 import css from "./me.module.css";
 import { DateInput } from "@mantine/dates";
 import { IconCrown, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
-import { api, type Character, type Me, type Meta } from "../api";
+import { api, type Character, type Me, type Meta, type MyRegular } from "../api";
 import { GameIcon } from "../components/Icons";
 import { CharacterCell, SpecCell } from "../components/Cells";
 import { classColour } from "../theme";
@@ -44,6 +44,10 @@ export function MePage({ meta }: { meta: Meta }) {
     const rosters = c.rosters.length ? `It comes off ${c.rosters.length === 1 ? "the " + c.rosters[0] + " roster" : `${c.rosters.length} rosters`}; sheets you answered with it lose that answer.` : "Sheets you answered with it lose that answer.";
     if (!(await ask({ title: `Delete ${c.label}?`, message: `${c.cls} ${c.spec}${c.is_main ? " — your main" : ""}. ${rosters} Officers keep the history.`, confirmLabel: "Delete", color: "red" }))) return;
     try { const r = await api.post<{ message: string }>("/api/me/character/delete", { label: c.label }); ok(r.message); load(); } catch (e) { fail(e); }
+  }
+  async function stepDown(r: MyRegular) {
+    if (!(await ask({ title: `Step down from ${r.label}?`, message: `You stop being one of its regulars (${r.character}): the bot no longer expects your answer or reminds you. You can still Join any of its sheets. To come back, ask an officer.`, confirmLabel: "Step down", color: "red" }))) return;
+    try { const x = await api.post<{ message: string }>("/api/me/regular/remove", { series: r.series }); ok(x.message); load(); } catch (e) { fail(e); }
   }
   async function setDm(on: boolean) { try { await api.post("/api/me/dm", { on }); ok(on ? "DMs on" : "DMs off"); load(); } catch (e) { fail(e); } }
   async function clearAbs(a: Me["absences"][number]) {
@@ -150,13 +154,30 @@ export function MePage({ meta }: { meta: Meta }) {
         </Stack>
 
         <Stack gap="lg" style={{ minWidth: 0 }}>
+          {(me.regulars || []).length > 0 && (
+            <Card>
+              <CardHeader title="My regular raids" hint="you're expected on every sheet of these" />
+              <Stack p="md" gap="xs">
+                {me.regulars!.map((r) => (
+                  <Group key={r.series} justify="space-between" wrap="nowrap">
+                    <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+                      <GameIcon meta={meta} kind="spec" id={`${r.cls}:${r.spec}`} size={20} title={`${r.spec} · ${r.role}`} />
+                      <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{r.label}</Text><Text size="xs" c={classColour(meta, r.cls)}>{r.character}</Text></Box>
+                    </Group>
+                    <Button size="xs" variant="subtle" color="red" onClick={() => stepDown(r)}>Step down</Button>
+                  </Group>
+                ))}
+                <Text size="xs" c="dimmed">Nothing is answered for you: press Join or No thanks on each sheet (an absence marks you away). Want to become a regular somewhere? Ask an officer.</Text>
+              </Stack>
+            </Card>
+          )}
           <Card>
             <CardHeader title="My sheets" />
             <Stack p="md" gap="xs">
               {me.sheets.length === 0 && <Text c="dimmed" size="sm">No live raids.</Text>}
               {me.sheets.map((s) => (
                 <Group key={s.key} justify="space-between" wrap="nowrap">
-                  <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}</Text><Text size="xs" c="dimmed">{s.when}{s.character ? ` · ${s.character}` : ""}</Text></Box>
+                  <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{s.raid}{s.kind === "adhoc" ? " · ad hoc" : ""}</Text><Text size="xs" c="dimmed">{s.when}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
                   <Badge variant="light" color={s.rostered ? "teal" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.rostered ? `rostered${s.roster && s.roster > 1 ? ` · roster ${s.roster}` : ""}` : s.label || "not answered"}</Badge>
                 </Group>
               ))}

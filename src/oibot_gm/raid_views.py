@@ -159,9 +159,10 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         want = max(1, int(team.get("rosters") or 1))  # a schedule that declares N rosters advertises N × the seats
         runs = max(want, len(ins) // size) if size else want
         _soft, hard, confirm = run_times(reg, ev, team)
+        confirms = rc.run_confirms(reg, ev)
         e.title = f"{tag}{name}"
         e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n**{len(ins)}** / {size * want}" + (f" · {runs} runs" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
-                         + f"\n🔒 locks <t:{int(hard.timestamp())}:R> · ✓ confirm by <t:{int(confirm.timestamp())}:f>")
+                         + f"\n🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
         by_cls: dict[str, list] = {}
         for sg in ins:
             by_cls.setdefault(sg.cls, []).append(sg)
@@ -171,20 +172,22 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         if not by_cls:
             e.add_field(name="\u200b", value="-# Nobody has joined yet.", inline=False)
         rows_field()
-        e.set_footer(text=("test run · " if test else "") + "Join = I'm coming · Bench = call me if you need me")
+        adhoc = rc.run_kind(reg, ev) == "adhoc"  # first come, first rostered; Join is the commitment when confirmations are off
+        e.set_footer(text=("test run · " if test else "") + ("First come, first rostered · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me")
         return e, sheet_view(ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
     rosters = ev.all_rosters
-    conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)} if rosters else {}
+    conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)} if rosters and rc.run_confirms(reg, ev) else {}
     marks = {n: MARK.get(a) for n, a in conf.items()} if state == "locked" else {}
     tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
     if state == "done":
         e.title, e.description = f"{tag}Finished · {name}", f"<t:{unix}:F>" + (f"\n**{len(ev.seated())}** rostered" if rosters else "")
     else:
         _soft, _hard, confirm = run_times(reg, ev, team)
+        confirms = rc.run_confirms(reg, ev)
         e.title = f"{tag}🔒 {name}"
-        e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n" + (f"**{len(ev.seated())}** rostered" + (f" in {len(rosters)} rosters" if len(rosters) > 1 else "") + f"\u2003{tally}" if rosters else "-# Building the roster…")
-                         + f"\n✓ confirm by <t:{int(confirm.timestamp())}:f>")
+        e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n" + (f"**{len(ev.seated())}** rostered" + (f" in {len(rosters)} rosters" if len(rosters) > 1 else "") + (f"\u2003{tally}" if confirms else "") if rosters else "-# Building the roster…")
+                         + (f"\n✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
     icons = sum(len(ico("spec", f"{p.cls}:{p.spec}")) + len(p.character or p.signup_name) + 4 for p in ev.seated()) < EMBED_TOTAL_MAX - 600
     for i, r in enumerate(rosters):
         if len(rosters) > 1:
@@ -202,7 +205,8 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     rows_field()
     if state != "locked":
         return e, None
-    e.set_footer(text=("test run · " if test else "") + "Rostered? answer your DM. Not rostered? nothing to do.")
+    e.set_footer(text=("test run · " if test else "") + ("Rostered? answer your DM. Not rostered? nothing to do." if rc.run_confirms(reg, ev)
+                                                       else "Rostered? you're in — press Can't make it if that changes. Not rostered? nothing to do."))
     v = discord.ui.View(timeout=None)
     v.add_item(SignupButton(ev.key, "cant"))
     return e, v
@@ -342,22 +346,29 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
         body.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing if ico("buff", b["id"])))
-    if h["unresponsive"]:
-        body.append(f"**No answer** {len(h['unresponsive'])}" + (" · nudged" if ev.nudged else ""))
+    waiting = rc.not_answered(reg, ev)  # the regulars who haven't answered (every main while the series has none); ad hoc: nobody
+    if waiting:
+        whose = {"regulars": "regulars", "everyone": "no regulars set: everyone", "test": "test bench"}.get(h.get("expected_from"), "")
+        lines = [f"**No answer** {len(waiting)}" + (f" · {whose}" if whose else "") + (" · nudged" if ev.nudged else "")]
+        lines += [f"{ico('spec', f'{c.cls}:{c.spec}')} {c.label}" for _m, c in waiting[:NO_ANSWER_LINES]]  # one member per line
+        if len(waiting) > NO_ANSWER_LINES:
+            lines.append(f"-# +{len(waiting) - NO_ANSWER_LINES} more on the board")
+        body.append("\n".join(lines))
     busy = rc.conflicts(rs, ev) if rs is not None else {}
     double = [reg.members[u].display_name for u in busy if u in reg.members and str(u) in ev.signups and ev.signups[str(u)].status == "in"]
     if double:
         body.append("**Double-booked** " + ", ".join(double))
     _soft, hard, confirm = run_times(reg, ev, team)
     parts = [head, ui.Separator()] + ([ui.TextDisplay("\n".join(body)), ui.Separator()] if body else [])
-    parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R> · ✓ confirm by <t:{int(confirm.timestamp())}:f>"))
+    parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else " · first come, no confirmations")))
     parts.append(run_actions_row(ev, locked=False))
-    worst = "red" if short else "amber" if missing or h["unresponsive"] else "green"
+    worst = "red" if short else "amber" if missing or waiting else "green"
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour={"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]))
     return view
 
 
+NO_ANSWER_LINES = 12  # the health card names this many regulars who haven't answered, then "+N"
 LEFTOVER_LINES = 15  # a card's text is capped (4000 chars across its displays); the board lists the rest
 
 
@@ -383,14 +394,15 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> dis
     """One locked roster as a card: groups with confirmation marks and auras, raid-wide row, bench, waiting-on, buttons."""
     ui = discord.ui
     r = ev.all_rosters[i]
-    rows = [c for c in rc.confirmations(reg, ev) if c["roster"] == i + 1]
+    confirms = rc.run_confirms(reg, ev)
+    rows = [c for c in rc.confirmations(reg, ev) if c["roster"] == i + 1] if confirms else []
     conf = {c["display_name"]: c["answer"] for c in rows}
     via_site = {c["display_name"] for c in rows if c["channel"] == "web"}  # DMs off: the ask waits on the Me page
     marks = {n: MARK.get(a) for n, a in conf.items()}
     tally = f"✅ {sum(1 for a in conf.values() if a == 'yes')} · ⏳ {sum(1 for a in conf.values() if a is None)} · ❌ {sum(1 for a in conf.values() if a in ('no', 'expired'))}"
     rd = reg.raid_def(ev.instance)
     head = _header(reg, ev, f"🔒 {rd.get('name', ev.instance)}" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else ""),
-                   [f"**{len(r.selected)}** rostered" + (f" · synergy {r.synergy_value}" if r.synergy_value else "") + "   " + _role_counts(ico, r.selected), tally])
+                   [f"**{len(r.selected)}** rostered" + (f" · synergy {r.synergy_value}" if r.synergy_value else "") + "   " + _role_counts(ico, r.selected), tally if confirms else "-# first come — no confirmations: Join is the commitment"])
     summaries = _group_summaries(reg, r)
     parts = [head, ui.Separator()]
     for gi in range(len(r.groups)):
@@ -408,7 +420,8 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> dis
     if pending:
         tail.append("**Waiting on** " + ", ".join(pending[:15]))
     _soft, _hard, confirm = run_times(reg, ev, team)
-    tail.append(f"-# ✓ confirm by <t:{int(confirm.timestamp())}:f> · unanswered then counts as out")
+    if confirms:
+        tail.append(f"-# ✓ confirm by <t:{int(confirm.timestamp())}:f> · unanswered then counts as out")
     parts += [ui.Separator(), ui.TextDisplay("\n".join(tail)), run_actions_row(ev, locked=True)]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=TEAL))

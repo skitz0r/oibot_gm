@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Accordion, ActionIcon, Badge, Box, Button, Group, Menu, Stack, Text, Tooltip } from "@mantine/core";
 import { IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconUserOff, IconUsersPlus } from "@tabler/icons-react";
 import type { Meta, Sheet, Signup } from "../../api";
+import { classColour } from "../../theme";
 import { GameIcon } from "../Icons";
 import { Eyebrow } from "../Page";
 import { useConfirm } from "../ConfirmModal";
@@ -66,10 +67,15 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
     <Box id={`run-${e.key}`} p="md" style={{ border: `1px solid ${locked ? "var(--mantine-color-yellow-5)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, scrollMarginTop: 16 }}>
       <Group justify="space-between" wrap="wrap" align="flex-start">
         <Box>
-          <Group gap="sm"><Text size="lg" fw={700}>{e.when}</Text>{locked && <Badge variant="light" color="yellow">locked</Badge>}</Group>
+          <Group gap="sm">
+            <Text size="lg" fw={700}>{e.when}</Text>
+            {locked && <Badge variant="light" color="yellow">locked</Badge>}
+            {e.kind === "adhoc" && <Tooltip label="first come, first rostered · no regulars · no reminder"><Badge variant="light" color="blue">ad hoc</Badge></Tooltip>}
+            {e.kind === "recurring" && e.series_name && <Text size="xs" c="dimmed">{e.series_name}</Text>}
+          </Group>
           {e.timeline && (
             <Text size="xs" c="dimmed" mt={2}>
-              🕒 {e.rel}{!locked && <> · ❗ nudges {e.timeline.nudge}</>} · 🔒 {locked ? "locked" : `locks ${e.timeline.lock}`} · ✓ confirm by {e.timeline.confirm}
+              🕒 {e.rel}{!locked && e.timeline.nudge && <> · ❗ nudges {e.timeline.nudge}</>} · 🔒 {locked ? "locked" : `locks ${e.timeline.lock}`}{e.timeline.confirm ? ` · ✓ confirm by ${e.timeline.confirm}` : " · no confirmations: Join is the commitment"}
             </Text>
           )}
         </Box>
@@ -77,12 +83,14 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
 
       <Group gap="xs" mt="sm" align="baseline">
         <Text fw={700} style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{locked ? e.rostered : joined.length}<Text span c="dimmed" fw={500} size="sm"> / {e.size}{e.n_rosters > 1 ? ` × ${e.n_rosters}` : ""}</Text></Text>
-        {locked && <Group gap={6} ml="sm"><Badge variant="light" color="teal">✓ {counts.yes}</Badge><Badge variant="light" color="gray">⏳ {counts.pending}</Badge><Badge variant="light" color="red">✗ {counts.no}</Badge><Text size="xs" c="dimmed">fill {e.fill_state}</Text></Group>}
+        {locked && e.confirms !== false && <Group gap={6} ml="sm"><Badge variant="light" color="teal">✓ {counts.yes}</Badge><Badge variant="light" color="gray">⏳ {counts.pending}</Badge><Badge variant="light" color="red">✗ {counts.no}</Badge><Text size="xs" c="dimmed">fill {e.fill_state}</Text></Group>}
       </Group>
       <Group gap="md" mt={4}>
         <RoleCounts meta={meta} counts={roles} size={18} />
         {(e.double_booked || []).length > 0 && <Tooltip label={e.double_booked!.join(", ")}><Badge variant="light" color="yellow">double-booked {e.double_booked!.length}</Badge></Tooltip>}
       </Group>
+
+      {!locked && <NotAnswered e={e} meta={meta} />}
 
       <Group gap="xl" mt="md" align="flex-start" wrap="wrap">
         {byClass.length === 0 && <Text size="sm" c="dimmed">Nobody has joined yet.</Text>}
@@ -115,6 +123,42 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
       <Detail e={e} />
       {locked && <FillModal e={e} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />}
       {confirmDialog}
+    </Box>
+  );
+}
+
+/** Officer-facing: who the bot expects an answer from and hasn't heard from — the series' regulars (every main while it
+ *  has none), one member per line (spec icon + character, the name in the tooltip), and how the rest of the regulars
+ *  answered as icon + number. Ad hoc runs expect nobody, so nothing shows. */
+function NotAnswered({ e, meta }: { e: Sheet; meta: Meta }) {
+  const waiting = e.not_answered || [];
+  if (!e.expected_from || e.expected_from === "none") return null;
+  const regs = e.regulars || [];
+  const tally = (st: string) => regs.filter((r) => r.status === st).length;
+  const title = e.expected_from === "regulars" ? `Regulars who haven't answered (${waiting.length} of ${regs.length})`
+    : e.expected_from === "test" ? `Test bench, not answered (${waiting.length})` : `Not answered (${waiting.length}) — no regulars set, everyone counts`;
+  return (
+    <Box mt="sm" p="sm" style={{ border: `1px solid ${waiting.length ? "var(--mantine-color-yellow-6)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8 }}>
+      <Group justify="space-between" wrap="wrap" gap="xs">
+        <Eyebrow>{title}</Eyebrow>
+        {e.expected_from === "regulars" && (
+          <Group gap="sm">
+            <Tooltip label={meta.labels.in}><Badge variant="light" color="teal">✓ {tally("in")}</Badge></Tooltip>
+            <Tooltip label={meta.labels.sub}><Badge variant="light" color="yellow">{meta.labels.sub} {tally("sub")}</Badge></Tooltip>
+            <Tooltip label={meta.labels.out}><Badge variant="light" color="red">✗ {tally("out")}</Badge></Tooltip>
+          </Group>
+        )}
+      </Group>
+      {waiting.length === 0 ? <Text size="sm" c="dimmed" mt={4}>Everyone has answered.</Text> : (
+        <Stack gap={0} mt={4}>
+          {waiting.map((s) => (
+            <Group key={s.uid || s.display_name} gap={6} wrap="nowrap" style={{ lineHeight: 1.8 }}>
+              <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={18} title={`${s.spec} · ${s.role}`} />
+              <Tooltip label={s.display_name}><Text size="sm" fw={600} c={classColour(meta, s.cls)} truncate>{s.character}</Text></Tooltip>
+            </Group>
+          ))}
+        </Stack>
+      )}
     </Box>
   );
 }

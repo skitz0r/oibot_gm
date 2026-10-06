@@ -38,9 +38,12 @@ export interface Meta {
   /** answer statuses in order (in, sub, out), split philosophies, role order, per-group role caps, class colours, bot start (epoch s) */
   statuses: string[]; split_policies: string[]; roles: string[]; group_caps: Record<string, number>; class_colours: Record<string, string>; started_at: number;
 }
-export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; confirmed: boolean; role: string; off_role: string | null }
+/** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
+export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null }
 export interface Absence { start: string; end: string; reason: string | null }
-export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null }
+export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean }
+/** One recurring schedule the viewer is a regular of (the Me page's My regular raids). */
+export interface MyRegular { series: string; label: string; character: string; cls: string; spec: string; role: string }
 /** `roster` is the run's key (what the answer is posted with); `raid` + `when` are what people see.
  *  `channel` is where the ask went: "dm", or "web" when DMs are off (the Me page is then the only place to answer). */
 export interface PlacementAsk { roster: string; character: string; asked_at: string; channel?: string | null; raid: string; when: string; key: string | null }
@@ -58,10 +61,16 @@ export interface Board { n_groups: number; group_size: number; size: number; ban
 /** Why the joiners make fewer runs than the headcount allows: run `run` is short these tank/healer counts (roles_allow 0 = not even one). */
 export interface SplitReason { bodies_allow: number; roles_allow: number; run: number; short: Record<string, number> }
 export interface Confirmation { uid: string | null; display_name: string; character: string; cls: string; spec: string; role: string; roster: number; answer: string | null; asked_at: string | null }
+/** A regular of the run's series and what they answered (status null = no answer). */
+export interface RegularAnswer { uid: string; display_name: string; character: string; cls: string; spec: string; role: string; status: string | null; source: string | null; signed_as: string | null }
 export interface Sheet {
   key: string; run: string; name: string; size: number; instance: string | null; raid: string; starts_at: string; when: string; rel: string; state: string; live: boolean; fill_state: string;
   counts: Record<string, number>; rostered: number; n_rosters: number;
-  timeline?: { nudge: string; lock: string; confirm: string; locked_at?: string | null };
+  /** recurring (has a series and regulars) or ad hoc (first come); `confirms` false = Join is the commitment */
+  kind?: "recurring" | "adhoc"; series?: string | null; series_name?: string | null; confirms?: boolean; test?: boolean;
+  /** who `not_answered` lists: the series' regulars, everyone (no regulars set yet), the test bench, or nobody (ad hoc) */
+  expected_from?: "regulars" | "everyone" | "test" | "none"; regulars?: RegularAnswer[];
+  timeline?: { nudge: string | null; lock: string; confirm: string | null; locked_at?: string | null };
   signups?: Signup[]; not_answered?: Seat[]; absences?: { display_name: string; start: string; end: string; reason: string | null; signed: boolean }[]; double_booked?: string[];
   needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean; rev?: string;
   split?: { strategy: string; policy: string; runs: number; reason?: SplitReason | null; reason_text?: string | null };
@@ -72,21 +81,33 @@ export interface Sheet {
 export interface RaidRuns {
   id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null;
   open: Sheet[]; locked: Sheet[]; past: Sheet[]; upcoming: { slot: string; start: string; opens: string; schedule?: string; schedule_name?: string }[];
-  /** every schedule of the raid, in words (`label`), for the open-a-run control; pickup templates open only on demand */
-  schedules?: { id: string; name: string; kind: string; label: string; active: boolean }[];
+  /** every schedule of the raid, in words (`label`), for the open-a-run control; pickup templates (ad hoc) open only on demand */
+  schedules?: { id: string; name: string; kind: string; class?: "recurring" | "adhoc"; label: string; active: boolean }[];
+  /** one entry per recurring schedule: its regulars (one member per line on the page) against the role minimums */
+  series?: Series[];
+  /** regulars of a schedule that was removed (or became ad hoc): listed, never stripped silently */
+  orphan_regulars?: { key: string; label: string; uid: string; display_name: string; character: string; cls: string; spec: string }[];
 }
+export interface Regular { uid: string; display_name: string; character: string; cls: string; spec: string; role: string }
+export interface Series { key: string; id: string; name: string; label: string; active: boolean; seats: number; regulars: Regular[]; counts: Record<string, number>; need: Record<string, number> }
+/** Someone who can be made a regular (real members with active characters, main first). */
+export interface Person { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; role: string; is_main: boolean }[] }
 /** One schedule of a raid (mirrors web/api.py schedule_json). Machine forms (`slots`, `days`, `time`) are for the editors;
  *  everything a person reads comes as words from the server (`label`, `slot_labels`, `time_label`, `next`). */
 export interface Schedule {
   id: string; name: string; kind: "weekly" | "lockout" | "pickup"; active: boolean; rosters: number; seats: number; is_default: boolean;
+  /** derived from the kind: weekly / lockout = recurring (regulars), pickup = ad hoc (first come, the ad hoc defaults) */
+  class?: "recurring" | "adhoc"; class_label?: string; series?: string | null; regulars?: number;
+  /** where each inherited value comes from: own | raid | adhoc (defaults); weights per key */
+  source?: Record<string, string | Record<string, string>>; own_weights?: Record<string, number>; weights?: Record<string, number>;
   slots: string[]; slot_labels: string[]; days: number[]; time: string; time_label: string; label: string;
   /** cadence the schedule sets itself; anything missing inherits the raid's (`effective` = what applies) */
   own: Record<string, number | boolean | string>; effective: Record<string, number | boolean | string>; next: string[];
 }
-export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; tz: string }
+export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; people?: Person[]; tz: string }
 export interface RaidRule {
   id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; comp: Record<string, { min?: number; max?: number }>;
-  slots: string[]; slot_labels?: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number; autofill: boolean; open_dm: boolean;
+  slots: string[]; slot_labels?: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number; autofill: boolean; open_dm: boolean; confirm?: boolean;
   overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; live: number;
   schedules: Schedule[];
 }
@@ -126,5 +147,5 @@ export interface Proposal {
 }
 export interface Me {
   display_name: string; registered: boolean; must_apply?: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
-  absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[];
+  absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[]; regulars?: MyRegular[];
 }

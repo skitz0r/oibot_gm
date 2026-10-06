@@ -23,7 +23,7 @@ export function RaidsPage() {
   );
 }
 
-type Draft = { split_policy: string; nudge: boolean; autofill: boolean; open_dm: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; fill_ask_hours: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
+type Draft = { split_policy: string; nudge: boolean; autofill: boolean; open_dm: boolean; confirm: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; fill_ask_hours: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
 
 function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: RaidRule; owner: boolean; weightKeys: string[]; policies: string[]; maxRosters: number; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
@@ -58,7 +58,7 @@ function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: 
               <Fact label="fill after lock" value={r.autofill ? "automatic" : "by hand"} c={oc("autofill")} />
               <Fact label="DM on open" value={r.open_dm ? "on" : "off"} c={oc("open_dm")} />
               <Fact label="locks" value={`${r.lock_hours_before} h before`} c={oc("lock_hours_before")} />
-              <Fact label="confirm by" value={`${r.confirm_hours_before} h before`} c={oc("confirm_hours_before")} />
+              <Fact label="confirm by" value={r.confirm === false ? "no confirmations" : `${r.confirm_hours_before} h before`} c={oc("confirm_hours_before") || oc("confirm")} />
               <Fact label="fill asks" value={`${r.fill_ask_hours} h to answer`} c={oc("fill_ask_hours")} />
               <Fact label="split policy" value={SPLIT_LABEL[r.split_policy] || r.split_policy} c={oc("split_policy")} />
             </Group>
@@ -80,6 +80,7 @@ function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: 
               <Switch label="nudge on" checked={d.nudge} onChange={(e) => setD({ ...d, nudge: e.currentTarget.checked })} mb={6} />
               <Switch label="fill seats automatically after lock" checked={d.autofill} onChange={(e) => setD({ ...d, autofill: e.currentTarget.checked })} mb={6} />
               <Switch label="DM every raider when the sheet opens" checked={d.open_dm} onChange={(e) => setD({ ...d, open_dm: e.currentTarget.checked })} mb={6} />
+              <Switch label="ask the rostered to confirm" checked={d.confirm} onChange={(e) => setD({ ...d, confirm: e.currentTarget.checked })} mb={6} />
               <NumberInput label="locks (h before)" min={0} value={d.lock_hours_before} onChange={(v) => setD({ ...d, lock_hours_before: v })} w={150} />
               <NumberInput label="confirm by (h before)" min={0} value={d.confirm_hours_before} onChange={(v) => setD({ ...d, confirm_hours_before: v })} w={170} />
               <NumberInput label="fill asks (h to answer)" description="no answer counts as no" min={0} value={d.fill_ask_hours} onChange={(v) => setD({ ...d, fill_ask_hours: v })} w={170} />
@@ -123,10 +124,10 @@ function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: 
 
 export const SPLIT_LABEL: Record<string, string> = { balanced: "Balanced", first: "Raid one first", rotation: "Rotation" };
 export const SPLIT_BLURB: Record<string, string> = { balanced: "both runs equal: synergy, tanks, healers and seat quality spread evenly", first: "roster 1 gets the best synergy and seat weights; roster 2 is the rest", rotation: "whoever sat out or was in the weaker run last window moves up" };
-const WEIGHT_HINT: Record<string, string> = { rank: "core > raider > trial", main: "main over alt", sat_out: "benched last window", signup_order: "earlier signup" };
+const WEIGHT_HINT: Record<string, string> = { rank: "core > raider > trial", main: "main over alt", sat_out: "benched last window", signup_order: "earlier signup", regular: "a regular of the schedule" };
 
 function toDraft(r: RaidRule): Draft {
-  return { split_policy: r.split_policy, nudge: r.nudge, autofill: r.autofill, open_dm: r.open_dm, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },
+  return { split_policy: r.split_policy, nudge: r.nudge, autofill: r.autofill, open_dm: r.open_dm, confirm: r.confirm !== false, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },
     first_open: r.first_open_local, lockout_days: r.lockout_days, duration_hours: r.duration_hours, notes: r.notes,
     comp: Object.fromEntries(["tank", "healer", "dps"].map((role) => [role, { min: r.comp[role]?.min ?? "", max: r.comp[role]?.max ?? "" }])) };
 }

@@ -121,6 +121,12 @@ Members (officer): character: member, character=<their character's name>, field=
     their character as main, rank trial; either way they get a DM and the review card updates).
   absence_clear: member, start=<YYYY-MM-DD the absence starts; blank = their only upcoming absence> — back early; sheets it had pre-filled re-open for them.
   dm: member, value=on|off — whether the bot DMs them (off: never asked to fill, confirmations wait on the site).
+  regular: target=<raid id>, field=<schedule id of a RECURRING schedule (weekly or lockout; blank = default, the raid's own run
+    times)>, member, character=<optional: which of their characters raids there; blank = their main>, value=add|remove — the
+    schedule's REGULARS: expected on every sheet of it (officers see who hasn't answered, the reminder goes to them, they're
+    seated ahead of others at lock; nothing is answered for them). One character per member per schedule. "make Ana a Tuesday
+    BD regular with Anabelle" → regular add. Someone stepping down themselves ("take me off the Tuesday regulars") = remove with
+    member empty. Pickup templates and one-off runs are ad hoc: no regulars (first come).
 Test bench (officer): test: value="seed <N>" | "seed all" (puppet members; all = the whole built-in roster)
   | "add <N> <Class> <Spec>[/<Offspec>], …" (puppets of exactly that mix) | "remove <N> <Class> <Spec>, …"
   | "comp <raid id>" (every puppet joined to a sandbox run two weeks out, not posted, to build a comp on its board)
@@ -132,18 +138,18 @@ A member is named by display name, mention or one of their characters. A request
 The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm"): leave member EMPTY — the bot fills in
   the requester itself. Who may do what, and where, is decided by the bot after you answer; write the ops as asked, never refuse or widen them.
 Not settable here (say so): the loot session itself (/raid loot) and handing the guild to a new owner (slash only, by design: over
-  chat or MCP it would give the guild away). There is no setting at all for standing rosters or availability (members answer each
-  run's sheet), loot items, tiers or wishlists.
+  chat or MCP it would give the guild away). A recurring schedule's regulars ARE settable (op regular); there is no standing
+  availability (members answer each run's sheet — regulars too: nobody is answered for them), and no loot items, tiers or wishlists.
 """
 
 
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, character, absence_clear, dm, test, recruit, application, proposal, job, policy, plain")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|news_keywords|ask_audience|about")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain)")
-    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain)")
+    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none)")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
@@ -278,7 +284,17 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
             + (data_block("Open applications (applicant<@id>: character, class spec)", applications_text(reg))
                + data_block("News proposals waiting (id: title, kind, state)", proposals_text(reg))
                + data_block("Unconfirmed characters (confirm character=\"all pending\" confirms every one of these)", pending_text(reg)) if officer else "")
+            + data_block("Regulars of each recurring schedule (raid:schedule = as a person reads it: name (character); op regular changes these)", regulars_text(reg))
             + data_block("Members (name<@id> [characters*=main:rank] away dates = the same days in words)", members))
+
+
+def regulars_text(reg: Registry) -> list[str]:
+    """One row per recurring schedule with its regulars (member-written names: <data>); 'none yet' when it has none."""
+    rows = []
+    for key, label in reg.series("recurring"):
+        regs = reg.regulars(key)
+        rows.append(f"- {key} = {label}: " + (", ".join(f"{m.display_name} ({c.label})" for m, c in regs) if regs else "none yet (every main is expected)"))
+    return rows
 
 
 def _stored_value(v) -> str:
@@ -354,11 +370,11 @@ OP_GROUP = {
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
     "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
     "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup", "job": "setup", "plain": "setup",
-    "application": "members", "proposal": "comp", "policy": "comp",
+    "application": "members", "proposal": "comp", "policy": "comp", "regular": "members",
     "test": "test",
 }
 APPLY_FIRST = "New here? Apply first with `/apply` (or *Apply to join* on the registration card) — the officers take it from there."
-SELF_OPS = {"absence", "absence_clear", "dm", "character", "set_main", "run_answer", "confirm_for"}
+SELF_OPS = {"absence", "absence_clear", "dm", "character", "set_main", "run_answer", "confirm_for", "regular"}  # regular: only a remove (stepping down, D7)
 ANYONE_OPS = {"run_sheet"}  # touch nobody's record, open to anyone like their slash command (/raid sheet): always "self"
 SHEET_HERE = "A sheet is re-posted in the channel you ask in — ask in a server channel, or use /raid sheet."
 OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other ops use their group's label
@@ -367,6 +383,7 @@ OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other op
     "set_main": ("your main", "someone else's main"), "run_answer": ("your answer on a sheet", "someone else's answer on a sheet"),
     "confirm_for": ("your confirmation", "someone else's confirmation"), "rank": ("ranks", "ranks"), "confirm": ("character confirmations", "character confirmations"),
     "run_sheet": ("where a sheet is posted", "where a sheet is posted"),
+    "regular": ("whether you're a regular (ask an officer to add you)", "a schedule's regulars"),
 }
 
 
@@ -393,6 +410,8 @@ def bind_self(reg: Registry, op: ConfigOp, author_id: int) -> tuple[str | None, 
         return "self", None  # /raid sheet is open to anyone: self-service grade, acts in "self" channels (authorize refuses DMs)
     if op.op not in SELF_OPS or (op.op == "character" and (op.field or "").strip().lower() == "rank"):
         return group, None
+    if op.op == "regular" and (op.value or "").strip().lower() not in ("remove", "off", "no", "false"):
+        return group, None  # becoming a regular is an officer's call (D7: volunteering is a request to officers); stepping down is yours
     ref = (op.member or "").strip()
     if ref and _candidates(reg, ref) != {author_id}:
         return group, None  # someone else (or several people could be meant): their usual group decides
@@ -527,6 +546,20 @@ def _layout(value: str | None) -> list[list[str]]:
     return [[n.strip() for n in g.split(",") if n.strip()] for g in groups if g.strip()]
 
 
+def _regular_args(reg: Registry, op: ConfigOp):
+    """op=regular → (member, series key, add?)."""
+    from .registry import series_key
+
+    rid = (op.target or "").strip()
+    if rid not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
+    m = _need_member(reg, op.member)
+    v = (op.value or "add").strip().lower()
+    if v not in ("add", "remove", "on", "off", "yes", "no", "true", "false"):
+        raise RegistryError("regular is add | remove")
+    return m, series_key(rid, (op.field or "").strip().lower() or "default"), v in ("add", "on", "yes", "true")
+
+
 def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None = None):
     """run_open: the raid's next run (of `schedule` when named), or a one-off 'YYYY-MM-DD HH:MM' in guild time (what
     /raid open and the web take). Returns (start, schedule id or None)."""
@@ -554,8 +587,8 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
             start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=reg.tz)
         except ValueError:
             raise RegistryError("I couldn't tell which time you meant — name the day and the time, e.g. Thu 10 Dec 7:30 PM (guild time)")
-        if sid is None:  # one of the raid's own upcoming runs: open it as that schedule's run, not a one-off
-            sid = next((s["id"] for s, t in nxt if t == start), None)
+        if sid is None:  # one of the raid's own upcoming runs: open it as that schedule's run; any other time is a one-off (ad hoc)
+            sid = rc.open_schedule(reg, rid, start, None)
         return start, sid
     if sched is not None and sched["kind"] == "pickup":
         raise RegistryError(f"{sched['name']} is a pickup template — give the date and time it starts")
@@ -1638,7 +1671,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         lo, hi = _range(op.value)
         new_s = f"{lo if lo is not None else (cur or {}).get('min', '?')}" + (f"–{hi}" if hi is not None else "")
         return f"{key} comp {slot}: {cur_s} → {new_s}" + (f" ({op.reason or op.text})" if (op.reason or op.text) else "")
-    if op.op in RUN_OPS or op.op in ("character", "absence_clear", "dm", "test"):
+    if op.op in RUN_OPS or op.op in ("character", "absence_clear", "dm", "regular", "test"):
         try:
             return _describe_action(reg, op, channel)
         except RegistryError as e:
@@ -1739,6 +1772,22 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         if v not in ("on", "off"):
             raise RegistryError("dm is on | off")
         return f"{m.display_name}: DMs {'off' if m.dm_opt_out else 'on'} → {v}" + (" (never asked to fill; confirmations wait on the site)" if v == "off" else "")
+    if op.op == "regular":
+        m, key, add = _regular_args(reg, op)
+        label = reg.series_label(key)
+        on = next((c for c in m.active() if key in c.rosters), None)
+        if not add:
+            if on is None:
+                raise RegistryError(f"{m.display_name} isn't a regular of {label}")
+            return f"{label}: {m.display_name} ({on.label}) off the regulars — they can still Join its sheets"
+        reg._recurring_series(key)
+        c = next((x for x in m.active() if x.matches(op.character)), None) if op.character else m.main
+        if c is None:
+            raise RegistryError(f"{m.display_name} has no {'character named ' + op.character if op.character else 'main'}")
+        twin = [reg.series_label(k) for k in c.rosters if k != key and k.partition(":")[0] == key.partition(":")[0]]
+        return (f"{label}: {m.display_name} ({c.label}) becomes a regular" + (f" (replaces {on.label})" if on is not None and on is not c else " (already is)" if on is c else "")
+                + " — expected on every sheet, seated ahead of others at lock; nothing is answered for them"
+                + (f" · warning: {c.label} is also a regular of {', '.join(twin)} (same lockout)" if twin else ""))
     # the run ops: resolve the live run first so the line names it
     rs, ev = _live_event(reg, op.target)
     label = f"{reg.raid_def(ev.instance).get('name', ev.instance)} {reg.local12(ev.start)} ({ev.key})"
@@ -2021,6 +2070,13 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         m.dm_opt_out = v == "off"
         reg.save(m, f"{m.display_name} DMs {v} (by {by})")
         return f"{m.display_name}: DMs {v}"
+    if op.op == "regular":  # the same registry verbs as the site's /api/admin/raid/regulars and Discord's /roster add|remove
+        m, key, add = _regular_args(reg, op)
+        if not add:
+            reg.regular_remove(m.discord_id, key, by)
+            return f"{m.display_name} is no longer a regular of {reg.series_label(key)}"
+        mm, c, warn = reg.regular_add(m.discord_id, key, by, op.character or None)
+        return f"{mm.display_name} ({c.label}) is a regular of {reg.series_label(key)}" + "".join(f" — warning: {w}" for w in warn)
     if op.op == "test":
         kind, arg = _test_op(op.value)
         if kind == "seed":
