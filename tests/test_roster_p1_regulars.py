@@ -167,7 +167,8 @@ def test_health_card_names_the_regulars_who_havent_answered(reg, rs):
     for m in ms[1:]:
         c = m.main
         assert f"<spec:{c.cls}:{c.spec}> {c.label}" in lines, "one member per line, spec icon + character"
-    assert reg.test_members()[0].main.label not in body, "non-regulars aren't chased"
+    no_answer = body.split("**No answer**", 1)[1].split("**Suggested**", 1)[0]  # Phase 2 adds the Suggested block below
+    assert reg.test_members()[0].main.label not in no_answer, "non-regulars aren't chased"
 
 
 def test_nudge_goes_to_unanswered_regulars_only(reg, rs):

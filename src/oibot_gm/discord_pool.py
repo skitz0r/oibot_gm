@@ -59,6 +59,7 @@ def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.L
         lines.append("**Short** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['want']}" for c in short[:8]))
     for cv in d.get("series") or []:  # regulars coverage per recurring series (replaces the old "on roster" count)
         lines.append(f"**{cv['name']}**{' (paused)' if not cv['active'] else ''} {views.coverage_line(ico, cv)}")
+        lines += views.forecast_lines(ico, cv)
     if over:
         lines.append("**Over cap** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['max']}" for c in over[:8]))
     parts = [top, ui.Separator(), ui.TextDisplay("\n".join(x for x in lines if x.strip()) or "every slot filled")]

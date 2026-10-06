@@ -109,7 +109,9 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
   const [ask, dialog] = useConfirm();
   const person = people.find((p) => p.uid === who);
   const on = new Set(s.regulars.map((x) => x.uid));
-  const short = Object.entries(s.need).filter(([role, n]) => (s.counts[role] || 0) < n);
+  const level = s.level || (Object.entries(s.need).some(([role, n]) => (s.counts[role] || 0) < n) ? "red" : "green");
+  const levelColour = { green: "teal", amber: "yellow", red: "red" }[level];
+  const levelWords = { green: "regular mains cover the tank and healer minimums", amber: "covered only with offspecs, flex roles or alts", red: "regulars can't field the minimum" }[level];
   async function remove(uid: string, name: string, character: string) {
     if (!(await ask({ title: `Take ${name} off the regulars?`, message: `${character} stops being expected on ${r.name} · ${s.name}. They can still Join any sheet.`, confirmLabel: "Remove", color: "red" }))) return;
     await onAct(`reg${s.key}${uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.id, uid, on: false });
@@ -126,10 +128,13 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
           <Text fw={700} size="sm">{s.name}{!s.active && <Badge ml={6} size="xs" color="gray" variant="light">paused</Badge>}</Text>
           <Text size="xs" c="dimmed">{s.label} · {s.regulars.length} regular{s.regulars.length === 1 ? "" : "s"} for {s.seats} seats</Text>
         </Box>
-        <Tooltip label={short.length ? "regular mains don't cover the minimum" : "regular mains cover the tank and healer minimums"}>
-          <Box style={{ borderBottom: `2px solid ${short.length ? "var(--mantine-color-red-5)" : "var(--mantine-color-teal-5)"}` }}><RoleCounts meta={meta} counts={s.counts} size={16} /></Box>
+        <Tooltip label={levelWords}>
+          <Box style={{ borderBottom: `2px solid var(--mantine-color-${levelColour}-5)` }}><RoleCounts meta={meta} counts={s.counts} size={16} /></Box>
         </Tooltip>
       </Group>
+      {s.regulars.length > 0 && level === "amber" && (s.cover || []).length > 0 && <Text size="xs" c="dimmed" mt={4}>could cover: {(s.cover || []).join(", ")}</Text>}
+      {s.regulars.length > 0 && level === "red" && <Text size="xs" c="red" mt={4}>recruit{(s.recruit || []).length ? `: ${(s.recruit || []).join(", ")}` : " — nobody in the guild plays the missing role"}</Text>}
+      <Forecast s={s} meta={meta} />
       <Stack gap={0} mt={6}>
         {s.regulars.length === 0 && <Text size="sm" c="dimmed">No regulars yet — every main counts as expected until you add some.</Text>}
         {s.regulars.map((x) => (
@@ -150,6 +155,31 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
         <Button size="xs" variant="default" leftSection={<IconUserPlus size={13} />} disabled={!person} loading={busy === `reg${s.key}add`} onClick={add}>Add</Button>
       </Group>
       {dialog}
+    </Box>
+  );
+}
+
+/** The series' 4-week forecast: each upcoming start with what the regulars minus recorded absences leave short — role
+ *  icon + number (icons stand alone), who is away in the tooltip. Officers see a hole a week ahead. */
+function Forecast({ s, meta }: { s: Series; meta: Meta }) {
+  const rows = s.forecast || [];
+  if (!rows.length) return null;
+  return (
+    <Box mt={6}>
+      <Eyebrow>Next 4 weeks</Eyebrow>
+      <Stack gap={0}>
+        {rows.map((f) => (
+          <Tooltip key={f.start} label={f.away.length ? `away: ${f.away.join(", ")}` : `${f.expected} regulars expected`} withinPortal>
+            <Group gap={8} wrap="nowrap" style={{ lineHeight: 1.7 }}>
+              <Text size="xs" w={78} style={{ fontVariantNumeric: "tabular-nums" }}>{f.day}</Text>
+              {Object.keys(f.short).length === 0 ? <Text size="xs" c="teal">✓</Text> : Object.entries(f.short).map(([role, k]) => (
+                <Group key={role} gap={2} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={14} title={role} /><Text size="xs" c="red" style={{ fontVariantNumeric: "tabular-nums" }}>−{k}</Text></Group>
+              ))}
+              {f.away.length > 0 && <Text size="xs" c="dimmed">{f.away.length} away</Text>}
+            </Group>
+          </Tooltip>
+        ))}
+      </Stack>
     </Box>
   );
 }

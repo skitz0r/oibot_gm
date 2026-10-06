@@ -92,7 +92,9 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
     (after lock: join seats them and asks them to confirm, no thanks frees their seat and the fill engine looks for cover).
   run_lock: target — lock now: roster(s) built from the signups (pins honoured), confirmation DMs to everyone rostered.
   run_cancel: target, reason=<optional>.
-  run_fill: target, value=preview|send — the fill engine on a locked run: who would be asked next / send those DMs.
+  run_fill: target, value=preview|send — who could cover the run's shortfall. Before lock ("suggest fixes for Tuesday's run",
+    "who could tank?"): the planner's suggestions for the tank/healer minimums (cheapest first, with alternates) — preview
+    shows them, send DMs those people a Yes/No ask ("send them", "ask them"). After lock: the fill engine's next batch.
   run_strategy: target, value=balanced|first|rotation — how a slot with more joiners than seats is split into rosters.
   run_autofill: target — before lock: the solver fills the board's empty seats around the officers' placements.
   run_propose: target, value=<optional strategy balanced|first|rotation>, field=<empty = a fresh preview | another (a different
@@ -1058,7 +1060,29 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
             except RegistryError:
                 continue
             out.setdefault(ev.key, rc.board_rev(reg, ev))
+        elif op.op == "run_fill":  # before lock a send carries the suggestions the diff showed (rc.plan_rev)
+            try:
+                rs, ev = _live_event(reg, op.target, raids)
+            except RegistryError:
+                continue
+            if ev.state == "open":
+                out.setdefault(PLAN_REV + ev.key, rc.role_plan(reg, rs, ev).rev)
     return out
+
+
+PLAN_REV = "plan:"  # board_revs key prefix for a run's plan fingerprint (never a run key: those hold no ':')
+
+
+def op_rev(op: ConfigOp, key: str | None, revs: dict[str, str]) -> str | None:
+    """The fingerprint Apply passes with an op: a board op → its run's board_rev; run_fill → the plan_rev the diff
+    showed; anything else → None."""
+    if not key:
+        return None
+    if op.op in BOARD_OPS:
+        return revs.get(key)
+    if op.op == "run_fill":
+        return revs.get(PLAN_REV + key)
+    return None
 
 
 def snapshot_revs(reg: Registry, revs: dict[str, str], raids) -> dict[str, str]:
@@ -1832,8 +1856,14 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         v = (op.value or "preview").strip().lower()
         if v not in ("preview", "send"):
             raise RegistryError("run_fill is preview | send")
+        if ev.state == "open":  # before lock: the planner's suggestions (an officer's Ask sends them)
+            plan = rc.role_plan(reg, rs, ev)
+            if not plan.seats:
+                return f"{label}: nothing to suggest — the tank/healer minimums are covered by who joined" + (" and the regulars yet to answer" if plan.expected else "")
+            head = f"{label}: {'suggestions before lock (nothing sent)' if v == 'preview' else 'ask these by DM (a yes changes their signup, seats nobody; unanswered asks close at lock)'}"
+            return head + " — " + " | ".join(rc.plan_lines(reg, plan))
         if ev.state != "locked":
-            raise RegistryError("the fill engine works after lock — before that, shape the board")
+            raise RegistryError(f"{ev.key} is {ev.state}")
         nd = rc.needs(reg, ev, rc.run_team(reg, ev))
         parts = ([f"{nd['headcount']} seat(s)"] if nd["headcount"] else []) + [f"{n} {r}" for r, n in nd["roles"].items()]
         short = ", ".join(parts) or "nothing"
@@ -2113,8 +2143,11 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         from . import raidcycle as rc
 
         rs, ev = _live_event(reg, op.target, raids)
-        if ev.state != "locked":
-            raise RegistryError("the fill engine works after lock — before that, shape the board")
+        if ev.state == "open":  # before lock: the suggestions, code-written (Claude may rephrase, never invent)
+            plan = rc.role_plan(reg, rs, ev)
+            if not plan.seats:
+                return f"{ev.key}: nothing to suggest — the tank/healer minimums are covered"
+            return f"{ev.key}: suggestions before lock (nothing sent): " + " | ".join(rc.plan_lines(reg, plan))
         team = rc.run_team(reg, ev)
         nd = rc.needs(reg, ev, team)
         batch = rc.fill_batch(reg, rs, ev, team) if (nd["headcount"] or nd["roles"]) else []
@@ -2386,9 +2419,12 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_cancel":
         return str(await bot.cancel_run(reg, rs, ev, by, (op.reason or "").strip() or None))
     if op.op == "run_fill" and (op.value or "preview").strip().lower() == "send":
-        if ev.state != "locked":
-            raise RegistryError("the fill engine works after lock — before that, shape the board")
-        sent, nd = await bot.run_fill(reg, rs, ev, team, by=by)
+        if ev.state == "open":  # the suggestions the diff showed (its plan fingerprint): RaidMixin.send_plan, refused if they changed
+            if not rev:
+                raise RegistryError("preview the suggestions first (ask “suggest fixes for …”), then send them")
+            sent, _plan = await bot.send_plan(reg, rs, ev, rev=rev, by=by)
+            return f"{ev.key}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + " — a yes changes their signup; the lock builds the roster"
+        sent, nd = await bot.run_fill(reg, rs, ev, team, by=by, approved_by=by)  # an officer's send: role swaps included (D3)
         if sent:
             from .raid_views import ask_line
 

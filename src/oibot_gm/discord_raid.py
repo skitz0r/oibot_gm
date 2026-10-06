@@ -121,7 +121,7 @@ class RaidMixin:
                 elif key.startswith("lock:"):
                     i = int(key[5:])
                     if i < len(ev.all_rosters):
-                        await msg.edit(view=lock_layout(reg, ev, team, self.ico, i))
+                        await msg.edit(view=lock_layout(reg, ev, team, self.ico, i, rs))
             except Exception as e:  # noqa: BLE001
                 log.warning("card refresh failed (%s %s): %s", ev.key, key, e)
 
@@ -152,6 +152,8 @@ class RaidMixin:
         if sheet_state(ev) == "open":
             s = rc.set_signup(reg, rs, ev, m, character, status, source=source)
             await self.refresh_sheet(reg, ev)
+            if "health" in ev.cards:  # the officer card's counts and Suggested block follow the answers
+                await self.refresh_cards(reg, ev)
             line = f"✅ {who}{s.character} {rc.LABELS[s.status]} for {label}" + (f" — {s.note}" if s.note and s.status != status else "")
         elif status == "out":
             if ev.seat_of(m.display_name):
@@ -235,14 +237,27 @@ class RaidMixin:
         rs.save(ev, f"open DMs {sent}")
         return sent
 
-    async def post_health(self, reg, rs, ev, channel, nudge: bool) -> None:
+    async def post_health(self, reg, rs, ev, channel, nudge: bool, early: bool = False) -> None:
+        """The officer health card (with its Suggested block) and, at reminder time, the nudge DMs. `early`: the early
+        warning a recurring sheet posts when it opens and its regulars can't cover a minimum — the card only (no
+        nudge, the reminder time still comes). At reminder time an early card is replaced by a fresh one (rebuilt
+        from the answers by then), so the current card sits at the bottom of the channel."""
         team = rc.run_team(reg, ev)
         if channel is not None:
+            old = ev.cards.get("health") if not early and ev.health_early else None
             try:
                 msg = await channel.send(view=health_layout(reg, rs, ev, team, self.ico))
                 ev.cards["health"], ev.cards_channel_id = msg.id, channel.id
             except Exception as e:  # noqa: BLE001
                 log.warning("health card failed (%s): %s", ev.key, e)
+            if old and old != ev.cards.get("health"):
+                with contextlib.suppress(Exception):
+                    await (await channel.fetch_message(old)).delete()
+        if early:
+            ev.health_early = True
+            ev.log.append("early warning: the regulars can't cover a minimum — health card posted at open")
+            rs.save(ev, "early warning")
+            return
         if nudge and rc.team_setting(team, "reminders") != "none":
             # the expected who haven't answered: a recurring run's regulars (every main while the series has none);
             # an ad hoc run expects nobody (and its reminder is off by default)
@@ -257,22 +272,26 @@ class RaidMixin:
         rs.save(ev, "health posted")
 
     # ---- filling gaps by DM
-    async def run_fill(self, reg, rs, ev, team, by: str = "scheduler") -> tuple[list, dict]:
+    async def run_fill(self, reg, rs, ev, team, by: str = "scheduler", approved_by: str | None = None) -> tuple[list, dict]:
         """Send the next batch of fill DMs. Returns (asks sent, needs). The fill engine only runs on a locked roster:
-        before lock nothing is sent, whoever calls (scheduler, card button, /raid fill, the web board)."""
+        before lock nothing is sent this way (an officer sends suggestions with send_plan). `approved_by` = the officer
+        who pressed Send: their batch may include role swaps. On its own (the scheduler, a freed seat, an answer) the
+        engine sends role swaps on an ad hoc run only — owner decision D3: on a recurring run a swap waits for an
+        officer's Ask (fill_state "suggested", the lock card lists it)."""
         nd = rc.needs(reg, ev, team)
         if sheet_state(ev) != "locked" or not ev.all_rosters:
             return [], nd
         if not nd["headcount"] and not nd["roles"]:
-            if ev.fill_state == "asking":
+            if ev.fill_state in ("asking", "suggested"):
                 ev.fill_state = "filled"
                 rs.save(ev, "fill: complete")
             return [], nd
-        batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team)
+        swaps = approved_by is not None or rc.auto_swaps(reg, ev)
+        batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team, swaps=swaps)
         sent = []
         deadline = rc.ask_deadline(reg, ev).isoformat()
         for ask in batch:  # tied pairs sit next to each other in the batch; both are on the event before either DM goes out
-            ask.expires_at = deadline
+            ask.expires_at, ask.approved_by = deadline, approved_by
             ev.fill_asks.append(ask)
         for ask in batch:
             m = reg.members.get(ask.discord_id)
@@ -286,9 +305,62 @@ class RaidMixin:
             ev.log.append(f"fill ({by}): asked {', '.join(a.display_name for a in sent)}")
             rs.save(ev, f"fill asked {len(sent)}")
         elif not [a for a in ev.fill_asks if a.open]:
-            ev.fill_state = "exhausted"
-            rs.save(ev, "fill: nobody left to ask")
+            if not swaps and await asyncio.to_thread(rc.withheld_swaps, reg, rs, ev):
+                if ev.fill_state != "suggested":  # said once: the swap needs an officer's Ask on the lock card
+                    ev.fill_state = "suggested"
+                    ev.log.append("fill: a role swap would cover it — waiting for an officer's Ask")
+                    rs.save(ev, "fill: role swap suggested")
+                    await self.post_run_update(reg, ev, f"🧩 short {gaps_text(self.ico, nd)} — a role swap would cover it; it needs an officer's **Ask** (the Suggested block on the lock card)")
+                    await self.refresh_cards(reg, ev)
+            else:
+                ev.fill_state = "exhausted"
+                rs.save(ev, "fill: nobody left to ask")
         return sent, nd
+
+    def plan_lock(self, key: str) -> asyncio.Lock:
+        """One officer send per run at a time (two presses of Ask never ask anyone twice)."""
+        return self.__dict__.setdefault("_plan_locks", {}).setdefault(key, asyncio.Lock())
+
+    async def send_plan(self, reg, rs, ev, *, rev: str, by: str, picks: dict | None = None) -> tuple[list, "rc.Plan"]:
+        """An officer's Ask: send the planner's suggestions (each seat's suggestion, or the alternate in `picks` =
+        {seat index: option index}) as DMs — the one path for the health / lock card's Ask, the Suggest wizard,
+        /raid fill on an open run, the site's Suggest, plain text and MCP. `rev` = the plan fingerprint the officer was
+        shown (rc.plan_rev): when the plan is different now, rc.PlanChanged is raised carrying the current plan and
+        nothing is sent. Before lock: pre-lock asks (one per member per run, expire at lock; a yes changes the signup
+        and seats nobody). After lock: fill asks the officer approved — role swaps included (D3). Returns (sent, plan)."""
+        async with self.plan_lock(ev.key):
+            if ev.state not in ("open", "locked"):
+                raise RegistryError(f"{run_title(reg, ev)} is {ev.state}")
+            plan = rc.role_plan(reg, rs, ev)
+            if not rev or rev != plan.rev:
+                raise rc.PlanChanged(plan)
+            asks = rc.pick_asks(plan, picks)
+            if not asks:
+                return [], plan
+            team = rc.run_team(reg, ev)
+            _soft, hard, _confirm = run_times(reg, ev, team)
+            prelock = plan.phase == "prelock"
+            deadline = (min(hard, ev.start) if prelock else rc.ask_deadline(reg, ev)).isoformat()  # pre-lock asks expire at lock time
+            for a in asks:
+                a.phase, a.approved_by, a.expires_at, a.asked_at = plan.phase, by, deadline, rc.now()
+                ev.fill_asks.append(a)
+            sent = []
+            for a in asks:
+                m = reg.members.get(a.discord_id)
+                if m and await self.send_member_dm(reg, m, None, fill_layout(reg, ev, team, self.ico, a), ev=ev):
+                    sent.append(a)
+                else:
+                    a.answer, a.answered_at = "expired", rc.now()
+                    rc.release_partner(reg, rs, ev, a)
+            if sent and not prelock:
+                ev.fill_state = "asking"
+            ev.log.append(f"{'suggestions' if prelock else 'fill'} sent by {by}: " + (", ".join(a.display_name for a in sent) or "nobody reachable"))
+            rs.save(ev, f"{'suggestions' if prelock else 'fill'} sent by {by}")
+        if sent:
+            await self.post_run_update(reg, ev, f"🧩 {by} asked:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
+        await self.refresh_cards(reg, ev)
+        await self.ops.emit(reg.config, "info", f"{by} sent {len(sent)} {'pre-lock ' if prelock else ''}ask(s) on {ev.key}")
+        return sent, plan
 
     async def withdraw_ask(self, reg, ev, ask, because: str) -> None:
         """Tell the other half of a tied pair the question is off."""
@@ -305,6 +377,12 @@ class RaidMixin:
             other = rc.release_partner(reg, rs, ev, ask)
             if other:
                 await self.withdraw_ask(reg, ev, other, f"{ask.display_name} said no")
+        if ask.phase == "prelock" and ev.state == "open":  # before lock: the signup changed, nobody was seated
+            plan = rc.role_plan(reg, rs, ev)
+            await self.post_run_update(reg, ev, f"🧩 {line}" + (f" · still short {rc.still_short_words(plan)}" if plan.seats else " · **minimums covered**"))
+            await self.refresh_cards(reg, ev)
+            await self.ops.emit(cfg, "info", f"suggestion {ev.key}: {line}")
+            return
         nd = rc.needs(reg, ev, team)
         await self.post_run_update(reg, ev, f"🧩 {line}" + (f" · still short {gaps_text(self.ico, nd)}" if nd["headcount"] or nd["roles"] else " · **gaps filled**"))
         await self.refresh_cards(reg, ev)
@@ -404,13 +482,19 @@ class RaidMixin:
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
             ev.log.append(f"locked by {by}")
+            rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time
+            short = rc.needs(reg, ev, team)["roles"]
+            if short:  # the solver caps a minimum at what the sheet can supply: say so instead of locking quietly
+                ev.log.append("locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
             rs.save(ev, f"locked by {by}")
+        if short:
+            await self.ops.emit(reg.config, "warn", f"{ev.key}: locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
         await self.refresh_sheet(reg, ev)
         ch = self.officer_channel(reg, ev)
         if ch:
             for i, r in enumerate(ev.all_rosters):
                 try:
-                    msg = await ch.send(view=lock_layout(reg, ev, team, self.ico, i))
+                    msg = await ch.send(view=lock_layout(reg, ev, team, self.ico, i, rs))
                     ev.cards[f"lock:{i}"], ev.cards_channel_id = msg.id, ch.id
                 except Exception as e:  # noqa: BLE001
                     log.warning("lock card failed (%s roster %d): %s", ev.key, i + 1, e)
@@ -608,6 +692,10 @@ class RaidMixin:
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:
             await self.post_sheet(reg, rs, ev, channel)
+        if not ev.health_early and not ev.health_posted and rc.early_warning(reg, rs, ev):
+            officer_ch = self.officer_channel(reg, ev)
+            if officer_ch is not None:
+                await self.post_health(reg, rs, ev, officer_ch, nudge=False, early=True)
         await self.ops.emit(reg.config, "info", f"{by} opened {ev.key} ({len(ev.signups)} pre-filled out from absences)" + ("" if ev.message_id else " — no signup channel: sheet not posted"))
         return ev
 

@@ -383,7 +383,8 @@ def readiness(reg: Registry, rid: str, rs=None) -> dict:
      comp: [{key, want, min, max, have, level, why, note, source, flex, flex_who}],
      short: [{key, have, want, why}], over: [{key, have, max, why}], notes: [str],
      plan: {mains, by_role: {role: n}, flex: {role: [names]}, single_provider: [{buff, who}], no_provider: [buff names]},
-     series: Registry.series_coverage(rid) — each recurring series' regulars against the tank/healer minimums}"""
+     series: raidcycle.series_outlook(rid) — each recurring series' regulars against the tank/healer minimums (green / amber /
+     red, with who could cover or whom to recruit) and its 4-week forecast}"""
     if rid not in reg.profile.raids:
         raise KeyError(f"unknown raid {rid!r}")
     roster = reg.raid_shell(rid)
@@ -409,6 +410,12 @@ def readiness(reg: Registry, rid: str, rs=None) -> dict:
             "plan": {"mains": plan["mains"], "by_role": dict(plan["by_role"]), "flex": {r: list(v) for r, v in plan["flex"].items() if v},
                      "single_provider": [{"buff": b, "who": who[0]} for b, who in plan["providers"].items() if len(who) == 1],
                      "no_provider": [b for b, who in plan["providers"].items() if not who]},
-            "series": reg.series_coverage(rid)}
+            "series": _outlook(reg, rid)}
 
 
+
+
+def _outlook(reg: Registry, rid: str) -> list[dict]:
+    from . import raidcycle as rc  # raidcycle imports the solver; readiness stays importable without it
+
+    return rc.series_outlook(reg, rid)

@@ -81,9 +81,18 @@ class FakeBot:
         self.calls.append(("cancel_run", ev.key, by, reason))
         return f"Cancelled {ev.key}" + (f": {reason}" if reason else "")
 
-    async def run_fill(self, reg, rs, ev, team, by):
+    async def run_fill(self, reg, rs, ev, team, by, approved_by=None):
         self.calls.append(("run_fill", ev.key, by))
         return [], rc.needs(reg, ev, team)
+
+    async def send_plan(self, reg, rs, ev, *, rev, by, picks=None):
+        """RaidMixin.send_plan's contract (refused on a stale plan fingerprint), recorded instead of DMing."""
+        plan = rc.role_plan(reg, rs, ev)
+        if rev != plan.rev:
+            raise rc.PlanChanged(plan)
+        asks = rc.pick_asks(plan, picks)
+        self.calls.append(("send_plan", ev.key, by, [a.display_name for a in asks]))
+        return asks, plan
 
     async def drop_seated(self, reg, rs, ev, team, m, why, note):
         self.calls.append(("drop_seated", ev.key, m.display_name, why, note))
@@ -553,8 +562,9 @@ def test_fill_preview_and_send(reg, rs, officer, channel):
     assert bot.names() == ["run_fill", "emit"] and bot.calls[0][1] == ev.key
 
 
-def test_fill_before_lock(reg, rs, officer, channel):
+def test_fill_before_lock_shows_suggestions(reg, rs, officer, channel):
+    """Phase 2: /raid fill on an open run is suggest → Send; nothing goes out before Send."""
     open_test_run(reg, rs)
     h, bot = harness(reg, rs)
     asyncio.run(FLOWS["raid_fill"](h.command(), reg))
-    assert "Fill works after lock" in h.text and not bot.calls
+    assert "before lock" in h.text and not bot.calls

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Accordion, ActionIcon, Badge, Box, Button, Group, Menu, Stack, Text, Tooltip } from "@mantine/core";
-import { IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconUserOff, IconUsersPlus } from "@tabler/icons-react";
+import { IconBulb, IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconUserOff, IconUsersPlus } from "@tabler/icons-react";
 import type { Meta, Sheet, Signup } from "../../api";
 import { classColour } from "../../theme";
 import { GameIcon } from "../Icons";
@@ -24,6 +24,7 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
   const short = n ? [n.headcount ? `${n.headcount} seat${n.headcount === 1 ? "" : "s"}` : null, ...Object.entries(n.roles).map(([role, k]) => `${k} ${role}`)].filter(Boolean).join(", ") : "";
   const [ask, confirmDialog] = useConfirm();
   const [fillOpen, setFillOpen] = useState(false);
+  const suggestN = (e.plan?.seats || []).length;  // seats the planner works on (before lock: the tank/healer minimums)
   const name = runName(e);
 
   const pin = (s: Signup, p: "in" | "out" | null) => onAct(`pin${s.uid}`, `/api/run/${e.key}/pin`, { uid: s.uid, pin: p });
@@ -105,7 +106,14 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
       <ChipRow label={`${meta.labels.out} (${signups.filter((s) => s.status === "out").length})`} items={signups.filter((s) => s.status === "out")} menu={menu} />
       <Group gap="xs" mt={8} justify="space-between" wrap="wrap">
         <Group gap="xs"><Eyebrow>Away that day</Eyebrow>{(e.absences || []).length === 0 ? <Text size="sm" c="dimmed">nobody</Text> : e.absences!.map((a) => <Text key={a.display_name} size="sm">{a.display_name}{a.reason ? <Text span c="dimmed"> ({a.reason})</Text> : null}</Text>)}</Group>
-        {short ? <Badge variant="filled" color="red">short: {short}</Badge> : <Badge variant="light" color="teal">full</Badge>}
+        <Group gap="xs">
+          {short ? <Badge variant="filled" color="red">short: {short}</Badge> : <Badge variant="light" color="teal">full</Badge>}
+          {!locked && (
+            <Tooltip label={suggestN ? `the planner's suggestions for the tank/healer minimums (${suggestN} seat${suggestN === 1 ? "" : "s"}) — nothing is sent until you press Send` : "the tank/healer minimums are covered by who joined and the regulars yet to answer"}>
+              <Button size="xs" variant={suggestN ? "light" : "default"} color={suggestN ? "yellow" : undefined} leftSection={<IconBulb size={13} />} onClick={() => setFillOpen(true)}>Suggest</Button>
+            </Tooltip>
+          )}
+        </Group>
       </Group>
 
       {e.board && <BoardView e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} />}
@@ -121,7 +129,7 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
         </Group>
       </Group>
       <Detail e={e} />
-      {locked && <FillModal e={e} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />}
+      <FillModal e={e} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />
       {confirmDialog}
     </Box>
   );
@@ -184,7 +192,7 @@ function Detail({ e }: { e: Sheet }) {
       <Accordion.Item value="detail">
         <Accordion.Control><Text size="xs" c="dimmed">fill asks ({fa.length}) · callouts ({co.length}) · log ({log.length})</Text></Accordion.Control>
         <Accordion.Panel>
-          {fa.length > 0 && <Stack gap={2} mb="sm">{fa.map((a, i) => <Text key={i} size="xs">{a.display_name} · {a.kind} · {a.character} ({a.spec}, {a.role}) · {a.reason} · <Text span c={a.answer === "yes" ? "teal" : a.answer === "no" ? "red" : "yellow"}>{a.answer || "waiting"}</Text></Text>)}</Stack>}
+          {fa.length > 0 && <Stack gap={2} mb="sm">{fa.map((a, i) => <Text key={i} size="xs">{a.display_name} · {a.kind}{a.phase === "prelock" ? " (before lock)" : ""} · {a.character} ({a.spec}, {a.role}) · {a.reason}{a.approved_by ? ` · by ${a.approved_by}` : ""} · <Text span c={a.answer === "yes" ? "teal" : a.answer === "no" ? "red" : "yellow"}>{a.answer || "waiting"}</Text></Text>)}</Stack>}
           {co.length > 0 && <Text size="xs" c="dimmed" mb="sm">{co.map((c) => `${c.display_name} ${c.hours_before}h before${c.late ? " (after lock)" : ""}`).join(" · ")}</Text>}
           <Box component="pre" style={{ fontSize: 12, whiteSpace: "pre-wrap", margin: 0, fontFamily: "var(--mantine-font-family-monospace)", color: "var(--mantine-color-slate-2)" }}>{log.join("\n")}</Box>
         </Accordion.Panel>

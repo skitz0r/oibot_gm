@@ -232,12 +232,67 @@ def ask_line(reg: Registry, ico, ask) -> str:
     """One thread line per fill ask: who, what they'd play (spec icon + character), and what it covers."""
     c = reg.find(ask.character)
     what = (ico("spec", f"{c[1].cls}:{ask.spec}") + " " if c else "") + f"**{ask.character}**"
-    if ask.kind == "offspec":
-        return f"asked {ask.display_name} to swap to {ask.spec} on {what}"
+    when = " (before lock)" if ask.phase == "prelock" else ""
+    if ask.kind in ("offspec", "flex"):
+        return f"asked {ask.display_name} to swap to {ask.spec} on {what}{when}"
     if ask.kind == "alt":
-        return f"asked {ask.display_name} to swap to {what}"
+        return f"asked {ask.display_name} to swap to {what}{when}"
     tail = f" ({ask.reason})" if ask.reason.startswith("covering") else ""
-    return f"asked {ask.display_name} to come as {what}{tail}"
+    return f"asked {ask.display_name} to come as {what}{tail}{when}"
+
+
+KIND_WORD = {"sub": "bench", "regular": "regular, no answer", "other": "not a regular", "flex": "flex", "offspec": "offspec", "alt": "alt"}
+SUGGEST_LINES = 3  # a card names this many seats; Suggest… lists them all with their alternates
+
+
+def plan_ask_md(reg: Registry, ico, a) -> str:
+    """One suggested ask on a card: the spec icon they'd play + the character, then how (flex / offspec / alt / bench …)."""
+    c = reg.find(a.character)
+    return (ico("spec", f"{c[1].cls}:{a.spec}") + " " if c else "") + f"**{a.character}** · {KIND_WORD.get(a.kind, a.kind)}"
+
+
+def still_short_md(ico, plan) -> str:
+    sa = plan.short_after
+    bits = ([f"{sa['headcount']} seat{'s' if sa['headcount'] != 1 else ''}"] if sa.get("headcount") else []) + [f"{ico('role', r)} {k}" for r, k in sa.get("roles", {}).items()]
+    return ("   ".join(bits) + " → recruit") if bits else "nothing"
+
+
+def suggested_block(reg: Registry, ico, plan) -> str:
+    """The Suggested block (the health card before lock; the lock card when a role swap waits for an officer): what the
+    planner would ask, cheapest first, each with the code-written reason and its alternates, then what stays short if
+    everyone says yes. Nothing here is sent until an officer presses Ask. "" when nothing is short."""
+    seats = [st for st in plan.seats if st.options]
+    if not plan.seats:  # before lock the asks still out cover their seats: say who the card is waiting on
+        return f"**Suggested** · asked, waiting on {', '.join(plan.waiting)}" if plan.waiting and plan.phase == "prelock" else ""
+    head = "**Suggested**"
+    if plan.phase == "prelock":
+        head += " · expected " + "   ".join(f"{ico('role', r)} {plan.have.get(r, 0)}/{plan.need[r]}" for r in ("tank", "healer") if plan.need.get(r))
+        if plan.expected:
+            head += f" (joined + {plan.expected} regular{'s' if plan.expected != 1 else ''} yet to answer)"
+    if plan.full and any(a.swap for st in seats for a in st.options[0]):
+        head += " · every seat taken: swaps first"
+    if plan.waiting and plan.phase == "prelock":
+        head += f" · waiting on {', '.join(plan.waiting)}"
+    lines = [head]
+    for st in seats[:SUGGEST_LINES]:
+        main = st.options[0]
+        lead = f"{ico('role', st.role)} " if st.role else ""
+        lines.append(lead + " + ".join(plan_ask_md(reg, ico, a) for a in main))
+        why = (main[0].why or "").split(" · ", 1)[-1] if st.role else (main[0].why or "")
+        alts = " · ".join(" + ".join(a.display_name for a in opt) for opt in st.options[1:])
+        lines.append("-# " + why + (f" · alternates: {alts}" if alts else ""))
+    if len(seats) > SUGGEST_LINES:
+        lines.append(f"-# +{len(seats) - SUGGEST_LINES} more — Suggest… lists them all")
+    lines.append(f"Still short if all say yes: {still_short_md(ico, plan)}")
+    return "\n".join(lines)
+
+
+def suggest_row(ev: rc.RaidEvent, plan):
+    """Ask (sends what the card shows — refused and refreshed if the plan changed since: the rev rides in its id) and
+    Suggest… (every seat with its alternates, pick and send)."""
+    n = len(plan.asks)
+    return discord.ui.ActionRow(RunButton(ev.key, "ask", rev=plan.rev, label=f"Ask these {n}" if n > 1 else "Ask this one" if n else "Ask", disabled=not n),
+                                RunButton(ev.key, "suggest"))
 
 
 def _role_counts(ico, players) -> str:
@@ -252,14 +307,29 @@ def gaps_text(ico, nd: dict) -> str:
     return "   ".join(bits) if bits else "nothing"
 
 
+LEVEL_DOT = {"green": "🟢", "amber": "🟠", "red": "🔴"}
+
+
 def coverage_line(ico, cov: dict) -> str:
-    """One recurring series' regulars coverage (Registry.series_coverage) for a Discord card: role icon + count, over
-    the minimum where there is one, ⚠ when short (the iconography rule: never "2 tank"); then regulars / seats."""
+    """One recurring series' regulars coverage (Registry.series_coverage) for a Discord card: the level dot (green:
+    regular mains cover the minimums; amber: only with offspecs or alts; red: can't), role icon + count over the
+    minimum where there is one, ⚠ when short (the iconography rule: never "2 tank"); then regulars / seats."""
     if not cov["regulars"]:
         return f"no regulars yet · every main is expected · {cov['seats']} seats"
     bits = [f"{ico('role', r)} {n}" + (f"/{cov['need'][r]}" if cov["need"].get(r) else "") + (" ⚠" if r in cov["short"] else "")
             for r, n in cov["counts"].items() if n or cov["need"].get(r)]
-    return "   ".join(bits) + f" · {len(cov['regulars'])}/{cov['seats']}"
+    dot = LEVEL_DOT.get(cov.get("level") or "", "")
+    return (dot + " " if dot else "") + "   ".join(bits) + f" · {len(cov['regulars'])}/{cov['seats']}" + (f" · recruit: {', '.join(cov['recruit'][:3])}" if cov.get("level") == "red" and cov.get("recruit") else "")
+
+
+def forecast_lines(ico, cov: dict, limit: int = 4) -> list[str]:
+    """The series' 4-week forecast (rc.series_forecast) for a Discord card: one line per upcoming start that the
+    regulars minus recorded absences leave short — day, role icon + number, who is away. Empty when all are covered."""
+    out = []
+    for f in (cov.get("forecast") or [])[:limit]:
+        if f["short"]:
+            out.append(f"-# {f['day']}: short " + "   ".join(f"{ico('role', r)} {k}" for r, k in f["short"].items()) + (f" ({', '.join(f['away'][:4])} away)" if f["away"] else ""))
+    return out
 
 
 def _group_summaries(reg: Registry, r) -> list[dict]:
@@ -370,9 +440,13 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
         body.append("**Double-booked** " + ", ".join(double))
     _soft, hard, confirm = run_times(reg, ev, team)
     parts = [head, ui.Separator()] + ([ui.TextDisplay("\n".join(body)), ui.Separator()] if body else [])
+    plan = rc.role_plan(reg, rs, ev)  # nothing is sent until an officer presses Ask
+    sug = suggested_block(reg, ico, plan)
+    if sug:
+        parts += [ui.TextDisplay(sug), suggest_row(ev, plan), ui.Separator()]
     parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else " · first come, no confirmations")))
     parts.append(run_actions_row(ev, locked=False))
-    worst = "red" if short else "amber" if missing or waiting else "green"
+    worst = "red" if short or plan.short["roles"] else "amber" if missing or waiting else "green"
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour={"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]))
     return view
@@ -400,7 +474,32 @@ def leftover_block(reg: Registry, ev: rc.RaidEvent, ico) -> str:
     return "\n".join(lines)
 
 
-def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> discord.ui.LayoutView:
+def lock_notes(reg: Registry, ev: rc.RaidEvent, ico, i: int) -> str:
+    """What the lock decided that officers should see on the card: "Locked short" (the solver caps a minimum at what
+    the sheet can supply — said out loud instead of locking quietly), the spec switches the solver made (one member
+    per line, the spec icon they now play), and on a recurring run the regulars who joined but weren't rostered (who
+    gets priority next time). Roster `i`'s switches; the other two on roster 1's card."""
+    r = ev.all_rosters[i]
+    lines = []
+    if i == 0:
+        short = rc.needs(reg, ev)["roles"]
+        if short:  # "Locked short" when the lock itself came out short (lock_run logs it); "Short" when a seat freed since
+            locked_short = any(ln.startswith("locked short") for ln in ev.log)
+            lines.append(f"**{'Locked short' if locked_short else 'Short'}** " + "   ".join(f"{ico('role', role)} {k}" for role, k in short.items()))
+    if r.spec_switches:
+        by = {p.signup_name: p for p in r.selected}
+        lines.append("**Playing an offspec**")
+        lines += [f"{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for n in r.spec_switches if (p := by.get(n))]
+    if i == 0 and rc.run_kind(reg, ev) == "recurring" and not rc.is_test_run(reg, ev):
+        seated = {rc.player_uid(ev, p) for p in ev.seated()}
+        benched = [(m, c) for m, c in rc.run_regulars(reg, ev) if (sg := ev.signups.get(str(m.discord_id))) and sg.status in ("in", "sub") and m.discord_id not in seated]
+        if benched:
+            lines.append("**Regulars not rostered**")
+            lines += [f"{ico('spec', f'{c.cls}:{c.spec}')} {c.label}" for _m, c in benched[:LEFTOVER_LINES]]
+    return "\n".join(lines)
+
+
+def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=None) -> discord.ui.LayoutView:
     """One locked roster as a card: groups with confirmation marks and auras, raid-wide row, bench, waiting-on, buttons."""
     ui = discord.ui
     r = ev.all_rosters[i]
@@ -421,6 +520,13 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int) -> dis
     left = leftover_block(reg, ev, ico) if i == 0 else ""
     if left:
         parts.append(ui.TextDisplay(left))
+    extra = lock_notes(reg, ev, ico, i)
+    if extra:
+        parts.append(ui.TextDisplay(extra))
+    if i == 0 and ev.state == "locked" and rc.run_kind(reg, ev) == "recurring":
+        plan = rc.role_plan(reg, rs, ev)
+        if any(a.swap for a in plan.asks):  # D3: after lock a role swap waits for an officer's Ask
+            parts += [ui.Separator(), ui.TextDisplay(suggested_block(reg, ico, plan)), suggest_row(ev, plan)]
     tail = ["-# " + _raidwide_line(reg, ico, r)]
     lefts = {p.signup_name for p in rc.leftovers(reg, ev, ev.all_rosters)} if i == 0 else set()
     bench = [p for p in r.benched if p.signup_name not in lefts] if i == 0 else []
@@ -443,7 +549,15 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     ui = discord.ui
     r = ev.all_rosters[i]
     rd = reg.raid_def(ev.instance)
-    head = _header(reg, ev, f"You're rostered · {rd.get('name', ev.instance)}", [f"{ico('spec', f'{sg.cls}:{sg.spec}')} **{sg.character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"])
+    seat = next((p for p in r.selected if p.signup_name == sg.display_name), None)
+    spec = seat.spec if seat else sg.spec  # the spec the roster has them on (the solver may have switched an offspec)
+    lines = [f"{ico('spec', f'{sg.cls}:{spec}')} **{sg.character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"]
+    found = reg.find(sg.character)
+    own = found[1] if found else None  # the character as registered: its main spec and offspec
+    if own is not None and spec != own.spec:  # an offspec the solver switched them to, or one they agreed to before lock
+        lines.append(f"You're rostered as **{spec}**" + (", your offspec" if spec == own.offspec else "")
+                     + (" — as you agreed" if sg.spec == spec else f" — you signed up as {sg.spec}") + ".")
+    head = _header(reg, ev, f"You're rostered · {rd.get('name', ev.instance)}", lines)
     _s, _h, confirm = run_times(reg, ev, team)
     summaries = _group_summaries(reg, r)
     parts = [head, ui.Separator()]
@@ -465,9 +579,12 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
     """Fill DM: what opened, the seat offered (character + spec), the group they'd join, Confirm / Can't make it."""
     ui = discord.ui
     rd = reg.raid_def(ev.instance)
-    what = {"sub": "you're on the bench", "regular": "you haven't answered the sheet", "other": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec", "alt": "you could bring your alt"}[ask.kind]
     c = reg.find(ask.character)
     cls = c[1].cls if c else ""
+    if ask.phase == "prelock" and ev.state == "open":
+        return prelock_layout(reg, ev, team, ico, ask, cls)
+    what = {"sub": "you're on the bench", "regular": "you haven't answered the sheet", "other": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec",
+            "flex": f"you said you can play {ask.role}", "alt": "you could bring your alt"}.get(ask.kind, "")
     lines = [f"{ask.reason} — {what}", f"{'Swap to' if ask.swap else 'Come as'} {ico('spec', f'{cls}:{ask.spec}') if cls else ''} **{ask.character}** ({ask.spec})"]
     partner = rc.partner_of(ev, ask)
     if partner and ask.swap:
@@ -486,6 +603,37 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
     parts += [ui.Separator(), ui.TextDisplay(("-# Confirm makes the swap at once." if ask.swap else "-# Confirm puts you straight in the seat.") + " A no asks the next person." + deadline), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0xE0A448))
+    return view
+
+
+def prelock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask, cls: str) -> discord.ui.LayoutView:
+    """A pre-lock ask (an officer pressed Ask on a suggestion): the run is short a role, could you come as X? A yes
+    puts them down as Join with that spec / character; the roster is still built at lock, when an unanswered ask
+    closes. Yes, as <spec> / No."""
+    ui = discord.ui
+    rd = reg.raid_def(ev.instance)
+    icon = ico("spec", f"{cls}:{ask.spec}") + " " if cls else ""
+    partner = rc.partner_of(ev, ask)
+    if ask.reason.startswith("covering") and partner:
+        lines = [f"{run_label(reg, ev)}: {partner.display_name} could switch to {partner.role} if someone covers their {ask.role} seat.",
+                 f"Could you come as {icon}**{ask.character}** ({ask.spec})? Both of you say yes, or neither changes."]
+    else:
+        role = (ask.role if ask.role not in ("melee", "ranged") else "DPS")
+        lines = [f"{run_label(reg, ev)} is short a {role}."]
+        if ask.kind in ("offspec", "flex"):
+            lines.append(f"Could you come as {icon}**{ask.spec}** on **{ask.character}**?")
+        elif ask.kind == "alt":
+            lines.append(f"Could you bring {icon}**{ask.character}** ({ask.spec})?")
+        else:
+            lines.append(f"Could you come as {icon}**{ask.character}** ({ask.spec})?")
+        if partner:
+            lines.append(f"{partner.display_name} is being asked to cover your {ask.vacates} seat; it only happens if you both say yes.")
+    _soft, hard, _c = run_times(reg, ev, team)
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(_header(reg, ev, f"Could you help? · {rd.get('name', ev.instance)}", lines), ui.Separator(),
+                               ui.TextDisplay(f"-# Yes puts you down as Join with that; the roster is still built at lock (<t:{int(hard.timestamp())}:R>). No answer by then counts as no."),
+                               ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes", label=f"Yes, as {ask.spec}"[:80]), FillButton(ev.key, ask.discord_id, "no", label="No")),
+                               accent_colour=0xE0A448))
     return view
 
 

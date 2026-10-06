@@ -403,6 +403,11 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         bench = [p.signup_name for p in (rosters[0].benched or [])]
         nd = rc.needs(reg, ev, team)
         out.append(f"  bench after lock: {_names(bench, 20)} · short: {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else ""))
+    if live and is_officer:  # the planner's suggestions, code-written: Claude may rephrase them, never invent one
+        plan = rc.role_plan(reg, rs, ev)
+        if plan.seats:
+            out.append(f"  suggestions ({'before lock: an officer presses Ask to send them; a yes changes the signup, seats nobody' if plan.phase == 'prelock' else 'after lock: the fill engine / an officer Ask'}): "
+                       + " | ".join(rc.plan_lines(reg, plan)))
     if live:  # open or locked: the same double-booking the site's run card shows
         clash = rc.conflicts(rs, ev) if rs is not None else {}
         booked = [f"{s.display_name} (also in {clash[s.discord_id]})" for s in ins if s.discord_id in clash]
@@ -677,7 +682,12 @@ def _readiness(ask: Ask) -> list[str]:
         for cv in d.get("series") or []:  # regulars coverage per recurring series (Registry.series_coverage)
             out.append(f"  regulars of {cv['name']}{'' if cv['active'] else ' (paused)'}: {len(cv['regulars'])} for {cv['seats']} seats — "
                        + (" · ".join(f"{r} {n}" + (f"/{cv['need'][r]}" if cv["need"].get(r) else "") for r, n in cv["counts"].items())
-                          + (f" · short {', '.join(f'{n} {r}' for r, n in cv['short'].items())}" if cv["short"] else "") if cv["regulars"] else "none yet (every main is expected)"))
+                          + (f" · short {', '.join(f'{n} {r}' for r, n in cv['short'].items())}" if cv["short"] else "")
+                          + (f" · coverage {cv.get('level')}" + (f" (could cover: {', '.join(cv.get('cover') or [])})" if cv.get("cover") else "") + (f" (recruit: {', '.join(cv.get('recruit') or [])})" if cv.get("recruit") else "") if cv.get("level") else "")
+                          if cv["regulars"] else "none yet (every main is expected)"))
+            for f in cv.get("forecast") or []:  # the 4-week forecast: regulars minus recorded absences (code-computed)
+                if f["short"]:
+                    out.append(f"    forecast {f['day']}: short {', '.join(f'{k} {r}' for r, k in f['short'].items())}" + (f" ({', '.join(f['away'])} away)" if f["away"] else ""))
         if d["missing_buffs"]:
             out.append(f"  nobody in the pool brings: {_names((b['name'] for b in d['missing_buffs']), 12)}")
         if d["short"]:

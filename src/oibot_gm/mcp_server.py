@@ -334,12 +334,23 @@ def lock_run(run: str) -> str:
 
 
 @mcp.tool()
-def fill_seats(run: str, send: bool = False) -> dict:
-    """After lock: what the fill engine would ask (shortfall, who is still being waited on, the next batch). With
-    `send=true` the asks are actually sent (DMs + a line under the sheet)."""
+def fill_seats(run: str, send: bool = False, rev: str = "", picks: dict | None = None) -> dict:
+    """Who to ask to cover a run's shortfall. Without `send` (a preview, nothing sent): before lock, the planner's
+    SUGGESTIONS for the tank/healer minimums — `plan.seats[i].options[0]` is the suggestion, the rest are alternates,
+    each with a code-written `why`; `plan.lines` in words; `plan.still_short`; `plan.rev`. After lock: the fill
+    engine's next `batch` (and the plan too). Quote the lines back — never invent a suggestion.
+    `send=true` sends: before lock it REQUIRES `rev` = the preview's plan.rev (a plan that changed since is refused
+    and the current plan returned — preview again) and takes optional `picks` {seat index: option index} to ask an
+    alternate; every pre-lock ask is a DM Yes/No, a yes changes the member's signup and seats nobody, and unanswered
+    asks close at lock. After lock without `rev`: the engine's next batch as the officer's Send (role swaps included)."""
     if not send:
         return api().post(f"/api/run/{run}/fill/preview")
-    return {"message": msg(api().post(f"/api/run/{run}/fill"))}
+    payload: dict = {}
+    if rev:
+        payload["rev"] = rev
+    if picks:
+        payload["picks"] = {str(k): int(v) for k, v in picks.items()}
+    return {"message": msg(api().post(f"/api/run/{run}/fill", payload))}
 
 
 @mcp.tool()

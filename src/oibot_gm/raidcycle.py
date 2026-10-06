@@ -15,7 +15,7 @@ from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
 from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
-                       RegisteredCharacter, RegistryError, now, schedule_class, series_key)
+                       RegisteredCharacter, RegistryError, can_cover, now, schedule_class, series_key)
 from .roster import explain, solver
 from .store import GitStore
 
@@ -33,6 +33,7 @@ RUN_LISTENERS: list = []  # callables (guild_key, run_key) told after every Raid
 FILL_OVERASK = 1  # ask one more person than the shortfall per batch
 FILL_MAX_OPEN = 3  # never more than this many unanswered asks per event
 FILL_ASK_HOURS_DEFAULT = RAID_DEFAULTS["fill_ask_hours"]
+SWAP_KINDS = ("flex", "offspec", "alt")  # asks that change what someone already coming plays (a role swap: D3)
 CONFLICT_WINDOW_HOURS = 4.0  # two runs closer than this count as the same night
 OPEN_HORIZON_DAYS = 21  # how far ahead "upcoming runs" lists look
 CLOSE_AFTER_HOURS = 3  # a run is closed this long after its scheduled end (start + duration)
@@ -69,19 +70,20 @@ class FillAsk(BaseModel):
 
     discord_id: int
     display_name: str
-    kind: str  # sub | regular | other | offspec | alt  (tiers: the bench, the series' regulars — every main while it has none —, everyone else)
+    kind: str  # sub | regular | other (bodies: the bench, the series' regulars — every main while it has none —, everyone else) | flex | offspec | alt (switches)
     role: str  # the role this ask covers
     character: str  # what they'd play
     spec: str
-    reason: str  # "short 1 healer", "short 2"
+    reason: str  # "short 1 healer", "short 2" — the member's DM shows it
+    why: Optional[str] = None  # the code-written reason officers see (role_plan): "short 1 healer · Ana's declared flex Holy · DPS stays 6 of 5 minimum"
     asked_at: str = Field(default_factory=now)
     answer: Optional[str] = None  # yes | no | expired | released (the paired ask fell through)
     answered_at: Optional[str] = None
     expires_at: Optional[str] = None  # ISO: no answer by then counts as no
     pair: Optional[int] = None  # discord_id of the ask this one is tied to (a swap and the backfill covering the vacated seat)
     vacates: Optional[str] = None  # swaps: the role the person leaves
-    phase: Literal["prelock", "fill"] = "fill"  # roster redesign appendix A: a suggestion before the lock (Phase 2) or a fill ask after it
-    approved_by: Optional[str] = None  # the officer who sent it, when an officer's Ask sent it (D3: recurring role swaps; Phase 2 wires it)
+    phase: Literal["prelock", "fill"] = "fill"  # a suggestion an officer sent before the lock (a yes changes the signup, seats nobody) or a fill ask after it
+    approved_by: Optional[str] = None  # the officer whose Ask / Send sent it (every pre-lock ask; D3: a recurring run's role swaps after lock); None = the fill engine on its own
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -94,7 +96,7 @@ class FillAsk(BaseModel):
 
     @property
     def swap(self) -> bool:
-        return self.kind in ("offspec", "alt")
+        return self.kind in SWAP_KINDS
 
 
 class RaidEvent(BaseModel):
@@ -126,6 +128,7 @@ class RaidEvent(BaseModel):
     message_id: Optional[int] = None
     thread_id: Optional[int] = None
     health_posted: bool = False
+    health_early: bool = False  # the early-warning health card went up when the sheet opened (the regulars can't cover a minimum)
     nudged: list[int] = Field(default_factory=list)
     fill_asks: list[FillAsk] = Field(default_factory=list)
     fill_state: str = "idle"  # idle | asking | filled | exhausted
@@ -355,6 +358,52 @@ def next_runs_of(reg: Registry, instance: str, sched: dict, n: int = 3, now: dat
     base = max(now, fo) if fo else now
     horizon = 24 * max(OPEN_HORIZON_DAYS, 8 * int(rd.get("lockout_days") or 7))
     return schedule_starts(reg, instance, sched, base, horizon, rd)[:n]
+
+
+FORECAST_DAYS = 28  # the regulars forecast looks this far ahead (from today, or from the raid's first opening before then)
+FORECAST_MAX = 8  # and never lists more starts than this
+
+
+def series_forecast(reg: Registry, key: str, now: datetime | None = None) -> list[dict]:
+    """A recurring series' 4-week forecast: each upcoming start in the next FORECAST_DAYS (counted from the raid's
+    first opening while it hasn't opened) with what its regulars minus recorded absences leave short of the tank /
+    healer minimums. [{start (ISO), day ('Tue 15 Dec'), when (12-hour), expected, seats, short {role: n}, away
+    [names]}]. Empty while the series has no regulars or is paused. Computed in code; officers see a hole a week
+    ahead instead of at reminder time."""
+    rid, _, sid = key.partition(":")
+    regs = reg.regulars(key)
+    if not regs or rid not in reg.profile.raids:
+        return []
+    sched = next((x for x in reg.schedules(rid) if x["id"] == sid), None)
+    if sched is None or not sched.get("active", True) or schedule_class(sched["kind"]) != "recurring":
+        return []
+    rd = reg.raid_def(rid)
+    starts = next_runs_of(reg, rid, sched, n=FORECAST_MAX, now=now, rd=rd)
+    if not starts:
+        return []
+    until = starts[0] + timedelta(days=FORECAST_DAYS)
+    size = int(reg.schedule_def(rid, sid).get("size") or DEFAULT_RAID_SIZE)
+    n = int(sched.get("rosters") or 1)
+    bounds = reg.role_bounds(rid, size)
+    need = {r: int(bounds[r]["min"] or 0) * n for r in ("tank", "healer")}
+    out = []
+    for t in starts:
+        if t >= until:
+            break
+        day = t.astimezone(reg.tz).date().isoformat()
+        here = [c for m, c in regs if not m.absent_on(day)]
+        counts = {r: sum(1 for c in here if reg.profile.spec(c.cls, c.spec).role == r) for r in need}
+        lt = t.astimezone(reg.tz)
+        out.append({"start": t.isoformat(), "day": f"{lt:%a} {lt.day} {lt:%b}", "when": reg.local12(t), "expected": len(here), "seats": size * n,
+                    "short": {r: k - counts[r] for r, k in need.items() if counts[r] < k},
+                    "away": sorted(m.display_name for m, _c in regs if m.absent_on(day))})
+    return out
+
+
+def series_outlook(reg: Registry, rid: str | None = None) -> list[dict]:
+    """Registry.series_coverage (regulars against the minimums, green / amber / red) with each series' forecast
+    attached — what the Rosters page, the analytics card, /roster overview, readiness (MCP, /ask) all show."""
+    return [{**cv, "forecast": series_forecast(reg, cv["key"])} for cv in reg.series_coverage(rid)]
 
 
 # a run opened closer than its cadence assumes keeps this much of the remaining time for each step
@@ -886,126 +935,444 @@ def would_short(reg: Registry, ev: RaidEvent, team: dict, role: str) -> bool:
     return have - 1 < int(bounds.get(key, {}).get("min") or 0) * n
 
 
-def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> list[FillAsk]:
-    """Ordered list of people to ask, best first, for the sheet's current needs. Pure; nothing is sent.
-    Order: role gaps first (a sub/pool member of that role, else an In player's offspec or alt — a swap is only
-    proposed when the role it vacates stays covered, or someone on the bench/pool can backfill it: then both asks
-    go out tied together, and a no from either releases the other), then plain headcount
-    (subs → roster pool not on the sheet → other rosters' members free that night)."""
-    nd = needs(reg, ev, team)
-    if not nd["headcount"] and not nd["roles"]:
-        return []
-    day = ev.start.date().isoformat()
-    busy = conflicts(rs, ev)
-    asked = {a.discord_id for a in ev.fill_asks}
-    locked = ev.state != "open" and bool(ev.all_rosters)
-    seated_names = {p.signup_name for p in ev.seated()} if locked else set()
-    # after lock, "in" means seated; joiners the solver benched are the first people to ask
-    ins = {s.discord_id for s in ev.by_status("in") if not locked or s.display_name in seated_names}
-    benched_joiners = [s for s in ev.by_status("in") if locked and s.display_name not in seated_names]
-    out: list[FillAsk] = []
-    used: set[int] = set()
-    # after lock a new body needs a free seat (seat_player): a role gap on a full roster is only covered by a swap in
-    # place, and a swap's backfill takes a seat too; before lock the lock decides, so bodies are not capped
-    free = [nd["headcount"] if locked else None]
+# ---------------------------------------------------------------- the planner (roster redesign Phase 2)
+# ONE engine for "who could cover this": the fill engine after lock and the officers' suggestions before it. No second
+# solver: a greedy pass in cost order, a matching check so nobody is counted for two seats, paired backfills.
 
-    def seat_left() -> bool:
-        return free[0] is None or free[0] > 0
+MOVE_COST = {"sub": 1, "flex": 1, "offspec": 2, "regular": 2, "alt": 3, "other": 4}  # design §4: cheapest first
+PLAN_ALTERNATES = 2  # alternates listed per short seat, so an officer can pick someone else without typing a name
 
-    def take_seat() -> None:
-        if free[0] is not None:
-            free[0] -= 1
 
-    def ok(m: Member) -> bool:
-        return m.discord_id not in asked and m.discord_id not in used and not m.dm_opt_out and not m.absent_on(day) and m.discord_id not in busy
+class PlanSeat(BaseModel):
+    """One seat the plan tries to cover: `role` short of its minimum ("" = a plain seat after lock). `options[0]` is the
+    suggestion, then up to PLAN_ALTERNATES alternates; an option is one ask, or a swap tied to the backfill that covers
+    the seat it vacates. No options = nobody can cover it (the still-short line)."""
 
-    def role_of(c: RegisteredCharacter) -> str:
-        return reg.profile.spec(c.cls, c.spec).role
+    role: str
+    options: list[list[FillAsk]] = Field(default_factory=list)
 
-    pool = run_pool(reg, ev)  # the regulars of the series (or every main), keyed on the series — the same before and after lock
-    pool_ids = {m.discord_id for m, _ in pool}
-    # bench tier: joiners the solver left off, then Bench answers — never someone already seated (the solver may seat a Bench answer)
-    subs = [(m, c) for s in benched_joiners + ev.by_status("sub") if s.display_name not in seated_names and (m := reg.members.get(s.discord_id)) and (c := next((c for c in m.active() if c.label == s.character), m.main))]
-    unresponsive = [(m, c) for m, c in pool if str(m.discord_id) not in ev.signups and c]
-    others = [] if is_test_run(reg, ev) else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups], key=lambda mc: _rank_key(reg, mc[0]))
-    tiers = [("sub", subs), ("regular", unresponsive), ("other", others)]
 
-    def first_of(role: str, skip: int | None = None):
-        for kind, cands in tiers:
-            for m, c in cands:
-                if ok(m) and m.discord_id != skip and role_of(c) == role:
-                    return kind, m, c
-        return None
+class Plan(BaseModel):
+    """role_plan's answer — computed on view, never stored (only sent asks are saved)."""
 
-    # 1. role gaps
-    for role, short in nd["roles"].items():
-        got = 0
-        for kind, cands in tiers:
-            for m, c in cands:
-                if got >= short or not seat_left():
-                    break
-                if ok(m) and role_of(c) == role:
-                    out.append(FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind=kind, role=role, character=c.label, spec=c.spec, reason=f"short {short} {role}"))
-                    used.add(m.discord_id)
-                    take_seat()
-                    got += 1
-        # switches by people already In: offspec, then an alt of the right role
-        for sid in ins:
-            if got >= short:
-                break
-            m = reg.members.get(sid)
-            s = ev.signups.get(str(sid))
-            # after lock compare with the seat as it is: the solver may already have switched them to that offspec
-            seat = ev.seat_of(s.display_name)[1] if (locked and s and ev.seat_of(s.display_name)) else None
-            cur_role, cur_spec = (seat.role, seat.spec) if seat else ((s.role, s.spec) if s else (None, None))
-            if not m or not s or not ok(m) or cur_role == role:
-                continue
-            ask = None
-            if s.offspec and s.offspec != cur_spec and reg.profile.spec(s.cls, s.offspec).role == role:
-                ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="offspec", role=role, character=s.character, spec=s.offspec, reason=f"short {short} {role}", vacates=cur_role)
-            else:
-                alt = next((a for a in m.active() if a.label != s.character and role_of(a) == role), None)
-                if alt:
-                    ask = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="alt", role=role, character=alt.label, spec=alt.spec, reason=f"short {short} {role}", vacates=cur_role)
-            if not ask:
-                continue
-            # look ahead: does the swap open a hole where they are now? then it only goes out with a backfill tied to it
-            if would_short(reg, ev, team, cur_role):
-                back = first_of(cur_role, skip=sid) if seat_left() else None
-                if not back:
-                    continue
-                bk, bm, bc = back
-                ask.pair = bm.discord_id
-                out.append(ask)
-                out.append(FillAsk(discord_id=bm.discord_id, display_name=bm.display_name, kind=bk, role=cur_role, character=bc.label, spec=bc.spec, reason=f"covering {m.display_name}'s {cur_role} seat", pair=sid))
-                used.update({sid, bm.discord_id})
-                take_seat()
-            else:
-                out.append(ask)
-                used.add(sid)
-            got += 1
-    # 2. headcount (role-gap asks that bring a new body count towards it; after lock, the seats still free)
-    remaining = free[0] if locked else nd["headcount"] - sum(1 for a in out if not a.swap and not a.pair)
-    for kind, cands in tiers:
-        for m, c in cands:
-            if remaining <= 0:
-                break
-            if ok(m):
-                out.append(FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind=kind, role=role_of(c), character=c.label, spec=c.spec, reason=f"short {nd['headcount']}"))
-                used.add(m.discord_id)
-                remaining -= 1
+    phase: Literal["prelock", "fill"]
+    short: dict  # {"headcount": n, "roles": {role: n}}: what the plan works on (before lock: the expected roster)
+    have: dict[str, int]  # role counts the plan starts from (before lock: joined + the regulars expected; "dps" summed)
+    need: dict[str, int]  # the minimums × rosters (tank, healer, dps)
+    full: bool  # every seat taken (before lock: by the expected roster) — swaps are tried before new people
+    expected: int = 0  # before lock: regulars who haven't answered (and aren't away), counted as coming
+    waiting: list[str] = Field(default_factory=list)  # asks still out (before lock they count as covering their seat)
+    seats: list[PlanSeat] = Field(default_factory=list)
+    short_after: dict  # {"headcount": n, "roles": {role: n}}: still short if every suggestion is a yes
+    rev: str = ""  # plan_rev: a send carrying an older one is refused
+
+    @property
+    def asks(self) -> list[FillAsk]:
+        """The suggestions in send order (a swap right before its backfill)."""
+        return [a for st in self.seats if st.options for a in st.options[0]]
+
+
+class PlanChanged(RegistryError):
+    """An officer's Ask / Send carried a plan fingerprint that is no longer current: nothing was sent; `plan` is the
+    plan as it is now (the card, modal or wizard shows it instead)."""
+
+    def __init__(self, plan: "Plan", msg: str = "The sheet changed since you looked — the suggestions have been refreshed; check them and send again."):
+        super().__init__(msg)
+        self.plan = plan
+
+
+def plan_rev(plan: "Plan") -> str:
+    """A fingerprint of what the plan would send (each seat's options: who, how, as what). An Ask carrying an older one
+    is refused, so nobody acts on a stale plan; an answer elsewhere that leaves the suggestions as they were does not
+    make a card stale."""
+    import hashlib
+    import json
+
+    blob = json.dumps([plan.phase, [[st.role, [[(a.discord_id, a.kind, a.role, a.character, a.spec, a.pair) for a in opt] for opt in st.options]] for st in plan.seats]])
+    return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+
+def saved_this_lockout(reg: Registry, rs: "RaidStore | None", ev: RaidEvent) -> set[str]:
+    """Characters already rostered on another run of this raid in the same lockout window (locked or done): an alt
+    saved there can't come, so the planner never suggests it (the alt-lockout filter — not a general lockout guard).
+    Test runs only count for test runs."""
+    if rs is None or not ev.instance:
+        return set()
+    days = int(reg.raid_def(ev.instance).get("lockout_days", 7))
+    anchored = reg.first_open(ev.instance) is not None
+    win = reg.lockout_window(ev.instance, ev.start) if anchored else None
+    out: set[str] = set()
+    for e in rs.events.values():
+        if e.key == ev.key or e.instance != ev.instance or e.state not in ("locked", "done") or bool(e.test) != bool(is_test_run(reg, ev)):
+            continue
+        same = reg.lockout_window(e.instance, e.start) == win if anchored else abs((e.start - ev.start).total_seconds()) < days * 86400
+        if same:
+            out |= {p.character for p in e.seated() if p.character}
     return out
 
 
-def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> list[FillAsk]:
-    """The next asks to send now: shortfall + FILL_OVERASK, capped so at most FILL_MAX_OPEN are outstanding."""
+def spec_for_role(reg: Registry, cls: str, offspec: str | None, role: str) -> str | None:
+    """The spec a declared flex role means on this character: its offspec when that plays the role, else the class's
+    only spec of that role; None when it is ambiguous (two specs of the role and neither is the offspec)."""
+    if offspec:
+        try:
+            if reg.profile.spec(cls, offspec).role == role:
+                return offspec
+        except KeyError:
+            pass
+    specs = [sp for sp in reg.profile.classes.get(cls, {}) if reg.profile.spec(cls, sp).role == role]
+    return specs[0] if len(specs) == 1 else None
+
+
+def _dps(role: str) -> str:
+    return "dps" if role in ("melee", "ranged") else role
+
+
+def _role_word(role: str) -> str:
+    return "DPS" if _dps(role) == "dps" else role
+
+
+def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> Plan:
+    """What would cover the run's shortfall, best first — pure; nothing is sent. The fill engine after lock (role gaps,
+    then free seats) and the officers' suggestions before it (tank/healer minimums only) read this one function.
+
+    Who counts: after lock the seated (their seat's role — the solver may have switched an offspec); before lock the
+    Join answers plus, on a recurring run with regulars, the regulars who haven't answered and aren't away (nothing is
+    pre-filled, D1: the plan treats them as coming, so it suggests what goes beyond them), and the officer's asks still
+    out as if they said yes (a No frees the seat again and the next alternate shows). After lock the fill engine's
+    over-ask (fill_batch, at most FILL_MAX_OPEN outstanding) is unchanged.
+    Moves per short seat, cheapest first (MOVE_COST): someone on Bench who plays the role · a declared flex role ·
+    an offspec · an unanswered regular · an alt (skipped when that alt is already saved to this raid this lockout) · a
+    non-regular main. When every seat is taken (before lock: by the expected roster), switches by people already coming
+    go before new people — a new healer would only bench a DPS at lock. A switch that would drop the role it vacates
+    under its minimum only goes with a tied backfill. A matching check keeps one person from covering two seats and
+    from blocking a seat only they can cover. Each short seat gets up to PLAN_ALTERNATES alternates. `swaps=False`
+    leaves switches out (D3: after lock on a recurring run they wait for an officer's Ask; `withheld` says so)."""
+    locked = ev.state != "open" and bool(ev.all_rosters)
+    g = gaps(reg, ev)
+    n, size = g["rosters"], g["size"]
+    bounds = reg.role_bounds(ev.instance, size)
+    need = {r: int(bounds.get(r, {}).get("min") or 0) * n for r in ("tank", "healer", "dps")}
+    day = ev.start.astimezone(reg.tz).date().isoformat()
+    busy = conflicts(rs, ev) if rs is not None else {}
+    asked = {a.discord_id for a in ev.fill_asks}  # one ask per member per run (pre-lock or after)
+    saved = saved_this_lockout(reg, rs, ev)
+    exp_from = expected_from(reg, ev)
+
+    def role_of(cls: str, spec: str) -> str:
+        return reg.profile.spec(cls, spec).role
+
+    def ok(m: Member | None) -> bool:
+        return bool(m) and m.discord_id not in asked and not m.dm_opt_out and not m.absent_on(day) and m.discord_id not in busy
+
+    # ---- who counts now
+    cur: list[dict] = []
+    seated_names = {p.signup_name for p in ev.seated()} if locked else set()
+    if locked:
+        for p in ev.seated():
+            uid = player_uid(ev, p)
+            sg = ev.signups.get(str(uid)) if uid is not None else None
+            cur.append({"uid": uid, "m": reg.members.get(uid) if uid is not None else None, "name": p.signup_name, "character": p.character or (sg.character if sg else p.signup_name),
+                        "cls": p.cls, "spec": p.spec, "offspec": sg.offspec if sg else p.offspec, "role": p.role, "signed": True})
+    else:
+        for sg in ev.by_status("in"):
+            cur.append({"uid": sg.discord_id, "m": reg.members.get(sg.discord_id), "name": sg.display_name, "character": sg.character,
+                        "cls": sg.cls, "spec": sg.spec, "offspec": sg.offspec, "role": sg.role, "signed": True})
+    projecting = not locked and exp_from == "regulars"
+    if projecting:
+        for m, c in not_answered(reg, ev):
+            if not m.absent_on(day):
+                cur.append({"uid": m.discord_id, "m": m, "name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec, "offspec": c.offspec,
+                            "role": role_of(c.cls, c.spec), "signed": False})
+    have = {r: sum(1 for p in cur if p["role"] == r) for r in ROLES}
+    waiting = [a for a in ev.fill_asks if a.open]
+    if not locked:  # before lock an officer's asks still out count as covering their seat (no second ask for it meanwhile)
+        for a in waiting:
+            have[a.role] = have.get(a.role, 0) + 1
+            if a.swap and a.vacates:
+                have[a.vacates] = have.get(a.vacates, 0) - 1
+    have["dps"] = have.get("melee", 0) + have.get("ranged", 0)
+    short_roles = {r: need[r] - have[r] for r in ("tank", "healer") if need[r] > have[r]}
+    free = [g["headcount"] if locked else None]  # after lock a new body needs a free seat (seat_player); before lock the lock decides
+    full = (g["headcount"] == 0) if locked else len(cur) >= g["seats"]
+    headcount = g["headcount"] if locked else 0  # before lock suggestions are for the minimums only; the reminder chases the rest
+    plan = Plan(phase="fill" if locked else "prelock", short={"headcount": headcount, "roles": dict(short_roles)}, have=dict(have), need=need, full=full,
+                expected=sum(1 for p in cur if not p["signed"]), short_after={"headcount": headcount, "roles": dict(short_roles)},
+                waiting=[a.display_name for a in waiting])
+    if not short_roles and not headcount:
+        plan.rev = plan_rev(plan)
+        return plan
+
+    # ---- bodies: the bench, the regulars (every main while the series has none) who haven't answered, everyone else
+    pool = run_pool(reg, ev)
+    pool_ids = {m.discord_id for m, _ in pool}
+    benched_joiners = [s for s in ev.by_status("in") if locked and s.display_name not in seated_names]
+    bodies: list[tuple[str, Member, RegisteredCharacter, str]] = []  # (kind, member, character, words)
+    for s in benched_joiners + ev.by_status("sub"):
+        m = reg.members.get(s.discord_id)
+        if s.display_name not in seated_names and m:
+            c = next((c for c in m.active() if c.label == s.character), m.main)
+            if c:
+                bodies.append(("sub", m, c, "joined, not rostered" if s.status == "in" else "on the Bench"))
+    if not projecting:  # projecting: the unanswered regulars are already counted as coming
+        word = {"regulars": "a regular, hasn't answered", "test": "test bench, hasn't answered"}.get(exp_from, "hasn't answered")
+        bodies += [("regular", m, c, word) for m, c in pool if c and str(m.discord_id) not in ev.signups]
+    if not is_test_run(reg, ev):
+        # everyone else with a main — never a test puppet on a real run (a test run's pool is the puppets + the tester)
+        others = sorted([(m, m.main) for m in reg.members.values() if m.main and not m.test and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups], key=lambda mc: _rank_key(reg, mc[0]))
+        bodies += [("other", m, c, "not a regular, no answer") for m, c in others]
+
+    def char_of(p: dict) -> RegisteredCharacter | None:
+        m = p["m"]
+        return next((c for c in m.active() if c.label == p["character"]), None) if m else None
+
+    def switch(p: dict, role: str) -> tuple[str, str, str, str] | None:
+        """(kind, character, spec, words) — the cheapest way `p` could play `role`; None when they can't."""
+        if p["role"] == role or not p["m"]:
+            return None
+        c = char_of(p)
+        first = p["name"]
+        if c and role in (c.flex or []):
+            sp = spec_for_role(reg, p["cls"], p["offspec"] if p["offspec"] != p["spec"] else None, role)
+            if sp and sp != p["spec"]:
+                return "flex", p["character"], sp, f"{first}'s declared flex {sp}"
+        if p["offspec"] and p["offspec"] != p["spec"]:
+            try:
+                if role_of(p["cls"], p["offspec"]) == role:
+                    return "offspec", p["character"], p["offspec"], f"{first}'s offspec {p['offspec']}"
+            except KeyError:
+                pass
+        alt = next((a for a in p["m"].active() if a.label != p["character"] and role_of(a.cls, a.spec) == role and a.label not in saved), None)
+        if alt:
+            return "alt", alt.label, alt.spec, f"{first} brings {alt.label} ({alt.spec} alt, not saved this lockout)"
+        return None
+
+    def moves(role: str) -> list[tuple]:
+        """Every way to cover one `role` seat, in the order they are tried. ("body", kind, m, c, words) |
+        ("swap", kind, p, character, spec, words). Bodies of the role only while a seat is left (after lock)."""
+        out = []
+        if role:
+            for p in cur:
+                if swaps and ok(p["m"]):
+                    sw = switch(p, role)
+                    if sw:
+                        out.append(("swap", sw[0], p, sw[1], sw[2], sw[3]))
+        if free[0] is None or free[0] > 0:
+            out += [("body", k, m, c, w) for k, m, c, w in bodies if ok(m) and (not role or role_of(c.cls, c.spec) == role)]
+        if full:  # every seat taken: switches by people already coming before new people
+            return sorted(out, key=lambda mv: (0 if mv[0] == "swap" else 1, MOVE_COST[mv[1]]))
+        return sorted(out, key=lambda mv: (MOVE_COST[mv[1]], 0 if mv[0] == "body" else 1))
+
+    def person(mv) -> int:
+        return mv[2]["uid"] if mv[0] == "swap" else mv[2].discord_id
+
+    def count(role: str) -> int:
+        return have.get(_dps(role), 0) if _dps(role) == "dps" else have.get(role, 0)
+
+    def reason_for(role: str, k: int) -> str:
+        return f"short {k} {role}" if role else f"short {headcount}"
+
+    def build(mv, role: str, k: int, used: set[int]) -> tuple[list[FillAsk], set[int]] | None:
+        """The asks for one move (a swap with its backfill when the vacated role would go short), or None."""
+        head = f"short {k} {_role_word(role)} · " if role else ""
+        tail = " · the sheet is full: the lock would bench someone" if (mv[0] == "body" and full and not locked) else ""
+        if mv[0] == "body":
+            _, kind, m, c, words = mv
+            a = FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind=kind, role=role_of(c.cls, c.spec), character=c.label, spec=c.spec,
+                        reason=reason_for(role, k), why=f"{head}{c.label} ({c.spec}) · {words}{tail}")
+            return [a], {m.discord_id}
+        _, kind, p, character, spec, words = mv
+        vac = p["role"]
+        left, floor = count(vac) - 1, need.get(_dps(vac), 0)
+        unsigned = "" if p["signed"] else " · a regular, hasn't answered yet"
+        a = FillAsk(discord_id=p["uid"], display_name=p["name"], kind=kind, role=role, character=character, spec=spec, reason=reason_for(role, k), vacates=vac)
+        if left >= floor:
+            a.why = f"{head}{words}{unsigned} · {_role_word(vac)} stays {left}" + (f" of {floor} minimum" if floor else "")
+            return [a], {p["uid"]}
+        if free[0] is not None and free[0] <= 0:
+            return None  # after lock the backfill would need a seat nobody has
+        back = next((b for b in bodies if ok(b[1]) and b[1].discord_id not in used and b[1].discord_id != p["uid"] and _dps(role_of(b[2].cls, b[2].spec)) == _dps(vac)), None)
+        if not back:
+            return None
+        bk, bm, bc, bw = back
+        a.pair = bm.discord_id
+        a.why = f"{head}{words}{unsigned} · {_role_word(vac)} would drop under its minimum, so {bm.display_name} covers it"
+        b = FillAsk(discord_id=bm.discord_id, display_name=bm.display_name, kind=bk, role=role_of(bc.cls, bc.spec), character=bc.label, spec=bc.spec,
+                    reason=f"covering {p['name']}'s {vac} seat", why=f"covering {p['name']}'s {_role_word(vac)} seat · {bc.label} ({bc.spec}) · {bw}", pair=p["uid"])
+        return [a, b], {p["uid"], bm.discord_id}
+
+    def cover_sets(exclude: set[int], roles_needed: set[str]) -> list[set[str]]:
+        """Per person still free, the short roles they have some move for (the matching check's input)."""
+        by: dict[int, set[str]] = {}
+        for r in roles_needed:
+            for mv in moves(r):
+                uid = person(mv)
+                if uid not in exclude:
+                    by.setdefault(uid, set()).add(r)
+        return list(by.values())
+
+    def apply_counts(opt: list[FillAsk]) -> None:
+        for a in opt:
+            if a.swap:
+                have[a.vacates] = have.get(a.vacates, 0) - 1
+                if _dps(a.vacates) == "dps":
+                    have["dps"] = have.get("dps", 0) - 1
+            have[a.role] = have.get(a.role, 0) + 1
+            if _dps(a.role) == "dps":
+                have["dps"] = have.get("dps", 0) + 1
+            if not a.swap and free[0] is not None:
+                free[0] -= 1
+
+    # ---- 1. the role seats: suggestions first (so alternates never take someone a later seat's suggestion needs)
+    used: set[int] = set()
+    need_list = [r for r, k in short_roles.items() for _ in range(k)]
+    seats: list[PlanSeat] = []
+    for i, role in enumerate(need_list):
+        rest = need_list[i + 1:]
+        chosen = None
+        for mv in moves(role):
+            if person(mv) in used:
+                continue
+            got = build(mv, role, short_roles[role], used)
+            if not got:
+                continue
+            opt, people = got
+            # the matching check: never take someone a later seat can't do without
+            if rest and _can_cover(cover_sets(used, set([role] + rest)), [role] + rest) and not _can_cover(cover_sets(used | people, set(rest)), rest):
+                continue
+            chosen = (opt, people)
+            break
+        st = PlanSeat(role=role)
+        if chosen:
+            st.options.append(chosen[0])
+            used |= chosen[1]
+            apply_counts(chosen[0])
+        seats.append(st)
+    # ---- 2. after lock, the seats still free (plain headcount)
+    if locked:
+        for _ in range(max(0, free[0] or 0)):
+            mv = next((mv for mv in moves("") if person(mv) not in used), None)
+            st = PlanSeat(role="")
+            if mv:
+                opt, people = build(mv, "", 0, used)
+                st.options.append(opt)
+                used |= people
+                apply_counts(opt)
+            seats.append(st)
+    # ---- 3. alternates per seat: people no suggestion uses, distinct per role
+    shown: dict[str, set[int]] = {}
+    for st in seats:
+        if not st.options:
+            continue
+        taken = shown.setdefault(st.role, set())
+        for mv in moves(st.role):
+            if len(st.options) > PLAN_ALTERNATES:
+                break
+            uid = person(mv)
+            if uid in used or uid in taken:
+                continue
+            got = build(mv, st.role, short_roles.get(st.role, 0), used | taken)
+            if got and not got[1] & (used | taken):
+                st.options.append(got[0])
+                taken |= got[1]
+    plan.seats = seats
+    plan.short_after = {"headcount": sum(1 for st in seats if not st.role and not st.options),
+                        "roles": {r: k for r in short_roles if (k := sum(1 for st in seats if st.role == r and not st.options))}}
+    plan.rev = plan_rev(plan)
+    return plan
+
+
+def early_warning(reg: Registry, rs: "RaidStore | None", ev: RaidEvent) -> bool:
+    """Post the officer health card as soon as a recurring sheet opens? Yes when the series has regulars and, counting
+    the ones who haven't answered (minus anyone away) as coming, a tank or healer minimum is still short — officers
+    see the hole (and the Suggested block) days before the reminder. Never for ad hoc or test runs, or a series
+    nobody curated (nothing to base it on)."""
+    if ev.state != "open" or run_kind(reg, ev) != "recurring" or is_test_run(reg, ev) or expected_from(reg, ev) != "regulars":
+        return False
+    return bool(role_plan(reg, rs, ev).short["roles"])
+
+
+def withheld_swaps(reg: Registry, rs: "RaidStore | None", ev: RaidEvent) -> bool:
+    """After lock on a recurring run, would a role swap cover a gap the fill engine can't cover on its own? (D3: such
+    swaps wait for an officer's Ask.)"""
+    if ev.state == "open" or not ev.all_rosters:
+        return False
+    with_swaps = role_plan(reg, rs, ev)
+    return any(a.swap for a in with_swaps.asks)
+
+
+def auto_swaps(reg: Registry, ev: RaidEvent) -> bool:
+    """May the fill engine send role swaps (flex / offspec / alt) on its own? Ad hoc: yes (today's behaviour). A recurring
+    run: no — owner decision D3: same-role fill asks stay automatic, a role swap needs an officer's Ask."""
+    return run_kind(reg, ev) == "adhoc"
+
+
+def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> list[FillAsk]:
+    """The planner's suggestions in send order (role_plan(...).asks). Pure; nothing is sent."""
+    return role_plan(reg, rs, ev, team, swaps=swaps).asks
+
+
+def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> list[FillAsk]:
+    """The next asks the fill engine sends now: shortfall + FILL_OVERASK, capped so at most FILL_MAX_OPEN are
+    outstanding — never cutting a tied swap from its backfill."""
     open_asks = [a for a in ev.fill_asks if a.open]
     nd = needs(reg, ev, team)
     want = nd["headcount"] + sum(nd["roles"].values())
     if want <= 0:
         return []
     room = max(0, min(want + FILL_OVERASK, FILL_MAX_OPEN) - len(open_asks))
-    return fill_candidates(reg, rs, ev, team)[:room]
+    batch = fill_candidates(reg, rs, ev, team, swaps=swaps)[:room]
+    ids = {a.discord_id for a in batch}
+    return [a for a in batch if a.pair is None or a.pair in ids]
+
+
+def pick_asks(plan: Plan, picks: dict | None = None) -> list[FillAsk]:
+    """The asks an officer sends: each seat's suggestion, or the alternate they picked (`picks` = {seat index: option
+    index}, 0 = the suggestion). Refuses a pick that asks one person for two seats."""
+    out: list[FillAsk] = []
+    seen: set[int] = set()
+    for i, st in enumerate(plan.seats):
+        if not st.options:
+            continue
+        k = int((picks or {}).get(i, (picks or {}).get(str(i), 0)) or 0)
+        if not 0 <= k < len(st.options):
+            raise RegistryError(f"seat {i + 1} has no option {k + 1}")
+        for a in st.options[k]:
+            if a.discord_id in seen:
+                raise RegistryError(f"{a.display_name} is picked for two seats — pick someone else for one of them")
+            seen.add(a.discord_id)
+            out.append(a.model_copy())
+    return out
+
+
+def plan_lines(reg: Registry, plan: Plan, limit: int = 8) -> list[str]:
+    """The plan in words (plain text, MCP, help, the wizard): one line per seat with its alternates, then what stays
+    short. Code-written — Claude may rephrase it, never invent one."""
+    out = []
+    for i, st in enumerate(plan.seats[:limit]):
+        if not st.options:
+            continue
+        main = st.options[0]
+        out.append(f"{i + 1}. " + " + ".join(_ask_words(a) for a in main) + (f" — {main[0].why}" if main[0].why else ""))
+        if len(st.options) > 1:
+            out.append("   alternates: " + " · ".join(" + ".join(_ask_words(a) for a in opt) for opt in st.options[1:]))
+    left = still_short_words(plan)
+    out.append(f"Still short if everyone says yes: {left}")
+    return out
+
+
+def _ask_words(a: FillAsk) -> str:
+    if a.kind in ("flex", "offspec"):
+        return f"{a.display_name} → {a.spec} ({a.kind})"
+    if a.kind == "alt":
+        return f"{a.display_name} brings {a.character} ({a.spec})"
+    return f"{a.display_name} as {a.character} ({a.spec}, {a.kind})"
+
+
+def still_short_words(plan: Plan) -> str:
+    sa = plan.short_after
+    bits = ([f"{sa['headcount']} seat{'s' if sa['headcount'] != 1 else ''}"] if sa.get("headcount") else []) + [f"{k} {r}" for r, k in sa.get("roles", {}).items()]
+    return ", ".join(bits) + " → recruit" if bits else "nothing"
 
 
 def _reseat(ev: RaidEvent, sg: Signup) -> bool:
@@ -1056,14 +1423,19 @@ def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[
 
 
 def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, yes: bool) -> str:
-    """Record the answer and, on yes, put the person on the sheet the way they were asked."""
+    """Record the answer and, on yes, put the person on the sheet the way they were asked. Before lock (an officer's
+    pre-lock ask) a yes changes the SIGNUP only — Join, with the spec or character they agreed to — and seats nobody:
+    the lock still decides, and now sees the agreed role. After lock (or a pre-lock ask answered once the run locked)
+    a yes takes the seat, or switches the seat in place."""
     ask.answer, ask.answered_at = ("yes" if yes else "no"), now()
     m = reg.members.get(ask.discord_id)
     if not yes or not m:
-        ev.log.append(f"fill: {ask.display_name} declined ({ask.kind})")
+        ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name} declined ({ask.kind})")
         rs.save(ev, f"fill {ask.display_name} no")
         return f"{ask.display_name} can't ({'swap' if ask.swap else ask.kind})"
-    if ask.kind == "offspec":
+    if ev.state == "open":
+        return _prelock_yes(reg, rs, ev, ask, m)
+    if ask.kind in ("offspec", "flex") and str(ask.discord_id) in ev.signups and ev.signups[str(ask.discord_id)].character == ask.character:
         s = ev.signups[str(ask.discord_id)]
         s.spec, s.offspec, s.role, s.note, s.source, s.updated_at = ask.spec, s.spec, ask.role, f"switched to {ask.spec} at request", "fill", now()
         _reseat(ev, s)
@@ -1072,6 +1444,8 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
         return f"{ask.display_name} swaps to {ask.spec} ({ask.role})"
     c = next((c for c in m.active() if c.label == ask.character), m.main)
     s = _signup(reg, m, c, "in", "fill", "filled in at request" if ask.kind != "alt" else f"swapped to {c.label} at request")
+    if ask.kind in ("offspec", "flex") and ask.spec != c.spec:  # a switch by someone who had no signup on that character
+        s.spec, s.offspec, s.role = ask.spec, c.spec, ask.role
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"fill: {ask.display_name} in as {c.label} ({ask.kind})")
     if ev.state != "open" and ev.all_rosters and not _reseat(ev, s) and seat_player(reg, ev, s) is None:
@@ -1081,6 +1455,35 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
         return f"{ask.display_name} said yes as {c.label} ({ask.role}), but there is no free seat — not rostered (move them in on the board)"
     rs.save(ev, f"fill {ask.display_name} in")
     return f"{ask.display_name} {'swaps to' if ask.kind == 'alt' else 'is in as'} {c.label} ({ask.role})"
+
+
+def _prelock_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: Member) -> str:
+    """A yes to a pre-lock ask: the signup becomes Join with what they agreed to (an offspec / flex spec on the same
+    character, an alt, or just Join); nobody is seated — the lock builds the roster from the signups."""
+    c = next((c for c in m.active() if c.label == ask.character), None) or m.main
+    if not c:
+        rs.save(ev, f"fill {ask.display_name} yes (no character)")
+        return f"{ask.display_name} said yes, but has no active character — set their answer on the sheet"
+    old = ev.signups.get(str(m.discord_id))
+    s = _signup(reg, m, c, "in", "fill")
+    if ask.kind in ("offspec", "flex") and ask.spec != c.spec:
+        s.spec, s.offspec, s.role = ask.spec, c.spec, ask.role
+    what = f"{c.label} as {s.spec}" if s.spec != c.spec or ask.kind in ("offspec", "flex") else c.label
+    s.note = f"agreed before lock to come as {what}"
+    ev.signups[str(m.discord_id)] = s
+    ev.log.append(f"suggestion: {ask.display_name} said yes — Join as {what} ({ask.role})" + (f", was {LABELS.get(old.status, old.status)} as {old.character} {old.spec}" if old else ""))
+    rs.save(ev, f"suggestion {ask.display_name} yes")
+    return f"{ask.display_name} said yes: Join as {what} ({ask.role}) — the lock builds the roster"
+
+
+def release_prelock_asks(ev: RaidEvent) -> list[FillAsk]:
+    """At lock: pre-lock asks nobody answered close (`released`) — they expire at lock time. The caller saves."""
+    gone = [a for a in ev.fill_asks if a.open and a.phase == "prelock"]
+    for a in gone:
+        a.answer, a.answered_at = "released", now()
+    if gone:
+        ev.log.append(f"pre-lock asks closed at lock: {', '.join(a.display_name for a in gone)}")
+    return gone
 
 
 # ---------------------------------------------------------------- health
@@ -1300,20 +1703,8 @@ def leftovers(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]) -> li
 
 
 def _can_cover(people: list[set[str]], need: list[str]) -> bool:
-    """Distinct people for every role seat in `need` (bipartite matching, people → the roles they can play)."""
-    match: dict[int, int] = {}  # person → seat
-
-    def place(seat: int, seen: set[int]) -> bool:
-        for i, roles in enumerate(people):
-            if need[seat] in roles and i not in seen:
-                seen.add(i)
-                holder = next((s for s, p in match.items() if p == i), None)
-                if holder is None or place(holder, seen):
-                    match[seat] = i
-                    return True
-        return False
-
-    return all(place(s, set()) for s in range(len(need)))
+    """Distinct people for every role seat in `need` (registry.can_cover: the one bipartite matching)."""
+    return can_cover(people, need)
 
 
 def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult], reason: dict | None) -> str | None:

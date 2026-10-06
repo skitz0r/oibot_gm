@@ -82,6 +82,7 @@ class RaidSchedulerMixin:
                     state = "open"
                     await self.ops.emit(cfg, "warn", f"{ev.key}: locked without a roster — reopened, retrying the lock")
                 if state == "open" and now >= hard:
+                    rc.expire_fill_asks(reg, rs, ev)  # pre-lock asks expire at lock time (a lock that keeps failing leaves none open)
                     tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
                     if ev.lock_error and tried and now - tried < timedelta(minutes=15):
                         continue  # failed recently; give the officers time to fix the board before trying again

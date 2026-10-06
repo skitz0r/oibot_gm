@@ -348,7 +348,7 @@ Known gaps: the companion is a Python script, not yet a packaged exe; Forever pr
 
 ### 5.16 Filling gaps: bench, subs, offspec and alt swaps (built 2026-09-15)
 
-*Since §5.20 the fill engine runs only after lock (never on an open sheet); the tiers below read "roster pool" as the series' regulars who haven't answered (§5.30; every main while the series has none, or on an ad hoc run; a test run: its puppets), and "another roster" as everyone else (ask kinds `regular` / `other`; stored `pool` / `other_roster` load as those). Roster redesign Phase 0 (2026-10-06): one need calculation (`rc.gaps`), a role gap on a full locked roster gets swaps only, and a seated player's current seat (not the signup) decides what they can switch to — see §5.20.*
+*Since §5.20 the fill engine runs only after lock (never on an open sheet); the tiers below read "roster pool" as the series' regulars who haven't answered (§5.30; every main while the series has none, or on an ad hoc run; a test run: its puppets), and "another roster" as everyone else (ask kinds `regular` / `other`; stored `pool` / `other_roster` load as those). Roster redesign Phase 0 (2026-10-06): one need calculation (`rc.gaps`), a role gap on a full locked roster gets swaps only, and a seated player's current seat (not the signup) decides what they can switch to — see §5.20. Phase 2 (2026-10-06): `fill_candidates` is now `rc.role_plan(...).asks` — one planner before and after lock, in the cost order of §5.31 (a declared **flex** role is a new switch kind), with a matching check and alternates; after lock on a recurring run the engine on its own sends same-role asks only, a role swap waits for an officer (D3, §5.31).*
 
 A roster with `autofill: true` (default) has the bot close its own gaps by DM, one small batch at a time, so officers only see the summary:
 
@@ -416,6 +416,7 @@ Members never fill in standing availability. The unit of work is a **run**: one 
 - **Absences**: a dedicated channel with one card (button *I'll be away* → modal start / end / reason). The bot posts a public line without the reason, pre-fills Out on every overlapping sheet (open or locked: rostered members are removed and fill runs), and the Rosters page shows overlapping absences beside each sheet. Same form on the Me page and `/me absent`.
 - **Phase 0 of the roster redesign (2026-10-06, `out/roster_redesign.md` §7 "Untangle")**: who holds a seat lives only in the run file (`ev.rosters`; `rc.rostered_runs` reads it for `/me view`, the registration card's status, help, the site's member JSON and readiness's "on roster"). Lock, confirmations, fill, declines, expiry, board removals and cleanup no longer write run keys into `RegisteredCharacter.rosters` — that list is kept for regular-series keys (`<raid>:<schedule>`, Phase 1), and `Registry.migrate_rosters_to_series` (`scripts/migrate_rosters.py`, idempotent, one commit) drops the leftovers (the phantom `"main"`, stale run keys). Bugs fixed with it: `set_signup` no longer demotes a member's own Join to Bench (it keyed on the run key, so after lock an unrostered member's own Join became Bench and was seated anyway); after lock the fill pool is every main who hasn't answered again (it had flipped to the seated, so they were asked as `other_roster`); `Player.discord_id` carries identity, so `seat_bonus` sat-out credit and rotation survive a rename; the sheet's *Can't make it* after lock writes a `Callout`; `rc.gaps` is the one role-need calculation (health card, `health_data`, `needs`/fill, `would_short`: the run's expected rosters before lock, the locked rosters after) and the card's split reason uses the per-run size; a policy `role_min` is merged per role over `role_bounds` (`rc.merged_role_min`), so a healer line never drops the tank minimum; `explain.annotate`'s tank advisory reads that merged minimum, not `profile.raids[...]["tank_needs"]`; after lock a role gap with no free seat gets no new-body ask (only swaps; a backfill takes a seat too), a yes that finds no seat is not recorded as rostered, and a swap compares with the seated `Player` (the solver may already have switched them). Every reader names a held run as a person reads it — `run_label` in Discord (`/me view`, the Status button), `run_title` / raid name + `local12` on the site's member JSON, help and the plain-text character-delete diff (which reads `rostered_runs` too) — never the run key, whose tail is the 24-hour start; the analytics card passes the bot's RaidStore to `comp.readiness`, so its "on roster" matches `/api/readiness`; and the load-time legacy `teams` migration copies only series keys (`:`), so it can't bring a phantom back.
 - **Phase 1 of the roster redesign (2026-10-06, "Classes + regulars")**: every run is **recurring** or **ad hoc** (from its schedule's kind) and a recurring series has **regulars** — see §5.30. Here that means: nothing is pre-filled (an absence still marks anyone away, at open and later; clearing it returns them to unanswered); "No answer" and the nudge are the series' regulars who haven't answered (`rc.expected` / `rc.not_answered`; every main while the series has none; ad hoc: nobody); the fill engine's first tier after the bench is `rc.run_pool` (the regulars, keyed on the series — never the run key); the lock adds the `regular` weight; ad hoc runs seat first come and may skip confirmations (`confirm` off: no Confirm DMs, `confirm_by` None, no seat expires).
+- **Phase 2 of the roster redesign (2026-10-06, "Suggestions")**: before lock the planner (`rc.role_plan`, the fill engine extended) suggests who could cover a short tank/healer minimum; nothing is sent until an officer presses **Ask** (pre-lock asks: a yes changes the signup, seats nobody; unanswered ones close at lock). After lock on a recurring run, role swaps need an officer's Ask (D3); ad hoc fill stays automatic. The lock card says **Locked short …**, lists the solver's spec switches and the regulars not rostered; the Confirm DM names the spec the roster has them on. See §5.31.
 - **Removed**: `Member.week`, `Member.availability`, `Member.slot_prefs`, `Member.role_prefs` (flex lives on the character), `Member.teams`, the heat-map, `roster/autoplan.py`, `roster/builder.py`, proposals, standing rosters as a scheduling concept (Phase 1 brought back a curated list per recurring series — the *regulars*, §5.30 — as who is expected, never a standing answer) (the `rosters[]` config now only holds ephemeral runs; `/gm config roster`, `team_set`/`team_add`/`team_remove`/`availability` plain-text ops and `TEAM_DEFAULTS` cutoffs are gone), candidate-slot polls, `/roster poll`.
 
 ### 5.21 Aura configurator: stacking families and beneficiaries (built 2026-09-17)
@@ -730,7 +731,8 @@ cover" hint drops the names of members not on the sheet for the same reason), `/
 `expected_from`, `kind`, `series_name`, `confirms`).
 
 **Regulars coverage.** `Registry.series_coverage(rid=None)` — per recurring series its regulars with roles, role
-counts, the tank/healer minimums × the schedule's rosters, `short`, seats. One computation, four readers: `/api/rosters`
+counts, the tank/healer minimums × the schedule's rosters, `short`, seats (Phase 2 adds `level` green / amber / red,
+`cover`, `recruit`, and `rc.series_outlook` attaches the 4-week forecast — §5.31). One computation, four readers: `/api/rosters`
 (`series`), `comp.readiness` (`series`, so the analytics card — one line per series via `raid_views.coverage_line`,
 next to the old headcount — `/ask` readiness and MCP read it), `/roster overview` (*Regulars* field).
 
@@ -777,6 +779,111 @@ configops `run_open` through `apply_async`, the confirmations switch, coverage, 
 **Migration:** none for Phase 1 (no schedules or regulars are stored yet; the default series' run behaves as before
 until an officer adds regulars; legacy runs read their class from their schedule). D11's `scripts/migrate_rosters.py`
 (Phase 0) still applies.
+
+### 5.31 Suggestions: covering short tank/healer seats (roster redesign Phase 2, built 2026-10-06)
+
+**Why.** Before lock the only help for a short tank or healer minimum was a hint line on the health card; the solver
+switched offspecs at lock without asking anyone and a thin sheet locked quietly under its minimum. The design
+(`out/roster_redesign.md` §4, Phase 2) as amended by the owner (`out/roster_decisions.md`): suggestions before lock,
+every one sent only on an officer's Ask (all before lock); after lock on a **recurring** run same-role fill asks stay
+automatic and any **role swap** (flex / offspec / alt, with or without a paired backfill) needs an officer's Ask (D3);
+ad hoc fill stays automatic. Nothing about it is computed by the model: code plans, Claude may rephrase in `/ask`.
+
+**One planner** — `rc.role_plan(reg, rs, ev, swaps=True) -> Plan` (the fill engine extended; no second solver;
+`fill_candidates` = `role_plan(...).asks`, `fill_batch` slices it without cutting a tied pair):
+- *Who counts.* After lock the seated (their seat's role). Before lock the Join answers plus, on a recurring run with
+  regulars, the regulars who haven't answered and aren't away — D1 pre-fills nothing, so the planner treats them as
+  coming and suggests what goes beyond them (`Plan.expected`) — plus the officer's pre-lock asks still out, counted as
+  covering their seat (`Plan.waiting`; a No frees the seat and the next alternate shows). After lock the engine's
+  over-ask (`FILL_OVERASK`, at most `FILL_MAX_OPEN` outstanding) is unchanged.
+- *What it works on.* Before lock the tank/healer minimums only (`gaps()["need"]`; the reminder chases the rest);
+  after lock role gaps, then free seats.
+- *Cost order* (`MOVE_COST`): someone on **Bench** of the role (after lock also joiners the solver left off) = a
+  joiner's **declared flex** role (`RegisteredCharacter.flex`, resolved by `spec_for_role`: the offspec when it plays
+  the role, else the class's only spec of that role, else skipped) < a joiner's **offspec** = an **unanswered regular**
+  of the role (no projection: a series without regulars, or after lock) < an **alt** of the role
+  (`saved_this_lockout` filters alts already rostered on another locked/done run of the raid in the same lockout
+  window — the alt-lockout filter, not a general guard) < a **non-regular main** (never a test puppet on a real run).
+  When every seat is taken (before lock: by the expected roster; after lock: no free seat) switches go before new
+  people — a new healer would only bench a DPS at lock; otherwise bodies win a tie.
+- *Paired backfills.* A switch that would drop the role it vacates under its minimum (dps counted as melee + ranged
+  against the dps minimum) goes only tied to a backfill body of that role (`FillAsk.pair`, both in one option).
+- *Feasibility.* A seat's suggestion is skipped when the remaining short seats could be matched without that person
+  but not with them taken (`registry.can_cover`, the one bipartite matching; `rc._can_cover` delegates); nobody is in
+  two suggestions.
+- *Alternates.* Up to `PLAN_ALTERNATES` (2) per seat, from people no suggestion uses, distinct per role.
+- *Output.* `Plan{phase prelock|fill, short, have, need, full, expected, waiting, seats: [PlanSeat{role, options:
+  [[FillAsk]]}], short_after, rev}`; each ask carries `reason` (short, the member's DM) and `why` (code-written, for
+  officers: "short 1 healer · Ana's declared flex Holy · DPS stays 6 of 5 minimum"). `plan_lines` / `still_short_words`
+  word it; `plan_rev(plan)` fingerprints what it would send (each seat's options) — an answer elsewhere that leaves the
+  suggestions as they were does not make a card stale.
+
+**Sending** — `RaidMixin.send_plan(reg, rs, ev, *, rev, by, picks=None)`, the one path (the cards' Ask, the Suggest…
+wizard, `/raid fill` on an open run, the site's Suggest, plain text, MCP): recomputes the plan; a missing or older
+`rev` raises `rc.PlanChanged(plan)` (nothing sent, the current plan handed back: the card is redrawn, the wizard
+screen redrawn, the site's modal shows it, the route answers 409 with it); `pick_asks(plan, picks)` takes each seat's
+suggestion or the picked alternate and refuses one person for two seats; per-run `plan_lock`. Before lock the asks are
+`phase="prelock"`, `approved_by` the officer, `expires_at` = the lock time; the DM (`prelock_layout`) reads "<run> is
+short a healer. Could you come as Holy?" with **Yes, as Holy** / **No** (`FillButton`, label render-time only). After
+lock they are fill asks the officer approved (role swaps included). One ask per member per run (anyone already asked
+is skipped).
+
+**Answers.** `rc.apply_fill_answer`: before lock (`_prelock_yes`) a yes rewrites the SIGNUP — Join on the asked
+character, an offspec / flex spec as `spec` with the old one as `offspec` — and seats nobody; the lock sees the agreed
+role. A pre-lock ask answered after the run locked takes the post-lock path (switch the seat in place, or seat them).
+`after_fill_answer` refreshes the health card (a No shows the next alternate); `lock_run` closes unanswered pre-lock
+asks (`release_prelock_asks`, `released`); a lock that keeps failing has them expire in the scheduler (deadline =
+lock time). `FillButton` says "That question closed when the roster locked" for such an ask.
+
+**D3 after lock.** `run_fill(..., approved_by=None)`: on its own (scheduler, a freed seat, an answer) the engine sends
+role swaps only on an ad hoc run (`rc.auto_swaps`); on a recurring run it sends same-role asks and, when only a swap
+could cover a gap (`rc.withheld_swaps`), sets `fill_state="suggested"`, posts one thread line and refreshes the lock
+card, whose **Suggested** block (roster 1, recurring) lists the plan with **Ask** / **Suggest…**. An officer's Fill
+seats / `/raid fill` / the site's Send / plain text / MCP send passes `approved_by` (swaps included).
+
+**Officer cards.** Health card (`health_layout`): a **Suggested** block (`suggested_block`: expected role icon +
+have/need, "(joined + N regulars yet to answer)", "every seat taken: swaps first", up to `SUGGEST_LINES` seats — role
+icon, the spec icon they'd play + character + how, the `why` and alternates on a `-#` line — then "Still short if all
+say yes: …"; "asked, waiting on …" while asks are out) and a row with **Ask** (`RunButton` `runact:<key>:ask:<rev>`,
+the rev riding in the persistent id: a stale card is refused and redrawn) and **Suggest…** (`runact:<key>:suggest` →
+flow `raid_suggest`: a select per seat with alternates, Send / Cancel). A sheet answer refreshes the card. **Early
+warning**: `open_run_and_post` posts the health card at once when `rc.early_warning` (a recurring, non-test run whose
+series has regulars and whose expected roster is short of a minimum); `RaidEvent.health_early` marks it; at reminder
+time `post_health` posts a fresh card (rebuilt from the answers) and deletes the early one. Lock card (`lock_notes`):
+**Locked short** + role icons (when the lock came out short — `lock_run` logs "locked short …" and warns on the ops
+feed; **Short** when a seat freed since), **Playing an offspec** (the solver's `spec_switches`, one per line, the spec
+icon they now play), **Regulars not rostered** (recurring: regulars who joined or benched and weren't seated). Confirm
+DM (`confirm_layout`): the spec icon of the seat's spec, plus "You're rostered as **Protection**, your offspec — as you
+agreed / — you signed up as Fury" when it differs from the character's registered spec.
+
+**Coverage and forecast.** `Registry.series_coverage` adds `level`: green = the regulars' own characters cover the
+minimums (`can_cover`), amber = only with offspecs, declared flex or alts (`cover` names who), red = not even then
+(`recruit`: non-regular members who play a short role, by rank); None without regulars. `rc.series_forecast(reg, key)`
+= each start in the next 28 days (`FORECAST_DAYS`, counted from the raid's first opening before then; at most
+`FORECAST_MAX`) with the regulars minus recorded absences against the minimums: `{start, day ('Tue 15 Dec'), when
+(12-hour), expected, seats, short, away}`; `rc.series_outlook(reg, rid)` = coverage + forecast, read by `/api/rosters`
+(the Rosters page's Regulars card: level colour under the role counts, could cover / recruit, a *Next 4 weeks* list —
+role icon + "−n", "n away" with the names on hover), `comp.readiness` (the analytics card: a level dot on the series
+line and a `-#` line per short start — `raid_views.coverage_line` / `forecast_lines`; `/ask` readiness), `/roster
+overview` (*Regulars*).
+
+**Surfaces.** Web: `POST /api/run/{key}/fill/preview` returns `plan` (`plan_json`: seats with options, `why`,
+`still_short`, `lines`, `rev`, `waiting`) — before lock instead of refusing; after lock the batch as well; `POST
+/api/run/{key}/fill {rev, picks}` → `send_plan` (required before lock; 409 + `plan` when stale), without `rev` after lock
+→ `run_fill(approved_by=…)`; `/api/run/{key}` carries `plan`. The sheet card's **Suggest** button (beside the short
+badge, open runs; highlighted when the plan has seats) opens `FillModal` in suggest mode (radio per seat: suggestion or
+alternate; Send; a 409 shows the fresh plan). Discord: `/raid fill` on an open run = the suggestions screen
+(`flows_raid.show_suggestions`); `/raid fill` and the card's Fill send after lock pass `approved_by`. Plain text:
+`run_fill` before lock — preview = `plan_lines`; send carries the plan fingerprint the diff showed
+(`configops.board_revs` stores it under `PLAN_REV + run key`; `configops.op_rev` hands Apply the right fingerprint per
+op, in Discord and on the web/MCP `plain_change`); without one the send is refused ("preview first"). MCP: `fill_seats(run,
+send=False, rev="", picks=None)` — a preview before lock returns the plan; a send before lock needs `rev`. Help: an
+officer's run lines carry the suggestions (`plan_lines`) and readiness the coverage level and forecast. Tests:
+`tests/test_roster_p2_planner.py` (the §4 worked example as a fixture; cost order, swaps-first, matching, alt-lockout,
+paired backfill, rev, picks), `tests/test_roster_p2_asks.py` (send_plan, stale refusal, alternates, the post-lock path,
+release at lock, D3, the cards, early warning, lock card, Confirm DM), `tests/test_roster_p2_surfaces.py` (web, plain
+text, MCP, `/raid fill` and the Suggest screen, coverage and forecast). **Migration:** none (new fields default:
+`FillAsk.why/phase/approved_by`, `RaidEvent.health_early`; a declared flex role is stored as before).
 
 ## 6. Architecture
 

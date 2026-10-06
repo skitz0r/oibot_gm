@@ -548,6 +548,18 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         return {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"),
                 "runs": rc.how_many_rosters(reg, players, size, rb, want=rc.run_rosters(reg, ev)), "reason": reason, "reason_text": rc.split_reason_text(reason) if reason else None}
 
+    def ask_json(reg, a) -> dict:
+        found = reg.find(a.character)
+        return {"uid": str(a.discord_id), "display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "cls": found[1].cls if found else None,
+                "role": a.role, "reason": a.reason, "why": a.why, "pair": str(a.pair) if a.pair is not None else None, "vacates": a.vacates}
+
+    def plan_json(reg, plan) -> dict:
+        """rc.role_plan as data: each seat (role, "" = a plain seat after lock) with its options — [0] the suggestion,
+        then alternates; an option is one ask or a tied swap + backfill — plus what stays short and the `rev` a send carries."""
+        return {"phase": plan.phase, "short": plan.short, "have": plan.have, "need": plan.need, "full": plan.full, "expected": plan.expected, "waiting": plan.waiting,
+                "seats": [{"role": st.role, "options": [[ask_json(reg, a) for a in opt] for opt in st.options]} for st in plan.seats],
+                "short_after": plan.short_after, "still_short": rc.still_short_words(plan), "rev": plan.rev, "lines": rc.plan_lines(reg, plan)}
+
     def ev_json(reg, rs, ev, full: bool = True) -> dict:
         t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
         live = ev.state not in ("done", "cancelled")
@@ -584,7 +596,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
                 "split": split_json(reg, ev) if live else {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"), "runs": 1, "reason": None, "reason_text": None},
                 "confirmations": conf_rows,
-                "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "answer": a.answer, "expires_at": a.expires_at, "pair": a.pair} for a in ev.fill_asks],
+                "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "why": a.why, "answer": a.answer,
+                               "expires_at": a.expires_at, "pair": a.pair, "phase": a.phase, "approved_by": a.approved_by} for a in ev.fill_asks],
+                # the planner's suggestions (computed on view, never stored): what an officer's Ask / Suggest would send
+                "plan": plan_json(reg, rc.role_plan(reg, rs, ev)) if live else None,
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late, "note": c.note} for c in ev.callouts], "log": list(ev.log),
                 "health": health_json(reg, ev, t) if ev.state == "open" else None}
 
@@ -614,7 +629,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             upcoming = [{"slot": (s["name"] if many else reg.slot_label(start.astimezone(reg.tz).strftime("%a %H:%M"))), "schedule": s["id"], "schedule_name": s["name"], "start": t12(reg, start),
                          "opens": t12(reg, start - timedelta(hours=float(reg.schedule_def(rid, s["id"])["signup_lead_hours"])))}
                         for s, start in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if rc.event_key(rid, start, s["id"]) not in rs.events][:6]
-            series = reg.series_coverage(rid)  # one card per recurring series: its regulars (one member per line on the page) against the minimums
+            series = rc.series_outlook(reg, rid)  # one card per recurring series: its regulars (one member per line on the page) against the minimums, level, forecast
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
                         "schedules": [{"id": s["id"], "name": s["name"], "kind": s["kind"], "class": schedule_class(s["kind"]), "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True))} for s in scheds],
                         "series": series,
@@ -883,28 +898,42 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
         return {"message": line}
 
-    def ask_json(reg, a) -> dict:
-        found = reg.find(a.character)
-        return {"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "cls": found[1].cls if found else None, "role": a.role, "reason": a.reason, "pair": a.pair}
-
     @app.post("/api/run/{key}/fill/preview")
     async def run_fill_preview(request: Request, key: str):
-        """What Fill seats would send, without sending: the shortfall, who is still being waited on, and the next batch (D2)."""
+        """What would be asked, without sending. Before lock: the planner's suggestions for the tank/healer minimums
+        (`plan`: each seat's suggestion with its code-written reason and alternates, what stays short, the `rev` a send
+        must carry). After lock: the fill engine's next batch (`batch`, an officer's Send — role swaps included) and
+        the plan as well."""
         v, _ = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
+        plan = await asyncio.to_thread(rc.role_plan, v.reg, rs, ev)
+        waiting = [a.display_name for a in ev.fill_asks if a.open]
         if ev.state == "open":
-            return JSONResponse({"error": "the fill engine works after lock — before that, shape the board"}, status_code=400)
+            return {"short": plan.short, "waiting": waiting, "batch": [], "plan": plan_json(v.reg, plan)}
         nd = rc.needs(v.reg, ev, t)
         batch = await asyncio.to_thread(rc.fill_batch, v.reg, rs, ev, t) if (nd["headcount"] or nd["roles"]) else []
-        return {"short": nd, "waiting": [a.display_name for a in ev.fill_asks if a.open], "batch": [ask_json(v.reg, a) for a in batch]}
+        return {"short": nd, "waiting": waiting, "batch": [ask_json(v.reg, a) for a in batch], "plan": plan_json(v.reg, plan)}
 
     @app.post("/api/run/{key}/fill")
     async def run_fill(request: Request, key: str):
-        v, _ = await body(request, officer=True)
+        """Send. With `rev` (always before lock: the plan fingerprint the preview returned) → RaidMixin.send_plan with
+        the officer's `picks` ({seat index: option index}; 0 = the suggestion): a plan that changed since is refused
+        (409, the current plan in the reply — nothing sent). After lock without `rev`: the fill engine's next batch as
+        an officer's Send (role swaps included, D3)."""
+        v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        if ev.state == "open":
-            return JSONResponse({"error": "the fill engine works after lock — before that, shape the board"}, status_code=400)
-        sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name)
+        rev = str(d.get("rev") or "").strip()
+        if ev.state == "open" or rev:
+            if not rev:
+                return JSONResponse({"error": "preview the suggestions first — a send carries the plan's rev"}, status_code=400)
+            try:
+                sent, plan = await bot.send_plan(v.reg, rs, ev, rev=rev, by=v.name, picks=d.get("picks") or None)
+            except rc.PlanChanged as e:
+                return JSONResponse({"error": str(e), "plan": plan_json(v.reg, e.plan)}, status_code=409)
+            except (RegistryError, ValueError) as e:
+                return JSONResponse({"error": str(e)}, status_code=400)
+            return {"message": ("asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)) if sent else ("nothing to ask" if not plan.asks else "nobody could be reached (DMs off)")}
+        sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name, approved_by=v.name)
         if sent:
             await bot.post_run_update(v.reg, ev, "🧩 " + "\n🧩 ".join(dr.ask_line(v.reg, bot.ico, a) for a in sent))
         return {"message": ("asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)) if sent else ("nothing to fill" if not (nd["headcount"] or nd["roles"]) else "nobody left to ask")}
@@ -1742,7 +1771,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 before = configops.snapshot_revs(v.reg, revs, raids)
                 try:
                     line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid, channel_id=PLAIN_WEB,  # authorize() allowed it
-                                                       rev=revs.get(key) if op.op in configops.BOARD_OPS else None)
+                                                       rev=configops.op_rev(op, key, revs))
                 except (RegistryError, ValueError) as e:
                     failed(op, e)
                     if isinstance(e, rc.BoardChanged) and key:

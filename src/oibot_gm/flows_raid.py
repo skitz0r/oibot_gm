@@ -582,6 +582,103 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
     await with_run(interaction, reg, title="Can't make it", then=body, prefer=mine)
 
 
+# ---------------------------------------------------------------- suggestions: the card's Suggest…, /raid fill on an open run
+
+MAX_PICK_SELECTS = 4  # a screen holds five rows: up to four seats get an alternates select, the buttons take the last
+
+
+def _opt_label(opt: list) -> str:
+    return " + ".join(rc._ask_words(a) for a in opt)[:100]
+
+
+async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, note: str = "") -> None:
+    """The planner's suggestions for one run on the wizard's screen: each seat's suggestion with the code-written
+    reason, a select per seat that has alternates (pick someone else — no names typed), what stays short, then Send
+    (RaidMixin.send_plan with the plan fingerprint this screen was drawn with: when the plan changed meanwhile the send
+    is refused and the screen redrawn) and Cancel. Nothing is sent before Send."""
+    reg = wiz.reg
+    ev = rs.events.get(key)
+    if not ev or ev.state not in LIVE:
+        await wiz.finish(i, "That run is closed.")
+        return
+    plan = rc.role_plan(reg, rs, ev)
+    if wiz.draft.get("rev") != plan.rev:
+        wiz.draft["picks"] = {}  # a new plan: earlier picks pointed at its predecessor's seats
+    wiz.draft["rev"], wiz.draft["key"] = plan.rev, key
+    picks = wiz.draft.setdefault("picks", {})
+    when = "before lock — a yes changes their signup, nobody is seated until the lock" if plan.phase == "prelock" else "after lock — a yes takes the seat (role swaps need your Ask)"
+    lines = ([note] if note else []) + [f"{run_title(reg, ev)} · {when}"]
+    if not plan.seats:
+        await wiz.finish(i, "\n".join(lines + ["Nothing is short" + (" — the minimums are covered by who joined and the regulars yet to answer." if plan.phase == "prelock" else ".")]))
+        return
+    if plan.phase == "prelock":
+        lines.append("Expected: " + " · ".join(f"{r} {plan.have.get(r, 0)}/{plan.need[r]}" for r in ("tank", "healer") if plan.need.get(r))
+                     + (f" (joined + {plan.expected} regulars yet to answer)" if plan.expected else "") + (" · every seat taken, so swaps first" if plan.full else ""))
+    try:
+        chosen = rc.pick_asks(plan, picks) if plan.asks else []
+    except RegistryError as e:  # one person picked for two seats: say so, Send stays off until a pick changes
+        chosen = []
+        lines.append(f"⚠️ {e}")
+    for n, st in enumerate(plan.seats):
+        what = st.role or "seat"
+        if not st.options:
+            lines.append(f"{n + 1}. {what}: nobody can cover it → recruit")
+            continue
+        k = int(picks.get(n, 0))
+        opt = st.options[k] if k < len(st.options) else st.options[0]
+        lines.append(f"{n + 1}. {what}: " + " + ".join(rc._ask_words(a) for a in opt) + (" (alternate)" if k else "") + (f"\n   -# {opt[0].why}" if opt[0].why else ""))
+    lines.append(f"Still short if everyone says yes: {rc.still_short_words(plan)}")
+    items = []
+    for n, st in enumerate(plan.seats):
+        if len(st.options) > 1 and len(items) < MAX_PICK_SELECTS:
+            async def picked(si: discord.Interaction, values: list[str], n=n) -> None:
+                wiz.draft["picks"][n] = int(values[0])
+                await show_suggestions(si, wiz, rs, key)
+            opts = [Opt(str(k), _opt_label(opt), "the suggestion" if k == 0 else f"alternate {k}", default=int(picks.get(n, 0)) == k) for k, opt in enumerate(st.options)]
+            items.append(wiz.select(f"Seat {n + 1} ({st.role or 'seat'}): who to ask", opts, picked))
+
+    async def send(si: discord.Interaction) -> None:
+        cur = rs.events.get(key)
+        if not cur or cur.state not in LIVE:
+            await wiz.finish(si, "That run closed — nothing sent.")
+            return
+        await wiz.working(si, "Sending…")
+        try:
+            sent, _plan = await si.client.send_plan(reg, rs, cur, rev=wiz.draft["rev"], by=si.user.display_name, picks=dict(wiz.draft["picks"]))
+        except rc.PlanChanged as e:
+            await show_suggestions(si, wiz, rs, key, note=f"⚠️ {e}")
+            return
+        except RegistryError as e:
+            await wiz.refuse(si, str(e), retry=lambda ri: show_suggestions(ri, wiz, rs, key))
+            return
+        await wiz.finish(si, ("Asked " + ", ".join(a.display_name for a in sent) + " by DM — answers post in the run's thread." if sent else "Nobody could be asked (DMs off).")
+                         + (" A yes changes their signup; the lock still builds the roster." if plan.phase == "prelock" else ""))
+
+    items.append(wiz.button(f"Send {len(chosen)} ask{'s' if len(chosen) != 1 else ''}", send, discord.ButtonStyle.success, disabled=not chosen))
+    items.append(wiz.button("Cancel", wiz.cancel))
+    await wiz.show(i, "\n".join(lines)[:1900], *items)
+
+
+@flow("raid_suggest")
+async def open_raid_suggest(interaction: discord.Interaction, reg: Registry, *, key: str | None = None, **_seed) -> None:
+    """The card's Suggest… (and any caller with a run key): the suggestions screen for that run; without a key, the run
+    picker first."""
+    if not await officer_only(interaction, reg):
+        return
+    rs = interaction.client.raids.store(reg)
+    if key:
+        wiz = Wizard(reg, interaction.user.id, title="Suggestions", guard=officer_guard(reg))
+        await show_suggestions(interaction, wiz, rs, key)
+        return
+
+    async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
+        if not ev:
+            await wiz.finish(i, "No live run.")
+            return
+        await show_suggestions(i, wiz, rs, ev.key)
+    await with_run(interaction, reg, title="Suggestions", then=body, officer=True)
+
+
 @flow("raid_fill")
 async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, preview: bool = False, **_seed) -> None:
     if not await officer_only(interaction, reg):
@@ -592,8 +689,11 @@ async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, pre
         if not ev:
             await wiz.finish(i, "No live run.")
             return
-        if sheet_state(ev) != "locked" or not ev.all_rosters:
-            await wiz.finish(i, "Fill works after lock — the sheet is still open.")
+        if sheet_state(ev) == "open":  # before lock /raid fill means suggest → Send (nothing goes out before Send)
+            await show_suggestions(i, wiz, rs, ev.key)
+            return
+        if not ev.all_rosters:
+            await wiz.finish(i, "The roster is still being built — try again in a moment.")
             return
         await wiz.working(i, "Looking for people…")
         bot, t = i.client, run_team(reg, ev)
@@ -606,12 +706,12 @@ async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, pre
             open_asks = [a for a in ev.fill_asks if a.open]
             await wiz.finish(i, f"{run_label(reg, ev)} · {gaps}" + (f" · double-booked: {', '.join(reg.members[u].display_name for u in busy if u in reg.members)}" if busy else "") + f"\nOutstanding asks: {', '.join(a.display_name for a in open_asks) or 'none'}\nWould ask next:\n" + ("\n".join(lines) or "nobody left"))
             return
-        sent, nd = await bot.run_fill(reg, rs, ev, t, by=i.user.display_name)
+        sent, nd = await bot.run_fill(reg, rs, ev, t, by=i.user.display_name, approved_by=i.user.display_name)  # an officer's: role swaps included (D3)
         if sent:
             await bot.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, bot.ico, a) for a in sent))
         await wiz.finish(i, f"{run_label(reg, ev)} · {gaps}\n" + ("Asked: " + ", ".join(ask_line(reg, bot.ico, a) for a in sent) if sent else ("Nothing to fill." if not (nd["headcount"] or nd["roles"]) else "Nobody left to ask (or the asks outstanding already cover it).")))
         await bot.ops.emit(reg.config, "info", f"{i.user.display_name} ran fill for {ev.key}: asked {len(sent)}")
-    await with_run(interaction, reg, title="Fill seats", then=body, states=("locked",), officer=True)
+    await with_run(interaction, reg, title="Fill seats", then=body, officer=True)
 
 
 __all__ = ["with_run", "OpenWizard", "SetWizard", "officer_guard", "officer_only", "run_team"]

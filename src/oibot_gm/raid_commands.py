@@ -104,7 +104,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["raid_out"](interaction, reg)
 
-    @raid.command(name="fill", description="Officer: ask the next best people to cover a sheet's gaps (bench, pool, offspec/alt)")
+    @raid.command(name="fill", description="Officer: who could cover a run's gaps — before lock suggestions to send, after lock fill asks")
     @app_commands.describe(preview="only show who would be asked")
     async def raid_fill(interaction: discord.Interaction, preview: bool = False):
         reg = await officer(interaction)

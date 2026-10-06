@@ -314,7 +314,7 @@ def test_analytics_card_and_readiness_show_regulars_coverage(reg):
     ico = lambda kind, key: f"<{kind}:{key}>"  # noqa: E731
     _regulars(reg)
     d = comp_mod.readiness(reg, RID)
-    assert d["series"] == reg.series_coverage(RID)
+    assert [{k: v for k, v in cv.items() if k != "forecast"} for cv in d["series"]] == reg.series_coverage(RID)  # + the Phase 2 forecast
     body = text_of(dp.pool_layout(reg, reg.raid_shell(RID), ico)[0])
     line = next(ln for ln in body.splitlines() if ln.startswith("**Raid nights**"))
     assert "<role:tank> 1/" in line and "<role:healer> 2/" in line and "· 4/" in line
@@ -344,7 +344,7 @@ def test_roster_overview_has_a_regulars_field(reg, monkeypatch):
     monkeypatch.setattr(dr, "is_officer", lambda i, r: True)
     asyncio.run(overview.callback(itx))
     field = next(f for f in said[0]["embed"].fields if f.name == "Regulars")
-    assert field.value.startswith("**Raid nights** <role:tank> 1/") and "· 4/" in field.value
+    assert field.value.startswith("**Raid nights** 🔴 <role:tank> 1/") and "· 4/" in field.value  # Phase 2: the coverage level dot
 
 
 def test_help_readiness_names_regulars_coverage(reg, rs):

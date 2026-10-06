@@ -53,9 +53,18 @@ class FakeBot:
         rs.save(ev, "cancelled (fake)")
         return f"Cancelled {ev.key}" + (f": {reason}" if reason else "")
 
-    async def run_fill(self, reg, rs, ev, team, by):
+    async def run_fill(self, reg, rs, ev, team, by, approved_by=None):
         self.calls.append(("run_fill", ev.key, by))
         return [], rc.needs(reg, ev, team)
+
+    async def send_plan(self, reg, rs, ev, *, rev, by, picks=None):
+        """RaidMixin.send_plan's contract (refused on a stale plan fingerprint), recorded instead of DMing."""
+        plan = rc.role_plan(reg, rs, ev)
+        if rev != plan.rev:
+            raise rc.PlanChanged(plan)
+        asks = rc.pick_asks(plan, picks)
+        self.calls.append(("send_plan", ev.key, by, [a.display_name for a in asks]))
+        return asks, plan
 
     async def post_run_update(self, reg, ev, text):
         self.calls.append(("post_run_update", ev.key, text))
@@ -136,7 +145,8 @@ def test_describe_run_ops(reg, rs):
     assert "balanced → rotation" in d(op="run_strategy", target=ev.key, value="rotation")
     assert "strategy is one of" in d(op="run_strategy", target=ev.key, value="random")
     assert "auto-fill the board" in d(op="run_autofill", target=ev.key)
-    assert "works after lock" in d(op="run_fill", target=ev.key, value="preview")
+    fill = d(op="run_fill", target=ev.key, value="preview")  # Phase 2: before lock run_fill shows the planner's suggestions
+    assert "suggestions before lock (nothing sent)" in fill or "nothing to suggest" in fill
     board = d(op="run_board", target=ev.key, value=f"{ms[0].display_name}, {ms[1].display_name} | {ms[2].display_name}")
     assert "board →" in board and "layout the lock will use" in board
     assert "not joined on this sheet: Nobody" in d(op="run_board", target=ev.key, value="Nobody")
@@ -264,8 +274,9 @@ def test_run_fill(reg, rs):
     join(reg, rs, ev, ms[:8])
     join(reg, rs, ev, ms[8:12], "sub")
     bot = FakeBot(rs)
-    with pytest.raises(RegistryError, match="works after lock"):
-        configops.apply(reg, ConfigOp(op="run_fill", target=ev.key), "officer", is_owner=False, raids=rs)
+    before = configops.apply(reg, ConfigOp(op="run_fill", target=ev.key), "officer", is_owner=False, raids=rs)  # Phase 2: suggestions
+    assert "suggestions before lock (nothing sent)" in before or "nothing to suggest" in before
+    assert not rs.events[ev.key].fill_asks
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:6]])
     preview = configops.apply(reg, ConfigOp(op="run_fill", target=ev.key, value="preview"), "officer", is_owner=False, raids=rs)
     short = rc.run_size(reg, ev) - 6

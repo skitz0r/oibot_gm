@@ -16,7 +16,7 @@ from typing import Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from .constants import ROLES
+from .constants import RANK_ORDER, ROLES
 from .profiles import GameProfile
 from .store import GitStore
 
@@ -366,6 +366,24 @@ ADHOC_SCHEDULE_NAME = "Ad hoc"
 def schedule_class(kind: str | None) -> str:
     """'recurring' | 'adhoc' for a schedule kind (weekly / lockout → recurring, pickup → ad hoc)."""
     return SCHEDULE_CLASS.get(kind or "weekly", "recurring")
+
+
+def can_cover(people: list[set[str]], need: list[str]) -> bool:
+    """Distinct people for every role seat in `need` (bipartite matching, people → the roles they can play). The one
+    matching the planner (raidcycle.role_plan), another_run_hint and the regulars coverage level use."""
+    match: dict[int, int] = {}  # seat → person
+
+    def place(seat: int, seen: set[int]) -> bool:
+        for i, roles in enumerate(people):
+            if need[seat] in roles and i not in seen:
+                seen.add(i)
+                holder = next((s for s, p in match.items() if p == i), None)
+                if holder is None or place(holder, seen):
+                    match[seat] = i
+                    return True
+        return False
+
+    return all(place(s, set()) for s in range(len(need)))
 
 
 def series_key(instance: str, sid: str | None) -> str:
@@ -2165,11 +2183,49 @@ class Registry:
                          "role": self.profile.spec(c.cls, c.spec).role} for m, c in self.regulars(key)]
                 counts = {role: sum(1 for x in regs if x["role"] == role) for role in ROLES}
                 need = {role: int(bounds[role]["min"] or 0) * n for role in ("tank", "healer")}
+                level, cover, recruit = self._coverage_level(key, need)
                 out.append({"key": key, "raid": r, "raid_name": rname, "id": s["id"], "name": s.get("name") or s["id"],
                             "label": self.schedule_label(r, s), "active": bool(s.get("active", True)), "size": size, "rosters": n,
                             "seats": size * n, "regulars": regs, "counts": counts, "need": need,
-                            "short": {role: k - counts[role] for role, k in need.items() if counts[role] < k}})
+                            "short": {role: k - counts[role] for role, k in need.items() if counts[role] < k},
+                            "level": level, "cover": cover, "recruit": recruit})
         return out
+
+    def _coverage_level(self, key: str, need: dict[str, int]) -> tuple[str | None, list[str], list[str]]:
+        """(level, cover, recruit) for a series: green = the regulars' own characters cover the tank/healer minimums;
+        amber = only with offspecs, declared flex roles or alts (`cover` names them); red = not even then (`recruit` =
+        members who aren't regulars of it and play a short role, best rank first). None while it has no regulars."""
+        regs = self.regulars(key)
+        if not regs:
+            return None, [], []
+        seats = [r for r, k in need.items() for _ in range(k)]
+
+        def role(c) -> str:
+            return self.profile.spec(c.cls, c.spec).role
+
+        own = [{role(c)} for _m, c in regs]
+        if can_cover(own, seats):
+            return "green", [], []
+        wide, cover = [], []
+        for m, c in regs:
+            extra = set(c.flex or [])
+            if c.offspec:
+                try:
+                    extra.add(self.profile.spec(c.cls, c.offspec).role)
+                except KeyError:
+                    pass
+            extra |= {role(a) for a in m.active() if a.label != c.label}
+            extra.discard(role(c))
+            if extra & set(need):
+                cover.append(f"{m.display_name} ({'/'.join(sorted(extra & set(need)))})")
+            wide.append({role(c)} | extra)
+        if can_cover(wide, seats):
+            return "amber", cover, []
+        short = {r for r, k in need.items() if sum(1 for x in own if r in x) < k}
+        ids = {m.discord_id for m, _ in regs}
+        cands = sorted([m for m in self.members.values() if not m.test and m.discord_id not in ids and m.main and any(role(c) in short for c in m.active())],
+                       key=lambda m: (RANK_ORDER.get(m.main.rank, 9), m.display_name.lower()))
+        return "red", cover, [m.display_name for m in cands[:5]]
 
     def orphan_regulars(self) -> list[tuple[str, Member, RegisteredCharacter]]:
         """(key, member, character) for every regular of a series whose schedule no longer exists (or is ad hoc now):

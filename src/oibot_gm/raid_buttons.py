@@ -16,20 +16,23 @@ from . import raidcycle as rc
 from .registry import RegistryError
 
 
-class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel)"):
-    """Officer buttons on the health and lock cards: Fill seats (with a preview + confirm), Lock now, Cancel run."""
-    LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger)}
+class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask)(?::(?P<rev>[0-9a-f]{6,16}))?"):
+    """Officer buttons on the health and lock cards: Fill seats (with a preview + confirm), Lock now, Cancel run, and
+    the Suggested block's Ask (sends what the card shows; the plan fingerprint it was drawn with rides in the id, so a
+    stale card is refused and redrawn) and Suggest… (every seat with its alternates: pick, then send)."""
+    LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger),
+              "ask": ("Ask", discord.ButtonStyle.success), "suggest": ("Suggest…", discord.ButtonStyle.secondary)}
 
-    def __init__(self, key: str, action: str, disabled: bool = False, label: str | None = None):
+    def __init__(self, key: str, action: str, disabled: bool = False, label: str | None = None, rev: str | None = None):
         """`disabled`/`label` are render-time only (the card is re-rendered on every state change): a button that does
-        not apply yet stays in its place, greyed, instead of disappearing."""
+        not apply yet stays in its place, greyed, instead of disappearing. `rev`: Ask's plan fingerprint."""
         text, style = self.LABELS[action]
-        super().__init__(discord.ui.Button(label=label or text, style=style, custom_id=f"runact:{key}:{action}", disabled=disabled))
-        self.key, self.action = key, action
+        super().__init__(discord.ui.Button(label=label or text, style=style, custom_id=f"runact:{key}:{action}" + (f":{rev}" if rev else ""), disabled=disabled))
+        self.key, self.action, self.rev = key, action, rev
 
     @classmethod
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
-        return cls(match["key"], match["action"])
+        return cls(match["key"], match["action"], rev=match["rev"])
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
@@ -44,6 +47,24 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             return
         team = rc.run_team(reg, ev)
         by = interaction.user.display_name
+        if self.action == "ask":  # the card's suggestions as drawn — refused (and the card redrawn) when the plan moved
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                sent, _plan = await bot.send_plan(reg, rs, ev, rev=self.rev or "", by=by)
+            except rc.PlanChanged as e:
+                await bot.refresh_cards(reg, ev)
+                await interaction.followup.send(f"{e} The card shows them as they are now.", ephemeral=True)
+                return
+            except RegistryError as e:
+                await interaction.followup.send(str(e), ephemeral=True)
+                return
+            await interaction.followup.send(("Asked " + ", ".join(a.display_name for a in sent) + " — their answers post in the run's thread.") if sent else "Nobody could be asked (DMs off or nobody left).", ephemeral=True)
+            return
+        if self.action == "suggest":
+            from .wizard import FLOWS
+
+            await FLOWS["raid_suggest"](interaction, reg, key=ev.key)
+            return
         if self.action == "fill":
             if sheet_state(ev) != "locked" or not ev.all_rosters:
                 await interaction.response.send_message("Fill works after lock — the sheet is still open.", ephemeral=True)
@@ -52,7 +73,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             if not nd["headcount"] and not nd["roles"]:
                 await interaction.response.send_message("Nothing to fill — every seat is taken.", ephemeral=True)
                 return
-            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team)
+            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team)  # what an officer's Send would ask (swaps included)
             outstanding = [a for a in ev.fill_asks if a.open]
             lines = [f"**Short** {gaps_text(bot.ico, nd)}"]
             if outstanding:
@@ -69,7 +90,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
 
             async def send(i: discord.Interaction):
                 await i.response.edit_message(content="Sending…", view=None)
-                sent, nd2 = await bot.run_fill(reg, rs, ev, team, by=by)
+                sent, nd2 = await bot.run_fill(reg, rs, ev, team, by=by, approved_by=by)  # an officer's Send: role swaps included (D3)
                 await i.edit_original_response(content=("Asked " + ", ".join(a.display_name for a in sent)) if sent else "Nobody could be asked.")
                 if sent:
                     await bot.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, bot.ico, a) for a in sent))
@@ -188,8 +209,9 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid:(?
 class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill:(?P<key>[A-Za-z0-9_\-]+):(?P<uid>\d+):(?P<answer>yes|no)"):
     """Yes/No on a fill DM. Survives restarts; only the person asked can answer."""
 
-    def __init__(self, key: str, uid: int, answer: str):
-        super().__init__(discord.ui.Button(label="Confirm" if answer == "yes" else "Can't make it", style=discord.ButtonStyle.success if answer == "yes" else discord.ButtonStyle.secondary, custom_id=f"fill:{key}:{uid}:{answer}"))
+    def __init__(self, key: str, uid: int, answer: str, label: str | None = None):
+        """`label` is render-time only (a pre-lock ask reads "Yes, as Holy" / "No")."""
+        super().__init__(discord.ui.Button(label=label or ("Confirm" if answer == "yes" else "Can't make it"), style=discord.ButtonStyle.success if answer == "yes" else discord.ButtonStyle.secondary, custom_id=f"fill:{key}:{uid}:{answer}"))
         self.key, self.uid, self.answer = key, uid, answer
 
     @classmethod
@@ -209,7 +231,9 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill:(?P<
             return
         ask = next((a for a in ev.fill_asks if a.discord_id == self.uid and a.open), None)
         if not ask:
-            await interaction.response.send_message("Already answered (or the gap was filled).", ephemeral=True)
+            last = next((a for a in reversed(ev.fill_asks) if a.discord_id == self.uid), None)
+            closed = last is not None and last.phase == "prelock" and last.answer in ("released", "expired")
+            await interaction.response.send_message("That question closed when the roster locked — nothing changed." if closed else "Already answered (or the gap was filled).", ephemeral=True)
             return
         line = rc.apply_fill_answer(reg, rs, ev, ask, self.answer == "yes")
         try:

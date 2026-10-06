@@ -75,7 +75,9 @@ export interface Sheet {
   needs?: { headcount: number; roles: Record<string, number>; size: number } | null; board?: Board; has_layout?: boolean; rev?: string;
   split?: { strategy: string; policy: string; runs: number; reason?: SplitReason | null; reason_text?: string | null };
   confirmations?: Confirmation[];
-  fill_asks?: { display_name: string; kind: string; character: string; spec: string; role: string; reason: string; answer: string | null }[];
+  fill_asks?: { display_name: string; kind: string; character: string; spec: string; role: string; reason: string; why?: string | null; answer: string | null; phase?: "prelock" | "fill"; approved_by?: string | null }[];
+  /** the planner's suggestions (computed on view, never stored): what an officer's Suggest / Ask would send */
+  plan?: Plan | null;
   callouts?: { display_name: string; hours_before: number; late: boolean }[]; log?: string[];
 }
 export interface RaidRuns {
@@ -89,7 +91,11 @@ export interface RaidRuns {
   orphan_regulars?: { key: string; label: string; uid: string; display_name: string; character: string; cls: string; spec: string }[];
 }
 export interface Regular { uid: string; display_name: string; character: string; cls: string; spec: string; role: string }
-export interface Series { key: string; id: string; name: string; label: string; active: boolean; seats: number; regulars: Regular[]; counts: Record<string, number>; need: Record<string, number> }
+/** One upcoming start of a recurring series: its regulars minus recorded absences, against the minimums. */
+export interface ForecastRow { start: string; day: string; when: string; expected: number; seats: number; short: Record<string, number>; away: string[] }
+/** `level`: green = regular mains cover the tank/healer minimums, amber = only with offspecs / flex / alts (`cover`), red = not even then (`recruit`); null = no regulars yet. */
+export interface Series { key: string; id: string; name: string; label: string; active: boolean; seats: number; regulars: Regular[]; counts: Record<string, number>; need: Record<string, number>;
+  level?: "green" | "amber" | "red" | null; cover?: string[]; recruit?: string[]; forecast?: ForecastRow[] }
 /** Someone who can be made a regular (real members with active characters, main first). */
 export interface Person { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; role: string; is_main: boolean }[] }
 /** One schedule of a raid (mirrors web/api.py schedule_json). Machine forms (`slots`, `days`, `time`) are for the editors;
@@ -113,9 +119,14 @@ export interface RaidRule {
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[]; schedule_kinds: string[]; schedule_cadence: string[]; max_rosters: number }
 export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; reason?: SplitReason | null; reason_text?: string | null }
-export interface FillAskRow { display_name: string; kind: string; character: string; spec: string; cls: string | null; role: string; reason: string; pair: number | null }
+export interface FillAskRow { uid?: string; display_name: string; kind: string; character: string; spec: string; cls: string | null; role: string; reason: string; why?: string | null; pair: string | number | null; vacates?: string | null }
+/** One seat the planner covers: `options[0]` the suggestion, then alternates; an option is one ask or a tied swap + backfill. role "" = a plain seat after lock. */
+export interface PlanSeat { role: string; options: FillAskRow[][] }
+/** raidcycle.role_plan as data: before lock (`prelock`) the suggestions for the tank/healer minimums; `rev` must ride with a send. */
+export interface Plan { phase: "prelock" | "fill"; short: { headcount: number; roles: Record<string, number> }; have: Record<string, number>; need: Record<string, number>; full: boolean; expected: number; waiting?: string[];
+  seats: PlanSeat[]; short_after: { headcount: number; roles: Record<string, number> }; still_short: string; rev: string; lines: string[] }
 /** What Fill seats would send: the shortfall, who is still being waited on, the next batch of asks. */
-export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size: number }; waiting: string[]; batch: FillAskRow[] }
+export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size?: number }; waiting: string[]; batch: FillAskRow[]; plan?: Plan }
 export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: { roster: string; answer: string | null; raid: string; when: string; key: string | null }[] }
 export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
