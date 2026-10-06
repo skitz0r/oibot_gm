@@ -357,7 +357,9 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     out.append("  joined by role: " + " · ".join(f"{r} {sum(1 for s in ins if s.role == r)}" for r in ROLES))
     out.append(f"  joined: {_names((f'{s.display_name} ({spec_of[s.display_name]})' for s in ins), max(MAX_LIST, size * n_rosters))}")
     outs = [s.display_name + (f" ({s.source})" if s.source != "member" else "") for s in ev.by_status("out")]
-    out.append(f"  bench: {_names(s.display_name for s in ev.by_status('sub'))} · no thanks: {_names(outs, 15)} · not answered ({whose}): {_names(unanswered, 15)}")
+    # D1: WHO hasn't answered is officer-facing — a member's /ask or @mention gets the count only
+    out.append(f"  bench: {_names(s.display_name for s in ev.by_status('sub'))} · no thanks: {_names(outs, 15)}"
+               + (f" · not answered ({whose}): {_names(unanswered, 15)}" if is_officer else ""))
     if is_officer and live and rc.expected_from(reg, ev) == "regulars":  # officer-facing: each regular and what they answered
         regs = rc.regular_answers(reg, ev)
         out.append("  regulars: " + _names((f"{r['display_name']} ({r['character']}) {rc.LABELS.get(r['status'], 'no answer') if r['status'] else 'no answer'}"
@@ -380,7 +382,9 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         if nd["headcount"] or nd["roles"]:
             out.append(f"  short: {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else ""))
         hd = rc.health_data(reg, ev, team)
-        covers = [f"{r['role']} {r['have']}/{r['need']} ({r['hint']})" for r in hd["roles"] if r["need"] and r["have"] < r["need"] and r["hint"]]
+        # the names of who could cover but hasn't signed are the "not answered" list again: officers only (D1)
+        hint = lambda h: h if is_officer or not h.startswith("not on sheet") else "members not on the sheet could cover"  # noqa: E731
+        covers = [f"{r['role']} {r['have']}/{r['need']} ({hint(r['hint'])})" for r in hd["roles"] if r["need"] and r["have"] < r["need"] and r["hint"]]
         if covers:
             out.append("  cover for short roles: " + " · ".join(covers))
         missing = [b["name"] for b in hd["buffs"] if not b["providers"]]
@@ -670,6 +674,10 @@ def _readiness(ask: Ask) -> list[str]:
         h = d["headcount"]
         out.append(f"{d['name']} ({rid}, {d['size']}-player) · {d['level']}: {h['mains']}/{h['size']} mains, {h['alts']} alts, {h['unnamed']} unnamed, {h['on_roster']} placed on its runs")
         out.append("  roles: " + " · ".join(f"{r['role']} {r['have']}" + (f"/{r['need']}" if r["need"] else "") + (f" ({r['hint']})" if r["hint"] else "") for r in d["roles"]))
+        for cv in d.get("series") or []:  # regulars coverage per recurring series (Registry.series_coverage)
+            out.append(f"  regulars of {cv['name']}{'' if cv['active'] else ' (paused)'}: {len(cv['regulars'])} for {cv['seats']} seats — "
+                       + (" · ".join(f"{r} {n}" + (f"/{cv['need'][r]}" if cv["need"].get(r) else "") for r, n in cv["counts"].items())
+                          + (f" · short {', '.join(f'{n} {r}' for r, n in cv['short'].items())}" if cv["short"] else "") if cv["regulars"] else "none yet (every main is expected)"))
         if d["missing_buffs"]:
             out.append(f"  nobody in the pool brings: {_names((b['name'] for b in d['missing_buffs']), 12)}")
         if d["short"]:

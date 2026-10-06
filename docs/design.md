@@ -348,7 +348,7 @@ Known gaps: the companion is a Python script, not yet a packaged exe; Forever pr
 
 ### 5.16 Filling gaps: bench, subs, offspec and alt swaps (built 2026-09-15)
 
-*Since §5.20 the fill engine runs only after lock (never on an open sheet); the tiers below read "roster pool" as the series' regulars who haven't answered (§5.30; every main while the series has none, or on an ad hoc run; a test run: its puppets), and "another roster" as everyone else. Roster redesign Phase 0 (2026-10-06): one need calculation (`rc.gaps`), a role gap on a full locked roster gets swaps only, and a seated player's current seat (not the signup) decides what they can switch to — see §5.20.*
+*Since §5.20 the fill engine runs only after lock (never on an open sheet); the tiers below read "roster pool" as the series' regulars who haven't answered (§5.30; every main while the series has none, or on an ad hoc run; a test run: its puppets), and "another roster" as everyone else (ask kinds `regular` / `other`; stored `pool` / `other_roster` load as those). Roster redesign Phase 0 (2026-10-06): one need calculation (`rc.gaps`), a role gap on a full locked roster gets swaps only, and a seated player's current seat (not the signup) decides what they can switch to — see §5.20.*
 
 A roster with `autofill: true` (default) has the bot close its own gaps by DM, one small batch at a time, so officers only see the summary:
 
@@ -725,12 +725,31 @@ ad hoc → nobody), `not_answered`, `expected_from` (regulars | everyone | test 
 `absence_pool` / `expected_character` (an absence marks every main away, a regular on their regular character).
 Readers: health's "No answer" and the health card (names one per line, spec icon + character), the nudge, the open
 DM (`run_pool`), the fill engine's pool tier, `another_run_hint`, help's run lines (officers also get each regular's
-answer), `/api/run` (`not_answered`, `regulars`, `expected_from`, `kind`, `series_name`, `confirms`).
+answer; a member's run lines carry the not-answered COUNT only — D1 makes the names officer-facing, and the "could
+cover" hint drops the names of members not on the sheet for the same reason), `/api/run` (`not_answered`, `regulars`,
+`expected_from`, `kind`, `series_name`, `confirms`).
+
+**Regulars coverage.** `Registry.series_coverage(rid=None)` — per recurring series its regulars with roles, role
+counts, the tank/healer minimums × the schedule's rosters, `short`, seats. One computation, four readers: `/api/rosters`
+(`series`), `comp.readiness` (`series`, so the analytics card — one line per series via `raid_views.coverage_line`,
+next to the old headcount — `/ask` readiness and MCP read it), `/roster overview` (*Regulars* field).
+
+**Fill tiers renamed** (appendix A): `FillAsk.kind` is `sub | regular | other | offspec | alt`; a stored `pool` /
+`other_roster` loads as `regular` / `other`. `FillAsk` also gained `phase` (`prelock | fill`, default fill) and
+`approved_by` (the officer whose Ask sent it) — both stored, wired in Phase 2 (suggestions before lock; D3 approval of
+recurring role swaps).
+
+**Dead config removed** (appendix C.4): `GuildConfig.slots` (the old candidate-slot poll) and `auto_propose_hour` (an old
+guild.yaml still loads; the keys are dropped on the next save), and `raidcycle.TEAM_DEFAULTS` — `team_setting` falls
+back to `run_settings(RAID_DEFAULTS)` and `run_team`'s stand-in (a run whose run dict is gone) reads `run_settings` of
+the raid's own definition.
 
 **Lock.** `run_weights(ev)` = the schedule's merged weights (read live). `seat_bonus` adds `regular` (default 4, above
 one rank step of 3) for a regular signed with their regular character, matched by discord id. Ad hoc: `first_come_out`
 benches the late joiners before the solve (signup order, a seat kept for an unmet tank/healer minimum, role maxima
-respected, pins and board placements first), so the solver only arranges groups; the weights' signup order counts per
+respected, pins, board placements and comp-policy `never_bench` names first; a joiner pinned out or `always_bench` is
+dropped from the line before it is drawn, so they never take a first-come seat — otherwise the next joiner came "late"
+too and `seats_total` became infeasible), so the solver only arranges groups; the weights' signup order counts per
 position. `run_confirms(ev)` (frozen `confirm` on the run dict; old files: yes): off → `confirm_one` asks nobody,
 `lock_run` stores no `confirm_by` (so `expire_confirmations` never frees a seat) and the cards, sheet and site drop the
 confirmation tallies and deadline.
@@ -740,15 +759,20 @@ member|uid, character, on}` (officers) and `POST /api/me/regular/remove {series}
 `series` (regulars, role counts vs the tank/healer minimum × rosters) and `orphan_regulars`, plus `people` for the
 pickers; `/api/me` gives `regulars`; `char_json.regular_on`; `schedule_json` gives `class`, `series`, `regulars`,
 `source`, `weights`. Pages: Rosters (*Open next run*, *Start ad hoc run*, a *Regulars* tab with one card per series,
-the sheet card's *Regulars who haven't answered* block and *ad hoc* badge), Me (*My regular raids* with Step down),
+the sheet card's *Regulars who haven't answered* block and *ad hoc* badge), Members (*Rank* and *Regular on* columns,
+read-only), Me (*My regular raids* with Step down),
 Raids (class badge, fields per class, sources, confirmations, seat order). Discord: `/roster add|remove` (schedule →
 member, the member widget optional → character), `/roster members` (a schedule picker, no typed key), `/me view`'s
 *Regular on* + *Step down…* (flow `regular_step_down`), the Status button's line, the sheet footer "First come, first
-rostered" on ad hoc, the health card's named "No answer", the lock card/sheet without confirmations. Plain text:
+rostered" on ad hoc, the health card's named "No answer", the lock card/sheet without confirmations, `/gm config raid` (*Behaviour*: the raid's confirmations switch; per
+schedule one *Change a switch* select — field=inherit|on|off for nudge, autofill, open DM and confirmations — because a
+select per switch needs more rows than a message has). Plain text:
 `op=regular` (target raid, field schedule, member, character, value add|remove; group "members", a member's own
 remove is "self", their own add is refused — volunteering is a request to officers); the parser's context lists each
 series' regulars inside `<data>`. MCP: `set_regular`; `get_run`, `list_raids`/`get_raid`, `guild_overview` carry class
 and regulars; `open_run` documents ad hoc. Tests: `tests/test_roster_p1_classes.py`, `tests/test_roster_p1_regulars.py`,
+`tests/test_roster_p1_fixes.py` (review fixes: ad hoc pins, officer-only not-answered, every `/raid open` branch and
+configops `run_open` through `apply_async`, the confirmations switch, coverage, tier rename, dead config),
 `tests/test_flows_roster.py`, the open-wizard tests in `tests/test_flows_raid.py` / `tests/test_schedules.py`.
 **Migration:** none for Phase 1 (no schedules or regulars are stored yet; the default series' run behaves as before
 until an officer adds regulars; legacy runs read their class from their schedule). D11's `scripts/migrate_rosters.py`

@@ -30,7 +30,6 @@ STATES = ("open", "locked", "done", "cancelled")
 LEGACY_STATES = {"proposed": "locked", "accepted": "locked"}  # pre-2026-09 files
 MAX_ROSTERS_PER_SLOT = 4
 RUN_LISTENERS: list = []  # callables (guild_key, run_key) told after every RaidStore.save
-TEAM_DEFAULTS = {"cutoff_soft_hours": 48, "cutoff_hard_hours": 24, "open_days_before": 6, "reminders": "dm", "open_dm": False, "autofill": True}
 FILL_OVERASK = 1  # ask one more person than the shortfall per batch
 FILL_MAX_OPEN = 3  # never more than this many unanswered asks per event
 FILL_ASK_HOURS_DEFAULT = RAID_DEFAULTS["fill_ask_hours"]
@@ -70,7 +69,7 @@ class FillAsk(BaseModel):
 
     discord_id: int
     display_name: str
-    kind: str  # sub | pool | other_roster | offspec | alt
+    kind: str  # sub | regular | other | offspec | alt  (tiers: the bench, the series' regulars — every main while it has none —, everyone else)
     role: str  # the role this ask covers
     character: str  # what they'd play
     spec: str
@@ -81,6 +80,13 @@ class FillAsk(BaseModel):
     expires_at: Optional[str] = None  # ISO: no answer by then counts as no
     pair: Optional[int] = None  # discord_id of the ask this one is tied to (a swap and the backfill covering the vacated seat)
     vacates: Optional[str] = None  # swaps: the role the person leaves
+    phase: Literal["prelock", "fill"] = "fill"  # roster redesign appendix A: a suggestion before the lock (Phase 2) or a fill ask after it
+    approved_by: Optional[str] = None  # the officer who sent it, when an officer's Ask sent it (D3: recurring role swaps; Phase 2 wires it)
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _old_tiers(cls, v):  # stored asks from before the tier rename read as the new names
+        return {"pool": "regular", "other_roster": "other"}.get(v, v)
 
     @property
     def open(self) -> bool:
@@ -198,13 +204,27 @@ def next_raid_time(schedule: str, tz: str, after: datetime | None = None) -> dat
     return cand
 
 
+def run_settings(rd: dict) -> dict:
+    """A raid (or schedule) definition's timing and behaviour in the run dict's words — what ensure_run stamps on a
+    run, and the fallback for a run dict that lacks one (a bare stand-in, an old file)."""
+    lead, lock = float(rd.get("signup_lead_hours", RAID_DEFAULTS["signup_lead_hours"])), float(rd.get("lock_hours_before", RAID_DEFAULTS["lock_hours_before"]))
+    nudge = float(rd["nudge_hours_before"]) if rd.get("nudge_hours_before") is not None else (lead + lock) / 2  # registry: halfway between open and lock
+    return {"cutoff_soft_hours": nudge, "cutoff_hard_hours": lock, "open_days_before": lead / 24,
+            "reminders": "dm" if rd.get("nudge", RAID_DEFAULTS["nudge"]) else "none",
+            "open_dm": bool(rd.get("open_dm", RAID_DEFAULTS["open_dm"])), "autofill": bool(rd.get("autofill", RAID_DEFAULTS["autofill"]))}
+
+
 def team_setting(team: dict, key: str):
-    return team.get(key, TEAM_DEFAULTS.get(key))
+    """A run's setting: the run dict's own value, else the guild-wide RAID_DEFAULTS in the run dict's words."""
+    return team[key] if key in team else run_settings(RAID_DEFAULTS).get(key)
 
 
 def run_team(reg: Registry, ev: "RaidEvent") -> dict:
     """The roster dict a run belongs to; a bare stand-in when the ephemeral roster is gone (cleanup, old files)."""
-    return reg.config.team(ev.team) or {"key": ev.team, "size": int(reg.raid_def(ev.instance).get("size") or DEFAULT_RAID_SIZE)}
+    if t := reg.config.team(ev.team):
+        return t
+    rd = reg.raid_def(ev.instance)  # the stand-in reads the raid's own settings (no hard-coded run defaults)
+    return {"key": ev.team, "size": int(rd.get("size") or DEFAULT_RAID_SIZE), **run_settings(rd)}
 
 
 def run_size(reg: Registry, ev: "RaidEvent") -> int:
@@ -908,7 +928,7 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict) -> 
     subs = [(m, c) for s in benched_joiners + ev.by_status("sub") if s.display_name not in seated_names and (m := reg.members.get(s.discord_id)) and (c := next((c for c in m.active() if c.label == s.character), m.main))]
     unresponsive = [(m, c) for m, c in pool if str(m.discord_id) not in ev.signups and c]
     others = [] if is_test_run(reg, ev) else sorted([(m, m.main) for m in reg.members.values() if m.main and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups], key=lambda mc: _rank_key(reg, mc[0]))
-    tiers = [("sub", subs), ("pool", unresponsive), ("other_roster", others)]
+    tiers = [("sub", subs), ("regular", unresponsive), ("other", others)]
 
     def first_of(role: str, skip: int | None = None):
         for kind, cands in tiers:
@@ -1400,15 +1420,20 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     pool = {p.signup_name for p in players}
     role_min = merged_role_min(rb, cc["role_min"])
     late: set[str] = set()
+    benched = {x for x in pin_out + [resolve(n) for n in cc["always_bench"]] if x and x in pool and x not in placed}
+    kept = {x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out}
     if run_kind(reg, ev) == "adhoc":  # first come, first rostered: the late joiners are benched before the solve
-        late = first_come_out(players, size * n_rosters, {r: n * n_rosters for r, n in role_min.items()},
-                              {r: int(rb[r]["max"]) * n_rosters for r in ("tank", "healer") if rb[r].get("max")}, set(pin_in) | set(placed))
+        # a joiner benched by a pin / always_bench takes no first-come seat, and a never_bench joiner keeps one —
+        # otherwise the same name lands in force_in and force_out, or a seat goes unfilled (INFEASIBLE)
+        late = first_come_out([p for p in players if p.signup_name not in benched], size * n_rosters,
+                              {r: n * n_rosters for r, n in role_min.items()},
+                              {r: int(rb[r]["max"]) * n_rosters for r in ("tank", "healer") if rb[r].get("max")}, kept)
     opts = solver.SolveOptions(
         time_limit_s=time_limit, raid_size=size,
         keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),
         keep_apart=tuple((resolve(a), resolve(b)) for a, b in cc["keep_apart"] if resolve(a) and resolve(b)),
         force_in=tuple(x for x in pin_in + list(placed) + [resolve(n) for n in cc["never_bench"]] if x and x in pool and x not in pin_out),
-        force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] + sorted(late) if x and x in pool and x not in placed),
+        force_out=tuple(x for x in pin_out + [resolve(n) for n in cc["always_bench"]] + sorted(late - kept) if x and x in pool and x not in placed),
         pins={n: gi for n, gi in placed.items() if gi < k * n_rosters} or None,
         prefer_group={resolve(n): g for n, g in cc["prefer_group"].items() if resolve(n)},
         role_min=role_min or None,

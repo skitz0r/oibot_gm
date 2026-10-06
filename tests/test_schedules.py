@@ -287,7 +287,7 @@ def test_config_schedules_refuse_on_the_spot_and_remove_and_pause(reg, store, ow
         await h.pick("Change this schedule", "active")
         assert "Paused" in h.text
         await h.pick("Change this schedule", "behaviour")
-        await h.pick("Nudge the unanswered", "off")
+        await h.pick("Change a switch", "nudge=off")
         assert "the raid's" in h.text or "the raid’s" in h.text
         await h.press("Back")
         await h.pick("Change this schedule", "remove")

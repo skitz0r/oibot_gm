@@ -14,6 +14,7 @@ import re
 import discord
 
 from . import comp as comp_mod
+from . import raid_views as views
 from .discord_registry import registration_card, registration_view
 from .registry import Registry
 
@@ -56,6 +57,8 @@ def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.L
         lines.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing[:12]))
     if short:
         lines.append("**Short** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['want']}" for c in short[:8]))
+    for cv in d.get("series") or []:  # regulars coverage per recurring series (replaces the old "on roster" count)
+        lines.append(f"**{cv['name']}**{' (paused)' if not cv['active'] else ''} {views.coverage_line(ico, cv)}")
     if over:
         lines.append("**Over cap** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['max']}" for c in over[:8]))
     parts = [top, ui.Separator(), ui.TextDisplay("\n".join(x for x in lines if x.strip()) or "every slot filled")]

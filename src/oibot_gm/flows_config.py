@@ -126,7 +126,8 @@ WEIGHT_WORDS = {0: "doesn't count", 1: "a little", 2: "some", 3: "a lot", 4: "mo
 SPLIT_WORDS = {"balanced": ("Balanced", "both runs equal in synergy, tanks, healers and seats"),
                "first": ("Raid one first", "roster 1 gets the best, roster 2 the rest"),
                "rotation": ("Rotation", "whoever sat out or was in the weaker run moves up")}
-BOOL_WORDS = {"nudge": "Nudge the unanswered", "autofill": "Fill seats automatically", "open_dm": "DM everyone on open"}
+BOOL_WORDS = {"nudge": "Nudge the unanswered", "autofill": "Fill seats automatically", "open_dm": "DM everyone on open",
+              "confirm": "Ask the rostered to confirm"}  # registry.RAID_BOOL_FIELDS, in words
 SECTIONS = [  # (key, label, fields it edits)
     ("times", "Schedules", ("slots", "schedules")),
     ("cadence", "Signup cadence", CADENCE),
@@ -134,14 +135,15 @@ SECTIONS = [  # (key, label, fields it edits)
     ("weights", "Selection weights", tuple(f"weight_{k}" for k in WEIGHTS)),
     ("length", "Lockout & length", ("lockout_days", "duration_hours")),
     ("first_open", "First lockout opens", ("first_open",)),
-    ("behaviour", "Behaviour", ("nudge", "autofill", "open_dm", "split_policy", "fill_ask_hours")),
+    ("behaviour", "Behaviour", ("nudge", "autofill", "open_dm", "confirm", "split_policy", "fill_ask_hours")),
     ("notes", "Notes", ("notes",)),
     ("reset", "Reset to defaults", ()),
 ]
 MAX_SCHEDULES = 10
 FIELD_WORDS = {"slots": "Run times", "schedules": "Schedules", "signup_lead_hours": "Sheet opens", "nudge_hours_before": "Nudge", "lock_hours_before": "Roster locks",
                "confirm_hours_before": "Confirm by", "fill_ask_hours": "A fill ask expires after", "nudge": "Nudge the unanswered",
-               "autofill": "Fill seats automatically", "open_dm": "DM everyone on open", "split_policy": "Split policy", "lockout_days": "Lockout",
+               "autofill": "Fill seats automatically", "open_dm": "DM everyone on open", "confirm": "Ask the rostered to confirm",
+               "split_policy": "Split policy", "lockout_days": "Lockout",
                "duration_hours": "Raid length", "first_open": "First lockout opens", "notes": "Notes",
                **{f"weight_{k}": f"Weight · {WEIGHT_LABEL[k].lower()}" for k in WEIGHTS},
                **{f"{r}_{b}": f"{'Fewest' if b == 'min' else 'Most'} {ROLE_WORDS[r]}" for r in ROLES for b in ("min", "max")}}
@@ -586,16 +588,21 @@ class RaidConfigWizard(OwnerWizard):
         adhoc = sd.get("class") == "adhoc"  # a pickup template inherits the ad hoc defaults, not the raid's cadence
         lines.append(f"**{sd['schedule']['name']}** · behaviour — pick one to change; " + ("“default” follows the ad hoc defaults (no reminder, no confirmations, first come)." if adhoc else "“the raid's” follows the raid's own setting."))
         base = {**view, **ADHOC_DEFAULTS} if adhoc else view
-        items: list = []
-        for f, w in BOOL_WORDS.items():
-            opts = [Opt("inherit", f"{w}: {'default' if adhoc else 'the raid’s'} ({'on' if base[f] else 'off'})", default=f not in own),
-                    Opt("on", f"{w}: on", default=own.get(f) is True), Opt("off", f"{w}: off", default=own.get(f) is False)]
-            items.append(self.select(w, opts, self._behaviour_setter(f)))
+        inherit = "default" if adhoc else "the raid’s"
+        lines += [f"• {w}: **{('on' if own[f] else 'off') if f in own else inherit + (' (on)' if base[f] else ' (off)')}**" for f, w in BOOL_WORDS.items()]
+        # one select for every switch (a select per switch would need more rows than a message has): field=value
+        opts = [Opt(f"{f}={v}", f"{w}: " + (f"{inherit} ({'on' if base[f] else 'off'})" if v == "inherit" else v))
+                for f, w in BOOL_WORDS.items() for v in ("inherit", "on", "off")]
+        items: list = [self.select("Change a switch", opts, self._switch_setter)]
         split = [Opt("inherit", f"Split: the raid's ({SPLIT_WORDS.get(view.get('split_policy') or 'balanced', ('?',))[0]})", default="split_policy" not in own)]
         split += [Opt(p, f"Split: {SPLIT_WORDS[p][0]}", SPLIT_WORDS[p][1], default=own.get("split_policy") == p) for p in SPLIT_POLICIES]
         items.append(self.select("How to split a full run", split, self._behaviour_setter("split_policy")))
         items.append(self.button("Back", self._to_sched))
         await self.show(i, "\n".join(lines), *items)
+
+    async def _switch_setter(self, i: discord.Interaction, values: list[str]) -> None:
+        field, v = values[0].split("=", 1)
+        await self._behaviour_setter(field)(i, [v])
 
     def _behaviour_setter(self, field: str):
         async def pick(i: discord.Interaction, values: list[str]) -> None:

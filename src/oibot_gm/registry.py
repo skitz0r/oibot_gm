@@ -201,8 +201,6 @@ class GuildConfig(BaseModel):
     news_channel_id: Optional[int] = None  # officer/read-only: a webhook posts game news here; the bot keeps the relevant items (news.py)
     news_keywords: list[str] = Field(default_factory=list)  # extra words that make a news item relevant (over the profile's news.yaml)
     timezone: str = "America/Los_Angeles"  # guild time: every schedule, window and displayed clock uses it
-    auto_propose_hour: int = 12  # guild-local hour when the planner runs for raids with auto-propose on
-    slots: list[str] = Field(default_factory=list)  # legacy candidate-slot poll (unused since the signup-driven cycle)
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
     about: Optional[str] = None  # short public blurb for the static guide (owner-set)
     invite_url: Optional[str] = None  # the public Discord invite the homepage's Join button opens (anyone can join; members apply inside)
@@ -2144,6 +2142,34 @@ class Registry:
 
     def roster_remove(self, discord_id: int, roster: str, by: str) -> Member:
         return self.regular_remove(discord_id, roster, by)
+
+    def series_coverage(self, rid: str | None = None) -> list[dict]:
+        """Regulars coverage (no run needed): per recurring series (of `rid`, or every raid) its regulars and their role
+        counts against the raid's tank/healer minimums times the schedule's rosters. ONE computation for the Rosters
+        page, /roster overview, the analytics card, readiness (MCP / help) — computed in code, never by the model.
+        [{key, raid, raid_name, id, name, label, active, size, rosters, seats, regulars: [{uid, display_name, character,
+        cls, spec, role}], counts: {role: n}, need: {tank: n, healer: n}, short: {role: n}}]"""
+        out = []
+        for r in ([rid] if rid else list(self.profile.raids)):
+            if r not in self.profile.raids:
+                continue
+            rname = self.raid_def(r).get("name", r)
+            for s in self.schedules(r):
+                if schedule_class(s["kind"]) != "recurring":
+                    continue
+                key = series_key(r, s["id"])
+                size = int(self.schedule_def(r, s["id"]).get("size") or DEFAULT_RAID_SIZE)
+                n = int(s.get("rosters") or 1)
+                bounds = self.role_bounds(r, size)
+                regs = [{"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec,
+                         "role": self.profile.spec(c.cls, c.spec).role} for m, c in self.regulars(key)]
+                counts = {role: sum(1 for x in regs if x["role"] == role) for role in ROLES}
+                need = {role: int(bounds[role]["min"] or 0) * n for role in ("tank", "healer")}
+                out.append({"key": key, "raid": r, "raid_name": rname, "id": s["id"], "name": s.get("name") or s["id"],
+                            "label": self.schedule_label(r, s), "active": bool(s.get("active", True)), "size": size, "rosters": n,
+                            "seats": size * n, "regulars": regs, "counts": counts, "need": need,
+                            "short": {role: k - counts[role] for role, k in need.items() if counts[role] < k}})
+        return out
 
     def orphan_regulars(self) -> list[tuple[str, Member, RegisteredCharacter]]:
         """(key, member, character) for every regular of a series whose schedule no longer exists (or is ad hoc now):

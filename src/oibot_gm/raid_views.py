@@ -252,6 +252,16 @@ def gaps_text(ico, nd: dict) -> str:
     return "   ".join(bits) if bits else "nothing"
 
 
+def coverage_line(ico, cov: dict) -> str:
+    """One recurring series' regulars coverage (Registry.series_coverage) for a Discord card: role icon + count, over
+    the minimum where there is one, ⚠ when short (the iconography rule: never "2 tank"); then regulars / seats."""
+    if not cov["regulars"]:
+        return f"no regulars yet · every main is expected · {cov['seats']} seats"
+    bits = [f"{ico('role', r)} {n}" + (f"/{cov['need'][r]}" if cov["need"].get(r) else "") + (" ⚠" if r in cov["short"] else "")
+            for r, n in cov["counts"].items() if n or cov["need"].get(r)]
+    return "   ".join(bits) + f" · {len(cov['regulars'])}/{cov['seats']}"
+
+
 def _group_summaries(reg: Registry, r) -> list[dict]:
     """Per-group present/missing auras for a locked roster (same coverage code as the site)."""
     from . import comp as comp_mod
@@ -455,7 +465,7 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
     """Fill DM: what opened, the seat offered (character + spec), the group they'd join, Confirm / Can't make it."""
     ui = discord.ui
     rd = reg.raid_def(ev.instance)
-    what = {"sub": "you're on the bench", "pool": "you haven't answered the sheet", "other_roster": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec", "alt": "you could bring your alt"}[ask.kind]
+    what = {"sub": "you're on the bench", "regular": "you haven't answered the sheet", "other": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec", "alt": "you could bring your alt"}[ask.kind]
     c = reg.find(ask.character)
     cls = c[1].cls if c else ""
     lines = [f"{ask.reason} — {what}", f"{'Swap to' if ask.swap else 'Come as'} {ico('spec', f'{cls}:{ask.spec}') if cls else ''} **{ask.character}** ({ask.spec})"]

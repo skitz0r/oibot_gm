@@ -647,6 +647,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             if thin:
                 val += "Only one: " + ", ".join(f"{ico('buff', ids.get(b, ''))} {b} ({who})" for b, who in thin)
             e.add_field(name="Buff coverage", value=val[:1000], inline=False)
+        cover = reg.series_coverage()  # regulars coverage per recurring series (the Rosters page's numbers)
+        if cover:
+            from .raid_views import coverage_line
+
+            many = len({cv["raid"] for cv in cover}) > 1
+            e.add_field(name="Regulars", value="\n".join(f"**{cv['raid_name'] + ' · ' if many else ''}{cv['name']}** {coverage_line(ico, cv)}" for cv in cover)[:1000], inline=False)
         if s["alts"]:
             e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
         asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]

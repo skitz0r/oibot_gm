@@ -271,8 +271,8 @@ def test_fill_asks_unanswered_regulars_before_other_mains(reg, rs):
     kinds = {a.discord_id: a.kind for a in cands}
     regular_dps = [m for m in ms if reg.profile.spec(m.main.cls, m.main.spec).role in ("melee", "ranged")]
     if regular_dps:
-        assert all(kinds.get(m.discord_id) in (None, "pool") for m in ms)
-    assert all(a.kind != "pool" or a.discord_id in {m.discord_id for m in ms} for a in cands), "the pool tier is the series' regulars"
+        assert all(kinds.get(m.discord_id) in (None, "regular") for m in ms)
+    assert all(a.kind != "regular" or a.discord_id in {m.discord_id for m in ms} for a in cands), "the regular tier is the series' regulars"
 
 
 # ---------------------------------------------------------------- a test run: puppets are virtual regulars

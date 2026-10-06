@@ -190,11 +190,13 @@ its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same 
   reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
   **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in signup order take
   the seats, except that a seat still needed for a tank or healer minimum is kept for the first later joiner who plays
-  that role). Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. A one-off's
+  that role). An officer's *Bench* pin (or a comp-policy *always bench*) takes that joiner out of the line, so the
+  next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. A one-off's
   key ends in `-adhoc` (`bd-1212-2100-adhoc`). The Raids page shows each schedule's class, and for a pickup template
   the editor hides the fields that mean nothing there (signup lead, reminder, DM on open); every value it inherits says
   where from (*raid* or *ad hoc default*). The owner can change any of them per schedule, including **confirmations**
-  (on/off) and the **seat order** weights.
+  (on/off) and the **seat order** weights — on the Raids page, in plain text, over MCP, or in `/gm config raid`
+  (*Behaviour*: the raid's **Ask the rostered to confirm** switch; per schedule, *Change a switch* → default / on / off).
 
 **Regulars** (recurring schedules only). Officers keep, per recurring schedule, a list of **regulars**: one member and
 the one character they raid on there. Regulars are the people the bot *expects* on every sheet of that schedule:
@@ -204,13 +206,20 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   the absence puts them back to unanswered.
 - **Officers see who hasn't answered**: the sheet card on the Rosters page lists *Regulars who haven't answered* (one
   per line, spec icon + character; the member's name on hover) with how the other regulars answered; the officer
-  health card's **No answer** names them; MCP `get_run` and `/ask` carry the same list.
+  health card's **No answer** names them; MCP `get_run` and an officer's `/ask` carry the same list. The list is
+  officer-only: a member's `/ask` gets the count of who hasn't answered, never the names (nor the names of who could
+  cover a short role but hasn't signed).
 - **The reminder** (the nudge DM) goes to the regulars who haven't answered. While a schedule has no regulars yet,
   every main counts as expected (exactly as before regulars existed).
 - **At lock** being a regular on your regular character is a seat weight (`regular`, 4 by default — more than one rank
   step): between equals the regular sits, but a much better fit for the comp can still win a seat. A non-regular's Join
   stays a Join; they are seated after regulars and are the first asked when a seat frees.
-- **Fill** asks the regulars who haven't answered before other members.
+- **Fill** asks the bench first, then the regulars who haven't answered, then other members (the Fill modal labels
+  each ask *from the bench* / *from the regulars* / *from the guild*).
+- **Regulars coverage** (no run needed): per recurring schedule, the regulars' role counts against the tank and healer
+  minimums. The same numbers show on the Rosters page's *Regulars* cards, in `/roster overview` (*Regulars*), on each
+  raid's analytics card (one line per schedule: role icons with counts, ⚠ when short, then regulars / seats) and in an
+  officer's `/ask` about readiness.
 - Officers edit regulars on the Rosters page (*Regulars* tab: one card per recurring schedule — role icons with counts
   against the minimums, the regulars one per line, *Add* a member and character, × to remove), with `/roster add`,
   `/roster remove` and `/roster members` (pick the schedule, then the member, then the character), in plain text ("make
@@ -218,6 +227,8 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   same character on two schedules of one raid is allowed with a warning (one lockout). A test puppet is never a
   regular — a test run treats every puppet as one. Removing a schedule never strips its regulars silently: the Rosters
   page lists them to clear.
+- The **Members** page shows each character's **Rank** (it weighs on seating) and **Regular on** (the schedules it is a
+  regular of); officers change regulars on the Rosters page and ranks with `/roster rank`.
 - **Members** see *My regular raids* on the Me page and *Regular on* in `/me view`; **Step down** (either place)
   takes you off a schedule's regulars. Becoming a regular is an officer's call — ask one.
 
@@ -393,7 +404,7 @@ returns to the game defaults.
   Propose); the old bank, optimised-groups and comp images are gone.
 - `/roster overview` (no arguments) shows the plan summary on demand: every planned main by class, the role counts
   against each raid's size with who could flex in, buff coverage (nobody / only one), the alts, and the recruiting ask
-  against the biggest raid. `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
+  against the biggest raid, and **Regulars** — each recurring schedule's regulars coverage. `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
 
 ## 7. Officers: day-to-day commands
 

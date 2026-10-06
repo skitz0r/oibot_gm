@@ -688,7 +688,6 @@ def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
     """Split 3 continued: the raw '## Current config' yaml carried a raid's first_open and slots with no label."""
     reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30", "first_open": "2026-12-09T15:00:00-08:00", "lock_hours_before": 12}, "t")
     reg.set_schedule("barrow_deeps", "late", {"slots": "Thu 21:00", "lock_hours_before": 30}, "t")
-    reg.config.auto_propose_hour = 13
     text = configops.current_config_text(reg, officer=True)
     dump = text.split("```yaml\n", 1)[1].split("```", 1)[0]
     assert "first_open" not in dump and "19:30" not in dump, "raid overrides leave the bare dump"
@@ -697,7 +696,7 @@ def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
     assert "(= run times Tue 7:30 PM)" in line and "(= locks 12 hours before)" in line
     own = next(l for l in text.splitlines() if "schedule late" in l)
     assert "own settings {" in own and "(= lock hours before: 30 hours before)" in own
-    assert "auto_propose_hour: 13 (= 1:00 PM)" in text
+    assert "auto_propose_hour" not in text and "legacy poll" not in text, "dead config is gone from the parser's context"
 
 
 def test_an_officer_applying_a_members_own_no_thanks_diff_is_still_their_callout(reg, rs):

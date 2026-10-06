@@ -91,10 +91,10 @@ export function MembersPage({ meta }: { meta: Meta }) {
       <PageTitle title="Members" intro={`${data.rows.length - nTest} members with characters${nTest ? ` (and ${nTest} test members)` : ""} · ${data.members} in the registry · owner and officer badges come from Discord roles · someone away on a run's day is listed under Away on its sheet`}
         right={!editing ? <Group gap="md">{nTest > 0 && <Switch size="sm" label={`show ${nTest} test members`} checked={showTest} onChange={(e) => setShowTest(e.currentTarget.checked)} />}<Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit members</Button></Group> : null} />
       <Card>
-        <Table.ScrollContainer minWidth={900}>
+        <Table.ScrollContainer minWidth={1120}>
           <Table style={{ tableLayout: "fixed" }}>
             <Table.Thead>
-              <Table.Tr><Table.Th w={210}>Member</Table.Th><Table.Th w={editing ? 56 : 44} /><Table.Th>Character</Table.Th><Table.Th w="20%">Spec</Table.Th><Table.Th w="20%">Offspec</Table.Th><Table.Th w={130}>{editing ? "" : "Confirmed"}</Table.Th><Table.Th w={48} /></Table.Tr>
+              <Table.Tr><Table.Th w={210}>Member</Table.Th><Table.Th w={editing ? 56 : 44} /><Table.Th>Character</Table.Th><Table.Th w="15%">Spec</Table.Th><Table.Th w="15%">Offspec</Table.Th><Table.Th w={84}>Rank</Table.Th><Table.Th w="17%">Regular on</Table.Th><Table.Th w={130}>{editing ? "" : "Confirmed"}</Table.Th><Table.Th w={48} /></Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {rows.map((r) => {
@@ -121,15 +121,15 @@ export function MembersPage({ meta }: { meta: Meta }) {
                     {(chars.length ? chars : [null]).map((c, i) => (
                       <Table.Tr key={c ? (c as Draft | Character).label ?? `new${i}` : "empty"} style={{ borderTop: i === 0 ? "1px solid var(--mantine-color-slate-5)" : undefined, background: editing ? "var(--mantine-color-slate-6)" : undefined }}>
                         {i === 0 && memberCell}
-                        {c === null ? <Table.Td colSpan={6}><Text size="sm" c="dimmed">no characters</Text></Table.Td>
+                        {c === null ? <Table.Td colSpan={8}><Text size="sm" c="dimmed">no characters</Text></Table.Td>
                           : !editing ? <ViewRow meta={meta} c={c as Character} busy={busy} onConfirm={() => act(`c${(c as Character).label}`, "/api/admin/confirm", { label: (c as Character).label })} onDelete={() => del(r, c as Character)} />
-                          : <EditRow meta={meta} d={c as Draft} uid={r.uid} specsOf={specsOf} onChange={(p) => updChar(r.uid, i, p)} onRemove={() => removeChar(r.uid, i)} />}
+                          : <EditRow meta={meta} d={c as Draft} uid={r.uid} specsOf={specsOf} onChange={(p) => updChar(r.uid, i, p)} onRemove={() => removeChar(r.uid, i)} {...(() => { const o = r.characters.find((x) => x.label === (c as Draft).label); return { rank: o?.rank, regularOn: o?.regular_on }; })()} />}
                       </Table.Tr>
                     ))}
                     {editing && (
                       <Table.Tr style={{ background: "var(--mantine-color-slate-6)" }}>
                         {chars.length === 0 && memberCell}
-                        <Table.Td /><Table.Td colSpan={5}><Button size="xs" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => upd(r.uid, { characters: [...(d?.characters ?? []), { label: null, cls: "", spec: "", offspec: null, name: "", surname: "", main: chars.length === 0, named: false, isNew: true }] })}>Add a character for {r.display_name}</Button></Table.Td>
+                        <Table.Td /><Table.Td colSpan={7}><Button size="xs" variant="subtle" leftSection={<IconPlus size={14} />} onClick={() => upd(r.uid, { characters: [...(d?.characters ?? []), { label: null, cls: "", spec: "", offspec: null, name: "", surname: "", main: chars.length === 0, named: false, isNew: true }] })}>Add a character for {r.display_name}</Button></Table.Td>
                       </Table.Tr>
                     )}
                   </Fragment>
@@ -178,13 +178,26 @@ function ViewRow({ meta, c, busy, onConfirm, onDelete }: { meta: Meta; c: Charac
       <Table.Td><CharacterCell meta={meta} cls={c.cls} label={c.label} /></Table.Td>
       <Table.Td><SpecCell meta={meta} cls={c.cls} spec={c.spec} role={c.role} /></Table.Td>
       <Table.Td>{c.offspec ? <SpecCell meta={meta} cls={c.cls} spec={c.offspec} role={c.off_role || ""} /> : <Text c="dimmed">—</Text>}</Table.Td>
+      <Table.Td><RankCell rank={c.rank} /></Table.Td>
+      <Table.Td><RegularOn on={c.regular_on} /></Table.Td>
       <Table.Td>{!c.name ? <Badge variant="outline" color="gray">planned</Badge> : c.confirmed ? <Badge variant="light" color="teal">confirmed</Badge> : <Button size="xs" loading={busy === `c${c.label}`} onClick={onConfirm}>Confirm</Button>}</Table.Td>
       <Table.Td><Tooltip label={`delete ${c.label}`}><ActionIcon variant="subtle" color="red" loading={busy === `d${c.label}`} onClick={onDelete}><IconTrash size={17} /></ActionIcon></Tooltip></Table.Td>
     </>
   );
 }
 
-function EditRow({ meta, d, uid, specsOf, onChange, onRemove }: { meta: Meta; d: Draft; uid: string; specsOf: (cls: string) => { value: string; label: string }[]; onChange: (p: Partial<Draft>) => void; onRemove: () => void }) {
+/** Rank weighs on seating (the lock's rank weight), so the page shows it; officers change it with /roster rank or plain text. */
+function RankCell({ rank }: { rank?: string }) {
+  return rank ? <Text size="sm" tt="capitalize">{rank}</Text> : <Text c="dimmed">—</Text>;
+}
+
+/** The recurring schedules this character is a regular of, in words; officers change them on the Rosters page (or /roster add|remove). */
+function RegularOn({ on }: { on?: string[] }) {
+  if (!on || !on.length) return <Text c="dimmed">—</Text>;
+  return <Group gap={4} wrap="wrap">{on.map((l) => <Badge key={l} size="sm" variant="light" color="teal" tt="none" style={{ maxWidth: "100%" }}><Text span size="xs" truncate>{l}</Text></Badge>)}</Group>;
+}
+
+function EditRow({ meta, d, uid, specsOf, onChange, onRemove, rank, regularOn }: { meta: Meta; d: Draft; uid: string; specsOf: (cls: string) => { value: string; label: string }[]; onChange: (p: Partial<Draft>) => void; onRemove: () => void; rank?: string; regularOn?: string[] }) {
   return (
     <>
       <Table.Td style={{ textAlign: "center" }}><Tooltip label="main"><Radio name={`main-${uid}`} checked={d.main} onChange={() => onChange({ main: true })} disabled={!d.cls} /></Tooltip></Table.Td>
@@ -200,6 +213,8 @@ function EditRow({ meta, d, uid, specsOf, onChange, onRemove }: { meta: Meta; d:
       </Table.Td>
       <Table.Td><Select size="sm" data={specsOf(d.cls)} value={d.spec || null} onChange={(v) => onChange({ spec: v || d.spec })} disabled={!d.cls} /></Table.Td>
       <Table.Td><Select size="sm" placeholder="none" data={specsOf(d.cls)} value={d.offspec} onChange={(v) => onChange({ offspec: v || null })} disabled={!d.cls} clearable /></Table.Td>
+      <Table.Td><RankCell rank={rank} /></Table.Td>
+      <Table.Td><RegularOn on={regularOn} /></Table.Td>
       <Table.Td><Text size="xs" c="dimmed">{d.isNew ? (d.name ? "confirm after save" : "planned until named") : ""}</Text></Table.Td>
       <Table.Td><Tooltip label={d.isNew ? "discard" : "delete on save"}><ActionIcon variant="subtle" color="red" onClick={onRemove}><IconTrash size={17} /></ActionIcon></Tooltip></Table.Td>
     </>

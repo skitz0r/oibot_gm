@@ -48,7 +48,7 @@ def test_fill_pool_tank_before_swap(reg, rs):
     assert nd["roles"] == {"tank": 1} and nd["headcount"] == 1
     assert ev.signups[str(next(m.discord_id for m in s["tanks"] if m.display_name == seated_tank.signup_name))].status == "out"
     cands = rc.fill_candidates(reg, rs, ev, team)
-    assert cands[0].kind == "pool" and cands[0].role == "tank" and cands[0].discord_id == s["silent_tank"].discord_id and cands[0].pair is None
+    assert cands[0].kind == "regular" and cands[0].role == "tank" and cands[0].discord_id == s["silent_tank"].discord_id and cands[0].pair is None
     assert all(not a.swap for a in cands), "a plain pool tank exists, so no swap is proposed"
 
 

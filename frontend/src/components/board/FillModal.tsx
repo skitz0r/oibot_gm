@@ -6,7 +6,7 @@ import { classColour } from "../../theme";
 import { Eyebrow, fail, ok } from "../Page";
 import { runName } from "./shared";
 
-const KIND: Record<string, string> = { sub: "from the bench", pool: "from the pool", other_roster: "from the other roster", offspec: "swap to offspec", alt: "bring an alt" };
+const KIND: Record<string, string> = { sub: "from the bench", regular: "from the regulars", other: "from the guild", offspec: "swap to offspec", alt: "bring an alt" };
 
 /** Fill seats (post-lock): preview what the fill engine would send — the shortfall, who is still being waited on, the next batch — then send. */
 export function FillModal({ e, meta, opened, onClose, onSent }: { e: Sheet; meta: Meta; opened: boolean; onClose: () => void; onSent: () => Promise<void> }) {

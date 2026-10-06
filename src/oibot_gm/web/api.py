@@ -614,20 +614,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             upcoming = [{"slot": (s["name"] if many else reg.slot_label(start.astimezone(reg.tz).strftime("%a %H:%M"))), "schedule": s["id"], "schedule_name": s["name"], "start": t12(reg, start),
                          "opens": t12(reg, start - timedelta(hours=float(reg.schedule_def(rid, s["id"])["signup_lead_hours"])))}
                         for s, start in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if rc.event_key(rid, start, s["id"]) not in rs.events][:6]
-            series = []
-            for s in scheds:  # one card per recurring series: its regulars (one member per line on the page) against the minimums
-                if schedule_class(s["kind"]) != "recurring":
-                    continue
-                key = series_key(rid, s["id"])
-                sd = reg.schedule_def(rid, s["id"])
-                size = int(sd.get("size") or 20) * int(s.get("rosters") or 1)
-                regs = reg.regulars(key)
-                bounds = reg.role_bounds(rid, int(sd.get("size") or 20))
-                counts = {r: sum(1 for _m, c in regs if reg.profile.spec(c.cls, c.spec).role == r) for r in ROLES}
-                series.append({"key": key, "id": s["id"], "name": s["name"], "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True)), "seats": size,
-                               "regulars": [{"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec,
-                                             "role": reg.profile.spec(c.cls, c.spec).role} for m, c in regs],
-                               "counts": counts, "need": {r: int(bounds[r]["min"]) * int(s.get("rosters") or 1) for r in ("tank", "healer")}})
+            series = reg.series_coverage(rid)  # one card per recurring series: its regulars (one member per line on the page) against the minimums
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
                         "schedules": [{"id": s["id"], "name": s["name"], "kind": s["kind"], "class": schedule_class(s["kind"]), "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True))} for s in scheds],
                         "series": series,

@@ -252,10 +252,6 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     cfg.pop("rosters", None)  # the ephemeral run rosters are noise here; live runs are listed on their own below
     roles = cfg.pop("member_role_ids", None)
     overrides = cfg.pop("raids", None) or {}  # the stored overrides get their own section below, each value beside its words
-    hour = cfg.pop("auto_propose_hour", None)
-    legacy = cfg.pop("slots", None)
-    clock = ([f"auto_propose_hour: {hour} (= {reg.time_label(f'{int(hour):02d}:00')})"] if hour is not None else []) \
-        + ([f"slots (legacy poll): {', '.join(legacy)} (= {', '.join(reg.slot_label(x) for x in legacy)})"] if legacy else [])
     if roles and officer:  # role ids mean nothing to the parser (or the person it answers): the names from the role cache
         cfg["member_roles"] = [reg.role_names.get(int(r), f"role:{r}") for r in roles]
     members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank for c in m.active())}]"
@@ -271,11 +267,11 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     def stored(rid, over):  # one raid's stored overrides: each value as stored (what raid_set writes) = as a person reads it
         return f"- {rid}: " + ", ".join(f"{k}={_stored_value(v)} (= {_overrides_words(reg, rid, {k: v})})" for k, v in over.items())
 
-    raids = "\n".join(f"- {rid}: " + ", ".join(cadence(k, v) for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "split_policy", "weights"))
+    raids = "\n".join(f"- {rid}: " + ", ".join(cadence(k, v) for k, v in reg.raid_def(rid).items() if k in ("slots", "signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "autofill", "open_dm", "confirm", "split_policy", "weights"))
                       + "".join(f"\n  - schedule {s['id']} ({s['name']}, {s['kind']}): {reg.schedule_label(rid, s)}" + own_settings(rid, s["id"])
                                 for s in reg.schedules(rid)) for rid in reg.profile.raids)
     over_text = "\n".join(stored(rid, over) for rid, over in overrides.items() if over) or "(none)"
-    return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n" + "".join(c + "\n" for c in clock)
+    return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n"
             + "## Guild raid overrides (raid id: setting=stored value (= as a person reads it); raid_set / raid_reset change these)\n" + over_text
             + "\n## Effective raid cadence (profile defaults + overrides)\n" + raids
             + f"\n## Now: {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} = {reg.local12(reg.now_local())} (guild time)\n## Live runs (run key: raid, start = as a person reads it, state, answers)\n" + live_runs_text(reg, raids_store)
