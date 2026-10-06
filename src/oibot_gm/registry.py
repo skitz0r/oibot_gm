@@ -816,8 +816,8 @@ class Registry:
                     for r in legacy_flex:
                         if r not in m.main.flex:
                             m.main.flex.append(r)
-                    for k in legacy_teams:
-                        if k not in m.main.rosters:
+                    for k in legacy_teams:  # regular-series keys only: a bare team key ("main") is a phantom (D11)
+                        if ":" in k and k not in m.main.rosters:
                             m.main.rosters.append(k)
                     self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
                 self.members[m.discord_id] = m

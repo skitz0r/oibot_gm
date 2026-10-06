@@ -308,10 +308,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else team_key, "when": t12(reg, ev.starts_at), "key": ev.key}
 
     def seat_runs(reg, rs, m) -> dict[str, list[str]]:
-        """character label -> the locked live runs it holds a seat on (from the run files: rc.rostered_runs)."""
+        """character label -> the locked live runs it holds a seat on (from the run files: rc.rostered_runs), as a
+        person reads them: raid name + 12-hour start (dr.run_title), never the run key (its tail is the 24-hour start)."""
         out: dict[str, list[str]] = {}
         for ev, char in (rc.rostered_runs(reg, rs, m) if m else []):
-            out.setdefault(char, []).append(ev.team)
+            out.setdefault(char, []).append(dr.run_title(reg, ev))
         return out
 
     def char_json(reg, c, runs: dict[str, list[str]] | None = None) -> dict:

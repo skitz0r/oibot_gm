@@ -36,13 +36,14 @@ def _site(path: str) -> str | None:
     return f"{web}{path}" if web.startswith("https") else None
 
 
-def pool_layout(reg: Registry, roster: dict, ico) -> tuple[discord.ui.LayoutView, str]:
+def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.LayoutView, str]:
     """One native card per raid: who the pool could field at this size (roles have/need, buffs nobody brings) and
     where the desired comp is short or over. Icons + numbers only; the Members and Raids pages hold the detail.
-    Returns (view, level). The numbers are comp.readiness (one computation for the card, the API, MCP and /ask)."""
+    Returns (view, level). The numbers are comp.readiness (one computation for the card, the API, MCP and /ask);
+    `rs` is the bot's RaidStore, so "on roster" counts the seats in the run files exactly as GET /api/readiness does."""
     ui = discord.ui
     key = roster.get("key", "main")
-    d = comp_mod.readiness(reg, roster.get("instance") or key)  # the same numbers GET /api/readiness, MCP and /ask read
+    d = comp_mod.readiness(reg, roster.get("instance") or key, rs)  # the same numbers GET /api/readiness, MCP and /ask read
     name, size, worst, hc = d["name"], d["size"], d["level"], d["headcount"]
     short = [c for c in d["comp"] if c["level"] == "red" and c["key"] not in ROLES]
     over = d["over"]
@@ -123,7 +124,8 @@ class PoolMixin:
                 ids.pop(key)
             for key, roster in wanted.items():
                 try:
-                    view, _level = await asyncio.to_thread(pool_layout, reg, roster, self.ico)
+                    raids = getattr(self, "raids", None)
+                    view, _level = await asyncio.to_thread(pool_layout, reg, roster, self.ico, raids.store(reg) if raids is not None else None)
                 except Exception as e:  # noqa: BLE001
                     await self.ops.emit(reg.config, "error", f"analytics card for {key} failed", e)
                     continue

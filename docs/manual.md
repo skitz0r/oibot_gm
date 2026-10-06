@@ -84,8 +84,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   character waits for an officer to confirm it.
 - **Alts**: *Add an alt* button, `/me char add` (first and last name, like the button), `/me plan alt`.
 - **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main` (or the crown on the website).
-  **Delete**: the bin icon on the website, or telling the bot ("delete my alt Jonny"), removes a character and its
-  roster placements outright; if it was your main, your next character becomes main (`/me char retire` keeps history
+  **Delete**: the bin icon on the website, or telling the bot ("delete my alt Jonny"), removes a character outright
+  (a seat it already holds on a locked run is not freed by the delete — press *Can't make it* for that run); if it was your main, your next character becomes main (`/me char retire` keeps history
   instead).
 - **Name a planned character at launch**: `/me char name`: pick the planned character (skipped when there is
   only one), then type first and last name.
@@ -535,8 +535,8 @@ of their characters. The bot reads each live run's board as it stands and each r
   tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
-  rank and roster placement), "delete Jon's alt Jonny" (gone outright with its roster placements — the diff says so;
-  retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
+  rank and roster placement), "delete Jon's alt Jonny" (gone outright; the diff names any run it is rostered on, by raid and
+  start time — the delete does not free that seat; retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
   raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every

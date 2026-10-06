@@ -59,6 +59,14 @@ def rostered_on(bot, reg: Registry, m) -> list:
     return rc.rostered_runs(reg, raids.store(reg), m) if raids is not None else []
 
 
+def rostered_text(reg: Registry, held: list, with_char: bool = False) -> str:
+    """The runs a member is rostered on as a person reads them: raid name + Discord's native <t:…> stamp (run_label),
+    never the run key (its last part is the 24-hour start — the clock rule)."""
+    from .raid_views import run_label
+
+    return ", ".join(run_label(reg, ev) + (f" ({char})" if with_char else "") for ev, char in held)
+
+
 def is_officer(interaction: discord.Interaction, reg: Registry) -> bool:
     if interaction.user.id == reg.config.owner_discord_id:
         return True
@@ -125,7 +133,7 @@ class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(
             lines.append(f"Roles: {primary or '?'}" + (f" (+{', '.join(flex)})" if flex else ""))
             held = rostered_on(bot, reg, m)
             if held:
-                lines.append("Rosters: " + ", ".join(ev.team for ev, _ in held))
+                lines.append("Rosters: " + rostered_text(reg, held))
             await interaction.response.send_message("\n".join(lines), ephemeral=True)
             return
         if self.action == "apply":
@@ -525,7 +533,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
         held = rostered_on(interaction.client, reg, m)
         if held:
-            e.add_field(name="Rosters", value=", ".join(f"{ev.team} ({char})" for ev, char in held), inline=True)
+            e.add_field(name="Rosters", value=rostered_text(reg, held, with_char=True), inline=True)
         primary, flex = reg.roles_of(m)
         e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me plan roles` to add more", inline=True)
         e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)

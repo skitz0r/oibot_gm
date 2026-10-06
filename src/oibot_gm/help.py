@@ -225,8 +225,9 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
 
     primary, flex = reg.roles_of(m)
     held = rc.rostered_runs(reg, rs, m) if rs is not None else []  # seats on locked runs, from the run files
-    runs_of = {c.label: [ev.team for ev, char in held if char == c.label] for c in m.active()}
-    chars = "; ".join(f"{c.label} ({c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''}, {'main' if c.is_main else 'alt'}, {c.status}, rank {c.rank}{', runs ' + ','.join(runs_of[c.label]) if runs_of[c.label] else ''}{'' if c.confirmed_by else ', unconfirmed'})" for c in m.active())
+    # a run as a person reads it (raid name + 12-hour start), never the run key — its tail is the 24-hour start
+    runs_of = {c.label: [f"{reg.raid_def(ev.instance).get('name', ev.instance or ev.team)} {reg.local12(ev.start)}" for ev, char in held if char == c.label] for c in m.active()}
+    chars = "; ".join(f"{c.label} ({c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''}, {'main' if c.is_main else 'alt'}, {c.status}, rank {c.rank}{', rostered on ' + '; '.join(runs_of[c.label]) if runs_of[c.label] else ''}{'' if c.confirmed_by else ', unconfirmed'})" for c in m.active())
     today = reg.now_local().date().isoformat()
     ups = m.upcoming_absences(today)
     absences = "; ".join(reg.span_label(a.start, a.end) + (f" (reason “{_safe(a.reason)[:120]}”)" if a.reason and officer_view else "") for a in ups[:4]) or "none"

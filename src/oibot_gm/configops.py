@@ -922,9 +922,14 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
     if f == "retire":
         return [{"label": cur.label, "retire": True}], f"{who}: retire {cur.label}" + (" (their main; the next character becomes main)" if cur.is_main else "")
     if f == "delete":
-        placed = f" and its {len(cur.rosters)} roster placement(s)" if cur.rosters else ""
+        # seats live in the run files (roster redesign Phase 0), not in cur.rosters: name each run as a person reads it
+        from . import raidcycle as rc
+        from .raid_views import run_title
+
+        held = [ev for ev, char in rc.rostered_runs(reg, rc.RaidStore(reg.store, reg.key), m) if char == cur.label]
+        placed = f" · it holds a seat on {', '.join(run_title(reg, ev) for ev in held)} (deleting it does not free the seat)" if held else ""
         return ([{"label": cur.label, "delete": True}],
-                f"{who}: DELETE {cur.label} outright{placed} — no history is kept (retire keeps it)"
+                f"{who}: DELETE {cur.label} outright — no history is kept (retire keeps it){placed}"
                 + (" · it is their main: the next character becomes main" if cur.is_main else ""))
     if f == "flex":
         roles = _flex_roles(value)
