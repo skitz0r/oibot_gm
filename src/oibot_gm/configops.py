@@ -94,7 +94,8 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
   run_cancel: target, reason=<optional>.
   run_fill: target, value=preview|send — who could cover the run's shortfall. Before lock ("suggest fixes for Tuesday's run",
     "who could tank?"): the planner's suggestions for the tank/healer minimums (cheapest first, with alternates) — preview
-    shows them, send DMs those people a Yes/No ask ("send them", "ask them"). After lock: the fill engine's next batch.
+    shows them, send DMs those people a Yes/No ask ("send them", "ask them"). After lock: the asks a send would DM (role
+    swaps marked) — send DMs exactly the batch the diff listed, refused if the plan changed before Apply.
   run_strategy: target, value=balanced|first|rotation — how a slot with more joiners than seats is split into rosters.
   run_autofill: target — before lock: the solver fills the board's empty seats around the officers' placements.
   run_propose: target, value=<optional strategy balanced|first|rotation>, field=<empty = a fresh preview | another (a different
@@ -1060,13 +1061,12 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
             except RegistryError:
                 continue
             out.setdefault(ev.key, rc.board_rev(reg, ev))
-        elif op.op == "run_fill":  # before lock a send carries the suggestions the diff showed (rc.plan_rev)
+        elif op.op == "run_fill":  # a send carries the plan the diff showed (rc.plan_rev) — before and after lock
             try:
                 rs, ev = _live_event(reg, op.target, raids)
             except RegistryError:
                 continue
-            if ev.state == "open":
-                out.setdefault(PLAN_REV + ev.key, rc.role_plan(reg, rs, ev).rev)
+            out.setdefault(PLAN_REV + ev.key, rc.role_plan(reg, rs, ev).rev)
     return out
 
 
@@ -1868,7 +1868,12 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         parts = ([f"{nd['headcount']} seat(s)"] if nd["headcount"] else []) + [f"{n} {r}" for r, n in nd["roles"].items()]
         short = ", ".join(parts) or "nothing"
         waiting = [a.display_name for a in ev.fill_asks if a.pending]
-        return f"{label}: fill {'preview (nothing sent)' if v == 'preview' else 'send the next batch of fill DMs'} — short {short}" + (f", waiting on {', '.join(waiting)}" if waiting else "")
+        head = f"{label}: fill {'preview (nothing sent)' if v == 'preview' else 'send exactly these fill DMs (refused if the plan changes before Apply)'} — short {short}" + (f", waiting on {', '.join(waiting)}" if waiting else "")
+        if not (nd["headcount"] or nd["roles"]):
+            return head
+        # the exact batch an Apply sends (rc.send_batch through RaidMixin.send_plan with this plan's rev): each ask,
+        # role swaps marked and the tied backfill named — so the diff shows every swap before an officer applies it
+        return head + " — " + " | ".join(rc.batch_preview(rc.role_plan(reg, rs, ev)))
     if op.op == "run_strategy":
         v = (op.value or "").strip().lower()
         from .registry import SPLIT_POLICIES
@@ -2150,10 +2155,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             return f"{ev.key}: suggestions before lock (nothing sent): " + " | ".join(rc.plan_lines(reg, plan))
         team = rc.run_team(reg, ev)
         nd = rc.needs(reg, ev, team)
-        batch = rc.fill_batch(reg, rs, ev, team) if (nd["headcount"] or nd["roles"]) else []
         waiting = [a.display_name for a in ev.fill_asks if a.pending]
+        batch = rc.batch_preview(rc.role_plan(reg, rs, ev, team)) if (nd["headcount"] or nd["roles"]) else ["nobody"]
         return (f"{ev.key}: short {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else "") + (f"; waiting on {', '.join(waiting)}" if waiting else "")
-                + "; would ask next: " + (", ".join(f"{a.display_name} ({a.kind}: {a.character} {a.spec}, {a.reason})" for a in batch) or "nobody"))
+                + "; a send would ask (nothing sent): " + " | ".join(batch))
     if op.op == "run_board":
         rs, ev = _live_event(reg, op.target, raids)
         if ev.state != "open":
@@ -2368,7 +2373,6 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
                 + (", every puppet DMed (to you)" if dm else "") + (f" — sheet in <#{posted.id}>" if posted is not None and getattr(posted, "id", None) else "")
                 + ("" if ev.message_id else " (no signup channel set — sheet not posted)"))
     rs, ev = _live_event(reg, op.target, rs)
-    team = rc.run_team(reg, ev)
     if op.op == "run_answer":
         m = _need_member(reg, op.member)
         want = _answer_value(op.value)
@@ -2419,21 +2423,16 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_cancel":
         return str(await bot.cancel_run(reg, rs, ev, by, (op.reason or "").strip() or None))
     if op.op == "run_fill" and (op.value or "preview").strip().lower() == "send":
-        if ev.state == "open" or rev:  # as the site's route: the suggestions the diff showed (its plan fingerprint) go through
-            # RaidMixin.send_plan, refused if they changed — a run that locked since changes the plan's phase, so a
-            # pre-lock diff never turns into a different post-lock batch (role swaps included) the officer never saw
-            if not rev:
-                raise RegistryError("preview the suggestions first (ask “suggest fixes for …”), then send them")
-            prelock = ev.state == "open"
-            sent, plan = await bot.send_plan(reg, rs, ev, rev=rev, by=by)
-            return f"{ev.key}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + (" — a yes changes their signup; the lock builds the roster" if prelock else rc.held_back_words(plan))
-        sent, nd = await bot.run_fill(reg, rs, ev, team, by=by, approved_by=by)  # an officer's send: role swaps included (D3)
-        if sent:
-            from .raid_views import ask_line
-
-            await bot.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, bot.ico, a) for a in sent))
-            return f"{ev.key}: asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)
-        return f"{ev.key}: " + ("nothing to fill" if not (nd["headcount"] or nd["roles"]) else "nobody left to ask (or the asks outstanding already cover it)")
+        # before and after lock: exactly the batch the diff showed (its plan fingerprint, board_revs) goes through
+        # RaidMixin.send_plan, refused if the plan changed since — so no role swap goes out that the officer never saw,
+        # and a pre-lock diff never turns into a post-lock batch
+        if not rev:
+            raise RegistryError("preview the suggestions first (ask “who could fill …” or “suggest fixes for …”), then send what it shows")
+        prelock = ev.state == "open"
+        sent, plan = await bot.send_plan(reg, rs, ev, rev=rev, by=by)
+        if not sent and not plan.asks:
+            return f"{ev.key}: nothing to ask"
+        return f"{ev.key}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + (" — a yes changes their signup; the lock builds the roster" if prelock else rc.held_back_words(plan))
     if op.op == "run_board":  # the whole board (RaidMixin.save_board, the site's and MCP's write): refused when it changed
         layout = _layout(op.value)
         names = {s.display_name for s in ev.signups.values() if s.status == "in"}

@@ -558,7 +558,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         then alternates; an option is one ask or a tied swap + backfill — plus what stays short and the `rev` a send carries."""
         return {"phase": plan.phase, "short": plan.short, "have": plan.have, "need": plan.need, "full": plan.full, "expected": plan.expected, "waiting": plan.waiting,
                 "seats": [{"role": st.role, "options": [[ask_json(reg, a) for a in opt] for opt in st.options]} for st in plan.seats],
-                "short_after": plan.short_after, "still_short": rc.still_short_words(plan), "rev": plan.rev, "lines": rc.plan_lines(reg, plan)}
+                "short_after": plan.short_after, "still_short": rc.still_short_words(plan), "rev": plan.rev, "lines": rc.plan_lines(reg, plan),
+                "room": plan.room if plan.phase == "fill" else None, "batch_lines": rc.batch_preview(plan)}
 
     def ev_json(reg, rs, ev, full: bool = True) -> dict:
         t = reg.config.team(ev.team) or {"key": ev.team, "size": reg.raid_def(ev.instance).get("size", 20)}
@@ -898,31 +899,41 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
         return {"message": line}
 
+    def send_batch_json(reg, plan) -> list[dict]:
+        try:
+            return [ask_json(reg, a) for a in rc.send_batch(plan)[0]]
+        except RegistryError:  # the cap is full: nothing can go out now (plan.batch_lines says why)
+            return []
+
     @app.post("/api/run/{key}/fill/preview")
     async def run_fill_preview(request: Request, key: str):
-        """What would be asked, without sending. Before lock: the planner's suggestions for the tank/healer minimums
-        (`plan`: each seat's suggestion with its code-written reason and alternates, what stays short, the `rev` a send
-        must carry). After lock: the fill engine's next batch (`batch`, an officer's Send — role swaps included) and
-        the plan as well."""
+        """What would be asked, without sending — before and after lock the planner's plan (`plan`: each seat's
+        suggestion with its code-written reason and alternates, what stays short, `batch_lines`, the `rev` a send must
+        carry) and `batch`: exactly what a send with that rev and no picks DMs now (rc.send_batch — after lock at most
+        FILL_MAX_OPEN out, never a swap without its backfill)."""
         v, _ = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         plan = await asyncio.to_thread(rc.role_plan, v.reg, rs, ev)
         waiting = [a.display_name for a in ev.fill_asks if a.pending]
-        if ev.state == "open":
-            return {"short": plan.short, "waiting": waiting, "batch": [], "plan": plan_json(v.reg, plan)}
-        nd = rc.needs(v.reg, ev, t)
-        batch = await asyncio.to_thread(rc.fill_batch, v.reg, rs, ev, t) if (nd["headcount"] or nd["roles"]) else []
-        return {"short": nd, "waiting": waiting, "batch": [ask_json(v.reg, a) for a in batch], "plan": plan_json(v.reg, plan)}
+        short = plan.short if ev.state == "open" else rc.needs(v.reg, ev, t)
+        return {"short": short, "waiting": waiting, "batch": send_batch_json(v.reg, plan), "plan": plan_json(v.reg, plan)}
 
     @app.post("/api/run/{key}/fill")
     async def run_fill(request: Request, key: str):
-        """Send. With `rev` (always before lock: the plan fingerprint the preview returned) → RaidMixin.send_plan with
-        the officer's `picks` ({seat index: option index}; 0 = the suggestion): a plan that changed since is refused
-        (409, the current plan in the reply — nothing sent). After lock without `rev`: the fill engine's next batch as
-        an officer's Send (role swaps included, D3)."""
+        """Send. With `rev` (the plan fingerprint the preview returned) → RaidMixin.send_plan with the officer's
+        `picks` ({seat index: option index}; 0 = the suggestion): exactly the batch the preview showed; a plan that
+        changed since is refused (409, the current plan in the reply — nothing sent). Without `rev`: refused before
+        lock (400), and after lock refused with 409 "preview first" when the batch holds a role swap (an officer sees
+        every swap before it goes out); a same-role-only batch is sent directly (the fill engine's batch, swaps off)."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         rev = str(d.get("rev") or "").strip()
+        if not rev and ev.state != "open":
+            batch = await asyncio.to_thread(rc.fill_batch, v.reg, rs, ev, t)  # what an officer's blind send would ask
+            if any(a.swap for a in batch):
+                plan = await asyncio.to_thread(rc.role_plan, v.reg, rs, ev)
+                return JSONResponse({"error": "preview first — this batch holds a role swap; preview (send=false) and send with the returned rev",
+                                     "plan": plan_json(v.reg, plan)}, status_code=409)
         if ev.state == "open" or rev:
             if not rev:
                 return JSONResponse({"error": "preview the suggestions first — a send carries the plan's rev"}, status_code=400)
@@ -933,7 +944,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             except (RegistryError, ValueError) as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
             return {"message": (("asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)) if sent else ("nothing to ask" if not plan.asks else "nobody could be reached (DMs off)")) + rc.held_back_words(plan)}
-        sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name, approved_by=v.name)
+        sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name, approved_by=v.name, swaps=False)  # same-role asks only: a swap needs the preview
         if sent:
             await bot.post_run_update(v.reg, ev, "🧩 " + "\n🧩 ".join(dr.ask_line(v.reg, bot.ico, a) for a in sent))
         return {"message": ("asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)) if sent else ("nothing to fill" if not (nd["headcount"] or nd["roles"]) else "nobody left to ask")}

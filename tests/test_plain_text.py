@@ -280,14 +280,15 @@ def test_run_fill(reg, rs):
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:6]])
     preview = configops.apply(reg, ConfigOp(op="run_fill", target=ev.key, value="preview"), "officer", is_owner=False, raids=rs)
     short = rc.run_size(reg, ev) - 6
-    assert preview.startswith(f"{ev.key}: short {short} seat(s)") and "; would ask next: " in preview and " (sub: " in preview
+    assert preview.startswith(f"{ev.key}: short {short} seat(s)") and "; a send would ask (nothing sent): 1. " in preview and "from the bench" in preview
     assert not rs.events[ev.key].fill_asks, "preview sends nothing"
     assert run(configops.apply_async(reg, ConfigOp(op="run_fill", target=ev.key, value="preview"), "Officer", False, bot=bot)) == preview
     assert bot.calls == []
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="run_fill", target=ev.key, value="send"), "officer", is_owner=False, raids=rs)
-    assert run(configops.apply_async(reg, ConfigOp(op="run_fill", target=ev.key, value="send"), "Officer", False, bot=bot)) == f"{ev.key}: nobody left to ask (or the asks outstanding already cover it)"
-    assert bot.calls == [("run_fill", ev.key, "Officer")]
+    with pytest.raises(RegistryError, match="preview the suggestions first"):  # a send carries the plan the diff showed
+        run(configops.apply_async(reg, ConfigOp(op="run_fill", target=ev.key, value="send"), "Officer", False, bot=bot))
+    assert bot.calls == []
 
 
 def test_character_ops(reg):

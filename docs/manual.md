@@ -231,7 +231,7 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   run (counted from the raid's first opening until then) the regulars minus recorded absences, e.g. "Tue 15 Dec: short
   1 tank, 1 healer (Thorn, Ona away)" — the hole shows a week ahead instead of at reminder time. The same numbers show
   on the Rosters page's *Regulars* cards (the colour under the role counts, a *Next 4 weeks* list: role icon and a
-  number per short role, who is away on hover), in `/roster overview` (*Regulars*), on each raid's analytics card (one
+  number per short role, who is away on hover), in an officer's `/roster overview` (*Regulars*), on each raid's analytics card (one
   line per schedule: a 🟢/🟠/🔴 dot, role icons with counts, ⚠ when short, regulars / seats, then a line per short run)
   and in an officer's `/ask` about readiness.
 - Officers edit regulars on the Rosters page (*Regulars* tab: one card per recurring schedule — role icons with counts
@@ -393,9 +393,13 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    asked. A yes goes straight into the freed seat (a swap changes the seat in place). A roster that is full but
    short a tank or healer has no seat for a newcomer, so only swaps are asked for it; a yes that finds every seat
    taken meanwhile is a Join, not rostered, and the bot says so (move them in on the board). Officers can run a batch
-   by hand: **Fill seats** on the Rosters page (locked runs) or on the lock card in the roster channel
-   shows a preview — exactly what is short, who is still being waited on and who would be DMed now — then
-   *Send N asks* or *Cancel*; `/raid fill` does the same. An officer's Send includes role swaps. With `autofill` off
+   by hand: **Fill seats** on the Rosters page (locked runs) or on the lock card in the roster channel, and
+   `/raid fill`, first show the batch — what is short, who is still being waited on, each seat with its alternates,
+   and **exactly the asks Send DMs**, one per line: who, as which character and spec, for which short role, a role
+   swap marked **SWAP** (with the role it leaves) and its tied backfill named; what waits under the 3-at-a-time cap;
+   what stays short — then *Send N asks* or *Cancel*. Send sends only what was shown: if the board or the answers
+   changed the plan meanwhile, nothing is sent and the batch is shown again as it is now. An officer's Send includes
+   the role swaps it lists. `/raid fill preview:true` shows the same batch without a Send button. With `autofill` off
    nothing is asked until an officer presses Fill seats.
 7. **Raid** — `/raid loot` opens the loot council thread (when loot tables exist for the game version).
 8. **Close** — 3 h after its scheduled end (start + the raid's length) the run is **done** and the sheet says so.
@@ -478,7 +482,8 @@ returns to the game defaults.
   Propose); the old bank, optimised-groups and comp images are gone.
 - `/roster overview` (no arguments) shows the plan summary on demand: every planned main by class, the role counts
   against each raid's size with who could flex in, buff coverage (nobody / only one), the alts, and the recruiting ask
-  against the biggest raid, and **Regulars** — each recurring schedule's regulars coverage. `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
+  against the biggest raid, and — for officers only — **Regulars**: each recurring schedule's regulars coverage and its
+  4-week forecast (recruit candidates and who is away are planning data; a member's overview leaves the field out). `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
 
 ## 7. Officers: day-to-day commands
 
@@ -655,9 +660,10 @@ of their characters. The bot reads each live run's board as it stands and each r
   kept for the officers; your own "I can't make it" is always a callout, reason or not); "Xanthe confirmed for tonight" / "Kestrel said she can't make it after all" (on a locked
   run: answers their Confirm / Can't make it ask for them, or the fill ask the bot sent them, when they told you out
   of band — exactly as if they had pressed the button, so a no frees the seat and asks the bench); "who would fill
-  ask next for tonight's run" (preview, nothing sent) and "send the fill asks"; before lock "suggest fixes for
-  Tuesday's Barrow Deeps" (the suggestions, nothing sent) and "send them" (the diff shows exactly who will be asked;
-  if the suggestions changed before you press Apply, nothing is sent); "split tonight's run
+  ask next for tonight's run" (preview, nothing sent) and "send the fill asks" (the diff lists every ask Apply sends,
+  role swaps marked SWAP and the backfill named; Apply sends exactly that batch, and nothing if it changed meanwhile);
+  before lock "suggest fixes for Tuesday's Barrow Deeps" (the suggestions, nothing sent) and "send them" (the diff
+  shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's run
   first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from the bank = asked to confirm, out to the bank = seat freed); "groups for
@@ -826,7 +832,7 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
-| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock: the suggestions — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.rev`; after lock: the next batch), `send=true` sends them (before lock pass the preview's `rev`, and `picks` {seat: option} for an alternate; a changed plan is refused) · cancel with a reason (rostered members are not told automatically: say so in the channel) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
+| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (rostered members are not told automatically: say so in the channel) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
@@ -903,10 +909,12 @@ lock), what the run is short and who could cover it, auras nobody brings, people
 (before and after lock), the rostered groups after lock (each seat's spec and role) with confirmed / waiting /
 declined, and per roster its auras: every raid-wide buff with how many bring it, each group's missing auras and
 totems, the synergy (the solver's top advisories are for officers only),
-the bench after lock, leftovers and whether they could make another run, fill asks outstanding and recent answers,
+the bench after lock, leftovers and whether they could make another run, for officers the fill asks outstanding
+(who, why) and recent answers — a member sees only their own open ask (what it asks, until when), never who else was asked —
 for officers the bot's suggestions for short tank/healer seats (exactly as the cards word them — the answer may
 rephrase them, never invent one), members absent that day, callouts, and the last log lines (more of the log when your question names the run, its
-raid or "tonight"). Also the last few finished or cancelled runs per raid (with the cancel reason) — a past run you
+raid or "tonight"; a member's view leaves out the officers' workflow lines — suggestions and fill asks sent, approvals,
+the planner's notes). Also the last few finished or cancelled runs per raid (with the cancel reason) — a past run you
 name by key or in words ("last Tuesday", "the last Barrow Deeps") in full, who joined and who was rostered — and when
 the next sheet opens. And your own record — characters, roles, DMs, upcoming absences with your own reasons,
 confirmations and fill asks waiting on you, your answer and seat on each live run — or, if you applied, your

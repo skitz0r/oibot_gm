@@ -335,14 +335,17 @@ def lock_run(run: str) -> str:
 
 @mcp.tool()
 def fill_seats(run: str, send: bool = False, rev: str = "", picks: dict | None = None) -> dict:
-    """Who to ask to cover a run's shortfall. Without `send` (a preview, nothing sent): before lock, the planner's
-    SUGGESTIONS for the tank/healer minimums — `plan.seats[i].options[0]` is the suggestion, the rest are alternates,
-    each with a code-written `why`; `plan.lines` in words; `plan.still_short`; `plan.rev`. After lock: the fill
-    engine's next `batch` (and the plan too). Quote the lines back — never invent a suggestion.
-    `send=true` sends: before lock it REQUIRES `rev` = the preview's plan.rev (a plan that changed since is refused
-    and the current plan returned — preview again) and takes optional `picks` {seat index: option index} to ask an
-    alternate; every pre-lock ask is a DM Yes/No, a yes changes the member's signup and seats nobody, and unanswered
-    asks close at lock. After lock without `rev`: the engine's next batch as the officer's Send (role swaps included)."""
+    """Who to ask to cover a run's shortfall. ALWAYS preview first (send=false, nothing sent), show the person the
+    batch, then send with the returned `plan.rev`. The preview: before lock the planner's SUGGESTIONS for the
+    tank/healer minimums, after lock the seats to fill — `plan.seats[i].options[0]` is the suggestion, the rest are
+    alternates, each with a code-written `why`; `plan.lines` in words; `plan.batch_lines` = exactly the asks a send
+    DMs now (one per line, role swaps marked SWAP, the tied backfill named; after lock at most 3 asks out at once);
+    `batch` the same as data; `plan.still_short`; `plan.rev`. Quote the lines back — never invent a suggestion.
+    `send=true` with `rev` = the preview's plan.rev sends exactly that batch (optional `picks` {seat index: option
+    index} asks an alternate); a plan that changed since (board or answers) is refused and the current plan returned —
+    show it and preview again. Every ask is a DM Yes/No; before lock a yes changes the member's signup and seats
+    nobody, and unanswered asks close at lock. Without `rev` a send is refused before lock, and after lock refused
+    ("preview first") whenever the batch holds a role swap — only a same-role batch goes out without one."""
     if not send:
         return api().post(f"/api/run/{run}/fill/preview")
     payload: dict = {}

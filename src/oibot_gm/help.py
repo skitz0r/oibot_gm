@@ -323,9 +323,37 @@ def roster_aura_lines(reg: Registry, i: int, r, is_officer: bool = False) -> lis
     return out
 
 
-def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = False) -> list[str]:
-    """Everything the Raids page shows for one run, as a few lines. `is_officer`: absence reasons and callout notes;
-    `detail`: the question names this run, so the log goes back further."""
+# run log lines that are the officers' workflow (who was asked about a seat or a swap, the officers' sends and the
+# planner's notes, solver retries, board edits): a member snapshot leaves them out of "recent log"
+OFFICER_LOG = re.compile(r"^(suggestions? |suggestion:|fill[ :(]|pre-lock asks|early warning|proposed |lock \(|board: |open DMs sent|"
+                         r"confirmation DMs sent|.*: auto-filled the board$|.*: board set$|.*\bapprov)", re.I)
+
+
+def member_log(lines) -> list[str]:
+    """The run log as a member snapshot shows it: the officers' workflow lines (OFFICER_LOG) left out."""
+    return [ln for ln in lines if not OFFICER_LOG.match(ln)]
+
+
+def _own_ask_words(reg: Registry, a, fmt: str) -> str:
+    """The asker's own open ask, as their DM put it: what it asks, for which role, until when — never who else is
+    asked (a tied swap's partner stays unnamed) or the officers' reasoning (`why`)."""
+    if a.kind in ("offspec", "flex"):
+        what = f"switch to {a.spec} on {a.character}"
+    elif a.kind == "alt":
+        what = f"bring {a.character} ({a.spec})"
+    else:
+        what = f"come as {a.character} ({a.spec})"
+    when = "before lock — a yes changes your signup" if a.phase == "prelock" else "a yes takes the seat"
+    state = ("you said yes — it takes effect once the other half of the swap says yes too" if a.held
+             else f"answer by {reg.local12(a.expires_at, fmt) if a.expires_at else 'the lock'}")
+    return f"{what} for {a.role} ({a.reason}; {when}) — {state}"
+
+
+def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = False, viewer_id: int | None = None) -> list[str]:
+    """Everything the Raids page shows for one run, as a few lines. `is_officer`: absence reasons and callout notes,
+    every fill ask with its reason and the officers' workflow in the log; a member snapshot (`is_officer` False, an
+    officer's public-channel view included) gets only `viewer_id`'s OWN open asks and the log without the officers'
+    workflow lines. `detail`: the question names this run, so the log goes back further."""
     from . import raidcycle as rc
     from .raid_views import run_times
 
@@ -422,7 +450,11 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
             out.append(f"  {hint}")
     open_asks = [a for a in ev.fill_asks if a.pending]
     done_asks = [a for a in ev.fill_asks if not a.pending][-4:]
-    if open_asks or done_asks:
+    if not is_officer:  # a member: their own DM only — who else is asked, and why, is the officers' business
+        mine = [a for a in open_asks if viewer_id is not None and a.discord_id == viewer_id]
+        if mine:
+            out.append("  your open ask (a DM from the bot, answer there): " + " · ".join(_own_ask_words(reg, a, fmt) for a in mine))
+    elif open_asks or done_asks:
         asks = [f"{a.display_name} ({a.kind}: {a.character} {a.spec} for {a.role}, {a.reason}, " + ("said yes, waiting for the tied ask" if a.held else f"deadline {reg.local12(a.expires_at, fmt) if a.expires_at else '?'}") + ")" for a in open_asks]
         out.append("  fill asks outstanding: " + (_names(asks) if asks else "none")
                    + (f" · recent answers: {', '.join(f'{a.display_name} {a.answer}' for a in done_asks)}" if done_asks else ""))
@@ -434,9 +466,10 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
             out.append(f"  absent that day: {_names((m.display_name + (' (answered)' if str(m.discord_id) in ev.signups else '') for m, _a in away), 15)}")
     if ev.callouts:
         out.append("  callouts: " + ", ".join(f"{c.display_name} ({c.hours_before:.0f}h before{', late' if c.late else ''}" + (f", note “{_safe(c.note)[:80]}”" if is_officer and c.note else "") + ")" for c in ev.callouts[-6:]))
-    if ev.log:
+    log = ev.log if is_officer else member_log(ev.log)
+    if log:
         n = DETAIL_LOG_LINES if detail else 4
-        out.append(f"  recent log: {' | '.join(ev.log[-n:])}")
+        out.append(f"  recent log: {' | '.join(log[-n:])}")
     return out
 
 
@@ -491,7 +524,7 @@ def runs_block(ask: Ask, budget: int) -> list[str]:
     closed = sorted((e for e in rs.events.values() if e.state in ("done", "cancelled")), key=lambda e: e.starts_at, reverse=True)
     named_closed = [e for e in closed if _mentions_closed_run(reg, e, ask.q)][:1]  # the newest one the question names
     for e in named_closed:
-        tail += run_lines(reg, rs, e, ask.officer, detail=True)
+        tail += run_lines(reg, rs, e, ask.officer, detail=True, viewer_id=ask.user_id)
     tail = _clip(tail, min(2_500, budget // 3))
     left = budget - _size(tail) - 1
     live = rs.live()
@@ -501,14 +534,14 @@ def runs_block(ask: Ask, budget: int) -> list[str]:
     named = [ev for ev in shown if _mentions_run(reg, ev, ask.q)][:2]
     parts: dict[str, list[str]] = {}
     for ev in named:
-        parts[ev.key] = _clip(run_lines(reg, rs, ev, ask.officer, detail=True), min(NAMED_RUN_CAP, max(RUN_MIN_SHARE, left // 2)))
+        parts[ev.key] = _clip(run_lines(reg, rs, ev, ask.officer, detail=True, viewer_id=ask.user_id), min(NAMED_RUN_CAP, max(RUN_MIN_SHARE, left // 2)))
     left -= sum(_size(p) + 1 for p in parts.values())
     rest = [ev for ev in shown if ev.key not in parts]
     extra = [f"(+{len(live) - MAX_RUNS} more live runs: {', '.join(e.key for e in live[MAX_RUNS:])})"] if len(live) > MAX_RUNS else []
     left -= _size(extra) + 1
     share = max(RUN_MIN_SHARE, left // max(1, len(rest))) if rest else 0
     for ev in rest:
-        parts[ev.key] = _clip(run_lines(reg, rs, ev, ask.officer), share)
+        parts[ev.key] = _clip(run_lines(reg, rs, ev, ask.officer, viewer_id=ask.user_id), share)
     out = [line for ev in shown for line in parts[ev.key]] + extra
     return _clip(out, budget - _size(tail) - 1) + tail
 

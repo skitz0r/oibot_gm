@@ -122,10 +122,11 @@ export interface SplitPreview { strategy: string; layout: string[][]; board: Boa
 export interface FillAskRow { uid?: string; display_name: string; kind: string; character: string; spec: string; cls: string | null; role: string; reason: string; why?: string | null; pair: string | number | null; vacates?: string | null }
 /** One seat the planner covers: `options[0]` the suggestion, then alternates; an option is one ask or a tied swap + backfill. role "" = a plain seat after lock. */
 export interface PlanSeat { role: string; options: FillAskRow[][] }
-/** raidcycle.role_plan as data: before lock (`prelock`) the suggestions for the tank/healer minimums; `rev` must ride with a send. */
+/** raidcycle.role_plan as data: before lock (`prelock`) the suggestions for the tank/healer minimums, after lock (`fill`) the seats to fill; `rev` must ride with every send. */
 export interface Plan { phase: "prelock" | "fill"; short: { headcount: number; roles: Record<string, number> }; have: Record<string, number>; need: Record<string, number>; full: boolean; expected: number; waiting?: string[];
-  seats: PlanSeat[]; short_after: { headcount: number; roles: Record<string, number> }; still_short: string; rev: string; lines: string[] }
-/** What Fill seats would send: the shortfall, who is still being waited on, the next batch of asks. */
+  seats: PlanSeat[]; short_after: { headcount: number; roles: Record<string, number> }; still_short: string; rev: string; lines: string[];
+  /** after lock: how many more asks may go out now (at most 3 out at once); null before lock */ room?: number | null; batch_lines?: string[] }
+/** What Fill seats would send: the shortfall, who is still being waited on, the plan, and `batch` = exactly what a send with the plan's rev (no picks) DMs now. */
 export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size?: number }; waiting: string[]; batch: FillAskRow[]; plan?: Plan }
 export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: { roster: string; answer: string | null; raid: string; when: string; key: string | null }[] }
 export interface Members { rows: MemberRow[]; members: number; tz: string }

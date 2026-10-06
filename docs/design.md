@@ -918,17 +918,26 @@ line and a `-#` line per short start — `raid_views.coverage_line` / `forecast_
 overview` (*Regulars*).
 
 **Surfaces.** Web: `POST /api/run/{key}/fill/preview` returns `plan` (`plan_json`: seats with options, `why`,
-`still_short`, `lines`, `rev`, `waiting`) — before lock instead of refusing; after lock the batch as well; `POST
-/api/run/{key}/fill {rev, picks}` → `send_plan` (required before lock; 409 + `plan` when stale), without `rev` after lock
-→ `run_fill(approved_by=…)`; `/api/run/{key}` carries `plan`. The sheet card's **Suggest** button (beside the short
-badge, open runs; highlighted when the plan has seats) opens `FillModal` in suggest mode (radio per seat: suggestion or
-alternate; Send; a 409 shows the fresh plan). Discord: `/raid fill` on an open run = the suggestions screen
-(`flows_raid.show_suggestions`); `/raid fill` and the card's Fill send after lock pass `approved_by`. Plain text:
-`run_fill` before lock — preview = `plan_lines`; send carries the plan fingerprint the diff showed
+`still_short`, `lines`, `rev`, `waiting`, `room`, `batch_lines`) — before lock instead of refusing — and `batch` =
+`rc.send_batch(plan)`, exactly what a send with that rev DMs (after lock the `FILL_MAX_OPEN` cut, which is part of
+`plan_rev`, never a swap without its backfill); `POST /api/run/{key}/fill {rev, picks}` → `send_plan` (409 + `plan`
+when stale); without `rev`: 400 before lock, and after lock 409 "preview first" when the blind batch (`fill_batch`)
+holds a role swap, else `run_fill(approved_by=…, swaps=False)`; `/api/run/{key}` carries `plan`. The sheet card's
+**Suggest** / **Fill seats** opens `FillModal`: the same plan view in both phases (radio per seat: suggestion or
+alternate; the exact asks Send DMs; Send carries `rev`; a 409 shows the fresh plan). Discord: `/raid fill` (both
+phases) and the lock card's Fill seats open the suggestions screen (`flows_raid.show_suggestions`: seat lines, then
+`rc.batch_preview` — one ask per line, SWAP marked, backfill named — then Send → `send_plan` with the screen's rev; a
+stale plan is refused and re-shown; `preview:true` = no Send). Officer review fix (2026-10-06): no officer-triggered
+send after lock bypasses this — every one shows the batch first. Plain text:
+`run_fill` — preview = `plan_lines` before lock, `batch_preview` after; send (both phases) carries the plan fingerprint the diff showed
 (`configops.board_revs` stores it under `PLAN_REV + run key`; `configops.op_rev` hands Apply the right fingerprint per
 op, in Discord and on the web/MCP `plain_change`); without one the send is refused ("preview first"). MCP: `fill_seats(run,
-send=False, rev="", picks=None)` — a preview before lock returns the plan; a send before lock needs `rev`. Help: an
-officer's run lines carry the suggestions (`plan_lines`) and readiness the coverage level and forecast. Tests:
+send=False, rev="", picks=None)` — preview first (the plan and `batch`), then send with its `rev`; without one a
+send is refused before lock and after lock whenever the batch holds a role swap. Help: an
+officer's run lines carry the suggestions (`plan_lines`) and readiness the coverage level and forecast; a member's
+(`is_officer` False, an officer's public view included) carry only the asker's own open ask (`viewer_id`) and the log
+without the officers' workflow lines (`help.OFFICER_LOG`). `/roster overview`'s *Regulars* field is officer-only.
+Tests (also `tests/test_roster_p2_review.py`: member help, the overview, every fill send shows its batch first):
 `tests/test_roster_p2_planner.py` (the §4 worked example as a fixture; cost order, swaps-first, matching, alt-lockout,
 paired backfill, rev, picks), `tests/test_roster_p2_asks.py` (send_plan, stale refusal, alternates, the post-lock path,
 release at lock, D3, the cards, early warning, lock card, Confirm DM), `tests/test_roster_p2_surfaces.py` (web, plain

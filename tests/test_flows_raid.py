@@ -93,7 +93,7 @@ class FakeBot:
         plan = rc.role_plan(reg, rs, ev)
         if rev != plan.rev:
             raise rc.PlanChanged(plan)
-        asks = rc.pick_asks(plan, picks)
+        asks, plan.held_back = rc.send_batch(plan, picks)
         self.calls.append(("send_plan", ev.key, by, [a.display_name for a in asks]))
         return asks, plan
 
@@ -563,9 +563,14 @@ def test_fill_preview_and_send(reg, rs, officer, channel):
     lock_with_board(reg, rs, ev, [m.display_name for m in members])
     h, bot = harness(reg, rs)
     asyncio.run(FLOWS["raid_fill"](h.command(), reg, preview=True))
-    assert "Would ask next" in h.text and not bot.calls
+    assert "A Send would DM:" in h.text and not bot.calls
+    with pytest.raises(AssertionError, match="no buttons"):  # preview: the screen is final, no Send button
+        h._items()
     asyncio.run(FLOWS["raid_fill"](h.command(), reg))
-    assert bot.names() == ["run_fill", "emit"] and bot.calls[0][1] == ev.key
+    assert "Send DMs exactly these:" in h.text and not bot.calls, "after lock /raid fill shows the batch first: nothing sent"
+    shown, _held = rc.send_batch(rc.role_plan(reg, rs, ev))
+    asyncio.run(h.press(next(b.label for b in h._items() if getattr(b, "label", "").startswith("Send"))))
+    assert bot.calls[0] == ("send_plan", ev.key, "Tester", [a.display_name for a in shown]), "Send sends the batch shown"
 
 
 def test_fill_before_lock_shows_suggestions(reg, rs, officer, channel):

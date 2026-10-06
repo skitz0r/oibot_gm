@@ -649,7 +649,10 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.add_field(name="Buff coverage", value=val[:1000], inline=False)
         from . import raidcycle as rc
 
-        cover = rc.series_outlook(reg)  # regulars coverage per recurring series + the 4-week forecast (the Rosters page's numbers)
+        officer_view = is_officer(interaction, reg)
+        # regulars coverage per recurring series + the 4-week forecast (the Rosters page's numbers): officer-facing — the
+        # recruit candidates and who is away which week are planning data, so a member's overview leaves the field out
+        cover = rc.series_outlook(reg) if officer_view else []
         if cover:
             from .raid_views import coverage_line, forecast_lines
 
@@ -659,7 +662,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
         asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
         e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
-        await interaction.response.send_message(embed=e, ephemeral=not is_officer(interaction, reg))
+        await interaction.response.send_message(embed=e, ephemeral=not officer_view)
 
     @roster.command(name="add", description="Make someone a regular of a recurring schedule: pick the schedule, member and character")
     @app_commands.describe(member="who to add (optional: pick them in the wizard)")

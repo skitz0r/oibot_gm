@@ -1003,7 +1003,13 @@ class Plan(BaseModel):
     seats: list[PlanSeat] = Field(default_factory=list)
     short_after: dict  # {"headcount": n, "roles": {role: n}}: still short if every suggestion is a yes
     rev: str = ""  # plan_rev: a send carrying an older one is refused
+    out: int = 0  # after lock: asks out now (pending) — an officer's send fills the room up to FILL_MAX_OPEN (send_batch)
     held_back: int = 0  # set by an officer's send after lock: asks not sent now (at most FILL_MAX_OPEN out at once)
+
+    @property
+    def room(self) -> int:
+        """After lock: how many more asks may go out now (FILL_MAX_OPEN minus those out); before lock: no cap."""
+        return max(0, FILL_MAX_OPEN - self.out)
 
     @property
     def asks(self) -> list[FillAsk]:
@@ -1027,7 +1033,11 @@ def plan_rev(plan: "Plan") -> str:
     import hashlib
     import json
 
-    blob = json.dumps([plan.phase, [[st.role, [[(a.discord_id, a.kind, a.role, a.character, a.spec, a.pair) for a in opt] for opt in st.options]] for st in plan.seats]])
+    seats = [[st.role, [[(a.discord_id, a.kind, a.role, a.character, a.spec, a.pair) for a in opt] for opt in st.options]] for st in plan.seats]
+    parts = [plan.phase, seats]
+    if plan.phase == "fill":  # after lock the cap decides how much of it goes out now (send_batch): a change there is a new plan
+        parts.append(min(plan.room, sum(max(len(o) for o in st.options) for st in plan.seats if st.options)))
+    blob = json.dumps(parts)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
@@ -1145,7 +1155,7 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     headcount = seats_free if locked else 0  # before lock suggestions are for the minimums only; the reminder chases the rest
     plan = Plan(phase="fill" if locked else "prelock", short={"headcount": headcount, "roles": dict(short_roles)}, have=dict(have), need=need, full=full,
                 expected=sum(1 for p in cur if not p["signed"]), short_after={"headcount": headcount, "roles": dict(short_roles)},
-                waiting=[a.display_name for a in waiting])
+                waiting=[a.display_name for a in waiting], out=sum(1 for a in ev.fill_asks if a.pending) if locked else 0)
     if not short_roles and not headcount:
         plan.rev = plan_rev(plan)
         return plan
@@ -1400,6 +1410,59 @@ def pick_asks(plan: Plan, picks: dict | None = None) -> list[FillAsk]:
             seen.add(a.discord_id)
             out.append(a.model_copy())
     return out
+
+
+def send_batch(plan: Plan, picks: dict | None = None) -> tuple[list[FillAsk], int]:
+    """Exactly what an officer's send of this plan (with `picks`, pick_asks) DMs now, and how many of the picked asks
+    wait: before lock all of them; after lock at most `plan.room` (FILL_MAX_OPEN out at once), never a swap without
+    its tied backfill. The preview screens (the wizard, the plain-text diff, the site and MCP) show this list and
+    RaidMixin.send_plan sends it — the cap is part of the plan's rev, so what was shown is what goes. RegistryError
+    when nothing can go out now."""
+    asks = pick_asks(plan, picks)
+    if plan.phase == "prelock" or not asks:
+        return asks, 0
+    if plan.room == 0:
+        raise RegistryError(f"{plan.out} asks are still out — at most {FILL_MAX_OPEN} at a time; ask again once some are answered.")
+    keep = asks[:plan.room]
+    ids = {a.discord_id for a in keep}
+    keep = [a for a in keep if a.pair is None or a.pair in ids]  # never a swap without its tied backfill
+    if not keep:
+        raise RegistryError(f"That swap and its backfill are two asks and only {plan.room} more can go out now (at most {FILL_MAX_OPEN}); ask again once some are answered.")
+    return keep, len(asks) - len(keep)
+
+
+ASK_HOW = {"sub": "from the bench", "regular": "a regular, no answer yet", "unanswered": "no answer yet", "other": "not a regular",
+           "flex": "declared flex", "offspec": "offspec", "alt": "brings an alt"}
+
+
+def batch_lines(asks: list[FillAsk]) -> list[str]:
+    """One line per ask an officer is about to send (plain text: the wizard, the plain-text diff, MCP): who, as which
+    character and spec, for which short role, SWAP marked with the role it leaves, the tied backfill named."""
+    names = {a.discord_id: a.display_name for a in asks}
+    out = []
+    for a in asks:
+        line = f"{a.display_name} as {a.character} ({a.spec}) for {a.role} — {a.reason}; {ASK_HOW.get(a.kind, a.kind)}"
+        if a.swap:
+            line += " · SWAP" + (f" (leaves {a.vacates})" if a.vacates else "")
+        if a.pair is not None:
+            other = names.get(a.pair, "?")
+            line += f" · backfill: {other}" if a.vacates else f" · backfills {other}'s swap"
+        out.append(line)
+    return out
+
+
+def batch_preview(plan: Plan, picks: dict | None = None) -> list[str]:
+    """The batch a send would DM (send_batch), one ask per line, then what waits and what stays short — or why
+    nothing can go out now. What every officer-triggered send shows before its Send / Apply."""
+    try:
+        asks, held = send_batch(plan, picks)
+    except RegistryError as e:
+        return [f"Nothing can go out now: {e}"]
+    if not asks:
+        return ["Nobody to ask."] + [f"Still short if everyone says yes: {still_short_words(plan)}"]
+    return ([f"{n + 1}. {ln}" for n, ln in enumerate(batch_lines(asks))]
+            + ([f"{held} more wait — at most {FILL_MAX_OPEN} asks out at once"] if held else [])
+            + [f"Still short if everyone says yes: {still_short_words(plan)}"])
 
 
 def plan_lines(reg: Registry, plan: Plan, limit: int = 8) -> list[str]:

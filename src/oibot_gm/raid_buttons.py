@@ -7,7 +7,6 @@ the DMs use (`place_view`, `fill_view`, `sheet_view`). Callbacks call the `RaidM
 Import cycle: see `raid_views` — the helpers this module formats replies with are imported at the bottom."""
 from __future__ import annotations
 
-import asyncio
 import re
 
 import discord
@@ -17,7 +16,7 @@ from .registry import RegistryError
 
 
 class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask)(?::(?P<rev>[0-9a-f]{6,16}))?"):
-    """Officer buttons on the health and lock cards: Fill seats (with a preview + confirm), Lock now, Cancel run, and
+    """Officer buttons on the health and lock cards: Fill seats (the suggestions screen: the batch, then Send), Lock now, Cancel run, and
     the Suggested block's Ask (sends what the card shows; the plan fingerprint it was drawn with rides in the id, so a
     stale card is refused and redrawn) and Suggest… (every seat with its alternates: pick, then send)."""
     LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger),
@@ -77,34 +76,11 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             if not nd["headcount"] and not nd["roles"]:
                 await interaction.response.send_message("Nothing to fill — every seat is taken.", ephemeral=True)
                 return
-            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team)  # what an officer's Send would ask (swaps included)
-            outstanding = [a for a in ev.fill_asks if a.pending]
-            lines = [f"**Short** {gaps_text(bot.ico, nd)}"]
-            if outstanding:
-                lines.append(f"**Already asked, waiting:** {', '.join(a.display_name for a in outstanding)}")
-            if batch:
-                lines.append("**Will DM now:**\n" + "\n".join("• " + ask_line(reg, bot.ico, a) + (" — tied to " + next((b.display_name for b in batch if b.discord_id == a.pair), "?") if a.pair else "") for a in batch))
-                hrs = reg.raid_def(ev.instance).get("fill_ask_hours")
-                lines.append(f"-# Each gets Confirm / Can't make it. A yes takes the seat at once; a no asks the next person; no answer within {hrs:g} h counts as no. Tied asks go out together and a no from either withdraws the other. Never more than 3 questions out at a time. Answers post in this run's thread.")
-            else:
-                lines.append("**Nobody to ask right now** — either the 3 outstanding questions already cover it, or everyone eligible has been asked.")
-            view = discord.ui.View(timeout=120)
-            go = discord.ui.Button(label=f"Send {len(batch)} ask{'s' if len(batch) != 1 else ''}", style=discord.ButtonStyle.success, disabled=not batch)
-            no = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary)
+            from .wizard import FLOWS
 
-            async def send(i: discord.Interaction):
-                await i.response.edit_message(content="Sending…", view=None)
-                sent, nd2 = await bot.run_fill(reg, rs, ev, team, by=by, approved_by=by)  # an officer's Send: role swaps included (D3)
-                await i.edit_original_response(content=("Asked " + ", ".join(a.display_name for a in sent)) if sent else "Nobody could be asked.")
-                if sent:
-                    await bot.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, bot.ico, a) for a in sent))
-
-            async def cancel(i: discord.Interaction):
-                await i.response.edit_message(content="Cancelled — nothing sent.", view=None)
-
-            go.callback, no.callback = send, cancel
-            view.add_item(go); view.add_item(no)
-            await interaction.response.send_message("\n".join(lines), view=view, ephemeral=True)
+            # the suggestions screen: the exact batch Send DMs (send_plan with the plan's rev — a stale one is refused
+            # and re-shown), nothing sent before Send
+            await FLOWS["raid_suggest"](interaction, reg, key=ev.key)
             return
         if self.action == "lock":
             if ev.state != "open":
@@ -302,4 +278,4 @@ def sheet_view(key: str) -> discord.ui.View:
 
 # text helpers the callbacks format with; imported last so `raid_views` (which places these buttons and imports them at
 # its own bottom) always finds the classes above bound, whichever module is imported first
-from .raid_views import ask_line, gaps_text, run_label, sheet_state  # noqa: E402
+from .raid_views import run_label, sheet_state  # noqa: E402

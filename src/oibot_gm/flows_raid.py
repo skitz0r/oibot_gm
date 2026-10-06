@@ -15,7 +15,7 @@ import discord
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .constants import TEAL
-from .raid_views import ask_line, gaps_text, health_layout, raid_name, run_label, run_title, sheet_state
+from .raid_views import health_layout, raid_name, run_label, run_title, sheet_state
 from .registry import ADHOC_SCHEDULE, ADHOC_SCHEDULE_NAME, Registry, RegistryError, schedule_class
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
 
@@ -596,11 +596,14 @@ def _opt_label(opt: list) -> str:
     return " + ".join(rc._ask_words(a) for a in opt)[:100]
 
 
-async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, note: str = "") -> None:
-    """The planner's suggestions for one run on the wizard's screen: each seat's suggestion with the code-written
-    reason, a select per seat that has alternates (pick someone else — no names typed), what stays short, then Send
-    (RaidMixin.send_plan with the plan fingerprint this screen was drawn with: when the plan changed meanwhile the send
-    is refused and the screen redrawn) and Cancel. Nothing is sent before Send."""
+async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, note: str = "", show_only: bool = False) -> None:
+    """The planner's suggestions for one run on the wizard's screen — before lock (the cards' Suggest…, /raid fill on
+    an open run) and after it (/raid fill, the lock card's Fill seats): each seat's suggestion with the code-written
+    reason, a select per seat that has alternates (pick someone else — no names typed), then the exact batch Send DMs
+    (rc.batch_preview: one ask per line — who, as which character and spec, for which short role, SWAP marked, the tied
+    backfill named — what waits under the cap and what stays short), then Send (RaidMixin.send_plan with the plan
+    fingerprint this screen was drawn with: when the plan changed meanwhile — board or answers — nothing is sent and
+    the screen is redrawn) and Cancel. Nothing is sent before Send. `show_only`: the same screen without Send."""
     reg = wiz.reg
     ev = rs.events.get(key)
     if not ev or ev.state not in LIVE:
@@ -614,7 +617,9 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
     when = "before lock — a yes changes their signup, nobody is seated until the lock" if plan.phase == "prelock" else "after lock — a yes takes the seat (role swaps need your Ask)"
     lines = ([note] if note else []) + [f"{run_title(reg, ev)} · {when}"]
     if not plan.seats:
-        await wiz.finish(i, "\n".join(lines + ["Nothing is short" + (" — the minimums are covered by who joined and the regulars yet to answer." if plan.phase == "prelock" else ".")]))
+        tail = (" — the minimums are covered by who joined and the regulars yet to answer." if plan.phase == "prelock"
+                else f" beyond the asks still out (waiting on {', '.join(plan.waiting)})." if plan.waiting else ".")
+        await wiz.finish(i, "\n".join(lines + ["Nothing is short" + tail]))
         return
     if plan.phase == "prelock":
         lines.append("Expected: " + " · ".join(f"{r} {plan.have.get(r, 0)}/{plan.need[r]}" for r in ("tank", "healer") if plan.need.get(r))
@@ -624,15 +629,24 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
     except RegistryError as e:  # one person picked for two seats: say so, Send stays off until a pick changes
         chosen = []
         lines.append(f"⚠️ {e}")
+    if plan.waiting:
+        lines.append(f"Asked, waiting on {', '.join(plan.waiting)} — their seats count as covered until they answer.")
+    seats = []  # (the seat's line, the code-written reason)
     for n, st in enumerate(plan.seats):
         what = st.role or "seat"
         if not st.options:
-            lines.append(f"{n + 1}. {what}: nobody can cover it → recruit")
+            seats.append((f"{n + 1}. {what}: nobody can cover it → recruit", ""))
             continue
         k = int(picks.get(n, 0))
         opt = st.options[k] if k < len(st.options) else st.options[0]
-        lines.append(f"{n + 1}. {what}: " + " + ".join(rc._ask_words(a) for a in opt) + (" (alternate)" if k else "") + (f"\n   -# {opt[0].why}" if opt[0].why else ""))
-    lines.append(f"Still short if everyone says yes: {rc.still_short_words(plan)}")
+        seats.append((f"{n + 1}. {what}: " + " + ".join(rc._ask_words(a) for a in opt) + (" (alternate)" if k else ""), opt[0].why or ""))
+    batch = ["", "**A Send would DM:**" if show_only else "**Send DMs exactly these:**"] + (rc.batch_preview(plan, picks) if chosen else [f"Still short if everyone says yes: {rc.still_short_words(plan)}"])
+    text = "\n".join(lines + [ln + (f"\n   -# {why}" if why else "") for ln, why in seats] + batch)
+    if len(text) > 1900:  # long: the reasons go first, the batch Send DMs always shows
+        text = "\n".join(lines + [ln for ln, _why in seats] + batch)
+    if show_only:
+        await wiz.finish(i, text[:1900])
+        return
     items = []
     for n, st in enumerate(plan.seats):
         if len(st.options) > 1 and len(items) < MAX_PICK_SELECTS:
@@ -659,9 +673,13 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
         await wiz.finish(si, ("Asked " + ", ".join(a.display_name for a in sent) + " by DM — answers post in the run's thread." if sent else "Nobody could be asked (DMs off).")
                          + (" A yes changes their signup; the lock still builds the roster." if plan.phase == "prelock" else "") + rc.held_back_words(sent_plan))
 
-    items.append(wiz.button(f"Send {len(chosen)} ask{'s' if len(chosen) != 1 else ''}", send, discord.ButtonStyle.success, disabled=not chosen))
+    try:
+        n_send = len(rc.send_batch(plan, picks)[0]) if chosen else 0
+    except RegistryError:  # the cap is full: Send stays off (the batch block says why)
+        n_send = 0
+    items.append(wiz.button(f"Send {n_send} ask{'s' if n_send != 1 else ''}", send, discord.ButtonStyle.success, disabled=not n_send))
     items.append(wiz.button("Cancel", wiz.cancel))
-    await wiz.show(i, "\n".join(lines)[:1900], *items)
+    await wiz.show(i, text[:1900], *items)
 
 
 @flow("raid_suggest")
@@ -688,34 +706,18 @@ async def open_raid_suggest(interaction: discord.Interaction, reg: Registry, *, 
 async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, preview: bool = False, **_seed) -> None:
     if not await officer_only(interaction, reg):
         return
-    import asyncio
 
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
         if not ev:
             await wiz.finish(i, "No live run.")
             return
-        if sheet_state(ev) == "open":  # before lock /raid fill means suggest → Send (nothing goes out before Send)
-            await show_suggestions(i, wiz, rs, ev.key)
-            return
-        if not ev.all_rosters:
+        if sheet_state(ev) != "open" and not ev.all_rosters:
             await wiz.finish(i, "The roster is still being built — try again in a moment.")
             return
-        await wiz.working(i, "Looking for people…")
-        bot, t = i.client, run_team(reg, ev)
-        nd = rc.needs(reg, ev, t)
-        gaps = f"short {gaps_text(bot.ico, nd)}" if nd["headcount"] or nd["roles"] else "nothing short"
-        busy = rc.conflicts(rs, ev)
-        if preview:
-            cands = await asyncio.to_thread(rc.fill_candidates, reg, rs, ev, t)
-            lines = [f"{n + 1}. " + ask_line(reg, bot.ico, a) + (" — tied to " + next((b.display_name for b in cands if b.discord_id == a.pair), "?") if a.pair else "") for n, a in enumerate(cands[:15])]
-            open_asks = [a for a in ev.fill_asks if a.pending]
-            await wiz.finish(i, f"{run_label(reg, ev)} · {gaps}" + (f" · double-booked: {', '.join(reg.members[u].display_name for u in busy if u in reg.members)}" if busy else "") + f"\nOutstanding asks: {', '.join(a.display_name for a in open_asks) or 'none'}\nWould ask next:\n" + ("\n".join(lines) or "nobody left"))
-            return
-        sent, nd = await bot.run_fill(reg, rs, ev, t, by=i.user.display_name, approved_by=i.user.display_name)  # an officer's: role swaps included (D3)
-        if sent:
-            await bot.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, bot.ico, a) for a in sent))
-        await wiz.finish(i, f"{run_label(reg, ev)} · {gaps}\n" + ("Asked: " + ", ".join(ask_line(reg, bot.ico, a) for a in sent) if sent else ("Nothing to fill." if not (nd["headcount"] or nd["roles"]) else "Nobody left to ask (or the asks outstanding already cover it).")))
-        await bot.ops.emit(reg.config, "info", f"{i.user.display_name} ran fill for {ev.key}: asked {len(sent)}")
+        # before and after lock: the plan, the exact batch Send DMs, then Send / Cancel (RaidMixin.send_plan with the
+        # rev this screen was drawn with — a stale plan is refused and re-shown); nothing goes out before Send.
+        # `preview`: the same screen without Send.
+        await show_suggestions(i, wiz, rs, ev.key, show_only=preview)
     await with_run(interaction, reg, title="Fill seats", then=body, officer=True)
 
 

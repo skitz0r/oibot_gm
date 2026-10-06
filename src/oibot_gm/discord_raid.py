@@ -279,12 +279,14 @@ class RaidMixin:
         rs.save(ev, "health posted")
 
     # ---- filling gaps by DM
-    async def run_fill(self, reg, rs, ev, team, by: str = "scheduler", approved_by: str | None = None) -> tuple[list, dict]:
+    async def run_fill(self, reg, rs, ev, team, by: str = "scheduler", approved_by: str | None = None, swaps: bool | None = None) -> tuple[list, dict]:
         """Send the next batch of fill DMs. Returns (asks sent, needs). The fill engine only runs on a locked roster:
         before lock nothing is sent this way (an officer sends suggestions with send_plan). `approved_by` = the officer
         who pressed Send: their batch may include role swaps. On its own (the scheduler, a freed seat, an answer) the
         engine sends role swaps on an ad hoc run only — owner decision D3: on a recurring run a swap waits for an
-        officer's Ask (fill_state "suggested", the lock card lists it)."""
+        officer's Ask (fill_state "suggested", the lock card lists it). `swaps=False` keeps role swaps out whoever
+        sends (the site's / MCP's send without a preview may only send same-role asks). An officer's send from a
+        screen goes through send_plan instead: the batch they were shown, nothing else."""
         nd = rc.needs(reg, ev, team)
         if sheet_state(ev) != "locked" or not ev.all_rosters:
             return [], nd
@@ -293,7 +295,7 @@ class RaidMixin:
                 ev.fill_state = "filled"
                 rs.save(ev, "fill: complete")
             return [], nd
-        swaps = approved_by is not None or rc.auto_swaps(reg, ev)
+        swaps = (approved_by is not None or rc.auto_swaps(reg, ev)) if swaps is None else swaps
         batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team, swaps=swaps)
         sent = []
         deadline = rc.ask_deadline(reg, ev).isoformat()
@@ -341,23 +343,14 @@ class RaidMixin:
             plan = rc.role_plan(reg, rs, ev)
             if not rev or rev != plan.rev:
                 raise rc.PlanChanged(plan)
-            asks = rc.pick_asks(plan, picks)
+            # exactly the batch the officer was shown (rc.send_batch: after lock the FILL_MAX_OPEN cap, which is part of
+            # the rev, so the preview listed these same asks)
+            asks, plan.held_back = rc.send_batch(plan, picks)
             if not asks:
                 return [], plan
             team = rc.run_team(reg, ev)
             _soft, hard, _confirm = run_times(reg, ev, team)
             prelock = plan.phase == "prelock"
-            if not prelock:  # after lock the fill engine's cap holds for an officer's send too: at most FILL_MAX_OPEN asks out
-                out = sum(1 for a in ev.fill_asks if a.pending)
-                room = max(0, rc.FILL_MAX_OPEN - out)
-                if room == 0:
-                    raise RegistryError(f"{out} asks are still out on {run_title(reg, ev)} — at most {rc.FILL_MAX_OPEN} at a time; ask again once some are answered.")
-                keep = asks[:room]
-                ids = {a.discord_id for a in keep}
-                keep = [a for a in keep if a.pair is None or a.pair in ids]  # never a swap without its tied backfill
-                if not keep:
-                    raise RegistryError(f"That swap and its backfill are two asks and only {room} more can go out on {run_title(reg, ev)} now (at most {rc.FILL_MAX_OPEN}); ask again once some are answered.")
-                plan.held_back, asks = len(asks) - len(keep), keep
             deadline = (min(hard, ev.start) if prelock else rc.ask_deadline(reg, ev)).isoformat()  # pre-lock asks expire at lock time
             for a in asks:
                 a.phase, a.approved_by, a.expires_at, a.asked_at = plan.phase, by, deadline, rc.now()
