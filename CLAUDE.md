@@ -48,8 +48,12 @@ src/oibot_gm/
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|plan main|alt|roles|char …|absent … (members);
                        /roster overview|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers; `poll` retired, PlanButton is a stub);
-                       Rosters are first-class: config `rosters[]` (key/size/schedule/instance/cutoffs), membership lives on characters (`RegisteredCharacter.rosters`),
-                       raids are opened for a roster, officer posts go to `roster_channel_id`. Internal helpers still say "team" (aliases) — don't rename them casually.
+                       Rosters (design §5.30, out of the roster redesign): a run's roster is ephemeral in config `rosters[]` (key/size/cutoffs per run) and WHO
+                       holds a seat lives only in the run file (rc.rostered_runs reads it); RegisteredCharacter.rosters holds only REGULARS, as series keys
+                       "<raid>:<schedule>" (Registry.regulars / set_regular; officers edit, members may step down). Schedules are RECURRING (weekly, lockout)
+                       or AD HOC (pickup templates, ADHOC_SCHEDULE one-offs) — rc.run_kind; ad hoc = first come (Signup.joined_at), no confirmations, lighter
+                       timing. Regulars are never pre-filled; officers see who hasn't answered. Officer posts go to `roster_channel_id`. Internal helpers still
+                       say "team" (aliases) — don't rename them casually.
                        /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py); /mock … (demo)
   raidcycle.py         signup-driven cycle (design.md §5.20): raid SCHEDULES (§5.27: Registry.schedules/schedule_def; weekly slots · day N of each
                        lockout · pickup templates; `default` = the raid's own slots) + cadence (schedule_def: slots, signup_lead/lock/confirm hours,
@@ -59,6 +63,10 @@ src/oibot_gm/
                        expire_confirmations, fill engine (after lock only: benched joiners + Bench first → pool → offspec → alt swaps, paired with a backfill
                        when the vacated role would go short; asks expire after fill_ask_hours). Per-raid `nudge`/`nudge_hours_before`/`autofill`/`open_dm`
                        come from raid_def. No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
+                       ONE planner (rc.role_plan; fill engine extended to before lock): ranked moves with alternates and a still-short line; nothing is
+                       sent before an officer's Ask (RaidMixin.send_plan with the shown plan rev; rc.send_batch = exactly what a send DMs); after lock on a
+                       recurring run same-role asks are automatic and ROLE SWAPS wait for an officer (owner decision D3, out/roster_decisions.md). Series
+                       coverage + 4-week forecast: Registry.series_coverage / rc.series_outlook (officer-only).
                        split_reason / split_reason_text: why the joiners make fewer runs than the headcount (what the next run is short, in code);
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run
   discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer (the one path for an answer), lock_run → roster
