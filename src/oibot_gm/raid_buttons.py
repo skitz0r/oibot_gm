@@ -50,7 +50,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
         if self.action == "ask":  # the card's suggestions as drawn — refused (and the card redrawn) when the plan moved
             await interaction.response.defer(ephemeral=True, thinking=True)
             try:
-                sent, _plan = await bot.send_plan(reg, rs, ev, rev=self.rev or "", by=by)
+                sent, plan = await bot.send_plan(reg, rs, ev, rev=self.rev or "", by=by)
             except rc.PlanChanged as e:
                 await bot.refresh_cards(reg, ev)
                 await interaction.followup.send(f"{e} The card shows them as they are now.", ephemeral=True)
@@ -58,7 +58,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
             except RegistryError as e:
                 await interaction.followup.send(str(e), ephemeral=True)
                 return
-            await interaction.followup.send(("Asked " + ", ".join(a.display_name for a in sent) + " — their answers post in the run's thread.") if sent else "Nobody could be asked (DMs off or nobody left).", ephemeral=True)
+            await interaction.followup.send((("Asked " + ", ".join(a.display_name for a in sent) + " — their answers post in the run's thread.") if sent else "Nobody could be asked (DMs off or nobody left).") + rc.held_back_words(plan), ephemeral=True)
             return
         if self.action == "suggest":
             from .wizard import FLOWS
@@ -74,7 +74,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
                 await interaction.response.send_message("Nothing to fill — every seat is taken.", ephemeral=True)
                 return
             batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team)  # what an officer's Send would ask (swaps included)
-            outstanding = [a for a in ev.fill_asks if a.open]
+            outstanding = [a for a in ev.fill_asks if a.pending]
             lines = [f"**Short** {gaps_text(bot.ico, nd)}"]
             if outstanding:
                 lines.append(f"**Already asked, waiting:** {', '.join(a.display_name for a in outstanding)}")

@@ -116,11 +116,14 @@ def test_regulars_start_unanswered_and_absences_mark_anyone_away(reg, rs):
     t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
     day = t.astimezone(reg.tz).date().isoformat()
     reg.add_absence(ms[0].discord_id, day, None, "work", "t")
-    outsider = reg.test_members()[0]
+    outsider = real(reg, 5)  # a member who is not a regular
     reg.add_absence(outsider.discord_id, day, None, None, "t")
+    puppet = reg.test_members()[0]
+    reg.add_absence(puppet.discord_id, day, None, None, "t")
     ev = rc.open_run(reg, rs, RID, t, by="t")
     assert not [s for s in ev.signups.values() if s.status != "out"], "D1: nobody is pre-filled Join"
     assert ev.signups[str(ms[0].discord_id)].source == "absence" and ev.signups[str(outsider.discord_id)].source == "absence"
+    assert str(puppet.discord_id) not in ev.signups, "a test puppet never appears on a real run's sheet"
     assert sorted(ev.regulars) == sorted(m.discord_id for m in ms)
     waiting = [m.discord_id for m, _c in rc.not_answered(reg, ev)]
     assert sorted(waiting) == sorted(m.discord_id for m in ms[1:]), "officers see the regulars who haven't answered — the away one has an answer"
@@ -133,11 +136,14 @@ def test_absence_recorded_after_open_and_cleared_again(reg, rs):
     ev = next_run(reg, rs)
     day = ev.start.astimezone(reg.tz).date().isoformat()
     bot = Bot(reg, rs)
-    for m in (ms[1], reg.test_members()[3]):
+    for m in (ms[1], real(reg, 5)):  # a regular, then a member who is not one
         _m, a = reg.add_absence(m.discord_id, day, None, None, "t")
         run(bot.after_absence(reg, m, a.start, a.end, "t"))
         sg = ev.signups[str(m.discord_id)]
         assert (sg.status, sg.source) == ("out", "absence")
+    puppet = reg.test_members()[3]
+    _m, a = reg.add_absence(puppet.discord_id, day, None, None, "t")
+    assert ev.key not in run(bot.after_absence(reg, puppet, a.start, a.end, "t")) and str(puppet.discord_id) not in ev.signups, "a puppet never lands on a real sheet"
     assert ev.signups[str(ms[1].discord_id)].character == "Altmira"
     assert ms[1].discord_id not in [m.discord_id for m, _c in rc.not_answered(reg, ev)]
     a = reg.clear_absence(ms[1].discord_id, day, "t")
@@ -149,7 +155,7 @@ def test_absence_recorded_after_open_and_cleared_again(reg, rs):
 def test_expected_is_regulars_else_everyone(reg, rs):
     opened(reg)
     ev = next_run(reg, rs)
-    assert rc.expected_from(reg, ev) == "everyone" and len(rc.expected(reg, ev)) == sum(1 for m in reg.members.values() if m.main)
+    assert rc.expected_from(reg, ev) == "everyone" and len(rc.expected(reg, ev)) == sum(1 for m in reg.members.values() if m.main and not m.test), "every main — never a test puppet"
     m = real(reg, 0)
     reg.regular_add(m.discord_id, KEY, "t")
     assert rc.expected_from(reg, ev) == "regulars" and [x.discord_id for x, _ in rc.expected(reg, ev)] == [m.discord_id]

@@ -304,7 +304,7 @@ class RaidMixin:
             ev.fill_state = "asking"
             ev.log.append(f"fill ({by}): asked {', '.join(a.display_name for a in sent)}")
             rs.save(ev, f"fill asked {len(sent)}")
-        elif not [a for a in ev.fill_asks if a.open]:
+        elif not [a for a in ev.fill_asks if a.pending]:
             if not swaps and await asyncio.to_thread(rc.withheld_swaps, reg, rs, ev):
                 if ev.fill_state != "suggested":  # said once: the swap needs an officer's Ask on the lock card
                     ev.fill_state = "suggested"
@@ -340,6 +340,17 @@ class RaidMixin:
             team = rc.run_team(reg, ev)
             _soft, hard, _confirm = run_times(reg, ev, team)
             prelock = plan.phase == "prelock"
+            if not prelock:  # after lock the fill engine's cap holds for an officer's send too: at most FILL_MAX_OPEN asks out
+                out = sum(1 for a in ev.fill_asks if a.pending)
+                room = max(0, rc.FILL_MAX_OPEN - out)
+                if room == 0:
+                    raise RegistryError(f"{out} asks are still out on {run_title(reg, ev)} — at most {rc.FILL_MAX_OPEN} at a time; ask again once some are answered.")
+                keep = asks[:room]
+                ids = {a.discord_id for a in keep}
+                keep = [a for a in keep if a.pair is None or a.pair in ids]  # never a swap without its tied backfill
+                if not keep:
+                    raise RegistryError(f"That swap and its backfill are two asks and only {room} more can go out on {run_title(reg, ev)} now (at most {rc.FILL_MAX_OPEN}); ask again once some are answered.")
+                plan.held_back, asks = len(asks) - len(keep), keep
             deadline = (min(hard, ev.start) if prelock else rc.ask_deadline(reg, ev)).isoformat()  # pre-lock asks expire at lock time
             for a in asks:
                 a.phase, a.approved_by, a.expires_at, a.asked_at = plan.phase, by, deadline, rc.now()
@@ -357,10 +368,22 @@ class RaidMixin:
             ev.log.append(f"{'suggestions' if prelock else 'fill'} sent by {by}: " + (", ".join(a.display_name for a in sent) or "nobody reachable"))
             rs.save(ev, f"{'suggestions' if prelock else 'fill'} sent by {by}")
         if sent:
-            await self.post_run_update(reg, ev, f"🧩 {by} asked:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
+            await self.post_run_update(reg, ev, f"🧩 {by} asked:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent)
+                                       + (f"\n-# {plan.held_back} more wait — at most {rc.FILL_MAX_OPEN} asks out at once; the card keeps them" if plan.held_back else ""))
         await self.refresh_cards(reg, ev)
         await self.ops.emit(reg.config, "info", f"{by} sent {len(sent)} {'pre-lock ' if prelock else ''}ask(s) on {ev.key}")
         return sent, plan
+
+    async def close_prelock_asks(self, reg, rs, ev) -> list:
+        """Lock time reached: pre-lock asks still out close (`released`, as lock_run does — a lock that keeps failing
+        leaves none open); a yes held for a tied partner who never answered is told nothing changed."""
+        held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
+        gone = rc.release_prelock_asks(ev)
+        if gone:
+            rs.save(ev, "pre-lock asks closed at lock time")
+        for a in held:
+            await self.withdraw_ask(reg, ev, a, "the roster locks before the other half of the swap was answered")
+        return gone
 
     async def withdraw_ask(self, reg, ev, ask, because: str) -> None:
         """Tell the other half of a tied pair the question is off."""
@@ -377,6 +400,18 @@ class RaidMixin:
             other = rc.release_partner(reg, rs, ev, ask)
             if other:
                 await self.withdraw_ask(reg, ev, other, f"{ask.display_name} said no")
+        if ask.held:  # the first yes of a tied pair: nothing changed yet, the partner's answer decides
+            await self.post_run_update(reg, ev, f"🧩 {line}")
+            await self.refresh_cards(reg, ev)
+            await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
+            return
+        both = rc.tied_ask(ev, ask) if ask.answer == "yes" else None
+        both = both if both is not None and both.answer == "yes" else None  # the partner's held yes took effect just now
+        if both is not None:
+            om = reg.members.get(both.discord_id)
+            if om:
+                await self.send_member_dm(reg, om, f"{ask.display_name} said yes too, so it's on for {run_label(reg, ev)}: you're down as **{both.character}** ({both.spec})"
+                                          + (" — the lock builds the roster." if ev.state == "open" else "."), ev=ev)
         if ask.phase == "prelock" and ev.state == "open":  # before lock: the signup changed, nobody was seated
             plan = rc.role_plan(reg, rs, ev)
             await self.post_run_update(reg, ev, f"🧩 {line}" + (f" · still short {rc.still_short_words(plan)}" if plan.seats else " · **minimums covered**"))
@@ -388,11 +423,12 @@ class RaidMixin:
         await self.refresh_cards(reg, ev)
         await self.ops.emit(cfg, "info", f"fill {ev.key}: {line}")
         if ask.answer == "yes" and ev.state != "open":
-            m = reg.members.get(ask.discord_id)
-            if m and ev.seat_of(m.display_name):  # a yes that found no free seat is a Join, not a rostered seat
-                a = reg.add_placement_ask(m.discord_id, ev.team, ask.character, "fill")
-                a["answer"], a["answered_at"] = "yes", rc.now()
-                reg.save(m, f"{m.display_name} rostered on {ev.team} via fill")
+            for done in [ask] + ([both] if both is not None else []):
+                m = reg.members.get(done.discord_id)
+                if m and ev.seat_of(m.display_name):  # a yes that found no free seat is a Join, not a rostered seat
+                    a = reg.add_placement_ask(m.discord_id, ev.team, done.character, "fill")
+                    a["answer"], a["answered_at"] = "yes", rc.now()
+                    reg.save(m, f"{m.display_name} rostered on {ev.team} via fill")
         if ask.answer == "no":
             await self.run_fill(reg, rs, ev, team, by="answer")
 
@@ -482,13 +518,16 @@ class RaidMixin:
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
             ev.log.append(f"locked by {by}")
-            rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time
+            held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
+            rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time (a yes held for a tied partner too)
             short = rc.needs(reg, ev, team)["roles"]
             if short:  # the solver caps a minimum at what the sheet can supply: say so instead of locking quietly
                 ev.log.append("locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
             rs.save(ev, f"locked by {by}")
         if short:
             await self.ops.emit(reg.config, "warn", f"{ev.key}: locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
+        for a in held:  # they said yes, but their partner never answered: nothing changed for them
+            await self.withdraw_ask(reg, ev, a, "the roster locked before the other half of the swap was answered")
         await self.refresh_sheet(reg, ev)
         ch = self.officer_channel(reg, ev)
         if ch:
@@ -757,6 +796,8 @@ class RaidMixin:
         rs = self.raids.store(reg)
         touched = []
         for ev in rc.runs_in_span(reg, rs, start, end):  # the same runs describe(absence) and MCP's preview list
+            if not rc.on_bench_side(reg, ev, m):
+                continue  # puppets belong to test runs only (and a real member to real runs, the tester aside)
             team = rc.run_team(reg, ev)
             sg = ev.signups.get(str(m.discord_id))
             if ev.state != "open" and ev.seat_of(m.display_name):

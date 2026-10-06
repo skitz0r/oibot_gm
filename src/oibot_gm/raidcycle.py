@@ -84,6 +84,7 @@ class FillAsk(BaseModel):
     vacates: Optional[str] = None  # swaps: the role the person leaves
     phase: Literal["prelock", "fill"] = "fill"  # a suggestion an officer sent before the lock (a yes changes the signup, seats nobody) or a fill ask after it
     approved_by: Optional[str] = None  # the officer whose Ask / Send sent it (every pre-lock ask; D3: a recurring run's role swaps after lock); None = the fill engine on its own
+    held: bool = False  # answered yes, but its tied partner hasn't answered yet: nothing changed (a pair needs both yeses)
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -93,6 +94,11 @@ class FillAsk(BaseModel):
     @property
     def open(self) -> bool:
         return self.answer is None
+
+    @property
+    def pending(self) -> bool:
+        """Still in play: unanswered, or a yes held until its tied partner answers (counts as an ask out)."""
+        return self.answer is None or self.held
 
     @property
     def swap(self) -> bool:
@@ -703,18 +709,19 @@ def run_regulars(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredC
     if is_test_run(reg, ev):
         return _test_pool(reg, ev)
     series = run_series(reg, ev)
-    return reg.regulars(series) if series else []
+    return [(m, c) for m, c in reg.regulars(series) if not m.test] if series else []
 
 
 def run_pool(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
     """Who a run is FOR, with the character each would bring: a test run → the puppets + the tester; a recurring run
-    whose series has regulars → those regulars; otherwise (ad hoc, or a series nobody curated yet) → every main.
-    Keyed on the series, never the run key, so it doesn't change at lock. The fill engine's first tier after the
-    bench, health's "not on sheet", another_run_hint and the open DMs read it."""
+    whose series has regulars → those regulars; otherwise (ad hoc, or a series nobody curated yet) → every main —
+    never a test puppet on a real run (puppets belong to test runs only, so they are never suggested, asked, nudged
+    or listed as "No answer" there). Keyed on the series, never the run key, so it doesn't change at lock. The fill
+    engine's first tier after the bench, health's "not on sheet", another_run_hint and the open DMs read it."""
     if is_test_run(reg, ev):
         return _test_pool(reg, ev)
     regs = run_regulars(reg, ev)
-    return regs if regs else [(m, m.main) for m in reg.members.values() if m.main]
+    return regs if regs else [(m, m.main) for m in reg.members.values() if m.main and not m.test]
 
 
 def expected(reg: Registry, ev: RaidEvent) -> list[tuple[Member, RegisteredCharacter]]:
@@ -750,13 +757,21 @@ def regular_answers(reg: Registry, ev: RaidEvent) -> list[dict]:
     return out
 
 
+def on_bench_side(reg: Registry, ev: RaidEvent, m: Member) -> bool:
+    """Does `m` belong on this run's side of the test bench? A test run takes its puppets and its tester; a real run
+    takes real members only (a puppet's absence never marks it away on a real sheet, a real member's never on a test one)."""
+    if is_test_run(reg, ev):
+        return bool(m.test) or m.discord_id == (reg.config.team(ev.team) or {}).get("test_by")
+    return not m.test
+
+
 def absence_pool(reg: Registry, ev: RaidEvent, team: dict | None = None) -> list[tuple[Member, RegisteredCharacter]]:
     """Everyone a recorded absence marks away on this run: a test run's puppets + tester; otherwise every member with a
-    main, a regular with their regular character."""
+    main (never a test puppet), a regular with their regular character."""
     if is_test_run(reg, ev):
         return _test_pool(reg, ev)
     regs = {m.discord_id: c for m, c in run_regulars(reg, ev)}
-    return [(m, regs.get(m.discord_id) or m.main) for m in reg.members.values() if m.main or m.discord_id in regs]
+    return [(m, regs.get(m.discord_id) or m.main) for m in reg.members.values() if not m.test and (m.main or m.discord_id in regs)]
 
 
 def expected_character(reg: Registry, ev: RaidEvent, m: Member) -> RegisteredCharacter | None:
@@ -844,6 +859,8 @@ def absence_effects(reg: Registry, rs: RaidStore, m: Member | None, start: str, 
     does it): 'seat freed' (locked and rostered: the fill engine looks for cover) | 'No thanks' | 'already No thanks'."""
     out = []
     for ev in runs_in_span(reg, rs, start, end):
+        if m is not None and not on_bench_side(reg, ev, m):
+            continue  # a puppet's absence never touches a real sheet (nor a real member's a test run)
         sg = ev.signups.get(str(m.discord_id)) if m is not None else None
         if m is not None and ev.state != "open" and ev.seat_of(m.display_name):
             out.append((ev, "seat freed"))
@@ -965,6 +982,7 @@ class Plan(BaseModel):
     seats: list[PlanSeat] = Field(default_factory=list)
     short_after: dict  # {"headcount": n, "roles": {role: n}}: still short if every suggestion is a yes
     rev: str = ""  # plan_rev: a send carrying an older one is refused
+    held_back: int = 0  # set by an officer's send after lock: asks not sent now (at most FILL_MAX_OPEN out at once)
 
     @property
     def asks(self) -> list[FillAsk]:
@@ -1032,15 +1050,17 @@ def _role_word(role: str) -> str:
     return "DPS" if _dps(role) == "dps" else role
 
 
-def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> Plan:
+def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict | None = None, *, swaps: bool = True, count_waiting: bool = True) -> Plan:
     """What would cover the run's shortfall, best first — pure; nothing is sent. The fill engine after lock (role gaps,
     then free seats) and the officers' suggestions before it (tank/healer minimums only) read this one function.
 
     Who counts: after lock the seated (their seat's role — the solver may have switched an offspec); before lock the
     Join answers plus, on a recurring run with regulars, the regulars who haven't answered and aren't away (nothing is
     pre-filled, D1: the plan treats them as coming, so it suggests what goes beyond them), and the officer's asks still
-    out as if they said yes (a No frees the seat again and the next alternate shows). After lock the fill engine's
-    over-ask (fill_batch, at most FILL_MAX_OPEN outstanding) is unchanged.
+    out as if they said yes (a No frees the seat again and the next alternate shows). After lock the asks still out
+    count the same way for the officers' view (the lock card, an officer's Send), so nobody is asked twice for one
+    seat; the fill engine's own batches (fill_batch) pass count_waiting=False and keep their over-ask (shortfall + 1,
+    at most FILL_MAX_OPEN outstanding).
     Moves per short seat, cheapest first (MOVE_COST): someone on Bench who plays the role · a declared flex role ·
     an offspec · an unanswered regular · an alt (skipped when that alt is already saved to this raid this lockout) · a
     non-regular main. When every seat is taken (before lock: by the expected roster), switches by people already coming
@@ -1085,17 +1105,19 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
                 cur.append({"uid": m.discord_id, "m": m, "name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec, "offspec": c.offspec,
                             "role": role_of(c.cls, c.spec), "signed": False})
     have = {r: sum(1 for p in cur if p["role"] == r) for r in ROLES}
-    waiting = [a for a in ev.fill_asks if a.open]
-    if not locked:  # before lock an officer's asks still out count as covering their seat (no second ask for it meanwhile)
-        for a in waiting:
-            have[a.role] = have.get(a.role, 0) + 1
-            if a.swap and a.vacates:
-                have[a.vacates] = have.get(a.vacates, 0) - 1
+    waiting = [a for a in ev.fill_asks if a.pending]
+    counted = waiting if (count_waiting or not locked) else []
+    for a in counted:  # asks still out count as covering their seat (no second ask for it meanwhile)
+        have[a.role] = have.get(a.role, 0) + 1
+        if a.swap and a.vacates:
+            have[a.vacates] = have.get(a.vacates, 0) - 1
     have["dps"] = have.get("melee", 0) + have.get("ranged", 0)
     short_roles = {r: need[r] - have[r] for r in ("tank", "healer") if need[r] > have[r]}
-    free = [g["headcount"] if locked else None]  # after lock a new body needs a free seat (seat_player); before lock the lock decides
-    full = (g["headcount"] == 0) if locked else len(cur) >= g["seats"]
-    headcount = g["headcount"] if locked else 0  # before lock suggestions are for the minimums only; the reminder chases the rest
+    # after lock a new body needs a free seat (seat_player) — a body ask still out holds one; before lock the lock decides
+    seats_free = max(0, g["headcount"] - sum(1 for a in counted if not a.swap)) if locked else None
+    free = [seats_free]
+    full = (seats_free == 0) if locked else len(cur) >= g["seats"]
+    headcount = seats_free if locked else 0  # before lock suggestions are for the minimums only; the reminder chases the rest
     plan = Plan(phase="fill" if locked else "prelock", short={"headcount": headcount, "roles": dict(short_roles)}, have=dict(have), need=need, full=full,
                 expected=sum(1 for p in cur if not p["signed"]), short_after={"headcount": headcount, "roles": dict(short_roles)},
                 waiting=[a.display_name for a in waiting])
@@ -1315,13 +1337,13 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | No
 def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> list[FillAsk]:
     """The next asks the fill engine sends now: shortfall + FILL_OVERASK, capped so at most FILL_MAX_OPEN are
     outstanding — never cutting a tied swap from its backfill."""
-    open_asks = [a for a in ev.fill_asks if a.open]
+    open_asks = [a for a in ev.fill_asks if a.pending]
     nd = needs(reg, ev, team)
     want = nd["headcount"] + sum(nd["roles"].values())
     if want <= 0:
         return []
     room = max(0, min(want + FILL_OVERASK, FILL_MAX_OPEN) - len(open_asks))
-    batch = fill_candidates(reg, rs, ev, team, swaps=swaps)[:room]
+    batch = role_plan(reg, rs, ev, team, swaps=swaps, count_waiting=False).asks[:room]  # the engine's over-ask: its own asks out aren't counted
     ids = {a.discord_id for a in batch}
     return [a for a in batch if a.pair is None or a.pair in ids]
 
@@ -1369,6 +1391,11 @@ def _ask_words(a: FillAsk) -> str:
     return f"{a.display_name} as {a.character} ({a.spec}, {a.kind})"
 
 
+def held_back_words(plan: Plan) -> str:
+    """What an officer's send after lock left for later (the FILL_MAX_OPEN cap), or ""."""
+    return f" · {plan.held_back} more wait — at most {FILL_MAX_OPEN} asks out at once; ask again once some are answered" if plan.held_back else ""
+
+
 def still_short_words(plan: Plan) -> str:
     sa = plan.short_after
     bits = ([f"{sa['headcount']} seat{'s' if sa['headcount'] != 1 else ''}"] if sa.get("headcount") else []) + [f"{k} {r}" for r, k in sa.get("roles", {}).items()]
@@ -1385,18 +1412,25 @@ def _reseat(ev: RaidEvent, sg: Signup) -> bool:
     return True
 
 
-def partner_of(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
-    """The open ask tied to this one (swap ↔ backfill), if any."""
+def tied_ask(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
+    """The ask tied to this one (swap ↔ backfill) in any state (one ask per member per run, so it is unique)."""
     if ask.pair is None:
         return None
-    return next((a for a in ev.fill_asks if a.open and a.discord_id == ask.pair and a.pair == ask.discord_id), None)
+    return next((a for a in ev.fill_asks if a is not ask and a.discord_id == ask.pair and a.pair == ask.discord_id), None)
+
+
+def partner_of(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
+    """The tied ask still in play (unanswered, or a yes held until this one answers), if any."""
+    other = tied_ask(ev, ask)
+    return other if other and other.pending else None
 
 
 def release_partner(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
-    """A no (or silence) on one half of a tied pair withdraws the other half. Returns the released ask."""
+    """A no (or silence) on one half of a tied pair withdraws the other half — unanswered, or a yes that was held
+    waiting for this one (nothing had changed for it). Returns the released ask."""
     other = partner_of(ev, ask)
     if other:
-        other.answer, other.answered_at = "released", now()
+        other.answer, other.answered_at, other.held = "released", now(), False
         ev.log.append(f"fill: {other.display_name}'s ask withdrawn ({ask.display_name} said no)")
         rs.save(ev, f"fill {other.display_name} released")
     return other
@@ -1426,13 +1460,32 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
     """Record the answer and, on yes, put the person on the sheet the way they were asked. Before lock (an officer's
     pre-lock ask) a yes changes the SIGNUP only — Join, with the spec or character they agreed to — and seats nobody:
     the lock still decides, and now sees the agreed role. After lock (or a pre-lock ask answered once the run locked)
-    a yes takes the seat, or switches the seat in place."""
+    a yes takes the seat, or switches the seat in place. A tied pair (a swap and the backfill covering the seat it
+    vacates) needs BOTH yeses: the first yes is held (`held`, nothing changes) until the partner answers; the second
+    yes applies both; a no or silence from the partner releases the held yes (release_partner)."""
     ask.answer, ask.answered_at = ("yes" if yes else "no"), now()
     m = reg.members.get(ask.discord_id)
     if not yes or not m:
         ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name} declined ({ask.kind})")
         rs.save(ev, f"fill {ask.display_name} no")
         return f"{ask.display_name} can't ({'swap' if ask.swap else ask.kind})"
+    other = partner_of(ev, ask)
+    if other is not None and other.answer is None:  # the partner hasn't answered: hold this yes, change nothing
+        ask.held = True
+        ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name} said yes — waiting for {other.display_name} (a tied pair needs both)")
+        rs.save(ev, f"fill {ask.display_name} yes, held")
+        return f"{ask.display_name} said yes — waiting for {other.display_name}; nothing changes until both say yes"
+    line = _apply_yes(reg, rs, ev, ask, m)
+    if other is not None and other.held:  # the partner said yes first: now both happen
+        other.held = False
+        om = reg.members.get(other.discord_id)
+        if om:
+            line += " · " + _apply_yes(reg, rs, ev, other, om)
+    return line
+
+
+def _apply_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: Member) -> str:
+    """One yes taking effect (apply_fill_answer): the signup before lock, the seat after."""
     if ev.state == "open":
         return _prelock_yes(reg, rs, ev, ask, m)
     if ask.kind in ("offspec", "flex") and str(ask.discord_id) in ev.signups and ev.signups[str(ask.discord_id)].character == ask.character:
@@ -1477,10 +1530,11 @@ def _prelock_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: M
 
 
 def release_prelock_asks(ev: RaidEvent) -> list[FillAsk]:
-    """At lock: pre-lock asks nobody answered close (`released`) — they expire at lock time. The caller saves."""
-    gone = [a for a in ev.fill_asks if a.open and a.phase == "prelock"]
+    """At lock: pre-lock asks nobody answered close (`released`) — they expire at lock time; so does a yes held for a
+    tied partner who never answered (nothing had changed for it). The caller saves."""
+    gone = [a for a in ev.fill_asks if a.pending and a.phase == "prelock"]
     for a in gone:
-        a.answer, a.answered_at = "released", now()
+        a.answer, a.answered_at, a.held = "released", now(), False
     if gone:
         ev.log.append(f"pre-lock asks closed at lock: {', '.join(a.display_name for a in gone)}")
     return gone

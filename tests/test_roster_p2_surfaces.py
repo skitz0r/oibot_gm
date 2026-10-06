@@ -67,7 +67,7 @@ def test_rosters_carry_coverage_level_and_forecast(reg, rs, client_bot):
     worked_example(reg, rs)
     raid = next(r for r in c.get("/api/rosters", headers=bearer()).json()["raids"] if r["id"] == RID)
     s = next(x for x in raid["series"] if x["key"] == KEY)
-    assert s["level"] == "green" and len(s["forecast"]) >= 4
+    assert s["level"] == "amber" and s["no_spare"] == ["tank", "healer"] and len(s["forecast"]) >= 4, "the worked example: tanks 2/2, healers 2/2 — no spare"
     first = s["forecast"][0]
     assert first["short"] == {"tank": 1, "healer": 1} and first["away"] == ["Ona", "Thorn"] and ":" not in first["day"]
     assert all(f["short"] == {} for f in s["forecast"][1:]), "the absences cover one day only"
@@ -152,7 +152,15 @@ def _series(reg, rows):
 
 def test_coverage_green_amber_red_with_recruits(reg):
     ms_ = _series(reg, [("Tia", "Warrior", "Protection"), ("Tob", "Paladin", "Protection"), ("Hux", "Priest", "Holy"), ("Hob", "Shaman", "Restoration")])
-    assert reg.series_coverage(RID)[0]["level"] == "green", "regular mains cover the minimums"
+    cov = reg.series_coverage(RID)[0]
+    assert cov["level"] == "amber" and cov["no_spare"] == ["tank", "healer"], "exactly the minimums: one absence leaves it short"
+    spares = [add(reg, 740, "Tor", "Druid", "Guardian"), add(reg, 741, "Hal", "Druid", "Restoration")]
+    for m in spares:
+        reg.regular_add(m.discord_id, KEY, "t")
+    cov = reg.series_coverage(RID)[0]
+    assert cov["level"] == "green" and cov["no_spare"] == [], "regular mains cover the minimums with a spare"
+    for m in spares:
+        reg.regular_remove(m.discord_id, KEY, "t")
     reg.regular_remove(ms_[1].discord_id, KEY, "t")
     offy = add(reg, 750, "Offy", "Warrior", "Fury", "Protection")
     reg.regular_add(offy.discord_id, KEY, "t")

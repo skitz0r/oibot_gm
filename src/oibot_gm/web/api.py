@@ -907,7 +907,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         v, _ = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         plan = await asyncio.to_thread(rc.role_plan, v.reg, rs, ev)
-        waiting = [a.display_name for a in ev.fill_asks if a.open]
+        waiting = [a.display_name for a in ev.fill_asks if a.pending]
         if ev.state == "open":
             return {"short": plan.short, "waiting": waiting, "batch": [], "plan": plan_json(v.reg, plan)}
         nd = rc.needs(v.reg, ev, t)
@@ -932,7 +932,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                 return JSONResponse({"error": str(e), "plan": plan_json(v.reg, e.plan)}, status_code=409)
             except (RegistryError, ValueError) as e:
                 return JSONResponse({"error": str(e)}, status_code=400)
-            return {"message": ("asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)) if sent else ("nothing to ask" if not plan.asks else "nobody could be reached (DMs off)")}
+            return {"message": (("asked " + ", ".join(f"{a.display_name} ({'swap' if a.swap else a.kind})" for a in sent)) if sent else ("nothing to ask" if not plan.asks else "nobody could be reached (DMs off)")) + rc.held_back_words(plan)}
         sent, nd = await bot.run_fill(v.reg, rs, ev, t, by=v.name, approved_by=v.name)
         if sent:
             await bot.post_run_update(v.reg, ev, "🧩 " + "\n🧩 ".join(dr.ask_line(v.reg, bot.ico, a) for a in sent))

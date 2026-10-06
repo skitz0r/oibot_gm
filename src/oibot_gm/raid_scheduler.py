@@ -82,7 +82,7 @@ class RaidSchedulerMixin:
                     state = "open"
                     await self.ops.emit(cfg, "warn", f"{ev.key}: locked without a roster — reopened, retrying the lock")
                 if state == "open" and now >= hard:
-                    rc.expire_fill_asks(reg, rs, ev)  # pre-lock asks expire at lock time (a lock that keeps failing leaves none open)
+                    await self.close_prelock_asks(reg, rs, ev)  # pre-lock asks close at lock time ("released", as lock_run does)
                     tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
                     if ev.lock_error and tried and now - tried < timedelta(minutes=15):
                         continue  # failed recently; give the officers time to fix the board before trying again
@@ -97,6 +97,9 @@ class RaidSchedulerMixin:
                     continue  # the fill engine, confirmations and closing only apply to a locked roster
                 gone = rc.expire_confirmations(reg, rs, ev)
                 if gone:
+                    if ev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again
+                        ev.fill_state = "idle"
+                        rs.save(ev, "fill: seats freed")
                     for name in gone:
                         m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
                         if m:
@@ -111,7 +114,9 @@ class RaidSchedulerMixin:
                     for a in released:
                         await self.withdraw_ask(reg, ev, a, "the other half of the question timed out")
                     await self.refresh_cards(reg, ev)
-                if rc.team_setting(team, "autofill") and ev.fill_state in ("idle", "asking"):
+                # every state but "exhausted" (nobody left; a freed seat resets it): "suggested" (a role swap waits for an
+                # officer, D3) and "filled" still get same-role asks for a seat freed later (an expired confirmation)
+                if rc.team_setting(team, "autofill") and ev.fill_state != "exhausted":
                     sent, nd = await self.run_fill(reg, rs, ev, team)
                     if sent:
                         exhausted_posted.discard(ev.key)

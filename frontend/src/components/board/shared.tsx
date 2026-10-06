@@ -36,9 +36,13 @@ export function RosterHeader({ meta, r, title }: { meta: Meta; r: BoardRoster; t
   );
 }
 
-export function RoleCounts({ meta, counts, size = 16 }: { meta: Meta; counts: Record<string, number>; size?: number }) {
+/** Role icon + count per role (never "3 tank"). With `need`, a role that has a minimum reads count/minimum, red when short. */
+export function RoleCounts({ meta, counts, size = 16, need }: { meta: Meta; counts: Record<string, number>; size?: number; need?: Record<string, number> }) {
   return (
-    <Group gap="md">{meta.roles.map((role) => <Group key={role} gap={4} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={size} title={role} /><Text size={size > 16 ? "sm" : "xs"} style={{ fontVariantNumeric: "tabular-nums" }}>{counts[role] || 0}</Text></Group>)}</Group>
+    <Group gap="md">{meta.roles.map((role) => {
+      const n = counts[role] || 0, min = need?.[role] || 0;
+      return <Group key={role} gap={4} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={size} title={role} /><Text size={size > 16 ? "sm" : "xs"} c={min && n < min ? "red" : undefined} fw={min && n < min ? 700 : undefined} style={{ fontVariantNumeric: "tabular-nums" }}>{min ? `${n}/${min}` : n}</Text></Group>;
+    })}</Group>
   );
 }
 

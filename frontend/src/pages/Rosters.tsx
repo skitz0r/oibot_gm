@@ -111,7 +111,8 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
   const on = new Set(s.regulars.map((x) => x.uid));
   const level = s.level || (Object.entries(s.need).some(([role, n]) => (s.counts[role] || 0) < n) ? "red" : "green");
   const levelColour = { green: "teal", amber: "yellow", red: "red" }[level];
-  const levelWords = { green: "regular mains cover the tank and healer minimums", amber: "covered only with offspecs, flex roles or alts", red: "regulars can't field the minimum" }[level];
+  const spare = s.no_spare || [];
+  const levelWords = { green: "regular mains cover the tank and healer minimums, with a spare", amber: spare.length ? `no spare ${spare.join(" or ")} among regular mains — one absence leaves it short` : "covered only with offspecs, flex roles or alts", red: "regulars can't field the minimum" }[level];
   async function remove(uid: string, name: string, character: string) {
     if (!(await ask({ title: `Take ${name} off the regulars?`, message: `${character} stops being expected on ${r.name} · ${s.name}. They can still Join any sheet.`, confirmLabel: "Remove", color: "red" }))) return;
     await onAct(`reg${s.key}${uid}`, "/api/admin/raid/regulars", { raid: r.id, schedule: s.id, uid, on: false });
@@ -129,7 +130,7 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
           <Text size="xs" c="dimmed">{s.label} · {s.regulars.length} regular{s.regulars.length === 1 ? "" : "s"} for {s.seats} seats</Text>
         </Box>
         <Tooltip label={levelWords}>
-          <Box style={{ borderBottom: `2px solid var(--mantine-color-${levelColour}-5)` }}><RoleCounts meta={meta} counts={s.counts} size={16} /></Box>
+          <Box style={{ borderBottom: `2px solid var(--mantine-color-${levelColour}-5)` }}><RoleCounts meta={meta} counts={s.counts} need={s.need} size={16} /></Box>
         </Tooltip>
       </Group>
       {s.regulars.length > 0 && level === "amber" && (s.cover || []).length > 0 && <Text size="xs" c="dimmed" mt={4}>could cover: {(s.cover || []).join(", ")}</Text>}

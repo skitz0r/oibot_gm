@@ -218,9 +218,11 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   each ask *from the bench* / *a regular, no answer* / *not a regular*). See *Suggestions* below for short tanks and
   healers.
 - **Regulars coverage** (no run needed): per recurring schedule, the regulars' role counts against the tank and healer
-  minimums, coloured **green** (the regulars' own characters cover the minimums), **amber** (only with offspecs, a
-  declared flex role or alts — the card says who could cover) or **red** (they can't field the minimum — the card names
-  members who play the missing role, best rank first, to recruit). Beside it a **4-week forecast**: for each upcoming
+  minimums (role icon and *count/minimum*, red when short), coloured **green** (the regulars' own characters cover the
+  minimums with a spare in each), **amber** (exactly the minimum with no spare — one absence leaves it short, e.g.
+  tanks 2/2 — or covered only with offspecs, a declared flex role or alts; the card says which, and who could cover) or
+  **red** (they can't field the minimum — the card names members who play the missing role, best rank first, to
+  recruit). Beside it a **4-week forecast**: for each upcoming
   run (counted from the raid's first opening until then) the regulars minus recorded absences, e.g. "Tue 15 Dec: short
   1 tank, 1 healer (Thorn, Ona away)" — the hole shows a week ahead instead of at reminder time. The same numbers show
   on the Rosters page's *Regulars* cards (the colour under the role counts, a *Next 4 weeks* list: role icon and a
@@ -249,12 +251,17 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
   roles*) · a joiner's **offspec** or a **regular who hasn't answered** · an **alt** of the role (never one already
   rostered on this raid in the same lockout) · a **member who isn't a regular**. When every seat is already taken,
   switches by people coming go first — a new healer would only push a DPS to the bench at lock. A switch that would
-  drop the role someone leaves under its minimum is offered only tied to someone covering it, and both must say yes.
-  Nobody is suggested for two seats, and the bot never takes the one person a later seat can't do without.
+  drop the role someone leaves under its minimum is offered only tied to someone covering it, and both must say yes:
+  the first yes changes nothing until the other answers; the second yes makes both changes; a no (or silence, or the
+  lock arriving first) from either closes the other with a "never mind" DM. Nobody is suggested for two seats (the
+  *Suggest…* screen refuses picking one person for two), and the bot never takes the one person a later seat can't do
+  without. Test puppets are never suggested or asked on a real run.
 - **Two alternates** per short seat, so you can ask someone else without typing a name, and a **Still short if all say
   yes** line ("nothing", or what to recruit).
-- **Where.** The officer **health card** gets a *Suggested* block (up to three seats) with **Ask** (sends what the card
-  shows) and **Suggest…** (every seat with its alternates in a select, then *Send*). On a recurring schedule with
+- **Where.** The officer **health card** gets a *Suggested* block (up to three seats; one member per line, the spec
+  icon they'd play and the character) with **Ask** (sends what the card shows) and **Suggest…** (every seat with its
+  alternates in a select, then *Send*). The block, the regulars who haven't answered and the buttons are for
+  officers: a member who runs `/raid health` sees the counts, what is short and the missing buffs only. On a recurring schedule with
   regulars the health card is posted **as soon as the sheet opens** when the regulars (minus anyone away) can't cover a
   minimum — an early warning — and posted again, rebuilt, at reminder time. On the site, **Suggest** beside the sheet's
   *short* badge opens the same list (pick the suggestion or an alternate per seat, then *Send*). `/raid fill` on an open
@@ -264,11 +271,14 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 - **What the member gets** (before lock): a DM — "Barrow Deeps <time> is short a healer. Could you come as Holy?"
   with **Yes, as Holy** / **No**. **Yes** changes their sign-up (Join, as that spec or character) and rosters nobody:
   the lock still builds the roster and now sees the agreed role. **No** frees the seat in the suggestions and the next
-  alternate shows on the card. At most one ask per member per run; unanswered asks close when the roster locks.
+  alternate shows on the card. At most one ask per member per run; unanswered asks close when the roster locks
+  (pressing them afterwards says "That question closed when the roster locked").
 - **After lock** the fill engine (step 6 below) uses the same list. On a **recurring** schedule it asks people for the
   same role on its own, but a **role swap** (a flex role, an offspec or an alt, with or without someone covering)
-  waits for an officer: the lock card shows it under *Suggested* with **Ask**. On an **ad hoc** run the fill engine
-  sends swaps itself, as before.
+  waits for an officer: the lock card shows it under *Suggested* with **Ask** — while it waits, a seat freed later
+  (a missed confirmation) still gets its same-role asks automatically. An officer's Ask after lock counts the asks
+  still out (nobody is asked twice for one seat) and keeps the cap of 3 questions out at a time: what doesn't fit
+  stays on the card ("1 more waits"). On an **ad hoc** run the fill engine sends swaps itself, as before.
 
 Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
 
@@ -362,6 +372,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    a swap is not sent on its own: the lock card shows it under *Suggested* and an officer presses **Ask** (or Fill
    seats); the updates thread says so once. On an ad hoc run swaps go out by themselves. A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
    for a bench or pool member of that role and sends both asks tied together — the swap and its backfill — and
+   nothing changes until both say yes (the first yes waits; the second makes both changes and tells the first);
    a no (or silence) from either withdraws the other with a "never mind" DM. It asks the shortfall + 1 at a
    time, never more than 3 outstanding, and never asks someone who is rostered on another raid within 4 hours,
    absent, or has DMs off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
@@ -766,7 +777,9 @@ Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps run and D
 out 1"), and so does MCP (`test_bench` compose / comp). The bench holds at most 80.
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,
-rostered or asked to fill it, and the test sheet refuses presses from real members; setting a real member's
+rostered or asked to fill it, and the test sheet refuses presses from real members. The other way round too: a real
+run (ad hoc, or a schedule with no regulars yet, where every main is expected) never expects, suggests, asks or marks
+away a puppet; setting a real member's
 answer on a test run is refused on every path too (the site, plain text, MCP). Every DM the bot would
 send a puppet (open, nudge, Confirm / Can't make it, fill asks) arrives in **your own DMs** with the puppet's
 name on it — the DMs of the officer who opened *that* test run, so two officers rehearsing at once each get their

@@ -103,6 +103,9 @@ class FakeBot:
     async def post_run_update(self, reg, ev, text):
         self.calls.append(("post_run_update", ev.key, text))
 
+    def officer_channel(self, reg, ev=None):
+        return self.__dict__.get("officer_ch")
+
     async def post_boss_tables(self, session, thread):
         self.calls.append(("post_boss_tables", session.id, thread.id))
 

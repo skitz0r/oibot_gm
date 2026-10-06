@@ -420,10 +420,10 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
         hint = rc.another_run_hint(reg, ev, rosters, reason)
         if hint:
             out.append(f"  {hint}")
-    open_asks = [a for a in ev.fill_asks if a.open]
-    done_asks = [a for a in ev.fill_asks if not a.open][-4:]
+    open_asks = [a for a in ev.fill_asks if a.pending]
+    done_asks = [a for a in ev.fill_asks if not a.pending][-4:]
     if open_asks or done_asks:
-        asks = [f"{a.display_name} ({a.kind}: {a.character} {a.spec} for {a.role}, {a.reason}, deadline {reg.local12(a.expires_at, fmt) if a.expires_at else '?'})" for a in open_asks]
+        asks = [f"{a.display_name} ({a.kind}: {a.character} {a.spec} for {a.role}, {a.reason}, " + ("said yes, waiting for the tied ask" if a.held else f"deadline {reg.local12(a.expires_at, fmt) if a.expires_at else '?'}") + ")" for a in open_asks]
         out.append("  fill asks outstanding: " + (_names(asks) if asks else "none")
                    + (f" · recent answers: {', '.join(f'{a.display_name} {a.answer}' for a in done_asks)}" if done_asks else ""))
     away = [(m, m.absent_on(day)) for m in reg.members.values() if m.absent_on(day)]
@@ -948,7 +948,7 @@ def officer_index(ask: Ask, included: list[str], skipped: list[str]) -> str:
         waiting = len(ProposalStore(reg.store, reg.key).all("proposed,failed"))  # what an officer can still approve or dismiss (configops.proposals_text)
     except Exception:  # noqa: BLE001
         waiting = 0
-    fill_open = sum(len([a for a in ev.fill_asks if a.open]) for ev in (ask.rs.live() if ask.rs is not None else []))
+    fill_open = sum(len([a for a in ev.fill_asks if a.pending]) for ev in (ask.rs.live() if ask.rs is not None else []))
     waiting_conf = 0
     if ask.rs is not None:
         from . import raidcycle as rc

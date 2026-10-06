@@ -128,8 +128,7 @@ def _locked_short_healer(reg, rs, adhoc: bool = False):
     if adhoc:
         reg.set_raid_overrides(RID, {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
         ms = [add(reg, 300 + i, *row) for i, row in enumerate(rows)]
-        for m in reg.test_members():
-            m.dm_opt_out = True  # an ad hoc run's pool is every main: keep the puppets out of it
+        assert reg.test_members(), "the fixture has test puppets: an ad hoc run's pool (every main) must leave them out"
         t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
         ev = rc.open_run(reg, rs, RID, t, by="t", schedule=ADHOC_SCHEDULE)
         join(reg, rs, ev, ms)
@@ -182,8 +181,10 @@ def test_health_card_has_the_suggested_block_with_ask_and_suggest(reg, rs):
     view = views.health_layout(reg, rs, ev, rc.run_team(reg, ev), ico)
     body = text_of(view)
     assert "**Suggested** · expected <role:tank> 1/2   <role:healer> 1/2 (joined + 10 regulars yet to answer) · every seat taken: swaps first" in body
-    assert "<role:tank> <spec:Warrior:Protection> **Kael** · offspec" in body and "alternates: Gorm" in body
-    assert "<role:healer> <spec:Paladin:Holy> **Ana** · flex" in body and "alternates: Wren · Pip" in body
+    lines = body.split("\n")
+    assert "<spec:Warrior:Protection> **Kael** · offspec" in lines and "alternates: Gorm" in body
+    assert "<spec:Paladin:Holy> **Ana** · flex" in lines and "alternates: Wren · Pip" in body
+    assert not any("<role:" in ln and "<spec:" in ln for ln in lines), "a spec icon alone on a member line — never a role icon beside it"
     assert "Still short if all say yes: nothing" in body
     ids = [b.custom_id for b in buttons(view)]
     rev = rc.role_plan(reg, rs, ev).rev

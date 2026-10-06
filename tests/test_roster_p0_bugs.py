@@ -81,9 +81,13 @@ def test_own_join_on_an_open_sheet_is_never_demoted(reg, rs):
 
 def test_fill_pool_after_lock_holds_the_unanswered(reg, rs):
     """After lock (with confirmations sent, as lock_run does) the unanswered mains are the 'pool' tier — not
-    'other_roster' — and health still lists them as not answered."""
-    ev = open_plain_run(reg, rs)
+    'other_roster' — and health still lists them as not answered. The bench's members stand in for a live guild here
+    (made real members: a real run never takes test puppets)."""
     seated = _ten(reg)
+    for m in reg.test_members():
+        m.test = False
+        reg.save(m, "a real member for this test")
+    ev = open_plain_run(reg, rs)
     join(reg, rs, ev, seated)
     _locked_with_confirmations(reg, rs, ev, seated)
     silent = [m for m in reg.members.values() if m.main and str(m.discord_id) not in ev.signups]

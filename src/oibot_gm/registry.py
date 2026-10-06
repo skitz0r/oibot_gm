@@ -2166,7 +2166,8 @@ class Registry:
         counts against the raid's tank/healer minimums times the schedule's rosters. ONE computation for the Rosters
         page, /roster overview, the analytics card, readiness (MCP / help) — computed in code, never by the model.
         [{key, raid, raid_name, id, name, label, active, size, rosters, seats, regulars: [{uid, display_name, character,
-        cls, spec, role}], counts: {role: n}, need: {tank: n, healer: n}, short: {role: n}}]"""
+        cls, spec, role}], counts: {role: n}, need: {tank: n, healer: n}, short: {role: n}, level, no_spare: [role], cover,
+        recruit}]"""
         out = []
         for r in ([rid] if rid else list(self.profile.raids)):
             if r not in self.profile.raids:
@@ -2184,17 +2185,20 @@ class Registry:
                 counts = {role: sum(1 for x in regs if x["role"] == role) for role in ROLES}
                 need = {role: int(bounds[role]["min"] or 0) * n for role in ("tank", "healer")}
                 level, cover, recruit = self._coverage_level(key, need)
+                no_spare = [role for role, k in need.items() if k and counts[role] == k] if regs else []
                 out.append({"key": key, "raid": r, "raid_name": rname, "id": s["id"], "name": s.get("name") or s["id"],
                             "label": self.schedule_label(r, s), "active": bool(s.get("active", True)), "size": size, "rosters": n,
                             "seats": size * n, "regulars": regs, "counts": counts, "need": need,
                             "short": {role: k - counts[role] for role, k in need.items() if counts[role] < k},
-                            "level": level, "cover": cover, "recruit": recruit})
+                            "level": level, "no_spare": no_spare, "cover": cover, "recruit": recruit})
         return out
 
     def _coverage_level(self, key: str, need: dict[str, int]) -> tuple[str | None, list[str], list[str]]:
-        """(level, cover, recruit) for a series: green = the regulars' own characters cover the tank/healer minimums;
-        amber = only with offspecs, declared flex roles or alts (`cover` names them); red = not even then (`recruit` =
-        members who aren't regulars of it and play a short role, best rank first). None while it has no regulars."""
+        """(level, cover, recruit) for a series: green = the regulars' own characters cover the tank/healer minimums with
+        a spare in each (one absence still leaves the minimum); amber = covered with no spare (the design's worked
+        example: tanks 2/2 is amber), or only with offspecs, declared flex roles or alts (`cover` names them); red = not
+        even then (`recruit` = members who aren't regulars of it and play a short role, best rank first). None while it
+        has no regulars."""
         regs = self.regulars(key)
         if not regs:
             return None, [], []
@@ -2204,7 +2208,8 @@ class Registry:
             return self.profile.spec(c.cls, c.spec).role
 
         own = [{role(c)} for _m, c in regs]
-        if can_cover(own, seats):
+        spare = all(can_cover(own, seats + [r]) for r, k in need.items() if k)
+        if can_cover(own, seats) and spare:
             return "green", [], []
         wide, cover = [], []
         for m, c in regs:

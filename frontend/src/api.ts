@@ -93,9 +93,9 @@ export interface RaidRuns {
 export interface Regular { uid: string; display_name: string; character: string; cls: string; spec: string; role: string }
 /** One upcoming start of a recurring series: its regulars minus recorded absences, against the minimums. */
 export interface ForecastRow { start: string; day: string; when: string; expected: number; seats: number; short: Record<string, number>; away: string[] }
-/** `level`: green = regular mains cover the tank/healer minimums, amber = only with offspecs / flex / alts (`cover`), red = not even then (`recruit`); null = no regulars yet. */
+/** `level`: green = regular mains cover the tank/healer minimums with a spare, amber = no spare (`no_spare`) or only with offspecs / flex / alts (`cover`), red = not even then (`recruit`); null = no regulars yet. */
 export interface Series { key: string; id: string; name: string; label: string; active: boolean; seats: number; regulars: Regular[]; counts: Record<string, number>; need: Record<string, number>;
-  level?: "green" | "amber" | "red" | null; cover?: string[]; recruit?: string[]; forecast?: ForecastRow[] }
+  level?: "green" | "amber" | "red" | null; no_spare?: string[]; cover?: string[]; recruit?: string[]; forecast?: ForecastRow[] }
 /** Someone who can be made a regular (real members with active characters, main first). */
 export interface Person { uid: string; display_name: string; characters: { label: string; cls: string; spec: string; role: string; is_main: boolean }[] }
 /** One schedule of a raid (mirrors web/api.py schedule_json). Machine forms (`slots`, `days`, `time`) are for the editors;

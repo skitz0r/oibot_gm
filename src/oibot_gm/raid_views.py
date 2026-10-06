@@ -276,8 +276,8 @@ def suggested_block(reg: Registry, ico, plan) -> str:
     lines = [head]
     for st in seats[:SUGGEST_LINES]:
         main = st.options[0]
-        lead = f"{ico('role', st.role)} " if st.role else ""
-        lines.append(lead + " + ".join(plan_ask_md(reg, ico, a) for a in main))
+        # the spec icon alone says role + spec on a member line (the iconography rule: role icons are for counts only)
+        lines.append(" + ".join(plan_ask_md(reg, ico, a) for a in main))
         why = (main[0].why or "").split(" · ", 1)[-1] if st.role else (main[0].why or "")
         alts = " · ".join(" + ".join(a.display_name for a in opt) for opt in st.options[1:])
         lines.append("-# " + why + (f" · alternates: {alts}" if alts else ""))
@@ -312,7 +312,7 @@ LEVEL_DOT = {"green": "🟢", "amber": "🟠", "red": "🔴"}
 
 def coverage_line(ico, cov: dict) -> str:
     """One recurring series' regulars coverage (Registry.series_coverage) for a Discord card: the level dot (green:
-    regular mains cover the minimums; amber: only with offspecs or alts; red: can't), role icon + count over the
+    regular mains cover the minimums with a spare; amber: no spare, or only with offspecs or alts; red: can't), role icon + count over the
     minimum where there is one, ⚠ when short (the iconography rule: never "2 tank"); then regulars / seats."""
     if not cov["regulars"]:
         return f"no regulars yet · every main is expected · {cov['seats']} seats"
@@ -399,9 +399,12 @@ def run_actions_row(ev: rc.RaidEvent, locked: bool):
     return ui.ActionRow(*items)
 
 
-def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> discord.ui.LayoutView:
+def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer: bool = True) -> discord.ui.LayoutView:
     """The health check as a card: joined vs size, role have/need with the short role marked, who could cover,
-    nobody-brings icons, no-answer count, double-booked; officer buttons."""
+    nobody-brings icons, no-answer count, double-booked; officer buttons. `officer=False` is the card a member sees
+    (/raid health is open to members): the counts, what is short and the missing buffs only — never the officer-facing
+    parts (owner decision D1 and Phase 2): who could cover, the regulars who haven't answered, who is double-booked,
+    the Suggested block and the officer buttons."""
     ui = discord.ui
     h = rc.health_data(reg, ev, team)  # role have/need = rc.gaps, the same numbers needs() and the fill engine read
     n, seats, _t, subs = h["headcount"]  # seats = what the run advertises (size × the rosters its schedule expects)
@@ -420,13 +423,13 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
     short = [r for r in h["roles"] if r["need"] and r["have"] < r["need"]]
     if short:
         body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] - r['have']}" for r in short))
-        hints = [r["hint"] for r in short if r["hint"]]
+        hints = [r["hint"] for r in short if r["hint"]] if officer else []  # names of who could cover: officers only
         if hints:
             body.append("-# " + " · ".join(hints))  # `-#` only renders at the start of a line
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
         body.append("⛔ " + " ".join(ico("buff", b["id"]) for b in missing if ico("buff", b["id"])))
-    waiting = rc.not_answered(reg, ev)  # the regulars who haven't answered (every main while the series has none); ad hoc: nobody
+    waiting = rc.not_answered(reg, ev) if officer else []  # the regulars who haven't answered (every main while the series has none); ad hoc: nobody
     if waiting:
         whose = {"regulars": "regulars", "everyone": "no regulars set: everyone", "test": "test bench"}.get(h.get("expected_from"), "")
         lines = [f"**No answer** {len(waiting)}" + (f" · {whose}" if whose else "") + (" · nudged" if ev.nudged else "")]
@@ -435,18 +438,19 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico) -> disco
             lines.append(f"-# +{len(waiting) - NO_ANSWER_LINES} more on the board")
         body.append("\n".join(lines))
     busy = rc.conflicts(rs, ev) if rs is not None else {}
-    double = [reg.members[u].display_name for u in busy if u in reg.members and str(u) in ev.signups and ev.signups[str(u)].status == "in"]
+    double = [reg.members[u].display_name for u in busy if u in reg.members and str(u) in ev.signups and ev.signups[str(u)].status == "in"] if officer else []
     if double:
         body.append("**Double-booked** " + ", ".join(double))
     _soft, hard, confirm = run_times(reg, ev, team)
     parts = [head, ui.Separator()] + ([ui.TextDisplay("\n".join(body)), ui.Separator()] if body else [])
-    plan = rc.role_plan(reg, rs, ev)  # nothing is sent until an officer presses Ask
-    sug = suggested_block(reg, ico, plan)
+    plan = rc.role_plan(reg, rs, ev) if officer else None  # nothing is sent until an officer presses Ask
+    sug = suggested_block(reg, ico, plan) if plan else ""
     if sug:
         parts += [ui.TextDisplay(sug), suggest_row(ev, plan), ui.Separator()]
     parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else " · first come, no confirmations")))
-    parts.append(run_actions_row(ev, locked=False))
-    worst = "red" if short or plan.short["roles"] else "amber" if missing or waiting else "green"
+    if officer:
+        parts.append(run_actions_row(ev, locked=False))
+    worst = "red" if short or (plan and plan.short["roles"]) else "amber" if missing or waiting else "green"
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour={"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]))
     return view
@@ -600,7 +604,8 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
                 parts += [ui.Separator(), ui.TextDisplay(_group_block(reg, ico, r, gi, None, _group_summaries(reg, r), title=f"You'd join Group {gi + 1}" + (f" of Roster {i + 1}" if len(ev.all_rosters) > 1 else ""), show_missing=False))]
                 break
     deadline = f" No answer by <t:{int(datetime.fromisoformat(ask.expires_at).timestamp())}:f> counts as no." if ask.expires_at else ""
-    parts += [ui.Separator(), ui.TextDisplay(("-# Confirm makes the swap at once." if ask.swap else "-# Confirm puts you straight in the seat.") + " A no asks the next person." + deadline), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
+    first = ("-# Confirm counts once you both say yes." if partner else "-# Confirm makes the swap at once." if ask.swap else "-# Confirm puts you straight in the seat.")
+    parts += [ui.Separator(), ui.TextDisplay(first + " A no asks the next person." + deadline), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0xE0A448))
     return view

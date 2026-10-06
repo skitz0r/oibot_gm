@@ -441,7 +441,12 @@ async def open_raid_health(interaction: discord.Interaction, reg: Registry, **_s
         if sheet_state(ev) != "open":
             await wiz.finish(i, f"{run_label(reg, ev)} is {sheet_state(ev)} — the health check is for an open sheet; see its lock cards in the roster channel.")
             return
-        layout, eph = health_layout(reg, rs, ev, run_team(reg, ev), i.client.ico), not is_officer(i, reg)
+        # an officer gets the full card (Suggested block, who hasn't answered, the buttons), shown to everyone only in
+        # the run's officer channel; a member gets the redacted card, always just to them
+        officer = is_officer(i, reg)
+        oc = i.client.officer_channel(reg, ev) if officer else None
+        eph = not (officer and oc is not None and i.channel is not None and i.channel.id == oc.id)
+        layout = health_layout(reg, rs, ev, run_team(reg, ev), i.client.ico, officer=officer)
         if is_command(i):
             await i.response.send_message(view=layout, ephemeral=eph)
             return
@@ -644,7 +649,7 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
             return
         await wiz.working(si, "Sending…")
         try:
-            sent, _plan = await si.client.send_plan(reg, rs, cur, rev=wiz.draft["rev"], by=si.user.display_name, picks=dict(wiz.draft["picks"]))
+            sent, sent_plan = await si.client.send_plan(reg, rs, cur, rev=wiz.draft["rev"], by=si.user.display_name, picks=dict(wiz.draft["picks"]))
         except rc.PlanChanged as e:
             await show_suggestions(si, wiz, rs, key, note=f"⚠️ {e}")
             return
@@ -652,7 +657,7 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
             await wiz.refuse(si, str(e), retry=lambda ri: show_suggestions(ri, wiz, rs, key))
             return
         await wiz.finish(si, ("Asked " + ", ".join(a.display_name for a in sent) + " by DM — answers post in the run's thread." if sent else "Nobody could be asked (DMs off).")
-                         + (" A yes changes their signup; the lock still builds the roster." if plan.phase == "prelock" else ""))
+                         + (" A yes changes their signup; the lock still builds the roster." if plan.phase == "prelock" else "") + rc.held_back_words(sent_plan))
 
     items.append(wiz.button(f"Send {len(chosen)} ask{'s' if len(chosen) != 1 else ''}", send, discord.ButtonStyle.success, disabled=not chosen))
     items.append(wiz.button("Cancel", wiz.cancel))
@@ -703,7 +708,7 @@ async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, pre
         if preview:
             cands = await asyncio.to_thread(rc.fill_candidates, reg, rs, ev, t)
             lines = [f"{n + 1}. " + ask_line(reg, bot.ico, a) + (" — tied to " + next((b.display_name for b in cands if b.discord_id == a.pair), "?") if a.pair else "") for n, a in enumerate(cands[:15])]
-            open_asks = [a for a in ev.fill_asks if a.open]
+            open_asks = [a for a in ev.fill_asks if a.pending]
             await wiz.finish(i, f"{run_label(reg, ev)} · {gaps}" + (f" · double-booked: {', '.join(reg.members[u].display_name for u in busy if u in reg.members)}" if busy else "") + f"\nOutstanding asks: {', '.join(a.display_name for a in open_asks) or 'none'}\nWould ask next:\n" + ("\n".join(lines) or "nobody left"))
             return
         sent, nd = await bot.run_fill(reg, rs, ev, t, by=i.user.display_name, approved_by=i.user.display_name)  # an officer's: role swaps included (D3)

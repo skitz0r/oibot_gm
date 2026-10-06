@@ -1867,7 +1867,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         nd = rc.needs(reg, ev, rc.run_team(reg, ev))
         parts = ([f"{nd['headcount']} seat(s)"] if nd["headcount"] else []) + [f"{n} {r}" for r, n in nd["roles"].items()]
         short = ", ".join(parts) or "nothing"
-        waiting = [a.display_name for a in ev.fill_asks if a.open]
+        waiting = [a.display_name for a in ev.fill_asks if a.pending]
         return f"{label}: fill {'preview (nothing sent)' if v == 'preview' else 'send the next batch of fill DMs'} — short {short}" + (f", waiting on {', '.join(waiting)}" if waiting else "")
     if op.op == "run_strategy":
         v = (op.value or "").strip().lower()
@@ -2151,7 +2151,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         team = rc.run_team(reg, ev)
         nd = rc.needs(reg, ev, team)
         batch = rc.fill_batch(reg, rs, ev, team) if (nd["headcount"] or nd["roles"]) else []
-        waiting = [a.display_name for a in ev.fill_asks if a.open]
+        waiting = [a.display_name for a in ev.fill_asks if a.pending]
         return (f"{ev.key}: short {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else "") + (f"; waiting on {', '.join(waiting)}" if waiting else "")
                 + "; would ask next: " + (", ".join(f"{a.display_name} ({a.kind}: {a.character} {a.spec}, {a.reason})" for a in batch) or "nobody"))
     if op.op == "run_board":
