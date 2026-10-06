@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import html
+import logging
 import os
 import re
 import secrets
@@ -153,6 +154,23 @@ class Viewer:
 
 
 MCP_TOKEN_ENV = "OIBOT_MCP_TOKEN"
+MCP_LOCAL_ENV = "OIBOT_MCP_LOCAL_ONLY"  # on unless set to 0/false/no/off: the owner token works only from this host
+LOOPBACK = frozenset({"127.0.0.1", "::1"})
+# set by a proxy in front of the bot (the Cloudflare tunnel adds cf-connecting-ip / cf-ray / x-forwarded-for); a call made
+# on this host by the MCP server sends none of them
+PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "cf-ipcountry", "x-forwarded-for", "x-real-ip", "forwarded", "true-client-ip")
+log = logging.getLogger(__name__)
+
+
+def mcp_local_only() -> bool:
+    return (os.environ.get(MCP_LOCAL_ENV) or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def local_request(request) -> bool:
+    """Made on this machine and not relayed: a loopback client address (uvicorn rewrites it to the real client for
+    proxied requests) and none of the headers a proxy adds — either alone marks a request from outside."""
+    host = request.client.host if request.client else ""
+    return host in LOOPBACK and not any(request.headers.get(h) for h in PROXY_HEADERS)
 
 
 def bearer_ok(request, token: str | None) -> bool:
@@ -166,8 +184,15 @@ def bearer_ok(request, token: str | None) -> bool:
 
 
 def mcp_viewer(request, bot, token: str | None) -> Viewer | None:
-    """The bearer identity: the guild owner (every write is attributed to them, name 'mcp', via='mcp')."""
+    """The bearer identity: the guild owner (every write is attributed to them, name 'mcp', via='mcp'). With
+    OIBOT_MCP_LOCAL_ONLY on (the default) only a request made on this host counts: the right token arriving through
+    the tunnel is refused exactly like a wrong one, and logged (never the token) because it means the token got out."""
     if not bearer_ok(request, token):
+        return None
+    if mcp_local_only() and not local_request(request):
+        host = request.client.host if request.client else "?"
+        log.warning("refused an MCP bearer request from %s (%s): bearer access is local-only (%s)", host,
+                    request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "no proxy header", MCP_LOCAL_ENV)
         return None
     reg = next(iter(bot.registries.by_discord.values()), None)  # single-guild deployment
     if reg is None or not reg.config.owner_discord_id:

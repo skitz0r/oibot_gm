@@ -702,7 +702,11 @@ name when it has one live run. An ambiguous name comes back with the candidates 
 
 **Safety.** The server acts as the **guild owner** (owner-only settings included) and every change is logged
 as the owner via `mcp`. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
-put it in `.mcp.json` or a commit. Ask for a preview first (`propose_split`, `fill_seats` without send,
+put it in `.mcp.json` or a commit. **Local only** (on by default): the bot accepts the token only from a call made on
+the machine it runs on, which is where the MCP server runs. The same token arriving from anywhere else, through the
+public site's tunnel included, is refused as if it were wrong, and the bot logs a warning (never the token), because
+it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (then restart the bot) lets it work
+remotely too; leave it on unless you run the MCP server on another machine. Browser logins are unaffected. Ask for a preview first (`propose_split`, `fill_seats` without send,
 `plain_change` without apply) and read the returned line back: it says what actually happened. There is no tool
 for handing the guild to a new owner, by design: the token *is* the owner, so a transfer through it would give the
 guild away and change whose rights the token carries — that stays `/gm config owner` in Discord.

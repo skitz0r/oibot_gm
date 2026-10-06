@@ -1,7 +1,10 @@
 """Shared fixtures: a Registry + RaidStore on a throw-away copy of the public demo fixtures (a git repo of its own,
 push off), the `forever` profile and a seeded test bench. Nothing here touches the real data repo.
 
-Solver-backed tests carry `@pytest.mark.slow`; `scripts/check_commands.py` runs `pytest -m "not slow"`."""
+Solver-backed tests carry `@pytest.mark.slow`; `scripts/check_commands.py` runs `pytest -m "not slow"`.
+Web tests call as if from this machine: TestClient's default client is the made-up host "testclient", and the MCP
+owner token is local-only by default (OIBOT_MCP_LOCAL_ONLY), so the default client is loopback here; the tunnel tests
+pass their own client and headers."""
 from __future__ import annotations
 
 import shutil
@@ -12,9 +15,20 @@ from pathlib import Path
 import pytest
 import yaml
 
+import starlette.testclient as _testclient
+
 from oibot_gm import raidcycle as rc
 from oibot_gm.profiles import GameProfile
 from oibot_gm.registry import Registry
+
+_tc_init = _testclient.TestClient.__init__
+
+
+def _loopback_init(self, app, *args, client=("127.0.0.1", 50000), **kwargs):
+    _tc_init(self, app, *args, client=client, **kwargs)
+
+
+_testclient.TestClient.__init__ = _loopback_init  # fastapi.testclient.TestClient is the same class
 from oibot_gm.store import GitStore
 
 ROOT = Path(__file__).resolve().parents[1]

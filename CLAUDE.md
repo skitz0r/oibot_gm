@@ -98,7 +98,8 @@ src/oibot_gm/
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr
   mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
                        that call the RUNNING bot's /api/* over HTTP as the owner (`Authorization: Bearer $OIBOT_MCP_TOKEN` → web/app.py `mcp_viewer`,
-                       via=mcp in the request log). Never a second code path: every write is the site's route. `.mcp.json` (repo root, no secrets)
+                       via=mcp in the request log; LOCAL ONLY by default — OIBOT_MCP_LOCAL_ONLY, web/app.py local_request: loopback client and no proxy
+                       headers, so the token never works through the tunnel). Never a second code path: every write is the site's route. `.mcp.json` (repo root, no secrets)
                        registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change; handle_change for every plain-text path (ConfigConfirmView re-authorizes the presser)
   news.py              news review (design §5.26): keyword filter of #news webhook embeds (profiles/<v>/news.yaml version_terms + raid names +
