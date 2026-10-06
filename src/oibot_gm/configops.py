@@ -2419,11 +2419,14 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_cancel":
         return str(await bot.cancel_run(reg, rs, ev, by, (op.reason or "").strip() or None))
     if op.op == "run_fill" and (op.value or "preview").strip().lower() == "send":
-        if ev.state == "open":  # the suggestions the diff showed (its plan fingerprint): RaidMixin.send_plan, refused if they changed
+        if ev.state == "open" or rev:  # as the site's route: the suggestions the diff showed (its plan fingerprint) go through
+            # RaidMixin.send_plan, refused if they changed — a run that locked since changes the plan's phase, so a
+            # pre-lock diff never turns into a different post-lock batch (role swaps included) the officer never saw
             if not rev:
                 raise RegistryError("preview the suggestions first (ask “suggest fixes for …”), then send them")
-            sent, _plan = await bot.send_plan(reg, rs, ev, rev=rev, by=by)
-            return f"{ev.key}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + " — a yes changes their signup; the lock builds the roster"
+            prelock = ev.state == "open"
+            sent, plan = await bot.send_plan(reg, rs, ev, rev=rev, by=by)
+            return f"{ev.key}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + (" — a yes changes their signup; the lock builds the roster" if prelock else rc.held_back_words(plan))
         sent, nd = await bot.run_fill(reg, rs, ev, team, by=by, approved_by=by)  # an officer's send: role swaps included (D3)
         if sent:
             from .raid_views import ask_line

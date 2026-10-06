@@ -6,7 +6,7 @@ import { classColour } from "../../theme";
 import { Eyebrow, fail, ok } from "../Page";
 import { runName } from "./shared";
 
-const KIND: Record<string, string> = { sub: "from the bench", regular: "a regular, no answer", other: "not a regular", flex: "declared flex", offspec: "offspec", alt: "brings an alt" };
+const KIND: Record<string, string> = { sub: "from the bench", regular: "a regular, no answer", unanswered: "no answer", other: "not a regular", flex: "declared flex", offspec: "offspec", alt: "brings an alt" };
 
 /** One ask: the spec icon they'd play + the character (class colour), the member in dim text, then how and why. */
 function AskLine({ a, meta, why = false }: { a: FillAskRow; meta: Meta; why?: boolean }) {

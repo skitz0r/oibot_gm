@@ -31,7 +31,7 @@ HEADERS = {"X-Requested-With": "oibot", "Accept": "application/json"}
 STATUSES = ("in", "sub", "out")
 POLICY_TEXT_MAX = 1500  # guild_overview's excerpt of each policy document (policy_get has the whole text)
 RAID_FIELDS = ("slots", "signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "lockout_days", "duration_hours",
-               "notes", "split_policy", "nudge", "autofill", "open_dm", "first_open")
+               "notes", "split_policy", "nudge", "autofill", "open_dm", "confirm", "first_open")
 
 
 class Api:
@@ -392,8 +392,9 @@ def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dic
     {field: value} — ONE validated write, so settings that are only legal together (signup lead and nudge raised
     together) go through, and a refusal leaves the raid as it was. field = slots ('Tue 19:30, Thu 19:30'),
     signup_lead_hours, nudge_hours_before, lock_hours_before, confirm_hours_before, fill_ask_hours, lockout_days,
-    duration_hours, notes, split_policy, nudge/autofill/open_dm (true|false), first_open ('YYYY-MM-DDTHH:MM' guild
-    time), weight_<key> (see list_raids weight_keys), or tank_min/tank_max/healer_min/healer_max/dps_min/dps_max."""
+    duration_hours, notes, split_policy, nudge/autofill/open_dm/confirm (true|false; confirm = the lock asks the
+    rostered to Confirm), first_open ('YYYY-MM-DDTHH:MM' guild time), weight_<key> (see list_raids weight_keys), or
+    tank_min/tank_max/healer_min/healer_max/dps_min/dps_max."""
     rid = get_raid(raid)["id"]
     want = dict(fields or {})
     if field:
@@ -408,7 +409,7 @@ def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dic
         elif f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max"):
             role, bound = f.split("_", 1)
             body.setdefault("comp", {}).setdefault(role, {})[bound] = v
-        elif f in ("nudge", "autofill", "open_dm"):
+        elif f in ("nudge", "autofill", "open_dm", "confirm"):
             body[f] = v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")
         elif f in RAID_FIELDS:
             body[f] = v
@@ -425,8 +426,10 @@ def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any 
     the raid's own weekly slots. field = kind (weekly|lockout|pickup) | name | active (true|false) | rosters (1-4) |
     slots ('Sat 20:00, Sun 20:00') | days ('1, 3' = days of each lockout, 1 = reset day) | time ('20:00') |
     signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge |
-    autofill | open_dm | split_policy. A cadence field set to 'inherit' goes back to the raid's value. A new schedule
-    starts with its kind, slots, or days/time."""
+    autofill | open_dm | confirm (true|false: the lock asks the rostered to Confirm) | split_policy | weights (the
+    schedule's own seat weights: {rank, main, sat_out, signup_order, regular} or 'regular 6, rank 0'; 'inherit' drops
+    them). A cadence field set to 'inherit' goes back to the raid's value. A new schedule starts with its kind, slots,
+    or days/time."""
     rid = get_raid(raid)["id"]
     want = {str(k).strip(): v for k, v in (fields or {}).items()}
     if field:

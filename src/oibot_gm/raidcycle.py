@@ -53,6 +53,15 @@ class Signup(BaseModel):
     source: str = "member"  # member | prefill | officer | callout | absence
     note: Optional[str] = None
     updated_at: str = Field(default_factory=now)
+    # when this Join began: kept while the member stays Join (pressing Join again, another character, a yes to an
+    # officer's ask), reset by a fresh Join after Bench / No thanks. Ad hoc first come (D4) orders by it, never by
+    # updated_at (the last touch). None = not Join, or a file from before it was stored (updated_at stands in)
+    joined_at: Optional[str] = None
+
+    @property
+    def order_at(self) -> str:
+        """The signup's place in the queue: when the Join began (joined_at), else when it was last set."""
+        return self.joined_at or self.updated_at
 
 
 class Callout(BaseModel):
@@ -70,7 +79,7 @@ class FillAsk(BaseModel):
 
     discord_id: int
     display_name: str
-    kind: str  # sub | regular | other (bodies: the bench, the series' regulars — every main while it has none —, everyone else) | flex | offspec | alt (switches)
+    kind: str  # sub | regular | unanswered | other (bodies: the bench, the series' regulars who haven't answered — "unanswered" = every main on an ad hoc run or a series with no regulars —, everyone else) | flex | offspec | alt (switches)
     role: str  # the role this ask covers
     character: str  # what they'd play
     spec: str
@@ -170,7 +179,7 @@ class RaidEvent(BaseModel):
 
 
     def by_status(self, status: str) -> list[Signup]:
-        return sorted([s for s in self.signups.values() if s.status == status], key=lambda s: s.updated_at)
+        return sorted([s for s in self.signups.values() if s.status == status], key=lambda s: s.order_at)
 
     @property
     def all_rosters(self) -> list[RosterResult]:
@@ -801,6 +810,18 @@ def _signup(reg: Registry, m: Member, c: RegisteredCharacter, status: str, sourc
     return Signup(discord_id=m.discord_id, display_name=m.display_name, character=c.label, cls=c.cls, spec=c.spec, offspec=c.offspec, role=reg.profile.spec(c.cls, c.spec).role, status=status, source=source, note=note)
 
 
+def carry_joined(old: Signup | None, s: Signup) -> Signup:
+    """Keep the queue place of a Join that stays a Join (a re-press, another character, a yes to an ask); a fresh Join
+    (after Bench / No thanks, or a first answer) starts now; anything but Join holds none."""
+    if s.status != "in":
+        s.joined_at = None
+    elif old is not None and old.status == "in":
+        s.joined_at = old.order_at
+    else:
+        s.joined_at = s.updated_at
+    return s
+
+
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None) -> Signup:
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}")
@@ -810,7 +831,7 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
         raise ValueError("no such active character")
     # no curated-roster demotion here (roster redesign Phase 0): it keyed on the run key, which lock used to fill with
     # the seated, so a member's own Join after lock was stored as Bench and then seated anyway
-    s = _signup(reg, m, c, status, source, note)
+    s = carry_joined(ev.signups.get(str(m.discord_id)), _signup(reg, m, c, status, source, note))
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"{m.display_name} {status} as {c.label} ({source})")
     rs.save(ev, f"{m.display_name} {status}")
@@ -956,7 +977,7 @@ def would_short(reg: Registry, ev: RaidEvent, team: dict, role: str) -> bool:
 # ONE engine for "who could cover this": the fill engine after lock and the officers' suggestions before it. No second
 # solver: a greedy pass in cost order, a matching check so nobody is counted for two seats, paired backfills.
 
-MOVE_COST = {"sub": 1, "flex": 1, "offspec": 2, "regular": 2, "alt": 3, "other": 4}  # design §4: cheapest first
+MOVE_COST = {"sub": 1, "flex": 1, "offspec": 2, "regular": 2, "unanswered": 2, "alt": 3, "other": 4}  # design §4: cheapest first
 PLAN_ALTERNATES = 2  # alternates listed per short seat, so an officer can pick someone else without typing a name
 
 
@@ -1075,7 +1096,10 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     need = {r: int(bounds.get(r, {}).get("min") or 0) * n for r in ("tank", "healer", "dps")}
     day = ev.start.astimezone(reg.tz).date().isoformat()
     busy = conflicts(rs, ev) if rs is not None else {}
-    asked = {a.discord_id for a in ev.fill_asks}  # one ask per member per run (pre-lock or after)
+    # one PRE-LOCK ask per member per run, and one fill ask after lock: once the run locked, the pre-lock asks (answered,
+    # or closed at lock) no longer keep anyone out — a benched joiner who said yes (or no) before lock can be asked for
+    # a seat freed later; asks still in play always do
+    asked = {a.discord_id for a in ev.fill_asks if a.pending or ev.state == "open" or a.phase == "fill"}
     saved = saved_this_lockout(reg, rs, ev)
     exp_from = expected_from(reg, ev)
 
@@ -1105,7 +1129,8 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
                 cur.append({"uid": m.discord_id, "m": m, "name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec, "offspec": c.offspec,
                             "role": role_of(c.cls, c.spec), "signed": False})
     have = {r: sum(1 for p in cur if p["role"] == r) for r in ROLES}
-    waiting = [a for a in ev.fill_asks if a.pending]
+    # asks still out — minus anyone who can't come any more (away that day, or No thanks since): theirs covers nothing
+    waiting = [a for a in ev.fill_asks if a.pending and ask_live(reg, ev, a)]
     counted = waiting if (count_waiting or not locked) else []
     for a in counted:  # asks still out count as covering their seat (no second ask for it meanwhile)
         have[a.role] = have.get(a.role, 0) + 1
@@ -1138,7 +1163,10 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
                 bodies.append(("sub", m, c, "joined, not rostered" if s.status == "in" else "on the Bench"))
     if not projecting:  # projecting: the unanswered regulars are already counted as coming
         word = {"regulars": "a regular, hasn't answered", "test": "test bench, hasn't answered"}.get(exp_from, "hasn't answered")
-        bodies += [("regular", m, c, word) for m, c in pool if c and str(m.discord_id) not in ev.signups]
+        # "regular" only where the run has regulars (a test run's puppets stand in for them); an ad hoc run or a series
+        # nobody curated yet has none — there the pool is every main, and the ask says only that they haven't answered
+        tier = "regular" if exp_from in ("regulars", "test") else "unanswered"
+        bodies += [(tier, m, c, word) for m, c in pool if c and str(m.discord_id) not in ev.signups]
     if not is_test_run(reg, ev):
         # everyone else with a main — never a test puppet on a real run (a test run's pool is the puppets + the tester)
         others = sorted([(m, m.main) for m in reg.members.values() if m.main and not m.test and m.discord_id not in pool_ids and str(m.discord_id) not in ev.signups], key=lambda mc: _rank_key(reg, mc[0]))
@@ -1287,6 +1315,11 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
         if not st.options:
             continue
         taken = shown.setdefault(st.role, set())
+        # an alternate REPLACES this seat's suggestion: the free seats its bodies took are the alternate's to take (after
+        # lock the suggestions may have used up every free seat, which would leave body seats with no alternates)
+        back = sum(1 for a in st.options[0] if not a.swap) if free[0] is not None else 0
+        if free[0] is not None:
+            free[0] += back
         for mv in moves(st.role):
             if len(st.options) > PLAN_ALTERNATES:
                 break
@@ -1297,6 +1330,8 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
             if got and not got[1] & (used | taken):
                 st.options.append(got[0])
                 taken |= got[1]
+        if free[0] is not None:
+            free[0] -= back
     plan.seats = seats
     plan.short_after = {"headcount": sum(1 for st in seats if not st.role and not st.options),
                         "roles": {r: k for r in short_roles if (k := sum(1 for st in seats if st.role == r and not st.options))}}
@@ -1413,10 +1448,11 @@ def _reseat(ev: RaidEvent, sg: Signup) -> bool:
 
 
 def tied_ask(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
-    """The ask tied to this one (swap ↔ backfill) in any state (one ask per member per run, so it is unique)."""
+    """The ask tied to this one (swap ↔ backfill) in any state: sent together, so the same phase (one ask per member per
+    phase — a member asked before lock may be asked again after it), the latest such."""
     if ask.pair is None:
         return None
-    return next((a for a in ev.fill_asks if a is not ask and a.discord_id == ask.pair and a.pair == ask.discord_id), None)
+    return next((a for a in reversed(ev.fill_asks) if a is not ask and a.discord_id == ask.pair and a.pair == ask.discord_id and a.phase == ask.phase), None)
 
 
 def partner_of(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
@@ -1425,15 +1461,47 @@ def partner_of(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
     return other if other and other.pending else None
 
 
-def release_partner(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
+def release_partner(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, because: str | None = None) -> Optional[FillAsk]:
     """A no (or silence) on one half of a tied pair withdraws the other half — unanswered, or a yes that was held
     waiting for this one (nothing had changed for it). Returns the released ask."""
     other = partner_of(ev, ask)
     if other:
         other.answer, other.answered_at, other.held = "released", now(), False
-        ev.log.append(f"fill: {other.display_name}'s ask withdrawn ({ask.display_name} said no)")
+        ev.log.append(f"fill: {other.display_name}'s ask withdrawn ({because or ask.display_name + ' said no'})")
         rs.save(ev, f"fill {other.display_name} released")
     return other
+
+
+def run_day(reg: Registry, ev: RaidEvent) -> str:
+    return ev.start.astimezone(reg.tz).date().isoformat()
+
+
+def ask_live(reg: Registry, ev: RaidEvent, a: FillAsk) -> bool:
+    """Can the person asked still come? Not when they're away that day or answered No thanks since: their ask then
+    covers no seat (role_plan) and a late yes on it is refused (apply_fill_answer)."""
+    m = reg.members.get(a.discord_id)
+    if m is not None and m.absent_on(run_day(reg, ev)):
+        return False
+    sg = ev.signups.get(str(a.discord_id))
+    return not (sg is not None and sg.status == "out")
+
+
+def release_member_asks(reg: Registry, rs: RaidStore, ev: RaidEvent, uid: int, why: str) -> list[FillAsk]:
+    """Someone can't come any more (an absence, No thanks, a callout): their asks still in play close (`released`),
+    and the tied half of each pair is withdrawn too (release_partner). Returns the partners released (the caller
+    tells them); saves when anything closed."""
+    mine = [a for a in ev.fill_asks if a.discord_id == uid and a.pending]
+    if not mine:
+        return []
+    partners = []
+    for a in mine:
+        a.answer, a.answered_at, a.held = "released", now(), False
+        ev.log.append(f"{'suggestion' if a.phase == 'prelock' else 'fill'}: {a.display_name}'s ask closed ({why})")
+        other = release_partner(reg, rs, ev, a, because=f"{a.display_name}: {why}")
+        if other:
+            partners.append(other)
+    rs.save(ev, f"asks closed for {mine[0].display_name}")
+    return partners
 
 
 def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[FillAsk], list[FillAsk]]:
@@ -1463,8 +1531,15 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
     a yes takes the seat, or switches the seat in place. A tied pair (a swap and the backfill covering the seat it
     vacates) needs BOTH yeses: the first yes is held (`held`, nothing changes) until the partner answers; the second
     yes applies both; a no or silence from the partner releases the held yes (release_partner)."""
-    ask.answer, ask.answered_at = ("yes" if yes else "no"), now()
     m = reg.members.get(ask.discord_id)
+    if yes and not ask_live(reg, ev, ask):  # away that day (or No thanks since): the absence stands, the yes counts as no
+        ask.answer, ask.answered_at, ask.held = "no", now(), False
+        away = m is not None and m.absent_on(run_day(reg, ev))
+        ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name}'s yes not taken ({'away that day' if away else 'answered No thanks'})")
+        rs.save(ev, f"fill {ask.display_name} yes refused")
+        return (f"{ask.display_name} is marked away that day, so the yes wasn't taken — clear the absence first, then answer the sheet" if away
+                else f"{ask.display_name} answered No thanks for this run, so the yes wasn't taken — change the answer on the sheet first")
+    ask.answer, ask.answered_at = ("yes" if yes else "no"), now()
     if not yes or not m:
         ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name} declined ({ask.kind})")
         rs.save(ev, f"fill {ask.display_name} no")
@@ -1496,7 +1571,7 @@ def _apply_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: Mem
         rs.save(ev, f"fill {ask.display_name} offspec")
         return f"{ask.display_name} swaps to {ask.spec} ({ask.role})"
     c = next((c for c in m.active() if c.label == ask.character), m.main)
-    s = _signup(reg, m, c, "in", "fill", "filled in at request" if ask.kind != "alt" else f"swapped to {c.label} at request")
+    s = carry_joined(ev.signups.get(str(m.discord_id)), _signup(reg, m, c, "in", "fill", "filled in at request" if ask.kind != "alt" else f"swapped to {c.label} at request"))
     if ask.kind in ("offspec", "flex") and ask.spec != c.spec:  # a switch by someone who had no signup on that character
         s.spec, s.offspec, s.role = ask.spec, c.spec, ask.role
     ev.signups[str(m.discord_id)] = s
@@ -1518,7 +1593,7 @@ def _prelock_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: M
         rs.save(ev, f"fill {ask.display_name} yes (no character)")
         return f"{ask.display_name} said yes, but has no active character — set their answer on the sheet"
     old = ev.signups.get(str(m.discord_id))
-    s = _signup(reg, m, c, "in", "fill")
+    s = carry_joined(old, _signup(reg, m, c, "in", "fill"))
     if ask.kind in ("offspec", "flex") and ask.spec != c.spec:
         s.spec, s.offspec, s.role = ask.spec, c.spec, ask.role
     what = f"{c.label} as {s.spec}" if s.spec != c.spec or ask.kind in ("offspec", "flex") else c.label
@@ -1602,7 +1677,7 @@ def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
 
 def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
     players = []
-    for i, s in enumerate(sorted(ev.signups.values(), key=lambda s: s.updated_at)):
+    for i, s in enumerate(sorted(ev.signups.values(), key=lambda s: s.order_at)):  # first come = when the Join began
         if s.status == "out":
             continue
         c = reg.find(s.character)
@@ -1657,7 +1732,8 @@ def run_weights(reg: Registry, ev: RaidEvent) -> dict[str, int]:
 def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player]) -> dict[str, int]:
     """Per-player selection bonus from the run's weights: rank, main over alt, sat out last window, signup order, and
     being a REGULAR of the run's series signed with their regular character (D9: a weight above one rank step, so a
-    strong outsider can still win a role seat). Ad hoc runs are first come: signup order counts per position (each
+    strong outsider can still win a role seat). A signup an officer's ask changed (source "fill": "Wren brings Fern")
+    keeps the main and regular weights the member had — doing the officers a favour never costs the seat. Ad hoc runs are first come: signup order counts per position (each
     earlier joiner `signup_order` points ahead of the next), rank and sat-out don't count by default.
     Keyed by this run's signup names (the solver's handle); sat-out and regulars match discord ids, so a rename keeps them."""
     w = run_weights(reg, ev)
@@ -1668,13 +1744,15 @@ def seat_bonus(reg: Registry, rs: RaidStore, ev: RaidEvent, players: list[Player
     out = {}
     for p in players:
         b = int(w.get("rank", 0)) * (4 - RANK_ORDER.get(p.rank, 3))
-        found = reg.find(p.character) if p.character else None
-        if found and found[1].is_main:
-            b += int(w.get("main", 0))
         uid = player_uid(ev, p)
+        sg = ev.signups.get(str(uid)) if uid is not None else None
+        asked = sg is not None and sg.source == "fill"  # agreed to an officer's ask: what they were asked to bring counts as theirs
+        found = reg.find(p.character) if p.character else None
+        if (found and found[1].is_main) or asked:
+            b += int(w.get("main", 0))
         if uid in sat:
             b += int(w.get("sat_out", 0))
-        if uid in regs and regs[uid] == p.character:
+        if uid in regs and (regs[uid] == p.character or asked):
             b += int(w.get("regular", 0))
         b += int(w.get("signup_order", 0)) * (n - p.pos) if adhoc else round(int(w.get("signup_order", 0)) * (n - p.pos) / n)
         out[p.signup_name] = b
@@ -2079,6 +2157,7 @@ def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: li
     seated = {p.signup_name for p in ev.seated()}
     ev.rosters[0].benched = [p for m, p in players.items() if m not in seated and p.status == "signed"]
     for sg in added:
+        sg.joined_at = sg.order_at if sg.status == "in" else now()
         sg.status, sg.source, sg.updated_at = "in", "officer", now()
     ev.log.append("board: " + (f"+{', '.join(s.display_name for s in added)} " if added else "") + (f"-{', '.join(removed)}" if removed else "") or "board: groups moved")
     rs.save(ev, "board updated")

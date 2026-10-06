@@ -20,7 +20,7 @@ from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
 from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _group_block, _group_summaries, _header,
                          _raidwide_line, _role_counts, ask_line, board_url, clock12, closed_layout, confirm_layout, fill_layout,
-                         gaps_text, health_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
+                         gaps_text, health_layout, health_locked_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
                          sheet_state)
 from .registry import Registry, RegistryError
 
@@ -31,7 +31,7 @@ __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "regist
            "FillButton", "PlaceButton", "RunButton", "SignupButton", "fill_view", "place_view", "sheet_view",
            # views + helpers
            "CLOCK12", "OUT_MARK", "RELEASE_WHY", "ask_line", "board_url", "clock12", "closed_layout", "confirm_layout", "fill_layout", "gaps_text",
-           "health_layout", "lock_layout", "raid_name", "run_actions_row", "run_label", "run_times", "run_title", "sheet_message", "sheet_state",
+           "health_layout", "health_locked_layout", "lock_layout", "raid_name", "run_actions_row", "run_label", "run_times", "run_title", "sheet_message", "sheet_state",
            "_aura_line", "_group_block", "_group_summaries", "_header", "_raidwide_line", "_role_counts"]
 
 
@@ -118,6 +118,10 @@ class RaidMixin:
                 elif key == "health":
                     if ev.state == "open":
                         await msg.edit(view=health_layout(reg, rs, ev, team, self.ico))
+                    else:  # locked: the card's Suggested block and Ask were for the open sheet — it now points at the lock card, once
+                        await msg.edit(view=health_locked_layout(reg, ev, self.ico))
+                        ev.cards.pop("health", None)
+                        rs.save(ev, "health card closed at lock")
                 elif key.startswith("lock:"):
                     i = int(key[5:])
                     if i < len(ev.all_rosters):
@@ -149,6 +153,7 @@ class RaidMixin:
             raise RegistryError(f"{run_title(reg, ev)} is a test run: only test members and the officer running it can answer it")
         label = run_label(reg, ev).replace("**", "")  # plain text: the line is shown in Discord replies and on the web alike
         who = "" if mine else f"{m.display_name}: "
+        released = status == "out" and await self.release_asks_of(reg, rs, ev, m, "answered No thanks")  # their ask covers nothing now
         if sheet_state(ev) == "open":
             s = rc.set_signup(reg, rs, ev, m, character, status, source=source)
             await self.refresh_sheet(reg, ev)
@@ -164,6 +169,8 @@ class RaidMixin:
             else:
                 rc.set_signup(reg, rs, ev, m, character, "out", source=source)
                 await self.refresh_sheet(reg, ev)
+                await self.refresh_cards(reg, ev)
+                await self.refill_after_release(reg, rs, ev, released)
                 line = f"✅ {who}No thanks for {label} (wasn't rostered)"
         elif status == "in":
             s = rc.set_signup(reg, rs, ev, m, character, "in", source=source)
@@ -385,6 +392,28 @@ class RaidMixin:
             await self.withdraw_ask(reg, ev, a, "the roster locks before the other half of the swap was answered")
         return gone
 
+    async def release_asks_of(self, reg, rs, ev, m, why: str) -> bool:
+        """`m` can't come any more (No thanks, a callout, an absence): close their asks still in play (rc.release_member_asks)
+        and tell the tied half of each pair it's off. The fill engine's next batch is the caller's (drop_seated, or
+        refill_after_release) — so a seat their ask was holding is asked for again. True when an ask was closed."""
+        had = any(a.discord_id == m.discord_id and a.pending for a in ev.fill_asks)
+        partners = rc.release_member_asks(reg, rs, ev, m.discord_id, why)
+        for other in partners:
+            await self.withdraw_ask(reg, ev, other, f"{m.display_name} can't come")
+        if had:
+            await self.post_run_update(reg, ev, f"↩️ {m.display_name}'s ask closed ({why})")
+        return had
+
+    async def refill_after_release(self, reg, rs, ev, released: bool) -> None:
+        """After lock, a seat a released ask was holding goes back to the fill engine (when the run fills on its own)."""
+        if not released:
+            return
+        team = rc.run_team(reg, ev)
+        if rc.team_setting(team, "autofill") and sheet_state(ev) == "locked":
+            sent, _nd = await self.run_fill(reg, rs, ev, team, by="ask closed")
+            if sent:
+                await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
+
     async def withdraw_ask(self, reg, ev, ask, because: str) -> None:
         """Tell the other half of a tied pair the question is off."""
         m = reg.members.get(ask.discord_id)
@@ -529,6 +558,8 @@ class RaidMixin:
         for a in held:  # they said yes, but their partner never answered: nothing changed for them
             await self.withdraw_ask(reg, ev, a, "the roster locked before the other half of the swap was answered")
         await self.refresh_sheet(reg, ev)
+        if "health" in ev.cards:  # the open sheet's card: its Suggested block and Ask go; it points at the lock card
+            await self.refresh_cards(reg, ev)
         ch = self.officer_channel(reg, ev)
         if ch:
             for i, r in enumerate(ev.all_rosters):
@@ -584,7 +615,8 @@ class RaidMixin:
             gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if sg.display_name in g), 0) if seat else 0
             await self.confirm_one(reg, ev, sg, seat[0] if seat else 0, gi, by)
         if added or removed:
-            await self.post_run_update(reg, ev, f"✏️ board by {by}: " + (f"in {', '.join(s.display_name for s in added)} (asked to confirm)" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
+            asks = " (asked to confirm)" if rc.run_confirms(reg, ev) else ""  # confirmations off (ad hoc, D5): nobody is asked
+            await self.post_run_update(reg, ev, f"✏️ board by {by}: " + (f"in {', '.join(s.display_name for s in added)}{asks}" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
         await self.refresh_sheet(reg, ev)
         await self.refresh_cards(reg, ev)
         if removed and rc.team_setting(team, "autofill") and sheet_state(ev) == "locked":
@@ -647,6 +679,7 @@ class RaidMixin:
         if t.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(t.get("test_by") or ""):
             raise RegistryError(f"{run_title(reg, ev)} is a test run: only test members and the officer running it can answer it")
         co = rc.callout(reg, rs, ev, m, t, note)
+        released = await self.release_asks_of(reg, rs, ev, m, "called out")
         when = f"{co.hours_before:.0f}h before{', after lock' if co.late else ''}"
         mine = by == m.display_name
         line = (f"Noted: out for {run_label(reg, ev)} ({when}). Thanks for saying so." if mine
@@ -655,6 +688,8 @@ class RaidMixin:
             await self.drop_seated(reg, rs, ev, t, m, "callout" if mine else "officer", note)
             return line + " — seat freed"
         await self.refresh_sheet(reg, ev)
+        await self.refresh_cards(reg, ev)
+        await self.refill_after_release(reg, rs, ev, released)
         await self.post_run_update(reg, ev, f"⚑ {m.display_name} ({co.character}) called out, {co.hours_before:.0f}h before" + ("" if mine else f" (by {by})"))
         await self.ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {ev.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else "") + ("" if mine else f" (by {by})"))
         return line
@@ -786,6 +821,7 @@ class RaidMixin:
                 ev.log.append(f"{m.display_name}'s absence cleared: answer reset")
                 rs.save(ev, f"{m.display_name} absence cleared")
                 await self.refresh_sheet(reg, ev)
+                await self.refresh_cards(reg, ev)  # the officers' No answer list, counts and Suggested block follow
                 lines.append(f"{label}: can answer the sheet again")
             else:
                 lines.append(f"{label}: the seat freed by the absence was not handed back")
@@ -800,12 +836,16 @@ class RaidMixin:
                 continue  # puppets belong to test runs only (and a real member to real runs, the tester aside)
             team = rc.run_team(reg, ev)
             sg = ev.signups.get(str(m.discord_id))
+            released = await self.release_asks_of(reg, rs, ev, m, "away that day")  # before drop_seated, so its fill sees the seat free
             if ev.state != "open" and ev.seat_of(m.display_name):
                 await self.drop_seated(reg, rs, ev, team, m, "absence", None)
-            elif not sg or sg.status != "out":
-                c = rc.expected_character(reg, ev, m)  # a regular is marked away on their regular character
-                if c:
-                    rc.set_signup(reg, rs, ev, m, c.label, "out", source="absence")
-                    await self.refresh_sheet(reg, ev)
+            else:
+                if not sg or sg.status != "out":
+                    c = rc.expected_character(reg, ev, m)  # a regular is marked away on their regular character
+                    if c:
+                        rc.set_signup(reg, rs, ev, m, c.label, "out", source="absence")
+                        await self.refresh_sheet(reg, ev)
+                await self.refresh_cards(reg, ev)  # the officers' No answer list, counts and Suggested block follow
+                await self.refill_after_release(reg, rs, ev, released)
             touched.append(ev.key)
         return touched

@@ -98,7 +98,8 @@ def test_fill_pool_after_lock_holds_the_unanswered(reg, rs):
     dps = next(p for p in ev.roster.selected if p.role in ("melee", "ranged"))
     rc.free_seat(reg, rs, ev, dps.signup_name, "declined")
     cands = rc.fill_candidates(reg, rs, ev, rc.run_team(reg, ev))
-    assert cands and cands[0].kind == "regular", [(a.display_name, a.kind) for a in cands]
+    # no regulars on this series: the pool is every main, and the ask says only that they haven't answered (never "a regular")
+    assert cands and cands[0].kind == "unanswered", [(a.display_name, a.kind) for a in cands]
     assert not [a for a in cands if a.kind == "other"]
     h = rc.health_data(reg, ev, rc.run_team(reg, ev))
     assert set(h["unresponsive"]) >= {m.display_name for m in silent}

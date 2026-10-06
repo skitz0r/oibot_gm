@@ -53,6 +53,10 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact:(?P
                 sent, plan = await bot.send_plan(reg, rs, ev, rev=self.rev or "", by=by)
             except rc.PlanChanged as e:
                 await bot.refresh_cards(reg, ev)
+                lock_cards = {mid for k, mid in ev.cards.items() if k.startswith("lock:")}
+                if ev.state != "open" and getattr(interaction.message, "id", None) not in lock_cards:  # the open sheet's health card, pressed after lock
+                    await interaction.followup.send("This run has locked, so this card's suggestions are closed — the lock card has the roster and its own Ask.", ephemeral=True)
+                    return
                 await interaction.followup.send(f"{e} The card shows them as they are now.", ephemeral=True)
                 return
             except RegistryError as e:

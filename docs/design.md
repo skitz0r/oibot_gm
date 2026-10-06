@@ -816,7 +816,14 @@ ad hoc fill stays automatic. Nothing about it is computed by the model: code pla
 - *Feasibility.* A seat's suggestion is skipped when the remaining short seats could be matched without that person
   but not with them taken (`registry.can_cover`, the one bipartite matching; `rc._can_cover` delegates); nobody is in
   two suggestions.
-- *Alternates.* Up to `PLAN_ALTERNATES` (2) per seat, from people no suggestion uses, distinct per role.
+- *Alternates.* Up to `PLAN_ALTERNATES` (2) per seat, from people no suggestion uses, distinct per role. After lock an
+  alternate replaces its seat's suggestion, so the free seats that suggestion's bodies took are counted back while its
+  alternates are found (otherwise suggestions using up the free seats left body seats with none).
+- *Body kinds.* `sub` (the bench, joiners left off after lock), `regular` (an unanswered regular — only where the run
+  has regulars: a series with regulars, or a test run's puppets), `unanswered` (an unanswered main on an ad hoc run or
+  a series with no regulars yet: nobody is called a regular there; same cost as `regular`), `other` (a non-regular main).
+  The fill DM words `other` truthfully ("you haven't answered the sheet (you're not one of its regulars)") — never
+  "you're free that night".
 - *Output.* `Plan{phase prelock|fill, short, have, need, full, expected, waiting, seats: [PlanSeat{role, options:
   [[FillAsk]]}], short_after, rev}`; each ask carries `reason` (short, the member's DM) and `why` (code-written, for
   officers: "short 1 healer · Ana's declared flex Holy · DPS stays 6 of 5 minimum"). `plan_lines` / `still_short_words`
@@ -832,7 +839,13 @@ suggestion or the picked alternate and refuses one person for two seats; per-run
 short a healer. Could you come as Holy?" with **Yes, as Holy** / **No** (`FillButton`, label render-time only). After
 lock they are fill asks the officer approved (role swaps included), under the engine's cap: at most `FILL_MAX_OPEN`
 pending in all — what doesn't fit is held back (`Plan.held_back`, `rc.held_back_words`: "1 more waits"; a tied pair
-is never split; no room at all → `RegistryError`). One ask per member per run (anyone already asked is skipped).
+is never split; no room at all → `RegistryError`). One PRE-LOCK ask per member per run and one fill ask after lock:
+before lock anyone already asked is skipped; once the run is no longer open only pending asks and `phase="fill"` asks
+keep someone out (`role_plan`'s `asked`), so a benched joiner who answered a pre-lock ask (yes or no) — or whose ask
+closed at lock — is still the cheapest move (`sub`) for a seat freed later. `tied_ask` matches within one phase.
+Plain text's "send them" mirrors the site's route: with the diff's plan `rev` (or on an open run) it goes through
+`send_plan`, so a run that locked between the diff and Apply raises `PlanChanged` (the phase is in the fingerprint)
+and nothing is sent; `run_fill(approved_by=…)` is only for a post-lock send with no rev.
 
 **Answers.** `rc.apply_fill_answer`: before lock (`_prelock_yes`) a yes rewrites the SIGNUP — Join on the asked
 character, an offspec / flex spec as `spec` with the old one as `offspec` — and seats nobody; the lock sees the agreed
@@ -842,6 +855,13 @@ applied — `_apply_yes` is not called); the partner's yes applies both; a no, a
 releases the held one through `release_partner` / `release_prelock_asks` (`partner_of` returns the tied ask while it
 is `pending`), and `withdraw_ask` DMs "never mind"; when the second yes lands, `after_fill_answer` DMs the first
 ("<partner> said yes too …") and records both placements. The fill DM says "Confirm counts once you both say yes".
+**Someone asked who can't come.** `rc.ask_live(reg, ev, ask)` = not away that day (`absent_on`) and no No thanks
+since: `role_plan` counts only live pending asks as covering a seat (`Plan.waiting` too), and `apply_fill_answer`
+records a yes from someone not live as **no** ("marked away … clear the absence first") — an absence-sourced No thanks
+is never overwritten by a late yes, before or after lock. `RaidMixin.release_asks_of` (→ `rc.release_member_asks`:
+`released`, the tied half through `release_partner`, `withdraw_ask` DMs it) runs on `after_absence`, `set_answer(out)`
+and `call_out`, before `drop_seated` so its fill sees the seat; for someone not seated `refill_after_release` lets the
+fill engine ask again after lock (autofill). `after_absence` / `after_absence_cleared` also refresh the officer cards.
 `after_fill_answer` refreshes the health card (a No shows the next alternate); `lock_run` closes unanswered pre-lock
 asks (`release_prelock_asks`, `released`); the scheduler does the same at lock time before it calls `lock_run`
 (`RaidMixin.close_prelock_asks`, so a lock that keeps failing leaves none open and the state is `released`, never
@@ -867,12 +887,22 @@ the lock time only (no Suggested block, no "No answer" names, no "could cover" n
 buttons), always ephemeral; an officer's card is public only in the run's officer channel. **Early
 warning**: `open_run_and_post` posts the health card at once when `rc.early_warning` (a recurring, non-test run whose
 series has regulars and whose expected roster is short of a minimum); `RaidEvent.health_early` marks it; at reminder
-time `post_health` posts a fresh card (rebuilt from the answers) and deletes the early one. Lock card (`lock_notes`):
+time `post_health` posts a fresh card (rebuilt from the answers) and deletes the early one. **At lock** the health card
+is redrawn once as `health_locked_layout` ("Locked — the lock card below …": no Suggested block, no buttons) and
+dropped from `ev.cards` (`refresh_cards`; `lock_run` triggers it); an old Ask pressed after lock on a card that isn't a
+lock card answers "This run has locked …". Lock card (`lock_notes`):
 **Locked short** + role icons (when the lock came out short — `lock_run` logs "locked short …" and warns on the ops
 feed; **Short** when a seat freed since), **Playing an offspec** (the solver's `spec_switches`, one per line, the spec
 icon they now play), **Regulars not rostered** (recurring: regulars who joined or benched and weren't seated). Confirm
 DM (`confirm_layout`): the spec icon of the seat's spec, plus "You're rostered as **Protection**, your offspec — as you
 agreed / — you signed up as Fury" when it differs from the character's registered spec.
+
+**Signup order.** `Signup.joined_at` = when the current Join began: `rc.carry_joined` keeps it while the member stays
+Join (a re-press, another character, a yes to an ask — `set_signup`, `_prelock_yes`, `_apply_yes`), starts it on a fresh
+Join (after Bench / No thanks, or a first answer) and clears it otherwise; `Signup.order_at` = `joined_at` or (older
+files) `updated_at`. `players_for` (`Player.pos`: ad hoc `first_come_out` and the `signup_order` weight) and
+`RaidEvent.by_status` order by it. `seat_bonus`: a signup an officer's ask changed (`source == "fill"`) keeps the main
+weight, and a regular's the regular weight, on the character they were asked to bring.
 
 **Coverage and forecast.** `Registry.series_coverage` adds `level`: green = the regulars' own characters cover the
 minimums with a spare in each (`can_cover` with one more seat of each minimum role), amber = exactly the minimum with

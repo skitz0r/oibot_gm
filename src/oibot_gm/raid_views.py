@@ -241,7 +241,7 @@ def ask_line(reg: Registry, ico, ask) -> str:
     return f"asked {ask.display_name} to come as {what}{tail}{when}"
 
 
-KIND_WORD = {"sub": "bench", "regular": "regular, no answer", "other": "not a regular", "flex": "flex", "offspec": "offspec", "alt": "alt"}
+KIND_WORD = {"sub": "bench", "regular": "regular, no answer", "unanswered": "no answer", "other": "not a regular", "flex": "flex", "offspec": "offspec", "alt": "alt"}
 SUGGEST_LINES = 3  # a card names this many seats; Suggest… lists them all with their alternates
 
 
@@ -460,6 +460,16 @@ NO_ANSWER_LINES = 12  # the health card names this many regulars who haven't ans
 LEFTOVER_LINES = 15  # a card's text is capped (4000 chars across its displays); the board lists the rest
 
 
+def health_locked_layout(reg: Registry, ev: rc.RaidEvent, ico) -> discord.ui.LayoutView:
+    """What the open sheet's health card becomes once the run locks: the header and a pointer to the lock card — no
+    Suggested block, no Ask (its suggestions were for the open sheet; the lock card has the current ones)."""
+    ui = discord.ui
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(_header(reg, ev, f"Roster health · {raid_name(reg, ev)}", ["🔒 Locked — the lock card below has the roster and what is still short."]),
+                               accent_colour=0x98A3B5))
+    return view
+
+
 def leftover_block(reg: Registry, ev: rc.RaidEvent, ico) -> str:
     """Joiners the locked roster(s) left out, as the board shows them: "Leftovers (n)", one member per line with the
     spec icon, then what another run is short and whether leftovers + bench + pool could make one. "" when none."""
@@ -587,7 +597,10 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
     cls = c[1].cls if c else ""
     if ask.phase == "prelock" and ev.state == "open":
         return prelock_layout(reg, ev, team, ico, ask, cls)
-    what = {"sub": "you're on the bench", "regular": "you haven't answered the sheet", "other": "you're free that night", "offspec": f"you could play **{ask.spec}** instead of your main spec",
+    # only what the bot knows: "other" = not one of the run's regulars and no answer on the sheet — never a claim that
+    # they're free that night (they never said so)
+    what = {"sub": "you're on the bench", "regular": "you haven't answered the sheet", "unanswered": "you haven't answered the sheet",
+            "other": "you haven't answered the sheet (you're not one of its regulars)", "offspec": f"you could play **{ask.spec}** instead of your main spec",
             "flex": f"you said you can play {ask.role}", "alt": "you could bring your alt"}.get(ask.kind, "")
     lines = [f"{ask.reason} — {what}", f"{'Swap to' if ask.swap else 'Come as'} {ico('spec', f'{cls}:{ask.spec}') if cls else ''} **{ask.character}** ({ask.spec})"]
     partner = rc.partner_of(ev, ask)

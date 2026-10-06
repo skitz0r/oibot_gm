@@ -45,6 +45,9 @@ class FakeBot:
 
     call_out = RaidMixin.call_out
     repost_sheet = RaidMixin.repost_sheet
+    release_asks_of = RaidMixin.release_asks_of  # call_out's own steps: a pending ask closes, the cards follow
+    refill_after_release = RaidMixin.refill_after_release
+    refresh_cards = RaidMixin.refresh_cards
 
     def __init__(self, rs):
         self.rs = rs

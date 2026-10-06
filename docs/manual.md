@@ -188,8 +188,9 @@ its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same 
   *Start ad hoc run* on the Rosters page, or plain text / MCP with a time that is none of the raid's upcoming runs).
   It takes the raid's size, comp, lockout and length but none of its recurring timing — its own lighter defaults: no
   reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
-  **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in signup order take
-  the seats, except that a seat still needed for a tank or healer minimum is kept for the first later joiner who plays
+  **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in the order they
+  first pressed Join take the seats — pressing Join again, switching character or saying yes to an officer's ask keeps
+  your place; Bench or No thanks and then Join again puts you at the back — except that a seat still needed for a tank or healer minimum is kept for the first later joiner who plays
   that role). An officer's *Bench* pin (or a comp-policy *always bench*) takes that joiner out of the line, so the
   next joiner gets the seat; a comp-policy *never bench* name keeps a seat even if they joined late. Nobody is expected on an ad hoc sheet, so there's no "No answer" list and nobody is reminded. A one-off's
   key ends in `-adhoc` (`bd-1212-2100-adhoc`). The Raids page shows each schedule's class, and for a pickup template
@@ -212,10 +213,14 @@ the one character they raid on there. Regulars are the people the bot *expects* 
 - **The reminder** (the nudge DM) goes to the regulars who haven't answered. While a schedule has no regulars yet,
   every main counts as expected (exactly as before regulars existed).
 - **At lock** being a regular on your regular character is a seat weight (`regular`, 4 by default — more than one rank
-  step): between equals the regular sits, but a much better fit for the comp can still win a seat. A non-regular's Join
+  step): between equals the regular sits, but a much better fit for the comp can still win a seat. A regular who agreed
+  to an officer's ask to bring an alt (or play an offspec) keeps that weight, and the main weight, on what they were
+  asked to bring. A non-regular's Join
   stays a Join; they are seated after regulars and are the first asked when a seat frees.
 - **Fill** asks the bench first, then the regulars who haven't answered, then other members (the Fill modal labels
-  each ask *from the bench* / *a regular, no answer* / *not a regular*). See *Suggestions* below for short tanks and
+  each ask *from the bench* / *a regular, no answer* / *not a regular*; on an ad hoc run or a schedule with no regulars
+  yet, where everyone counts, it says *no answer* — nobody is called a regular there). The DM says only what the bot
+  knows: "you haven't answered the sheet" — never that you're free that night. See *Suggestions* below for short tanks and
   healers.
 - **Regulars coverage** (no run needed): per recurring schedule, the regulars' role counts against the tank and healer
   minimums (role icon and *count/minimum*, red when short), coloured **green** (the regulars' own characters cover the
@@ -271,8 +276,16 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 - **What the member gets** (before lock): a DM — "Barrow Deeps <time> is short a healer. Could you come as Holy?"
   with **Yes, as Holy** / **No**. **Yes** changes their sign-up (Join, as that spec or character) and rosters nobody:
   the lock still builds the roster and now sees the agreed role. **No** frees the seat in the suggestions and the next
-  alternate shows on the card. At most one ask per member per run; unanswered asks close when the roster locks
-  (pressing them afterwards says "That question closed when the roster locked").
+  alternate shows on the card. At most one ask per member before lock; unanswered asks close when the roster locks
+  (pressing them afterwards says "That question closed when the roster locked"). After lock the fill engine may ask
+  the same person again for a seat freed later — someone who said yes before lock and wasn't rostered is the first
+  asked.
+- **Someone asked can't come after all.** If a member you asked records an absence for that day, answers No thanks or
+  calls out, their ask closes at once (the other half of a swap is told it's off), the seat shows short again and the
+  card suggests someone else; a late yes on the old DM is not taken (they're told to clear the absence first).
+- **The health card follows the sheet**: every answer, and an absence recorded or cleared, redraws it. Once the run
+  locks it says *Locked* and points at the lock card — its *Suggested* block and **Ask** go (pressing an old Ask says
+  the run has locked).
 - **After lock** the fill engine (step 6 below) uses the same list. On a **recurring** schedule it asks people for the
   same role on its own, but a **role swap** (a flex role, an offspec or an alt, with or without someone covering)
   waits for an officer: the lock card shows it under *Suggested* with **Ask** — while it waits, a seat freed later
@@ -405,7 +418,8 @@ make it tonight, her baby is sick") or MCP `set_answer` with `note`. Your own "I
 callout too, note or not (hours before, late after the lock, the line in the updates thread) — also when an officer
 presses Apply on your request for you — and so is MCP
 `set_answer` with status `out`; an officer who only sets someone else's answer to No thanks without a reason changes
-the answer, no callout.
+the answer, no callout. When an officer drags someone onto a locked board, the run's thread says they were asked to
+confirm only when the run asks for confirmations (an ad hoc run with confirmations off just says *in*).
 
 **Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
 run* far left, then *Fill seats* and *Lock now* on the right; what does not apply yet is greyed with the reason
@@ -813,7 +827,7 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock: the suggestions — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.rev`; after lock: the next batch), `send=true` sends them (before lock pass the preview's `rev`, and `picks` {seat: option} for an alternate; a changed plan is refused) · cancel with a reason (rostered members are not told automatically: say so in the channel) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
-| `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, weights, comp bounds, first open…) · back to defaults |
+| `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off |
