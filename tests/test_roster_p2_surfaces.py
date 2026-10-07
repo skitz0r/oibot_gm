@@ -186,3 +186,15 @@ def test_forecast_counts_regulars_minus_absences(reg):
     reg.regular_remove(ms_[0].discord_id, KEY, "t")
     reg.set_schedule(RID, "default", {"active": False}, "t")
     assert rc.series_forecast(reg, KEY) == [], "a paused series has no forecast"
+
+
+@pytest.mark.parametrize("day,hour", [(6, 20), (7, 9), (9, 23), (4, 12)], ids=["tue-evening", "wed", "fri-late", "sun"])
+def test_the_forecast_is_four_weeks_whatever_the_day(reg, rs, day, hour):
+    """A 3-day lockout once cut the forecast's starts at 24 days (next_runs_of's horizon): on a Tuesday evening a weekly
+    Tuesday raid showed three weeks, not four."""
+    from datetime import datetime
+
+    worked_example(reg, rs)
+    now = datetime(2026, 10, day, hour, 0, tzinfo=reg.tz)
+    f = rc.series_forecast(reg, KEY, now=now)
+    assert len(f) == 4 and all(x["day"].startswith("Tue") for x in f), [x["day"] for x in f]

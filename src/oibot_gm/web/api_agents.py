@@ -90,7 +90,11 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         v, d = await body(request, officer=True)
         dup = news.duplicate_profile_proposal(bot.registries, v.reg, d)
         if dup:  # a profile edit is shared by every guild on the game version: one proposal is enough (design §5.26)
-            return {"message": f"already proposed by another guild on this game version ({dup}) — nothing to do", "duplicate_of": dup}
+            if is_job(v):  # the owner's review job may look it up; a person gets the other guild's name, never its proposal id
+                return {"message": f"already proposed by another guild on this game version ({dup}) — nothing to do", "duplicate_of": dup}
+            other = bot.registries.by_key.get(dup.split("/", 1)[0])
+            return {"message": f"already proposed by {other.config.name if other else 'another guild'} on this game version — nothing to do",
+                    "duplicate": True}
         try:
             p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).create, v.reg, d, "review" if is_job(v) else v.name)
         except (ProposalError, ValueError) as e:
@@ -101,8 +105,7 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
 
     async def move(v, pid: str, state: str, commit: str | None = None, note: str | None = None):
         try:
-            p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).move, pid, state, v.name, officer=v.officer, job=is_job(v), by_id=v.uid, commit=commit, note=note,
-                                        profile_owners=news.shared_profile_owners(bot.registries, v.reg))
+            p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).move, pid, state, v.name, officer=v.officer, job=is_job(v), by_id=v.uid, commit=commit, note=note)
         except PermissionError as e:
             raise HTTPException(403, str(e)[:1].upper() + str(e)[1:] + ".")
         except ProposalError as e:
@@ -165,7 +168,7 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
     async def agents_overview(request: Request):
         v = await who(request, officer=True)
         tz = v.reg.tz
-        ov = await asyncio.to_thread(agents.overview, agents.OUT, tz)
+        ov = await asyncio.to_thread(agents.overview, agents.OUT, tz, None, agents_guild(v))  # this guild's steps and results only (K7)
         ps = ProposalStore(store(), v.reg.key)
         runs = [{**r, "started_label": agents.clock12(r["started"], tz)} for r in await asyncio.to_thread(agents.list_runs, None, agents.OUT, guild=agents_guild(v))]
         # waiting / approved: this guild's proposals; the jobs themselves serve every guild

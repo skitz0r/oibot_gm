@@ -230,12 +230,13 @@ class ProposalStore:
         p.history.append({"state": "proposed", "by": by, "at": p.created_at, "note": None})
         return self.save(p, f"proposed: {p.title[:70]}")
 
-    def move(self, pid: str, state: str, by: str, *, officer: bool, job: bool, by_id: int | None = None, commit: str | None = None, note: str | None = None,
-             profile_owners: list[tuple[str, int | None]] | None = None) -> Proposal:
-        """One state change. `officer`: approve/dismiss allowed; `job`: the apply job's steps (the owner's token).
-        `profile_owners` (`shared_profile_owners`): every guild on this game version when several share it — then
-        approving a `profile` proposal (an edit of the shared profiles/<version>/*.yaml, and a restart for everyone)
-        needs the owner of every one of them (design §14 K3); dismissing stays with the proposing guild's officers."""
+    def move(self, pid: str, state: str, by: str, *, officer: bool, job: bool, by_id: int | None = None, commit: str | None = None,
+             note: str | None = None) -> Proposal:
+        """One state change — the one path for the card's buttons, the site, MCP and plain text (configops).
+        `officer`: approve/dismiss allowed; `job`: the apply job's steps (the owner's token). When several served guilds
+        run this guild's game version (`store.guilds`, the index discord_registry.Guilds attaches), approving a `profile`
+        proposal (an edit of the shared profiles/<version>/*.yaml, and a restart for everyone) needs the owner of every
+        one of them (design §14 K3); dismissing stays with the proposing guild's officers."""
         if state not in STATES:
             raise ProposalError(f"state is one of {', '.join(STATES)}")
         with self.store.lock:
@@ -251,11 +252,10 @@ class ProposalStore:
                 raise ProposalError(f"{p.id} is {p.state}: it can't become {state}")
             if state == "approved" and p.kind == "needs_developer":
                 raise ProposalError("this one needs a developer: the apply job can't do it (dismiss it once it's handled)")
-            if state == "approved" and p.kind == "profile" and profile_owners:
-                others = [name for name, oid in profile_owners if oid is None or oid != by_id]
-                if others:
-                    raise PermissionError(f"this edits game data that {', '.join(others)} also use{'s' if len(others) == 1 else ''}: "
-                                          "the owner of every guild on this game version approves it")
+            if state == "approved" and p.kind == "profile":
+                why = shared_profile_refusal(getattr(self.store, "guilds", None), self.key, by_id)
+                if why:
+                    raise PermissionError(why)
             p.state = state
             if state in ("approved", "dismissed"):
                 p.decided_by, p.decided_by_id, p.decided_at = by, by_id, now()
@@ -274,13 +274,40 @@ class ProposalStore:
             self.save(cur, "card posted")
 
 
+def same_profile_guilds(guilds, reg) -> list:
+    """Every served guild (Registry) on the game profile of `reg` (a Registry or a guild key) when more than one guild
+    uses it, else [] — the guilds a `profile` proposal's edit is shared by (K3)."""
+    ordered = getattr(guilds, "ordered", None)
+    regs = ordered() if ordered else []
+    key = reg if isinstance(reg, str) else reg.key
+    mine = next((r for r in regs if r.key == key), None if isinstance(reg, str) else reg)
+    if mine is None:
+        return []
+    same = [r for r in regs if r.config.game_profile == mine.config.game_profile]
+    return same if len(same) > 1 else []
+
+
 def shared_profile_owners(guilds, reg) -> list[tuple[str, int | None]]:
     """(name, owner id) of every guild on `reg`'s game profile when more than one guild uses it, else [] (K3)."""
-    ordered = getattr(guilds, "ordered", None)
-    regs = [r for r in (ordered() if ordered else []) if r.config.game_profile == reg.config.game_profile]
-    if len(regs) < 2:
-        return []
-    return [(str(r.config.name), r.config.owner_discord_id) for r in regs]
+    return [(str(r.config.name), r.config.owner_discord_id) for r in same_profile_guilds(guilds, reg)]
+
+
+def shared_profile_others(guilds, reg) -> list[str]:
+    """The names of the OTHER guilds a profile edit of `reg`'s guild is shared with ([] = not shared)."""
+    key = reg if isinstance(reg, str) else reg.key
+    return [str(r.config.name) for r in same_profile_guilds(guilds, reg) if r.key != key]
+
+
+def shared_profile_refusal(guilds, key: str, by_id: int | None) -> str | None:
+    """Why `by_id` may not approve a profile proposal of guild `key` (K3), or None: when other guilds run the same game
+    version, the approver must own every guild on it. The message names only the OTHER guilds (the proposing guild's
+    officers already know their own)."""
+    same = same_profile_guilds(guilds, key)
+    if not same or all(r.config.owner_discord_id is not None and r.config.owner_discord_id == by_id for r in same):
+        return None
+    others = shared_profile_others(guilds, key)
+    return (f"this edits game data that {', '.join(others)} also use{'s' if len(others) == 1 else ''}: "
+            "the owner of every guild on this game version approves it")
 
 
 def duplicate_profile_proposal(guilds, reg, data: dict) -> str | None:

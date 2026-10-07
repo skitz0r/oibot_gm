@@ -36,6 +36,10 @@ def redact(text: str) -> str:
 
 
 class GitStore:
+    # The guild index serving this data root (discord_registry.Guilds sets it; None offline): read by the rules that
+    # span guilds, e.g. ProposalStore.move's shared-profile approval (design §14 K3).
+    guilds = None
+
     def __init__(self, root: Path, push: bool | None = None):
         self.root = root.resolve()
         self.lock = threading.RLock()

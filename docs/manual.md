@@ -241,7 +241,7 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   tanks 2/2 — or covered only with offspecs, a declared flex role or alts; the card says which, and who could cover) or
   **red** (they can't field the minimum — the card names members who play the missing role, best rank first, to
   recruit). Beside it a **4-week forecast**: for each upcoming
-  run (counted from the raid's first opening until then) the regulars minus recorded absences, e.g. "Tue 15 Dec: short
+  run in the next four weeks (counted from the raid's first opening until then) the regulars minus recorded absences, e.g. "Tue 15 Dec: short
   1 tank, 1 healer (Thorn, Ona away)" — the hole shows a week ahead instead of at reminder time. The same numbers show
   on the Rosters page's *Regulars* cards (the colour under the role counts, a *Next 4 weeks* list: role icon and a
   number per short role, who is away on hover), in an officer's `/roster overview` (*Regulars*), on each raid's analytics card (one
@@ -565,8 +565,10 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
 - **Several servers.** Each server's news is reviewed on its own (its own news channel and keywords, its own cards and
   Agents page — you see your server's review runs only). A **game data** change is shared by every server on that game
   version: the review proposes it once, approving it needs the owner of every server on that version (in practice one
-  person), and when it lands or is rolled back every one of those servers gets an ops line. The restart takes every
-  server's bot down for those two minutes.
+  person) — on the card, on the Agents page and in plain text alike; anyone else's Approve is refused with the names
+  of the other servers that use it (Dismiss stays with your officers). When it lands or is rolled back every one of
+  those servers gets an ops line. The restart takes every server's bot down for those two minutes. The Agents page
+  and `/ask` show a job's current step and last result only for your own server's runs.
 
 ## 8. Owner: setup
 

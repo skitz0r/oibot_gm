@@ -122,6 +122,60 @@ def test_apply_takes_the_oldest_approval_across_guilds_and_resolves_it_there(out
     assert "from Duo Guild (duo)" in apply.commit_message({"id": "x", "title": "t", "change": "c"}, {"key": GUILD2, "name": "Duo Guild"})
 
 
+def test_apply_pins_the_profile_session_to_the_proposals_guild(out_dir, monkeypatch):
+    """The profile edit's Claude session starts its own MCP server: OIBOT_MCP_GUILD in its environment is the
+    proposal's guild, so get_proposal / get_raid read that guild (never a .env default, never 'Which guild?')."""
+    from oibot_gm.mcp_server import GUILD_ENV
+
+    apply = load_script("apply")
+    world = {"calls": [], "news": {}, "approved": {
+        GUILD2: [{"id": "260101-bbbb", "kind": "profile", "created_at": "2026-01-01T00:00:00+00:00", "title": "t", "change": "c"}]}}
+    monkeypatch.setenv(GUILD_ENV, GUILD)  # a .env default naming the OTHER guild
+    git = {("rev-parse", "--abbrev-ref", "HEAD"): "main", ("rev-parse", "HEAD"): "abc"}
+    monkeypatch.setattr(apply, "sh", lambda *a, **k: SimpleNamespace(stdout=git.get(a[1:], ""), stderr="", returncode=0))
+    monkeypatch.setattr(apply, "dirty_paths", lambda: [])
+    monkeypatch.setattr(apply, "revert_worktree", lambda: None)  # never touch this checkout from a test
+    envs = []
+
+    def fake_claude(cmd, prompt, transcript, on_step=None, timeout_s=0, env=None):
+        envs.append(env[GUILD_ENV])
+        return 0
+
+    class Api(FakeApi):
+        def post(self, path, body=None):
+            self.world["calls"].append((self.guild, "POST", path, (body or {}).get("state")))
+            return {}
+    assert apply.main([], api_factory=lambda guild=None: Api(world, guild), run_claude=fake_claude) == 1  # no edit made: failed, reverted
+    assert envs == [GUILD2]
+    assert [c for c in world["calls"] if c[1] == "POST"] == [(GUILD2, "POST", "/api/proposals/260101-bbbb/resolve", "applying"),
+                                                           (GUILD2, "POST", "/api/proposals/260101-bbbb/resolve", "failed")]
+
+
+def test_apply_goes_ahead_when_another_guilds_list_fails(out_dir):
+    from oibot_gm.mcp_server import ToolError
+
+    apply = load_script("apply")
+    world = {"calls": [], "news": {}, "approved": {
+        GUILD2: [{"id": "260101-bbbb", "kind": "needs_developer", "created_at": "2026-01-01T00:00:00+00:00", "title": "t", "change": "c"}]}}
+    resolved = []
+
+    class Api(FakeApi):
+        def get(self, path, **params):
+            if self.guild == GUILD:
+                raise ToolError("400: this guild has no owner set")
+            return super().get(path, **params)
+
+        def post(self, path, body=None):
+            resolved.append((self.guild, path, (body or {}).get("state")))
+            return {}
+    assert apply.main([], api_factory=lambda guild=None: Api(world, guild)) == 0
+    assert resolved == [(GUILD2, "/api/proposals/260101-bbbb/resolve", "failed")], "duo's approval is handled although demo's list failed"
+    world["approved"] = {}
+    assert apply.main([], api_factory=lambda guild=None: Api(world, guild)) == 1
+    st = agents.read_status("apply")
+    assert st["state"] == "failed" and st["result"].startswith("nothing approved · could not list Demo Guild: 400")
+
+
 # ---------------------------------------------------------------- runs per guild on the site
 
 class Bot:
@@ -178,6 +232,50 @@ def test_each_guild_sees_only_its_own_runs_and_legacy_runs_go_to_the_first(duo, 
     assert len(everything) == 3, "the MCP bearer (the owner's jobs) sees every run"
 
 
+def test_the_job_monitor_shows_a_guild_only_its_own_step_and_result(duo, monkeypatch, out_dir):
+    """agents.overview scoped (K7): another guild's live step ('Demo Guild: reviewing …'), its run id and the job's
+    combined result line never reach this guild's officers — on the Agents page or in /ask."""
+    theirs, tr_a = agents.new_run("review", guild=GUILD)
+    mine, tr_b = agents.new_run("review", guild=GUILD2)
+    agents.runner_line(tr_b, "1 item(s) reviewed, 0 proposal(s) posted", done=True)
+    agents.write_status("review", state="running", run_id=theirs, step="Demo Guild: reviewing 3 news item(s)",
+                        result="2 guild(s) · Demo Guild: secret title · Duo Guild: 1 item(s) reviewed")
+    bot, c = site(duo, monkeypatch)
+    job = next(j for j in c.get("/api/agents", headers={"X-Oibot-Guild": GUILD2}).json()["jobs"] if j["job"] == "review")
+    assert (job["step"], job["run_id"], job["result"], job["state"]) == (None, None, "1 item(s) reviewed, 0 proposal(s) posted", "running")
+    job = next(j for j in c.get("/api/agents", headers={"X-Oibot-Guild": GUILD}).json()["jobs"] if j["job"] == "review")
+    assert job["step"] == "Demo Guild: reviewing 3 news item(s)" and job["run_id"] == theirs
+    owner = next(j for j in agents.overview(guild=None)["jobs"] if j["job"] == "review")
+    assert "secret title" in owner["result"], "unscoped (one guild, the MCP bearer): the status as written"
+    apply_job = next(j for j in agents.overview(guild=GUILD2)["jobs"] if j["job"] == "apply")
+    assert apply_job["result"] is None and apply_job["run_id"] is None
+
+
+def test_ask_reads_the_job_monitor_scoped_to_its_guild(duo, out_dir):
+    from oibot_gm import discord_help
+
+    theirs, _ = agents.new_run("review", guild=GUILD)
+    agents.write_status("review", state="running", run_id=theirs, step="Demo Guild: reviewing 3 news item(s)", result="Demo Guild: secret title")
+
+    class Host(discord_help.HelpMixin):
+        def __init__(self):
+            self.registries = duo.guilds
+            self.ops = SimpleNamespace(recent_for=lambda k: [])
+            self.ctx = SimpleNamespace(provider=None)
+            self.feed = self.started_at = self.tree = None
+            self.raids = SimpleNamespace(store=lambda r: duo.rs_b)
+
+        def get_guild(self, gid):
+            return None
+
+    x = Host().help_extras(duo.b, True)
+    job = next(j for j in x.agents()["jobs"] if j["job"] == "review")
+    assert "secret" not in str(job) and "Demo Guild" not in str(job) and job["run_id"] is None
+    assert x.agent_steps(theirs) == [] and x.agent_runs("review") == []
+    job = next(j for j in Host().help_extras(duo.a, True).agents()["jobs"] if j["job"] == "review")
+    assert job["step"].startswith("Demo Guild: reviewing")
+
+
 def test_one_guild_sees_every_run_as_before(reg, rs, monkeypatch, out_dir):
     from test_agents import clients
 
@@ -197,6 +295,8 @@ def test_a_profile_proposal_is_proposed_once_per_game_version(duo, monkeypatch):
     assert first["id"]
     dup = c.post("/api/proposals", json=proposal_data(kind="profile", edit=PROFILE_EDIT), headers={**job, "X-Oibot-Guild": GUILD2}).json()
     assert dup["duplicate_of"] == f"{GUILD}/{first['id']}" and not ProposalStore(duo.b.store, GUILD2).all()
+    person = c.post("/api/proposals", json=proposal_data(kind="profile", edit=PROFILE_EDIT), headers={"X-Requested-With": "oibot", "X-Oibot-Guild": GUILD2}).json()
+    assert "duplicate_of" not in person and first["id"] not in person["message"] and "Demo Guild" in person["message"], "a person never gets the other guild's proposal id"
     ok = c.post("/api/proposals", json=proposal_data(), headers={**job, "X-Oibot-Guild": GUILD2}).json()
     assert ok["id"], "a guild setting is per guild: never a duplicate"
 
@@ -208,15 +308,75 @@ def test_approving_a_shared_profile_edit_needs_every_owner(duo):
     owners = news.shared_profile_owners(duo.guilds, duo.a)
     assert owners == [("Demo Guild", OWNER), ("Duo Guild", OWNER2)]
     with pytest.raises(PermissionError, match="Duo Guild also uses"):
-        ps.move(p.id, "approved", "Demo owner", officer=True, job=False, by_id=OWNER, profile_owners=owners)
-    with pytest.raises(PermissionError, match="Demo Guild, Duo Guild also use"):
-        ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5, profile_owners=owners)
-    assert ps.move(p.id, "dismissed", "an officer", officer=True, job=False, by_id=5, profile_owners=owners).state == "dismissed", "dismissing stays open"
+        ps.move(p.id, "approved", "Demo owner", officer=True, job=False, by_id=OWNER)
+    with pytest.raises(PermissionError, match=r"that Duo Guild also uses: the owner"):  # never names the proposing guild itself
+        ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5)
+    assert ps.move(p.id, "dismissed", "an officer", officer=True, job=False, by_id=5).state == "dismissed", "dismissing stays open"
     q = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
     duo.b.config.owner_discord_id = OWNER  # one person owns both
-    assert ps.move(q.id, "approved", "owner", officer=True, job=False, by_id=OWNER, profile_owners=news.shared_profile_owners(duo.guilds, duo.a)).state == "approved"
+    assert ps.move(q.id, "approved", "owner", officer=True, job=False, by_id=OWNER).state == "approved"
     duo.b.config.game_profile = "tbc"
     assert news.shared_profile_owners(duo.guilds, duo.a) == [], "another game version: nothing shared"
+
+
+def test_plain_text_approval_goes_through_the_same_shared_profile_rule(duo):
+    """configops' proposal op (an @mention, /gm change, the site's plain change, MCP plain_change) reaches
+    ProposalStore.move without passing anything extra: the rule is in move itself (K3, one code path)."""
+    import asyncio
+
+    from test_parity_ops_owner import Bot as OpsBot
+
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+    from oibot_gm.registry import RegistryError
+
+    add_news(duo.a)
+    ps = ProposalStore(duo.a.store, GUILD)
+    p = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    op = ConfigOp(op="proposal", target=p.id, value="approve")
+    assert "it edits game data Duo Guild also uses, so only the owner of every guild on this game version can approve it" in configops.describe(duo.a, op)
+    for uid in (5, OWNER):  # an officer; demo's owner alone
+        with pytest.raises(RegistryError, match="Duo Guild also uses"):
+            asyncio.run(configops.apply_async(duo.a, op, "someone", False, bot=OpsBot(), by_id=uid))
+    assert ps.get(p.id).state == "proposed"
+    dismiss = ConfigOp(op="proposal", target=p.id, value="dismiss")
+    assert "also use" not in configops.describe(duo.a, dismiss)
+    duo.b.config.owner_discord_id = OWNER
+    assert asyncio.run(configops.apply_async(duo.a, op, "owner", True, bot=OpsBot(), by_id=OWNER)).endswith("approved: " + p.title)
+    g = ps.create(duo.a, proposal_data())  # a guild setting: per guild, the officers approve it as before
+    duo.b.config.owner_discord_id = OWNER2
+    assert "also use" not in configops.describe(duo.a, ConfigOp(op="proposal", target=g.id, value="approve"))
+    asyncio.run(configops.apply_async(duo.a, ConfigOp(op="proposal", target=g.id, value="approve"), "an officer", False, bot=OpsBot(), by_id=5))
+    assert ps.get(g.id).state == "approved"
+
+
+def test_the_discord_approve_button_goes_through_the_same_shared_profile_rule(duo):
+    import asyncio
+
+    from test_news import FakeResp, fake_client
+
+    from oibot_gm.discord_news import ProposalButton
+
+    add_news(duo.a)
+    ps = ProposalStore(duo.a.store, GUILD)
+    p = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    client, _ = fake_client(duo.a, officer=True)
+    client.registries = duo.guilds
+    itx = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
+    asyncio.run(ProposalButton(GUILD, p.id, "approve").callback(itx))
+    assert itx.response.sent and "Duo Guild also uses" in itx.response.sent[0] and ps.get(p.id).state == "proposed"
+
+
+def test_a_single_guild_approves_profile_proposals_as_before(reg):
+    from oibot_gm.discord_registry import Guilds
+
+    from conftest import ROOT
+
+    Guilds(reg.store, ROOT)  # the index is attached to the store, with one guild in it
+    add_news(reg)
+    ps = ProposalStore(reg.store, GUILD)
+    p = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    assert ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5).state == "approved"
 
 
 def test_the_site_refuses_a_shared_profile_approval_and_tells_every_guild_when_it_lands(duo, monkeypatch):
@@ -226,9 +386,9 @@ def test_the_site_refuses_a_shared_profile_approval_and_tells_every_guild_when_i
     p = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
     officer = {"X-Requested-With": "oibot", "X-Oibot-Guild": GUILD}
     r = c.post(f"/api/proposals/{p.id}/resolve", json={"state": "approved"}, headers=officer)
-    assert r.status_code == 403 and "Demo Guild, Duo Guild also use" in r.json()["error"]
+    assert r.status_code == 403 and "Duo Guild also uses" in r.json()["error"] and "Demo Guild" not in r.json()["error"]
     duo.b.config.owner_discord_id = OWNER
-    ps.move(p.id, "approved", "owner", officer=True, job=False, by_id=OWNER, profile_owners=news.shared_profile_owners(duo.guilds, duo.a))
+    ps.move(p.id, "approved", "owner", officer=True, job=False, by_id=OWNER)
     job = {"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot", "X-Oibot-Guild": GUILD}
     for state in ("applying", "applied"):
         assert c.post(f"/api/proposals/{p.id}/resolve", json={"state": state, "commit": "abc1234"}, headers=job).status_code == 200

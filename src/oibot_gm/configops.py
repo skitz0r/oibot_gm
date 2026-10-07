@@ -1537,9 +1537,15 @@ def _describe_new(reg: Registry, op: ConfigOp) -> str:
                 + (f" — registers {a.label} as their main, rank trial" if accept else "") + (f"; note to them: “{note}”" if note else "")
                 + "; they get a DM and the review card updates")
     if op.op == "proposal":
+        from .news import shared_profile_others
+
         _, p, state = _proposal(reg, op)
+        others = shared_profile_others(getattr(reg.store, "guilds", None), reg) if state == "approved" and p.kind == "profile" else []
         return (f"news proposal {p.id} “{p.title}” ({p.kind}, {p.confidence}): {p.state} → {state}"
-                + (" — the apply job carries it out within 15 minutes" if state == "approved" else "") + (f"; note: {op.reason.strip()}" if (op.reason or "").strip() else ""))
+                + (" — the apply job carries it out within 15 minutes" if state == "approved" else "")
+                + (f"; it edits game data {', '.join(others)} also use{'s' if len(others) == 1 else ''}, so only the owner of every guild on this "
+                   "game version can approve it" if others else "")
+                + (f"; note: {op.reason.strip()}" if (op.reason or "").strip() else ""))
     from . import agents
 
     job = _job(op)

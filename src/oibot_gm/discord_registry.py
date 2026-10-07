@@ -39,6 +39,7 @@ class Guilds:
         import threading
 
         self.store = store
+        store.guilds = self  # the guild index of this data root: ProposalStore.move's shared-profile rule reads it (K3)
         self.code_root = code_root
         self.load_errors: list[str] = []
         self._lock = threading.Lock()
@@ -86,6 +87,8 @@ class Guilds:
 
         g = cls.__new__(cls)
         g.store, g.code_root, g.load_errors = store, code_root or Path(__file__).resolve().parents[2], []
+        if getattr(store, "guilds", None) is None:  # the real loader's index (the bot's) stays the store's; this one only fills a gap
+            store.guilds = g
         g._lock, g._claiming = threading.Lock(), set()
         g.by_discord = {int(r.config.discord_guild_id): r for r in regs}
         g._mark()

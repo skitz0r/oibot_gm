@@ -69,13 +69,22 @@ def commit_message(p: dict, guild: dict | None = None) -> str:
             f"Approved by {p.get('decided_by') or '?'}. News: {', '.join(p.get('news') or [])}\n\n{TRAILER}")
 
 
-def gather_approved(make) -> tuple[list[tuple[dict, dict]], dict]:
-    """Every guild's approved proposals as (guild row, proposal), oldest first, plus each guild's scoped Api (design
-    §5.32: one apply job serves every guild; the oldest approval overall goes first)."""
+def gather_approved(make) -> tuple[list[tuple[dict, dict]], dict, list[str]]:
+    """Every guild's approved proposals as (guild row, proposal), oldest first, each guild's scoped Api, and one line
+    per guild whose list failed (design §5.32: one apply job serves every guild; the oldest approval overall goes
+    first). One guild answering an error (no owner set, a bad config) never holds up the others' approvals; only the
+    guild listing itself failing means the bot is unreachable (raised)."""
+    from oibot_gm.mcp_server import ToolError
+
     guilds = make().guilds()
     apis = {g["key"]: make(guild=g["key"]) for g in guilds}
-    rows = [(g, p) for g in guilds for p in apis[g["key"]].get("/api/proposals", state="approved")["proposals"]]
-    return sorted(rows, key=lambda gp: gp[1]["created_at"]), apis
+    rows, errors = [], []
+    for g in guilds:
+        try:
+            rows += [(g, p) for p in apis[g["key"]].get("/api/proposals", state="approved")["proposals"]]
+        except ToolError as e:
+            errors.append(f"{g.get('name') or g['key'] or 'the guild'}: {e}")
+    return sorted(rows, key=lambda gp: gp[1]["created_at"]), apis, errors
 
 
 def healthz_url() -> str:
@@ -106,7 +115,7 @@ def restart_bot() -> int | None:
     return old
 
 
-def main(argv: list[str] | None = None, api_factory=None) -> int:
+def main(argv: list[str] | None = None, api_factory=None, run_claude=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dry-run", action="store_true", help="print the claude command for a profile edit and exit")
     p.add_argument("--pr", action="store_true", default=os.environ.get("OIBOT_APPLY_MODE") == "pr", help="profile edits: branch + PR, no restart")
@@ -121,19 +130,20 @@ def main(argv: list[str] | None = None, api_factory=None) -> int:
     if st["state"] == "running":
         return 0
 
-    from oibot_gm.mcp_server import Api, ToolError
+    from oibot_gm.mcp_server import GUILD_ENV, Api, ToolError
 
     make = api_factory or (lambda guild=None: Api(guild=guild))
     polled = agents.iso()
     try:
-        approved_rows, apis = gather_approved(make)
+        approved_rows, apis, errors = gather_approved(make)
     except ToolError as e:
         agents.write_status(JOB, state="failed", started=polled, finished=agents.iso(), result=f"bot not reachable: {e}", step=None, pid=None)
         return 1
     approved = [p for _, p in approved_rows]
     if not approved:
-        agents.write_status(JOB, state="idle", started=polled, finished=agents.iso(), result="nothing approved", step=None, pid=None, waiting=0)
-        return 0
+        agents.write_status(JOB, state="failed" if errors else "idle", started=polled, finished=agents.iso(), step=None, pid=None, waiting=0,
+                            result="nothing approved" + (" · could not list " + " · ".join(errors) if errors else ""))
+        return 1 if errors else 0
     guild, prop = approved_rows[0]
     api = apis[guild["key"]]  # resolve and apply in the proposal's own guild
     gname = guild.get("name") or guild["key"] or "the guild"
@@ -148,6 +158,8 @@ def main(argv: list[str] | None = None, api_factory=None) -> int:
     rid, tr = agents.new_run(JOB, guild=guild["key"] or None)
     agents.write_status(JOB, state="running", started=polled, finished=None, run_id=rid, pid=os.getpid(), step=f"Applying {prop['id']}: {prop['title'][:80]}", result=None, waiting=len(approved))
     agents.runner_line(tr, (f"{gname}: approved" if len(apis) > 1 else "Approved") + f" by {prop.get('decided_by') or '?'}: {prop['title']} ({prop['kind']})")
+    for err in errors:  # another guild's list failed: this one goes ahead; the failure goes to the job's log, not this guild's transcript
+        print(f"apply: could not list approvals for {err}", file=sys.stderr)
 
     def resolve(state: str, commit: str | None = None, note: str | None = None) -> None:
         try:
@@ -176,7 +188,8 @@ def main(argv: list[str] | None = None, api_factory=None) -> int:
     prompt = PROMPT.read_text() + "\n\n## The proposal (data)\n```json\n" + json.dumps(prop, indent=1, ensure_ascii=False) + "\n```\n"
     cmd = agents.apply_command(agents.mcp_tool_names(), a.budget, a.model)
     agents.runner_line(tr, "Starting Claude to edit the profile")
-    code = agents.run_claude(cmd, prompt, tr, on_step=lambda s: agents.write_status(JOB, step=s["title"][:160]), timeout_s=30 * 60)
+    env = {**os.environ, GUILD_ENV: guild["key"]}  # the session's MCP reads (get_proposal, get_raid …) are the proposal's guild's, never a default
+    code = (run_claude or agents.run_claude)(cmd, prompt, tr, on_step=lambda s: agents.write_status(JOB, step=s["title"][:160]), timeout_s=30 * 60, env=env)
     if sh("git", "rev-parse", "HEAD").stdout.strip() != head0:
         sh("git", "reset", "--hard", head0)
         resolve("failed", note="the session moved HEAD; reset")

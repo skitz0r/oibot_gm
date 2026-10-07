@@ -912,8 +912,9 @@ minimums with a spare in each (`can_cover` with one more seat of each minimum ro
 no spare (`no_spare` lists the roles; the worked example's tanks 2/2, healers 2/2) or only with offspecs, declared flex
 or alts (`cover` names who), red = not even then
 (`recruit`: non-regular members who play a short role, by rank); None without regulars. `rc.series_forecast(reg, key)`
-= each start in the next 28 days (`FORECAST_DAYS`, counted from the raid's first opening before then; at most
-`FORECAST_MAX`) with the regulars minus recorded absences against the minimums: `{start, day ('Tue 15 Dec'), when
+= each start in the 28 days from the first upcoming start (`FORECAST_DAYS`, counted from the raid's first opening
+before then; at most `FORECAST_MAX`; `next_runs_of(min_days=)` looks far enough ahead, so a 3-day lockout's shorter
+listing horizon never cuts it to three weeks) with the regulars minus recorded absences against the minimums: `{start, day ('Tue 15 Dec'), when
 (12-hour), expected, seats, short, away}`; `rc.series_outlook(reg, rid)` = coverage + forecast, read by `/api/rosters`
 (the Rosters page's Regulars card: role icon + count/minimum (`RoleCounts need=`), the level colour under them, could cover / recruit, a *Next 4 weeks* list —
 role icon + "−n", "n away" with the names on hover), `comp.readiness` (the analytics card: a level dot on the series
@@ -1084,7 +1085,8 @@ pressed in any other server, configured or not (K1: an unconfigured server's Man
 in a DM the only guild; with several guilds in a DM the button's own `legacy(reg)` matcher over the person's guilds
 (`raid`: the run is live there; `fill`: that run holds an ask for the uid; `place`: an open placement ask for the roster;
 `runact`: live and the presser is an officer there; `reg`/`guide`: any) — one → it, several → the picker, none → the
-button's own "closed" line. Old messages keep their old ids and keep working; a re-rendered card gets new ids (roll
+button's own "closed" line (after the picker the button continues on the picker's press, so Fill and Place show the
+answer on the picker and edit the original DM card themselves — `raid_buttons.show_answer` — so its Yes/No go). Old messages keep their old ids and keep working; a re-rendered card gets new ids (roll
 forward, never back, K23). `may_answer_for` checks a puppet answer against the puppet's own guild. *Names in DMs:*
 `Guilds` marks every served registry `many_guilds` while there are several; then `send_member_dm` starts a text DM with
 `**<guild>** · ` (unless it already opens with the name) and `raid_views._header` puts the name before every card's
@@ -1121,9 +1123,20 @@ guild is configured the bot writes `out/agents/legacy_guild` once, and untagged 
 `agents.runs_scope` shows a guild's web viewers its runs only (every run while one guild is configured), `agents_run`
 404s another guild's run; the MCP bearer sees all. **Profile proposals are shared** by every guild on one
 `game_profile`: `post_proposal` answers `{duplicate_of: "<guild>/<id>"}` when another such guild has an open profile
-proposal citing the same news; approving one needs the owner of every guild on that game version
-(`news.shared_profile_owners` → `ProposalStore.move`, the one path for the site, MCP and the card's button, K3;
-dismissing stays with the proposing guild's officers); applied/reverted sends an ops line to every other guild on it.
+proposal citing the same news (only the owner's job gets that id back; a person posting on the site gets the other
+guild's name, never its proposal id); approving one needs the owner of every guild on that game version, and the rule
+lives in `ProposalStore.move` itself, so no caller can skip it: `discord_registry.Guilds` attaches itself to its
+`GitStore` (`store.guilds`; `Guilds.of`, the tests' and offline tools' index, only when none is attached) and `move`
+asks `news.shared_profile_refusal(store.guilds, key, by_id)` — the card's button, the site, MCP and plain text
+(configops' `proposal` op: an @mention, `/gm change`, the site's plain change, MCP `plain_change`) all go through it;
+`configops.describe` says up front that only the owner of every guild on the version can approve it. The refusal names
+only the OTHER guilds on the version (K3; dismissing stays with the proposing guild's officers); applied/reverted
+sends an ops line to every other guild on it. `apply.py` pins the profile edit's Claude session to the proposal's guild
+(`OIBOT_MCP_GUILD` in its environment, like the review), and one guild's failing proposal list (no owner set, say)
+never holds up the others' approvals (the error goes to the job's log; with nothing approved anywhere the status is
+failed and says which guild). `agents.overview(guild=runs_scope)` — the Agents page and `/ask` — shows a guild's
+viewers a job's live step and run id only when the current run is theirs, and as the result their own newest run's
+outcome, never the job's combined line naming every guild.
 The agents functions read `agents.OUT` at call time (tests point it at a tmp dir; the conftest does it for every test).
 Tests: `tests/test_agents_multiguild.py`.
 

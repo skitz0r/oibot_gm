@@ -419,16 +419,25 @@ def start_job(job: str, out: Path | None = None) -> tuple[bool, str]:
     return True, f"{spec['name']} started"
 
 
-def overview(out: Path | None = None, tz=None, launchctl: Callable[[str], dict] | None = None) -> dict:
-    """What the monitor shows per job: state + light, last run and outcome, next run, launchd."""
+def overview(out: Path | None = None, tz=None, launchctl: Callable[[str], dict] | None = None, guild: str | None = None) -> dict:
+    """What the monitor shows per job: state + light, last run and outcome, next run, launchd. `guild` (runs_scope):
+    a guild's viewer while several are served — the live step and run id only when the current run is that guild's
+    (run_visible), and the result is that guild's newest run's outcome, never the job's combined line naming every
+    guild (K7: one guild's officers never read another's titles). None = everything, as before."""
     launchctl = launchctl or launchd_status
     jobs = []
     for job, spec in JOBS.items():
         st = read_status(job, out)
         ld = launchctl(spec["label"])
         nxt = next_run(job, st)
-        jobs.append({"job": job, "name": spec["name"], "label": spec["label"], "state": st["state"], "light": light(st, ld), "step": st.get("step"),
-                     "run_id": st.get("run_id"), "result": st.get("result"), "started": st.get("started"), "finished": st.get("finished"),
+        step, run_id, result = st.get("step"), st.get("run_id"), st.get("result")
+        if guild is not None:
+            if not (run_id and run_visible(run_id, guild, out)):
+                step, run_id = None, None
+            mine = list_runs(job, out, guild=guild)
+            result = mine[0]["outcome"] if mine else None
+        jobs.append({"job": job, "name": spec["name"], "label": spec["label"], "state": st["state"], "light": light(st, ld), "step": step,
+                     "run_id": run_id, "result": result, "started": st.get("started"), "finished": st.get("finished"),
                      "started_label": clock12(st.get("started"), tz), "finished_label": clock12(st.get("finished"), tz),
                      "next": iso(nxt) if nxt else None, "next_label": clock12(nxt, tz) if nxt else "", "launchd": ld,
                      "schedule": schedule_label(job)})

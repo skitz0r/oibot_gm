@@ -66,7 +66,7 @@ class Itx:
         self.edits: list = []
         self.original_edits: list = []
         self.response = Resp(self)
-        self.message = types.SimpleNamespace(id=1, content="the question")
+        self.message = CardMessage("the question")
         self.type = discord.InteractionType.component
         self.followup = types.SimpleNamespace(send=self._followup)
         self.namespace = types.SimpleNamespace()
@@ -293,6 +293,49 @@ def test_an_old_button_matching_both_guilds_asks_which(duo):
     i, press = run(go())
     assert i.said[0] == guild_picker.PROMPT and press.extras["guild"] == GUILD2
     assert duo.rs_b.events[ev_b.key].fill_asks[-1].answer == "no" and duo.rs_a.events[ev_a.key].fill_asks[-1].answer is None
+    line = next(d[2] for d in bot.did if d[0] == "fill")
+    assert press.edits == [{"content": f"**→ {line}**", "view": None}], "the picker shows the answer"
+    assert i.message.edits == [{"content": f"the question\n\n**→ {line}**", "view": None}], "and the DM card itself loses its buttons"
+
+
+class CardMessage:
+    """The DM card a button sits on: the bot's own message, edited directly after the server picker."""
+
+    def __init__(self, content):
+        self.id, self.content, self.edits = 1, content, []
+
+    async def edit(self, **kw):
+        self.edits.append(kw)
+
+
+def test_an_old_placement_button_answered_through_the_picker_closes_the_card(duo):
+    ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
+    for r, ev in ((duo.a, ev_a), (duo.b, ev_b)):
+        r.add_placement_ask(PUPPET, ev.team, "Puppet", "t")
+    bot = dm_bot(duo)
+
+    async def go():
+        i = Itx(bot)
+        i.message = CardMessage("You're rostered — confirm?")
+        task = asyncio.create_task(PlaceButton(None, ev_b.team, PUPPET, "yes").callback(i))
+        press = await press_picker(i, "Duo Guild", client=bot)
+        await task
+        return i, press
+    i, press = run(go())
+    assert ("place", GUILD2, True) in bot.did and not duo.b.open_placement_asks(PUPPET) and duo.a.open_placement_asks(PUPPET)
+    assert len(press.edits) == 1 and press.edits[0]["content"].startswith("**→ ") and press.edits[0]["view"] is None
+    assert len(i.message.edits) == 1 and i.message.edits[0]["content"].startswith("You're rostered — confirm?\n\n**→ ") and i.message.edits[0]["view"] is None
+
+
+def test_a_new_id_answer_edits_only_its_own_card(duo):
+    ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
+    duo.b.add_placement_ask(PUPPET, ev_b.team, "Puppet", "t")
+    bot = dm_bot(duo)
+    i = Itx(bot)
+    i.message = CardMessage("You're rostered — confirm?")
+    run(PlaceButton(GUILD2, ev_b.team, PUPPET, "yes").callback(i))
+    assert len(i.edits) == 1 and i.edits[0]["content"].startswith("You're rostered — confirm?\n\n**→ ")
+    assert i.message.edits == [], "no picker: the press's own edit_message is the card's"
 
 
 # ---------------------------------------------------------------- the picker

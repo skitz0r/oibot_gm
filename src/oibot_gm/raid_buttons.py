@@ -11,6 +11,7 @@ as before (guild_routing.resolve_button), with each button's own matcher decidin
 Import cycle: see `raid_views` — the helpers this module formats replies with are imported at the bottom."""
 from __future__ import annotations
 
+import logging
 import re
 
 import discord
@@ -18,6 +19,8 @@ import discord
 from . import raidcycle as rc
 from .guild_routing import resolve_button
 from .registry import RegistryError
+
+log = logging.getLogger(__name__)
 
 
 class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask)(?::(?P<rev>[0-9a-f]{6,16}))?"):
@@ -198,6 +201,26 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid(?:
         await bot.apply_signup(interaction, reg, rs, ev, m, None, self.status)
 
 
+async def show_answer(card: discord.Interaction, press: discord.Interaction, line: str) -> None:
+    """The answer goes on the DM card and its buttons go. `press` is `card` itself, or — an old id with several guilds —
+    the DM server picker's press: then the picker message shows the line and the card is edited directly (the bot's
+    own DM message), so its Yes/No never stay behind as if unanswered."""
+    try:
+        if press is card:
+            await press.response.edit_message(content=press.message.content + f"\n\n**→ {line}**", view=None)
+            return
+        await press.response.edit_message(content=f"**→ {line}**", view=None)
+    except Exception:  # noqa: BLE001
+        if not press.response.is_done():
+            await press.response.send_message(line, ephemeral=True)
+    msg = getattr(card, "message", None)
+    if press is not card and msg is not None:
+        try:
+            await msg.edit(content=(msg.content or "") + f"\n\n**→ {line}**", view=None)
+        except Exception as e:  # noqa: BLE001 — the answer is saved; only the old card keeps its buttons
+            log.debug("card edit after the server picker failed: %s", e)
+
+
 class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<uid>\d+):(?P<answer>yes|no)"):
     """Yes/No on a fill DM. Survives restarts; only the person asked can answer."""
 
@@ -217,6 +240,7 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill(?:\.
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
+        card = interaction  # the DM card's press; after the server picker (an old id, several guilds) `interaction` is the picker's
         reg, interaction = await resolve_button(interaction, self.gk, lambda r: self._asked(bot, r))
         if reg is None and interaction.response.is_done():
             return
@@ -235,10 +259,7 @@ class FillButton(discord.ui.DynamicItem[discord.ui.Button], template=r"fill(?:\.
             await interaction.response.send_message("That question closed when the roster locked — nothing changed." if closed else "Already answered (or the gap was filled).", ephemeral=True)
             return
         line = rc.apply_fill_answer(reg, rs, ev, ask, self.answer == "yes")
-        try:
-            await interaction.response.edit_message(content=interaction.message.content + f"\n\n**→ {line}**", view=None)
-        except Exception:  # noqa: BLE001
-            await interaction.response.send_message(line, ephemeral=True)
+        await show_answer(card, interaction, line)
         await bot.after_fill_answer(reg, rs, ev, ask, line)
 
 
@@ -259,6 +280,7 @@ class PlaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"place(?:
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
+        card = interaction  # see FillButton.callback
         reg, interaction = await resolve_button(interaction, self.gk, self._asked)
         if not reg:
             if not interaction.response.is_done():
@@ -272,10 +294,7 @@ class PlaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"place(?:
         except RegistryError as e:
             await interaction.response.send_message(f"{e}", ephemeral=True)
             return
-        try:
-            await interaction.response.edit_message(content=interaction.message.content + f"\n\n**→ {line}**", view=None)
-        except Exception:  # noqa: BLE001
-            await interaction.response.send_message(line, ephemeral=True)
+        await show_answer(card, interaction, line)
         await bot.after_placement_answer(reg, self.uid, self.roster, self.answer == "yes", line)
 
 

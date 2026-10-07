@@ -364,14 +364,16 @@ def upcoming(reg: Registry, instance: str, now: datetime, horizon_hours: float |
     return sorted(out, key=lambda x: (x[1], x[0]["id"] != DEFAULT_SCHEDULE))
 
 
-def next_runs_of(reg: Registry, instance: str, sched: dict, n: int = 3, now: datetime | None = None, rd: dict | None = None) -> list[datetime]:
+def next_runs_of(reg: Registry, instance: str, sched: dict, n: int = 3, now: datetime | None = None, rd: dict | None = None,
+                 min_days: float = 0) -> list[datetime]:
     """A schedule's next `n` starts (active or not), for "the next three runs" on every surface; never before the raid
-    first opens (before that: its first runs, not an empty list)."""
+    first opens (before that: its first runs, not an empty list). `min_days`: look at least this far ahead (the
+    forecast's four weeks must not be cut by a short lockout's horizon)."""
     rd = rd if rd is not None else reg.raid_def(instance)
     now = now or reg.now_local()
     fo = first_open_of(reg, rd)
     base = max(now, fo) if fo else now
-    horizon = 24 * max(OPEN_HORIZON_DAYS, 8 * int(rd.get("lockout_days") or 7))
+    horizon = 24 * max(OPEN_HORIZON_DAYS, 8 * int(rd.get("lockout_days") or 7), min_days)
     return schedule_starts(reg, instance, sched, base, horizon, rd)[:n]
 
 
@@ -393,7 +395,7 @@ def series_forecast(reg: Registry, key: str, now: datetime | None = None) -> lis
     if sched is None or not sched.get("active", True) or schedule_class(sched["kind"]) != "recurring":
         return []
     rd = reg.raid_def(rid)
-    starts = next_runs_of(reg, rid, sched, n=FORECAST_MAX, now=now, rd=rd)
+    starts = next_runs_of(reg, rid, sched, n=FORECAST_MAX, now=now, rd=rd, min_days=2 * FORECAST_DAYS)  # the first start, then 4 weeks from it
     if not starts:
         return []
     until = starts[0] + timedelta(days=FORECAST_DAYS)

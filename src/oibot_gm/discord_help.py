@@ -328,8 +328,8 @@ class HelpMixin:
         x.privilege, x.officers = self.help_privilege(reg, guild)
         from . import agents
 
-        x.agents = lambda: agents.overview(tz=reg.tz)
         scope = agents.runs_scope(getattr(self, "registries", None), reg)  # this guild's runs only (all of them while it is the only one)
+        x.agents = lambda: agents.overview(tz=reg.tz, guild=scope)
         x.agent_steps = lambda run_id: agents.steps(agents.read_run(run_id)) if agents.run_visible(run_id, scope) else []
         x.agent_runs = lambda job: [{**r, "started_label": agents.clock12(r["started"], reg.tz)} for r in agents.list_runs(job, guild=scope)[:3]]  # the Agents page's past runs
         return x

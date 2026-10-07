@@ -105,8 +105,7 @@ class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"newsp
         by = interaction.user.display_name
         state = "approved" if self.action == "approve" else "dismissed"
         try:
-            p = await asyncio.to_thread(ps.move, self.pid, state, by, officer=True, job=False, by_id=interaction.user.id,
-                                        profile_owners=news.shared_profile_owners(bot.registries, reg))
+            p = await asyncio.to_thread(ps.move, self.pid, state, by, officer=True, job=False, by_id=interaction.user.id)
         except (ProposalError, PermissionError) as e:
             await interaction.response.send_message(str(e), ephemeral=True)
             return
