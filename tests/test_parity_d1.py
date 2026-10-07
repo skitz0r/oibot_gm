@@ -51,7 +51,7 @@ class HelpBot(HelpMixin):
         self.ctx = types.SimpleNamespace(provider=types.SimpleNamespace(summary=lambda: "LLM spend $0"))
         self.tree = None
         self.raids = types.SimpleNamespace(store=lambda r: rs)
-        self.ops = types.SimpleNamespace(recent=[("9:00 PM", "info", "ops secret line")])
+        self.ops = types.SimpleNamespace(recent_for=lambda key: [("9:00 PM", "info", "ops secret line")])  # the ring is per guild
 
 
 def test_help_answer_in_public_uses_the_member_view_and_says_where_the_officer_view_is(reg, rs, secret, monkeypatch):

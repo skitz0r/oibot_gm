@@ -134,11 +134,11 @@ PREVIEW_TTL = 600  # seconds a plain_change preview token stays good (Discord's 
 
 def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     @contextlib.asynccontextmanager
-    async def solving(key: str):
+    async def solving(reg, key: str):
         """The run's solver single-flight (RaidMixin.solving — shared with chat, MCP, the scheduler and the cards);
-        a second caller gets a 409 instead of queueing."""
+        a second caller gets a 409 instead of queueing. Keyed (guild, run key)."""
         try:
-            async with bot.solving(key):
+            async with bot.solving(reg, key):
                 yield
         except rc.SolverBusy as e:
             raise HTTPException(409, str(e))
@@ -751,7 +751,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     def reg_saved(reg, kind: str, lines) -> None:
         publish(kind)
 
-    def ops_line() -> None:
+    def ops_line(guild_key: str | None = None) -> None:
         publish("ops")
 
     from .. import ops as ops_mod, registry as registry_mod
@@ -793,7 +793,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         if strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
         avoid = d.get("avoid") if isinstance(d.get("avoid"), list) else None
-        async with solving(ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
+        async with solving(v.reg, ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
             try:
                 layout, rosters = await asyncio.to_thread(rc.split_preview, v.reg, rs, ev, strategy, avoid or None)
             except RuntimeError as e:
@@ -813,7 +813,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         b = parse(d, StrategyBody)
         if b.strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": "unknown strategy"}, status_code=400)
-        async with solving(ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
+        async with solving(v.reg, ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
             ev.split_strategy = b.strategy
             rs.save(ev, f"split strategy {b.strategy}")
         return {"message": f"split strategy: {b.strategy}"}
@@ -824,7 +824,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
             return JSONResponse({"error": "already locked — move people on the board instead"}, status_code=400)
-        async with solving(ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
+        async with solving(v.reg, ev.key):  # the run key, never the URL ref: an alias must hit the same single-flight
             rev = rc.board_rev(v.reg, ev)  # the board the solve fills around: a drag during the solve wins (409), never lost
             try:
                 layout = await asyncio.to_thread(rc.autofill, v.reg, rs, ev)
@@ -1452,7 +1452,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         started = float(getattr(bot, "started_at", STARTED))
         return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed.status() if feed else "disabled",
                 "up": int(time.time() - started), "started_at": started,
-                "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent)],
+                "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent_for(v.reg.key))],
                 "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))],
                 "precedents": list(reversed(precedents[-pl:] if pl else [])), "ledger": list(reversed(ledger[-ll:] if ll else [])),
                 "member": m.display_name if member else None}

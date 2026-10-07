@@ -55,7 +55,8 @@ class FakeInteraction:
         self.h, self.type, self.user, self.client = h, kind, h.user, h.client
         self.message = SimpleNamespace(id=message_id) if message_id is not None else None
         self.response = FakeResponse(h, self)
-        self.guild_id, self.guild, self.channel = 1, None, getattr(h, "channel", None)
+        self.guild_id, self.guild, self.channel = getattr(h, "guild_id", 1), getattr(h, "guild", None), getattr(h, "channel", None)
+        self.extras: dict = {}
         self._sent_id: int | None = None
         self.followup = SimpleNamespace(send=self._followup)
 

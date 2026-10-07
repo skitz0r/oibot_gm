@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import logging
 import os
 import re
 import time
@@ -52,6 +53,7 @@ from .store import GitStore, resolve_data_root
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "out"
+log = logging.getLogger(__name__)
 STORE: GitStore | None = None  # set in run(); None = fixtures-only mode (no git)
 # The mock fixtures' guild key: the directory name of the guild dir the bot was started on (run() sets it from
 # the real path; before that, OIBOT_GUILD_DIR or the public demo fixtures). Never a real guild's name in code.
@@ -767,7 +769,9 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        reg = self.registries.for_interaction(interaction)
+        # the guild the command resolved to (need() tags it), else the server's own; never a guess, never a prompt
+        key = (getattr(interaction, "extras", None) or {}).get("guild")
+        reg = self.registries.by_key.get(key) if key else self.registries.for_guild(interaction.guild_id)
         cmd = interaction.command.qualified_name if interaction.command else "?"
         msg = f"`/{cmd}` by {interaction.user.display_name}: {type(error).__name__}: {str(error)[:200]}"
         if reg:
@@ -791,7 +795,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         if ev.guild not in self.contexts:
             from .lootctx import RegistryLootContext
 
-            reg = next((r for r in self.registries.by_discord.values() if r.key == ev.guild), None)
+            reg = self.registries.by_key.get(ev.guild)
             if reg is None:
                 raise RuntimeError(f"no registry for guild {ev.guild}")
             self.contexts[ev.guild] = RegistryLootContext(reg, _store(), self.ctx.provider)
@@ -824,7 +828,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             return
         wanted = {f"class_{c.lower()}": ("class", c) for c in render.CLASS} | {f"role_{r}": ("role", r) for r in render.ROLE_COLOUR}
         buff_defs = {}
-        for reg in list(self.registries.by_discord.values()) + [self.ctx]:
+        for reg in self.registries.ordered() + [self.ctx]:
             for b in reg.profile.party_buffs():
                 buff_defs[b.id] = (b.abbr, b.colour)
         wanted |= {f"buff_{bid}": ("buff", bid) for bid in buff_defs}
@@ -848,7 +852,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         icon_dir = Path(__file__).resolve().parents[2] / "out" / "icons"
         icon_dir.mkdir(parents=True, exist_ok=True)
         wanted: dict[str, str] = {}
-        for reg in list(self.registries.by_discord.values()):
+        for reg in self.registries.ordered():
             ic = reg.profile.icons
             for kind, key_map in (("class", ic.get("classes", {})), ("role", ic.get("roles", {})), ("spec", ic.get("specs", {}))):
                 for key, name in key_map.items():
@@ -995,16 +999,105 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         cache[key] = (now, m)
         return m
 
+    # ---- several guilds (design §5.32)
+    async def claim_guild(self, guild, owner_id: int, profile: str, by) -> "object":
+        """Make an unconfigured Discord server a guild (the claim wizard's Confirm): the folder and its commit in a
+        worker thread, then served ON THE LOOP (copy-on-write add), hooked up like boot (guild_added), announced to the
+        owners of every other guild. Raises RegistryError when the server is configured or a claim is in flight."""
+        from .registry import RegistryError
+
+        if guild is None:
+            raise RegistryError("Invite the bot to this server first.")
+        reg = await asyncio.to_thread(self.registries.create, guild, owner_id, profile, (self.ctx.guild_key,))
+        self.registries.add(reg)
+        await self.guild_added(reg)
+        who = getattr(by, "display_name", None) or str(by)
+        line = f"guild created for {guild.name} by {who}; owner <@{owner_id}> · profile {reg.profile.label}"
+        await self.ops.emit(reg.config, "warn", line)  # no ops channel yet: the log (and the new guild's ring)
+        told: set[int] = set()
+        for other in self.registries.ordered():  # the bot host learns at once that a new server is served (K5)
+            oid = other.config.owner_discord_id
+            if other is reg or not oid or oid in told:
+                continue
+            told.add(oid)
+            try:
+                user = self.get_user(oid) or await self.fetch_user(oid)
+                await user.send(f"🆕 The bot now also serves **{discord.utils.escape_markdown(str(guild.name))}** — claimed by {discord.utils.escape_markdown(who)}, "
+                                f"owner <@{owner_id}>. It shares this bot's LLM budget. If you didn't expect this, check that Public Bot is off in the Discord Developer Portal.")
+            except Exception as e:  # noqa: BLE001 — closed DMs: the log line stays
+                log.warning("claim DM to owner %s failed: %s", oid, e)
+        return reg
+
+    async def guild_added(self, reg) -> None:
+        """Hook a guild claimed at run time up the way boot does: analytics listener, officer roles, guild-scoped command
+        sync (development mode), and the icons of a game profile no loaded guild used before. The raid/policy stores
+        are lazy and the web reads Guilds live, so nothing restarts."""
+        self.attach_pool_listener(reg)
+        await self.resolve_officer_roles(reg)
+        if os.environ.get("OIBOT_COMMAND_SCOPE", "global") == "guild":
+            try:
+                obj = discord.Object(id=int(reg.config.discord_guild_id))
+                self.tree.copy_global_to(guild=obj)
+                await self.tree.sync(guild=obj)
+            except Exception as e:  # noqa: BLE001 — the claim stands; a restart syncs it
+                log.warning("command sync for %s failed: %s", reg.key, e)
+        if reg.profile.name not in {r.profile.name for r in self.registries.ordered() if r is not reg}:
+            try:
+                existing = {e.name: e for e in await self.fetch_application_emojis()}
+                await self.ensure_icon_emojis(existing)
+                self.check_emoji_conflicts()
+            except Exception as e:  # noqa: BLE001 — icons fall back to the generated badges
+                log.warning("icon emojis for %s: %s", reg.profile.name, e)
+
+    def check_emoji_conflicts(self) -> list[str]:
+        """App emoji names are shared by every loaded profile: warn when two profiles map one icon name to different art."""
+        seen: dict[tuple[str, str], tuple[str, str]] = {}
+        out = []
+        for reg in self.registries.ordered():
+            ic = reg.profile.icons
+            pairs = [(kind, key, name) for kind, km in (("class", ic.get("classes", {})), ("role", ic.get("roles", {})), ("spec", ic.get("specs", {}))) for key, name in km.items()]
+            pairs += [("buff", b.id, b.art) for b in reg.profile.buffs if b.art]
+            for kind, key, name in pairs:
+                prev = seen.setdefault((kind, key), (name, reg.profile.name))
+                if prev[0] != name and prev[1] != reg.profile.name:
+                    out.append(f"{kind} {key}: {prev[1]} uses {prev[0]}, {reg.profile.name} uses {name}")
+        for line in out:
+            log.warning("emoji conflict between profiles — %s", line)
+        return out
+
+    async def dm_guild(self, message: discord.Message):
+        """Which guild a plain DM is about: the only one; else the one the sender belongs to; else say why and None
+        (in none: every server's Join link; in several: use the server — the picker is the next stage)."""
+        from . import guild_routing
+
+        only = self.registries.only()
+        if only is not None:
+            return only
+        regs = self.registries.ordered()
+        if not regs:
+            return None
+        mine = await guild_routing.guilds_of(self, message.author.id)
+        if len(mine) == 1:
+            return mine[0]
+        quiet = discord.AllowedMentions.none()
+        if mine:
+            await message.reply("You're in more than one server I look after; ask me in the server (an @mention) instead.", allowed_mentions=quiet)
+        else:
+            await message.reply("You're not in any server I look after yet. Join one first:\n" + guild_routing.join_lines(regs), allowed_mentions=quiet)
+        return None
+
     # ---- chat handlers
-    def officiates(self, user, guild) -> bool:
+    def officiates(self, user, guild, mock: bool = False) -> bool:
         """Officer check for buttons and chat: owner, Manage Server, or one of the configured officer roles (matched by
-        role id — `GuildConfig.officer_by_roles`; legacy names only until `resolve_officer_roles` has run)."""
-        reg = self.registries.by_discord.get(guild.id) if guild else None
+        role id — `GuildConfig.officer_by_roles`; legacy names only until `resolve_officer_roles` has run). Manage
+        Server counts only in a configured server (design §14 K24): an unconfigured server's admin is nobody's officer.
+        `mock`: the /mock shadow sessions keep their old rule (Manage Server anywhere)."""
+        reg = self.registries.for_guild(guild.id) if guild else None
         if reg and reg.config.owner_discord_id == user.id:
             return True
         if not isinstance(user, discord.Member):
             return False
-        if user.guild_permissions.manage_guild:
+        if user.guild_permissions.manage_guild and (reg is not None or mock):
             return True
         return bool(reg and reg.config.officer_by_roles(user.roles))
 
@@ -1016,7 +1109,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
     async def resolve_officer_roles(self, reg=None) -> None:
         """Turn legacy officer role names into role ids against the live guild (one commit) and refresh the name cache;
         on ready and whenever a role is edited so a rename never drops an officer."""
-        for r in ([reg] if reg else list(self.registries.by_discord.values())):
+        for r in ([reg] if reg else self.registries.ordered()):
             g = self.get_guild(r.config.discord_guild_id)
             if not g:
                 continue
@@ -1049,8 +1142,8 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             await self.resolve_officer_roles(reg)
 
     async def gate(self, interaction: discord.Interaction) -> bool:
-        """Refuse non-officers on decision buttons; returns True when the press may proceed."""
-        if self.officiates(interaction.user, interaction.guild):
+        """Refuse non-officers on the /mock decision buttons; returns True when the press may proceed."""
+        if self.officiates(interaction.user, interaction.guild, mock=True):
             return True
         await interaction.response.send_message("Officers only.", ephemeral=True)
         return False
@@ -1142,11 +1235,14 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         if message.author.bot:
             return
         if not message.guild:  # a DM to the bot: a question, or a change to the sender's own record (plain-text policy "DMs")
-            reg = next(iter(self.registries.by_discord.values()), None) if len(self.registries.by_discord) == 1 else next((r for r in self.registries.by_discord.values() if message.author.id in r.members), None)
-            if reg and message.content.strip():
-                await self.plain_text(message, reg, message.content.strip(), None)
+            text = message.content.strip()
+            if not text:
+                return
+            reg = await self.dm_guild(message)
+            if reg is not None:
+                await self.plain_text(message, reg, text, None)
             return
-        reg = self.registries.by_discord.get(message.guild.id)
+        reg = self.registries.for_guild(message.guild.id)
         # an @mention: routed by intent and by the channel's plain-text mode (the ops and analytics channels act by default;
         # the mock loot/roster channels keep their own chat below)
         if reg and self._addressed(message) and (message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) or not self.event_for(message.channel.id)):
@@ -1157,7 +1253,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         ev = self.event_for(message.channel.id)
         if not ev or not self.ctx.provider:
             return
-        if not self.officiates(message.author, message.guild):
+        if not self.officiates(message.author, message.guild, mock=True):
             return  # members may chat in the roster/loot channels; only officers steer the bot
         if ev.state == "roster_proposed" and message.channel.id == ev.channel_id and ev.roster:
             async with message.channel.typing():
@@ -1225,7 +1321,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
         class MockGroup(app_commands.Group):
             async def interaction_check(self, interaction: discord.Interaction) -> bool:  # officers only: it spends LLM budget
-                if bot.officiates(interaction.user, interaction.guild):
+                if bot.officiates(interaction.user, interaction.guild, mock=True):
                     return True
                 await interaction.response.send_message("Officers only.", ephemeral=True)
                 return False
@@ -1348,15 +1444,23 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
         self.tree.add_command(mock)
 
+    def sync_servers(self) -> list[int]:
+        """The servers a guild-scoped sync covers: the test server and every configured server, each once."""
+        ids = ([self.test_guild] if self.test_guild else []) + [int(r.config.discord_guild_id) for r in self.registries.ordered()]
+        return list(dict.fromkeys(ids))
+
     async def setup_hook(self):
-        # One scope only, or Discord lists every command twice. Default: global (works in DMs;
-        # new commands can take a while to propagate). OIBOT_COMMAND_SCOPE=guild gives instant
-        # updates in the test server but no DM commands.
+        # One scope only, or Discord lists every command twice. Default: global (works in every server and in DMs;
+        # new commands can take a while to propagate). OIBOT_COMMAND_SCOPE=guild (development) gives instant updates
+        # in the test server and every configured server, but no DM commands — and an unconfigured server then has no
+        # commands at all, so it can't be claimed in that mode.
         scope = os.environ.get("OIBOT_COMMAND_SCOPE", "global")
         g = discord.Object(id=self.test_guild) if self.test_guild else None
-        if scope == "guild" and g:
-            self.tree.copy_global_to(guild=g)
-            await self.tree.sync(guild=g)
+        if scope == "guild" and (g or self.registries.ordered()):
+            for gid in self.sync_servers():
+                obj = discord.Object(id=gid)
+                self.tree.copy_global_to(guild=obj)
+                await self.tree.sync(guild=obj)
             self.tree.clear_commands(guild=None)
             await self.tree.sync()
         else:
@@ -1380,11 +1484,15 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
     async def on_ready(self):
         await self.ensure_emojis()
+        self.check_emoji_conflicts()
         await self.resolve_officer_roles()  # legacy officer role names → ids, name cache for display
         st = _store()
-        regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.registries.by_discord.values())
+        regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.registries.ordered())
         print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
-        for reg in self.registries.by_discord.values():
+        for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
+            print(f"guild NOT loaded — {err}")
+            log.error("guild not loaded: %s", err)
+        for reg in self.registries.ordered():
             await self.ops.emit(reg.config, "info", f"bot online · data @ {st.head()} · {len(reg.members)} members / {len(reg.all_characters())} characters · {len(reg.pending())} unconfirmed")
             if reg.config.analytics_channel_id and not getattr(self, "_pool_booted", False):
                 await self.refresh_pool(reg)  # state may have changed while offline (PRs to the data repo)

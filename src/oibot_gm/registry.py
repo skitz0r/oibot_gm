@@ -272,6 +272,53 @@ class RegistryError(ValueError):
     pass
 
 
+# ---- guild identity (design §5.32): the folder name IS the key; it never changes after creation. 1–16 characters of
+# [a-z0-9_-], so a key fits every persistent custom id (`runact.<gk>:<run>:…` stays under Discord's 100) and can never
+# contain the `.`/`:` separators. Everything outside Discord (custom ids, ?g=, the cookie, MCP guild=) names a guild by it.
+GUILD_KEY_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,15}")
+GUILD_KEY_SLUG = 12  # the slug part of a picked key; a "-N" suffix keeps it within 16
+RESERVED_GUILD_KEYS = frozenset({"out", "fixtures", "profiles"})
+
+
+def guild_key_for(name: str, taken: set[str] | frozenset[str]) -> str:
+    """A new guild's key from its Discord server name: casefolded, transliterated to ASCII, `[a-z0-9]` runs joined
+    with '-', cut to 12 and stripped of '-' ('guild' when nothing is left); a taken key gets -2, -3, … . `taken` = every
+    directory in the data root (guild or not), the mock fixtures' key and the reserved names. Nobody ever types a key."""
+    import unicodedata
+
+    ascii_name = unicodedata.normalize("NFKD", str(name or "").casefold()).encode("ascii", "ignore").decode()
+    slug = "-".join(re.findall(r"[a-z0-9]+", ascii_name))[:GUILD_KEY_SLUG].strip("-") or "guild"
+    taken = {str(t).casefold() for t in taken} | set(RESERVED_GUILD_KEYS)
+    if slug not in taken:
+        return slug
+    n = 2
+    while True:
+        suffix = f"-{n}"
+        key = slug[:16 - len(suffix)].strip("-") + suffix
+        if key not in taken:
+            return key
+        n += 1
+
+
+def create_guild(store: GitStore, cfg: GuildConfig, profile: GameProfile, code_root: Path | None = None) -> "Registry":
+    """The one way a guild comes into being (the claim wizard, move tooling, tests): write <key>/guild.yaml exactly as
+    Registry.save_config writes it, one commit, and return its Registry. Refuses a bad or taken key and a data root
+    under the code repo's fixtures/ (a dev run must never write a real guild into the public repo)."""
+    from .store import is_fixture_root
+
+    code_root = code_root or Path(__file__).resolve().parents[2]
+    if is_fixture_root(code_root, store.root):
+        raise RegistryError("the data root is the code repo's fixtures/ — a guild can't be created there")
+    if not GUILD_KEY_RE.fullmatch(cfg.key or "") or cfg.key in RESERVED_GUILD_KEYS:
+        raise RegistryError(f"bad guild key {cfg.key!r}")
+    if (store.root / cfg.key).exists():
+        raise RegistryError(f"{cfg.key} already exists in the data repo")
+    cfg = GuildConfig.model_validate(cfg.model_dump())
+    store.write_text(Path(cfg.key) / "guild.yaml", "# oibot_GM guild config — edit via /gm config or by PR.\n" + yaml.safe_dump(cfg.model_dump(), sort_keys=False))
+    store.commit(f"{cfg.key}: guild created for {cfg.name}")
+    return Registry(store, cfg.key, profile)
+
+
 SAVE_LISTENERS: list = []  # process-wide fn(reg, kind: "member"|"config", lines) after every commit (the web's event stream)
 CHANGES_KEEP = 200
 RECENT_CHANGES: "deque[tuple[str, str, str, str]]" = deque(maxlen=CHANGES_KEEP)  # (guild key, ISO time, kind, line) — every registry change line, newest last

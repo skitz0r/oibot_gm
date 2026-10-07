@@ -55,6 +55,12 @@ src/oibot_gm/
                        timing. Regulars are never pre-filled; officers see who hasn't answered. Officer posts go to `roster_channel_id`. Internal helpers still
                        say "team" (aliases) — don't rename them casually.
                        /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py); /mock … (demo)
+                       `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only), by_key, ordered(),
+                       get(key|name), for_guild (strict), only(), many, cfg_for, load_errors; `/gm config owner` in an UNCONFIGURED server is the bootstrap
+                       (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; a second server is refused until S3, Guilds.ALLOW_SECOND)
+  guild_routing.py     THE resolver: need(interaction, reply=True) → (reg, interaction) — every command rebinds both; an unconfigured server is told
+                       "isn't set up" and never reaches another guild; DMs: only() → else guilds_of (owner / membership yes|no|unknown) → one, none (Join links),
+                       several ("use the server" until S3's picker); may_access = the strict "belongs to" (the web uses it in S2)
   raidcycle.py         signup-driven cycle (design.md §5.20): raid SCHEDULES (§5.27: Registry.schedules/schedule_def; weekly slots · day N of each
                        lockout · pickup templates; `default` = the raid's own slots) + cadence (schedule_def: slots, signup_lead/lock/confirm hours,
                        weights) → upcoming/schedule_starts/open_run(schedule=) (ephemeral roster per run, key suffix -<schedule id> unless default);
@@ -117,9 +123,10 @@ src/oibot_gm/
                        (ops-channel card edited in place); ProposalButton (DynamicItem Approve/Dismiss, officers only)
   agents.py            local jobs on the Mac mini: out/agents/<job>.json status + runs/<job>-<stamp>.jsonl transcripts (last 30), stream-json → steps,
                        launchctl print/kickstart, claude command lines (allow/deny lists, dontAsk; never a permission bypass)
-  feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks
-  discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence
-  ops.py               ops feed (channel line per action; errors DM the owner)
+  feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks; status(guild) per guild
+  discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence. Routed by the companion's
+                       hello `guild` (active_raid(comp), companion_key; with several guilds raiding, a companion without --guild routes nowhere)
+  ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key
 scripts/agents/        review.py (daily 9:00 AM; no Claude session without new news), apply.py (every 15 min; guild settings by the bot, profile
                        edits by Claude then checks/commit/push/restart/health/revert by the SCRIPT; --pr), menubar.py (rumps via uv --with),
                        install/uninstall.sh; plists in scripts/launchd/
@@ -143,7 +150,7 @@ out/                   generated reports/logs only (event state is in the data r
 ```
 uv sync
 uv run oibot demo --no-llm      # deterministic end-to-end, writes out/report.md
-uv run oibot discord            # bot; needs DISCORD_TOKEN, DISCORD_TEST_GUILD_ID, ANTHROPIC_API_KEY in .env
+uv run oibot discord            # bot; needs DISCORD_TOKEN, ANTHROPIC_API_KEY in .env (DISCORD_TEST_GUILD_ID optional: dev command sync only)
 ```
 After touching `frontend/`: `cd frontend && npm run build` (commit the bundle). Before restarting: `uv run python scripts/check_commands.py` (builds the command tree offline and runs the fast tests; `uv run pytest -q` runs all, incl. the slow solver tests) and `uv run python scripts/check_bundle.py` (fails when frontend/ and the committed bundle disagree). Supervision: `scripts/launchd/README.md` (installed LaunchAgent; power-cut recovery = autorestart + auto-login; the bot pushes pending data commits on shutdown). Restart: `launchctl kickstart -k gui/$(id -u)/gg.earlyandoften.oibot` (the bot runs as a LaunchAgent with KeepAlive whose plist EXECs `.venv/bin/oibot` so launchd tracks the bot itself — never go back to `uv run` there, never start a second copy with nohup; logs in out/oibot.log and out/launchd.log).
 
@@ -152,6 +159,6 @@ After touching `frontend/`: `cd frontend && npm run build` (commit the bundle). 
 - Deterministic first: add a rule to `scoring.py`/`comp_rules.yaml`, not to a prompt.
 - Anything slow (solver, LLM) runs in `asyncio.to_thread`; Discord interactions must respond within 3 s.
 - Verify offline before touching Discord: copy the data repo to a scratch dir, `GitStore(scratch, push=False)`, drive `Registry`/`raidcycle`/`MockEvent` directly (see git history for examples); build a `CommandTree` on a bare `discord.Client` to validate command decorators.
-- Real guild state is keyed by Discord guild id → `<data>/<guild>/guild.yaml`; `/mock` uses the shadow fixtures. Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template.
+- Real guild state is keyed by the guild's folder key → `<data>/<key>/guild.yaml` (fixed for good; `Guilds` maps the Discord server id to it). Several guilds run in one process: never take "the first guild" — use `Guilds.for_guild/only/by_key/ordered`, route commands through `guild_routing.need`, and key per-run process state (locks, caches) by (guild key, run key). `/mock` uses the shadow fixtures. Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template.
 - Item data in `profiles/tbc/items/*.yaml` is unverified; `equippable()` is the safety net. Verify ids against the Blizzard API before relying on them.
 - Model routing lives in `llm/provider.py:ROUTES`; override per workload with `OIBOT_MODEL_<WORKLOAD>`.

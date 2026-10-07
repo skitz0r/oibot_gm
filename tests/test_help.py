@@ -371,7 +371,8 @@ class FakeChannel:
 
 class FakeClient(discord_help.HelpMixin):
     def __init__(self, reg, rs, guild):
-        self.ops = types.SimpleNamespace(recent=[("9:00 PM", "info", f"line {i}") for i in range(20)], emit=None)
+        lines = [("9:00 PM", "info", f"line {i}") for i in range(20)]
+        self.ops = types.SimpleNamespace(recent_for=lambda key: lines if key == reg.key else [], emit=None)  # the ring is per guild
         self.ctx = types.SimpleNamespace(provider=types.SimpleNamespace(summary=lambda: "LLM spend this month $0.50 of $20"))
         self.feed, self.started_at, self.tree = None, time.time() - 120, None
         self.raids = types.SimpleNamespace(store=lambda r: rs)

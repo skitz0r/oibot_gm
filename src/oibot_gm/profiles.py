@@ -159,6 +159,7 @@ class GameProfile:
     loot: dict[str, Any]
     icons: dict[str, dict[str, str]] = field(default_factory=dict)  # {classes, roles, specs('Class:Spec')} -> CDN icon names
     families: dict[str, Family] = field(default_factory=dict)  # stacking families; buffs without one get a family of their own
+    label: str = ""  # display name for people ("WoW: Forever"): profiles/<version>/profile.yaml `label`, else the name titled
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
@@ -180,8 +181,10 @@ class GameProfile:
             known.update({int(k): v for k, v in doc.get("known_items", {}).items()})
         for it in items.values():
             known.setdefault(it.id, it.name)
+        meta = y("profile.yaml") if (root / "profile.yaml").exists() else {}
         return cls(
             name=c["profile"],
+            label=str((meta or {}).get("label") or c["profile"].title()),
             root=root,
             classes=c["classes"],
             spec_aliases=c.get("spec_aliases", {}),
@@ -199,6 +202,8 @@ class GameProfile:
         )
 
     def __post_init__(self):
+        if not self.label:
+            self.label = self.name.title()
         self.link_families()
 
     def link_families(self) -> None:
@@ -280,3 +285,19 @@ class GameProfile:
         if item.slot in ("two_hand", "one_hand") and spec.cls == "Hunter":
             return sw["ranged_weapon_stat"]
         return sw.get(item.slot, 1.0)
+
+
+def available_profiles(code_root: Path) -> list[tuple[str, str]]:
+    """(folder name, display label) of every game profile under profiles/ that loads, A–Z: the claim wizard's choices.
+    A folder that fails to load is left out (logged), never offered."""
+    import logging
+
+    out = []
+    for d in sorted((code_root / "profiles").iterdir()):
+        if not (d / "classes.yaml").exists():
+            continue
+        try:
+            out.append((d.name, GameProfile.load(d).label))
+        except Exception:  # noqa: BLE001 — a broken profile is not a choice
+            logging.getLogger(__name__).exception("profile %s does not load", d.name)
+    return out

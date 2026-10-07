@@ -486,7 +486,7 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, **_see
             await wiz.finish(i, "Lock the roster first (/raid lock).")
             return
         bot = i.client
-        existing = next((s for s in bot.events.values() if s.id == ev.key and s.state == "raid"), None)
+        existing = next((s for s in bot.events.values() if s.id == ev.key and s.guild == reg.key and s.state == "raid"), None)
         if existing:
             await wiz.finish(i, f"Loot thread already open: <#{existing.raid_thread_id}>")
             return

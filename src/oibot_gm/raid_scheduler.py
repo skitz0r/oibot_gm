@@ -19,116 +19,155 @@ class RaidSchedulerMixin:
     """The scheduler loop; mixed into OibotGM next to RaidMixin (the client starts `self.scheduler()` on ready)."""
 
     async def scheduler(self) -> None:
-        """Every minute: open sheets on cadence, post health/nudges, lock, fill, expire confirmations, close."""
+        """Every minute: open sheets on cadence, post health/nudges, lock, fill, expire confirmations, close — for every
+        guild (scheduler_tick never raises: each guild runs in its own try)."""
         await self.wait_until_ready()
-        self._last_tick_error: str | None = None
         while not self.is_closed():
             try:
                 await self.scheduler_tick()
-                self._last_tick_error = None
-            except Exception as e:  # noqa: BLE001
-                text = f"scheduler tick failed: {type(e).__name__}: {e}"
-                log.exception("scheduler tick failed")
-                if text != self._last_tick_error:  # the same failure every minute is reported once
-                    self._last_tick_error = text
-                    cfg = next(iter(self.registries.by_discord.values())).config if self.registries.by_discord else None
-                    if cfg:
-                        try:
-                            await self.ops.emit(cfg, "error", text, e)
-                        except Exception:  # noqa: BLE001
-                            log.warning("ops emit failed for the scheduler error")
+            except Exception:  # noqa: BLE001 — belt and braces: the loop itself never dies
+                log.exception("scheduler tick failed outside the guild loop")
             await asyncio.sleep(60)
 
+    def _tick_errors(self) -> dict[str, str]:
+        """The last failure text per guild key ('' = process-wide): the same failure every minute is reported once."""
+        return self.__dict__.setdefault("_tick_error_by_guild", {})
+
+    async def _tick_failed(self, reg, e: BaseException) -> None:
+        """A guild's tick failed: report it to THAT guild (ops line + its owner's DM), once per distinct text. A failure
+        outside the guild loop (reg None) goes to every guild's ops channel; each distinct owner is DMed once."""
+        text = f"scheduler tick failed: {type(e).__name__}: {e}"
+        log.exception("scheduler tick failed for %s", reg.key if reg is not None else "the process", exc_info=e)
+        errors = self._tick_errors()
+        slot = reg.key if reg is not None else ""
+        if errors.get(slot) == text:
+            return
+        errors[slot] = text
+        targets = [reg] if reg is not None else self.registries.ordered()
+        dmed: set[int] = set()
+        for r in targets:
+            owner = r.config.owner_discord_id
+            try:
+                if owner in dmed:
+                    await self.ops.emit(r.config, "error", text, e, dm=False)
+                else:
+                    await self.ops.emit(r.config, "error", text, e)
+                dmed.add(owner)
+            except Exception:  # noqa: BLE001
+                log.warning("ops emit failed for the scheduler error (%s)", r.key)
+
     async def scheduler_tick(self) -> None:
+        """One pass: the companion check, then each guild in its own try — one guild's exception never skips the next."""
+        errors = self._tick_errors()
+        try:
+            await self.companion_check()
+            errors.pop("", None)
+        except Exception as e:  # noqa: BLE001
+            await self._tick_failed(None, e)
+        for reg in self.registries.ordered():  # a snapshot: a guild claimed mid-tick is picked up next minute
+            try:
+                await self.scheduler_tick_guild(reg)
+                errors.pop(reg.key, None)
+            except Exception as e:  # noqa: BLE001
+                await self._tick_failed(reg, e)
+
+    async def companion_check(self) -> None:
+        """A companion silent for 5 minutes while its raid is live: warn that raid's guild once (per silence)."""
         feed = getattr(self, "feed", None)
-        raid = next((e for e in self.events.values() if e.state == "raid"), None)
-        if feed and raid:
-            for c in list(feed.companions.values()):
-                if c.silent_for > 300 and not getattr(c, "warned", False):
-                    c.warned = True
-                    cfg = next(iter(self.registries.by_discord.values())).config if self.registries.by_discord else None
-                    if cfg:
-                        await self.ops.emit(cfg, "warn", f"companion {c.character} silent for {int(c.silent_for // 60)} min during {raid.id} — is /chatlog on?")
-                elif c.silent_for <= 300:
-                    c.warned = False
-        exhausted_posted: set[str] = self.__dict__.setdefault("_fill_exhausted_posted", set())  # run keys whose "nobody left to ask" line went out
-        for reg in self.registries.by_discord.values():
-            cfg = reg.config
-            rs = self.raids.store(reg)
-            channel = self.get_channel(cfg.signup_channel_id) if cfg.signup_channel_id else None
-            await self.cleanup_ephemeral(reg, rs)
-            now = reg.now_local()
-            # open sheets on cadence: every active schedule's runs within that schedule's signup lead (needs the signup
-            # channel); a pickup template never opens here
-            if channel:
-                for inst in reg.profile.raids:
-                    for sched, start in rc.upcoming(reg, inst, now, lead=True):
-                        if rc.event_key(inst, start, sched["id"]) in rs.events:
-                            continue
-                        await self.open_run_and_post(reg, rs, inst, start, by="scheduler", **rc.schedule_kw(sched["id"]))
-            # every live run is processed even when its sheet channel can't be resolved: the steps that post to a
-            # channel (refresh_sheet, post_run_update, cards) fail soft on their own
-            for ev in rs.live():
-                team = rc.run_team(reg, ev)
-                officer_ch = self.officer_channel(reg, ev)
-                soft, hard, confirm = run_times(reg, ev, team)
-                state = sheet_state(ev)
-                if state == "open" and not ev.health_posted and now >= soft:
-                    await self.post_health(reg, rs, ev, officer_ch, nudge=True)
-                    await self.ops.emit(cfg, "info", f"{ev.key}: health check posted, nudged {len(ev.nudged)}")
-                if state == "locked" and not ev.all_rosters:  # a lock that never finished (old code path / crash): back to open, retry below
-                    ev.state, ev.locked_at, ev.confirm_by = "open", None, None
-                    rs.save(ev, "lock recovered")
-                    state = "open"
-                    await self.ops.emit(cfg, "warn", f"{ev.key}: locked without a roster — reopened, retrying the lock")
-                if state == "open" and now >= hard:
-                    await self.close_prelock_asks(reg, rs, ev)  # pre-lock asks close at lock time ("released", as lock_run does)
-                    tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
-                    if ev.lock_error and tried and now - tried < timedelta(minutes=15):
-                        continue  # failed recently; give the officers time to fix the board before trying again
-                    try:
-                        line = await self.lock_run(reg, rs, ev)
-                    except RegistryError:  # someone is locking it right now (rc.SolverBusy), or it stopped being open
+        if not feed:
+            return
+        for c in list(feed.companions.values()):
+            raid = self.active_raid(c)
+            if raid is None:
+                continue
+            if c.silent_for > 300 and not getattr(c, "warned", False):
+                c.warned = True
+                cfg = self.registries.cfg_for(raid.guild)
+                if cfg:
+                    await self.ops.emit(cfg, "warn", f"companion {c.character} silent for {int(c.silent_for // 60)} min during {raid.id} — is /chatlog on?")
+            elif c.silent_for <= 300:
+                c.warned = False
+
+    async def scheduler_tick_guild(self, reg) -> None:
+        """One guild's minute: open on cadence → health → lock → expire → fill → close."""
+        # (guild key, run key) whose "nobody left to ask" line went out: two guilds can hold runs with the same key
+        exhausted_posted: set[tuple[str, str]] = self.__dict__.setdefault("_fill_exhausted_posted", set())
+        cfg = reg.config
+        rs = self.raids.store(reg)
+        channel = self.get_channel(cfg.signup_channel_id) if cfg.signup_channel_id else None
+        await self.cleanup_ephemeral(reg, rs)
+        now = reg.now_local()
+        # open sheets on cadence: every active schedule's runs within that schedule's signup lead (needs the signup
+        # channel); a pickup template never opens here
+        if channel:
+            for inst in reg.profile.raids:
+                for sched, start in rc.upcoming(reg, inst, now, lead=True):
+                    if rc.event_key(inst, start, sched["id"]) in rs.events:
                         continue
-                    if not ev.lock_error:
-                        await self.ops.emit(cfg, "info", line)
+                    await self.open_run_and_post(reg, rs, inst, start, by="scheduler", **rc.schedule_kw(sched["id"]))
+        # every live run is processed even when its sheet channel can't be resolved: the steps that post to a
+        # channel (refresh_sheet, post_run_update, cards) fail soft on their own
+        for ev in rs.live():
+            team = rc.run_team(reg, ev)
+            officer_ch = self.officer_channel(reg, ev)
+            soft, hard, confirm = run_times(reg, ev, team)
+            state = sheet_state(ev)
+            if state == "open" and not ev.health_posted and now >= soft:
+                await self.post_health(reg, rs, ev, officer_ch, nudge=True)
+                await self.ops.emit(cfg, "info", f"{ev.key}: health check posted, nudged {len(ev.nudged)}")
+            if state == "locked" and not ev.all_rosters:  # a lock that never finished (old code path / crash): back to open, retry below
+                ev.state, ev.locked_at, ev.confirm_by = "open", None, None
+                rs.save(ev, "lock recovered")
+                state = "open"
+                await self.ops.emit(cfg, "warn", f"{ev.key}: locked without a roster — reopened, retrying the lock")
+            if state == "open" and now >= hard:
+                await self.close_prelock_asks(reg, rs, ev)  # pre-lock asks close at lock time ("released", as lock_run does)
+                tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
+                if ev.lock_error and tried and now - tried < timedelta(minutes=15):
+                    continue  # failed recently; give the officers time to fix the board before trying again
+                try:
+                    line = await self.lock_run(reg, rs, ev)
+                except RegistryError:  # someone is locking it right now (rc.SolverBusy), or it stopped being open
                     continue
-                if state != "locked":
-                    continue  # the fill engine, confirmations and closing only apply to a locked roster
-                gone = rc.expire_confirmations(reg, rs, ev)
-                if gone:
-                    if ev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again
-                        ev.fill_state = "idle"
-                        rs.save(ev, "fill: seats freed")
-                    for name in gone:
-                        m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
-                        if m:
-                            await self.dm_seat_released(reg, ev, m, "no-confirm")
-                    await self.post_run_update(reg, ev, f"⌛ no confirmation from {', '.join(gone)} — seats freed")
-                    await self.refresh_sheet(reg, ev)
-                    await self.refresh_cards(reg, ev)
-                    await self.ops.emit(cfg, "warn", f"{ev.key}: confirmations expired for {len(gone)}")
-                expired, released = rc.expire_fill_asks(reg, rs, ev)
-                if expired:
-                    await self.post_run_update(reg, ev, f"⌛ no answer from {', '.join(a.display_name for a in expired)} — counts as no")
-                    for a in released:
-                        await self.withdraw_ask(reg, ev, a, "the other half of the question timed out")
-                    await self.refresh_cards(reg, ev)
-                # every state but "exhausted" (nobody left; a freed seat resets it): "suggested" (a role swap waits for an
-                # officer, D3) and "filled" still get same-role asks for a seat freed later (an expired confirmation)
-                if rc.team_setting(team, "autofill") and ev.fill_state != "exhausted":
-                    sent, nd = await self.run_fill(reg, rs, ev, team)
-                    if sent:
-                        exhausted_posted.discard(ev.key)
-                        await self.post_run_update(reg, ev, f"🧩 short {gaps_text(self.ico, nd)}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
-                    elif ev.fill_state == "exhausted" and ev.key not in exhausted_posted:  # just transitioned: say so once
-                        exhausted_posted.add(ev.key)
-                        await self.post_run_update(reg, ev, f"🧩 nobody left to ask — short {gaps_text(self.ico, nd)}")
-                elif ev.fill_state != "exhausted":
-                    exhausted_posted.discard(ev.key)
-                if now >= rc.run_close_at(reg, ev):
-                    ev.state = "done"
-                    rs.save(ev, "done")
-                    exhausted_posted.discard(ev.key)
-                    await self.refresh_sheet(reg, ev)
-                    await self.ops.emit(cfg, "info", f"{ev.key}: closed")
+                if not ev.lock_error:
+                    await self.ops.emit(cfg, "info", line)
+                continue
+            if state != "locked":
+                continue  # the fill engine, confirmations and closing only apply to a locked roster
+            gone = rc.expire_confirmations(reg, rs, ev)
+            if gone:
+                if ev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again
+                    ev.fill_state = "idle"
+                    rs.save(ev, "fill: seats freed")
+                for name in gone:
+                    m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
+                    if m:
+                        await self.dm_seat_released(reg, ev, m, "no-confirm")
+                await self.post_run_update(reg, ev, f"⌛ no confirmation from {', '.join(gone)} — seats freed")
+                await self.refresh_sheet(reg, ev)
+                await self.refresh_cards(reg, ev)
+                await self.ops.emit(cfg, "warn", f"{ev.key}: confirmations expired for {len(gone)}")
+            expired, released = rc.expire_fill_asks(reg, rs, ev)
+            if expired:
+                await self.post_run_update(reg, ev, f"⌛ no answer from {', '.join(a.display_name for a in expired)} — counts as no")
+                for a in released:
+                    await self.withdraw_ask(reg, ev, a, "the other half of the question timed out")
+                await self.refresh_cards(reg, ev)
+            # every state but "exhausted" (nobody left; a freed seat resets it): "suggested" (a role swap waits for an
+            # officer, D3) and "filled" still get same-role asks for a seat freed later (an expired confirmation)
+            if rc.team_setting(team, "autofill") and ev.fill_state != "exhausted":
+                sent, nd = await self.run_fill(reg, rs, ev, team)
+                if sent:
+                    exhausted_posted.discard((reg.key, ev.key))
+                    await self.post_run_update(reg, ev, f"🧩 short {gaps_text(self.ico, nd)}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
+                elif ev.fill_state == "exhausted" and (reg.key, ev.key) not in exhausted_posted:  # just transitioned: say so once
+                    exhausted_posted.add((reg.key, ev.key))
+                    await self.post_run_update(reg, ev, f"🧩 nobody left to ask — short {gaps_text(self.ico, nd)}")
+            elif ev.fill_state != "exhausted":
+                exhausted_posted.discard((reg.key, ev.key))
+            if now >= rc.run_close_at(reg, ev):
+                ev.state = "done"
+                rs.save(ev, "done")
+                exhausted_posted.discard((reg.key, ev.key))
+                await self.refresh_sheet(reg, ev)
+                await self.ops.emit(cfg, "info", f"{ev.key}: closed")

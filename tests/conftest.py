@@ -117,3 +117,88 @@ def lock_with_board(reg: Registry, rs: rc.RaidStore, ev: rc.RaidEvent, names: li
     ev.confirm_by = (ev.start - timedelta(hours=hours_to_confirm)).isoformat()
     rs.save(ev, "locked (test board)")
     return ev
+
+
+# ---- two guilds in one process (design §5.32): `demo` (Discord server 1, the fixtures above) and `duo` (server 2, its
+# own owner, officer role and members). Every isolation test is built on a run key that exists in BOTH guilds.
+GUILD2 = "duo"
+DUO_SERVER = 2
+OWNER2 = 100_000_000_000_000_002
+OFFICER_ROLE2 = 200_000_000_000_000_002
+DUO_MEMBERS = 12
+
+
+def add_duo(data_root: Path) -> None:
+    """<data>/duo/guild.yaml committed on top of the demo guild (no fixture files: a fresh guild)."""
+    (data_root / GUILD2).mkdir()
+    (data_root / GUILD2 / "guild.yaml").write_text(yaml.safe_dump({
+        "key": GUILD2, "name": "Duo Guild", "game_profile": "forever", "discord_guild_id": DUO_SERVER, "owner_discord_id": OWNER2,
+        "timezone": "America/Los_Angeles", "officer_role_ids": [OFFICER_ROLE2],
+    }, sort_keys=False))
+    subprocess.run(["git", "add", "-A"], cwd=data_root, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "duo"], cwd=data_root, check=True)
+
+
+def two_guilds(data_root: Path, store: GitStore):
+    """(guilds, reg_demo, reg_duo) through the real loader (discord_registry.Guilds). The duo guild gets its own test
+    members — the same puppet names as demo's, so a name shared by two guilds is part of every isolation test."""
+    from oibot_gm.discord_registry import Guilds
+
+    if not (data_root / GUILD2).exists():
+        add_duo(data_root)
+    guilds = Guilds(store, ROOT)
+    a, b = guilds.by_key[GUILD], guilds.by_key[GUILD2]
+    if not b.test_members():
+        b.seed_test_members(DUO_MEMBERS, "t")
+    return guilds, a, b
+
+
+@pytest.fixture
+def duo(data_root: Path, store: GitStore, reg: Registry):
+    """Two configured guilds: SimpleNamespace(guilds, a=demo registry, b=duo registry, rs_a, rs_b). `reg` is requested
+    first so demo's test bench is seeded on disk before the loader reads it."""
+    from types import SimpleNamespace
+
+    guilds, a, b = two_guilds(data_root, store)
+    return SimpleNamespace(guilds=guilds, a=a, b=b, rs_a=rc.RaidStore(store, GUILD), rs_b=rc.RaidStore(store, GUILD2))
+
+
+def same_run(reg_a: Registry, rs_a: rc.RaidStore, reg_b: Registry, rs_b: rc.RaidStore, instance: str = "barrow_deeps",
+             days: float = 3, schedule: str | None = None) -> tuple[rc.RaidEvent, rc.RaidEvent]:
+    """The same instance opened at the same local start in both guilds (same timezone), so the run keys COLLIDE.
+    `schedule`: both guilds hold a weekly schedule with that id (the collision most likely in practice, K20)."""
+    start = (reg_a.now_local() + timedelta(days=days, hours=3)).replace(second=0, microsecond=0)
+    if schedule:
+        slot = start.strftime("%a %H:%M")
+        for r in (reg_a, reg_b):
+            r.set_schedule(instance, schedule, {"kind": "weekly", "slots": slot, "name": "Fridays"}, "t")
+    cut = {"soft": 2, "hard": 1.5, "confirm": 1}
+    ev_a = rc.open_run(reg_a, rs_a, instance, start, by="t", cutoffs=cut, schedule=schedule)
+    ev_b = rc.open_run(reg_b, rs_b, instance, start, by="t", cutoffs=cut, schedule=schedule)
+    assert ev_a.key == ev_b.key and ev_a.team == ev_b.team, "the fixture's premise: one run key in both guilds"
+    return ev_a, ev_b
+
+
+class MemberDirectory:
+    """A `cached_member` double for routing tests: {(discord server id, uid): member}; `flaky` = (server, uid) pairs
+    whose lookup fails transiently (unknown), everything else absent is Discord's own 404 (recorded in _member_gone)."""
+
+    def __init__(self, members: dict | None = None, flaky: set | None = None):
+        self.members, self.flaky = dict(members or {}), set(flaky or ())
+
+    def install(self, bot, servers=(1, 2)) -> None:
+        guilds = {sid: __import__("types").SimpleNamespace(id=sid, name=f"Server {sid}", owner_id=None) for sid in servers}
+        bot.get_guild = lambda gid: guilds.get(gid)
+        bot.__dict__.setdefault("_member_gone", set())
+        directory = self
+
+        async def cached_member(guild, uid, max_age=300):
+            key = (guild.id, uid)
+            if key in directory.flaky:
+                bot._member_gone.discard(key)
+                return None
+            m = directory.members.get(key)
+            if m is None:
+                bot._member_gone.add(key)
+            return m
+        bot.cached_member = cached_member

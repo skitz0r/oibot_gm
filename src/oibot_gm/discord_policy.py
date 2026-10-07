@@ -7,7 +7,7 @@ import asyncio
 import discord
 from discord import app_commands
 
-from . import configops, policy as policy_mod
+from . import configops, guild_routing, policy as policy_mod
 from .discord_registry import Guilds, is_officer, is_owner
 from .ops import Ops
 from .registry import Registry, RegistryError
@@ -320,15 +320,14 @@ def preview_line(reg: Registry, op: configops.ConfigOp, channel=configops._UNSET
 # ---------------------------------------------------------------- commands
 
 def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: Ops, bot, pctx: PolicyContext) -> None:
-    async def officer(interaction: discord.Interaction) -> Registry | None:
-        reg = guilds.for_interaction(interaction)
+    async def officer(interaction: discord.Interaction) -> tuple[Registry | None, discord.Interaction]:
+        reg, interaction = await guild_routing.need(interaction, guilds=guilds)
         if reg is None:
-            await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
-            return None
+            return None, interaction
         if not is_officer(interaction, reg):
             await interaction.response.send_message("Officers only.", ephemeral=True)
-            return None
-        return reg
+            return None, interaction
+        return reg, interaction
 
     doc_choices = [app_commands.Choice(name=d, value=d) for d in policy_mod.DOCS]
     gm = next(c for c in tree.get_commands() if c.name == "gm")
@@ -338,7 +337,7 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
     @policy.command(name="show", description="Show a policy document and its compiled reading")
     @app_commands.choices(doc=doc_choices)
     async def policy_show(interaction: discord.Interaction, doc: app_commands.Choice[str]):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         ps = pctx.store(reg)
@@ -355,7 +354,7 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
     @policy.command(name="edit", description="Edit a policy document (the bot shows its reading for confirmation)")
     @app_commands.choices(doc=doc_choices)
     async def policy_edit(interaction: discord.Interaction, doc: app_commands.Choice[str]):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await interaction.response.send_modal(PolicyEditModal(reg, pctx.store(reg), doc.value, bot.ctx.provider, ops))
@@ -363,7 +362,7 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
     @policy.command(name="reload", description="Recompile a document from the file (after a PR edit)")
     @app_commands.choices(doc=doc_choices)
     async def policy_reload(interaction: discord.Interaction, doc: app_commands.Choice[str]):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -372,22 +371,21 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
 
     @rule.command(name="comp", description="Add a standing composition instruction in plain English")
     async def comp_rule(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["rule"](interaction, reg, doc="comp")
 
     @rule.command(name="loot", description="Add a loot policy rule in plain English")
     async def loot_rule(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["rule"](interaction, reg, doc="loot")
 
 
     @gm.command(name="change", description="Change things in plain English (shows a diff, applies on confirm; plain-text permissions decide)")
     async def gm_change(interaction: discord.Interaction, text: str):
-        reg = guilds.for_interaction(interaction)
+        reg, interaction = await guild_routing.need(interaction, guilds=guilds)
         if reg is None:
-            await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
             return
         where = None if interaction.guild_id is None else interaction.channel_id  # a DM is the policy's DMs entry, not an unlisted channel (stage C L9)
         if reg.plain_mode(where) == "ignore" and not is_owner(interaction, reg):

@@ -6,48 +6,188 @@ officer role; /gm config needs the owner."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 
 import discord
 from discord import app_commands
 
-from . import ops as ops_mod
+from . import guild_routing, ops as ops_mod
 from .profiles import GameProfile
-from .registry import RANKS, Registry, RegistryError
+from .registry import GUILD_KEY_RE, RANKS, Registry, RegistryError
 from .store import GitStore
 from .wizard_flows import FLOWS
 
 RANK_CHOICES = [app_commands.Choice(name=r, value=r) for r in RANKS]
 STARTED = time.time()
+log = logging.getLogger(__name__)
 
 
 class Guilds:
-    """Discord guild id -> Registry (guild config + members + game profile)."""
+    """The configured guilds of this process (design §5.32): one folder per guild in the data repo (`<key>/guild.yaml`),
+    each mapped from its Discord server id. Several guilds run in one process; nothing may take "the first guild" for
+    routing — use `for_guild` (strict, a server), `only()` (exactly one configured), `by_key`, `get` (key or unique name)
+    and `ordered()` (the one stable order for listings). `by_discord` is swapped, never mutated (`add`), so a reader
+    iterating it (or an `ordered()` snapshot) never sees it change size."""
+
+    # S1 of the multi-guild build: a claim in a SECOND server is refused until the DM picker and the guild-carrying
+    # button ids ship (design §14 K11) — until then an old-format DM button could not tell the two guilds apart.
+    ALLOW_SECOND = False
 
     def __init__(self, store: GitStore, code_root: Path):
+        import threading
+
         self.store = store
         self.code_root = code_root
+        self.load_errors: list[str] = []
+        self._lock = threading.Lock()
+        self._claiming: set[int] = set()
         self.by_discord: dict[int, Registry] = {}
-        for gdir in store.root.iterdir():
-            if (gdir / "guild.yaml").exists():
+        found: list[tuple[Path, Registry]] = []
+        profiles: dict[str, GameProfile] = {}
+        for gdir in sorted(p for p in store.root.iterdir() if p.is_dir() and not p.name.startswith(".")):
+            if not (gdir / "guild.yaml").exists():
+                continue
+            try:
                 import yaml
 
                 cfg = yaml.safe_load((gdir / "guild.yaml").read_text())
-                profile = GameProfile.load(code_root / "profiles" / cfg["game_profile"])
-                reg = Registry(store, gdir.name, profile)
-                self.by_discord[int(cfg["discord_guild_id"])] = reg
+                if not isinstance(cfg, dict):
+                    raise ValueError("guild.yaml is not a mapping")
+                key = str(cfg.get("key") or "")
+                if key != gdir.name:
+                    raise ValueError(f"key {key!r} differs from the folder name")
+                if not GUILD_KEY_RE.fullmatch(key):
+                    raise ValueError(f"key {key!r} is not 1-16 characters of a-z, 0-9, _ and -")
+                pname = str(cfg["game_profile"])
+                if pname not in profiles:
+                    proot = code_root / "profiles" / pname
+                    if not (proot / "classes.yaml").exists():
+                        raise ValueError(f"unknown game_profile {pname!r}")
+                    profiles[pname] = GameProfile.load(proot)
+                found.append((gdir, Registry(store, gdir.name, profiles[pname])))
+            except Exception as e:  # noqa: BLE001 — one broken guild never stops the others (or the bot)
+                log.exception("guild %s did not load", gdir.name)
+                self.load_errors.append(f"{gdir.name}: {type(e).__name__}: {e}")
+        seen: dict[int, list[str]] = {}
+        for gdir, reg in found:
+            seen.setdefault(int(reg.config.discord_guild_id), []).append(gdir.name)
+        for gid, keys in seen.items():
+            if len(keys) > 1:  # routing a server to the wrong guild is worse than refusing it
+                self.load_errors.append(f"{' and '.join(keys)}: the same discord_guild_id {gid} — neither loaded")
+        self.by_discord = {int(r.config.discord_guild_id): r for _, r in found if len(seen[int(r.config.discord_guild_id)]) == 1}
+
+    @classmethod
+    def of(cls, store: GitStore, *regs: Registry, code_root: Path | None = None) -> "Guilds":
+        """An index over registries already built (tests, offline tools): no directory scan."""
+        import threading
+
+        g = cls.__new__(cls)
+        g.store, g.code_root, g.load_errors = store, code_root or Path(__file__).resolve().parents[2], []
+        g._lock, g._claiming = threading.Lock(), set()
+        g.by_discord = {int(r.config.discord_guild_id): r for r in regs}
+        return g
+
+    # ---- lookups
+    @property
+    def by_key(self) -> dict[str, Registry]:
+        return {r.key: r for r in self.by_discord.values()}
+
+    def ordered(self) -> list[Registry]:
+        """Every guild, by name then key: the one stable order (a snapshot list — safe to iterate across awaits)."""
+        return sorted(self.by_discord.values(), key=lambda r: (str(r.config.name).casefold(), r.key))
+
+    def get(self, ref: str | None) -> Registry | None:
+        """A guild by key, else by name (case-insensitive) when exactly one guild has that name."""
+        ref = str(ref or "").strip()
+        if not ref:
+            return None
+        hit = self.by_key.get(ref)
+        if hit is not None:
+            return hit
+        named = [r for r in self.by_discord.values() if str(r.config.name).casefold() == ref.casefold()]
+        return named[0] if len(named) == 1 else None
+
+    def for_guild(self, guild_id: int | None) -> Registry | None:
+        """The guild of that Discord server, or None. Strict: never falls back to another guild."""
+        return self.by_discord.get(int(guild_id)) if guild_id else None
+
+    def only(self) -> Registry | None:
+        """The guild when exactly one is configured (every "single-guild keeps working" branch goes through here)."""
+        regs = list(self.by_discord.values())
+        return regs[0] if len(regs) == 1 else None
+
+    @property
+    def many(self) -> bool:
+        return len(self.by_discord) > 1
+
+    def cfg_for(self, key: str | None):
+        """A guild's config by key, else the only guild's, else None (the feed and the scheduler's process-wide lines)."""
+        reg = self.by_key.get(key) if key else None
+        reg = reg or self.only()
+        return reg.config if reg is not None else None
 
     def for_interaction(self, interaction: discord.Interaction) -> Registry | None:
-        if interaction.guild_id and interaction.guild_id in self.by_discord:
-            return self.by_discord[interaction.guild_id]
-        # DMs: the member's guild is whichever one knows them (single-guild deployments: the only one)
-        if len(self.by_discord) == 1:
-            return next(iter(self.by_discord.values()))
-        for reg in self.by_discord.values():
-            if interaction.user.id in reg.members:
-                return reg
+        """Sync resolution: the guild a resolver already chose (`interaction.extras["guild"]`) → the interaction's server
+        (strict: an unconfigured server is None, never another guild) → in a DM, the only guild → None. DMs with several
+        guilds are guild_routing.need's job (it asks Discord who the person belongs to)."""
+        extras = getattr(interaction, "extras", None) or {}
+        if extras.get("guild"):
+            return self.by_key.get(extras["guild"])
+        if interaction.guild_id:
+            return self.for_guild(interaction.guild_id)
+        return self.only()
+
+    # ---- bootstrap (design §5.32: a server becomes a guild only when someone claims it)
+    def taken_keys(self, extra: tuple[str, ...] | list[str] = ()) -> set[str]:
+        """Every name a new key must avoid: each directory in the data root (guild or not), `extra` (the mock fixtures'
+        key), the reserved names."""
+        from .registry import RESERVED_GUILD_KEYS
+
+        return {p.name for p in self.store.root.iterdir()} | set(self.by_key) | set(extra) | set(RESERVED_GUILD_KEYS)
+
+    def claim_refusal(self, guild_id: int) -> str | None:
+        """Why a claim of this server can't go ahead now (None = it can)."""
+        if self.for_guild(guild_id) is not None or guild_id in self._claiming:
+            return "This server is already set up."
+        if self.by_discord and not self.ALLOW_SECOND:
+            return "Serving a second server needs the next update of the bot; nothing was set up."
         return None
+
+    def create(self, guild, owner_id: int, profile_name: str, extra_taken: tuple[str, ...] | list[str] = ()) -> Registry:
+        """Write the new guild's folder (registry.create_guild) for a Discord server (`guild`: .id and .name) and return
+        its Registry. File work only — runs in a worker thread; the caller adds it with `add()` ON THE LOOP. Refuses a
+        configured server and a claim already in flight (a double press, two claimers racing)."""
+        from .registry import GuildConfig, create_guild, guild_key_for
+
+        gid = int(guild.id)
+        with self._lock:
+            why = self.claim_refusal(gid)
+            if why:
+                raise RegistryError(why)
+            self._claiming.add(gid)
+        try:
+            proot = self.code_root / "profiles" / profile_name
+            if not (proot / "classes.yaml").exists():
+                raise RegistryError(f"unknown game profile {profile_name!r}")
+            key = guild_key_for(guild.name, self.taken_keys(extra_taken))
+            cfg = GuildConfig(key=key, name=str(guild.name)[:100] or key, game_profile=profile_name, discord_guild_id=gid, owner_discord_id=int(owner_id))
+            return create_guild(self.store, cfg, GameProfile.load(proot), self.code_root)
+        except BaseException:
+            with self._lock:
+                self._claiming.discard(gid)
+            raise
+        # on success the id stays in _claiming until add() serves it, so a second press in between still refuses
+
+    def add(self, reg: Registry) -> None:
+        """Serve a newly created guild. On the event-loop thread only: builds a new dict and swaps it in (copy-on-write),
+        so nothing iterating the old one can fail. Refuses a key or Discord id already served."""
+        gid = int(reg.config.discord_guild_id)
+        if gid in self.by_discord or reg.key in self.by_key:
+            raise RegistryError(f"{reg.key} is already served")
+        self.by_discord = {**self.by_discord, gid: reg}
+        self._claiming.discard(gid)
 
 
 def rostered_on(bot, reg: Registry, m) -> list:
@@ -343,11 +483,9 @@ async def refresh_registration_card(client, reg: Registry) -> bool:
 
 
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
-    async def need(interaction: discord.Interaction) -> Registry | None:
-        reg = guilds.for_interaction(interaction)
-        if reg is None:
-            await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
-        return reg
+    async def need(interaction: discord.Interaction) -> tuple[Registry | None, discord.Interaction]:
+        """guild_routing.need over this tree's Guilds: (guild, interaction) — rebind both at every call site."""
+        return await guild_routing.need(interaction, guilds=guilds)
 
     def _ns(interaction: discord.Interaction, *names: str):
         """First present option value from the interaction namespace (renamed options use their display name)."""
@@ -391,7 +529,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @tree.command(name="register", description="Register a character: pick class and spec, then name it (blank = plan it)")
     @app_commands.describe(main="Make this your main")
     async def register(interaction: discord.Interaction, main: bool = False):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         m = reg.members.get(interaction.user.id)
@@ -403,20 +541,20 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @plan.command(name="main", description="What you plan to main (no name needed yet)")
     async def plan_main(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["register"](interaction, reg, slot="main", plan_only=True)
 
     @plan.command(name="alt", description="What you plan to play as an alt")
     async def plan_alt(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["register"](interaction, reg, slot="alt", plan_only=True)
 
     @plan.command(name="roles", description="Extra roles your main can play besides its spec (flex); or tell the bot, per character")
     @app_commands.choices(primary=ROLE_CHOICES, flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
     async def plan_roles(interaction: discord.Interaction, primary: app_commands.Choice[str], flex1: app_commands.Choice[str] | None = None, flex2: app_commands.Choice[str] | None = None, flex3: app_commands.Choice[str] | None = None):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         flex = [f.value for f in (flex1, flex2, flex3) if f]
@@ -435,37 +573,37 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @char.command(name="name", description="At launch: give your planned character its real name")
     async def char_name(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["char_name"](interaction, reg)
 
     @char.command(name="add", description="Register another character (alt)")
     async def char_add(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["register"](interaction, reg, slot="alt")
 
     @char.command(name="main", description="Make one of your characters your main (rank follows you)")
     async def char_main(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["char_main"](interaction, reg)
 
     @char.command(name="spec", description="Change a character's spec/offspec")
     async def char_spec(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["char_spec"](interaction, reg)
 
     @char.command(name="retire", description="Retire a character (history is kept)")
     async def char_retire(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["char_retire"](interaction, reg)
 
     @char.command(name="list", description="Show your registered characters")
     async def char_list(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         m = reg.members.get(interaction.user.id)
@@ -480,21 +618,21 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @absent.command(name="add", description="Say you'll be away: pick the first day and how long")
     async def absent_add(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         await FLOWS["absence"](interaction, reg)
 
     @absent.command(name="list", description="Your upcoming absences")
     async def absent_list(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         await show_my_absences(interaction, reg)
 
     @absent.command(name="clear", description="Remove one of your absences (pick it from the list)")
     async def absent_clear(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         await show_my_absences(interaction, reg)
@@ -514,13 +652,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @tree.command(name="apply", description="Apply to join the guild")
     async def apply(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["register"](interaction, reg, mode="apply")
 
     @me.command(name="view", description="Your plan, characters and upcoming absences")
     async def me(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         m = reg.members.get(interaction.user.id)
@@ -558,16 +696,16 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     # ---------------- /roster (officers)
     roster = app_commands.Group(name="roster", description="Officer: the guild's registered characters")
 
-    async def officer(interaction: discord.Interaction) -> Registry | None:
-        reg = await need(interaction)
+    async def officer(interaction: discord.Interaction) -> tuple[Registry | None, discord.Interaction]:
+        reg, interaction = await need(interaction)
         if reg and not is_officer(interaction, reg):
             await interaction.response.send_message("Officers only (Manage Server or a configured officer role).", ephemeral=True)
-            return None
-        return reg
+            return None, interaction
+        return reg, interaction
 
     @roster.command(name="list", description="All registered characters by class")
     async def roster_list(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         chars = reg.all_characters()
@@ -589,7 +727,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @roster.command(name="confirm", description="Confirm registered characters: pick from the unconfirmed ones, one after another")
     async def roster_confirm(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await FLOWS["roster_confirm"](interaction, reg)
@@ -597,7 +735,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @roster.command(name="rank", description="Set a member's character rank: pick the character and rank")
     @app_commands.describe(member="whose character")
     async def roster_rank(interaction: discord.Interaction, member: discord.User):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await FLOWS["roster_rank"](interaction, reg, member=member)
@@ -605,14 +743,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @roster.command(name="set-main", description="Set a member's main on their behalf: pick the character")
     @app_commands.describe(member="whose main")
     async def roster_set_main(interaction: discord.Interaction, member: discord.User):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await FLOWS["roster_set_main"](interaction, reg, member=member)
 
     @roster.command(name="overview", description="Who is planning to play what: classes, roles, flexibility, buff coverage")
     async def roster_plan(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         s = reg.plan_summary()
@@ -667,7 +805,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @roster.command(name="add", description="Make someone a regular of a recurring schedule: pick the schedule, member and character")
     @app_commands.describe(member="who to add (optional: pick them in the wizard)")
     async def roster_add(interaction: discord.Interaction, member: discord.User | None = None):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await FLOWS["roster_add"](interaction, reg, member=member)
@@ -675,14 +813,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @roster.command(name="remove", description="Take someone off a schedule's regulars (they can still Join its sheets)")
     @app_commands.describe(member="who to remove (optional: pick them in the wizard)")
     async def roster_remove(interaction: discord.Interaction, member: discord.User | None = None):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await FLOWS["roster_remove"](interaction, reg, member=member)
 
     @roster.command(name="members", description="A recurring schedule's regulars by role: pick the schedule")
     async def roster_members_cmd(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         await FLOWS["roster_members"](interaction, reg)
@@ -690,7 +828,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @roster.command(name="absences", description="Upcoming absences across the guild (with reasons)")
     @app_commands.describe(days="How far ahead to look (default 30)")
     async def roster_absences(interaction: discord.Interaction, days: int = 30):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         from datetime import timedelta
@@ -703,14 +841,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @roster.command(name="absent", description="Record an absence on a member's behalf: pick the days, no typing")
     @app_commands.describe(member="who is away")
     async def roster_absent(interaction: discord.Interaction, member: discord.User):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await FLOWS["absence"](interaction, reg, member=member)
 
     @roster.command(name="applicants", description="Open applications")
     async def roster_applicants(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         opens = reg.open_applicants()
@@ -722,7 +860,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @roster.command(name="applicant", description="Accept or decline an application by member")
     @app_commands.choices(decision=[app_commands.Choice(name="accept", value="accept"), app_commands.Choice(name="decline", value="decline")])
     async def roster_applicant(interaction: discord.Interaction, member: discord.User, decision: app_commands.Choice[str], note: str | None = None):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await decide_application(interaction, reg, member.id, decision.value == "accept", note)
@@ -733,9 +871,16 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     gm = app_commands.Group(name="gm", description="oibot_GM administration")
     config = app_commands.Group(name="config", description="Owner: bot configuration", parent=gm)
 
-    @config.command(name="owner", description="Claim ownership (first caller) or transfer it")
+    @config.command(name="owner", description="Set up this server for the bot (first claim) or transfer ownership")
     async def cfg_owner(interaction: discord.Interaction, user: discord.User | None = None):
-        reg = await need(interaction)
+        if guilds.for_interaction(interaction) is None:  # design §5.32: the only command that works in an unconfigured server
+            if interaction.guild_id:
+                await FLOWS["guild_claim"](interaction, None, owner=user)
+                return
+            if not (getattr(guilds, "ordered", None) and guilds.ordered()):
+                await interaction.response.send_message("Run this in the server you want to set up.", ephemeral=True)
+                return
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if reg.config.owner_discord_id and not is_owner(interaction, reg):
@@ -754,7 +899,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="ops-channel", description="Owner: where the bot mirrors every action")
     async def cfg_ops(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -767,7 +912,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="applications-channel", description="Owner: where application review cards are posted (defaults to the ops channel)")
     async def cfg_apps(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -779,7 +924,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="officer-role", description="Owner: add or remove a Discord role that counts as officer")
     async def cfg_role(interaction: discord.Interaction, role: discord.Role, remove: bool = False):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -795,7 +940,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="roster-channel", description="Owner: private channel for roster overviews, proposals and officer health cards")
     async def cfg_roster_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -807,7 +952,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="registration-channel", description="Owner: public read-only channel where the bot keeps the registration card (buttons open to everyone)")
     async def cfg_registration_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -824,7 +969,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="analytics-channel", description="Owner: officer channel with live pool-readiness cards per roster and a change log")
     async def cfg_analytics_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -844,13 +989,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="aura", description="Owner: what we know about a buff — scope, stacking family, strength, status, who benefits")
     async def cfg_aura(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["aura"](interaction, reg)
 
     @config.command(name="absences-channel", description="Owner: public channel with the 'I'll be away' card; the bot posts one line per absence there")
     async def cfg_absences_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -867,7 +1012,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="signup-channel", description="Owner: where raid sheets are posted")
     async def cfg_signup(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -879,7 +1024,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="news-channel", description="Owner: where the news webhook posts; the bot keeps the items about our game version")
     async def cfg_news_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -897,7 +1042,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @config.command(name="ask-audience", description="Owner: who may ask the bot free-form questions (/ask, DMs, @mentions); others get the static guide")
     @app_commands.choices(audience=[app_commands.Choice(name=a, value=a) for a in ("officers", "confirmed", "registered", "everyone")])
     async def cfg_ask_audience(interaction: discord.Interaction, audience: app_commands.Choice[str]):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
@@ -909,31 +1054,31 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @config.command(name="raid", description="Owner: a raid's rules — run times, signup cadence, make-up, weights, lockout, notes")
     async def cfg_raid(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["raid_config"](interaction, reg)
 
     @config.command(name="about", description="Owner: one-paragraph public blurb for the static guide ('About the guild')")
     async def cfg_about(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["about"](interaction, reg)
 
     @config.command(name="recruitment", description="Owner: applications open or closed, the note, the guild's questions, member roles, invite")
     async def cfg_recruitment(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["recruitment"](interaction, reg)
 
     @config.command(name="timezone", description="Owner: the guild's timezone for every run time, lock and lockout")
     async def cfg_tz(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if reg:
             await FLOWS["timezone"](interaction, reg)
 
     @config.command(name="show", description="Effective configuration")
     async def cfg_show(interaction: discord.Interaction):
-        reg = await need(interaction)
+        reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_officer(interaction, reg):
@@ -944,7 +1089,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
 
     async def roster_regcard(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await interaction.response.send_message(embed=registration_card(reg), view=registration_view())
@@ -957,23 +1102,26 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @gm.command(name="status", description="Bot health: data repo, registry, spend, recent ops")
     async def gm_status(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         st = guilds.store
         up = int(time.time() - STARTED)
         provider = getattr(interaction.client, "ctx", None) and interaction.client.ctx.provider
         chars = reg.all_characters()
+        whole = " (whole bot)" if getattr(guilds, "many", False) else ""  # with one guild the card reads exactly as before
         e = discord.Embed(title=f"oibot_GM status · {reg.config.name}", colour=TEAL)
-        e.add_field(name="Bot", value=f"up {up // 3600}h{(up % 3600) // 60}m · profile {reg.profile.name}", inline=True)
-        e.add_field(name="Data repo", value=f"{st.root.name} @ {st.head()} · push {'on' if st.push_enabled else 'off'}", inline=True)
+        e.add_field(name="Bot" + whole, value=f"up {up // 3600}h{(up % 3600) // 60}m · profile {reg.profile.name}", inline=True)
+        e.add_field(name="Data repo" + whole, value=f"{st.root.name} @ {st.head()} · push {'on' if st.push_enabled else 'off'}", inline=True)
         e.add_field(name="Registry", value=f"{len(reg.members)} members · {len(chars)} characters · {len(reg.pending())} unconfirmed", inline=True)
         e.add_field(name="Config", value=f"owner {'<@%d>' % reg.config.owner_discord_id if reg.config.owner_discord_id else '—'} · ops {'<#%d>' % reg.config.ops_channel_id if reg.config.ops_channel_id else '—'} · officer roles {', '.join(reg.officer_role_names()) or '—'}", inline=False)
-        e.add_field(name="LLM", value=provider.summary()[:1000] if provider else "off", inline=False)
-        feed = getattr(interaction.client, "feed", None)
-        e.add_field(name="Loot feed", value=(feed.status() if feed else "disabled (OIBOT_FEED_TOKEN unset)")[:500], inline=False)
-        if ops.recent:
-            e.add_field(name="Recent ops", value="\n".join(f"`{t}` {LEVEL[l]} {x}"[:120] for t, l, x in ops.recent[-8:])[:1000], inline=False)
+        e.add_field(name="LLM" + whole, value=provider.summary()[:1000] if provider else "off", inline=False)
+        from .discord_feed import feed_status
+
+        e.add_field(name="Loot feed", value=feed_status(interaction.client, reg)[:500], inline=False)
+        recent = ops.recent_for(reg.key)
+        if recent:
+            e.add_field(name="Recent ops", value="\n".join(f"`{t}` {LEVEL[l]} {x}"[:120] for t, l, x in recent[-8:])[:1000], inline=False)
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     # ---------------- /gm test: seed puppet members and rehearse the whole cycle in Discord within the hour
@@ -981,25 +1129,25 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
 
     @test.command(name="seed", description="Officer: add test members to the bench (5, 10, 20 or all of them)")
     async def test_seed(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["test_seed"](interaction, reg)
 
     @test.command(name="run", description="Officer: open a short test run now (pick raid and tempo)")
     async def test_run(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["test_run"](interaction, reg)
 
     @test.command(name="answer", description="Officer: test members answer a sheet (a random mix, or one member)")
     async def test_answer(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if reg:
             await FLOWS["test_answer"](interaction, reg)
 
     @test.command(name="clear", description="Officer: end the test — cancel test runs, remove every test member and their placements")
     async def test_clear(interaction: discord.Interaction):
-        reg = await officer(interaction)
+        reg, interaction = await officer(interaction)
         if not reg:
             return
         await interaction.response.defer(ephemeral=True)

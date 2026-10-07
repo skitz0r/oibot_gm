@@ -8,7 +8,7 @@ import time
 import discord
 from discord import app_commands
 
-from . import help as help_mod
+from . import guild_routing, help as help_mod
 from .discord_registry import Guilds, is_officer
 from .ops import Ops
 
@@ -199,7 +199,7 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
     @app_commands.describe(topic="a section of the manual")
     @app_commands.choices(topic=TOPIC_CHOICES)
     async def help_cmd(interaction: discord.Interaction, topic: app_commands.Choice[str] | None = None):
-        reg = guilds.for_interaction(interaction)
+        reg, interaction = await guild_routing.need(interaction, reply=False, guilds=guilds)  # None still shows the member tier
         officer = bool(reg and (await asker_identity(interaction, reg))[0])  # in a DM too: the tiers follow the guild's roles
         if topic:
             text = manual_section(TOPICS[topic.value][0])
@@ -224,14 +224,15 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if officer:
             e.add_field(name="Officers", value="\n".join(tiers["officer"])[:1024], inline=False)
             e.add_field(name="Owner", value="\n".join(tiers["owner"])[:1024], inline=False)
+        if reg is None and interaction.guild_id:  # an unconfigured server: one response, with the way to set it up
+            e.add_field(name="Not set up here", value=guild_routing.NOT_SET_UP, inline=False)
         e.set_footer(text="Buttons: #register card (Register / Add an alt / My status) · sheets (Join / Bench / No thanks; locked: Can't make it) · DMs (Confirm / Can't make it, fill: Confirm / Can't make it)")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @tree.command(name="ask", description="Ask the bot how something works or what to do next (it answers from its own manual and your record)")
     async def ask_cmd(interaction: discord.Interaction, question: str):
-        reg = guilds.for_interaction(interaction)
+        reg, interaction = await guild_routing.need(interaction, guilds=guilds)
         if not reg:
-            await interaction.response.send_message("This server isn't configured for oibot_GM.", ephemeral=True)
             return
         officer, role_ids = await asker_identity(interaction, reg)
         if not reg.may_ask(interaction.user.id, officer):
@@ -312,11 +313,12 @@ class HelpMixin:
         if not officer:
             return x
         ops = getattr(self, "ops", None)
-        x.ops = list(getattr(ops, "recent", None) or [])[-15:]
+        x.ops = list(ops.recent_for(reg.key) if ops is not None and hasattr(ops, "recent_for") else [])[-15:]  # this guild's lines only
         provider = getattr(getattr(self, "ctx", None), "provider", None)
         x.llm = provider.summary() if provider is not None else "LLM off"
-        feed = getattr(self, "feed", None)
-        x.feed = feed.status() if feed is not None else "disabled"
+        from .discord_feed import feed_status
+
+        x.feed = feed_status(self, reg, off="disabled")
         started = getattr(self, "started_at", None)
         x.uptime_s = int(time.time() - started) if started else None
         x.privilege, x.officers = self.help_privilege(reg, guild)

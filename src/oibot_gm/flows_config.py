@@ -1376,5 +1376,109 @@ async def open_about(interaction: discord.Interaction, reg: Registry, **_seed) -
     await AboutWizard(reg, interaction.user.id).start(interaction)
 
 
-__all__ = ["MultiForm", "RaidConfigWizard", "AuraWizard", "TimezoneWizard", "AboutWizard", "open_raid_config", "open_aura", "open_timezone",
-           "open_about", "next_runs", "hours_words", "tz_cities"]
+# ---------------------------------------------------------------- claiming a server (design §5.32)
+
+CLAIMERS = "The Discord server owner (or someone with Manage Server) sets this server up."
+DEFAULT_CLAIM_PROFILE = "forever"
+
+
+def claim_refusal(i: discord.Interaction) -> str | None:
+    """Why this person can't set up this server now (None = they can): it must be an unconfigured server the bot is
+    in, and they its Discord owner or a holder of Manage Server. Re-checked at every press of the wizard."""
+    guild = getattr(i, "guild", None)
+    if not i.guild_id or guild is None:
+        return "Run this in the server you want to set up (the bot must be in it)."
+    registries = i.client.registries
+    if registries.for_guild(i.guild_id) is not None:
+        return "This server is already set up."
+    manages = getattr(getattr(i.user, "guild_permissions", None), "manage_guild", False)
+    if guild.owner_id != i.user.id and not manages:
+        return CLAIMERS
+    return registries.claim_refusal(int(i.guild_id))
+
+
+async def _claim_guard(i: discord.Interaction) -> str | None:
+    return claim_refusal(i)
+
+
+class GuildClaimWizard(Wizard):
+    """Set up an unconfigured server: shows the server, the key the bot picked (fixed for good), the game version
+    (Forever unless another is picked) and the owner (the caller, or the member given/picked). Nothing is written before
+    Confirm, which hands off to the client's claim_guild (one folder, one commit, served at once)."""
+
+    def __init__(self, presser_id: int, owner, profiles: list[tuple[str, str]]):
+        super().__init__(None, presser_id, title="Set up this server", guard=_claim_guard)  # type: ignore[arg-type]
+        names = [n for n, _ in profiles]
+        self.profiles = profiles
+        self.draft = {"profile": DEFAULT_CLAIM_PROFILE if DEFAULT_CLAIM_PROFILE in names else (names[0] if names else DEFAULT_CLAIM_PROFILE), "owner": owner}
+
+    def _key(self, i: discord.Interaction) -> str:
+        from .registry import guild_key_for
+
+        mock = getattr(getattr(i.client, "ctx", None), "guild_key", None)
+        return guild_key_for(i.guild.name, i.client.registries.taken_keys((mock,) if mock else ()))
+
+    async def start(self, i: discord.Interaction) -> None:
+        await self.screen(i)
+
+    async def screen(self, i: discord.Interaction) -> None:
+        owner = self.draft["owner"]
+        label = dict(self.profiles).get(self.draft["profile"], self.draft["profile"])
+        lines = [f"Server: **{discord.utils.escape_markdown(str(i.guild.name))}**",
+                 f"Guild key: `{self._key(i)}` — picked from the server name; it never changes (links, the site and MCP use it)",
+                 f"Game version: **{label}**",
+                 f"Owner: <@{owner.id}> — the owner sets channels, raids and policy (`/gm config …` or the site's Config page)",
+                 "-# Nothing is written until you press Confirm. The new guild starts empty: its own members, raids and settings."]
+        opts = [Opt(n, lab, default=n == self.draft["profile"]) for n, lab in self.profiles]
+        await self.show(i, "\n".join(lines), self.select("Game version", opts, self.picked_profile),
+                        self.members("Someone else will own it…", self.picked_owner),
+                        self.button("Confirm", self.confirm, discord.ButtonStyle.success), self.button("Cancel", self.cancel))
+
+    async def picked_profile(self, i: discord.Interaction, values: list[str]) -> None:
+        if values and values[0] in dict(self.profiles):
+            self.draft["profile"] = values[0]
+        await self.screen(i)
+
+    async def picked_owner(self, i: discord.Interaction, users: list) -> None:
+        if users:
+            if getattr(users[0], "bot", False):
+                await self.refuse(i, "A bot can't own a guild — pick a person.", self.screen, "Back")
+                return
+            self.draft["owner"] = users[0]
+        await self.screen(i)
+
+    async def confirm(self, i: discord.Interaction) -> None:
+        await self.working(i, "Setting up…")
+        try:
+            reg = await i.client.claim_guild(i.guild, int(self.draft["owner"].id), self.draft["profile"], i.user)
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        import os
+
+        web = os.environ.get("OIBOT_WEB_URL", "")
+        where = f", or the Config page at {web}/app/config?g={reg.key}" if web.startswith("https") else ", or the site's Config page"
+        await self.finish(i, f"✅ **{discord.utils.escape_markdown(str(i.guild.name))}** is set up (game version {reg.profile.label}). "
+                             f"Next: `/gm config ops-channel`{where}.")
+
+
+@flow("guild_claim")
+async def open_guild_claim(interaction: discord.Interaction, reg: Registry | None = None, owner=None, **_seed) -> None:
+    """`/gm config owner` in a server that isn't set up (the only command that works there)."""
+    why = claim_refusal(interaction)
+    if why:
+        await interaction.response.send_message(why, ephemeral=True)
+        return
+    from pathlib import Path
+
+    from .profiles import available_profiles
+
+    profiles = available_profiles(Path(__file__).resolve().parents[2])
+    if not profiles:
+        await interaction.response.send_message("No game profile loads on this bot; nothing was set up.", ephemeral=True)
+        return
+    await GuildClaimWizard(interaction.user.id, owner or interaction.user, profiles).start(interaction)
+
+
+__all__ = ["MultiForm", "RaidConfigWizard", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "open_raid_config", "open_aura",
+           "open_timezone", "open_about", "open_guild_claim", "claim_refusal", "next_runs", "hours_words", "tz_cities"]

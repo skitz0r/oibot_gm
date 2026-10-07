@@ -101,10 +101,15 @@ class FeedServer:
         self.companions.pop(peer, None)
         return ws
 
-    def status(self) -> str:
-        if not self.companions:
+    def status(self, guild: str | None = None, resolve: Callable[[str], str | None] | None = None) -> str:
+        """The connected companions as one line; `guild` (a key) keeps only those feeding that guild — the companion's
+        hello `guild` as is, or through `resolve` (the bot's routing: a name or an unknown value → the guild it counts for)."""
+        comps = list(self.companions.values())
+        if guild is not None:
+            comps = [c for c in comps if (resolve(c.guild) if resolve else c.guild) == guild]
+        if not comps:
             return "no companion connected"
-        return "; ".join(f"{c.character} ({c.client}) {c.events} events, seen {int(c.silent_for)}s ago" for c in self.companions.values())
+        return "; ".join(f"{c.character} ({c.client}) {c.events} events, seen {int(c.silent_for)}s ago" for c in comps)
 
 
 def feed_config() -> tuple[str | None, str]:

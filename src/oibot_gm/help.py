@@ -113,7 +113,7 @@ class HelpExtras:
     """Facts that live on the bot, not in the registry. HelpMixin.help_extras collects them on the event loop before the
     thread hop (help.answer runs in asyncio.to_thread); every field is optional, so guild_state(extras=None) — tests,
     offline tools — simply leaves those lines out. Officer-only fields stay empty for a member's snapshot."""
-    ops: list[tuple[str, str, str]] = field(default_factory=list)  # Ops.recent (time, level, text), newest last
+    ops: list[tuple[str, str, str]] = field(default_factory=list)  # Ops.recent_for(guild key) (time, level, text), newest last
     llm: str | None = None  # provider.summary()
     feed: str | None = None  # FeedServer.status() or "disabled"
     uptime_s: int | None = None

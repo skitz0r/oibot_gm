@@ -426,7 +426,13 @@ def create_app(bot) -> FastAPI:
 
     @app.get("/healthz")
     async def healthz():
-        return {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(bot.registries.by_discord)}
+        """Liveness for launchd tooling (menubar, the apply job): the bot user, the guild count, and per guild whether
+        the bot sees its Discord server. `guilds_failed` = guild folders that didn't load (their names are in the log)."""
+        get_guild = getattr(bot, "get_guild", None)
+        regs = bot.registries.ordered() if hasattr(bot.registries, "ordered") else list(bot.registries.by_discord.values())
+        per = {r.key: {"server": bool(get_guild and get_guild(r.config.discord_guild_id) is not None)} for r in regs}
+        return {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(regs), "per_guild": per,
+                "guilds_failed": len(getattr(bot.registries, "load_errors", None) or [])}
 
     from .api import public_info
 

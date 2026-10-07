@@ -1,6 +1,8 @@
 """Pre-restart check: build the full command tree offline (no Discord connection) and fail on anything Discord would
 reject — descriptions over 100 chars, non-coroutine autocompletes, decorator errors — then run the fast test suite
-(`pytest -q -m "not slow"`; the solver tests are left to a full `uv run pytest -q`). Exit code 1 on either failure."""
+(`pytest -q -m "not slow"`; the solver tests are left to a full `uv run pytest -q`). Also fails when a guild folder in the
+data repo would not load (a broken guild.yaml, a key that isn't its folder name, two guilds on one Discord server).
+Exit code 1 on any failure."""
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +23,8 @@ store = GitStore(resolve_data_root(ROOT), push=False)
 client = discord.Client(intents=discord.Intents.default())
 tree = app_commands.CommandTree(client)
 guilds = Guilds(store, ROOT)
+if guilds.load_errors:  # a guild that won't load would be skipped by the bot (and two folders claiming one server: both)
+    raise SystemExit("guild(s) that would not load:\n" + "\n".join(f"  {e}" for e in guilds.load_errors))
 
 
 class Bot:  # just enough for registration

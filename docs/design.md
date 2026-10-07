@@ -947,6 +947,66 @@ pair needs both yeses, the cap and the asks still out after lock, the cards' Ask
 interaction, one person for two seats refused). **Migration:** none (new fields default:
 `FillAsk.why/phase/approved_by/held`, `RaidEvent.health_early`; a declared flex role is stored as before).
 
+
+### 5.32 Several servers in one process (stage S1 built 2026-10-06; S2 web selector and S3 DMs/MCP/news follow)
+
+Owner decisions 2026-10-06 (D1–D7): one bot process serves several Discord servers, each its own guild with fresh data
+in its own data-repo folder; nothing is shared but the process (and usually the owner). Full design and the skeptic
+amendments (K1–K24) in `out/multiguild_design.md`. **S1** (this section) is the core; until S3 ships a claim in a
+*second* server is refused (`Guilds.ALLOW_SECOND = False`, K11).
+
+**Identity.** Guild key = folder name = `GuildConfig.key`, fixed for good: `registry.GUILD_KEY_RE`
+(`[a-z0-9][a-z0-9_-]{0,15}`, so `runact.<gk>:<run>:…` stays under Discord's 100-character custom id and no key holds
+`.`/`:`). The Discord server id only maps an interaction to its guild. `discord_registry.Guilds` is the one index:
+`by_discord` (swapped copy-on-write by `add`, on the loop thread only, K6), `by_key`, `ordered()` (name, key — the
+one stable order; a snapshot list), `get(ref)` (key, or a unique name), `for_guild(id)` (strict), `only()` (exactly
+one configured — every "single guild keeps working" branch), `many`, `cfg_for(key)`, `load_errors`. **Nothing takes
+"the first guild" for routing.** Loading: each guild in its own try (a broken `guild.yaml`, a key ≠ folder, a bad key
+or an unknown `game_profile` is skipped and listed); two folders on one Discord server → neither loads.
+`scripts/check_commands.py` fails on any load error; `on_ready` prints them.
+
+**Bootstrap (D1).** `/gm config owner` is the only command that works in an unconfigured server; it opens
+`flows_config` `guild_claim` (Discord server owner or Manage Server; re-checked at every press). The wizard shows the
+server, the key `registry.guild_key_for` picked (ASCII slug of the server name, ≤12, `-2`… on a clash with any data-repo
+folder, the mock key or `out`/`fixtures`/`profiles`), the game version (`profiles.available_profiles`, labels from
+`profiles/<v>/profile.yaml`, default Forever) and the owner (the caller or a picked member). Nothing is written before
+Confirm → `OibotGM.claim_guild`: `Guilds.create` in a worker thread (`registry.create_guild`: one file, one commit
+"`<key>: guild created for <server>`"; refuses a fixtures root, a taken folder, a configured server or a claim in
+flight) → `add` on the loop → `guild_added` (analytics listener, officer roles, guild-scope command sync, icons for a
+profile not loaded before) → an ops line and a DM to every other guild's owner (once each, K5). Joining a server never
+creates a guild. In a DM it answers "Run this in the server you want to set up."
+
+**Routing (`guild_routing.py`, the one resolver).** `need(interaction, reply=True)` replaces every per-module
+`need()/officer()` copy; call sites rebind `reg, interaction = await need(interaction)` (a test enforces it, K10):
+`for_interaction` first (`extras["guild"]` → the server, strict → in a DM `only()`); an unconfigured server is told
+"isn't set up" and never reaches another guild (this closes the hole where a command in any server fell through to the
+configured guild and that server's Manage Server counted as its officer); a DM with several guilds goes by
+`guilds_of` (owner, or `membership` yes/unknown — tri-state, concurrent, 1.5 s timeout, K4): one → it, none → every
+server's Join link, several → "use this command in the server" until S3's picker. `/help` uses `reply=False` and adds
+its own line (K9). The chosen key lands in `interaction.extras["guild"]`; `_on_command_error` reads it, else the
+server, never a guess. Channel-only buttons (`app:`, `abs:`, `newsprop:`) resolve through the now-strict
+`for_interaction`. `officiates` grants Manage Server only in a configured server (K24; `/mock` keeps its rule). Plain
+DMs: `OibotGM.dm_guild` (same rules).
+
+**Per-guild process pieces (D6).** Scheduler: `scheduler_tick` runs `companion_check` and then each guild's
+`scheduler_tick_guild` in its own try; a failure goes to THAT guild once per distinct text (`_tick_error_by_guild`); a
+process-wide one to every guild's ops channel with each distinct owner DMed once (`Ops.emit(dm=False)` for repeats).
+`_fill_exhausted_posted` holds (guild, run key). Feed: `active_raid(comp)` routes by the companion's hello `guild`
+(`companion_key`: a key, a unique name or the mock key; anything else counts as empty, K12); one guild served → today's
+rule; several → its guild's real session, else a mock session; no guild named and two guilds raiding → none, with the
+hello `note` "start the companion with --guild <key>". `feed_status(bot, reg)` / `FeedServer.status(guild, resolve)`
+list a guild's companions only. Ops: the ring is per guild (`Ops.recent_for(key)`; `recent` is gone), `LISTENERS`
+get the key, an owner's error DM is prefixed with the guild name only when `many`. Run locks `plan_lock`, `solving`,
+`board_lock` and `configops.split_seen` are keyed (guild, run key) — two guilds can hold runs with one key. The loot
+thread check matches `s.guild`. `SetupMixin.set_channel` refuses a channel from another server (site, MCP, plain text).
+Pool listeners per guild (`attach_pool_listener`, idempotent). `OIBOT_COMMAND_SCOPE=guild` syncs the test server plus
+every configured server (`sync_servers`, deduplicated). `/gm status` and `help_extras` show this guild's ops lines and
+companions; "(whole bot)" labels appear only with several guilds (K17). `/healthz` adds `per_guild` (does the bot see
+each server) and `guilds_failed`. `check_emoji_conflicts` warns when two loaded profiles map one icon name to
+different art. **Shared on purpose:** the LLM budget (one monthly cap for the whole bot), the feed token and listener.
+Tests: `tests/test_multiguild_core.py` on the two-guild fixture (`conftest.duo`: demo on server 1, duo on server 2
+with its own owner and members; `same_run` opens one run key in both, also via a shared schedule id).
+
 ## 6. Architecture
 
 ```mermaid
@@ -1089,6 +1149,7 @@ A directory of data files the engine loads; no version-specific code paths. Prof
 
 ### Layer 2: Guild (per guild, references one profile)
 `guild(id, name, game_profile, mode, discord_guild_id, settings)` plus its teams, members, characters, policy docs, roles. Everything in §6.2 is already keyed by `guild_id`. A guild's `mode` is `live` or `shadow`.
+One process serves many guilds (§5.32): each is a folder `<data>/<key>/` keyed by its fixed key, mapped from its Discord server; a new server becomes a guild only when claimed.
 
 ### Shadow mode
 The bot ingests a real guild's data through **read-only** sources, runs every pipeline, and writes its outputs only to a private shadow channel and the database. It never posts to the guild, never DMs, never sends reminders, never writes to TMB/Gargul.

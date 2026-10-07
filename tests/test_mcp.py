@@ -18,6 +18,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from oibot_gm import mcp_server as ms
 from oibot_gm import raidcycle as rc
 from oibot_gm.discord_raid import RaidMixin
+from oibot_gm.discord_registry import Guilds
 from oibot_gm.web import app as web
 
 TOKEN = "a" * 64
@@ -26,9 +27,11 @@ TOKEN = "a" * 64
 class FakeOps:
     def __init__(self):
         self.lines = []
-        self.recent = []
 
-    async def emit(self, cfg, level, text, exc=None):
+    def recent_for(self, key):
+        return []
+
+    async def emit(self, cfg, level, text, exc=None, dm=True):
         self.lines.append((level, text))
 
 
@@ -42,7 +45,7 @@ class FakeBot:
     _write_board = RaidMixin._write_board
 
     def __init__(self, reg, rs):
-        self.registries = type("R", (), {"by_discord": {reg.config.discord_guild_id: reg}, "store": reg.store})()
+        self.registries = Guilds.of(reg.store, reg)  # the real index (by_key, ordered, only, for_guild) over this one guild
         self.raids = type("S", (), {"store": lambda _self, r: rs})()
         self.ops = FakeOps()
         self.user = None

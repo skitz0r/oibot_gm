@@ -552,7 +552,19 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
 
 ## 8. Owner: setup
 
-`/gm config owner` (first claim needs the Discord server owner or Manage Server). Handing the guild to a new owner
+**Setting up a server.** Inviting the bot never sets anything up. In the new server, the Discord server owner (or
+someone with Manage Server) runs `/gm config owner`: a short screen shows the server's name, the guild key the bot
+picked from it (it never changes; the site and MCP use it), the game version (WoW: Forever unless you pick another) and
+the owner (you, or pick someone). Nothing is saved until **Confirm**; then the server is a guild of its own — empty:
+its own members, raids, schedules, policy and settings — and you continue with the channels below. Every other
+command used in a server that isn't set up answers "This server isn't set up for oibot_GM yet". For now the bot looks
+after **one** server: a claim in a second server is refused until the next update. Keep **Public Bot** switched off in
+the Discord Developer Portal, so only you can invite the bot. Commands are global (every server and DMs); the
+development mode `OIBOT_COMMAND_SCOPE=guild` puts them only in the test server and the configured servers, so a new
+server can't be claimed in that mode. A command used in the test server acts on the test server's own guild only — if
+the test server isn't the guild's server, it answers "isn't set up".
+
+`/gm config owner` in a configured server transfers ownership (first claim needs the Discord server owner or Manage Server). Handing the guild to a new owner
 is only ever this slash command, by design — not the site, plain text or MCP: an MCP token acts as the owner, so a
 transfer there would give the guild away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
@@ -886,7 +898,7 @@ an absence puts you back to unanswered on any open sheet it had pre-filled (a se
 not handed back automatically — ask an officer). Claude is used sparingly — never for registry, signup or solver work — and spend is
 capped by a monthly budget the owner sets (`OIBOT_BUDGET_USD`, per calendar month, kept across restarts); questions and
 plain-text requests may use at most half of it each, so they can't spend what loot night needs. `/gm status` shows
-this month's spend.
+this month's spend. The budget is one for the whole bot: if it ever looks after several servers, they share it.
 
 ## 10a. Asking the bot questions
 
@@ -958,6 +970,9 @@ on the reply; it opens the same application as the registration card, right ther
 speaks to you: your application waiting, a past decision, or already a member.
 
 ## 11. Things the bot cannot do (yet)
+
+Servers: the bot looks after one Discord server for now (a second claim is refused until the next update), and there
+is no per-server spending cap — the monthly budget is shared by the whole bot.
 
 Loot: add or tier loot items, record wishlists, retire a precedent, or see your own loot history on `/me` — the
 loot council only runs on the demo data until Forever's loot tables exist. The precedents and the loot ledger are

@@ -76,8 +76,14 @@ class PoolMixin:
     """Needs self.registries, self.ops, self.ico, self.loop (discord.Client)."""
 
     def attach_pool_listeners(self) -> None:
-        self._pool_timers: dict[str, asyncio.TimerHandle] = {}
-        for reg in self.registries.by_discord.values():
+        """Boot: every configured guild's change listener (a guild claimed later gets its own via attach_pool_listener)."""
+        for reg in self.registries.ordered():
+            self.attach_pool_listener(reg)
+
+    def attach_pool_listener(self, reg: Registry) -> None:
+        """One guild's analytics listener; idempotent (boot and a claim may both call it)."""
+        self.__dict__.setdefault("_pool_timers", {})
+        if self.on_registry_change not in reg.listeners:
             reg.listeners.append(self.on_registry_change)
 
     # ---- listener (sync; may be called from a worker thread)
@@ -327,6 +333,8 @@ class SetupMixin:
         ch = self.get_channel(channel_id) if channel_id else None
         if channel_id and (ch is None or not isinstance(ch, discord.TextChannel)):
             raise ValueError("that channel isn't a text channel I can see")
+        if ch is not None and getattr(getattr(ch, "guild", None), "id", None) != reg.config.discord_guild_id:
+            raise ValueError("That channel is in another server.")  # the site, MCP and plain text all come through here
         if not ch:
             setattr(reg.config, attr, None)
             if kind == "registration":

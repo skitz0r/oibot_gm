@@ -1226,7 +1226,7 @@ def _propose_args(reg: Registry, ev, op: ConfigOp) -> tuple[str, str | None]:
 
 
 def split_seen(bot) -> dict:
-    """The proposals shown per (run key, requester) since the bot started: {strategy, layouts} — 'another' avoids them,
+    """The proposals shown per (guild key, run key, requester) since the bot started: {strategy, layouts} — 'another' avoids them,
     'use' applies the last one. Per process on purpose: a restart forgets them (the officer asks again)."""
     return bot.__dict__.setdefault("_split_seen", {})
 
@@ -2445,7 +2445,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_autofill":
         if ev.state != "open":
             raise RegistryError("already locked — move people on the board instead")
-        async with bot.solving(ev.key):  # the run's solver single-flight (RaidMixin.solving), as the site's Auto-fill
+        async with bot.solving(reg, ev.key):  # the run's solver single-flight (RaidMixin.solving), as the site's Auto-fill
             rev = rev or rc.board_rev(reg, ev)  # a drag during the solve wins: the fill is refused, never overwrites it
             try:
                 layout = await asyncio.to_thread(rc.autofill, reg, rs, ev)
@@ -2472,7 +2472,7 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
 
     f, v = _propose_args(reg, ev, op)
     seen = split_seen(bot)
-    key = (ev.key, by_id)
+    key = (reg.key, ev.key, by_id)  # two guilds can hold runs with the same key
     last = seen.get(key)
     if f == "use":
         if not last or not last.get("layouts"):
@@ -2485,7 +2485,7 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
     strategy = v or ((last or {}).get("strategy") if f == "another" else None) or ev.split_strategy or reg.raid_def(ev.instance).get("split_policy", "balanced")
     avoid = list((last or {}).get("layouts") or []) if f == "another" else []
     try:
-        async with bot.solving(ev.key):  # the run's solver single-flight (RaidMixin.solving), as the site's split
+        async with bot.solving(reg, ev.key):  # the run's solver single-flight (RaidMixin.solving), as the site's split
             layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, avoid or None)
     except RuntimeError as e:
         raise RegistryError(rc.solver_error_text(e))

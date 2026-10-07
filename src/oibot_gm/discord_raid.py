@@ -40,7 +40,7 @@ class RaidContext:
 
     def __init__(self, guilds: Guilds):
         self.guilds = guilds
-        self.stores: dict[str, rc.RaidStore] = {k: rc.RaidStore(guilds.store, reg.key) for k, reg in ((r.key, r) for r in guilds.by_discord.values())}
+        self.stores: dict[str, rc.RaidStore] = {r.key: rc.RaidStore(guilds.store, r.key) for r in guilds.ordered()}
 
     def store(self, reg: Registry) -> rc.RaidStore:
         return self.stores.setdefault(reg.key, rc.RaidStore(self.guilds.store, reg.key))
@@ -326,9 +326,10 @@ class RaidMixin:
                 rs.save(ev, "fill: nobody left to ask")
         return sent, nd
 
-    def plan_lock(self, key: str) -> asyncio.Lock:
-        """One officer send per run at a time (two presses of Ask never ask anyone twice)."""
-        return self.__dict__.setdefault("_plan_locks", {}).setdefault(key, asyncio.Lock())
+    def plan_lock(self, reg, key: str) -> asyncio.Lock:
+        """One officer send per run at a time (two presses of Ask never ask anyone twice). Keyed (guild, run): two
+        guilds can hold runs with the same key."""
+        return self.__dict__.setdefault("_plan_locks", {}).setdefault((reg.key, key), asyncio.Lock())
 
     async def send_plan(self, reg, rs, ev, *, rev: str, by: str, picks: dict | None = None, limit: int | None = None) -> tuple[list, "rc.Plan"]:
         """An officer's Ask: send the planner's suggestions (each seat's suggestion, or the alternate in `picks` =
@@ -338,7 +339,7 @@ class RaidMixin:
         nothing is sent. Before lock: pre-lock asks (one per member per run, expire at lock; a yes changes the signup
         and seats nobody). After lock: fill asks the officer approved — role swaps included (D3). `limit`: only the first
         that many seats (the card's Ask: the seats the card draws, never one it left under "+N more"). Returns (sent, plan)."""
-        async with self.plan_lock(ev.key):
+        async with self.plan_lock(reg, ev.key):
             if ev.state not in ("open", "locked"):
                 raise RegistryError(f"{run_title(reg, ev)} is {ev.state}")
             plan = rc.role_plan(reg, rs, ev)
@@ -486,10 +487,11 @@ class RaidMixin:
         return (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(cfg.ops_channel_id) if cfg.ops_channel_id else None)
 
     @contextlib.asynccontextmanager
-    async def solving(self, key: str):
+    async def solving(self, reg, key: str):
         """Single flight for the solver per run, whoever asks (a lock from chat, MCP, the scheduler, the card or the
-        site; an auto-fill; a split preview): a second caller gets rc.SolverBusy instead of a second solve."""
-        lock = self.__dict__.setdefault("_solver_locks", {}).setdefault(key, asyncio.Lock())
+        site; an auto-fill; a split preview): a second caller gets rc.SolverBusy instead of a second solve. Keyed
+        (guild, run key)."""
+        lock = self.__dict__.setdefault("_solver_locks", {}).setdefault((reg.key, key), asyncio.Lock())
         if lock.locked():
             raise rc.SolverBusy()
         async with lock:
@@ -504,7 +506,7 @@ class RaidMixin:
         the lock solve again on the live run (rc.solve_inputs), up to rc.LOCK_SOLVES times; still moving after that,
         the lock fails and the sheet stays open — nobody is rostered from answers they already changed."""
         team = rc.run_team(reg, ev)
-        async with self.solving(ev.key), self.board_lock(ev.key):
+        async with self.solving(reg, ev.key), self.board_lock(reg, ev.key):
             if ev.state != "open":
                 raise RegistryError(f"{ev.key} is already {ev.state}")
             # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
@@ -620,9 +622,10 @@ class RaidMixin:
         await self.ops.emit(reg.config, "info", f"[web] {by} edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""))
 
     # ---- the board: one writer at a time per run, whoever writes (the site's drags, MCP, plain text)
-    def board_lock(self, key: str) -> asyncio.Lock:
-        """One writer at a time per run's board: concurrent officers queue here (short), they never overwrite each other."""
-        return self.__dict__.setdefault("_board_locks", {}).setdefault(key, asyncio.Lock())
+    def board_lock(self, reg, key: str) -> asyncio.Lock:
+        """One writer at a time per run's board: concurrent officers queue here (short), they never overwrite each other.
+        Keyed (guild, run key)."""
+        return self.__dict__.setdefault("_board_locks", {}).setdefault((reg.key, key), asyncio.Lock())
 
     async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str) -> str:
         """The one way a board is written (whole board, or the result of a single move); the caller holds board_lock.
@@ -645,7 +648,7 @@ class RaidMixin:
         rc.board_rev the author was looking at: when the board changed since, rc.BoardChanged is raised and nothing is
         written. Only joiners count; returns the line to show."""
         state = ev.state
-        async with self.board_lock(ev.key):
+        async with self.board_lock(reg, ev.key):
             if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state:  # a write queued behind a lock is stale
                 raise rc.BoardChanged()
             return await self._write_board(reg, rs, ev, groups, by)
@@ -657,7 +660,7 @@ class RaidMixin:
         `rev`: plain text's preview fingerprint — the move was worded against that board, so a changed one raises
         rc.BoardChanged (the site's drags pass none: they always act on the board as it is)."""
         state = ev.state
-        async with self.board_lock(ev.key):
+        async with self.board_lock(reg, ev.key):
             if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state:  # a move queued behind a lock is stale
                 raise rc.BoardChanged()
             groups = rc.apply_move(reg, ev, name, to)
