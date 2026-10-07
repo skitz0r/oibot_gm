@@ -402,10 +402,15 @@ def _role_ids(interaction: discord.Interaction) -> list[int]:
     return [r.id for r in (getattr(interaction.user, "roles", None) or []) if getattr(r, "id", None) is not None]
 
 
-def must_apply(interaction: discord.Interaction, reg: Registry) -> bool:
-    """A newcomer (nothing registered, not an officer, no member role) applies instead of registering."""
+async def must_apply(interaction: discord.Interaction, reg: Registry) -> bool:
+    """A newcomer (nothing registered, not an officer, no member role) applies instead of registering. In a DM Discord
+    hands over a bare User without roles, so officer and roles come from the guild member (OibotGM.plain_identity, as
+    plain text and the /ask reply read them) — else a member-role holder pressing Register in a DM was sent to Apply."""
     from .discord_registry import is_officer
 
+    if interaction.guild_id is None and getattr(interaction.client, "plain_identity", None) is not None:
+        officer, role_ids = await interaction.client.plain_identity(reg, interaction.user)
+        return reg.must_apply(interaction.user.id, officer=officer, role_ids=role_ids)
     return reg.must_apply(interaction.user.id, officer=is_officer(interaction, reg), role_ids=_role_ids(interaction))
 
 
@@ -417,7 +422,7 @@ async def open_register(interaction: discord.Interaction, reg: Registry, *, slot
     if slot not in ("main", "alt") or mode not in ("register", "apply"):
         raise ValueError(f"register flow: bad seed slot={slot!r} mode={mode!r}")
     lead = None
-    if mode == "register" and must_apply(interaction, reg):
+    if mode == "register" and await must_apply(interaction, reg):
         mode, plan_only, lead = "apply", False, NEWCOMER
     if mode == "apply":
         m = reg.members.get(interaction.user.id)

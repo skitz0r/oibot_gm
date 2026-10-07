@@ -57,10 +57,11 @@ src/oibot_gm/
                        /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py); /mock … (demo)
                        `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only), by_key, ordered(),
                        get(key|name), for_guild (strict), only(), many, cfg_for, load_errors; `/gm config owner` in an UNCONFIGURED server is the bootstrap
-                       (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; a second server is refused until S3, Guilds.ALLOW_SECOND)
+                       (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; any number of servers — Guilds.ALLOW_SECOND is on since S3)
   guild_routing.py     THE resolver: need(interaction, reply=True) → (reg, interaction) — every command rebinds both; an unconfigured server is told
                        "isn't set up" and never reaches another guild; DMs: only() → else guilds_of (owner / membership yes|no|unknown) → one, none (Join links),
-                       several ("use the server" until S3's picker); may_access = the strict "belongs to" (the web uses it in S2)
+                       several → the DM server picker (guild_picker.choose_guild: asked EVERY time, asker only, 2 min; the command continues on
+                       the press); resolve_button(interaction, g, legacy) for persistent buttons; may_access = the strict "belongs to" (the web uses it)
   raidcycle.py         signup-driven cycle (design.md §5.20): raid SCHEDULES (§5.27: Registry.schedules/schedule_def; weekly slots · day N of each
                        lockout · pickup templates; `default` = the raid's own slots) + cadence (schedule_def: slots, signup_lead/lock/confirm hours,
                        weights) → upcoming/schedule_starts/open_run(schedule=) (ephemeral roster per run, key suffix -<schedule id> unless default);
@@ -81,7 +82,8 @@ src/oibot_gm/
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
                        run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client
   raid_buttons.py      persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
-                       RunButton (officer Fill/Lock/Cancel on the cards); raid_views ⇄ raid_buttons import each other at the bottom of the file
+                       RunButton (officer Fill/Lock/Cancel on the cards); constructors take the guild key first (`raid.<gk>:…` ids; old ids still match,
+                       g=None → guild_routing.resolve_button + each button's legacy matcher); raid_views ⇄ raid_buttons import each other at the bottom
   raid_scheduler.py    RaidSchedulerMixin: the minute loop (open on cadence → health → lock → expire → fill → close), calls RaidMixin
   raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|end|set|cancel|list|out|fill
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
@@ -111,7 +113,9 @@ src/oibot_gm/
                        authorize → Registry.may_plain; confirm_for (an officer records a member's Confirm/Can't through answer_placement_for)
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr
   mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
-                       that call the RUNNING bot's /api/* over HTTP as the owner (`Authorization: Bearer $OIBOT_MCP_TOKEN` → web/app.py `mcp_viewer`,
+                       that call the RUNNING bot's /api/* over HTTP as the OWNER OF THE CHOSEN GUILD (every tool's optional `guild` = key or name,
+                       default OIBOT_MCP_GUILD / --guild, else the only guild; names → keys client side via GET /api/guilds; header X-Oibot-Guild;
+                       list_guilds; the bot never reads OIBOT_MCP_GUILD) (`Authorization: Bearer $OIBOT_MCP_TOKEN` → web/app.py `mcp_authorized` + `mcp_guild` → `mcp_viewer`,
                        via=mcp in the request log; LOCAL ONLY by default — OIBOT_MCP_LOCAL_ONLY, web/app.py local_request: loopback client and no proxy
                        headers, so the token never works through the tunnel). Never a second code path: every write is the site's route. `.mcp.json` (repo root, no secrets)
                        registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py
@@ -127,7 +131,8 @@ src/oibot_gm/
   discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence. Routed by the companion's
                        hello `guild` (active_raid(comp), companion_key; with several guilds raiding, a companion without --guild routes nowhere)
   ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key
-scripts/agents/        review.py (daily 9:00 AM; no Claude session without new news), apply.py (every 15 min; guild settings by the bot, profile
+scripts/agents/        loop EVERY guild (Api().guilds()): review.py (daily 9:00 AM; one tagged run per guild, its own since, a Claude session only for a
+                       guild with new news, pinned with OIBOT_MCP_GUILD), apply.py (every 15 min; oldest approval across guilds; guild settings by the bot, profile
                        edits by Claude then checks/commit/push/restart/health/revert by the SCRIPT; --pr), menubar.py (rumps via uv --with),
                        install/uninstall.sh; plists in scripts/launchd/
 companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests
@@ -162,6 +167,6 @@ After touching `frontend/`: `cd frontend && npm run build` (commit the bundle). 
 - Deterministic first: add a rule to `scoring.py`/`comp_rules.yaml`, not to a prompt.
 - Anything slow (solver, LLM) runs in `asyncio.to_thread`; Discord interactions must respond within 3 s.
 - Verify offline before touching Discord: copy the data repo to a scratch dir, `GitStore(scratch, push=False)`, drive `Registry`/`raidcycle`/`MockEvent` directly (see git history for examples); build a `CommandTree` on a bare `discord.Client` to validate command decorators.
-- Real guild state is keyed by the guild's folder key → `<data>/<key>/guild.yaml` (fixed for good; `Guilds` maps the Discord server id to it). Several guilds run in one process: never take "the first guild" — use `Guilds.for_guild/only/by_key/ordered`, route commands through `guild_routing.need`, and key per-run process state (locks, caches) by (guild key, run key). `/mock` uses the shadow fixtures. Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template.
+- Real guild state is keyed by the guild's folder key → `<data>/<key>/guild.yaml` (fixed for good; `Guilds` maps the Discord server id to it). Several guilds run in one process: never take "the first guild" — use `Guilds.for_guild/only/by_key/ordered`, route commands through `guild_routing.need`, and key per-run process state (locks, caches) by (guild key, run key). `/mock` uses the shadow fixtures. Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template, and every persistent `custom_id` carries the guild key (`<prefix>.<gk>:…`, an optional group in the template; old ids still resolve via `guild_routing.resolve_button`). DMs and cards name their guild only when the bot serves several (`Registry.many_guilds`); with one guild every message reads as before.
 - Item data in `profiles/tbc/items/*.yaml` is unverified; `equippable()` is the safety net. Verify ids against the Blizzard API before relying on them.
 - Model routing lives in `llm/provider.py:ROUTES`; override per workload with `OIBOT_MODEL_<WORKLOAD>`.

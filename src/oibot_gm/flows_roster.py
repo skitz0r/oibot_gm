@@ -236,9 +236,13 @@ class ConfirmWizard(OfficerWizard):
             return
         self.done.append(c.label)
         await _emit(interaction, self.reg, f"{by} confirmed {c.label} ({m.display_name})")
+        text = f"✅ {c.label} was confirmed by {by}. Welcome aboard."
         try:
-            user = await interaction.client.fetch_user(m.discord_id)
-            await user.send(f"✅ {c.label} was confirmed by {by}. Welcome aboard.")
+            send = getattr(interaction.client, "send_member_dm", None)
+            if send is not None:  # the one DM path: names the guild when the bot serves several
+                await send(self.reg, m, text)
+            else:
+                await (await interaction.client.fetch_user(m.discord_id)).send(text)
         except Exception:  # noqa: BLE001 — closed DMs, a test puppet, a user who left
             pass
         self.page = 0

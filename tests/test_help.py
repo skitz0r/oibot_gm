@@ -130,14 +130,14 @@ def _custom_ids(view):
 
 def test_apply_view_only_for_a_newcomer_while_open(reg):
     async def go():
-        assert _custom_ids(discord_help.apply_view(reg, 42, officer=False)) == ["reg:apply"]
+        assert _custom_ids(discord_help.apply_view(reg, 42, officer=False)) == [f"reg.{reg.key}:apply"]
         assert discord_help.apply_view(reg, 42, officer=True) is None, "officers register directly"
         assert discord_help.apply_view(reg, reg.test_members()[0].discord_id, officer=False) is None, "members don't apply"
         reg.config.member_role_ids = [777]
         assert discord_help.apply_view(reg, 42, officer=False, role_ids=[777]) is None, "a member role skips the application"
         reg.config.member_role_ids = []
-        base = discord_help.guide_view()
-        assert _custom_ids(discord_help.apply_view(reg, 42, officer=False, base=base)) == ["guide:menu", "reg:apply"]
+        base = discord_help.guide_view(reg)
+        assert _custom_ids(discord_help.apply_view(reg, 42, officer=False, base=base)) == [f"guide.{reg.key}:menu", f"reg.{reg.key}:apply"]
         applications(reg)
         assert discord_help.apply_view(reg, NEWCOMER, officer=False) is None, "an application is already waiting"
         reg.set_recruitment("t", open=False)
@@ -175,10 +175,10 @@ def test_plain_text_reply_to_a_newcomer_carries_the_apply_button(reg, monkeypatc
         asyncio.run(db.OibotGM.plain_text(stub, msg, reg, text, None))  # a DM
 
     send(42)  # outside the ask audience: the static guide + Apply to join
-    assert _custom_ids(replies[-1][1]) == ["guide:menu", "reg:apply"]
+    assert _custom_ids(replies[-1][1]) == [f"guide.{reg.key}:menu", f"reg.{reg.key}:apply"]
     says["answer"] = "Apply with the button below."
     send(42)  # an answer (ask audience everyone): the answer + Apply to join
-    assert replies[-1][0] == "Apply with the button below." and _custom_ids(replies[-1][1]) == ["reg:apply"]
+    assert replies[-1][0] == "Apply with the button below." and _custom_ids(replies[-1][1]) == [f"reg.{reg.key}:apply"]
     send(reg.test_members()[0].discord_id)  # a member: no button
     assert replies[-1][1] is None
 
@@ -196,7 +196,7 @@ def test_apply_button_finds_the_registry_from_a_dm(reg, monkeypatch):
 
     monkeypatch.setitem(FLOWS, "register", fake_register)
     interaction = types.SimpleNamespace(guild_id=None, guild=None, user=types.SimpleNamespace(id=42), client=types.SimpleNamespace(registries=guilds))
-    btn = RegisterButton("apply")
+    btn = RegisterButton("apply", None)  # an Apply button sent before ids carried the guild still opens the flow
     assert btn.item.custom_id == "reg:apply"
     asyncio.run(btn.callback(interaction))
     assert seen == [(reg, {"mode": "apply"})]

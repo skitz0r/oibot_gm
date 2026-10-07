@@ -151,7 +151,7 @@ def test_closed_recruitment_is_refused_at_entry_and_on_the_card_button(reg):
     h = person(reg)
     run(FLOWS["register"](h.command(), reg, mode="apply"))
     assert "isn't taking applications" in h.text and h.screen["view"] is None
-    run(discord_registry.RegisterButton("apply").callback(h.card_press()))
+    run(discord_registry.RegisterButton("apply", reg.key).callback(h.card_press()))
     assert "isn't taking applications" in h.text and h.screen["view"] is None and h.modal is None
     assert NEW_ID not in reg.applicants
 
@@ -446,7 +446,7 @@ def test_the_card_buttons_use_the_clients_decide_path(reg, monkeypatch):
         return "✅ line from the client"
     h.client.decide_application = decide
     view = discord_registry.ApplicationView(reg, NEW_ID)
-    assert [b.item.custom_id for b in view.children] == [f"app:accept:{NEW_ID}", f"app:decline:{NEW_ID}"]
+    assert [b.item.custom_id for b in view.children] == [f"app.{reg.key}:accept:{NEW_ID}", f"app.{reg.key}:decline:{NEW_ID}"]
     run(view.children[0].callback(h.card_press()))
     assert calls == [(NEW_ID, True, "Officer", None)] and h.text == "✅ line from the client"
     run(view.children[1].callback(h.card_press()))

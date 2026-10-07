@@ -150,7 +150,7 @@ def test_recurring_after_lock_a_role_swap_waits_for_an_officer(reg, rs):
     assert any("waiting for an officer's Ask" in ln for ln in ev.log)
     card = text_of(views.lock_layout(reg, ev, rc.run_team(reg, ev), ico, 0, rs))
     assert "**Suggested**" in card and "**Offy** · offspec" in card and "**Short** <role:healer> 1" in card
-    ask = next(b for b in buttons(views.lock_layout(reg, ev, rc.run_team(reg, ev), ico, 0, rs)) if b.custom_id.startswith(f"runact:{ev.key}:ask:"))
+    ask = next(b for b in buttons(views.lock_layout(reg, ev, rc.run_team(reg, ev), ico, 0, rs)) if b.custom_id.startswith(f"runact.{reg.key}:{ev.key}:ask:"))
     assert ask.custom_id.endswith(rc.role_plan(reg, rs, ev).rev)
     sent, _ = run(bot.run_fill(reg, rs, ev, rc.run_team(reg, ev), by="Officer", approved_by="Officer"))  # an officer's Send
     assert [(a.display_name, a.kind, a.approved_by) for a in sent] == [("Offy", "offspec", "Officer")]
@@ -188,14 +188,14 @@ def test_health_card_has_the_suggested_block_with_ask_and_suggest(reg, rs):
     assert "Still short if all say yes: nothing" in body
     ids = [b.custom_id for b in buttons(view)]
     rev = rc.role_plan(reg, rs, ev).rev
-    assert f"runact:{ev.key}:ask:{rev}" in ids and f"runact:{ev.key}:suggest" in ids
+    assert f"runact.{reg.key}:{ev.key}:ask:{rev}" in ids and f"runact.{reg.key}:{ev.key}:suggest" in ids
     assert "tank 1" not in body and "1 healer" not in body.split("**Suggested**")[1].split("\n")[0], "role counts are icon + number"
 
 
 def test_ask_button_round_trips_its_rev(reg, rs):
     ev, _ = worked_example(reg, rs)
     rev = rc.role_plan(reg, rs, ev).rev
-    b = views.RunButton(ev.key, "ask", rev=rev)
+    b = views.RunButton(reg.key, ev.key, "ask", rev=rev)
     m = views.RunButton.__discord_ui_compiled_template__.fullmatch(b.custom_id)
     assert m and m["key"] == ev.key and m["action"] == "ask" and m["rev"] == rev
     plain = views.RunButton.__discord_ui_compiled_template__.fullmatch(f"runact:{ev.key}:lock")
@@ -272,6 +272,6 @@ def test_pressing_yes_on_a_prelock_ask_that_closed_at_lock_says_so(reg, rs):
         return True
     client = SimpleNamespace(registries=SimpleNamespace(for_interaction=lambda i: reg), raids=SimpleNamespace(store=lambda r: rs), may_answer_for=may_answer_for)
     itx = SimpleNamespace(client=client, user=SimpleNamespace(id=p["Kael"].discord_id), response=SimpleNamespace(send_message=send_message))
-    run(views.FillButton(ev.key, p["Kael"].discord_id, "yes").callback(itx))
+    run(views.FillButton(reg.key, ev.key, p["Kael"].discord_id, "yes").callback(itx))
     assert said == ["That question closed when the roster locked — nothing changed."]
     assert str(p["Kael"].discord_id) not in ev.signups

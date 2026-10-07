@@ -20,7 +20,7 @@ from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
 from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _group_block, _group_summaries, _header,
                          _raidwide_line, _role_counts, ask_line, board_url, clock12, closed_layout, confirm_layout, fill_layout,
-                         gaps_text, health_layout, health_locked_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
+                         gaps_text, guild_prefix, health_layout, health_locked_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
                          sheet_state)
 from .registry import Registry, RegistryError
 
@@ -61,7 +61,11 @@ class RaidMixin:
     async def send_member_dm(self, reg, m, text: str | None = None, view=None, ev=None) -> bool:
         """DM a member — text + buttons, or a layout card (`view` a LayoutView, `text` None). For a test member the same
         goes to whoever is running the test (`ev`'s own tester when the DM is about a run, so two officers testing at
-        once each get their own puppets' DMs), with the puppet's name in front. Returns True when delivered."""
+        once each get their own puppets' DMs), with the puppet's name in front. Returns True when delivered.
+        While the process serves several guilds a text DM starts with the guild's name (raid_views.guild_prefix; a card
+        names it in its header), unless the text already opens with it; with one guild nothing changes."""
+        if text and not str(text).startswith(str(reg.config.name)):
+            text = guild_prefix(reg) + text
         target, prefix = m.discord_id, None
         if getattr(m, "test", False):
             own = (reg.config.team(ev.team) or {}).get("test_by") if ev is not None else None
@@ -238,7 +242,7 @@ class RaidMixin:
                 continue
             s = ev.signups.get(str(m.discord_id))
             status = f"You're marked **{rc.LABELS.get(s.status, s.status)}** ({'away that day' if s.source == 'absence' else s.source})" if s else "You haven't answered yet"
-            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key), ev=ev):
+            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(reg, ev.key), ev=ev):
                 sent += 1
         ev.log.append(f"open DMs sent to {sent}")
         rs.save(ev, f"open DMs {sent}")
@@ -271,7 +275,7 @@ class RaidMixin:
             targets = [m for m, _c in rc.not_answered(reg, ev) if m.discord_id not in ev.nudged and not m.dm_opt_out]
             _soft, hard, _confirm = run_times(reg, ev, team)
             for m in targets:  # same buttons as the sheet (and the open DM), so they can answer right here
-                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(ev.key), ev=ev):
+                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(reg, ev.key), ev=ev):
                     ev.nudged.append(m.discord_id)
             if targets:
                 rs.save(ev, f"nudged {len(targets)}")

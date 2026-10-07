@@ -230,8 +230,8 @@ def test_channel_only_cards_resolve_their_server_strictly(duo, monkeypatch):
         seen.append(("anywhere", reg.key))
         return False
     client = types.SimpleNamespace(registries=duo.guilds, is_officer_anywhere=anywhere)
-    cards = [(dr.ApplicationButton("accept", 5), "Officers only."), (discord_pool.AbsenceButton("new"), "Not configured here."),
-             (discord_news.ProposalButton("260101-abcd", "approve"), "Officers only.")]
+    cards = [(dr.ApplicationButton("accept", 5, None), "Officers only."), (discord_pool.AbsenceButton("new", None), "Not configured here."),
+             (discord_news.ProposalButton(None, "260101-abcd", "approve"), "Officers only.")]  # old ids (no guild): the server decides
     for card, refusal in cards:
         for server in (None, 999):  # a DM, an unconfigured server
             i = itx(client, guild_id=server)
@@ -243,7 +243,7 @@ def test_channel_only_cards_resolve_their_server_strictly(duo, monkeypatch):
     assert seen == [("officer", GUILD2), ("absence", GUILD2), ("anywhere", GUILD2)]
     one = types.SimpleNamespace(registries=Guilds.of(duo.a.store, duo.a), is_officer_anywhere=anywhere)
     i = itx(one, guild_id=None)
-    run(dr.ApplicationButton("decline", 5).callback(i))
+    run(dr.ApplicationButton("decline", 5, None).callback(i))
     assert i.response.replies == ["Officers only."], "one guild too: a channel card pressed outside its server is refused"
 
 
@@ -262,10 +262,9 @@ def test_api_ops_feed_shows_only_this_guilds_companions(duo, monkeypatch):
     for peer, g in (("p1", GUILD2), ("p2", GUILD), ("p3", "")):
         fs.companions[peer] = types.SimpleNamespace(character=f"c-{peer}", client="x", events=0, silent_for=1, guild=g)
     bot.feed = fs
-    me = next(iter(duo.guilds.by_discord.values())).key  # the bearer's guild in S1 (S2 picks it per request)
-    body = TestClient(web.create_app(bot)).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}"}).json()
-    mine, theirs = ("c-p2", "c-p1") if me == GUILD else ("c-p1", "c-p2")
-    assert mine in body["feed"] and theirs not in body["feed"] and "c-p3" not in body["feed"], body["feed"]
+    for me, mine, theirs in ((GUILD, "c-p2", "c-p1"), (GUILD2, "c-p1", "c-p2")):  # the bearer names its guild (S3)
+        body = TestClient(web.create_app(bot)).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}", "X-Oibot-Guild": me}).json()
+        assert mine in body["feed"] and theirs not in body["feed"] and "c-p3" not in body["feed"], body["feed"]
     one = FakeBot(duo.a, duo.rs_a)
     one.feed = fs
     body = TestClient(web.create_app(one)).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}"}).json()
@@ -273,7 +272,7 @@ def test_api_ops_feed_shows_only_this_guilds_companions(duo, monkeypatch):
     assert TestClient(web.create_app(FakeBot(duo.a, duo.rs_a))).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}"}).json()["feed"] == "disabled"
 
 
-# ---------------------------------------------------------------- DMs while S1 (no picker yet)
+# ---------------------------------------------------------------- DMs (the picker itself: test_multiguild_dm.py)
 
 def dm_client(duo, members=None, flaky=None):
     client = types.SimpleNamespace(registries=duo.guilds)
@@ -288,16 +287,16 @@ def test_dm_from_someone_in_one_guild_routes_there(duo):
     assert reg is duo.b and i.extras["guild"] == GUILD2 and not i.response.replies
 
 
-def test_dm_from_someone_in_both_is_refused_until_the_picker_exists(duo):
-    client = dm_client(duo, {(1, 42): object(), (DUO_SERVER, 42): object()})
-    i = itx(client)
-    assert run(guild_routing.need(i))[0] is None and i.response.replies == [guild_routing.SEVERAL]
+def test_dm_with_a_discord_hiccup_asks_instead_of_picking_the_other_guild(duo, monkeypatch):
+    asked = []
 
-
-def test_dm_with_a_discord_hiccup_asks_instead_of_picking_the_other_guild(duo):
+    async def picker(target, regs, *a, **kw):
+        asked.append([r.key for r in regs])
+        return None, None
+    monkeypatch.setattr("oibot_gm.guild_picker.choose_guild", picker)
     client = dm_client(duo, {(DUO_SERVER, 42): object()}, flaky={(1, 42)})  # in duo; demo's lookup failed transiently
     i = itx(client)
-    assert run(guild_routing.need(i))[0] is None and i.response.replies == [guild_routing.SEVERAL], "unknown counts (K4)"
+    assert run(guild_routing.need(i))[0] is None and asked == [[GUILD, GUILD2]], "unknown counts (K4): the bot asks"
     assert run(guild_routing.may_access(client, duo.a, 42)) is False and run(guild_routing.membership(client, duo.a, 42)) == "unknown"
 
 
@@ -359,13 +358,11 @@ def test_the_owner_belongs_to_their_guild_without_being_in_its_server(duo):
     assert [r.key for r in run(guild_routing.guilds_of(client, OWNER2))] == [GUILD2]
 
 
-def test_plain_dm_in_both_is_answered_with_use_the_server(duo):
+def test_plain_dm_from_someone_in_one_guild_needs_no_question(duo):
     replies = []
     msg = types.SimpleNamespace(author=types.SimpleNamespace(id=42), reply=lambda text, **kw: _rec(replies, text))
-    bot = dm_client(duo, {(1, 42): object(), (DUO_SERVER, 42): object()})
-    assert run(OibotGM.dm_guild(bot, msg)) is None and "more than one server" in replies[0]
     bot1 = dm_client(duo, {(1, 42): object()})
-    assert run(OibotGM.dm_guild(bot1, msg)) is duo.a
+    assert run(OibotGM.dm_guild(bot1, msg)) is duo.a and not replies
 
 
 async def _rec(out, text):
@@ -387,7 +384,7 @@ def test_help_in_an_unconfigured_server_answers_once_with_the_setup_line(duo):
 
 
 def test_every_need_and_officer_call_site_rebinds_the_interaction():
-    """K10: the DM picker (next stage) answers on a NEW interaction, so every caller unpacks `reg, interaction`."""
+    """K10: the DM picker answers on a NEW interaction (the press), so every caller unpacks `reg, interaction`."""
     bad = []
     for f in (ROOT / "src" / "oibot_gm").glob("*.py"):
         for n, line in enumerate(f.read_text().splitlines(), 1):
@@ -498,8 +495,10 @@ def test_cfg_owner_in_an_unconfigured_server_opens_the_claim_and_refuses_in_a_dm
     assert dm.response.replies == ["Run this in the server you want to set up."]
 
 
-def test_a_second_server_is_refused_until_the_next_stage_then_gets_a_unique_key(duo, monkeypatch):
+def test_a_second_server_may_be_claimed_since_s3_and_gets_a_unique_key(duo, monkeypatch):
+    assert Guilds.ALLOW_SECOND, "K11: S3 (the DM picker, guild-carrying button ids) shipped, so a second claim is allowed"
     srv = types.SimpleNamespace(id=7, name="Demo")
+    monkeypatch.setattr(Guilds, "ALLOW_SECOND", False)  # the switch still works (as S1 shipped it)
     with pytest.raises(RegistryError, match="second server"):
         duo.guilds.create(srv, 1, "forever")
     monkeypatch.setattr(Guilds, "ALLOW_SECOND", True)
@@ -513,7 +512,8 @@ def test_a_second_server_is_refused_until_the_next_stage_then_gets_a_unique_key(
 
 
 def test_a_claim_in_flight_on_an_empty_deployment_blocks_a_second_server(tmp_path, monkeypatch):
-    """K11 with nothing configured yet: two servers claiming in the same window must not both get folders."""
+    """K11 with nothing configured yet (as S1 shipped it): two servers claiming in the same window must not both get folders."""
+    monkeypatch.setattr(Guilds, "ALLOW_SECOND", False)
     g = Guilds(scratch_root(tmp_path), ROOT)
     assert g.claim_refusal(5) is None
     g._claiming.add(5)  # server 5's claim is writing its folder (create() ran, add() hasn't)

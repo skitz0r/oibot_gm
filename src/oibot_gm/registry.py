@@ -781,6 +781,10 @@ def pool_health_data(reg: "Registry", roster: dict, placed: set[int] | None = No
 
 
 class Registry:
+    # set by discord_registry.Guilds for every guild it serves: True while the process serves several, so a DM or a card
+    # names its guild (design §5.32); with one guild every message reads exactly as before
+    many_guilds: bool = False
+
     def __init__(self, store: GitStore, guild_key: str, profile: GameProfile):
         self.store = store
         self.key = guild_key

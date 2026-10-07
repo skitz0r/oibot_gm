@@ -489,7 +489,7 @@ def test_guide_apply_in_a_dm_reads_the_guild_members_roles(reg):
     client = types.SimpleNamespace(plain_identity=plain_identity, registries=types.SimpleNamespace(for_interaction=lambda i: reg))
     itx = types.SimpleNamespace(guild_id=None, guild=None, user=types.SimpleNamespace(id=uid), client=client,
                                 response=types.SimpleNamespace(send_message=send_message))
-    sel = discord_help.GuideSelect()
+    sel = discord_help.GuideSelect(reg.key)
     sel.item._values = ["apply"]
     asyncio.run(sel.callback(itx))
     assert sent == [None], "a member-role holder is never offered Apply to join, DMs included"

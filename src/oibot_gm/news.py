@@ -230,8 +230,12 @@ class ProposalStore:
         p.history.append({"state": "proposed", "by": by, "at": p.created_at, "note": None})
         return self.save(p, f"proposed: {p.title[:70]}")
 
-    def move(self, pid: str, state: str, by: str, *, officer: bool, job: bool, by_id: int | None = None, commit: str | None = None, note: str | None = None) -> Proposal:
-        """One state change. `officer`: approve/dismiss allowed; `job`: the apply job's steps (the owner's token)."""
+    def move(self, pid: str, state: str, by: str, *, officer: bool, job: bool, by_id: int | None = None, commit: str | None = None, note: str | None = None,
+             profile_owners: list[tuple[str, int | None]] | None = None) -> Proposal:
+        """One state change. `officer`: approve/dismiss allowed; `job`: the apply job's steps (the owner's token).
+        `profile_owners` (`shared_profile_owners`): every guild on this game version when several share it — then
+        approving a `profile` proposal (an edit of the shared profiles/<version>/*.yaml, and a restart for everyone)
+        needs the owner of every one of them (design §14 K3); dismissing stays with the proposing guild's officers."""
         if state not in STATES:
             raise ProposalError(f"state is one of {', '.join(STATES)}")
         with self.store.lock:
@@ -247,6 +251,11 @@ class ProposalStore:
                 raise ProposalError(f"{p.id} is {p.state}: it can't become {state}")
             if state == "approved" and p.kind == "needs_developer":
                 raise ProposalError("this one needs a developer: the apply job can't do it (dismiss it once it's handled)")
+            if state == "approved" and p.kind == "profile" and profile_owners:
+                others = [name for name, oid in profile_owners if oid is None or oid != by_id]
+                if others:
+                    raise PermissionError(f"this edits game data that {', '.join(others)} also use{'s' if len(others) == 1 else ''}: "
+                                          "the owner of every guild on this game version approves it")
             p.state = state
             if state in ("approved", "dismissed"):
                 p.decided_by, p.decided_by_id, p.decided_at = by, by_id, now()
@@ -263,6 +272,31 @@ class ProposalStore:
             cur.channel_id, cur.message_id = channel_id, message_id
             p.channel_id, p.message_id = channel_id, message_id
             self.save(cur, "card posted")
+
+
+def shared_profile_owners(guilds, reg) -> list[tuple[str, int | None]]:
+    """(name, owner id) of every guild on `reg`'s game profile when more than one guild uses it, else [] (K3)."""
+    ordered = getattr(guilds, "ordered", None)
+    regs = [r for r in (ordered() if ordered else []) if r.config.game_profile == reg.config.game_profile]
+    if len(regs) < 2:
+        return []
+    return [(str(r.config.name), r.config.owner_discord_id) for r in regs]
+
+
+def duplicate_profile_proposal(guilds, reg, data: dict) -> str | None:
+    """`<guild key>/<proposal id>` of another guild's open (proposed/approved) profile proposal citing one of the same
+    news items, when that guild runs the same game profile: a profile edit is shared, so one proposal is enough."""
+    if str(data.get("kind") or "") != "profile":
+        return None
+    cited = {NewsStore.ident({"url": u}) for u in (data.get("news") or [])}
+    ordered = getattr(guilds, "ordered", None)
+    for other in (ordered() if ordered else []):
+        if other.key == reg.key or other.config.game_profile != reg.config.game_profile:
+            continue
+        for p in ProposalStore(guilds.store, other.key).all("proposed,approved"):
+            if p.kind == "profile" and cited & {NewsStore.ident({"url": u}) for u in p.news}:
+                return f"{other.key}/{p.id}"
+    return None
 
 
 def validate_edit(reg, p: Proposal) -> None:

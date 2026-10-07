@@ -267,20 +267,49 @@ def bearer_ok(request, token: str | None) -> bool:
     return scheme.lower() == "bearer" and bool(presented.strip()) and secrets.compare_digest(presented.strip(), token)
 
 
-def mcp_viewer(request, bot, token: str | None) -> Viewer | None:
-    """The bearer identity: the guild owner (every write is attributed to them, name 'mcp', via='mcp'). With
-    OIBOT_MCP_LOCAL_ONLY on (the default) only a request made on this host counts: the right token arriving through
-    the tunnel is refused exactly like a wrong one, and logged (never the token) because it means the token got out."""
+def mcp_authorized(request, token: str | None) -> bool:
+    """The bearer token is right AND (with OIBOT_MCP_LOCAL_ONLY on, the default) the request was made on this host: the
+    right token arriving through the tunnel is refused exactly like a wrong one, and logged (never the token) because
+    it means the token got out. No guild needed (GET /api/guilds lists them all for the bearer)."""
     if not bearer_ok(request, token):
-        return None
+        return False
     if mcp_local_only() and not local_request(request):
         host = request.client.host if request.client else "?"
         log.warning("refused an MCP bearer request from %s (%s): bearer access is local-only (%s)", host,
                     request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "no proxy header", MCP_LOCAL_ENV)
+        return False
+    return True
+
+
+def guild_list_words(bot) -> str:
+    return ", ".join(f"{r.key} ({r.config.name})" for r in bot.registries.ordered()) or "none configured"
+
+
+def mcp_guild(request, bot):
+    """The guild a bearer request acts on (design §5.32 "MCP"): the X-Oibot-Guild header (a key; a unique name only as
+    an ASCII fallback — the MCP server always sends the key) → that guild; no header → the only guild; else 400 with
+    the list. The bot never reads OIBOT_MCP_GUILD: a forgotten default can never act on the wrong guild."""
+    ref = (request.headers.get(GUILD_HEADER) or "").strip()
+    guilds = bot.registries
+    if ref:
+        reg = guilds.get(ref) if hasattr(guilds, "get") else guilds.by_key.get(ref)
+        if reg is None:
+            raise HTTPException(400, f"No guild {ref!r}. Pass guild= one of: {guild_list_words(bot)}")
+        return reg
+    reg = guilds.only()
+    if reg is None:
+        raise HTTPException(400, f"Which guild? Pass guild= one of: {guild_list_words(bot)}")
+    return reg
+
+
+def mcp_viewer(request, bot, token: str | None) -> Viewer | None:
+    """The bearer identity: the OWNER OF THE CHOSEN GUILD (mcp_guild; every write is attributed to them, name 'mcp',
+    via='mcp'). None = not authorized (mcp_authorized); 400 = no guild chosen, an unknown one, or one without an owner."""
+    if not mcp_authorized(request, token):
         return None
-    reg = next(iter(bot.registries.by_discord.values()), None)  # single-guild deployment
-    if reg is None or not reg.config.owner_discord_id:
-        return None
+    reg = mcp_guild(request, bot)
+    if not reg.config.owner_discord_id:
+        raise HTTPException(400, f"{reg.config.name} has no owner yet")
     return Viewer(int(reg.config.owner_discord_id), "mcp", reg, officer=True, owner=True, via="mcp")
 
 

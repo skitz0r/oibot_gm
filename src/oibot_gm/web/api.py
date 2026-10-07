@@ -321,6 +321,25 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             set_guild_cookie(out, v.reg.key)
         return out
 
+    @app.get("/api/guilds")
+    async def guilds_list(request: Request):
+        """The guilds this caller may act on (design §5.32 "MCP"). The MCP bearer (valid and local; no guild needed):
+        every configured guild, with its Discord ids — the MCP server resolves a guild name to its key from this and
+        computes its own default (the bot never reads OIBOT_MCP_GUILD). A web session: the guilds the person may open,
+        with their role there (the selector's own list stays /api/meta.guilds)."""
+        import os as _os
+
+        from .app import MCP_TOKEN_ENV, mcp_authorized
+
+        if request.headers.get("authorization"):
+            if not mcp_authorized(request, _os.environ.get(MCP_TOKEN_ENV) or None):
+                raise HTTPException(401, "login required")
+            return {"guilds": [{"key": r.key, "name": r.config.name, "discord_guild_id": str(r.config.discord_guild_id),
+                                "owner_discord_id": str(r.config.owner_discord_id) if r.config.owner_discord_id else None,
+                                "game_profile": r.config.game_profile} for r in bot.registries.ordered()]}
+        v = await who(request)
+        return {"guilds": await guild_choices(v)}
+
     @app.post("/api/guild")
     async def choose_guild(request: Request):
         """The server selector: {key} → that guild becomes this browser's selection (the oibot_guild cookie) when the
@@ -1534,7 +1553,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                 "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles, "news_keywords": list(cfg.news_keywords),
                              "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None,
                              "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids]},
-                "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner}
+                "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner,
+                "guild": {"key": reg.key, "name": cfg.name, "discord_guild_id": str(cfg.discord_guild_id)}}  # which guild answered (MCP guild_overview)
 
     # ---- policy documents (loot, comp, persona): edit → compile → confirm | discard, what /gm policy edit does
     def policy_store(reg):

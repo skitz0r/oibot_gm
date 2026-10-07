@@ -133,22 +133,26 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
     return "Pick a topic."
 
 
-class GuideSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"guide:menu"):
-    """Persistent static guide for people outside the ask audience."""
+class GuideSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"guide(?:\.(?P<g>[a-z0-9_-]{1,16}))?:menu"):
+    """Persistent static guide for people outside the ask audience. The id carries the guild (`guide.<gk>:menu`); an
+    old `guide:menu` resolves as before (several guilds in a DM: the person's guilds, the picker when more than one)."""
 
-    def __init__(self):
-        super().__init__(discord.ui.Select(placeholder="What do you want to know?", custom_id="guide:menu", options=[discord.SelectOption(label=lab, value=k, description=d) for k, lab, d in GUIDE_OPTIONS]))
+    def __init__(self, gk: str | None):
+        super().__init__(discord.ui.Select(placeholder="What do you want to know?", custom_id=f"guide{'.' + gk if gk else ''}:menu", options=[discord.SelectOption(label=lab, value=k, description=d) for k, lab, d in GUIDE_OPTIONS]))
+        self.gk = gk
 
     @classmethod
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match, /):
-        return cls()
+        return cls(match["g"])
 
     async def callback(self, interaction: discord.Interaction):
-        reg = interaction.client.registries.for_interaction(interaction)
+        values = list(self.item.values)  # read before a picker: the press interaction carries no select values
+        reg, interaction = await guild_routing.resolve_button(interaction, self.gk)
         if not reg:
-            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Not configured here.", ephemeral=True)
             return
-        key = self.item.values[0]
+        key = values[0]
         if key == "apply":
             officer, role_ids = await asker_identity(interaction, reg)
             view = apply_view(reg, interaction.user.id, officer=officer, role_ids=role_ids)
@@ -166,9 +170,9 @@ async def asker_identity(interaction: discord.Interaction, reg) -> tuple[bool, l
     return is_officer(interaction, reg), [r.id for r in getattr(interaction.user, "roles", None) or []]
 
 
-def guide_view() -> discord.ui.View:
+def guide_view(reg) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
-    v.add_item(GuideSelect())
+    v.add_item(GuideSelect(reg.key))
     return v
 
 
@@ -181,7 +185,7 @@ def guide_intro(reg) -> str:
 
 
 def apply_view(reg, user_id: int, *, officer: bool, role_ids=(), base: discord.ui.View | None = None) -> discord.ui.View | None:
-    """`base` (or a new view) with the persistent **Apply to join** button (RegisterButton "apply", custom_id reg:apply —
+    """`base` (or a new view) with the persistent **Apply to join** button (RegisterButton "apply", custom_id reg.<gk>:apply —
     it opens the application wizard from a DM too) when this person must apply first, applications are open and they
     have no application waiting; else `base` unchanged (None when there was none). Typed class/spec is never parsed."""
     from .discord_registry import RegisterButton
@@ -190,7 +194,7 @@ def apply_view(reg, user_id: int, *, officer: bool, role_ids=(), base: discord.u
     if not reg.config.recruitment.open or (a and a.status == "open") or not reg.must_apply(user_id, officer=officer, role_ids=role_ids):
         return base
     view = base or discord.ui.View(timeout=None)
-    view.add_item(RegisterButton("apply"))
+    view.add_item(RegisterButton("apply", reg.key))
     return view
 
 
@@ -199,7 +203,7 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
     @app_commands.describe(topic="a section of the manual")
     @app_commands.choices(topic=TOPIC_CHOICES)
     async def help_cmd(interaction: discord.Interaction, topic: app_commands.Choice[str] | None = None):
-        reg, interaction = await guild_routing.need(interaction, reply=False, guilds=guilds)  # None still shows the member tier
+        reg, interaction = await guild_routing.need(interaction, reply=False, guilds=guilds, ask=True)  # None still shows the member tier
         officer = bool(reg and (await asker_identity(interaction, reg))[0])  # in a DM too: the tiers follow the guild's roles
         if topic:
             text = manual_section(TOPICS[topic.value][0])
@@ -236,7 +240,7 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             return
         officer, role_ids = await asker_identity(interaction, reg)
         if not reg.may_ask(interaction.user.id, officer):
-            view = apply_view(reg, interaction.user.id, officer=officer, role_ids=role_ids, base=guide_view())
+            view = apply_view(reg, interaction.user.id, officer=officer, role_ids=role_ids, base=guide_view(reg))
             await interaction.response.send_message(guide_intro(reg), view=view, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -325,8 +329,9 @@ class HelpMixin:
         from . import agents
 
         x.agents = lambda: agents.overview(tz=reg.tz)
-        x.agent_steps = lambda run_id: agents.steps(agents.read_run(run_id))
-        x.agent_runs = lambda job: [{**r, "started_label": agents.clock12(r["started"], reg.tz)} for r in agents.list_runs(job)[:3]]  # the Agents page's past runs
+        scope = agents.runs_scope(getattr(self, "registries", None), reg)  # this guild's runs only (all of them while it is the only one)
+        x.agent_steps = lambda run_id: agents.steps(agents.read_run(run_id)) if agents.run_visible(run_id, scope) else []
+        x.agent_runs = lambda job: [{**r, "started_label": agents.clock12(r["started"], reg.tz)} for r in agents.list_runs(job, guild=scope)[:3]]  # the Agents page's past runs
         return x
 
     def help_privilege(self, reg, guild) -> tuple[dict[int, str], list[str]]:

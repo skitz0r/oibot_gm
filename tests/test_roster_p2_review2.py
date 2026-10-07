@@ -52,7 +52,7 @@ def test_card_shows_three_seats_and_its_ask_counts_three(reg, rs, monkeypatch):
     ev, p, plan = _four_seats(reg, rs, monkeypatch)
     body = views.suggested_block(reg, ico, plan)
     assert "**Bo**" not in body and "+1 more — Ask sends only the 3 above" in body
-    row = views.suggest_row(ev, plan)
+    row = views.suggest_row(reg, ev, plan)
     assert row.children[0].item.label == "Ask these 3"
 
 
@@ -60,7 +60,7 @@ def test_card_ask_button_never_dms_a_seat_the_card_left_out(reg, rs, monkeypatch
     ev, p, plan = _four_seats(reg, rs, monkeypatch)
     bot = CardBot(reg, rs)
     h = Harness(reg, rs, client=bot)
-    run(views.RunButton(ev.key, "ask", rev=plan.rev).callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "ask", rev=plan.rev).callback(h.card_press()))
     assert h.text.startswith("Asked Kael, Ana, Gorm")
     assert set(bot.dms) == {p["Kael"].discord_id, p["Ana"].discord_id, p["Gorm"].discord_id}
     assert p["Bo"].discord_id not in bot.dms and all(a.display_name != "Bo" for a in ev.fill_asks)
@@ -70,7 +70,7 @@ def test_the_suggest_screen_still_sends_every_seat(reg, rs, monkeypatch, officer
     ev, p, plan = _four_seats(reg, rs, monkeypatch)
     bot = CardBot(reg, rs)
     h = Harness(reg, rs, client=bot)
-    run(views.RunButton(ev.key, "suggest").callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "suggest").callback(h.card_press()))
     assert "Bo as Bo (Fire" in h.text
     run(h.press("Send 4 asks"))
     assert p["Bo"].discord_id in bot.dms
@@ -101,7 +101,7 @@ def test_suggest_screen_disables_send_when_the_batch_cannot_show(reg, rs, monkey
     monkeypatch.setattr(flows_raid, "fit_suggestions", lambda lines, seats, batch: ("cut", False))
     bot = CardBot(reg, rs)
     h = Harness(reg, rs, client=bot)
-    run(views.RunButton(ev.key, "suggest").callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "suggest").callback(h.card_press()))
     send = next(b for b in h.screen["view"].children if getattr(b, "label", "").startswith("Send"))
     assert send.disabled and send.label == "Send 0 asks"
 

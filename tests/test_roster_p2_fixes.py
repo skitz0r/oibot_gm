@@ -71,7 +71,7 @@ def test_member_health_card_leaves_out_the_officer_parts(reg, rs):
     ev, p = worked_example(reg, rs)
     team = rc.run_team(reg, ev)
     full = views.health_layout(reg, rs, ev, team, ico)
-    assert "**Suggested**" in text_of(full) and "**No answer**" in text_of(full) and any(i.startswith("runact:") for i in ids(full))
+    assert "**Suggested**" in text_of(full) and "**No answer**" in text_of(full) and any(i.startswith("runact.") for i in ids(full))
     member = views.health_layout(reg, rs, ev, team, ico, officer=False)
     body = text_of(member)
     assert "**Short**" in body and "locks <t:" in body, "the counts and what is short stay"
@@ -340,7 +340,7 @@ def test_card_ask_button_sends_through_send_plan(reg, rs):
     bot = CardBot(reg, rs)
     h = Harness(reg, rs, client=bot)
     rev = rc.role_plan(reg, rs, ev).rev
-    run(views.RunButton(ev.key, "ask", rev=rev).callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "ask", rev=rev).callback(h.card_press()))
     assert h.text.startswith("Asked Kael, Ana") and set(bot.dms) == {p["Kael"].discord_id, p["Ana"].discord_id}
     assert all(a.phase == "prelock" and a.approved_by == "Tester" for a in ev.fill_asks)
 
@@ -351,7 +351,7 @@ def test_card_ask_button_with_a_stale_rev_sends_nothing(reg, rs):
     h = Harness(reg, rs, client=bot)
     old = rc.role_plan(reg, rs, ev).rev
     rc.set_signup(reg, rs, ev, p["Gorm"], None, "in")
-    run(views.RunButton(ev.key, "ask", rev=old).callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "ask", rev=old).callback(h.card_press()))
     assert "The sheet changed" in h.text and not ev.fill_asks and not bot.dms
 
 
@@ -359,7 +359,7 @@ def test_card_ask_button_refuses_a_non_officer(reg, rs):
     ev, p = worked_example(reg, rs)
     bot = CardBot(reg, rs, officer=False)
     h = Harness(reg, rs, client=bot)
-    run(views.RunButton(ev.key, "ask", rev=rc.role_plan(reg, rs, ev).rev).callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "ask", rev=rc.role_plan(reg, rs, ev).rev).callback(h.card_press()))
     assert h.text == "Officers only." and not ev.fill_asks
 
 
@@ -367,7 +367,7 @@ def test_card_suggest_button_opens_the_screen_and_sends(reg, rs, officer):  # no
     ev, p = worked_example(reg, rs)
     bot = CardBot(reg, rs)
     h = Harness(reg, rs, client=bot)
-    run(views.RunButton(ev.key, "suggest").callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "suggest").callback(h.card_press()))
     assert "Kael → Protection (offspec)" in h.text and not bot.dms, "nothing goes out before Send"
     run(h.press("Send 2 asks"))
     assert set(bot.dms) == {p["Kael"].discord_id, p["Ana"].discord_id} and "Asked Kael, Ana" in h.text

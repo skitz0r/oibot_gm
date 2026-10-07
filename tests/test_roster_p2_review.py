@@ -188,7 +188,7 @@ def test_lock_card_fill_button_shows_the_batch_before_sending(reg, rs, officer):
     ev, people = _locked_short_healer(reg, rs)
     bot = CardBot(reg, rs)
     h = Harness(reg, rs, client=bot)
-    run(views.RunButton(ev.key, "fill").callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "fill").callback(h.card_press()))
     assert "Offy as Offy (Restoration) for healer" in h.text and "SWAP" in h.text and not bot.dms
     run(h.press("Send 1 ask"))
     assert set(bot.dms) == {people["Offy"].discord_id}

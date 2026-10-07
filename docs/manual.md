@@ -562,6 +562,11 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   data change, so the commit was undone and the bot restarted on the old version).
 - The same list, with Approve / Dismiss, is on the site's **Agents** page, and plain text does it too: "approve
   proposal 260927-a1b2", "dismiss 260927-a1b2: handled by hand" (officers by default; the note is kept on the card).
+- **Several servers.** Each server's news is reviewed on its own (its own news channel and keywords, its own cards and
+  Agents page — you see your server's review runs only). A **game data** change is shared by every server on that game
+  version: the review proposes it once, approving it needs the owner of every server on that version (in practice one
+  person), and when it lands or is rolled back every one of those servers gets an ops line. The restart takes every
+  server's bot down for those two minutes.
 
 ## 8. Owner: setup
 
@@ -570,14 +575,25 @@ someone with Manage Server) runs `/gm config owner`: a short screen shows the se
 picked from it (it never changes; the site and MCP use it), the game version (WoW: Forever unless you pick another) and
 the owner (you, or pick someone). Nothing is saved until **Confirm**; then the server is a guild of its own — empty:
 its own members, raids, schedules, policy and settings — and you continue with the channels below. Every other
-command used in a server that isn't set up answers "This server isn't set up for oibot_GM yet". For now the bot looks
-after **one** server: a claim in a second server is refused until the next update. Keep **Public Bot** switched off in
-the Discord Developer Portal, so only you can invite the bot. Commands are global (every server and DMs); the
+command used in a server that isn't set up answers "This server isn't set up for oibot_GM yet". The bot can look
+after **several** servers, each its own guild with its own data; when a second one is claimed the owners of the others
+get a DM. Keep **Public Bot** switched off in the Discord Developer Portal, so only you can invite the bot (any server
+the bot is in could otherwise claim itself, show on the homepage and draw on the shared AI budget). The invite link:
+`uv run python scripts/move_guild.py --invite-link` (`--guild <server id>` preselects the server). Commands are global (every server and DMs); the
 development mode `OIBOT_COMMAND_SCOPE=guild` puts them only in the test server and the configured servers, so a new
 server can't be claimed in that mode. A command used in the test server acts on the test server's own guild only — if
 the test server isn't the guild's server, it answers "isn't set up". Cards the bot posts in a channel (an
 application's Accept / Decline, the absences card, an agent proposal's Approve / Dismiss) answer only in the server they
-were posted in. The companions shown by `/gm status` and on the site's **Ops** page are the ones feeding this guild.
+were posted in. The companions shown by `/gm status` and on the site's **Ops** page are the ones feeding this guild;
+once two servers run raids with the loot companion, start each companion with `--guild <key>` so its drops reach the
+right raid.
+
+**Moving a guild to another server** (rather than claiming the new server as a guild of its own):
+`scripts/move_guild.py --to <new server id> [--key <guild>]` with the bot stopped (which stops every server it looks
+after), `--dry-run` first. Members, characters, schedules, policy and history carry over; channels, card messages,
+roles, the invite and per-channel plain-text settings are cleared to set again in the new server. Once the
+several-servers update is live, don't roll the bot's code back to before it: buttons posted since carry their server in
+a form older code doesn't read.
 
 `/gm config owner` in a configured server transfers ownership (first claim needs the Discord server owner or Manage Server). Handing the guild to a new owner
 is only ever this slash command, by design — not the site, plain text or MCP: an MCP token acts as the owner, so a
@@ -850,8 +866,15 @@ included (sheets re-rendered, roster cards, DMs, ops lines). If the bot is not r
 (`uv run oibot-mcp`); `claude mcp list` shows `oibot_gm`. `uv run oibot-mcp --list-tools` prints the tools.
 The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change it).
 
+**Several servers.** Every tool takes an optional `guild`: the server's key or its name (any case). Leave it out
+and the tool uses `OIBOT_MCP_GUILD` from `.env` (or `uv run oibot-mcp --guild <key>`), else the only server; when
+the bot serves several and no default is set, the tool answers with the list instead of guessing. `list_guilds`
+lists them (key, name, Discord ids, owner, game version, which one is the default). Each call acts as the owner of
+the server it is for; `guild_overview` says which server answered.
+
 | Tool | Does |
 |---|---|
+| `list_guilds` | every server the bot serves, and which one a tool uses when `guild` is left out |
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench |
 | `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
 | `list_raids` · `get_raid` | effective raid settings and overrides; each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
@@ -882,8 +905,8 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
 
-**Safety.** The server acts as the **guild owner** (owner-only settings included) and every change is logged
-as the owner via `mcp`. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
+**Safety.** The server acts as the **owner of the chosen server's guild** (owner-only settings included) and every
+change is logged as that owner via `mcp`. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
 put it in `.mcp.json` or a commit. **Local only** (on by default): the bot accepts the token only from a call made on
 the machine it runs on, which is where the MCP server runs. The same token arriving from anywhere else, through the
 public site's tunnel included, is refused as if it were wrong, and the bot logs a warning (never the token), because
@@ -899,7 +922,8 @@ The council scores each drop deterministically — tier for the spec × slot wei
 wishlist, discounted by recent loot and a same-slot repeat — and Claude judges the top candidates against
 the written loot policy, explains, and flags close calls. Officers confirm, or override with a reason; the
 reason becomes a precedent the bot cites next time. In-game awards from the companion app are matched
-to the proposal automatically. WoW: Forever loot tables are not published yet, so this part is waiting
+to the proposal automatically (when the bot looks after several servers that raid, start the companion with
+`--guild <key>`: without it, and with two servers raiding at once, its drops go nowhere and it is told so). WoW: Forever loot tables are not published yet, so this part is waiting
 for data discovered in game.
 
 ## 10. Data, privacy, cost
@@ -916,6 +940,14 @@ plain-text requests may use at most half of it each, so they can't spend what lo
 this month's spend. The budget is one for the whole bot: if it ever looks after several servers, they share it.
 
 ## 10a. Asking the bot questions
+
+**Two servers?** When the bot looks after more than one Discord server and you are in more than one of them, a DM to
+the bot — a question, a request, a slash command or a wizard used in DMs, `/help`, `/ask`, applying — first asks
+**which server it is for** (one button per server). It asks every time; it never assumes. Pick one and the bot carries
+on with what you asked, for that server; nobody picked in two minutes and it says so — ask again any time. If you are
+in only one of them, it is that one, no question. Buttons the bot sent you (Confirm / Can't make it, a seat offer, Join
+on a sheet, Apply to join) already know their server and never ask. With several servers, DMs and cards start with the
+server's name.
 
 `/ask`, a DM, or an @mention outside the officer channels gets a free-form answer from this manual and
 your own record — or, when you're asking the bot to *do* something about your own record, the change itself to
@@ -986,8 +1018,8 @@ speaks to you: your application waiting, a past decision, or already a member.
 
 ## 11. Things the bot cannot do (yet)
 
-Servers: the bot looks after one Discord server for now (a second claim is refused until the next update), and there
-is no per-server spending cap — the monthly budget is shared by the whole bot.
+Servers: there is no per-server spending cap — the monthly budget is shared by every server the bot looks after — and
+removing a server (when the bot leaves it) or renaming a guild's key is a manual job in the data repo.
 
 Loot: add or tier loot items, record wishlists, retire a precedent, or see your own loot history on `/me` — the
 loot council only runs on the demo data until Forever's loot tables exist. The precedents and the loot ledger are

@@ -173,7 +173,7 @@ def test_card_renders_state_sources_and_buttons(reg):
         fields = {f.name: f.value for f in e.fields}
         assert p.title in e.title and "Barrow Deeps lockout is now 7 days" in fields["News"] and fields["Confidence"] == "high"
         assert "Waiting for an officer" in fields["Status"]
-        v = proposal_view(p)
+        v = proposal_view(p, reg.key)
         assert [(b.item.label, b.item.disabled) for b in v.children] == [("Approve", False), ("Dismiss", False)]
         q = ps.move(p.id, "approved", "Kessa", officer=True, job=False)
         q = ps.move(q.id, "applying", "mcp", officer=True, job=True)
@@ -181,9 +181,9 @@ def test_card_renders_state_sources_and_buttons(reg):
         e2 = proposal_embed(q, rows)
         status = next(f.value for f in e2.fields if f.name == "Status")
         assert "Applied" in status and "Kessa" in status and "abc1234def" in status
-        assert all(b.item.disabled for b in proposal_view(q).children)
+        assert all(b.item.disabled for b in proposal_view(q, reg.key).children)
         dev = ps.create(reg, proposal_data(kind="needs_developer", edit={}))
-        labels = [(b.item.label, b.item.disabled) for b in proposal_view(dev).children]
+        labels = [(b.item.label, b.item.disabled) for b in proposal_view(dev, reg.key).children]
         assert labels == [("Needs a developer", True), ("Dismiss", False)]
         assert all(len(b.item.custom_id) <= 100 for b in v.children)
         assert "<t:" in next(f.value for f in proposal_embed(ps.move(dev.id, "dismissed", "Kessa", officer=True, job=False)).fields if f.name == "Status"), "a Discord timestamp, never a typed clock"
@@ -226,16 +226,16 @@ def test_buttons_are_officer_only_and_flip_the_state(reg):
     async def go():  # a proposal card is pressed in its channel, in the guild's own server (server 1)
         client, lines = fake_client(reg, officer=False)
         itx = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=9, display_name="Rando"), response=FakeResp())
-        await ProposalButton(p.id, "approve").callback(itx)
+        await ProposalButton(reg.key, p.id, "approve").callback(itx)
         assert itx.response.sent == ["Officers only."] and ps.get(p.id).state == "proposed"
         client, lines = fake_client(reg, officer=True)
         itx = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
-        await ProposalButton(p.id, "approve").callback(itx)
+        await ProposalButton(reg.key, p.id, "approve").callback(itx)
         q = ps.get(p.id)
         assert q.state == "approved" and q.decided_by == "Kessa" and q.decided_by_id == 5
         assert itx.response.edited and "embed" in itx.response.edited[0] and any("approved by Kessa" in x for x in lines)
         itx2 = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
-        await ProposalButton(p.id, "approve").callback(itx2)  # a second press: refused, nothing changes
+        await ProposalButton(reg.key, p.id, "approve").callback(itx2)  # a second press: refused, nothing changes
         assert itx2.response.sent and "can't become approved" in itx2.response.sent[0]
 
     run(go())
@@ -247,7 +247,9 @@ def test_dynamic_item_template_round_trips():
     from oibot_gm.discord_news import ProposalButton
 
     m = re.fullmatch(ProposalButton.__discord_ui_compiled_template__, "newsprop:260922-ab12:dismiss")
-    assert m and m["pid"] == "260922-ab12" and m["action"] == "dismiss"
+    assert m and m["pid"] == "260922-ab12" and m["action"] == "dismiss" and m["g"] is None, "an old card still matches"
+    m = re.fullmatch(ProposalButton.__discord_ui_compiled_template__, ProposalButton("demo", "260922-ab12", "dismiss").custom_id)
+    assert m and m["g"] == "demo" and m["pid"] == "260922-ab12"
 
 
 # ---- the on_message hook

@@ -337,7 +337,7 @@ def test_an_ask_pressed_on_the_health_card_after_lock_says_the_run_locked(reg, r
     lock_with_board(reg, rs, ev, ten)
     rc.free_seat(reg, rs, ev, "Mira", "declined")
     h = Harness(reg, rs, client=bot)
-    run(views.RunButton(ev.key, "ask", rev=rev).callback(h.card_press()))
+    run(views.RunButton(reg.key, ev.key, "ask", rev=rev).callback(h.card_press()))
     assert "locked" in h.text and "The card shows them as they are now" not in h.text and not bot.dms
 
 

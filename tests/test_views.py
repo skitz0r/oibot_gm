@@ -31,8 +31,8 @@ def test_officer_card_buttons_never_move(reg, rs):
 
 def test_yes_no_dms_share_one_label_pair_and_cant_is_grey():
     import discord
-    assert [FillButton("k", 1, a).item.label for a in ("yes", "no")] == [PlaceButton("k", 1, a).item.label for a in ("yes", "no")] == ["Confirm", "Can't make it"]
-    assert SignupButton("k", "cant").item.style == discord.ButtonStyle.secondary
+    assert [FillButton("g", "k", 1, a).item.label for a in ("yes", "no")] == [PlaceButton("g", "k", 1, a).item.label for a in ("yes", "no")] == ["Confirm", "Can't make it"]
+    assert SignupButton("g", "k", "cant").item.style == discord.ButtonStyle.secondary
 
 
 def test_sheet_is_an_embed_with_class_then_group_columns(reg, rs):

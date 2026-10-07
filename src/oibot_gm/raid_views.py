@@ -174,7 +174,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         rows_field()
         adhoc = rc.run_kind(reg, ev) == "adhoc"  # first come, first rostered; Join is the commitment when confirmations are off
         e.set_footer(text=("test run · " if test else "") + ("First come, first rostered · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me")
-        return e, sheet_view(ev.key)
+        return e, sheet_view(reg, ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
     rosters = ev.all_rosters
     conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, ev)} if rosters and rc.run_confirms(reg, ev) else {}
@@ -208,7 +208,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     e.set_footer(text=("test run · " if test else "") + ("Rostered? answer your DM. Not rostered? nothing to do." if rc.run_confirms(reg, ev)
                                                        else "Rostered? you're in — press Can't make it if that changes. Not rostered? nothing to do."))
     v = discord.ui.View(timeout=None)
-    v.add_item(SignupButton(ev.key, "cant"))
+    v.add_item(SignupButton(reg.key, ev.key, "cant"))
     return e, v
 
 
@@ -225,10 +225,19 @@ def board_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
     return f"{web}/app/rosters?g={reg.key}#run-{ev.key}" if web.startswith("http") else None
 
 
+def guild_prefix(reg: Registry) -> str:
+    """`**<guild name>** · ` while the process serves several guilds (a DM or a card says which guild it is about;
+    the name is data, so escaped), else nothing — one guild reads exactly as before."""
+    return f"**{discord.utils.escape_markdown(str(reg.config.name))}** · " if getattr(reg, "many_guilds", False) else ""
+
+
 def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
-    """Section with the raid emblem: title, run time with countdown, then `lines`."""
+    """Section with the raid emblem: (the guild's name when there are several,) title, run time with countdown, then
+    `lines`."""
     ui = discord.ui
     unix = int(ev.start.timestamp())
+    if getattr(reg, "many_guilds", False):
+        title = f"{discord.utils.escape_markdown(str(reg.config.name))} · {title}"
     text = f"## {title}\n<t:{unix}:F> · <t:{unix}:R>" + ("\n" + "\n".join(lines) if lines else "")
     thumb = raid_thumb_url(reg, ev.instance)
     if thumb:
@@ -295,15 +304,15 @@ def suggested_block(reg: Registry, ico, plan) -> str:
     return "\n".join(lines)
 
 
-def suggest_row(ev: rc.RaidEvent, plan):
+def suggest_row(reg: Registry, ev: rc.RaidEvent, plan):
     """Ask (sends what the card shows — the first SUGGEST_LINES seats, after lock within the cap; refused and refreshed
     if the plan changed since: the rev rides in its id) and Suggest… (every seat with its alternates, pick and send)."""
     try:
         n = len(rc.send_batch(plan, limit=SUGGEST_LINES)[0])
     except RegistryError:  # after lock with the cap full: nothing can go out now
         n = 0
-    return discord.ui.ActionRow(RunButton(ev.key, "ask", rev=plan.rev, label=f"Ask these {n}" if n > 1 else "Ask this one" if n else "Ask", disabled=not n),
-                                RunButton(ev.key, "suggest"))
+    return discord.ui.ActionRow(RunButton(reg.key, ev.key, "ask", rev=plan.rev, label=f"Ask these {n}" if n > 1 else "Ask this one" if n else "Ask", disabled=not n),
+                                RunButton(reg.key, ev.key, "suggest"))
 
 
 def _role_counts(ico, players) -> str:
@@ -404,9 +413,9 @@ def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
         items.append(ui.Button(label="Open the board", style=discord.ButtonStyle.link, url=url))
     # one order in every state — Open · Lock · Fill · Cancel — so nothing moves when the run locks; what does not
     # apply is disabled in place (fill only runs on a locked roster)
-    items.append(RunButton(ev.key, "lock", disabled=locked, label="Locked" if locked else None))
-    items.append(RunButton(ev.key, "fill", disabled=not locked))
-    items.append(RunButton(ev.key, "cancel"))
+    items.append(RunButton(reg.key, ev.key, "lock", disabled=locked, label="Locked" if locked else None))
+    items.append(RunButton(reg.key, ev.key, "fill", disabled=not locked))
+    items.append(RunButton(reg.key, ev.key, "cancel"))
     return ui.ActionRow(*items)
 
 
@@ -457,7 +466,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     plan = rc.role_plan(reg, rs, ev) if officer else None  # nothing is sent until an officer presses Ask
     sug = suggested_block(reg, ico, plan) if plan else ""
     if sug:
-        parts += [ui.TextDisplay(sug), suggest_row(ev, plan), ui.Separator()]
+        parts += [ui.TextDisplay(sug), suggest_row(reg, ev, plan), ui.Separator()]
     parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else " · first come, no confirmations")))
     if officer:
         parts.append(run_actions_row(reg, ev, locked=False))
@@ -551,7 +560,7 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
     if i == 0 and ev.state == "locked" and rc.run_kind(reg, ev) == "recurring":
         plan = rc.role_plan(reg, rs, ev)
         if any(a.swap for a in plan.asks):  # D3: after lock a role swap waits for an officer's Ask
-            parts += [ui.Separator(), ui.TextDisplay(suggested_block(reg, ico, plan)), suggest_row(ev, plan)]
+            parts += [ui.Separator(), ui.TextDisplay(suggested_block(reg, ico, plan)), suggest_row(reg, ev, plan)]
     tail = ["-# " + _raidwide_line(reg, ico, r)]
     lefts = {p.signup_name for p in rc.leftovers(reg, ev, ev.all_rosters)} if i == 0 else set()
     bench = [p for p in r.benched if p.signup_name not in lefts] if i == 0 else []
@@ -594,7 +603,7 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
         parts.append(ui.TextDisplay("-# " + rw))
     parts += [ui.Separator(),
              ui.TextDisplay(f"-# Confirm keeps the seat. Can't make it frees it for someone on the bench. Unanswered by <t:{int(confirm.timestamp())}:f> counts as out."),
-             ui.ActionRow(PlaceButton(ev.team, uid, "yes"), PlaceButton(ev.team, uid, "no"))]
+             ui.ActionRow(PlaceButton(reg.key, ev.team, uid, "yes"), PlaceButton(reg.key, ev.team, uid, "no"))]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=TEAL))
     return view
@@ -629,7 +638,7 @@ def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discor
                 break
     deadline = f" No answer by <t:{int(datetime.fromisoformat(ask.expires_at).timestamp())}:f> counts as no." if ask.expires_at else ""
     first = ("-# Confirm counts once you both say yes." if partner else "-# Confirm makes the swap at once." if ask.swap else "-# Confirm puts you straight in the seat.")
-    parts += [ui.Separator(), ui.TextDisplay(first + " A no asks the next person." + deadline), ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes"), FillButton(ev.key, ask.discord_id, "no"))]
+    parts += [ui.Separator(), ui.TextDisplay(first + " A no asks the next person." + deadline), ui.ActionRow(FillButton(reg.key, ev.key, ask.discord_id, "yes"), FillButton(reg.key, ev.key, ask.discord_id, "no"))]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0xE0A448))
     return view
@@ -661,7 +670,7 @@ def prelock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask, cls: s
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(_header(reg, ev, f"Could you help? · {rd.get('name', ev.instance)}", lines), ui.Separator(),
                                ui.TextDisplay(f"-# Yes puts you down as Join with that; the roster is still built at lock (<t:{int(hard.timestamp())}:R>). No answer by then counts as no."),
-                               ui.ActionRow(FillButton(ev.key, ask.discord_id, "yes", label=f"Yes, as {ask.spec}"[:80]), FillButton(ev.key, ask.discord_id, "no", label="No")),
+                               ui.ActionRow(FillButton(reg.key, ev.key, ask.discord_id, "yes", label=f"Yes, as {ask.spec}"[:80]), FillButton(reg.key, ev.key, ask.discord_id, "no", label="No")),
                                accent_colour=0xE0A448))
     return view
 

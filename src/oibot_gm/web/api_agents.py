@@ -31,7 +31,12 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
             r = fn(reg, p)
             if inspect.isawaitable(r):
                 await r
-        publish("agents")
+        publish("agents", reg.key)  # this guild's pages only (the jobs' own status pushes reach every guild)
+
+    def agents_guild(v) -> str | None:
+        """Whose runs a caller sees: the MCP bearer sees every run (the owner's jobs); a web viewer, their selected
+        guild's (every run while one guild is configured — agents.runs_scope)."""
+        return None if is_job(v) else agents.runs_scope(bot.registries, v.reg)
 
     def news_json(reg, r: dict) -> dict:
         return {**r, "posted_label": reg.local12(r["posted_at"]) if r.get("posted_at") else "", "ingested_label": reg.local12(r["ingested_at"]) if r.get("ingested_at") else ""}
@@ -61,7 +66,7 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         fn = getattr(bot, "news_backfill", None)
         added = await fn(v.reg) if fn is not None else 0
         if added:
-            publish("agents")
+            publish("agents", v.reg.key)
         return {"added": added, "message": f"{added} new news item(s) from the channel's history"}
 
     # ---- proposals
@@ -83,6 +88,9 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
     async def proposal_post(request: Request):
         """A new proposal (the review job, through MCP post_proposal): validated, stored, carded in the ops channel."""
         v, d = await body(request, officer=True)
+        dup = news.duplicate_profile_proposal(bot.registries, v.reg, d)
+        if dup:  # a profile edit is shared by every guild on the game version: one proposal is enough (design §5.26)
+            return {"message": f"already proposed by another guild on this game version ({dup}) — nothing to do", "duplicate_of": dup}
         try:
             p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).create, v.reg, d, "review" if is_job(v) else v.name)
         except (ProposalError, ValueError) as e:
@@ -93,7 +101,8 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
 
     async def move(v, pid: str, state: str, commit: str | None = None, note: str | None = None):
         try:
-            p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).move, pid, state, v.name, officer=v.officer, job=is_job(v), by_id=v.uid, commit=commit, note=note)
+            p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).move, pid, state, v.name, officer=v.officer, job=is_job(v), by_id=v.uid, commit=commit, note=note,
+                                        profile_owners=news.shared_profile_owners(bot.registries, v.reg))
         except PermissionError as e:
             raise HTTPException(403, str(e)[:1].upper() + str(e)[1:] + ".")
         except ProposalError as e:
@@ -109,6 +118,10 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         state = str(d.get("state") or "")
         p = await move(v, pid, state, (str(d.get("commit") or "").strip() or None), (str(d["note"]) if d.get("note") is not None else None))
         await bot.ops.emit(v.reg.config, "info", f"news proposal {p.id} → {p.state} (by {v.name})" + (f" @ {p.commit}" if p.commit and state in ("applied", "reverted") else "") + (f": {p.note}" if p.note else ""))
+        if p.kind == "profile" and p.state in ("applied", "reverted"):  # shared game data: every guild on it hears about it
+            for other in bot.registries.ordered():
+                if other is not v.reg and other.config.game_profile == v.reg.config.game_profile:
+                    await bot.ops.emit(other.config, "info", f"profile change from {v.reg.config.name}'s news {p.state}: {p.title}" + (f" @ {p.commit}" if p.commit else ""))
         return {"message": f"proposal {p.id} is {p.state}", "proposal": proposal_json(v.reg, p)}
 
     @app.post("/api/proposals/{pid}/apply")
@@ -154,12 +167,15 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         tz = v.reg.tz
         ov = await asyncio.to_thread(agents.overview, agents.OUT, tz)
         ps = ProposalStore(store(), v.reg.key)
-        runs = [{**r, "started_label": agents.clock12(r["started"], tz)} for r in await asyncio.to_thread(agents.list_runs, None, agents.OUT)]
-        return {**ov, "runs": runs, "owner": v.owner, "waiting": len(ps.all("proposed")), "approved": len(ps.all("approved"))}
+        runs = [{**r, "started_label": agents.clock12(r["started"], tz)} for r in await asyncio.to_thread(agents.list_runs, None, agents.OUT, guild=agents_guild(v))]
+        # waiting / approved: this guild's proposals; the jobs themselves serve every guild
+        return {**ov, "runs": runs, "owner": v.owner, "waiting": len(ps.all("proposed")), "approved": len(ps.all("approved")), "guild": v.reg.key}
 
     @app.get("/api/agents/run/{run_id}")
     async def agents_run(request: Request, run_id: str):
         v = await who(request, officer=True)
+        if not agents.run_visible(run_id, agents_guild(v), agents.OUT):  # another guild's transcript (K7)
+            raise HTTPException(404, f"no run {run_id}")
         try:
             events = await asyncio.to_thread(agents.read_run, run_id, agents.OUT)
         except ValueError as e:

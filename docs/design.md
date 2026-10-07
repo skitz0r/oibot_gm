@@ -303,7 +303,7 @@ Goal: nobody types drops or awards into Discord. The game already writes files o
 
 **Bot behaviour per event**: drop announcement → auto-tick the boss's loot table (optionally run the council immediately so proposals precede assignment); `receives loot` matching the proposal → auto-confirm to the ledger; differing → record as the award, mark override, ask the council for the reason in the thread (precedent stored only once answered); no proposal → manual award; boss kill → boss done; heartbeat → presence, stale-feed warning mid-raid; end of night SavedVariables → reconciliation, disagreements flagged never overwritten.
 
-**Security**: a `companion` principal in the security framework (§4), a machine identity limited to `loot.event.write` and `raid.presence`; events carry chat-log timestamp + item + recipient as an idempotency key; the companion buffers and replays on reconnect. Forever risk is low: `/chatlog` is a client feature, not an addon.
+**Security**: a `companion` principal in the security framework (§4), a machine identity limited to `loot.event.write` and `raid.presence`; events carry chat-log timestamp + item + recipient as an idempotency key; the companion buffers and replays on reconnect. Forever risk is low: `/chatlog` is a client feature, not an addon. **Several guilds** (§5.32): one token and one listener serve every guild; the companion's hello `guild` (`--guild <key>`, also a unique name) routes its events to that guild's live raid, and with no guild named while two guilds raid, nothing routes and the hello note says to pass `--guild`.
 
 ### 5.14 Ops feed and owner monitoring (built)
 
@@ -439,7 +439,7 @@ Members never fill in standing availability. The unit of work is a **run**: one 
 
 **Why stdio over HTTP, not an in-process server.** The bot is one process holding the registries, the raid scheduler, Discord views and the debounced git push; a second process must not open the data repo beside it. So the MCP server owns no state: every tool is one HTTP call to the running bot's JSON API (`OIBOT_MCP_URL`, default `http://127.0.0.1:8788`), which is the same route the React site uses. A write from Claude Code therefore runs the exact verb the site and the Discord commands run — `bot.set_answer`, `bot.lock_run`, `configops.apply_async(bot=…)` — with its side effects (sheet re-rendered, roster cards, DMs, ops-feed line, request log). Nothing new to keep in sync; when the bot is down every tool answers "oibot is not running on …; start it with `uv run oibot discord`". stdio because Claude Code spawns it per session (`uv run oibot-mcp`), no port, no lifecycle.
 
-**Auth.** `OIBOT_MCP_TOKEN` (64 hex, `.env` only, never in `.mcp.json` — the server calls `load_dotenv(ROOT/.env)` itself). `web/app.py:viewer()` accepts `Authorization: Bearer <token>` (`bearer_ok`: constant-time compare; no token configured = bearer auth off) and returns a `Viewer` for the **guild owner** (`config.owner_discord_id`, name `mcp`, officer = owner = true, `via="mcp"`), so `need_owner` routes work and every audit line names the owner; the request-log middleware appends `via=mcp`. The CSRF marker `X-Requested-With: oibot` is still required on POSTs and the client always sends it. Consequence: whoever can run the MCP server acts as the owner — the token is as sensitive as the bot token.
+**Auth.** `OIBOT_MCP_TOKEN` (64 hex, `.env` only, never in `.mcp.json` — the server calls `load_dotenv(ROOT/.env)` itself). `web/app.py:viewer()` accepts `Authorization: Bearer <token>` (`bearer_ok`: constant-time compare; no token configured = bearer auth off) and returns a `Viewer` for the **owner of the chosen guild** (`config.owner_discord_id`, name `mcp`, officer = owner = true, `via="mcp"`; several guilds: the `X-Oibot-Guild` header names the guild — every tool's optional `guild` argument, `OIBOT_MCP_GUILD`, `list_guilds`, §5.32 "MCP"), so `need_owner` routes work and every audit line names the owner; the request-log middleware appends `via=mcp`. The CSRF marker `X-Requested-With: oibot` is still required on POSTs and the client always sends it. Consequence: whoever can run the MCP server acts as the owner — the token is as sensitive as the bot token.
 
 **Local only (2026-10-05).** The tunnel publishes the whole site, `/api/*` included, so a leaked token used to be the owner from anywhere. `mcp_viewer` now also requires `local_request(request)` while `OIBOT_MCP_LOCAL_ONLY` is on (default; `0/false/no/off` turns it off, read per request): a loopback client address (uvicorn's proxy_headers rewrites it to the real client for the tunnel's requests, `forwarded_allow_ips=127.0.0.1`) and none of the proxy headers (`cf-connecting-ip`, `cf-ray`, `cf-ipcountry`, `x-forwarded-for`, `x-real-ip`, `forwarded`, `true-client-ip`). Either signal alone marks a relayed request. The right token from outside is refused like a wrong one (401, nothing revealed) and logged as a warning without the token; a wrong token is not logged. Browser sessions never take the bearer path. Tests: `tests/test_mcp_local_only.py`; `tests/conftest.py` makes TestClient's default client loopback.
 
@@ -631,12 +631,15 @@ when applied). API (`web/api_agents.py`, officer read): `GET /api/news`, `POST /
 `get_profile`, `post_proposal`, `list_proposals`, `get_proposal`, `resolve_proposal`, `job_status`.
 
 **Jobs (`scripts/agents/`, `agents.py`).** Both are LaunchAgents beside the bot's; neither runs inside the bot.
-- *review* (daily 9:00 AM, `review.py`): backfill + `GET /api/news?since=<last good run>` from the script; nothing new
-  → done, no Claude session. Otherwise `claude -p` (prompt `news_review.md` on stdin) with `--mcp-config .mcp.json
+- *review* (daily 9:00 AM, `review.py`): **per guild** (§5.32 "News jobs": one tagged run each, its own `since`, a
+  session only for a guild with news, pinned with `OIBOT_MCP_GUILD`) backfill + `GET /api/news?since=<last good run>`
+  from the script; nothing new → done, no Claude session. Otherwise `claude -p` (prompt `news_review.md` on stdin) with `--mcp-config .mcp.json
   --strict-mcp-config --tools Read,Grep,Glob`, `--allowedTools` = those + the read MCP tools + `post_proposal`,
   `--disallowedTools` = every other MCP tool + WebFetch/WebSearch/Write…, `--permission-mode dontAsk` (unlisted =
   refused, never prompted), `--max-budget-usd`, `--output-format stream-json --verbose`.
-- *apply* (every 15 min, `apply.py`): one API call; only an approved proposal does anything, oldest first. needs_developer
+- *apply* (every 15 min, `apply.py`): one API call per guild; only an approved proposal does anything, the oldest
+  across every guild first, resolved in its own guild (a profile proposal shared by guilds on one game version needs
+  every one of their owners to approve, K3). needs_developer
   → failed. guild_setting → `POST /api/proposals/{id}/apply` (no Claude, no restart). profile → refuses a dirty tree
   or a checkout off main (the proposal waits); `claude -p` with Edit + reads + `Bash(uv run python
   scripts/check_commands.py | uv run pytest * | git diff * | git status *)` edits the YAML; then **the script, not the
@@ -948,12 +951,13 @@ interaction, one person for two seats refused). **Migration:** none (new fields 
 `FillAsk.why/phase/approved_by/held`, `RaidEvent.health_early`; a declared flex role is stored as before).
 
 
-### 5.32 Several servers in one process (stages S1 core and S2 web selector built 2026-10-06; S3 DMs/MCP/news follows)
+### 5.32 Several servers in one process (stages S1 core, S2 web selector and S3 DMs/MCP/news built 2026-10-06)
 
 Owner decisions 2026-10-06 (D1–D7): one bot process serves several Discord servers, each its own guild with fresh data
 in its own data-repo folder; nothing is shared but the process (and usually the owner). Full design and the skeptic
-amendments (K1–K24) in `out/multiguild_design.md`. **S1** (this section) is the core; until S3 ships a claim in a
-*second* server is refused (`Guilds.ALLOW_SECOND = False`, K11).
+amendments (K1–K24) in `out/multiguild_design.md`. **S1** is the core, **S2** the web, **S3** the DMs, buttons, MCP and
+news jobs. S1 refused a claim in a *second* server until S3 shipped (K11); S3 turned that off
+(`Guilds.ALLOW_SECOND = True`, kept as a switch for tests), so a second server may now be claimed.
 
 **Identity.** Guild key = folder name = `GuildConfig.key`, fixed for good: `registry.GUILD_KEY_RE`
 (`[a-z0-9][a-z0-9_-]{0,15}`, so `runact.<gk>:<run>:…` stays under Discord's 100-character custom id and no key holds
@@ -972,8 +976,7 @@ folder, the mock key or `out`/`fixtures`/`profiles`), the game version (`profile
 `profiles/<v>/profile.yaml`, default Forever) and the owner (the caller or a picked member). Nothing is written before
 Confirm → `OibotGM.claim_guild`: `Guilds.create` in a worker thread (`registry.create_guild`: one file, one commit
 "`<key>: guild created for <server>`"; refuses a fixtures root, a taken folder, a configured server or a claim in
-flight — while `ALLOW_SECOND` is off, a first claim still in flight counts as a served server, so two servers claiming
-an empty deployment at once can't both get folders) → `add` on the loop → `guild_added` (analytics listener, officer roles, guild-scope command sync, icons for a
+flight — and, while `ALLOW_SECOND` is off, a first claim still in flight counts as a served server) → `add` on the loop → `guild_added` (analytics listener, officer roles, guild-scope command sync, icons for a
 profile not loaded before) → an ops line and a DM to every other guild's owner (once each, K5). Joining a server never
 creates a guild. In a DM it answers "Run this in the server you want to set up."
 
@@ -983,14 +986,13 @@ creates a guild. In a DM it answers "Run this in the server you want to set up."
 "isn't set up" and never reaches another guild (this closes the hole where a command in any server fell through to the
 configured guild and that server's Manage Server counted as its officer); a DM with several guilds goes by
 `guilds_of` (owner, or `membership` yes/unknown — tri-state, concurrent, 1.5 s timeout, K4): one → it, none → every
-server's Join link, several → "use this command in the server" until S3's picker. `/help` uses `reply=False` and adds
-its own line (K9). The chosen key lands in `interaction.extras["guild"]`; `_on_command_error` reads it, else the
+server's Join link, several → the server picker (S3, below). `/help` uses `reply=False, ask=True` and adds its own line
+(K9). The chosen key lands in `interaction.extras["guild"]`; `_on_command_error` reads it, else the
 server (strict), else in a DM that failed before `need()` (a transformer or check error) `only()` — one guild gets its
-ops line and owner DM as before; several → the log only, never a guess. Channel-only buttons (`app:`, `abs:`,
-`newsprop:`) resolve through strict `for_guild(interaction.guild_id)`: pressed anywhere but their own server they are
-refused (DM-capable buttons — `raid`, `fill`, `place`, `runact`, `reg`, `guide` — keep `for_interaction` until S3
-carries the guild in their ids). `officiates` grants Manage Server only in a configured server (K24; `/mock` keeps its rule). Plain
-DMs: `OibotGM.dm_guild` (same rules).
+ops line and owner DM as before; several → the log only, never a guess. Channel-only cards (`app`, `abs`, `newsprop`)
+resolve through `discord_registry.channel_card_guild`: the server's own guild (strict `for_guild`), and when the id
+carries a guild it must be that one — pressed anywhere else they are refused. `officiates` grants Manage Server only in
+a configured server (K24; `/mock` keeps its rule). Plain DMs: `OibotGM.dm_guild` (same rules, the picker included).
 
 **Per-guild process pieces (D6).** Scheduler: `scheduler_tick` runs `companion_check` and then each guild's
 `scheduler_tick_guild` in its own try; a failure goes to THAT guild once per distinct text (`_tick_error_by_guild`); a
@@ -1054,9 +1056,82 @@ the rail (server icon + name — Discord server icons, not in-game icons, so the
 `meta.profile`; the phone header shows the server name; a notice whenever the app lands on another guild than the one
 it had (`moved`, a tab whose guild became inaccessible — `api.ts` drops the header and reloads, K16 — or a link to a
 server the person isn't in); the Config page title names the server; copy that named Forever reads `meta.game`.
-MCP bearer requests still act on the guild's owner as in S1 (S3 adds `guild`). Tests: `tests/test_web_multiguild.py`
+MCP bearer requests name their guild (S3, below). Tests: `tests/test_web_multiguild.py`
 (precedence, refusals, moved, 503, per-guild rights, `/api/guild`, public/home/not-member, SSE isolation on a shared
 run key, emblems per guild, `/api/ops`, plain-change previews per guild, deep links, single-guild goldens).
+
+**DMs and buttons (S3, built 2026-10-06; D2).** *The server picker* (`guild_picker.py`): when someone who belongs to
+several guilds (`guilds_of`: owner, or membership yes/unknown — a Discord hiccup asks rather than picks, K4) DMs the bot —
+plain text (`dm_guild`), a slash command or a wizard opened from one in a DM (`need`), `/help`, `/ask`, the apply flow,
+an old-format button matching both guilds — the bot asks "Which one is this for?" with one button per guild
+(`Guilds.ordered()`, labels cut to 80, names escaped, K19), **every time, never remembered**. Only the asker may press;
+after two minutes the question reads "No server picked. Ask again any time." and loses its buttons (the limit is
+`choose_guild`'s own wait, which stops the view; non-persistent — a restart drops an open question). A slash command
+continues on the PRESS (`reg, interaction = await need(interaction)`; the picker message becomes "For **<guild>**:",
+the command answers the press, `extras["guild"]` set); a plain message is answered for the chosen guild as a reply.
+*Persistent custom ids carry their guild* — all nine: `raid.<gk>:<run>:<status>`, `fill.<gk>:<run>:<uid>:<answer>`,
+`place.<gk>:<roster>:<uid>:<answer>`, `runact.<gk>:<run>:<action>[:<rev>]`, `reg.<gk>:<action>`, `guide.<gk>:menu`,
+`app.<gk>:<action>:<uid>`, `abs.<gk>:<action>`, `newsprop.<gk>:<pid>:<action>` (one template per class with an optional
+`(?:\.(?P<g>[a-z0-9_-]{1,16}))?`; `.` is outside every key, so prefixes never collide; the longest id stays under 100).
+Every id the bot emits now has the guild, one guild included; constructors take the key (`RunButton(gk, key, action)`,
+`FillButton(gk, …)`, `PlaceButton(gk, …)`, `SignupButton(gk, …)`, `RegisterButton(action, gk)`, `GuideSelect(gk)`,
+`ApplicationButton(action, uid, gk)`, `AbsenceButton(action, gk)`, `ProposalButton(gk, pid, action)`) and the
+factories the registry (`sheet_view(reg, key)`, `fill_view`, `place_view`, `registration_view(reg)`, `guide_view(reg)`,
+`absences_view(reg)`, `proposal_view(p, gk)`; the layouts pass `reg.key`). `guild_routing.resolve_button(interaction, g,
+legacy)`: **`g` set** → that guild, never asking, refused ("This button belongs to another server.") whenever it is
+pressed in any other server, configured or not (K1: an unconfigured server's Manage Server never reaches
+`is_officer_anywhere`), "isn't served any more" for a gone key; **`g` None (an old id)** → as before: the server's guild,
+in a DM the only guild; with several guilds in a DM the button's own `legacy(reg)` matcher over the person's guilds
+(`raid`: the run is live there; `fill`: that run holds an ask for the uid; `place`: an open placement ask for the roster;
+`runact`: live and the presser is an officer there; `reg`/`guide`: any) — one → it, several → the picker, none → the
+button's own "closed" line. Old messages keep their old ids and keep working; a re-rendered card gets new ids (roll
+forward, never back, K23). `may_answer_for` checks a puppet answer against the puppet's own guild. *Names in DMs:*
+`Guilds` marks every served registry `many_guilds` while there are several; then `send_member_dm` starts a text DM with
+`**<guild>** · ` (unless it already opens with the name) and `raid_views._header` puts the name before every card's
+title (confirm, fill, pre-lock, health, lock); with one guild every DM reads exactly as before. The character-confirmed
+DM goes through `send_member_dm`. `flows_register.must_apply` in a DM reads officer and roles from the guild member
+(`plain_identity`), so a member-role holder pressing Register in a DM is not sent to Apply. Tests:
+`tests/test_multiguild_dm.py` (every template old/new, lengths, layouts, new ids on a shared run key — fill, place,
+sheet, lock land in their own guild — K1, old ids with one and two guilds, the picker every time / asker only / expiry /
+labels, /help and plain text through the picker, Join links for neither, name prefixes, must_apply).
+
+**MCP (S3; D5, §5.24).** Every tool takes an optional `guild` (key or name; one `Guild` annotation documents it).
+`mcp_server.Api(guild=…)` holds the default — `OIBOT_MCP_GUILD` (from the environment, or `.env` loaded without
+overriding, so the review job's pinned value wins, K8), set by `--guild` too — in exactly one place; `api(guild)` scopes
+a call; tools that call tools forward it (`get_raid` inside `open_run`, `raid_set`, `schedule_*`, `raid_reset`,
+`test_bench`). A name is resolved to the key client side through `GET /api/guilds` (cached per process), so the
+`X-Oibot-Guild` header always carries an ASCII key; an unknown or ambiguous name is an error listing the guilds. A bot
+from before S3 (no `/api/guilds`: 404) reads as one guild with no header, so the local jobs keep working until the
+restart. `list_guilds` returns every guild with `default` computed client side. Bot side: `web/app.py`
+`mcp_authorized` (bearer + local-only, unchanged and first) then `mcp_guild`: the header (a key; a unique name only as an
+ASCII fallback) → that guild; none → `only()`; else 400 "Which guild? Pass guild= one of: demo (Demo Guild), …"; a guild
+without `owner_discord_id` → 400. The viewer is **the owner of the chosen guild**. The bot never reads
+`OIBOT_MCP_GUILD`. `GET /api/guilds`: the bearer sees every guild (key, name, Discord ids, owner, profile); a web session
+its accessible guilds with their role. `/api/config` names the answering guild (`guild_overview.guild`).
+`scripts/shots.py --guild`. Tests: `tests/test_mcp_multiguild.py`.
+
+**News jobs (S3; §5.26).** `scripts/agents/review.py` loops `Api().guilds()`: per guild a tagged run
+(`agents.new_run(job, guild=key)` writes a `meta` first line; ids stay unique within a second), its own backfill and
+`since` (`last_ok_started` is now `{key: ISO}`; an older single value is every guild's `since` until it has its own),
+and a `claude -p` session **only when that guild has news**, with `OIBOT_MCP_GUILD=<key>` in the child's environment
+(`agents.run_claude(env=)`) so the model never picks a guild; "## This run" names it. The status line totals across
+guilds. `apply.py` gathers approved proposals from every guild, takes the oldest overall and resolves it in its own
+guild (the guild in the runner lines and, with several, the commit message). Runs per guild (K7): at a start while one
+guild is configured the bot writes `out/agents/legacy_guild` once, and untagged runs belong to that guild;
+`agents.runs_scope` shows a guild's web viewers its runs only (every run while one guild is configured), `agents_run`
+404s another guild's run; the MCP bearer sees all. **Profile proposals are shared** by every guild on one
+`game_profile`: `post_proposal` answers `{duplicate_of: "<guild>/<id>"}` when another such guild has an open profile
+proposal citing the same news; approving one needs the owner of every guild on that game version
+(`news.shared_profile_owners` → `ProposalStore.move`, the one path for the site, MCP and the card's button, K3;
+dismissing stays with the proposing guild's officers); applied/reverted sends an ops line to every other guild on it.
+The agents functions read `agents.OUT` at call time (tests point it at a tmp dir; the conftest does it for every test).
+Tests: `tests/test_agents_multiguild.py`.
+
+**`scripts/move_guild.py` (S3; D7)** stays the tool for an actual move of ONE guild (`--key`, a key or a unique name;
+required with several; the key never changes) and for `--invite-link`. It resolves the data root properly, refuses the
+in-repo fixtures, a server another guild uses, a running bot (the web bind or a launchd pid), live runs (`--force` skips
+those two); validates the new `guild.yaml`; also clears applicants' review-card and proposals' card message ids; and
+moves `DISCORD_TEST_GUILD_ID` only when it was the old server. Tests: `tests/test_move_guild.py`.
 
 ## 6. Architecture
 

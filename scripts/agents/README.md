@@ -7,12 +7,15 @@ doing. Design: `docs/design.md` §5.26. Officer side: `docs/manual.md` §7a.
 1. **The bot keeps the news.** A Wowhead webhook posts in the guild's news channel (set it on the Config page or with
    `/gm config news-channel`). The bot reads only the post (title and summary, never the linked article) and keeps
    the ones about our game version, our raids or the extra *news keywords* in `<data>/<guild>/news.jsonl`.
-2. **The review (daily, 9:00 AM).** `review.py` asks the bot for the news kept since the last good run. Nothing new →
-   it stops there: **no Claude session, no cost**. Otherwise it starts `claude -p` with `news_review.md`, which can
+2. **The review (daily, 9:00 AM).** `review.py` goes through each guild the bot serves (each guild's news channel),
+   one after another, asking for the news kept since that guild's last good run. Nothing new →
+   it stops there for that guild: **no Claude session, no cost** — one session per guild with new news, pinned to it
+   (`OIBOT_MCP_GUILD` in the session's environment). Otherwise it starts `claude -p` with `news_review.md`, which can
    only read (the news, the effective profile, the guild's settings, the repo) and post proposals. Each proposal
    becomes a card in the ops channel with **Approve** / **Dismiss**.
 3. **An officer approves.** That only records who and when.
-4. **The apply poller (every 15 minutes).** `apply.py` makes one API call. Nothing approved → done. Otherwise, oldest first:
+4. **The apply poller (every 15 minutes).** `apply.py` makes one API call per guild. Nothing approved → done.
+   Otherwise, the oldest approval across all guilds first, resolved in its own guild:
    - a **guild setting** is applied by the bot itself (the same code as the Raids / Auras pages), no restart;
    - a **game data** change: Claude edits the YAML under `profiles/` and nothing else; then the script runs
      `check_commands.py`, `pytest -q` and `check_bundle.py`, commits to main, pushes, restarts the bot and waits up to

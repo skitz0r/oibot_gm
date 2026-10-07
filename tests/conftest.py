@@ -48,6 +48,17 @@ def _no_pending_policy_edits():
     policy.PENDING.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_real_agents_out_or_mcp_default(tmp_path, monkeypatch):
+    """The agents' status files and transcripts (agents.OUT, read at call time) live in this test's tmp dir, never the
+    real out/agents the Agents page reads; and an OIBOT_MCP_GUILD from the real .env (mcp_server loads it) never
+    picks a guild for a test."""
+    from oibot_gm import agents
+
+    monkeypatch.setattr(agents, "OUT", tmp_path / "agents-out")
+    monkeypatch.delenv("OIBOT_MCP_GUILD", raising=False)
+
+
 @pytest.fixture(scope="session")
 def profile() -> GameProfile:
     return GameProfile.load(ROOT / "profiles" / "forever")

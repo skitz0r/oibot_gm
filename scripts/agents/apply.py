@@ -1,6 +1,7 @@
 """The apply poller (design.md §5.26; launchd: gg.earlyandoften.oibot.apply, every 15 minutes).
 
-Cheap by default: one API call. Only when a proposal is approved does it do anything, oldest first, one per poll:
+Cheap by default: one API call per guild (design §5.32: one job serves every guild). Only when a proposal is approved
+does it do anything, the oldest approval across all guilds first, one per poll, resolved in its own guild:
 - needs_developer → refused (marked failed; the card says a developer has to do it).
 - guild_setting   → the bot applies the typed config op itself (POST /api/proposals/<id>/apply). No Claude, no restart.
 - profile         → Claude edits the YAML under profiles/ (Edit + read tools + self-checks only, see
@@ -62,9 +63,19 @@ def revert_worktree() -> None:
     sh("git", "clean", "-fdq", "--", "profiles")
 
 
-def commit_message(p: dict) -> str:
-    return (f"profile: {p['title'][:60]} (news proposal {p['id']})\n\n{p['change']}\n\n"
+def commit_message(p: dict, guild: dict | None = None) -> str:
+    where = f" from {guild.get('name') or guild['key']} ({guild['key']})" if guild else ""
+    return (f"profile: {p['title'][:60]} (news proposal {p['id']}{where})\n\n{p['change']}\n\n"
             f"Approved by {p.get('decided_by') or '?'}. News: {', '.join(p.get('news') or [])}\n\n{TRAILER}")
+
+
+def gather_approved(make) -> tuple[list[tuple[dict, dict]], dict]:
+    """Every guild's approved proposals as (guild row, proposal), oldest first, plus each guild's scoped Api (design
+    §5.32: one apply job serves every guild; the oldest approval overall goes first)."""
+    guilds = make().guilds()
+    apis = {g["key"]: make(guild=g["key"]) for g in guilds}
+    rows = [(g, p) for g in guilds for p in apis[g["key"]].get("/api/proposals", state="approved")["proposals"]]
+    return sorted(rows, key=lambda gp: gp[1]["created_at"]), apis
 
 
 def healthz_url() -> str:
@@ -95,7 +106,7 @@ def restart_bot() -> int | None:
     return old
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, api_factory=None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dry-run", action="store_true", help="print the claude command for a profile edit and exit")
     p.add_argument("--pr", action="store_true", default=os.environ.get("OIBOT_APPLY_MODE") == "pr", help="profile edits: branch + PR, no restart")
@@ -112,17 +123,20 @@ def main(argv: list[str] | None = None) -> int:
 
     from oibot_gm.mcp_server import Api, ToolError
 
-    api = Api()
+    make = api_factory or (lambda guild=None: Api(guild=guild))
     polled = agents.iso()
     try:
-        approved = api.get("/api/proposals", state="approved")["proposals"]
+        approved_rows, apis = gather_approved(make)
     except ToolError as e:
         agents.write_status(JOB, state="failed", started=polled, finished=agents.iso(), result=f"bot not reachable: {e}", step=None, pid=None)
         return 1
+    approved = [p for _, p in approved_rows]
     if not approved:
         agents.write_status(JOB, state="idle", started=polled, finished=agents.iso(), result="nothing approved", step=None, pid=None, waiting=0)
         return 0
-    prop = sorted(approved, key=lambda x: x["created_at"])[0]
+    guild, prop = approved_rows[0]
+    api = apis[guild["key"]]  # resolve and apply in the proposal's own guild
+    gname = guild.get("name") or guild["key"] or "the guild"
     if prop["kind"] == "profile":  # preflight before a transcript: a waiting proposal must not fill the run history
         dirty = dirty_paths()
         branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
@@ -131,9 +145,9 @@ def main(argv: list[str] | None = None) -> int:
         if why:
             agents.write_status(JOB, state="failed", started=polled, finished=agents.iso(), step=None, pid=None, waiting=len(approved), result=f"{prop['id']} waits: {why}")
             return 1
-    rid, tr = agents.new_run(JOB)
+    rid, tr = agents.new_run(JOB, guild=guild["key"] or None)
     agents.write_status(JOB, state="running", started=polled, finished=None, run_id=rid, pid=os.getpid(), step=f"Applying {prop['id']}: {prop['title'][:80]}", result=None, waiting=len(approved))
-    agents.runner_line(tr, f"Approved by {prop.get('decided_by') or '?'}: {prop['title']} ({prop['kind']})")
+    agents.runner_line(tr, (f"{gname}: approved" if len(apis) > 1 else "Approved") + f" by {prop.get('decided_by') or '?'}: {prop['title']} ({prop['kind']})")
 
     def resolve(state: str, commit: str | None = None, note: str | None = None) -> None:
         try:
@@ -187,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             agents.runner_line(tr, tail, "error")
             resolve("failed", note=f"{' '.join(check[2:])} failed; edit reverted")
             return finish("failed", f"{prop['id']}: {' '.join(check[2:])} failed — edit reverted", False)
-    msg = commit_message(prop)
+    msg = commit_message(prop, guild if len(apis) > 1 else None)
     if a.pr:
         br = f"news/{prop['id']}"
         sh("git", "switch", "-c", br)

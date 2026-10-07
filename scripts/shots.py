@@ -1,6 +1,12 @@
 """Screenshot every dashboard page (desktop + phone) from localhost, for usability review. Signs in with the MCP
 bearer token from .env (owner view) — the dev-user login no longer exists on a public URL. The SSE stream never goes
-idle, so pages are awaited on `load` plus a pause rather than `networkidle`."""
+idle, so pages are awaited on `load` plus a pause rather than `networkidle`.
+
+    uv run python scripts/shots.py [BASE] [--guild KEY]
+
+Several guilds (design §5.32): `--guild` names the one to shoot (the bearer acts as its owner; sent as the
+X-Oibot-Guild header and ?g= on every page). Without it a bot serving several guilds answers 400 "Which guild?"."""
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -14,16 +20,23 @@ HEADERS = {"Authorization": f"Bearer {os.environ['OIBOT_MCP_TOKEN']}"} if os.env
 OUT = Path(__file__).resolve().parents[1] / "out" / "shots"
 OUT.mkdir(parents=True, exist_ok=True)
 PAGES = ["/app/me", "/app/rosters", "/app/raids", "/app/members", "/app/auras", "/app/ops", "/app/config"]
-BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8788"
+ap = argparse.ArgumentParser(description="Screenshot every dashboard page.")
+ap.add_argument("base", nargs="?", default="http://127.0.0.1:8788")
+ap.add_argument("--guild", default=None, help="the guild key to shoot (several guilds)")
+args = ap.parse_args(sys.argv[1:])
+BASE = args.base
+if args.guild:
+    HEADERS["X-Oibot-Guild"] = args.guild
+QUERY = f"?g={args.guild}" if args.guild else ""
 with sync_playwright() as p:
     b = p.chromium.launch()
     for name, w in (("desktop", 1360), ("phone", 400)):
         ctx = b.new_context(viewport={"width": w, "height": 900}, device_scale_factor=1, extra_http_headers=HEADERS)
         page = ctx.new_page()
         for path in PAGES:
-            page.goto(BASE + path, wait_until="load")
+            page.goto(BASE + path + QUERY, wait_until="load")
             page.wait_for_timeout(1800)
-            fn = OUT / f"{name}-{path.removeprefix('/app/')}.png"
+            fn = OUT / f"{name}-{(args.guild + '-') if args.guild else ''}{path.removeprefix('/app/')}.png"
             page.screenshot(path=str(fn), full_page=True)
             print(fn.name, "scrollW", page.evaluate("document.documentElement.scrollWidth"), "of", w)
         ctx.close()

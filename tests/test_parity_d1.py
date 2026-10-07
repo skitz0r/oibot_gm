@@ -615,7 +615,7 @@ def test_card_lock_button_answers_a_busy_or_locked_run_quietly(reg, rs, why):
                                 is_officer_anywhere=is_officer_anywhere, lock_run=lock_run, ops=feed)
     inter = press(log, "Officer")
     inter.client = bot
-    asyncio.run(RunButton(ev.key, "lock").callback(inter))
+    asyncio.run(RunButton(reg.key, ev.key, "lock").callback(inter))
     sent = [c for k, c, _ in log if k == "followup"]
     assert sent and "lock failed" not in sent[0], sent
     assert ("the solver is already working" in sent[0]) if why == "busy" else ("already locked" in sent[0])
@@ -700,7 +700,7 @@ def test_mcp_plain_change_sends_the_token_on_apply(monkeypatch):
     from oibot_gm import mcp_server as msrv
 
     sent = []
-    monkeypatch.setattr(msrv, "api", lambda: types.SimpleNamespace(post=lambda path, body: sent.append((path, body)) or {"ok": True}))
+    monkeypatch.setattr(msrv, "api", lambda guild=None: types.SimpleNamespace(post=lambda path, body: sent.append((path, body)) or {"ok": True}))
     msrv.plain_change("make Kessa core")
     msrv.plain_change(apply=True, token="abc")
     assert sent == [("/api/ops/change", {"text": "make Kessa core"}), ("/api/ops/change", {"token": "abc", "apply": True})]

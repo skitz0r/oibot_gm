@@ -1083,9 +1083,11 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         return out
 
     async def dm_guild(self, message: discord.Message):
-        """Which guild a plain DM is about: the only one; else the one the sender belongs to; else say why and None
-        (in none: every server's Join link; in several: use the server — the picker is the next stage)."""
+        """Which guild a plain DM is about: the only one; else the one the sender belongs to; in several, the server
+        picker (buttons, asked every time — owner decision D2), then the chosen one; None after saying why (in none:
+        every server's Join link) or when nobody picked in time."""
         from . import guild_routing
+        from .guild_picker import choose_guild
 
         only = self.registries.only()
         if only is not None:
@@ -1096,11 +1098,10 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         mine = await guild_routing.guilds_of(self, message.author.id)
         if len(mine) == 1:
             return mine[0]
-        quiet = discord.AllowedMentions.none()
         if mine:
-            await message.reply("You're in more than one server I look after; ask me in the server (an @mention) instead.", allowed_mentions=quiet)
-        else:
-            await message.reply("You're not in any server I look after yet. Join one first:\n" + guild_routing.join_lines(regs), allowed_mentions=quiet)
+            reg, _press = await choose_guild(message, mine)
+            return reg
+        await message.reply(guild_routing.not_in_any(regs), allowed_mentions=discord.AllowedMentions.none())
         return None
 
     # ---- chat handlers
@@ -1212,7 +1213,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         uid = message.author.id
         quiet = discord.AllowedMentions.none()
         if await left_server(self, reg, message.author):  # a DM from someone no longer in the server: unregistered, whatever the registry holds
-            await message.reply(guide_intro(reg), view=guide_view(), allowed_mentions=quiet)
+            await message.reply(guide_intro(reg), view=guide_view(reg), allowed_mentions=quiet)
             return
         officer, role_ids = await self.plain_identity(reg, message.author)
         provider, ps = self.ctx.provider, self.policies.store(reg)
@@ -1235,14 +1236,14 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
                 if req.kind == "change" and req.ops:
                     await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req)
                 else:
-                    await message.reply(guide_intro(reg), view=apply_button(guide_view()), allowed_mentions=quiet)
+                    await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
             answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public)
             if answer == HELP_ACT:
                 await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
                 return
         if answer is None:  # outside the ask audience: static guide only
-            await message.reply(guide_intro(reg), view=apply_button(guide_view()), allowed_mentions=quiet)
+            await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
         else:
             await message.reply(answer, view=apply_button(), allowed_mentions=quiet)
 
@@ -1509,6 +1510,14 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
             print(f"guild NOT loaded — {err}")
             log.error("guild not loaded: %s", err)
+        only = self.registries.only()
+        if only is not None:  # K7: the agents' runs written before runs carried a guild are this (the first) guild's
+            try:
+                from . import agents
+
+                agents.tag_legacy_runs(only.key)
+            except OSError as e:
+                log.warning("legacy agent runs not tagged: %s", e)
         for reg in self.registries.ordered():
             await self.ops.emit(reg.config, "info", f"bot online · data @ {st.head()} · {len(reg.members)} members / {len(reg.all_characters())} characters · {len(reg.pending())} unconfirmed")
             if reg.config.analytics_channel_id and not getattr(self, "_pool_booted", False):

@@ -201,7 +201,7 @@ def test_apply_first_refusal_carries_the_apply_button(reg):
         await discord_policy.handle_change(it, reg, None, None, Feed(), "add my main Nyx", bot=it.client, channel=GENERAL_CH, req=req)
         kind, content, kw = log[-1]
         assert content == "⛔ " + configops.APPLY_FIRST
-        assert [getattr(c, "custom_id", None) for c in kw["view"].children] == ["reg:apply"]
+        assert [getattr(c, "custom_id", None) for c in kw["view"].children] == [f"reg.{reg.key}:apply"]
         # applications closed: the refusal alone, no button
         reg.set_recruitment("t", open=False)
         await discord_policy.handle_change(it, reg, None, None, Feed(), "add my main Nyx", bot=it.client, channel=GENERAL_CH, req=req)
@@ -223,7 +223,7 @@ def test_apply_first_alongside_allowed_ops_adds_the_button_to_the_diff(reg):
         await discord_policy.handle_change(it, reg, None, None, Feed(), "plan my main and turn DMs off", bot=it.client, channel=GENERAL_CH, req=req)
         kind, content, kw = log[-1]
         assert isinstance(kw["view"], discord_policy.ConfigConfirmView)
-        assert "reg:apply" in [getattr(c, "custom_id", None) for c in kw["view"].children]
+        assert f"reg.{reg.key}:apply" in [getattr(c, "custom_id", None) for c in kw["view"].children]
         assert "⛔ " + configops.APPLY_FIRST in kw["embed"].description
 
     asyncio.run(go())

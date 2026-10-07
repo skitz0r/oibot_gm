@@ -172,7 +172,7 @@ class PoolMixin:
                     await (await old.fetch_message(reg.config.registration_message_id)).delete()
                 except Exception:  # noqa: BLE001
                     pass
-        msg = await ch.send(embed=registration_card(reg), view=registration_view())
+        msg = await ch.send(embed=registration_card(reg), view=registration_view(reg))
         try:
             await msg.pin()
         except Exception:  # noqa: BLE001
@@ -194,19 +194,22 @@ class PoolMixin:
 
 # ---------------------------------------------------------------- absences channel
 
-class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs:(?P<action>new|mine)"):
-    def __init__(self, action: str):
+class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>new|mine)"):
+    """The absences card's buttons; the id carries the guild (`abs.<gk>:new`), and the card works only in its server."""
+
+    def __init__(self, action: str, gk: str | None):
         label, style = ("I'll be away", discord.ButtonStyle.primary) if action == "new" else ("My absences", discord.ButtonStyle.secondary)
-        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"abs:{action}"))
-        self.action = action
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"abs{'.' + gk if gk else ''}:{action}"))
+        self.action, self.gk = action, gk
 
     @classmethod
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
-        return cls(match["action"])
+        return cls(match["action"], match["g"])
 
     async def callback(self, interaction: discord.Interaction):
-        bot = interaction.client
-        reg = bot.registries.for_guild(interaction.guild_id)  # a channel-only card: strict, never a DM fallback
+        from .discord_registry import channel_card_guild
+
+        reg = channel_card_guild(interaction, self.gk)  # a channel-only card: strict, never a DM fallback
         if not reg:
             await interaction.response.send_message("Not configured here.", ephemeral=True)
             return
@@ -259,10 +262,10 @@ def absences_card(reg: Registry) -> discord.Embed:
     return e
 
 
-def absences_view() -> discord.ui.View:
+def absences_view(reg: Registry) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
-    v.add_item(AbsenceButton("new"))
-    v.add_item(AbsenceButton("mine"))
+    v.add_item(AbsenceButton("new", reg.key))
+    v.add_item(AbsenceButton("mine", reg.key))
     return v
 
 
@@ -275,7 +278,7 @@ class AbsencesMixin:
                     await (await old.fetch_message(reg.config.absences_message_id)).delete()
                 except Exception:  # noqa: BLE001
                     pass
-        msg = await ch.send(embed=absences_card(reg), view=absences_view())
+        msg = await ch.send(embed=absences_card(reg), view=absences_view(reg))
         try:
             await msg.pin()
         except Exception:  # noqa: BLE001
@@ -290,7 +293,7 @@ class AbsencesMixin:
         if not ch:
             return
         try:
-            await (await ch.fetch_message(reg.config.absences_message_id)).edit(embed=absences_card(reg), view=absences_view())
+            await (await ch.fetch_message(reg.config.absences_message_id)).edit(embed=absences_card(reg), view=absences_view(reg))
         except Exception:  # noqa: BLE001
             pass
 

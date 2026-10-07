@@ -31,9 +31,9 @@ class Guilds:
     and `ordered()` (the one stable order for listings). `by_discord` is swapped, never mutated (`add`), so a reader
     iterating it (or an `ordered()` snapshot) never sees it change size."""
 
-    # S1 of the multi-guild build: a claim in a SECOND server is refused until the DM picker and the guild-carrying
-    # button ids ship (design §14 K11) — until then an old-format DM button could not tell the two guilds apart.
-    ALLOW_SECOND = False
+    # design §14 K11: a claim in a second server was refused until the DM server picker and the guild-carrying button
+    # ids shipped (stage S3); they have, so a second (third, …) server may be claimed. Kept as a switch for tests.
+    ALLOW_SECOND = True
 
     def __init__(self, store: GitStore, code_root: Path):
         import threading
@@ -77,6 +77,7 @@ class Guilds:
             if len(keys) > 1:  # routing a server to the wrong guild is worse than refusing it
                 self.load_errors.append(f"{' and '.join(keys)}: the same discord_guild_id {gid} — neither loaded")
         self.by_discord = {int(r.config.discord_guild_id): r for _, r in found if len(seen[int(r.config.discord_guild_id)]) == 1}
+        self._mark()
 
     @classmethod
     def of(cls, store: GitStore, *regs: Registry, code_root: Path | None = None) -> "Guilds":
@@ -87,7 +88,15 @@ class Guilds:
         g.store, g.code_root, g.load_errors = store, code_root or Path(__file__).resolve().parents[2], []
         g._lock, g._claiming = threading.Lock(), set()
         g.by_discord = {int(r.config.discord_guild_id): r for r in regs}
+        g._mark()
         return g
+
+    def _mark(self) -> None:
+        """Tell every served registry whether the process serves several guilds (Registry.many_guilds: DM and card
+        texts name their guild only then)."""
+        many = len(self.by_discord) > 1
+        for r in self.by_discord.values():
+            r.many_guilds = many
 
     # ---- lookups
     @property
@@ -188,6 +197,7 @@ class Guilds:
             raise RegistryError(f"{reg.key} is already served")
         self.by_discord = {**self.by_discord, gid: reg}
         self._claiming.discard(gid)
+        self._mark()
 
 
 def rostered_on(bot, reg: Registry, m) -> list:
@@ -205,6 +215,16 @@ def rostered_text(reg: Registry, held: list, with_char: bool = False) -> str:
     from .raid_views import run_label
 
     return ", ".join(run_label(reg, ev) + (f" ({char})" if with_char else "") for ev, char in held)
+
+
+def channel_card_guild(interaction: discord.Interaction, gk: str | None) -> Registry | None:
+    """The guild of a card that lives in a server channel (applications, absences, news proposals): the server's own
+    guild, never a DM fallback; a card carrying a guild key (`app.<gk>:…`) must also be pressed in that guild's server
+    (K1/K2) — anywhere else it is nobody's."""
+    reg = interaction.client.registries.for_guild(interaction.guild_id)
+    if reg is None or (gk and reg.key != gk):
+        return None
+    return reg
 
 
 def is_officer(interaction: discord.Interaction, reg: Registry) -> bool:
@@ -238,27 +258,30 @@ def char_line(ico, c) -> str:
     return f"{ico('class', c.cls)} **{c.label}** · {c.spec}{'/' + c.offspec if c.offspec else ''} · _{', '.join(flags)}_"
 
 
-class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg:(?P<action>register|alt|status|apply)"):
+class RegisterButton(discord.ui.DynamicItem[discord.ui.Button], template=r"reg(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>register|alt|status|apply)"):
     """Persistent registration card: Apply to join (newcomers) · Register/Plan main → class → spec/offspec → name
-    (optional) · Add an alt · My status. A newcomer pressing Register is sent to the application (flows_register)."""
+    (optional) · Add an alt · My status. A newcomer pressing Register is sent to the application (flows_register).
+    The id carries the guild (`reg.<gk>:apply`: the Apply button also rides on DM replies); an old `reg:apply`
+    resolves as before (several guilds in a DM: the person's guilds, the picker when more than one)."""
 
     LABELS = {"apply": ("Apply to join", discord.ButtonStyle.primary), "register": ("Register / plan my main", discord.ButtonStyle.success),
               "alt": ("Add an alt", discord.ButtonStyle.secondary), "status": ("My status", discord.ButtonStyle.secondary)}
 
-    def __init__(self, action: str):
+    def __init__(self, action: str, gk: str | None):
         label, style = self.LABELS[action]
-        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"reg:{action}"))
-        self.action = action
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"reg{'.' + gk if gk else ''}:{action}"))
+        self.action, self.gk = action, gk
 
     @classmethod
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match, /):
-        return cls(match["action"])
+        return cls(match["action"], match["g"])
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
-        reg = bot.registries.for_interaction(interaction)
+        reg, interaction = await guild_routing.resolve_button(interaction, self.gk)
         if not reg:
-            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Not configured here.", ephemeral=True)
             return
         if self.action == "status":
             m = reg.members.get(interaction.user.id)
@@ -301,10 +324,10 @@ def registration_card(reg: Registry) -> discord.Embed:
     return e
 
 
-def registration_view() -> discord.ui.View:
+def registration_view(reg: Registry) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
     for a in ("apply", "register", "alt", "status"):
-        v.add_item(RegisterButton(a))
+        v.add_item(RegisterButton(a, reg.key))
     return v
 
 
@@ -422,20 +445,21 @@ class DeclineModal(discord.ui.Modal, title="Decline application"):
         await decide_application(interaction, self.reg, self.discord_id, False, str(self.note.value))
 
 
-class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"app:(?P<action>accept|decline):(?P<uid>[0-9]{1,20})"):
-    """Accept / Decline… on a review card; persistent, so a card posted before a restart still works."""
+class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"app(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>accept|decline):(?P<uid>[0-9]{1,20})"):
+    """Accept / Decline… on a review card; persistent, so a card posted before a restart still works. The id carries
+    the guild (`app.<gk>:…`); a card only works in its own server either way (an old id: that server's guild)."""
 
-    def __init__(self, action: str, discord_id: int):
+    def __init__(self, action: str, discord_id: int, gk: str | None):
         label, style = ("Accept", discord.ButtonStyle.success) if action == "accept" else ("Decline…", discord.ButtonStyle.secondary)
-        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"app:{action}:{discord_id}"))
-        self.action, self.discord_id = action, discord_id
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"app{'.' + gk if gk else ''}:{action}:{discord_id}"))
+        self.action, self.discord_id, self.gk = action, discord_id, gk
 
     @classmethod
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match, /):
-        return cls(match["action"], int(match["uid"]))
+        return cls(match["action"], int(match["uid"]), match["g"])
 
     async def callback(self, interaction: discord.Interaction):
-        reg = interaction.client.registries.for_guild(interaction.guild_id)  # a channel-only card: strict, never a DM fallback
+        reg = channel_card_guild(interaction, self.gk)  # a channel-only card: strict, never a DM fallback
         if not reg or not is_officer(interaction, reg):
             await interaction.response.send_message("Officers only.", ephemeral=True)
             return
@@ -449,8 +473,8 @@ class ApplicationView(discord.ui.View):
     def __init__(self, reg: Registry, discord_id: int):
         super().__init__(timeout=None)
         self.reg, self.discord_id = reg, discord_id
-        self.add_item(ApplicationButton("accept", discord_id))
-        self.add_item(ApplicationButton("decline", discord_id))
+        self.add_item(ApplicationButton("accept", discord_id, reg.key))
+        self.add_item(ApplicationButton("decline", discord_id, reg.key))
 
 
 async def post_application(client, reg: Registry, a) -> str:
@@ -476,7 +500,7 @@ async def refresh_registration_card(client, reg: Registry) -> bool:
     try:
         ch = client.get_channel(ch_id)
         msg = await ch.fetch_message(msg_id)
-        await msg.edit(embed=registration_card(reg), view=registration_view())
+        await msg.edit(embed=registration_card(reg), view=registration_view(reg))
         return True
     except Exception:  # noqa: BLE001 — a deleted card is re-posted with /gm config registration-channel
         return False
@@ -1092,7 +1116,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg, interaction = await officer(interaction)
         if not reg:
             return
-        await interaction.response.send_message(embed=registration_card(reg), view=registration_view())
+        await interaction.response.send_message(embed=registration_card(reg), view=registration_view(reg))
         try:
             msg = await interaction.original_response()
             await msg.pin()

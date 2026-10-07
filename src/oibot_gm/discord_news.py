@@ -7,7 +7,7 @@
   through the API before it reads the list, so a restart never loses a day's news.
 - `proposal_card_update`: posts a proposal's card in the ops channel, or edits it in place when its state moves
   (approved by …, applying, applied @ commit, failed, reverted).
-- `ProposalButton`: Approve / Dismiss on the card, officers only. Approving only flips the state and records who;
+- `ProposalButton`: Approve / Dismiss on the card (`newsprop.<gk>:<id>:<action>`), officers only. Approving only flips the state and records who;
   the local apply job does the work."""
 from __future__ import annotations
 
@@ -70,31 +70,34 @@ def proposal_embed(p: Proposal, news_rows: dict[str, dict] | None = None) -> dis
     return e
 
 
-def proposal_view(p: Proposal) -> discord.ui.View:
-    """Approve / Dismiss while it is waiting (a failed one can be approved again); greyed once decided."""
+def proposal_view(p: Proposal, gk: str | None) -> discord.ui.View:
+    """Approve / Dismiss while it is waiting (a failed one can be approved again); greyed once decided. `gk`: the
+    proposal's guild (proposal ids are per guild and may repeat across guilds, so the button ids carry it)."""
     v = discord.ui.View(timeout=None)
     can_approve = p.state in ("proposed", "failed") and p.kind != "needs_developer"
     can_dismiss = p.state in ("proposed", "approved", "failed")
-    v.add_item(ProposalButton(p.id, "approve", disabled=not can_approve, label="Needs a developer" if p.kind == "needs_developer" else None))
-    v.add_item(ProposalButton(p.id, "dismiss", disabled=not can_dismiss))
+    v.add_item(ProposalButton(gk, p.id, "approve", disabled=not can_approve, label="Needs a developer" if p.kind == "needs_developer" else None))
+    v.add_item(ProposalButton(gk, p.id, "dismiss", disabled=not can_dismiss))
     return v
 
 
-class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"newsprop:(?P<pid>[0-9]{6}-[0-9a-f]{4}):(?P<action>approve|dismiss)"):
+class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"newsprop(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<pid>[0-9]{6}-[0-9a-f]{4}):(?P<action>approve|dismiss)"):
     LABELS = {"approve": ("Approve", discord.ButtonStyle.success), "dismiss": ("Dismiss", discord.ButtonStyle.secondary)}
 
-    def __init__(self, pid: str, action: str, disabled: bool = False, label: str | None = None):
+    def __init__(self, gk: str | None, pid: str, action: str, disabled: bool = False, label: str | None = None):
         text, style = self.LABELS[action]
-        super().__init__(discord.ui.Button(label=label or text, style=style, custom_id=f"newsprop:{pid}:{action}", disabled=disabled))
-        self.pid, self.action = pid, action
+        super().__init__(discord.ui.Button(label=label or text, style=style, custom_id=f"newsprop{'.' + gk if gk else ''}:{pid}:{action}", disabled=disabled))
+        self.gk, self.pid, self.action = gk, pid, action
 
     @classmethod
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
-        return cls(match["pid"], match["action"])
+        return cls(match["g"], match["pid"], match["action"])
 
     async def callback(self, interaction: discord.Interaction):
+        from .discord_registry import channel_card_guild
+
         bot = interaction.client
-        reg = bot.registries.for_guild(interaction.guild_id)  # a channel-only card: strict, never a DM fallback
+        reg = channel_card_guild(interaction, self.gk)  # a channel-only card: strict, never a DM fallback
         if not reg or not await bot.is_officer_anywhere(reg, interaction.user.id):
             await interaction.response.send_message("Officers only.", ephemeral=True)
             return
@@ -102,11 +105,12 @@ class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"newsp
         by = interaction.user.display_name
         state = "approved" if self.action == "approve" else "dismissed"
         try:
-            p = await asyncio.to_thread(ps.move, self.pid, state, by, officer=True, job=False, by_id=interaction.user.id)
+            p = await asyncio.to_thread(ps.move, self.pid, state, by, officer=True, job=False, by_id=interaction.user.id,
+                                        profile_owners=news.shared_profile_owners(bot.registries, reg))
         except (ProposalError, PermissionError) as e:
             await interaction.response.send_message(str(e), ephemeral=True)
             return
-        await interaction.response.edit_message(embed=proposal_embed(p, bot.news_rows(reg)), view=proposal_view(p))
+        await interaction.response.edit_message(embed=proposal_embed(p, bot.news_rows(reg)), view=proposal_view(p, reg.key))
         await bot.ops.emit(reg.config, "info", f"news proposal {p.id} {state} by {by}: {p.title}")
 
 
@@ -155,12 +159,12 @@ class NewsMixin:
                 ch = self.get_channel(p.channel_id)
                 if ch is not None:
                     msg = ch.get_partial_message(p.message_id)
-                    await msg.edit(embed=proposal_embed(p, rows), view=proposal_view(p))
+                    await msg.edit(embed=proposal_embed(p, rows), view=proposal_view(p, reg.key))
                     return
             ch = self.get_channel(reg.config.ops_channel_id) if reg.config.ops_channel_id else None
             if ch is None:
                 return
-            msg = await ch.send(embed=proposal_embed(p, rows), view=proposal_view(p))
+            msg = await ch.send(embed=proposal_embed(p, rows), view=proposal_view(p, reg.key))
             await asyncio.to_thread(ProposalStore(self.registries.store, reg.key).set_card, p, ch.id, msg.id)
         except discord.HTTPException as e:
             await self.ops.emit(reg.config, "warn", f"news proposal {p.id}: card not updated ({e})")

@@ -68,8 +68,8 @@ def clock12(value, tz=None) -> str:
 
 # ---------------------------------------------------------------- status files
 
-def status_path(job: str, out: Path = OUT) -> Path:
-    return out / f"{job}.json"
+def status_path(job: str, out: Path | None = None) -> Path:
+    return (out or OUT) / f"{job}.json"  # OUT read at call time (tests and the scripts' callers can point it elsewhere)
 
 
 def pid_alive(pid) -> bool:
@@ -80,7 +80,7 @@ def pid_alive(pid) -> bool:
     return True
 
 
-def read_status(job: str, out: Path = OUT) -> dict:
+def read_status(job: str, out: Path | None = None) -> dict:
     """The job's status file, with defaults. A 'running' file whose process is gone reads as failed (interrupted)."""
     p = status_path(job, out)
     try:
@@ -93,8 +93,9 @@ def read_status(job: str, out: Path = OUT) -> dict:
     return st
 
 
-def write_status(job: str, out: Path = OUT, **fields) -> dict:
+def write_status(job: str, out: Path | None = None, **fields) -> dict:
     """Merge fields into the status file (atomic replace, so a reader never sees half a file)."""
+    out = out or OUT
     out.mkdir(parents=True, exist_ok=True)
     p = status_path(job, out)
     try:
@@ -138,44 +139,108 @@ def light(st: dict, launchd: dict | None = None) -> str:
 
 # ---------------------------------------------------------------- transcripts
 
-def runs_dir(out: Path = OUT) -> Path:
-    return out / "runs"
+def runs_dir(out: Path | None = None) -> Path:
+    return (out or OUT) / "runs"
 
 
-def new_run(job: str, out: Path = OUT, now: datetime | None = None) -> tuple[str, Path]:
-    """A fresh transcript file; older ones beyond KEEP_RUNS for this job are removed."""
+def new_run(job: str, out: Path | None = None, now: datetime | None = None, guild: str | None = None) -> tuple[str, Path]:
+    """A fresh transcript file; older ones beyond KEEP_RUNS for this job are removed. `guild`: the guild the run is for
+    (design §5.32: one review session per guild) — its first line is a `meta` event naming it, which the transcript
+    readers skip; the Agents page shows a guild only its own runs (`run_visible`). Two runs in one second (two guilds
+    with nothing to do) get consecutive ids instead of sharing a file."""
     d = runs_dir(out)
     d.mkdir(parents=True, exist_ok=True)
-    rid = f"{job}-{(now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-    p = d / f"{rid}.jsonl"
+    t = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    while True:
+        rid = f"{job}-{t.strftime('%Y%m%d-%H%M%S')}"
+        p = d / f"{rid}.jsonl"
+        if not p.exists():
+            break
+        t += timedelta(seconds=1)
     p.touch()
+    if guild:
+        append_event(p, {"type": "meta", "guild": guild, "at": iso()})
     rotate(job, out)
     return rid, p
 
 
-def rotate(job: str, out: Path = OUT, keep: int = KEEP_RUNS) -> None:
+LEGACY_FILE = "legacy_guild"  # out/agents/legacy_guild: the guild every untagged (pre-multi-guild) run belongs to (K7)
+
+
+def tag_legacy_runs(guild: str, out: Path | None = None) -> bool:
+    """Once, while exactly one guild is configured (the bot's start): the runs written before runs carried a guild are
+    that guild's. Never rewritten afterwards (a second guild must not inherit them). True when written now."""
+    out = out or OUT
+    f = out / LEGACY_FILE
+    if f.exists():
+        return False
+    out.mkdir(parents=True, exist_ok=True)
+    f.write_text(guild + "\n")
+    return True
+
+
+def legacy_guild(out: Path | None = None) -> str | None:
+    try:
+        return ((out or OUT) / LEGACY_FILE).read_text().strip() or None
+    except OSError:
+        return None
+
+
+def run_guild(run_id: str, out: Path | None = None) -> str | None:
+    """The guild a run was for (its first line's `meta` event), None for an untagged (older) run."""
+    try:
+        with run_path(run_id, out).open() as f:
+            first = f.readline()
+        ev = json.loads(first) if first.strip() else {}
+    except (OSError, ValueError):
+        return None
+    return ev.get("guild") if isinstance(ev, dict) and ev.get("type") == "meta" else None
+
+
+def runs_scope(guilds, reg) -> str | None:
+    """Whose runs a guild's viewer sees: every run while one guild is configured (exactly as before), else `reg.key`
+    (run_visible: its own runs, plus the untagged ones legacy_guild gives it)."""
+    only = getattr(guilds, "only", None)
+    if only is None:  # no guild index to ask (a bare client): as before
+        return None
+    return None if only() is not None else reg.key
+
+
+def run_visible(run_id: str, guild: str | None, out: Path | None = None) -> bool:
+    """`guild` None = every run (the MCP bearer: the owner's jobs). Otherwise a run tagged for that guild, or an untagged
+    one when legacy_guild says the untagged runs are that guild's (K7: never another guild's transcript)."""
+    if guild is None:
+        return True
+    tag = run_guild(run_id, out)
+    return tag == guild if tag else legacy_guild(out) == guild
+
+
+def rotate(job: str, out: Path | None = None, keep: int = KEEP_RUNS) -> None:
     for old in sorted(runs_dir(out).glob(f"{job}-*.jsonl"))[:-keep]:
         old.unlink(missing_ok=True)
 
 
-def run_path(run_id: str, out: Path = OUT) -> Path:
+def run_path(run_id: str, out: Path | None = None) -> Path:
     if not re.fullmatch(r"[a-z]+-\d{8}-\d{6}", run_id or ""):
         raise ValueError(f"no run {run_id!r}")
     return runs_dir(out) / f"{run_id}.jsonl"
 
 
-def list_runs(job: str | None = None, out: Path = OUT) -> list[dict]:
-    """Newest first: {id, job, started (ISO), outcome} — the outcome is the transcript's last runner/result line."""
+def list_runs(job: str | None = None, out: Path | None = None, guild: str | None = None) -> list[dict]:
+    """Newest first: {id, job, started (ISO), outcome, guild} — the outcome is the transcript's last runner/result line.
+    `guild`: only the runs that guild may see (run_visible); None = all."""
     rows = []
     for p in runs_dir(out).glob(f"{job or '*'}-*.jsonl"):
         rid = p.stem
+        if not run_visible(rid, guild, out):
+            continue
         j, d, t = rid.rsplit("-", 2)
         started = datetime.strptime(d + t, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
-        rows.append({"id": rid, "job": j, "started": iso(started), "outcome": outcome(read_run(rid, out))})
+        rows.append({"id": rid, "job": j, "started": iso(started), "outcome": outcome(read_run(rid, out)), "guild": run_guild(rid, out)})
     return sorted(rows, key=lambda r: r["started"], reverse=True)
 
 
-def read_run(run_id: str, out: Path = OUT) -> list[dict]:
+def read_run(run_id: str, out: Path | None = None) -> list[dict]:
     p = run_path(run_id, out)
     if not p.exists():
         raise ValueError(f"no run {run_id}")
@@ -354,7 +419,7 @@ def start_job(job: str, out: Path | None = None) -> tuple[bool, str]:
     return True, f"{spec['name']} started"
 
 
-def overview(out: Path = OUT, tz=None, launchctl: Callable[[str], dict] | None = None) -> dict:
+def overview(out: Path | None = None, tz=None, launchctl: Callable[[str], dict] | None = None) -> dict:
     """What the monitor shows per job: state + light, last run and outcome, next run, launchd."""
     launchctl = launchctl or launchd_status
     jobs = []
@@ -410,12 +475,14 @@ def apply_command(all_mcp: list[str], budget: float = 2.0, model: str | None = N
     return claude_command(allowed, (*BUILTIN_READ, "Edit", "Bash"), all_mcp, budget, model)
 
 
-def run_claude(cmd: list[str], prompt: str, transcript: Path, on_step: Callable[[dict], None] | None = None, timeout_s: int = 1800, popen=subprocess.Popen) -> int:
+def run_claude(cmd: list[str], prompt: str, transcript: Path, on_step: Callable[[dict], None] | None = None, timeout_s: int = 1800, popen=subprocess.Popen,
+               env: dict | None = None) -> int:
     """Run the session, streaming every stream-json line into the transcript; `on_step` gets each readable step as
-    it happens (the status file's current step). Returns the exit code (124 on timeout)."""
+    it happens (the status file's current step). Returns the exit code (124 on timeout). `env`: the child's environment
+    (the review pins OIBOT_MCP_GUILD there, so the MCP server the session starts acts on one guild); None = inherit."""
     import threading
 
-    proc = popen(cmd, cwd=str(ROOT), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = popen(cmd, cwd=str(ROOT), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
     killed = threading.Event()
 
     def kill() -> None:
