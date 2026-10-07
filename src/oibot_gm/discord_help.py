@@ -204,6 +204,8 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
     @app_commands.choices(topic=TOPIC_CHOICES)
     async def help_cmd(interaction: discord.Interaction, topic: app_commands.Choice[str] | None = None):
         reg, interaction = await guild_routing.need(interaction, reply=False, guilds=guilds, ask=True)  # None still shows the member tier
+        if reg is None and interaction.response.is_done():
+            return  # the DM server picker ran out: it already said "No server picked" — one response per interaction
         officer = bool(reg and (await asker_identity(interaction, reg))[0])  # in a DM too: the tiers follow the guild's roles
         if topic:
             text = manual_section(TOPICS[topic.value][0])

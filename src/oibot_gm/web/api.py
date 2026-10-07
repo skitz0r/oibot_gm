@@ -1136,7 +1136,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
         channel = bot.get_channel(int(cid))
         if channel is None:
             return JSONResponse({"error": "I can't see that channel"}, status_code=400)
-        line = await bot.repost_sheet(v.reg, rs, ev, channel)
+        try:
+            line = await bot.repost_sheet(v.reg, rs, ev, channel)  # refuses a channel of another server
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
         await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
         return {"message": line}
 

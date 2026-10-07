@@ -528,3 +528,70 @@ def test_every_persistent_custom_id_in_the_source_carries_the_guild():
     src = Path(__file__).resolve().parents[1] / "src" / "oibot_gm"
     templates = re.findall(r'DynamicItem\[[^\]]+\], template=r"([^"]+)"', "\n".join(p.read_text() for p in src.glob("*.py")))
     assert len(templates) == 9 and all(r"(?:\.(?P<g>[a-z0-9_-]{1,16}))?" in t for t in templates), templates
+
+
+def test_help_in_a_dm_when_the_picker_runs_out_answers_once(duo, monkeypatch):
+    """The picker was /help's response; when nobody presses it says "No server picked" and /help stops there (a second
+    response would raise InteractionResponded and post an apology under the expired picker)."""
+    from discord import app_commands
+
+    from oibot_gm.discord_help import register_help_commands
+
+    monkeypatch.setattr(guild_picker.choose_guild, "__defaults__", (guild_picker.PROMPT, 0.05))
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    register_help_commands(tree, duo.guilds, None, None)
+    bot = dm_bot(duo)
+    i = Itx(bot)
+    run(tree.get_command("help").callback(i))  # the fake's send_message asserts "a second response to one interaction"
+    assert i.said == [guild_picker.PROMPT] and i.original_edits[-1] == {"content": guild_picker.EXPIRED, "view": None}
+
+
+def test_a_command_failing_after_the_picker_reaches_the_chosen_guild_and_answers_the_press(duo):
+    """discord.py hands tree.on_error the ORIGINAL interaction: pick() tags it with the chosen guild (ops line and owner
+    DM go there, not just the log) and keeps the press, which the apology answers."""
+    bot = dm_bot(duo)
+    errs = []
+
+    async def emit(cfg, level, text, exc=None, dm=True):
+        errs.append((cfg.key, level, text))
+    owner = types.SimpleNamespace(registries=duo.guilds, ops=types.SimpleNamespace(emit=emit))
+
+    async def go():
+        i = Itx(bot)
+        i.command = types.SimpleNamespace(qualified_name="raid lock")
+        task = asyncio.create_task(guild_routing.need(i))
+        press = await press_picker(i, "Duo Guild", client=bot)
+        reg, got = await task
+        assert reg is duo.b and got is press
+        await OibotGM._on_command_error(owner, i, RuntimeError("boom"))
+        return i, press
+    i, press = run(go())
+    assert i.extras["guild"] == GUILD2 and errs and errs[0][:2] == (GUILD2, "error") and "boom" in errs[0][2]
+    assert press.said == ["Something went wrong; the owner has been notified."] and press.response.is_done()
+    assert i.said == [guild_picker.PROMPT], "nothing more under the picker itself"
+
+
+def test_an_error_with_no_guild_never_claims_the_owner_was_told(duo):
+    owner = types.SimpleNamespace(registries=duo.guilds, ops=types.SimpleNamespace(emit=None))
+    i = Itx(dm_bot(duo))
+    i.command = None
+    run(OibotGM._on_command_error(owner, i, RuntimeError("boom")))
+    assert i.said == ["Something went wrong; it has been logged."]
+
+
+def test_a_guild_that_ignores_dms_is_never_offered_and_all_ignoring_is_silence(duo):
+    """The DM picker counts only the guilds that answer DMs (plain-text policy dm != ignore): one of two ignoring → the
+    other, no question; both ignoring → silence, for members and strangers alike (no Join-links reply)."""
+    bot = dm_bot(duo)
+    bot.dm_guild = functools.partial(OibotGM.dm_guild, bot)
+    out = []
+    msg = types.SimpleNamespace(author=types.SimpleNamespace(id=PUPPET), reply=lambda text, **kw: _rec(out, text))
+    duo.a.config.plain.dm = "ignore"
+    assert run(OibotGM.dm_guild(bot, msg)) is duo.b and out == [], "only duo answers DMs: no picker"
+    duo.b.config.plain.dm = "ignore"
+    assert run(OibotGM.dm_guild(bot, msg)) is None and out == [], "nobody answers DMs: no picker leading nowhere"
+    stranger = dm_bot(duo, members={})
+    assert run(OibotGM.dm_guild(stranger, msg)) is None and out == [], "and no Join-links reply either"
+    duo.b.config.plain.dm = "self"
+    assert run(OibotGM.dm_guild(stranger, msg)) is None and len(out) == 1 and "not in any server" in out[0]

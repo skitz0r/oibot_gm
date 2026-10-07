@@ -426,7 +426,11 @@ async def open_raid_sheet(interaction: discord.Interaction, reg: Registry, **_se
         if i.channel is None:
             await wiz.finish(i, "I can't post the sheet here — run /raid sheet in a server channel.")
             return
-        await wiz.finish(i, await i.client.repost_sheet(reg, rs, ev, i.channel))  # the verb the site, MCP and plain text use
+        try:
+            line = await i.client.repost_sheet(reg, rs, ev, i.channel)  # the verb the site, MCP and plain text use
+        except RegistryError as e:  # a channel of another server
+            line = str(e)
+        await wiz.finish(i, line)
     await with_run(interaction, reg, title="Re-post a sheet", then=body)
 
 

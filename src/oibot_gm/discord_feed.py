@@ -25,15 +25,20 @@ log = logging.getLogger(__name__)
 
 def feed_status(bot, reg, off: str = "disabled (OIBOT_FEED_TOKEN unset)") -> str:
     """The companions that feed THIS guild (FeedServer.status filtered by the companion's routed guild): one whose hello
-    named no guild we serve counts for the only guild, never for one of several."""
+    named no guild we serve counts for the only guild, never for one of several. With several guilds a companion's
+    `guild` is its token's guild (Companion sets it from `bound`), and a shared-token one counts for none."""
     feed = getattr(bot, "feed", None)
     if feed is None:
         return off
     registries = getattr(bot, "registries", None)
     only = registries.only() if registries is not None and hasattr(registries, "only") else reg
     key_of = getattr(bot, "companion_key", None)
+    many = getattr(registries, "many", False)
 
-    def resolve(g: str) -> str | None:
+    def resolve(c) -> str | None:
+        if many:
+            return getattr(c, "bound", None)  # only a guild's own token feeds it
+        g = c.guild
         k = key_of(g) if key_of else (g or None)
         return k or (reg.key if only is reg else None)
     return feed.status(reg.key, resolve=resolve)
@@ -57,8 +62,10 @@ class FeedMixin:
 
     def active_raid(self, comp: Companion | None = None):
         """The live loot session a companion's events go to. One guild served (or none): today's rule — a real raid
-        first, else any live session. Several: the companion's own guild (its real session, else a mock session as
-        the fallback); a companion that named no guild routes only while every live real session is one guild's."""
+        first, else any live session. Several: the guild its TOKEN belongs to (`comp.bound`, OIBOT_FEED_TOKEN_<KEY>;
+        what its hello names never decides) — that guild's real session, else a mock session started in that guild's
+        server; the shared token (bound to no guild) reaches mock sessions only, never a real raid: no guessing, and a
+        token handed to one guild's raid leader can't feed another guild."""
         live = [e for e in self.events.values() if e.state == "raid"]
         if not live:
             return None
@@ -68,21 +75,32 @@ class FeedMixin:
             return today
         real = [e for e in live if e.origin == "raid"]
         mock = [e for e in live if e.origin != "raid"]
-        want = self.companion_key(comp.guild) if comp is not None else None
+        want = getattr(comp, "bound", None) if comp is not None else None
         if want:
-            return next((e for e in real if e.guild == want), None) or next((e for e in mock if e.guild == want), None) or (mock[0] if mock else None)
-        if len({e.guild for e in real}) > 1:
-            return None  # two guilds raiding and the companion didn't say which: never guess
-        return today
+            return (next((e for e in real if e.guild == want), None) or next((e for e in mock if e.guild == want), None)
+                    or next((e for e in mock if self._mock_in_server_of(e, want)), None))
+        return mock[0] if mock else None
+
+    def _mock_in_server_of(self, ev, key: str) -> bool:
+        """A mock session whose thread is in guild `key`'s server (or whose server can't be told: the demo flow)."""
+        get = getattr(self, "get_channel", None)
+        ch = get(ev.channel_id) if get and getattr(ev, "channel_id", None) else None
+        sid = getattr(getattr(ch, "guild", None), "id", None)
+        reg = self.registries.by_key.get(key) if hasattr(self.registries, "by_key") else None
+        return sid is None or (reg is not None and sid == reg.config.discord_guild_id)
 
     def feed_note(self, comp: Companion) -> str | None:
         """Why a companion routes nowhere (or ignores what it named) — the hello reply's `note`."""
+        bound, named = getattr(comp, "bound", None), getattr(comp, "named", comp.guild)
+        if getattr(self.registries, "many", False):
+            if not bound:
+                return ("several guilds are served: a companion feeds the guild its token belongs to — "
+                        "start it with that guild's own token (OIBOT_FEED_TOKEN_<KEY> on the bot)")
+            if named and self.companion_key(named) not in (None, bound):
+                return f"this token feeds {bound}; --guild {named!r} is ignored"
+            return None
         if comp.guild and self.companion_key(comp.guild) is None:
             return f"guild {comp.guild!r} isn't one I serve; routing as if none was given"
-        if getattr(self.registries, "many", False) and not self.companion_key(comp.guild):
-            live = {e.guild for e in self.events.values() if e.state == "raid" and e.origin == "raid"}
-            if len(live) > 1:
-                return "several guilds have a live raid; start the companion with --guild <key>"
         return None
 
     async def feed_post(self, ev, text: str, view: discord.ui.View | None = None) -> None:
@@ -115,7 +133,9 @@ class FeedMixin:
     async def handle_feed_event(self, ev: dict[str, Any], comp: Companion) -> dict[str, Any] | None:
         kind = ev.get("type")
         raid = self.active_raid(comp)
-        cfg = self.registries.cfg_for(raid.guild if raid else self.companion_key(comp.guild))  # None: the log only
+        many = getattr(self.registries, "many", False)
+        mine = getattr(comp, "bound", None) if many else self.companion_key(comp.guild)  # several: only its token names a guild
+        cfg = self.registries.cfg_for(raid.guild if raid else mine)  # None: the log only
         if kind == "hello":
             note = self.feed_note(comp)
             if cfg:

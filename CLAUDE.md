@@ -127,7 +127,7 @@ src/oibot_gm/
                        (ops-channel card edited in place); ProposalButton (DynamicItem Approve/Dismiss, officers only)
   agents.py            local jobs on the Mac mini: out/agents/<job>.json status + runs/<job>-<stamp>.jsonl transcripts (last 30), stream-json → steps,
                        launchctl print/kickstart, claude command lines (allow/deny lists, dontAsk; never a permission bypass)
-  feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND), hello+token, idempotent acks; status(guild) per guild
+  feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token, idempotent acks; status(guild) per guild
   discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence. Routed by the companion's
                        hello `guild` (active_raid(comp), companion_key; with several guilds raiding, a companion without --guild routes nowhere)
   ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key

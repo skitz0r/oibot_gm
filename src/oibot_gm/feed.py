@@ -9,12 +9,19 @@ Protocol (JSON text frames):
   client → {"type":"heartbeat","ts":"…"}
   server → {"type":"ack","idem":"…"} | {"type":"error","message":"…"} | {"type":"welcome","routes_to":"BLA-0915"}
 Bind to the tailnet address (OIBOT_FEED_BIND=100.x.y.z:8787); never expose publicly.
+
+Tokens (design §5.32 "Feed"): `OIBOT_FEED_TOKEN` is the shared one (one guild served: it feeds that guild, as always);
+`OIBOT_FEED_TOKEN_<KEY>` belongs to one guild (key upper-cased, anything not a letter or digit → `_`). A companion
+authenticated with a guild's token feeds that guild only, whatever its hello names; with several guilds the shared
+token feeds no real raid (mock sessions only), so a token handed to one guild's raid leader can't reach another guild.
 """
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
@@ -24,8 +31,12 @@ Handler = Callable[[dict[str, Any], "Companion"], Awaitable[dict[str, Any] | Non
 
 
 class Companion:
-    def __init__(self, character: str, client: str, guild: str, peer: str):
+    def __init__(self, character: str, client: str, guild: str, peer: str, bound: str | None = None):
         self.character, self.client, self.guild, self.peer = character, client, guild, peer
+        self.named = guild  # what its hello said (the note when it differs from its token's guild)
+        self.bound = bound  # the guild key its token belongs to (OIBOT_FEED_TOKEN_<KEY>); None = the shared token
+        if bound:
+            self.guild = bound  # the token decides; status and routing read this
         self.connected_at = datetime.now(timezone.utc)
         self.last_seen = self.connected_at
         self.events = 0
@@ -40,8 +51,11 @@ class Companion:
 
 
 class FeedServer:
-    def __init__(self, handler: Handler, token: str, bind: str = "127.0.0.1:8787"):
-        self.handler, self.token = handler, token
+    def __init__(self, handler: Handler, token: str | None, bind: str = "127.0.0.1:8787",
+                 auth: Callable[[str], tuple[bool, str | None]] | None = None):
+        """`auth(token) → (ok, guild key the token belongs to | None)`: the bot's per-guild tokens; without it, the one
+        shared `token`."""
+        self.handler, self.token, self.auth = handler, token, auth
         host, _, port = bind.rpartition(":")
         self.host, self.port = host or "127.0.0.1", int(port or 8787)
         self.companions: dict[str, Companion] = {}  # peer -> companion
@@ -74,11 +88,12 @@ class FeedServer:
                 await ws.send_json({"type": "error", "message": "bad json"})
                 continue
             if comp is None:
-                if ev.get("type") != "hello" or ev.get("token") != self.token:
+                ok, bound = self.authorize(ev.get("token")) if ev.get("type") == "hello" else (False, None)
+                if not ok:
                     await ws.send_json({"type": "error", "message": "hello with a valid token first"})
                     await ws.close()
                     break
-                comp = Companion(ev.get("character", "?"), ev.get("client", "?"), ev.get("guild", ""), peer)
+                comp = Companion(ev.get("character", "?"), ev.get("client", "?"), ev.get("guild", ""), peer, bound=bound)
                 self.companions[peer] = comp
                 reply = await self.handler(ev, comp)
                 await ws.send_json({"type": "welcome", **(reply or {})})
@@ -101,17 +116,53 @@ class FeedServer:
         self.companions.pop(peer, None)
         return ws
 
-    def status(self, guild: str | None = None, resolve: Callable[[str], str | None] | None = None) -> str:
+    def authorize(self, token: Any) -> tuple[bool, str | None]:
+        if self.auth is not None:
+            return self.auth(str(token or ""))
+        return same(token, self.token), None
+
+    def status(self, guild: str | None = None, resolve: Callable[["Companion"], str | None] | None = None) -> str:
         """The connected companions as one line; `guild` (a key) keeps only those feeding that guild — the companion's
-        hello `guild` as is, or through `resolve` (the bot's routing: a name or an unknown value → the guild it counts for)."""
+        `guild` as is, or through `resolve(companion)` (the bot's routing: the guild it counts for, or None)."""
         comps = list(self.companions.values())
         if guild is not None:
-            comps = [c for c in comps if (resolve(c.guild) if resolve else c.guild) == guild]
+            comps = [c for c in comps if (resolve(c) if resolve else c.guild) == guild]
         if not comps:
             return "no companion connected"
         return "; ".join(f"{c.character} ({c.client}) {c.events} events, seen {int(c.silent_for)}s ago" for c in comps)
 
 
+GUILD_TOKEN_PREFIX = "OIBOT_FEED_TOKEN_"
+
+
+def same(a: Any, b: str | None) -> bool:
+    """A token comparison in constant time; an empty token never matches."""
+    return bool(a) and bool(b) and hmac.compare_digest(str(a).encode(), str(b).encode())
+
+
+def token_suffix(key: str) -> str:
+    """A guild key as the suffix of its feed token's variable: OIBOT_FEED_TOKEN_<this>."""
+    return re.sub(r"[^A-Za-z0-9]", "_", key).upper()
+
+
 def feed_config() -> tuple[str | None, str]:
-    """(token, bind) from the environment; token None disables the listener."""
+    """(shared token, bind) from the environment; no shared token and no guild token disables the listener."""
     return os.environ.get("OIBOT_FEED_TOKEN") or None, os.environ.get("OIBOT_FEED_BIND", "127.0.0.1:8787")
+
+
+def guild_tokens(env: dict | None = None) -> dict[str, str]:
+    """{suffix: token} for every OIBOT_FEED_TOKEN_<KEY> set (values never printed)."""
+    env = os.environ if env is None else env
+    return {k[len(GUILD_TOKEN_PREFIX):].upper(): v for k, v in env.items() if k.startswith(GUILD_TOKEN_PREFIX) and v}
+
+
+def authorize(token: str, shared: str | None, per_guild: dict[str, str], keys: Callable[[], list[str]]) -> tuple[bool, str | None]:
+    """A hello's token → (ok, guild key it belongs to). A guild's own token first (so the owner may give the guild token
+    the shared value and leave the companion as it is); a guild token naming no guild served is refused; then the
+    shared one (bound to no guild). `keys()`: the guild keys served now (a guild claimed at run time counts at once)."""
+    for suffix, t in per_guild.items():
+        if same(token, t):
+            key = next((k for k in keys() if token_suffix(k) == suffix), None)
+            if key:
+                return True, key
+    return same(token, shared), None

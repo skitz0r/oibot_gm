@@ -168,3 +168,64 @@ def test_main_guild_flag_sets_the_default(monkeypatch):
     assert os.environ[ms.GUILD_ENV] == "duo"
     monkeypatch.delenv(ms.GUILD_ENV)
     ms.use(None)
+
+
+def test_a_locked_session_refuses_any_other_guild(two, monkeypatch):
+    """The jobs set OIBOT_MCP_GUILD_LOCK=1 beside OIBOT_MCP_GUILD: a tool's guild= naming another guild (say, from a
+    news post the session read) is refused before any request; the pinned guild, by key or name, still works."""
+    c, duo = two
+    monkeypatch.setenv(ms.GUILD_ENV, GUILD2)
+    monkeypatch.setenv(ms.LOCK_ENV, "1")
+    ms.use(through(c))
+    try:
+        assert ms.guild_overview()["guild"]["key"] == GUILD2
+        assert ms.guild_overview(guild="Duo Guild")["guild"]["key"] == GUILD2, "its own guild by name is fine"
+        with pytest.raises(ToolError, match="pinned to duo"):
+            ms.guild_overview(guild=GUILD)
+        with pytest.raises(ToolError, match="pinned"):
+            ms.list_proposals(guild="Demo Guild")
+    finally:
+        ms.use(None)
+    monkeypatch.delenv(ms.LOCK_ENV)
+    ms.use(through(c))
+    try:
+        assert ms.guild_overview(guild=GUILD)["guild"]["key"] == GUILD, "unlocked (an interactive session): guild= wins"
+    finally:
+        ms.use(None)
+
+
+def test_the_guild_list_is_re_read_when_a_name_misses():
+    """A server claimed while the MCP server runs can be named at once, list_guilds is always fresh, a 'Which guild?'
+    drops the stale list, and the 404 of a bot from before several guilds is never kept."""
+    state = {"guilds": [{"key": GUILD, "name": "Demo Guild"}], "old": False, "asked": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/guilds":
+            state["asked"] += 1
+            if state["old"]:
+                return httpx.Response(404, json={"error": "Not Found"})
+            return httpx.Response(200, json={"guilds": state["guilds"]})
+        g = request.headers.get("x-oibot-guild")
+        if g is None and len(state["guilds"]) > 1:
+            return httpx.Response(400, json={"error": "Which guild? Pass guild= one of: …"})
+        return httpx.Response(200, json={"guild": g})
+    a = ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler))
+    ms.use(a)
+    try:
+        assert ms.list_guilds()["default"] == GUILD
+        state["guilds"].append({"key": "new", "name": "New Guild"})  # claimed at runtime, no restart
+        assert a.get("/api/x", guild="New Guild") == {"guild": "new"}, "a miss re-reads the list"
+        assert ms.list_guilds()["default"] is None and len(ms.list_guilds()["guilds"]) == 2
+        state["guilds"].pop()
+        a.guilds()
+        state["guilds"].append({"key": "new", "name": "New Guild"})
+        with pytest.raises(ToolError, match="Which guild"):
+            a.get("/api/x")
+        assert a._guilds is None, "a 'Which guild?' drops the stale one-guild list"
+        b = ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler))
+        state["old"] = True
+        assert b.guilds() == [{"key": "", "name": ""}]
+        state["old"] = False
+        assert b.get("/api/x", guild="new") == {"guild": "new"}, "the bot restarted on the new code: seen at once"
+    finally:
+        ms.use(None)

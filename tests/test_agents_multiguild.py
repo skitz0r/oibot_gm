@@ -62,6 +62,7 @@ def test_review_runs_one_session_per_guild_with_news_pinned_to_it(out_dir, monke
 
     def fake_claude(cmd, prompt, transcript, on_step=None, timeout_s=0, env=None):
         sessions.append((env["OIBOT_MCP_GUILD"], prompt.rsplit("## This run", 1)[1]))
+        assert env["OIBOT_MCP_GUILD_LOCK"] == "1", "news text can't steer the review session into another guild"
         return 0
     agents.write_status("review", state="idle", last_ok_started="2026-09-01T00:00:00+00:00")  # an old single value
     assert review.main([], api_factory=lambda guild=None: FakeApi(world, guild), run_claude=fake_claude) == 0
@@ -125,7 +126,7 @@ def test_apply_takes_the_oldest_approval_across_guilds_and_resolves_it_there(out
 def test_apply_pins_the_profile_session_to_the_proposals_guild(out_dir, monkeypatch):
     """The profile edit's Claude session starts its own MCP server: OIBOT_MCP_GUILD in its environment is the
     proposal's guild, so get_proposal / get_raid read that guild (never a .env default, never 'Which guild?')."""
-    from oibot_gm.mcp_server import GUILD_ENV
+    from oibot_gm.mcp_server import GUILD_ENV, LOCK_ENV
 
     apply = load_script("apply")
     world = {"calls": [], "news": {}, "approved": {
@@ -139,6 +140,7 @@ def test_apply_pins_the_profile_session_to_the_proposals_guild(out_dir, monkeypa
 
     def fake_claude(cmd, prompt, transcript, on_step=None, timeout_s=0, env=None):
         envs.append(env[GUILD_ENV])
+        assert env[LOCK_ENV] == "1", "the session is locked to the proposal's guild: a guild= naming another is refused"
         return 0
 
     class Api(FakeApi):

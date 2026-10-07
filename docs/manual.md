@@ -586,9 +586,13 @@ development mode `OIBOT_COMMAND_SCOPE=guild` puts them only in the test server a
 server can't be claimed in that mode. A command used in the test server acts on the test server's own guild only — if
 the test server isn't the guild's server, it answers "isn't set up". Cards the bot posts in a channel (an
 application's Accept / Decline, the absences card, an agent proposal's Approve / Dismiss) answer only in the server they
-were posted in. The companions shown by `/gm status` and on the site's **Ops** page are the ones feeding this guild;
-once two servers run raids with the loot companion, start each companion with `--guild <key>` so its drops reach the
-right raid.
+were posted in. A sheet is only ever re-posted in a channel of its own server (the site, MCP and plain text refuse
+another server's channel). The companions shown by `/gm status` and on the site's **Ops** page are the ones feeding
+this guild. **Loot companion with two servers:** each server's companion needs that server's own token —
+`OIBOT_FEED_TOKEN_<KEY>` in the bot's `.env` (the guild key in capitals, `-` as `_`; e.g. `OIBOT_FEED_TOKEN_OI`) — and
+feeds that server's raid only, whatever `--guild` says. The shared `OIBOT_FEED_TOKEN` feeds no real raid once two
+servers are looked after (the demo `/mock` flow only); to keep an existing companion as it is, give its server's token
+the shared value. Never hand one server's raid leader another server's token.
 
 **Moving a guild to another server** (rather than claiming the new server as a guild of its own):
 `scripts/move_guild.py --to <new server id> [--key <guild>]` with the bot stopped (which stops every server it looks
@@ -871,8 +875,11 @@ The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change
 **Several servers.** Every tool takes an optional `guild`: the server's key or its name (any case). Leave it out
 and the tool uses `OIBOT_MCP_GUILD` from `.env` (or `uv run oibot-mcp --guild <key>`), else the only server; when
 the bot serves several and no default is set, the tool answers with the list instead of guessing. `list_guilds`
-lists them (key, name, Discord ids, owner, game version, which one is the default). Each call acts as the owner of
-the server it is for; `guild_overview` says which server answered.
+lists them (key, name, Discord ids, owner, game version, which one is the default) and always asks the bot afresh, so
+a server claimed while the session runs can be named at once. Each call acts as the owner of the server it is for;
+`guild_overview` says which server answered. The news review and apply jobs lock their sessions to one server
+(`OIBOT_MCP_GUILD_LOCK=1` beside `OIBOT_MCP_GUILD`): a tool call naming any other server is refused, so nothing a
+news post says can make the review read or write another server.
 
 | Tool | Does |
 |---|---|
@@ -924,8 +931,8 @@ The council scores each drop deterministically — tier for the spec × slot wei
 wishlist, discounted by recent loot and a same-slot repeat — and Claude judges the top candidates against
 the written loot policy, explains, and flags close calls. Officers confirm, or override with a reason; the
 reason becomes a precedent the bot cites next time. In-game awards from the companion app are matched
-to the proposal automatically (when the bot looks after several servers that raid, start the companion with
-`--guild <key>`: without it, and with two servers raiding at once, its drops go nowhere and it is told so). WoW: Forever loot tables are not published yet, so this part is waiting
+to the proposal automatically (when the bot looks after several servers, each companion uses its own server's token,
+`OIBOT_FEED_TOKEN_<KEY>`, see §8; with the shared token its drops go nowhere and it is told so). WoW: Forever loot tables are not published yet, so this part is waiting
 for data discovered in game.
 
 ## 10. Data, privacy, cost
@@ -947,7 +954,8 @@ this month's spend. The budget is one for the whole bot: if it ever looks after 
 the bot — a question, a request, a slash command or a wizard used in DMs, `/help`, `/ask`, applying — first asks
 **which server it is for** (one button per server). It asks every time; it never assumes. Pick one and the bot carries
 on with what you asked, for that server; nobody picked in two minutes and it says so — ask again any time. If you are
-in only one of them, it is that one, no question. Buttons the bot sent you (Confirm / Can't make it, a seat offer, Join
+in only one of them, it is that one, no question (a server you just joined or left counts within seconds). A server
+whose owner turned DMs off is never offered; if every server has, a plain DM gets no answer. Buttons the bot sent you (Confirm / Can't make it, a seat offer, Join
 on a sheet, Apply to join) already know their server and never ask. With several servers, DMs and cards start with the
 server's name.
 

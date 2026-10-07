@@ -30,4 +30,8 @@ python oibot_companion.py --replay sample_chatlog.txt --token … --server ws://
 
 Set `OIBOT_FEED_TOKEN` (any long random string) and `OIBOT_FEED_BIND=<tailnet-ip>:8787`
 in the bot's `.env`. The listener only accepts frames after a `hello` with the token.
+When the bot looks after several Discord servers, give each server's companion that server's own token,
+`OIBOT_FEED_TOKEN_<KEY>` (guild key in capitals, `-` as `_`): it feeds that server's raid only, whatever `--guild`
+says, and the shared token then feeds no real raid. Giving a server's token the shared value keeps an existing
+companion working unchanged.
 `/gm status` shows connected companions; the ops feed warns when one goes silent mid-raid.

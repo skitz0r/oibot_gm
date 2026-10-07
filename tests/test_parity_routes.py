@@ -311,3 +311,22 @@ def test_changed_tools_send_one_body(mocked):
 def test_the_tool_list_has_the_new_tools():
     names = {t.name for t in asyncio.run(ms.mcp.list_tools())}
     assert {"fill_answer", "repost_sheet", "get_job_run", "run_job", "create_invite", "policy_get", "policy_edit", "policy_compile", "policy_confirm"} <= names
+
+
+def test_sheet_repost_refuses_a_channel_of_another_server(c, bot, reg, rs):
+    """An officer can't make the bot post their guild's sheet in another server's channel (by id or <#id>): the same
+    rule set_channel and create_invite keep, enforced in RaidMixin.repost_sheet so every caller gets it."""
+    ev = open_test_run(reg, rs)
+    before = (ev.channel_id, ev.message_id)
+    other = Chan(91, "general")
+    other.guild = SimpleNamespace(id=(reg.config.discord_guild_id or 0) + 12345)
+    bot.channels[91] = other
+    for ref in ("91", "<#91>"):
+        r = c.post(f"/api/run/{ev.key}/sheet", json={"channel": ref}, headers=H)
+        assert r.status_code == 400 and "another server" in r.json()["error"], r.text
+    assert other.sent == [] and (ev.channel_id, ev.message_id) == before
+    mine = Chan(92, "raids")
+    mine.guild = SimpleNamespace(id=reg.config.discord_guild_id)
+    bot.channels[92] = mine
+    r = c.post(f"/api/run/{ev.key}/sheet", json={"channel": "<#92>"}, headers=H)
+    assert r.status_code == 200 and ev.channel_id == 92, r.text

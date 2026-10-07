@@ -130,7 +130,7 @@ def main(argv: list[str] | None = None, api_factory=None, run_claude=None) -> in
     if st["state"] == "running":
         return 0
 
-    from oibot_gm.mcp_server import GUILD_ENV, Api, ToolError
+    from oibot_gm.mcp_server import GUILD_ENV, LOCK_ENV, Api, ToolError
 
     make = api_factory or (lambda guild=None: Api(guild=guild))
     polled = agents.iso()
@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None, api_factory=None, run_claude=None) -> in
     prompt = PROMPT.read_text() + "\n\n## The proposal (data)\n```json\n" + json.dumps(prop, indent=1, ensure_ascii=False) + "\n```\n"
     cmd = agents.apply_command(agents.mcp_tool_names(), a.budget, a.model)
     agents.runner_line(tr, "Starting Claude to edit the profile")
-    env = {**os.environ, GUILD_ENV: guild["key"]}  # the session's MCP reads (get_proposal, get_raid …) are the proposal's guild's, never a default
+    env = {**os.environ, GUILD_ENV: guild["key"], LOCK_ENV: "1"}  # the session's MCP reads (get_proposal, get_raid …) are the proposal's guild's, never a default
     code = (run_claude or agents.run_claude)(cmd, prompt, tr, on_step=lambda s: agents.write_status(JOB, step=s["title"][:160]), timeout_s=30 * 60, env=env)
     if sh("git", "rev-parse", "HEAD").stdout.strip() != head0:
         sh("git", "reset", "--hard", head0)

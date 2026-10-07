@@ -998,11 +998,10 @@ a configured server (K24; `/mock` keeps its rule). Plain DMs: `OibotGM.dm_guild`
 **Per-guild process pieces (D6).** Scheduler: `scheduler_tick` runs `companion_check` and then each guild's
 `scheduler_tick_guild` in its own try; a failure goes to THAT guild once per distinct text (`_tick_error_by_guild`); a
 process-wide one to every guild's ops channel with each distinct owner DMed once (`Ops.emit(dm=False)` for repeats).
-`_fill_exhausted_posted` holds (guild, run key). Feed: `active_raid(comp)` routes by the companion's hello `guild`
-(`companion_key`: a key, a unique name or the mock key; anything else counts as empty, K12); one guild served → today's
-rule; several → its guild's real session, else a mock session; no guild named and two guilds raiding → none, with the
-hello `note` "start the companion with --guild <key>". `feed_status(bot, reg)` / `FeedServer.status(guild, resolve)`
-list a guild's companions only. Ops: the ring is per guild (`Ops.recent_for(key)`; `recent` is gone), `LISTENERS`
+`_fill_exhausted_posted` holds (guild, run key). Feed: one guild served → today's rule, whatever the hello names;
+several → the guild the companion's TOKEN belongs to (`OIBOT_FEED_TOKEN_<KEY>`, see "Final review fixes" below) — its
+real session, else a mock session in its server; the shared token reaches mock sessions only. `feed_status(bot, reg)` /
+`FeedServer.status(guild, resolve)` list a guild's companions only. Ops: the ring is per guild (`Ops.recent_for(key)`; `recent` is gone), `LISTENERS`
 get the key, an owner's error DM is prefixed with the guild name only when `many`. Run locks `plan_lock`, `solving`,
 `board_lock` and `configops.split_seen` are keyed (guild, run key) — two guilds can hold runs with one key. The loot
 thread check matches `s.guild`. `SetupMixin.set_channel` refuses a channel from another server (site, MCP, plain text).
@@ -1145,6 +1144,35 @@ required with several; the key never changes) and for `--invite-link`. It resolv
 in-repo fixtures, a server another guild uses, a running bot (the web bind or a launchd pid), live runs (`--force` skips
 those two); validates the new `guild.yaml`; also clears applicants' review-card and proposals' card message ids; and
 moves `DISCORD_TEST_GUILD_ID` only when it was the old server. Tests: `tests/test_move_guild.py`.
+
+**Final review fixes (S3, 2026-10-06).** *A sheet stays in its own server:* `RaidMixin.repost_sheet` refuses a channel
+whose `.guild` is another server ("That channel is in another server.") for every caller — `POST /api/run/{key}/sheet`
+(400; `channel_ref` takes a bare id or `<#id>`, so this is where the check belongs), MCP `repost_sheet`, plain text's
+`run_sheet`, the `/raid sheet` wizard — the rule `set_channel` and `create_invite` already kept. *A job's MCP session is
+locked to its guild:* `OIBOT_MCP_GUILD_LOCK=1` beside `OIBOT_MCP_GUILD` (review.py and apply.py set both in the child's
+environment) makes `Api._send` refuse a `guild=` resolving to any other guild before a request is made — news posts are
+member text and must never steer the review into another guild (reading its policy, planting proposals there). An
+interactive session (no lock) keeps "a call's own `guild=` wins". *The MCP guild list is never stale:* `Api.guilds()`
+re-reads on a `key_for` miss (once), on every `list_guilds`, and after a "Which guild?" 400; the 404 fallback of a bot
+from before several guilds is never kept. *The companion feed binds a token to a guild:* `feed.authorize` — a guild's
+own token (`OIBOT_FEED_TOKEN_<KEY>`, key upper-cased, non-alphanumerics → `_`, resolved against the guilds served NOW so
+a server claimed later counts at once) binds the companion (`Companion.bound`; its `guild` becomes that key, `named`
+keeps what the hello said); the shared `OIBOT_FEED_TOKEN` binds none. With several guilds `active_raid` routes by
+`bound` only: never an unnamed or shared-token companion to a real raid (not even when one guild alone is raiding), never
+a named guild the token doesn't belong to (hello note "this token feeds X; --guild Y is ignored"); the mock fallback is a
+mock session whose thread is in the bound guild's server (or whose server can't be told). The owner keeps an existing
+companion working by giving `OIBOT_FEED_TOKEN_<KEY>` the shared value. Tokens compare in constant time. *Errors after
+the DM picker:* `pick()` tags the ORIGINAL interaction with the chosen guild too and keeps the press in
+`extras["press"]`, so `_on_command_error` (which discord.py hands the original) emits to that guild and answers the
+press; with no guild at all the apology says "it has been logged", never "the owner has been notified". `/help` returns
+when the picker ran out (its response is used). *Fresh DM routing:* `guilds_of` reads membership at most
+`ROUTING_MAX_AGE_S` (10 s) old instead of the web's 5 minutes, and `OibotGM.saw_member` (on every guild message and
+interaction — `on_interaction` is a listener only) drops a cached 404 at once, so a person who just joined the second
+server is asked and one who just left is not offered it. *DM modes:* `dm_guild` counts only guilds whose plain-text
+`dm` mode isn't "ignore": one left → it, none → silence (no picker, no Join-links reply), as one guild with DMs off.
+Tests: `test_parity_routes.py` (sheet in another server), `test_mcp_multiguild.py` (lock, re-read),
+`test_agents_multiguild.py` (jobs set the lock), `test_multiguild_core.py` (feed tokens, routing, fresh membership),
+`test_multiguild_dm.py` (help expiry, error after the picker, DM modes).
 
 ## 6. Architecture
 

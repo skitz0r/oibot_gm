@@ -29,12 +29,17 @@ NO_GUILDS = "I'm not set up for any server yet. Run `/gm config owner` in the se
 GONE = "This button's server isn't served by the bot any more."
 OTHER_SERVER = "This button belongs to another server."
 LOOKUP_TIMEOUT_S = 1.5  # per guild, run concurrently: `need` stays inside Discord's 3-second window
+# DM routing decides WHICH guild a message or command is handled for without asking when only one answers yes, so it reads
+# a much fresher membership than the web's 5 minutes: someone who just joined the second server is asked, someone who just
+# left it is not offered it (the bot has no members intent, so no join/leave event ever evicts the cache)
+ROUTING_MAX_AGE_S = 10
 
 
-async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S) -> tuple[str, object | None]:
+async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S, max_age: float | None = None) -> tuple[str, object | None]:
     """(answer, member): `membership`'s answer plus the Discord member when it is 'yes' (the web needs the member for
     the officer check and the display name). `timeout` None = wait as long as the lookup takes (the web; Discord's
-    3-second window is the reason for the default)."""
+    3-second window is the reason for the default). `max_age`: how old a cached answer may be (None: cached_member's own
+    default; DM routing passes ROUTING_MAX_AGE_S)."""
     get_guild = getattr(bot, "get_guild", None)
     guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
     if guild is None:
@@ -43,7 +48,8 @@ async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S
     if cached_member is None:
         return "unknown", None
     try:
-        m = await (asyncio.wait_for(cached_member(guild, uid), timeout) if timeout else cached_member(guild, uid))
+        look = cached_member(guild, uid) if max_age is None else cached_member(guild, uid, max_age=max_age)
+        m = await (asyncio.wait_for(look, timeout) if timeout else look)
     except Exception:  # noqa: BLE001 — a timeout or a transient error is not a departure
         return "unknown", None
     if m is not None:
@@ -52,16 +58,17 @@ async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S
     return ("no" if (guild.id, uid) in gone else "unknown"), None
 
 
-async def membership(bot, reg, uid: int) -> str:
+async def membership(bot, reg, uid: int, max_age: float | None = None) -> str:
     """'yes' | 'no' | 'unknown': is `uid` in the guild's Discord server right now (gateway cache, else one cached fetch)."""
-    return (await member_of(bot, reg, uid))[0]
+    return (await member_of(bot, reg, uid, max_age=max_age))[0]
 
 
 async def guilds_of(bot, uid: int, guilds=None) -> list:
-    """The guilds `uid` belongs to (their owner, or in the server — 'unknown' counts, so a blip asks), in ordered() order."""
+    """The guilds `uid` belongs to (their owner, or in the server — 'unknown' counts, so a blip asks), in ordered() order.
+    Read at most ROUTING_MAX_AGE_S old: this decides, without asking, which guild a DM is handled for."""
     guilds = guilds if guilds is not None else bot.registries
     regs = guilds.ordered()
-    answers = await asyncio.gather(*(membership(bot, r, uid) for r in regs))
+    answers = await asyncio.gather(*(membership(bot, r, uid, max_age=ROUTING_MAX_AGE_S) for r in regs))
     return [r for r, a in zip(regs, answers) if r.config.owner_discord_id == uid or a in ("yes", "unknown")]
 
 
@@ -133,13 +140,21 @@ def not_in_any(regs) -> str:
 
 
 async def pick(interaction, regs):
-    """The picker on `interaction`; (reg, press) with the press tagged, or (None, interaction) when nobody picked."""
+    """The picker on `interaction`; (reg, press) with the press tagged, or (None, interaction) when nobody picked
+    (then `interaction.response.is_done()`: the picker was its response and now says so — the caller says nothing more).
+    The ORIGINAL interaction is tagged too, and keeps the press in `extras["press"]`: discord.py hands the tree's error
+    handler the original, so a command failing after the picker still reaches the chosen guild's ops channel and owner,
+    and its apology answers the press (the interaction the command was answering)."""
     from .guild_picker import choose_guild
 
     reg, press = await choose_guild(interaction, regs)
     if reg is None:
         return None, interaction
     _tag(press, reg)
+    _tag(interaction, reg)
+    extras = getattr(interaction, "extras", None)
+    if isinstance(extras, dict):
+        extras["press"] = press
     return reg, press
 
 

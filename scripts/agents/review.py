@@ -60,7 +60,7 @@ def review_guild(g: dict, st: dict, a, api_for, run_claude=None, named: bool = T
     there is news — pinned to the guild (OIBOT_MCP_GUILD in the child's environment, so the MCP server it starts acts
     on this guild only and the model never picks one). Returns (ok, result line, items, proposals posted). `named`:
     the result line starts with the guild's name (several guilds)."""
-    from oibot_gm.mcp_server import GUILD_ENV, ToolError
+    from oibot_gm.mcp_server import GUILD_ENV, LOCK_ENV, ToolError
 
     key, name = g["key"], g.get("name") or g["key"] or "the guild"  # key "": a bot from before several guilds (no header)
     since = a.since or since_for(st, key)
@@ -84,7 +84,7 @@ def review_guild(g: dict, st: dict, a, api_for, run_claude=None, named: bool = T
     cmd, prompt = build(since, len(items), a.budget, a.model, agents.mcp_tool_names(), g)
     agents.runner_line(tr, f"Starting Claude to review {len(items)} item(s) for {name}")
     agents.write_status(JOB, step=f"{name}: reviewing {len(items)} news item(s)")
-    env = {**os.environ, GUILD_ENV: key}
+    env = {**os.environ, GUILD_ENV: key, LOCK_ENV: "1"}  # locked: a news post naming another guild can't steer the session there
     code = (run_claude or agents.run_claude)(cmd, prompt, tr, on_step=lambda s: agents.write_status(JOB, step=s["title"][:160]), timeout_s=20 * 60, env=env)
     posted = agents.proposals_posted(agents.read_run(rid))
     if code != 0:

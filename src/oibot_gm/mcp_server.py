@@ -9,7 +9,10 @@ Several guilds (design §5.32 "MCP"): every tool takes an optional `guild` (key 
 (from the environment or .env, non-overriding, so a job's pinned value wins), else the only guild; with several and no
 default the bot answers with the list. The header always carries the KEY (a name is resolved here through
 /api/guilds: names may be non-ASCII and headers are Latin-1). `list_guilds` lists them. Each call acts as the OWNER OF
-THE CHOSEN GUILD.
+THE CHOSEN GUILD. A job pins its session to one guild with `OIBOT_MCP_GUILD_LOCK=1` beside `OIBOT_MCP_GUILD` (the news
+review and apply jobs set both in the child's environment): then a tool's `guild=` naming any other guild is refused, so
+text the session reads (news posts are member text) can never steer it into another guild. The guild list is re-read
+whenever a name misses and on every `list_guilds`, so a server claimed while this process runs can be named at once.
 
 Names: members may be given as a display name, a character name or a Discord id; runs as a run key
 (`bd-1209-1930-2026-12-09`), a roster key (`bd-1209-1930`) or the raid's name ("Barrow Deeps" = the one live run
@@ -34,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env")  # OIBOT_MCP_TOKEN (never printed), OIBOT_MCP_URL — at import so tools work when called directly too
 DEFAULT_URL = "http://127.0.0.1:8788"
 TOKEN_ENV, URL_ENV, GUILD_ENV = "OIBOT_MCP_TOKEN", "OIBOT_MCP_URL", "OIBOT_MCP_GUILD"
+LOCK_ENV = "OIBOT_MCP_GUILD_LOCK"  # "1": every call acts on OIBOT_MCP_GUILD only (the jobs' pinned sessions)
 GUILD_HEADER = "X-Oibot-Guild"
 # every tool's last parameter, documented once
 Guild = Annotated[str | None, Field(description="guild: key or name; omit for OIBOT_MCP_GUILD or the only guild (list_guilds lists them)")]
@@ -47,15 +51,17 @@ RAID_FIELDS = ("slots", "signup_lead_hours", "nudge_hours_before", "lock_hours_b
 class Api:
     """The bot's JSON API as the owner of the chosen guild. `transport` is for tests (httpx.MockTransport). `guild`: the
     default guild (key or name) for every call — `OIBOT_MCP_GUILD` when not given; the one place that default lives
-    (scripts/agents reuse this class). A call's own `guild=` wins over it."""
+    (scripts/agents reuse this class). A call's own `guild=` wins over it — unless `lock` (`OIBOT_MCP_GUILD_LOCK=1`
+    when not given): then a `guild=` resolving to any other guild is refused (a job's session acts on its guild only)."""
 
     def __init__(self, url: str | None = None, token: str | None = None, transport: httpx.BaseTransport | None = None, timeout: float = 60.0,
-                 guild: str | None = None):
+                 guild: str | None = None, lock: bool | None = None):
         self.url = (url or os.environ.get(URL_ENV) or DEFAULT_URL).rstrip("/")
         self.token = token if token is not None else (os.environ.get(TOKEN_ENV) or "")
         self.guild = guild if guild is not None else (os.environ.get(GUILD_ENV) or "").strip() or None
+        self.lock = lock if lock is not None else (os.environ.get(LOCK_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
         self._client = httpx.Client(base_url=self.url, headers=HEADERS, transport=transport, timeout=timeout)
-        self._guilds: list[dict] | None = None  # GET /api/guilds, cached for the process (name → key)
+        self._guilds: list[dict] | None = None  # GET /api/guilds (name → key); re-read on a miss and by list_guilds
 
     def _headers(self) -> dict[str, str]:
         if not self.token:
@@ -66,6 +72,9 @@ class Api:
         """`scoped=False`: no guild header at all (GET /api/guilds, which lists every guild for the bearer)."""
         headers = self._headers()
         key = self.key_for(guild or self.guild) if scoped else None
+        if scoped and self.lock and guild and key != self.key_for(self.guild):
+            pinned = self.guild or "the bot's only guild"
+            raise ToolError(f"this session is pinned to {pinned}: guild={guild!r} is refused (it acts on its own guild only)")
         if key:
             headers[GUILD_HEADER] = key
         try:
@@ -82,6 +91,8 @@ class Api:
             data = {"error": r.text[:300]} if r.status_code >= 400 else r.text
         if r.status_code == 401:
             raise ToolError(f"the bot rejected the token ({TOKEN_ENV} in .env must match the bot's)")
+        if r.status_code == 400 and scoped and not key:
+            self._guilds = None  # "Which guild?": the bot serves more guilds than this process last read
         if r.status_code >= 400:
             err = data.get("error") if isinstance(data, dict) else None
             e = ToolError(str(err or data or f"HTTP {r.status_code}"))
@@ -90,17 +101,20 @@ class Api:
         return data
 
     # ---- guilds
-    def guilds(self) -> list[dict]:
-        """Every guild the bot serves ({key, name, discord_guild_id, owner_discord_id, game_profile}); fetched once.
-        A bot from before several guilds (no /api/guilds: 404) serves exactly one: one row with an empty key, which
-        sends no header — the jobs run from this checkout and may meet the running bot before it restarts."""
-        if self._guilds is None:
+    def guilds(self, fresh: bool = False) -> list[dict]:
+        """Every guild the bot serves ({key, name, discord_guild_id, owner_discord_id, game_profile}); kept until a
+        name misses (key_for re-reads once), the bot answers "Which guild?", or `fresh` (list_guilds). A bot from
+        before several guilds (no /api/guilds: 404) serves exactly one: one row with an empty key, which sends no
+        header — the jobs run from this checkout and may meet the running bot before it restarts. That fallback is
+        never kept: the next call asks again, so a bot restarted on the new code is seen at once."""
+        if self._guilds is None or fresh:
             try:
                 self._guilds = list(self._send("GET", "/api/guilds", scoped=False).get("guilds", []))
             except ToolError as e:
                 if getattr(e, "status", None) != 404:
                     raise
-                self._guilds = [{"key": "", "name": ""}]
+                self._guilds = None
+                return [{"key": "", "name": ""}]
         return self._guilds
 
     def key_for(self, ref: str | None) -> str | None:
@@ -109,12 +123,15 @@ class Api:
         ref = (ref or "").strip()
         if not ref:
             return None
-        rows = self.guilds()
-        if any(g["key"] == ref for g in rows):
-            return ref
-        named = [g for g in rows if str(g.get("name", "")).casefold() == ref.casefold()] or [g for g in rows if g["key"].casefold() == ref.casefold()]
-        if len(named) == 1:
-            return named[0]["key"]
+        for fresh in (False, True):  # a miss re-reads the list once: a server claimed since the last read
+            rows = self.guilds(fresh=fresh)
+            if any(g["key"] == ref for g in rows):
+                return ref
+            named = [g for g in rows if str(g.get("name", "")).casefold() == ref.casefold()] or [g for g in rows if g["key"].casefold() == ref.casefold()]
+            if len(named) == 1:
+                return named[0]["key"]
+            if named:
+                break  # ambiguous, not missing: re-reading won't help
         listing = ", ".join(f"{g['key']} ({g.get('name')})" for g in rows) or "none configured"
         raise ToolError(f"{'which guild' if named else 'no guild'} {ref!r}? Pass guild= one of: {listing}")
 
@@ -207,7 +224,7 @@ def list_guilds() -> dict:
     acts on when `guild` is omitted (OIBOT_MCP_GUILD, else the only guild; none when several and no default). Pass a
     key or a name as `guild` to any tool; each call acts as the owner of that guild."""
     base = api()
-    rows = base.guilds()
+    rows = base.guilds(fresh=True)  # always the bot's current list (a server claimed while this process runs)
     default = base.default_key()
     return {"guilds": [{**g, "default": g["key"] == default} for g in rows], "default": default}
 

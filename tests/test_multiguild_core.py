@@ -259,8 +259,8 @@ def test_api_ops_feed_shows_only_this_guilds_companions(duo, monkeypatch):
     bot = FakeBot(duo.a, duo.rs_a)
     bot.registries = duo.guilds
     fs = FeedServer(lambda ev, c: None, "t")
-    for peer, g in (("p1", GUILD2), ("p2", GUILD), ("p3", "")):
-        fs.companions[peer] = types.SimpleNamespace(character=f"c-{peer}", client="x", events=0, silent_for=1, guild=g)
+    for peer, g in (("p1", GUILD2), ("p2", GUILD), ("p3", "")):  # p1, p2: their guild's own token (bound); p3: the shared one
+        fs.companions[peer] = types.SimpleNamespace(character=f"c-{peer}", client="x", events=0, silent_for=1, guild=g, bound=g or None)
     bot.feed = fs
     for me, mine, theirs in ((GUILD, "c-p2", "c-p1"), (GUILD2, "c-p1", "c-p2")):  # the bearer names its guild (S3)
         body = TestClient(web.create_app(bot)).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}", "X-Oibot-Guild": me}).json()
@@ -683,26 +683,92 @@ def session(guild, origin="raid", sid="BAR-1010"):
     return types.SimpleNamespace(state="raid", origin=origin, guild=guild, id=f"{guild}:{sid}", raid_thread_id=None, roster=None)
 
 
-def comp(guild=""):
-    return types.SimpleNamespace(guild=guild, character="Scribe", client="oibot-companion/0.1")
+def comp(guild="", bound=None):
+    """A connected companion: `guild` = what its hello named, `bound` = the guild its token belongs to (feed.Companion)."""
+    from oibot_gm.feed import Companion
+
+    c = Companion("Scribe", "oibot-companion/0.1", guild, "peer", bound=bound)
+    return c
 
 
-def test_a_companion_routes_to_its_own_guilds_session(duo):
+def test_a_companion_routes_to_its_own_tokens_guild(duo):
     bot = FeedBot(duo.guilds, [session(GUILD), session(GUILD2)])
-    assert bot.active_raid(comp("duo")).guild == GUILD2 and bot.active_raid(comp("Duo Guild")).guild == GUILD2
-    reply = run(bot.handle_feed_event({"type": "hello"}, comp("duo")))
+    assert bot.active_raid(comp("", bound=GUILD2)).guild == GUILD2 and bot.active_raid(comp("duo", bound=GUILD2)).guild == GUILD2
+    reply = run(bot.handle_feed_event({"type": "hello"}, comp("duo", bound=GUILD2)))
     assert reply["routes_to"] == f"{GUILD2}:BAR-1010" and bot.ops.lines[-1][0] == GUILD2, "the line goes to the session's guild"
 
 
-def test_a_companion_naming_no_guild_never_guesses_between_two_raiding_guilds(duo):
+def test_a_guilds_token_never_feeds_another_guild_whatever_the_hello_names(duo):
+    """B's raid leader holds B's token: --guild demo is ignored (the token decides), so A's live session gets nothing."""
     bot = FeedBot(duo.guilds, [session(GUILD), session(GUILD2)])
-    assert bot.active_raid(comp("")) is None and bot.active_raid(comp("stale name")) is None
+    c = comp(GUILD, bound=GUILD2)
+    assert bot.active_raid(c).guild == GUILD2
+    reply = run(bot.handle_feed_event({"type": "hello"}, c))
+    assert reply["routes_to"] == f"{GUILD2}:BAR-1010" and "is ignored" in reply["note"]
+    only_a = FeedBot(duo.guilds, [session(GUILD)])
+    assert only_a.active_raid(comp(GUILD, bound=GUILD2)) is None, "B's token with only A raiding: nowhere, never A's session"
+
+
+def test_a_shared_token_companion_never_feeds_a_real_raid_with_several_guilds(duo):
+    """Several guilds: the shared OIBOT_FEED_TOKEN is bound to no guild, so it never routes to a real raid — not when one
+    guild alone is raiding (no guess), not when its hello names a guild (anyone holding it could name any)."""
+    bot = FeedBot(duo.guilds, [session(GUILD), session(GUILD2)])
+    assert bot.active_raid(comp("")) is None and bot.active_raid(comp("duo")) is None and bot.active_raid(comp("stale name")) is None
     reply = run(bot.handle_feed_event({"type": "hello"}, comp("")))
-    assert reply["routes_to"] is None and "--guild" in reply["note"] and not bot.ops.lines, "no guild to tell: the log only"
+    assert reply["routes_to"] is None and "OIBOT_FEED_TOKEN_<KEY>" in reply["note"] and not bot.ops.lines, "no guild to tell: the log only"
     one = FeedBot(duo.guilds, [session(GUILD2)])
-    assert one.active_raid(comp("")).guild == GUILD2, "only one guild raiding: today's rule"
+    assert one.active_raid(comp("")) is None and one.active_raid(comp(GUILD)) is None, "one guild raiding: still no guess"
+    ev = {"type": "drop", "boss": "X", "items": []}
+    assert run(one.handle_feed_event(ev, comp(""))) == {"note": "no active raid; event ignored"}
     mock = FeedBot(duo.guilds, [session(GUILD), session("mockdata", origin="mock")])
-    assert mock.active_raid(comp("duo")).guild == "mockdata", "mock sessions stay the fallback (K12)"
+    assert mock.active_raid(comp("", bound=GUILD2)).guild == "mockdata", "a mock session stays the fallback (K12)"
+    assert mock.active_raid(comp("")).guild == "mockdata", "the shared token still reaches the demo flow"
+
+
+def test_feed_tokens_bind_a_companion_to_its_guild():
+    """feed.authorize: a guild's own token → that guild (a guild claimed later counts at once); the shared token →
+    bound to none; a guild token for a guild not served, or a wrong token → refused."""
+    from oibot_gm.feed import authorize, guild_tokens, token_suffix
+
+    per = guild_tokens({"OIBOT_FEED_TOKEN_DUO": "tb", "OIBOT_FEED_TOKEN_OI_2": "tc", "OIBOT_FEED_TOKEN": "shared", "OTHER": "x"})
+    assert per == {"DUO": "tb", "OI_2": "tc"} and token_suffix("oi-2") == "OI_2"
+    keys = ["demo", "duo"]
+    assert authorize("tb", "shared", per, lambda: keys) == (True, "duo")
+    assert authorize("shared", "shared", per, lambda: keys) == (True, None)
+    assert authorize("tc", "shared", per, lambda: keys) == (False, None), "oi-2 isn't served yet"
+    keys.append("oi-2")
+    assert authorize("tc", "shared", per, lambda: keys) == (True, "oi-2")
+    assert authorize("", None, per, lambda: keys) == (False, None) and authorize("nope", "shared", per, lambda: keys) == (False, None)
+    same = {"DUO": "shared"}  # the owner gives a guild's token the shared value: that companion now feeds that guild
+    assert authorize("shared", "shared", same, lambda: keys) == (True, "duo")
+
+
+def test_the_feed_server_binds_the_token_at_hello():
+    from aiohttp.test_utils import TestClient as AioClient, TestServer
+    from aiohttp import web as aioweb
+
+    from oibot_gm.feed import FeedServer, authorize
+
+    seen = []
+
+    async def handler(ev, c):
+        seen.append((c.guild, c.bound, c.named))
+        return {"routes_to": None}
+
+    async def go():
+        fs = FeedServer(handler, "shared", auth=lambda t: authorize(t, "shared", {"DUO": "tb"}, lambda: ["demo", "duo"]))
+        app = aioweb.Application()
+        app.router.add_get("/feed", fs._ws)
+        async with AioClient(TestServer(app)) as cl:
+            for tok, named in (("tb", "demo"), ("shared", "demo"), ("bad", "duo")):
+                ws = await cl.ws_connect("/feed")
+                await ws.send_json({"type": "hello", "token": tok, "character": "X", "guild": named})
+                out.append((await ws.receive_json())["type"])
+                await ws.close()
+    out = []
+    asyncio.run(go())
+    assert out == ["welcome", "welcome", "error"]
+    assert seen == [("duo", "duo", "demo"), ("demo", None, "demo")], "B's token: its guild is B whatever the hello said"
 
 
 def test_single_guild_feed_routes_as_before_whatever_the_companion_says(reg, store):
@@ -719,11 +785,12 @@ def test_feed_status_is_per_guild(duo):
     from oibot_gm.feed import FeedServer
 
     fs = FeedServer(lambda ev, c: None, "t")
-    for peer, g in (("p1", "duo"), ("p2", "demo"), ("p3", "")):
-        fs.companions[peer] = types.SimpleNamespace(character=f"c-{peer}", client="x", events=0, silent_for=1, guild=g)
+    for peer, g, b in (("p1", "duo", "duo"), ("p2", "demo", "demo"), ("p3", "", None), ("p4", "duo", None)):
+        fs.companions[peer] = types.SimpleNamespace(character=f"c-{peer}", client="x", events=0, silent_for=1, guild=g, bound=b)
     bot = FeedBot(duo.guilds, [])
     bot.feed = fs
     assert "c-p1" in feed_status(bot, duo.b) and "c-p2" not in feed_status(bot, duo.b) and "c-p3" not in feed_status(bot, duo.b)
+    assert "c-p4" not in feed_status(bot, duo.b), "a shared-token companion naming duo doesn't feed it, so it isn't listed"
     assert feed_status(types.SimpleNamespace(feed=None), duo.a) == "disabled (OIBOT_FEED_TOKEN unset)"
 
 
@@ -885,3 +952,45 @@ def test_two_guild_fixture_holds_a_colliding_schedule_key(duo):
     assert len(shared) == len(duo.b.test_members()), "the same puppet names in both guilds"
     assert duo.a.config.owner_discord_id == OWNER and duo.b.config.owner_discord_id == OWNER2
     add_duo  # noqa: B018 — the helper the fixture uses (no second folder is ever written)
+
+
+def test_dm_routing_reads_a_fresh_membership_and_evidence_beats_the_cache(duo, monkeypatch):
+    """guilds_of decides which guild a DM is handled for without asking, so it never reads a 5-minute-old 404: someone
+    who just joined the second server is asked (both answer yes), someone who just left is no longer offered it; and a
+    message or interaction made inside a server drops a cached 404 for it at once (saw_member)."""
+    import functools
+
+    from oibot_gm import discord_bot as db
+
+    clock = {"t": 2_000_000.0}
+    monkeypatch.setattr(db.time, "time", lambda: clock["t"])
+    inside = {1: {42}, DUO_SERVER: set()}
+
+    class Server:
+        def __init__(self, sid):
+            self.id = sid
+
+        def get_member(self, _uid):
+            return None
+
+        async def fetch_member(self, uid):
+            if uid in inside[self.id]:
+                return types.SimpleNamespace(id=uid)
+            raise discord.NotFound(types.SimpleNamespace(status=404, reason="Not Found"), {"code": 10007, "message": "Unknown Member"})
+
+    servers = {1: Server(1), DUO_SERVER: Server(DUO_SERVER)}
+    stub = types.SimpleNamespace(get_guild=servers.get, registries=duo.guilds)
+    stub.cached_member = functools.partial(OibotGM.cached_member, stub)
+    stub.saw_member = functools.partial(OibotGM.saw_member, stub)
+    keys = lambda: [r.key for r in run(guild_routing.guilds_of(stub, 42))]  # noqa: E731
+    assert keys() == [GUILD]
+    inside[DUO_SERVER].add(42)  # joins the second server
+    clock["t"] += guild_routing.ROUTING_MAX_AGE_S
+    assert keys() == [GUILD, GUILD2], "a minute later (not five) the DM asks which server"
+    inside[1].discard(42)  # leaves the first
+    clock["t"] += guild_routing.ROUTING_MAX_AGE_S
+    assert keys() == [GUILD2], "and a server they left is no longer offered"
+    inside[1].add(42)
+    assert keys() == [GUILD2], "inside the routing window the 404 still stands…"
+    stub.saw_member(1, types.SimpleNamespace(id=42))  # …until they post or press something in that server
+    assert keys() == [GUILD, GUILD2]

@@ -34,7 +34,7 @@ from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
-from .feed import FeedServer, feed_config
+from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_tokens
 from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
 from .discord_news import NewsMixin, ProposalButton
 from .discord_raid import RaidContext, RaidMixin
@@ -772,7 +772,11 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         # the guild the command resolved to (need() tags it), else the server's own (strict), else — a DM that failed before
         # need() ran — the only guild, as with one guild before; with several, the log only. Never a guess, never a prompt.
-        key = (getattr(interaction, "extras", None) or {}).get("guild")
+        # After the DM server picker (guild_routing.pick) the original carries the chosen key AND the press: the apology
+        # answers the press, which the command was answering (else Discord shows "This interaction failed" on it).
+        extras = getattr(interaction, "extras", None) or {}
+        key = extras.get("guild")
+        target = extras.get("press") or interaction
         if key:
             reg = self.registries.by_key.get(key)
         elif interaction.guild_id:
@@ -786,11 +790,11 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         else:
             print("[ops:error]", msg)
         try:
-            text = "Something went wrong; the owner has been notified."
-            if interaction.response.is_done():
-                await interaction.followup.send(text, ephemeral=True)
+            text = "Something went wrong; the owner has been notified." if reg else "Something went wrong; it has been logged."
+            if target.response.is_done():
+                await target.followup.send(text, ephemeral=True)
             else:
-                await interaction.response.send_message(text, ephemeral=True)
+                await target.response.send_message(text, ephemeral=True)
         except Exception:  # noqa: BLE001
             pass
 
@@ -1016,6 +1020,25 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         cache[key] = (now, m)
         return m
 
+    def saw_member(self, guild_id: int | None, member) -> None:
+        """Evidence beats the cache: a message or an interaction someone made inside a server proves they are in it now,
+        so a cached 404 ("left", or "not yet joined") for that server is dropped at once — DM routing (guilds_of) and the
+        web read the fresh answer instead of waiting out max_age."""
+        uid = getattr(member, "id", None)
+        if not guild_id or uid is None:
+            return
+        key = (guild_id, uid)
+        self.__dict__.setdefault("_member_gone", set()).discard(key)
+        cache = self.__dict__.setdefault("_member_cache", {})
+        if isinstance(member, discord.Member):
+            cache[key] = (time.time(), member)
+        else:
+            cache.pop(key, None)
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        if interaction.guild_id:  # a listener only: the tree and the views answer the interaction itself
+            self.saw_member(interaction.guild_id, interaction.user)
+
     # ---- several guilds (design §5.32)
     async def claim_guild(self, guild, owner_id: int, profile: str, by) -> "object":
         """Make an unconfigured Discord server a guild (the claim wizard's Confirm): the folder and its commit in a
@@ -1085,17 +1108,22 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
     async def dm_guild(self, message: discord.Message):
         """Which guild a plain DM is about: the only one; else the one the sender belongs to; in several, the server
         picker (buttons, asked every time — owner decision D2), then the chosen one; None after saying why (in none:
-        every server's Join link) or when nobody picked in time."""
+        every server's Join link) or when nobody picked in time. Only the guilds that answer DMs count (plain-text
+        policy `dm` not "ignore"): a guild whose owner switched DMs off is never offered, and when every guild has,
+        a DM gets silence — as one guild with DMs off always has."""
+        import types as _types
+
         from . import guild_routing
         from .guild_picker import choose_guild
 
         only = self.registries.only()
         if only is not None:
-            return only
+            return only  # one guild: plain_text applies its DM mode, as before
         regs = self.registries.ordered()
-        if not regs:
+        answering = [r for r in regs if r.plain_mode(None) != "ignore"]
+        if not answering:
             return None
-        mine = await guild_routing.guilds_of(self, message.author.id)
+        mine = await guild_routing.guilds_of(self, message.author.id, _types.SimpleNamespace(ordered=lambda: answering))
         if len(mine) == 1:
             return mine[0]
         if mine:
@@ -1252,6 +1280,8 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             return
         if message.author.bot:
             return
+        if message.guild:
+            self.saw_member(message.guild.id, message.author)
         if not message.guild:  # a DM to the bot: a question, or a change to the sender's own record (plain-text policy "DMs")
             text = message.content.strip()
             if not text:
@@ -1490,11 +1520,13 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         self.loop.create_task(self.scheduler())
         self.attach_pool_listeners()
         token, bind = feed_config()
-        if token:
-            self.feed = FeedServer(self.handle_feed_event, token, bind)
+        per_guild = guild_tokens()  # OIBOT_FEED_TOKEN_<KEY>: a token that feeds one guild only
+        if token or per_guild:
+            self.feed = FeedServer(self.handle_feed_event, token, bind,
+                                   auth=lambda t: feed_authorize(t, token, per_guild, lambda: list(self.registries.by_key)))
             await self.feed.start()
         else:
-            print("loot feed disabled (set OIBOT_FEED_TOKEN and OIBOT_FEED_BIND)")
+            print("loot feed disabled (set OIBOT_FEED_TOKEN or OIBOT_FEED_TOKEN_<KEY>, and OIBOT_FEED_BIND)")
         from .web.app import serve as web_serve
 
         self.started_at = time.time()

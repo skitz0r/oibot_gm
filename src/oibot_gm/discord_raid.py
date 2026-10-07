@@ -708,7 +708,12 @@ class RaidMixin:
 
     async def repost_sheet(self, reg, rs, ev, channel) -> str:
         """Post a fresh copy of a live sheet in `channel` (/raid sheet, the site, MCP); the sheet's buttons and later
-        refreshes follow the new message. No open DMs (that was the first posting)."""
+        refreshes follow the new message. No open DMs (that was the first posting). A channel of another server is
+        refused here, for every caller (the site, MCP, plain text, the wizard): one guild's sheet never lands in another's
+        server — the rule set_channel and create_invite keep."""
+        g = getattr(channel, "guild", None)
+        if g is not None and getattr(g, "id", None) != reg.config.discord_guild_id:
+            raise RegistryError("That channel is in another server.")
         embed, view = sheet_message(reg, ev, rc.run_team(reg, ev), self.ico)
         msg = await channel.send(embed=embed, **({"view": view} if view else {}))
         ev.channel_id, ev.message_id = msg.channel.id, msg.id
