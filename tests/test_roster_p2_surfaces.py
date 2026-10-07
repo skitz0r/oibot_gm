@@ -68,9 +68,15 @@ def test_rosters_carry_coverage_level_and_forecast(reg, rs, client_bot):
     raid = next(r for r in c.get("/api/rosters", headers=bearer()).json()["raids"] if r["id"] == RID)
     s = next(x for x in raid["series"] if x["key"] == KEY)
     assert s["level"] == "amber" and s["no_spare"] == ["tank", "healer"] and len(s["forecast"]) >= 4, "the worked example: tanks 2/2, healers 2/2 — no spare"
-    first = s["forecast"][0]
+    # the absences sit on the worked example's run day; find that day in the forecast rather than assuming it comes
+    # first (the forecast and rc.upcoming can disagree about "next" late on a raid day, which made this fail on Tuesdays)
+    away_day = next(iter(reg.members[next(m.discord_id for m in reg.members.values() if m.absences)].absences)).start
+    hit = [f for f in s["forecast"] if f["start"][:10] == away_day or f["start"].startswith(away_day)]
+    hit = hit or [f for f in s["forecast"] if f["away"]]
+    assert len(hit) == 1, f"the absence day {away_day} appears once in the forecast"
+    first = hit[0]
     assert first["short"] == {"tank": 1, "healer": 1} and first["away"] == ["Ona", "Thorn"] and ":" not in first["day"]
-    assert all(f["short"] == {} for f in s["forecast"][1:]), "the absences cover one day only"
+    assert all(f["short"] == {} for f in s["forecast"] if f is not first), "the absences cover one day only"
 
 
 # ---------------------------------------------------------------- plain text
