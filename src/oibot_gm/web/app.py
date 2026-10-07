@@ -41,6 +41,7 @@ GUILD_COOKIE = "oibot_guild"  # the selected guild's key: a preference (unsigned
 GUILD_HEADER = "x-oibot-guild"  # an explicit choice: the app sends it once it has rendered a guild (a tab stays on its guild)
 GUILD_COOKIE_MAX_AGE_S = 365 * 86400
 UNSURE = "Discord didn't answer whether you're in that server; try again in a moment."
+UNSURE_RETRY_S = 5
 CONFIRM_TTL_S = 300  # the "continue as <name>" page (login finished in another browser than it started in)
 MOBILE_LOGIN_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>oibot_GM · sign in</title>
@@ -115,6 +116,14 @@ class NotMember(HTTPException):
                   else "Your Discord account isn't a member of any server this site serves.")
         super().__init__(status_code=403, detail=detail)
         self.guild, self.requested, self.guilds = guild, requested, list(guilds or [])
+
+
+class DiscordUnsure(HTTPException):
+    """Several guilds: Discord didn't answer whether this person is in the server the request is about (K4). Never a
+    move; the API answers 503 JSON with `retry`, a page request gets a page with Try again (never raw JSON)."""
+
+    def __init__(self):
+        super().__init__(status_code=503, detail=UNSURE, headers={"Retry-After": str(UNSURE_RETRY_S)})
 
 
 def set_guild_cookie(resp, key: str, secure: bool | None = None) -> None:
@@ -208,6 +217,14 @@ def not_member_page(infos: list[dict] | dict) -> str:
     return (PAGE_HEAD.replace("{title}", html.escape(info["name"])) + head_block(info)
             + f"<p>You're not in the {html.escape(info['name'])} Discord yet. The site is for members of the server. {how}</p>"
             + f'<div class="btns">{join_button(info.get("invite_url"))}</div>'
+            + '<p class="small"><a class="plain" href="/auth/logout">Log out</a></p></div></body></html>')
+
+
+def unsure_page(retry_href: str) -> str:
+    """A page request whose guild lookup Discord didn't answer (K4): say so, Try again (the same page), Log out."""
+    return (PAGE_HEAD.replace("{title}", "oibot_GM") + '<div class="head"><h1>Discord didn&#x27;t answer</h1></div>'
+            + "<p>We couldn't check whether you're in that Discord server just now. Nothing changed; try again in a moment.</p>"
+            + f'<div class="btns"><a class="btn login" href="{html.escape(retry_href, quote=True)}">Try again</a></div>'
             + '<p class="small"><a class="plain" href="/auth/logout">Log out</a></p></div></body></html>')
 
 
@@ -329,7 +346,7 @@ def create_app(bot) -> FastAPI:
                 if ok:
                     return reg, member, None
                 if answer == "unknown" and many:
-                    raise HTTPException(503, UNSURE)
+                    raise DiscordUnsure()
             raise NotMember(reg.config.name if reg else None, requested=want, guilds=await accessible_keys(uid, skip=reg))
         moved, tried = None, None
         ck = (request.cookies.get(GUILD_COOKIE) or "").strip()
@@ -340,7 +357,7 @@ def create_app(bot) -> FastAPI:
                 if ok:
                     return tried, member, None
                 if answer == "unknown" and many:
-                    raise HTTPException(503, UNSURE)
+                    raise DiscordUnsure()
                 moved = tried.config.name
             elif many:
                 moved = ck  # a guild that isn't served any more
@@ -350,7 +367,7 @@ def create_app(bot) -> FastAPI:
             if ok:
                 return r, member, moved
         if many and any(answer == "unknown" for _, answer, _ in looks):
-            raise HTTPException(503, UNSURE)
+            raise DiscordUnsure()
         raise NotMember(regs[0].config.name if not many else None)
 
     async def viewer(request: Request, guild: str | None = None, query: bool = True) -> Viewer | None:
@@ -580,12 +597,35 @@ def create_app(bot) -> FastAPI:
             return JSONResponse({"error": exc.detail, "not_member": True, "guild": exc.requested, "guilds": exc.guilds}, status_code=403)
         return HTMLResponse(not_member_page(guild_infos()), status_code=403)
 
+    @app.exception_handler(DiscordUnsure)
+    async def _unsure(request: Request, exc: DiscordUnsure):
+        """K4 503: the API keeps its JSON (with `retry`, the SPA offers Try again); a page request (/, /app/*) gets a
+        page with Try again instead of raw JSON."""
+        if request.url.path.startswith("/api/"):
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"error": exc.detail, "retry": True}, status_code=503, headers=exc.headers)
+        if request.url.path == "/":
+            g = (request.query_params.get("g") or "").strip()
+            retry = "/?" + urlencode({"g": g}) if g else "/"
+        else:
+            retry = safe_next(request.url.path + (f"?{request.url.query}" if request.url.query else ""))  # in-app paths only
+        return HTMLResponse(unsure_page(retry), status_code=503, headers=exc.headers)
+
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
-        v = await viewer(request)
+        g = (request.query_params.get("g") or "").strip()
+        try:
+            v = await viewer(request)
+        except NotMember as e:
+            if not (g and e.guilds):
+                raise
+            # a link to a server this person isn't in, and they are in another: into the app, which opens one of
+            # theirs and says so (spa() and the K16 notice) — never the "not in any of these servers" page
+            return RedirectResponse("/app/me?" + urlencode({"g": g}), status_code=302)
         if v is None:
             return HTMLResponse(landing_page(guild_infos()))
-        return RedirectResponse("/app/me", status_code=302)
+        return RedirectResponse("/app/me?" + urlencode({"g": g}) if g else "/app/me", status_code=302)
 
     for _old, _new in (("/admin", "/app/members"), ("/admin/build", "/app/rosters"), ("/bank", "/app/members"), ("/rosters", "/app/rosters"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):
         app.add_api_route(_old, (lambda new: (lambda: RedirectResponse(new, status_code=301)))(_new), methods=["GET"])

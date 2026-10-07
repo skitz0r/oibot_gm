@@ -102,6 +102,14 @@ def open_test_run(reg: Registry, rs: rc.RaidStore, instance: str = "barrow_deeps
     return rc.open_run(reg, rs, instance, start, by="t", cutoffs={"soft": 2, "hard": 1.5, "confirm": 1, **cutoffs})
 
 
+def first_slot(reg: Registry, instance: str, horizon_days: float = 21, min_lead_hours: float = 24):
+    """The soonest scheduled start at least `min_lead_hours` away: a test that locks, confirms and fills a run must
+    not depend on the hour it runs at (the next Tuesday 19:30 is half an hour away on a Tuesday evening, its confirm
+    and fill deadlines already past)."""
+    now = reg.now_local()
+    return next(t for _, t in rc.upcoming(reg, instance, now, 24 * horizon_days) if t - now >= timedelta(hours=min_lead_hours))
+
+
 def join(reg: Registry, rs: rc.RaidStore, ev: rc.RaidEvent, members, status: str = "in") -> None:
     for m in members:
         rc.set_signup(reg, rs, ev, m, None, status, source="test")

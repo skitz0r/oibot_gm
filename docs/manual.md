@@ -65,7 +65,10 @@ in, a **server selector** at the top of the left rail lists the servers you can 
 you own its guild) with your role in each; pick one and every page, save and live update is for that server only. Your
 choice is remembered in this browser. Links the bot posts in Discord (Open the board, Members, Raid rules) open the
 right server. If you leave the server you had selected, the site opens on another one you're in and tells you so; if
-you're in none of them you get the not-a-member page with every server's Join button. Owners and officers are per
+you're in none of them you get the not-a-member page with every server's Join button. A link to a server you aren't
+in opens one you are in, with a note saying so. If Discord doesn't answer whether you're in a server (it happens for
+a few seconds now and then), the site says so with a **Try again** button rather than switching you to the other
+server. Owners and officers are per
 server: owning or running one guild gives you nothing in the other. With one server there is no selector and the site
 looks exactly as before.
 

@@ -1020,11 +1020,19 @@ links, deep links) — honoured when the person may open it, otherwise `NotMembe
 https, a year, `path=/`; logout keeps it) when they may open it, else fall through with `moved` = its name; (3) the
 first guild they may open in `Guilds.ordered()` — the only "first" in the web, over their own list. "May open" =
 `guild_routing.member_of` (the one "belongs to"; no timeout on the web): its owner, or in its server now. With several
-guilds a lookup Discord didn't answer ('unknown') on (1) or (2) is a 503 "try again", never a move (K4); one guild
-behaves exactly as before. Officer and owner are computed against the chosen registry (`officiates(member, guild)` by
+guilds a lookup Discord didn't answer ('unknown') on (1) or (2) is a 503 "try again", never a move (K4): `DiscordUnsure`
+(an `HTTPException` subclass with its own handler, `Retry-After: 5`) answers `/api/*` with `{error, retry: true}` and a page
+request (`/`, `/app/*`) with `unsure_page` (Try again = the same in-app path through `safe_next`, Log out), never raw JSON;
+the SPA's first `/api/meta` shows the message with **Try again** for any failure but 401/403 instead of "Loading…".
+`cached_member` never caches a transient fetch failure (5xx, rate limit, network) as a miss — only Discord's own 404
+is cached for `max_age`; a blip is throttled for `MEMBER_BLIP_RETRY_S` (15 s, `_member_blip`) and reads 'unknown'
+until then, so a hiccup is a 503 for seconds, not five minutes, and `help_privilege` never reads it as "outside". One
+guild behaves exactly as before. Officer and owner are computed against the chosen registry (`officiates(member, guild)` by
 that server, the per-guild owner bypass): owning B grants nothing in A. `POST /api/guild {key}` (CSRF header) sets the
 cookie for a guild the person may open and answers its meta (403 `not_member` otherwise); `/app/*?g=<key>` sets it too
-(`spa()`), and a link to a server they aren't in opens theirs (the app says so); a logged-out deep link keeps its query
+(`spa()`), and a link to a server they aren't in opens theirs (the app says so) — `/?g=<key>` too: `home()` redirects a
+logged-in person to `/app/me?g=<key>` (the link's guild, or theirs with the notice when they aren't in it; the
+not-a-member page only when they may open none); a logged-out deep link keeps its query
 through login (`login_href`, K14). `/api/meta` adds `guild_key`, `guilds` ([{key, name, icon, role}] — the selector's
 source; only meta pays for the other guilds' lookups), `moved` (and re-sets the cookie when moved), `profile`
 (`GameProfile.label`) and `game` (the label without "WoW: "). `/api/public`: one guild (or none) → the old shape

@@ -151,6 +151,36 @@ def test_a_discord_hiccup_on_the_selected_guild_is_a_503_not_a_move(duo, env):
     assert meta(c).json()["guild_key"] == GUILD, "the other guild answered: fine"
 
 
+def test_a_discord_hiccup_on_a_page_load_is_a_try_again_page_not_raw_json(duo, env):
+    bot = WebBot(duo, default_members(), flaky={(DUO_SERVER, BOTH)})
+    c = client_for(bot)
+    as_user(c, BOTH, guild_cookie=GUILD2)
+    for path, retry in (("/", 'href="/"'), (f"/?g={GUILD2}", f'href="/?g={GUILD2}"'), (f"/app/rosters?g={GUILD2}", f'href="/app/rosters?g={GUILD2}"'), ("/app/me", 'href="/app/me"')):
+        r = c.get(path)
+        assert r.status_code == 503 and r.headers["content-type"].startswith("text/html"), (path, r.status_code, r.text[:200])
+        assert "Try again" in r.text and retry in r.text and '"detail"' not in r.text, path
+        assert r.headers.get("retry-after") == str(web.UNSURE_RETRY_S)
+    api = meta(c)
+    assert api.status_code == 503 and api.json() == {"error": web.UNSURE, "retry": True}, "the API keeps its JSON (the app offers Try again)"
+    assert web.unsure_page('/app/me?g="><script>').count("<script>") == 0, "the retry link is escaped"
+
+
+def test_homepage_link_to_a_server_you_are_not_in_opens_yours(bot):
+    c = client_for(bot)
+    as_user(c, DEMO_ONLY)
+    r = c.get(f"/?g={GUILD2}")
+    assert r.status_code == 302 and r.headers["location"] == f"/app/me?g={GUILD2}", "into the app, which opens yours and says so"
+    assert c.get(r.headers["location"]).status_code == 200
+    as_user(c, BOTH)
+    r = c.get(f"/?g={GUILD2}")
+    assert r.status_code == 302 and r.headers["location"] == f"/app/me?g={GUILD2}", "the link's guild is kept (spa() remembers it)"
+    assert f"{web.GUILD_COOKIE}={GUILD2}" in c.get(r.headers["location"]).headers.get("set-cookie", "")
+    assert c.get("/").headers["location"] == "/app/me", "no link: as before"
+    as_user(c, NEITHER)
+    r = c.get(f"/?g={GUILD2}")
+    assert r.status_code == 403 and INVITE_A in r.text and INVITE_B in r.text, "in no server at all: the page with every Join button"
+
+
 def test_nobody_in_either_server_gets_the_page_with_every_join_button(bot):
     c = client_for(bot)
     as_user(c, NEITHER)

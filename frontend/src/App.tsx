@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { REFRESH_EVENT } from "./hooks/usePoll";
-import { AppShell, Avatar, Box, Burger, Group, Menu, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { AppShell, Avatar, Box, Burger, Button, Group, Menu, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot } from "@tabler/icons-react";
@@ -77,7 +77,12 @@ export default function App() {
   const mobile = useMediaQuery("(max-width: 48em)");
   const loc = useLocation();
   const [notMember, setNotMember] = useState(false);
+  // a first load that failed for another reason (a 503 "Discord didn't answer", the bot restarting, no network): say
+  // so and offer Try again, never sit on "Loading…" (K4)
+  const [failed, setFailed] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    setFailed(null);
     api.get<Meta>("/api/meta").then((m) => {
       setGuild(m.guild_key, m.guild);  // from here on every call, image and live stream names this guild
       setMeta(m);
@@ -89,10 +94,20 @@ export default function App() {
         : prev && prev.key !== m.guild_key ? `You no longer have access to ${prev.name}; showing ${m.guild}.`
         : linked && linked !== m.guild_key && m.guilds.length ? `That link is for a server you're not in; showing ${m.guild}.` : null;
       if (note) notifications.show({ message: note, color: "yellow", autoClose: 8000 });
-    }).catch((e) => { if (e instanceof ApiError && e.status === 403) setNotMember(true); });
-  }, []);
+    }).catch((e) => {
+      if (e instanceof ApiError && e.status === 403) setNotMember(true);
+      else if (e instanceof ApiError && e.status === 401) return;  // api() is already sending the browser to log in
+      else setFailed((e instanceof ApiError && e.message) || "The site didn't answer; try again in a moment.");
+    });
+  }, [attempt]);
   useEffect(() => close(), [loc.pathname, close]);
   if (notMember) return <NotMember />;
+  if (failed) return (
+    <Stack p="xl" gap="sm" align="flex-start">
+      <Text>{failed}</Text>
+      <Button leftSection={<IconRefresh size={16} />} onClick={() => setAttempt((n) => n + 1)}>Try again</Button>
+    </Stack>
+  );
   if (!meta) return <Box p="xl"><Text c="dimmed">Loading…</Text></Box>;
 
   const officer = (el: React.ReactElement) => (meta.viewer.officer ? el : <Navigate to="/me" replace />);

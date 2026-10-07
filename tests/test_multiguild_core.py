@@ -301,6 +301,49 @@ def test_dm_with_a_discord_hiccup_asks_instead_of_picking_the_other_guild(duo):
     assert run(guild_routing.may_access(client, duo.a, 42)) is False and run(guild_routing.membership(client, duo.a, 42)) == "unknown"
 
 
+def test_a_transient_fetch_failure_is_never_cached_as_not_a_member(duo, monkeypatch):
+    """The real cached_member behind member_of: a 503 from Discord reads 'unknown' only until the short retry (never for
+    the cache's 5 minutes, which would be a 503 page for that long on the web); a success and a 404 are cached as before."""
+    import functools
+
+    from oibot_gm import discord_bot as db
+
+    clock = {"t": 1_000_000.0}
+    monkeypatch.setattr(db.time, "time", lambda: clock["t"])
+    calls, answer = [], {"r": discord.HTTPException(types.SimpleNamespace(status=503, reason="Service Unavailable"), "later")}
+
+    class Server:
+        id = 1
+
+        def get_member(self, _uid):
+            return None
+
+        async def fetch_member(self, uid):
+            calls.append(uid)
+            if isinstance(answer["r"], Exception):
+                raise answer["r"]
+            return answer["r"]
+
+    server = Server()
+    stub = types.SimpleNamespace(get_guild=lambda gid: server if gid == 1 else None)
+    stub.cached_member = functools.partial(OibotGM.cached_member, stub)
+    look = lambda: run(guild_routing.member_of(stub, duo.a, 42, timeout=None))[0]  # noqa: E731
+    assert look() == "unknown" and calls == [42]
+    assert look() == "unknown" and calls == [42], "throttled for a few seconds: no stream of fetches"
+    assert (1, 42) not in stub.__dict__.get("_member_cache", {}), "a blip is not an answer"
+    clock["t"] += db.MEMBER_BLIP_RETRY_S
+    member = types.SimpleNamespace(id=42)
+    answer["r"] = member
+    assert look() == "yes" and len(calls) == 2, "asked again after the retry, long before the 5-minute cache would"
+    clock["t"] += 60
+    assert look() == "yes" and len(calls) == 2, "a real answer is cached as before"
+    clock["t"] += 300
+    answer["r"] = discord.NotFound(types.SimpleNamespace(status=404, reason="Not Found"), {"code": 10007, "message": "Unknown Member"})
+    assert look() == "no" and len(calls) == 3
+    clock["t"] += 60
+    assert look() == "no" and len(calls) == 3, "Discord's own 404 is remembered for the cache's lifetime"
+
+
 def test_dm_from_someone_in_neither_lists_every_join_link(duo):
     duo.b.config.invite_url = "https://discord.gg/duo"
     client = dm_client(duo, {})

@@ -766,8 +766,8 @@ def test_in_guild_is_false_only_on_discords_own_unknown_member(reg):
     guild["g"] = Guild()
     raised["exc"] = discord.HTTPException(types.SimpleNamespace(status=503, reason="Service Unavailable"), "try later")
     assert check() is True, "a 503 is not a departure"
-    assert check() is True, "nor is the cached miss it left behind"
-    stub.__dict__.pop("_member_cache", None)
+    assert check() is True, "nor is the throttle it left behind (a blip is never cached as a miss)"
+    stub.__dict__.pop("_member_blip", None)  # the throttle's few seconds have passed
     raised["exc"] = discord.NotFound(types.SimpleNamespace(status=404, reason="Not Found"), {"code": 10007, "message": "Unknown Member"})
     assert check() is False, "Discord's Unknown Member: they left"
     assert check() is False, "remembered for the cache's lifetime"

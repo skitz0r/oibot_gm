@@ -66,6 +66,7 @@ def _store() -> GitStore:
 
 CLASS_COLOURS = {"Warrior": 0xC79C6E, "Paladin": 0xF58CBA, "Hunter": 0xABD473, "Rogue": 0xFFF569, "Priest": 0xFFFFFF, "Shaman": 0x0070DE, "Mage": 0x69CCF0, "Warlock": 0x9482C9, "Druid": 0xFF7D0A}
 from .constants import ROLES, TEAL  # noqa: E402
+MEMBER_BLIP_RETRY_S = 15  # cached_member: a transient fetch failure is retried after this, never cached as a miss
 ROLE_ICON = {"tank": "🛡", "healer": "✚", "melee": "⚔", "ranged": "🏹"}
 # Filled at startup with application emojis (class_<name>, role_<name>); falls back to text.
 EMOJI: dict[str, str] = {}
@@ -988,16 +989,26 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         if hit and now - hit[0] < max_age:
             return hit[1]
         gone: set[tuple[int, int]] = self.__dict__.setdefault("_member_gone", set())  # misses that were Discord's own 404
+        # a fetch Discord didn't answer (5xx, rate limit, network) is NOT an answer: it is never cached as "not a
+        # member" (that would read as 'unknown' — a 503 on the web — for max_age); it is only throttled for a few seconds
+        blips: dict[tuple[int, int], float] = self.__dict__.setdefault("_member_blip", {})
+        b = blips.get(key)
+        if b is not None and now - b < min(max_age, MEMBER_BLIP_RETRY_S):
+            return None
         try:
             m = await guild.fetch_member(uid)
         except Exception as e:  # noqa: BLE001 — not a member (404) or transient
-            m = None
-            if isinstance(e, discord.NotFound):
-                gone.add(key)
-            else:
+            if not isinstance(e, discord.NotFound):
                 gone.discard(key)
+                if len(blips) > 4096:
+                    blips.clear()
+                blips[key] = now
+                return None
+            m = None
+            gone.add(key)
         else:
             gone.discard(key)
+        blips.pop(key, None)
         if len(cache) > 4096:  # bounded: drop what has aged out
             for k in [k for k, (t, _) in cache.items() if now - t >= max_age]:
                 cache.pop(k, None)

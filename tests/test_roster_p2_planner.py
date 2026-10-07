@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from conftest import join
+from conftest import first_slot, join
 
 from oibot_gm import raidcycle as rc
 from oibot_gm.models import Player, RosterResult
@@ -150,7 +150,7 @@ def _joined_series(reg, rs, specs):
         m = add(reg, 100 + i, name, cls, spec, off, flex, alt)
         reg.regular_add(m.discord_id, KEY, "officer")
         ms.append(m)
-    t = rc.upcoming(reg, RID, reg.now_local(), 24 * 21)[0][1]
+    t = first_slot(reg, RID)
     ev = rc.open_run(reg, rs, RID, t, by="t")
     join(reg, rs, ev, ms)
     return ev, {m.display_name: m for m in ms}
