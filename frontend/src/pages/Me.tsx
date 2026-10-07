@@ -97,7 +97,7 @@ export function MePage({ meta }: { meta: Meta }) {
       <div className={css.layout}>
         <Stack gap="lg" style={{ minWidth: 0 }}>
           <Card>
-            <CardHeader title="Characters" hint="Forever names are first + last · the crown marks your main" />
+            <CardHeader title="Characters" hint={`${meta.game} names are first + last · the crown marks your main`} />
             <Table.ScrollContainer minWidth={640}>
               <Table style={{ tableLayout: "fixed" }}>
                 <Table.Thead><Table.Tr><Table.Th w={editing ? 84 : 44} /><Table.Th>Character</Table.Th><Table.Th w={editing ? "27%" : "22%"}>Spec</Table.Th><Table.Th w={editing ? "27%" : "22%"}>Offspec</Table.Th>{!editing && <Table.Th w="18%">Status</Table.Th>}<Table.Th w={48} /></Table.Tr></Table.Thead>

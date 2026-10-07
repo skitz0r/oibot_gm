@@ -25,23 +25,30 @@ SEVERAL = "You're in more than one server I look after; use this command in the 
 LOOKUP_TIMEOUT_S = 1.5  # per guild, run concurrently: `need` stays inside Discord's 3-second window
 
 
-async def membership(bot, reg, uid: int) -> str:
-    """'yes' | 'no' | 'unknown': is `uid` in the guild's Discord server right now (gateway cache, else one cached fetch)."""
+async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S) -> tuple[str, object | None]:
+    """(answer, member): `membership`'s answer plus the Discord member when it is 'yes' (the web needs the member for
+    the officer check and the display name). `timeout` None = wait as long as the lookup takes (the web; Discord's
+    3-second window is the reason for the default)."""
     get_guild = getattr(bot, "get_guild", None)
     guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
     if guild is None:
-        return "no"  # a server the bot can't see
+        return "no", None  # a server the bot can't see
     cached_member = getattr(bot, "cached_member", None)
     if cached_member is None:
-        return "unknown"
+        return "unknown", None
     try:
-        m = await asyncio.wait_for(cached_member(guild, uid), LOOKUP_TIMEOUT_S)
+        m = await (asyncio.wait_for(cached_member(guild, uid), timeout) if timeout else cached_member(guild, uid))
     except Exception:  # noqa: BLE001 — a timeout or a transient error is not a departure
-        return "unknown"
+        return "unknown", None
     if m is not None:
-        return "yes"
+        return "yes", m
     gone = getattr(bot, "__dict__", {}).get("_member_gone", set())
-    return "no" if (guild.id, uid) in gone else "unknown"
+    return ("no" if (guild.id, uid) in gone else "unknown"), None
+
+
+async def membership(bot, reg, uid: int) -> str:
+    """'yes' | 'no' | 'unknown': is `uid` in the guild's Discord server right now (gateway cache, else one cached fetch)."""
+    return (await member_of(bot, reg, uid))[0]
 
 
 async def guilds_of(bot, uid: int, guilds=None) -> list:

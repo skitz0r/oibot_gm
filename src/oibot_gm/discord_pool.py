@@ -32,9 +32,10 @@ def _comp_icon(ico, key: str) -> str:
     return ico("spec", key) if ":" in key else ico("class", key)
 
 
-def _site(path: str) -> str | None:
+def _site(reg: Registry, path: str) -> str | None:
+    """A site page for this guild (?g= selects it in the server selector), or None off https."""
     web = os.environ.get("OIBOT_WEB_URL", "")
-    return f"{web}{path}" if web.startswith("https") else None
+    return f"{web}{path}?g={reg.key}" if web.startswith("https") else None
 
 
 def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.LayoutView, str]:
@@ -49,8 +50,9 @@ def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.L
     short = [c for c in d["comp"] if c["level"] == "red" and c["key"] not in ROLES]
     over = d["over"]
     head = f"## {name}\n**{hc['mains']}** / {size} mains" + (f" · {hc['alts']} alts" if hc["alts"] else "") + (f" · {hc['unnamed']} unnamed" if hc["unnamed"] else "")
-    web = os.environ.get("OIBOT_WEB_URL", "")
-    top = ui.Section(ui.TextDisplay(head), accessory=ui.Thumbnail(media=f"{web}/img/raid/{roster.get('instance') or key}.png")) if web.startswith("https") and (roster.get("instance") or key) in reg.profile.raids else ui.TextDisplay(head)
+    rid = roster.get("instance") or key
+    thumb = views.raid_thumb_url(reg, rid) if rid in reg.profile.raids else None
+    top = ui.Section(ui.TextDisplay(head), accessory=ui.Thumbnail(media=thumb)) if thumb else ui.TextDisplay(head)
     lines = ["   ".join(f"{ico('role', r['role'])} {r['have']}/{r['need']}" + (" ⚠" if r["level"] == "red" else "") for r in d["roles"] if r["need"])]
     missing = [b for b in d["missing_buffs"] if ico("buff", b["id"])]
     if missing:
@@ -63,7 +65,7 @@ def pool_layout(reg: Registry, roster: dict, ico, rs=None) -> tuple[discord.ui.L
     if over:
         lines.append("**Over cap** " + "   ".join(f"{_comp_icon(ico, c['key'])} {c['have']}/{c['max']}" for c in over[:8]))
     parts = [top, ui.Separator(), ui.TextDisplay("\n".join(x for x in lines if x.strip()) or "every slot filled")]
-    links = [ui.Button(label=label, style=discord.ButtonStyle.link, url=url) for label, url in (("Members", _site("/app/members")), ("Raid rules", _site("/app/raids"))) if url]
+    links = [ui.Button(label=label, style=discord.ButtonStyle.link, url=url) for label, url in (("Members", _site(reg, "/app/members")), ("Raid rules", _site(reg, "/app/raids"))) if url]
     parts += [ui.Separator(), ui.TextDisplay(f"-# Change the ideals in plain text here: @mention me, e.g. “{roster.get('instance') or key}: we want 3 tanks”, “cap hunters at 3”.")]
     if links:
         parts.append(ui.ActionRow(*links))

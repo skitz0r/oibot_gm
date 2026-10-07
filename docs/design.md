@@ -694,7 +694,7 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **Decision (owner).** Anyone can join the Discord server; applications happen *in Discord* (`/apply`, the registration card's Apply button). The website does not take applications. It routes newcomers to the server, lets the owner set up recruitment, and lets officers (and the MCP server) read and decide applications through the same verb as the Discord card.
 
-**Homepage.** `web/app.py` `landing_page(public_info)`: guild name, the Discord server's icon when it has one, a one-line intro, `about` as one paragraph, **Join our Discord** only when `GuildConfig.invite_url` is set, **Log in with Discord**. Plain HTML, the same dark card and fonts as before, phone width. A logged-in member still redirects to `/app/me`. `GET /api/public` (anonymous) returns the same facts: `{name, about, invite_url, recruiting, icon}`, nothing personal. **Not a member:** `viewer()` raises `NotMember` (an `HTTPException` subclass) for a logged-in Discord user outside the server; its own exception handler (class lookup beats the generic `HTTPException` handler in `api.py`) keeps the 403 JSON for `/api/*` (with `not_member: true`) and renders `not_member_page` (the Join button when an invite is set, a log-out link) for `/` and `/app/*`. The SPA shows the same screen (`components/NotMember.tsx`, from `/api/public`) if `/api/meta` answers 403 mid-session.
+**Homepage.** `web/app.py` `landing_page(infos)` (several guilds: one card per server side by side, each with its own Join and Log in — §5.32 "Web"; one guild: as follows): guild name, the Discord server's icon when it has one, a one-line intro, `about` as one paragraph, **Join our Discord** only when `GuildConfig.invite_url` is set, **Log in with Discord**. Plain HTML, the same dark card and fonts as before, phone width. A logged-in member still redirects to `/app/me`. `GET /api/public` (anonymous) returns the same facts: `{name, about, invite_url, recruiting, icon}`, nothing personal. **Not a member:** `viewer()` raises `NotMember` (an `HTTPException` subclass) for a logged-in Discord user outside the server; its own exception handler (class lookup beats the generic `HTTPException` handler in `api.py`) keeps the 403 JSON for `/api/*` (with `not_member: true`) and renders `not_member_page` (the Join button when an invite is set, a log-out link) for `/` and `/app/*`. The SPA shows the same screen (`components/NotMember.tsx`, from `/api/public`) if `/api/meta` answers 403 mid-session.
 
 **Settings.** The Config page's Recruitment section (`components/Recruitment.tsx`, edit mode with one Save) → `POST /api/admin/recruitment` (owner) → `Registry.set_recruitment` (one validated write; a `RegistryError` is shown inline and nothing is saved). Fields: open, note (≤200), invite URL, member roles (role ids), questions (≤15; label ≤45 and hint ≤100 are Discord's modal caps). **Create invite:** `POST /api/admin/invite {channel_id}` (owner) → `SetupMixin.create_invite(reg, channel_id)`: a permanent, unlimited-use invite (`max_age=0, max_uses=0`); a missing *Create Instant Invite* permission is a `ValueError` naming it. It returns the link and does not save it: the page fills the field and the owner saves the section. `GET /api/recruitment` (officers) also lists the server's roles.
 
@@ -948,7 +948,7 @@ interaction, one person for two seats refused). **Migration:** none (new fields 
 `FillAsk.why/phase/approved_by/held`, `RaidEvent.health_early`; a declared flex role is stored as before).
 
 
-### 5.32 Several servers in one process (stage S1 built 2026-10-06; S2 web selector and S3 DMs/MCP/news follow)
+### 5.32 Several servers in one process (stages S1 core and S2 web selector built 2026-10-06; S3 DMs/MCP/news follows)
 
 Owner decisions 2026-10-06 (D1–D7): one bot process serves several Discord servers, each its own guild with fresh data
 in its own data-repo folder; nothing is shared but the process (and usually the owner). Full design and the skeptic
@@ -1010,6 +1010,45 @@ each server) and `guilds_failed`. `check_emoji_conflicts` warns when two loaded 
 different art. **Shared on purpose:** the LLM budget (one monthly cap for the whole bot), the feed token and listener.
 Tests: `tests/test_multiguild_core.py` on the two-guild fixture (`conftest.duo`: demo on server 1, duo on server 2
 with its own owner and members; `same_run` opens one run key in both, also via a shared schedule id).
+
+**Web: the server selector (S2, built 2026-10-06).** Every request acts on one guild, chosen by `web/app.py`
+`selected_reg(request, uid)`: (1) an explicit choice — the `X-Oibot-Guild` header (`api.ts` sends it once the tab has
+rendered a guild, so a tab stays on its guild when another tab switches) or `?g=<key>` (EventSource, `<img>`, Discord
+links, deep links) — honoured when the person may open it, otherwise `NotMember` (403 JSON `{not_member, guild:
+<requested>, guilds: [<keys they can open>]}`): **a request that named its guild is never switched silently**; (2) the
+`oibot_guild` cookie (a key; unsigned — a preference, re-checked on every request; httponly, `samesite=lax`, `secure` on
+https, a year, `path=/`; logout keeps it) when they may open it, else fall through with `moved` = its name; (3) the
+first guild they may open in `Guilds.ordered()` — the only "first" in the web, over their own list. "May open" =
+`guild_routing.member_of` (the one "belongs to"; no timeout on the web): its owner, or in its server now. With several
+guilds a lookup Discord didn't answer ('unknown') on (1) or (2) is a 503 "try again", never a move (K4); one guild
+behaves exactly as before. Officer and owner are computed against the chosen registry (`officiates(member, guild)` by
+that server, the per-guild owner bypass): owning B grants nothing in A. `POST /api/guild {key}` (CSRF header) sets the
+cookie for a guild the person may open and answers its meta (403 `not_member` otherwise); `/app/*?g=<key>` sets it too
+(`spa()`), and a link to a server they aren't in opens theirs (the app says so); a logged-out deep link keeps its query
+through login (`login_href`, K14). `/api/meta` adds `guild_key`, `guilds` ([{key, name, icon, role}] — the selector's
+source; only meta pays for the other guilds' lookups), `moved` (and re-sets the cookie when moved), `profile`
+(`GameProfile.label`) and `game` (the label without "WoW: "). `/api/public`: one guild (or none) → the old shape
+exactly (K13); several → `{guilds: [public_info + key]}`. `/api/ops` adds `scope: "bot"` only with several guilds
+(K17). The request log line carries `guild=<key>`. **Live updates:** `subscribers` maps each stream's queue to its
+guild (taken at connect, `?g=`); `publish(topic, guild)` reaches only that guild's pages (`run_saved(guild, run)`,
+`reg_saved(reg, …)`, `ops_line(guild)`), `guild=None` every page (the agents' job status); topic strings are
+unchanged, so two guilds holding one run key never wake each other's boards. **Images and Discord links:**
+`/img/raid/<rid>.png?g=<key>` (else the cookie, else the only guild; several and none named → the profile's defaults,
+never "the first guild"; the cache key holds profile, name, size and lockout, K15); `raid_views.raid_thumb_url(reg,
+rid)`, `board_url(reg, ev)` (`/app/rosters?g=<key>#run-<key>`) and `discord_pool._site(reg, path)` carry the key.
+**Homepage and not-a-member page** (`landing_page(infos)`, `not_member_page(infos)` over `guild_infos()` =
+`public_card` per guild in ordered() order): one guild — the old pages byte for byte (a golden test), none — the
+generic card (K22); several — the servers side by side (a grid that stacks at phone width), each with its icon, name,
+about, its own Join button (when it has an invite) and its own Log in (`next=/app/me?g=<key>`, encoded); the
+not-a-member page shows only when the person may open none, with every server's Join. **App chrome:** a selector in
+the rail (server icon + name — Discord server icons, not in-game icons, so the name stands beside them) when
+`meta.guilds` has more than one; switching = `POST /api/guild` then a reload of the path; the rail subtitle is
+`meta.profile`; the phone header shows the server name; a notice whenever the app lands on another guild than the one
+it had (`moved`, a tab whose guild became inaccessible — `api.ts` drops the header and reloads, K16 — or a link to a
+server the person isn't in); the Config page title names the server; copy that named Forever reads `meta.game`.
+MCP bearer requests still act on the guild's owner as in S1 (S3 adds `guild`). Tests: `tests/test_web_multiguild.py`
+(precedence, refusals, moved, 503, per-guild rights, `/api/guild`, public/home/not-member, SSE isolation on a shared
+run key, emblems per guild, `/api/ops`, plain-change previews per guild, deep links, single-guild goldens).
 
 ## 6. Architecture
 

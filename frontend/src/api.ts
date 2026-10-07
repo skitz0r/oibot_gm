@@ -1,4 +1,18 @@
 // Thin JSON client. The session cookie carries identity; the header marks requests as ours (CSRF guard on the server).
+// Several guilds (design §5.32 "Web"): once the app has rendered a guild, every call names it (X-Oibot-Guild), so this
+// tab stays on its guild even when another tab switches the browser's selection (the oibot_guild cookie).
+let guild: string | null = null;
+let guildName: string | null = null;
+const PREV_KEY = "oibot_prev_guild";
+
+/** The guild this tab shows (from /api/meta), or null before meta has loaded. */
+export function setGuild(key: string | null, name: string | null = null) { guild = key; guildName = name; }
+/** "?g=<key>" for URLs the browser fetches on its own (images, EventSource): they can't carry the header. */
+export function guildQuery(sep: "?" | "&" = "?"): string { return guild ? `${sep}g=${encodeURIComponent(guild)}` : ""; }
+/** The guild a tab lost access to mid-session (set just before the reload that lands on another), read once. */
+export function takePrevGuild(): { key: string; name: string } | null {
+  try { const raw = sessionStorage.getItem(PREV_KEY); sessionStorage.removeItem(PREV_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
 export class ApiError extends Error {
   status: number;
   body?: unknown;  // the server's JSON on a refusal (a stale board write carries the current board)
@@ -11,15 +25,24 @@ export class ApiError extends Error {
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(path, {
     method,
-    headers: { "Content-Type": "application/json", "X-Requested-With": "oibot" },
+    headers: { "Content-Type": "application/json", "X-Requested-With": "oibot", ...(guild ? { "X-Oibot-Guild": guild } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: "same-origin",
   });
   if (r.status === 401) {
-    window.location.href = "/auth/login?next=" + encodeURIComponent(window.location.pathname);
+    window.location.href = "/auth/login?next=" + encodeURIComponent(window.location.pathname + window.location.search);
     throw new ApiError(401, "login required");
   }
   const data = await r.json().catch(() => ({}));
+  const nm = data as { not_member?: boolean; guilds?: string[] };
+  if (r.status === 403 && nm.not_member && guild && (nm.guilds || []).length) {
+    // this tab's guild is no longer one this person may open, but another is: drop the header and reload onto the
+    // browser's selection (or the first guild they may open); the app then says which guild it left (K16)
+    try { sessionStorage.setItem(PREV_KEY, JSON.stringify({ key: guild, name: guildName || guild })); } catch { /* private window: no notice */ }
+    setGuild(null);
+    window.location.reload();
+    throw new ApiError(403, "switching server");
+  }
   if (!r.ok) { const err = new ApiError(r.status, (data as { error?: string }).error || r.statusText); err.body = data; throw err; }
   return data as T;
 }
@@ -30,8 +53,12 @@ export const api = {
 };
 
 // ---- shapes (mirror src/oibot_gm/web/api.py)
+/** A guild this person may open: the server selector's rows (role = theirs there). */
+export interface GuildChoice { key: string; name: string; icon: string | null; role: "owner" | "officer" | "member" }
 export interface Meta {
-  guild: string; tz: string; classes: Record<string, Record<string, string>>; icons: { classes: Record<string, string>; roles: Record<string, string>; specs: Record<string, string> };
+  guild: string; tz: string;
+  /** the selected guild's key; every guild this person may open; `moved` = the guild they had selected and lost; the game version's label */
+  guild_key: string; guilds: GuildChoice[]; moved: string | null; profile: string; game: string; classes: Record<string, Record<string, string>>; icons: { classes: Record<string, string>; roles: Record<string, string>; specs: Record<string, string> };
   raids: { id: string; name: string; size: number; lockout_days: number }[];
   viewer: { uid: string; name: string; officer: boolean; owner: boolean };
   labels: Record<string, string>;
@@ -132,11 +159,14 @@ export interface MemberRow { uid: string; display_name: string; verification: st
 export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }
-export interface Ops { head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
+/** `scope: "bot"` (several guilds only): head, push, llm and uptime are the whole bot's, the rest is this guild's. */
+export interface Ops { scope?: "bot"; head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
 /** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
 export interface RoleRef { id: string; name: string }
-/** GET /api/public (anonymous): what the homepage and the not-a-member screen show. */
-export interface PublicInfo { name: string; about: string | null; invite_url: string | null; recruiting: boolean; icon: string | null }
+/** GET /api/public (anonymous): what the homepage and the not-a-member screen show. One guild: this shape; several:
+ *  `{guilds: PublicInfo[]}` (each with its key) — read it through `publicGuilds`. */
+export interface PublicInfo { name: string; about: string | null; invite_url: string | null; recruiting: boolean; icon: string | null; key?: string }
+export const publicGuilds = (p: PublicInfo | { guilds: PublicInfo[] }): PublicInfo[] => ("guilds" in p ? p.guilds : [p]);
 export interface Question { id?: string; label: string; hint: string | null; required: boolean }
 /** GET /api/recruitment (officers); the owner saves the same shape to /api/admin/recruitment. */
 export interface Recruitment { open: boolean; note: string; invite_url: string; questions: Question[]; member_role_ids: string[]; questions_max: number; guild_roles: RoleRef[]; owner: boolean }

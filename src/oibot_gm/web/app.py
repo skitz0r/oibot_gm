@@ -4,7 +4,12 @@ The old server-rendered pages are gone; their URLs redirect into the app.
 Env: OIBOT_WEB_BIND (host:port, unset = web off), OIBOT_WEB_URL (public base, e.g. https://gm.earlyandoften.gg),
 DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET (OAuth2), OIBOT_WEB_SECRET (cookie signing),
 OIBOT_WEB_SESSION_EPOCH (unix time or ISO datetime: every session issued before it is logged out),
-OIBOT_WEB_DEV_USER (a Discord id: skip OAuth on localhost while developing)."""
+OIBOT_WEB_DEV_USER (a Discord id: skip OAuth on localhost while developing).
+
+Several guilds (design §5.32 "Web"): every request acts on ONE guild, `selected_reg`: an explicit choice (the
+`X-Oibot-Guild` header the app sends, or `?g=<key>` on EventSource / images / deep links) is honoured or refused, never
+switched; else the `oibot_guild` cookie (a preference, re-checked every request); else the first guild the person can
+open in `Guilds.ordered()`. One guild configured = exactly the old single-guild site."""
 from __future__ import annotations
 
 import asyncio
@@ -16,14 +21,14 @@ import re
 import secrets
 import time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from itsdangerous import BadSignature, URLSafeSerializer
 
-from .. import render
+from .. import guild_routing, render
 
 HERE = Path(__file__).parent
 DISCORD_API = "https://discord.com/api/v10"
@@ -32,6 +37,10 @@ COOKIE = "oibot_session"
 NONCE_COOKIE = "oibot_oauth"  # short-lived: binds the OAuth round trip to the browser that started it
 STATE_TTL_S = 600  # a login must complete within 10 minutes of the redirect
 SESSION_MAX_AGE_S = 30 * 86400
+GUILD_COOKIE = "oibot_guild"  # the selected guild's key: a preference (unsigned), access re-checked on every request
+GUILD_HEADER = "x-oibot-guild"  # an explicit choice: the app sends it once it has rendered a guild (a tab stays on its guild)
+GUILD_COOKIE_MAX_AGE_S = 365 * 86400
+UNSURE = "Discord didn't answer whether you're in that server; try again in a moment."
 CONFIRM_TTL_S = 300  # the "continue as <name>" page (login finished in another browser than it started in)
 MOBILE_LOGIN_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>oibot_GM · sign in</title>
@@ -97,11 +106,22 @@ def session_valid(s: dict | None, now: float | None = None) -> bool:
 
 class NotMember(HTTPException):
     """A logged-in Discord user who isn't in the guild's server. The API answers 403 JSON as before; an HTML page
-    request (/, /app/*) gets the friendly 'not in the Discord yet' page with the Join button instead."""
+    request (/, /app/*) gets the friendly 'not in the Discord yet' page with the Join button instead.
+    `requested` = the guild key the request named (None = it named none); `guilds` = the keys this person CAN open
+    (the app switches to one of those, saying so, instead of showing the page)."""
 
-    def __init__(self, guild: str):
-        super().__init__(status_code=403, detail=f"Your Discord account isn't a member of the {guild} server.")
-        self.guild = guild
+    def __init__(self, guild: str | None, requested: str | None = None, guilds: list[str] | None = None):
+        detail = (f"Your Discord account isn't a member of the {guild} server." if guild
+                  else "Your Discord account isn't a member of any server this site serves.")
+        super().__init__(status_code=403, detail=detail)
+        self.guild, self.requested, self.guilds = guild, requested, list(guilds or [])
+
+
+def set_guild_cookie(resp, key: str, secure: bool | None = None) -> None:
+    """Remember the selected guild for this browser (a year; logout keeps it; path / so every page and image sees it)."""
+    if secure is None:
+        secure = web_config()[1].startswith("https")
+    resp.set_cookie(GUILD_COOKIE, key, max_age=GUILD_COOKIE_MAX_AGE_S, httponly=True, secure=secure, samesite="lax", path="/")
 
 
 PAGE_HEAD = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -125,8 +145,41 @@ def head_block(info: dict) -> str:
     return f'<div class="head">{icon}<h1>{html.escape(info["name"])}</h1></div>'
 
 
-def landing_page(info: dict) -> str:
-    """The public homepage: who we are, Join our Discord (when an invite is set), Log in with Discord for members."""
+GENERIC_INFO = {"name": "oibot_GM", "about": None, "invite_url": None, "recruiting": False, "icon": None}  # no guild configured yet
+
+# several guilds: the cards sit in a grid that stacks at phone width (the single-guild page keeps PAGE_HEAD's one card)
+PAGE_HEAD_MANY = PAGE_HEAD.replace("</style></head><body><div class=\"card\">",
+                                   ".wrap{box-sizing:border-box;width:100%;max-width:960px;padding:16px}.intro{text-align:center;margin:0 0 16px}"
+                                   ".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),440px));justify-content:center;gap:16px}"
+                                   ".cards .card{width:auto;max-width:none;margin:0}</style></head><body><div class=\"wrap\">")
+
+
+def login_href(next_path: str) -> str:
+    """/auth/login with an encoded in-app `next` (a query such as ?g=<key> survives the round trip)."""
+    return "/auth/login?next=" + quote(next_path, safe="/")
+
+
+def landing_card(info: dict) -> str:
+    """One guild's card on the several-guild homepage: icon, name, about, its own Join button and its own Log in."""
+    about = f'<p class="about">{html.escape(info["about"])}</p>' if info.get("about") else ""
+    login_cls = "alt" if info.get("invite_url") else "login"
+    nxt = f"/app/me?g={info['key']}" if info.get("key") else "/app/me"
+    tail = ("Anyone can join the Discord; new raiders apply there with /apply." if info.get("recruiting") else "Anyone can join the Discord.") if info.get("invite_url") else ""
+    return ('<div class="card">' + head_block(info) + about
+            + f'<div class="btns">{join_button(info.get("invite_url"))}<a class="btn {login_cls}" href="{html.escape(login_href(nxt), quote=True)}">Log in with Discord</a></div>'
+            + (f'<p class="small">{tail}</p>' if tail else "") + "</div>")
+
+
+def landing_page(infos: list[dict] | dict) -> str:
+    """The public homepage. One guild (or none yet): who we are, Join our Discord (when an invite is set), Log in with
+    Discord — the page as it always was. Several: the servers side by side, each with its own Join and Log in."""
+    if isinstance(infos, dict):
+        infos = [infos]
+    if len(infos) > 1:
+        return (PAGE_HEAD_MANY.replace("{title}", "oibot_GM")
+                + '<p class="intro">World of Warcraft raiding guilds. Members keep their characters, availability and raid signups here.</p>'
+                + '<div class="cards">' + "".join(landing_card(i) for i in infos) + "</div></div></body></html>")
+    info = infos[0] if infos else GENERIC_INFO
     about = f'<p class="about">{html.escape(info["about"])}</p>' if info.get("about") else ""
     login_cls = "alt" if info.get("invite_url") else "login"
     tail = ""
@@ -138,8 +191,19 @@ def landing_page(info: dict) -> str:
             + (f'<p class="small">{tail}</p>' if tail else "") + "</div></body></html>")
 
 
-def not_member_page(info: dict) -> str:
-    """A logged-in Discord user who isn't in the server: how to get in (anyone can join)."""
+def not_member_page(infos: list[dict] | dict) -> str:
+    """A logged-in Discord user who isn't in the server (several: in none of the servers): how to get in (anyone can
+    join), every server's own Join button, and Log out."""
+    if isinstance(infos, dict):
+        infos = [infos]
+    if len(infos) > 1:
+        cards = "".join('<div class="card">' + head_block(i) + (f'<p class="about">{html.escape(i["about"])}</p>' if i.get("about") else "")
+                        + (f'<div class="btns">{join_button(i.get("invite_url"))}</div>' if i.get("invite_url") else "<p>Ask a member of the guild for an invite.</p>")
+                        + "</div>" for i in infos)
+        return (PAGE_HEAD_MANY.replace("{title}", "oibot_GM")
+                + "<p class=\"intro\">You're not in any of these Discord servers yet. The site is for members of a server. Join one, then come back and log in again.</p>"
+                + f'<div class="cards">{cards}</div><p class="small intro"><a class="plain" href="/auth/logout">Log out</a></p></div></body></html>')
+    info = infos[0] if infos else GENERIC_INFO
     how = "Join the server, then come back and log in again." if info.get("invite_url") else "Ask a member of the guild for an invite, then come back and log in again."
     return (PAGE_HEAD.replace("{title}", html.escape(info["name"])) + head_block(info)
             + f"<p>You're not in the {html.escape(info['name'])} Discord yet. The site is for members of the server. {how}</p>"
@@ -148,8 +212,11 @@ def not_member_page(info: dict) -> str:
 
 
 class Viewer:
-    def __init__(self, uid: int, name: str, reg, officer: bool, owner: bool, via: str = "web"):
-        self.uid, self.name, self.reg, self.officer, self.owner, self.via = uid, name, reg, officer, owner, via
+    """Who is asking, about which guild (`reg`, the selected one). `moved` = the name of the guild the browser had
+    selected that this person can no longer open (the request landed on another; the app says so), else None."""
+
+    def __init__(self, uid: int, name: str, reg, officer: bool, owner: bool, via: str = "web", moved: str | None = None):
+        self.uid, self.name, self.reg, self.officer, self.owner, self.via, self.moved = uid, name, reg, officer, owner, via, moved
         self.member = reg.members.get(uid) if reg else None
 
 
@@ -224,9 +291,72 @@ def create_app(bot) -> FastAPI:
         """Live guild member (roles decide the tier): the bot's TTL-cached lookup (get_member, then a REST fetch)."""
         return await bot.cached_member(guild, uid, max_age)
 
-    async def viewer(request: Request) -> Viewer | None:
-        """None = not logged in. Raises 403 for a Discord user who is not in the guild's server:
-        the server's membership and roles are the whitelist — there is no separate user list."""
+    async def look(reg, uid: int) -> tuple[bool, str, object | None]:
+        """(may open it, membership answer, Discord member): the guild's owner, or in its server now (guild_routing —
+        the one definition of "belongs to"; no timeout here, a page may wait for a slow fetch as it always did)."""
+        answer, member = await guild_routing.member_of(bot, reg, uid, timeout=None)
+        return answer == "yes" or reg.config.owner_discord_id == uid, answer, member
+
+    async def accessible_keys(uid: int, skip=None) -> list[str]:
+        regs = [r for r in bot.registries.ordered() if r is not skip]
+        looks = await asyncio.gather(*(look(r, uid) for r in regs))
+        return [r.key for r, (ok, _, _) in zip(regs, looks) if ok]
+
+    def requested(request: Request, guild: str | None, query: bool) -> str | None:
+        if guild:
+            return guild
+        h = (request.headers.get(GUILD_HEADER) or "").strip()
+        if h:
+            return h
+        return (request.query_params.get("g") or "").strip() or None if query else None
+
+    async def selected_reg(request: Request, uid: int, guild: str | None = None, query: bool = True):
+        """(reg, Discord member or None, moved-from name or None) for this request (design §5.32 "Web"):
+        1. an explicit choice (`guild`, the X-Oibot-Guild header, or ?g= when `query`) — honoured or refused with
+           NotMember naming what the person CAN open; a request that named its guild is never switched silently;
+        2. the oibot_guild cookie, when this person may open it (otherwise fall through, moved-from = its name);
+        3. the first guild they may open in Guilds.ordered() — the only "first" in the web, over their own list.
+        Several guilds: a lookup Discord didn't answer ('unknown') on 1. or 2. is a 503, never a move (K4). One guild:
+        as before (not in the server = NotMember)."""
+        regs = bot.registries.ordered()
+        many = len(regs) > 1
+        by_key = {r.key: r for r in regs}
+        want = requested(request, guild, query)
+        if want is not None:
+            reg = by_key.get(want)
+            if reg is not None:
+                ok, answer, member = await look(reg, uid)
+                if ok:
+                    return reg, member, None
+                if answer == "unknown" and many:
+                    raise HTTPException(503, UNSURE)
+            raise NotMember(reg.config.name if reg else None, requested=want, guilds=await accessible_keys(uid, skip=reg))
+        moved, tried = None, None
+        ck = (request.cookies.get(GUILD_COOKIE) or "").strip()
+        if ck:
+            tried = by_key.get(ck)
+            if tried is not None:
+                ok, answer, member = await look(tried, uid)
+                if ok:
+                    return tried, member, None
+                if answer == "unknown" and many:
+                    raise HTTPException(503, UNSURE)
+                moved = tried.config.name
+            elif many:
+                moved = ck  # a guild that isn't served any more
+        rest = [r for r in regs if r is not tried]
+        looks = await asyncio.gather(*(look(r, uid) for r in rest))
+        for r, (ok, _, member) in zip(rest, looks):
+            if ok:
+                return r, member, moved
+        if many and any(answer == "unknown" for _, answer, _ in looks):
+            raise HTTPException(503, UNSURE)
+        raise NotMember(regs[0].config.name if not many else None)
+
+    async def viewer(request: Request, guild: str | None = None, query: bool = True) -> Viewer | None:
+        """None = not logged in (or no guild configured). Raises 403 (NotMember) for a Discord user who may not open
+        the selected guild: the server's membership and roles are the whitelist — there is no separate user list.
+        `guild` = an explicit choice (POST /api/guild); `query=False` ignores ?g= (a deep link to someone else's server)."""
         if request.headers.get("authorization"):  # the MCP server: bearer token → the owner; a wrong token is nobody
             return mcp_viewer(request, bot, os.environ.get(MCP_TOKEN_ENV) or None)
         s = session(request)
@@ -235,17 +365,34 @@ def create_app(bot) -> FastAPI:
         if not s:
             return None
         uid = int(s["uid"])
-        reg = next(iter(bot.registries.by_discord.values()), None)  # single-guild deployment
-        if reg is None:
+        if not bot.registries.ordered():
             return None
-        guild = bot.get_guild(reg.config.discord_guild_id)
-        member = await guild_member(guild, uid) if guild else None
-        if member is None and reg.config.owner_discord_id != uid:
-            raise NotMember(reg.config.name)
-        officer = bot.officiates(member, guild) if member else True
+        reg, member, moved = await selected_reg(request, uid, guild, query)
+        guild_obj = bot.get_guild(reg.config.discord_guild_id)
+        officer = bot.officiates(member, guild_obj) if member else True  # per guild: owning B grants nothing in A
         owner = reg.config.owner_discord_id == uid
         name = member.display_name if member else (reg.members[uid].display_name if uid in reg.members else s.get("name", str(uid)))
-        return Viewer(uid, name, reg, officer, owner)
+        return Viewer(uid, name, reg, officer, owner, moved=moved)
+
+    async def guild_choices(v: Viewer) -> list[dict]:
+        """The selector's list: every guild this person may open, in ordered() order, with their role there
+        (owner | officer | member, from that server's roles). Only /api/meta pays for the other guilds' lookups."""
+        from .api import public_info
+
+        regs = bot.registries.ordered()
+        others = [r for r in regs if r is not v.reg]
+        looks = dict(zip((r.key for r in others), await asyncio.gather(*(look(r, v.uid) for r in others))))
+        out = []
+        for r in regs:
+            if r is v.reg:
+                role = "owner" if v.owner else "officer" if v.officer else "member"
+            else:
+                ok, _, member = looks[r.key]
+                if not ok:
+                    continue
+                role = "owner" if r.config.owner_discord_id == v.uid else "officer" if member is not None and bot.officiates(member, bot.get_guild(r.config.discord_guild_id)) else "member"
+            out.append({"key": r.key, "name": r.config.name, "icon": public_info(bot, r)["icon"], "role": role})
+        return out
 
     async def privilege(reg, uid: int, max_age: float = 60) -> str:
         """owner | officer | member | outside — from Discord roles (Manage Server or the configured officer role), never stored."""
@@ -256,17 +403,6 @@ def create_app(bot) -> FastAPI:
         if m is None:
             return "outside"
         return "officer" if bot.officiates(m, guild) else "member"
-
-    async def need(request: Request, officer: bool = False) -> Viewer:
-        v = await viewer(request)
-        if v is None:
-            raise HTTPException(status_code=307, headers={"Location": "/auth/login?next=" + request.url.path})
-        if officer and not v.officer:
-            raise HTTPException(status_code=403, detail="Officers only.")
-        return v
-
-    def guild_reg():
-        return next(iter(bot.registries.by_discord.values()), None)  # single-guild deployment
 
     # ---- auth
     @app.get("/auth/login")
@@ -348,12 +484,22 @@ def create_app(bot) -> FastAPI:
     thumb_cache: dict[str, bytes] = {}
 
     @app.get("/img/raid/{rid}.png")
-    async def raid_thumb(rid: str):
-        reg = next(iter(bot.registries.by_discord.values()), None)
-        if reg is None or rid not in reg.profile.raids:
-            raise HTTPException(404)
-        rd = reg.raid_def(rid)
-        key = f"{rid}:{rd.get('size')}:{rd.get('lockout_days')}"
+    async def raid_thumb(request: Request, rid: str, g: str | None = None):
+        """The raid emblem with that guild's size / lockout / name: ?g=<key> (Discord fetches without cookies, so every
+        caller names its guild), else the cookie, else the only guild; several guilds and none named → the game
+        profile's defaults (never "the first guild", K15)."""
+        guilds = bot.registries
+        reg = guilds.by_key.get(g or "") or guilds.by_key.get(request.cookies.get(GUILD_COOKIE) or "") or guilds.only()
+        if reg is not None:
+            if rid not in reg.profile.raids:
+                raise HTTPException(404)
+            rd, prof = reg.raid_def(rid), reg.profile.name
+        else:
+            profile = next((r.profile for r in guilds.ordered() if rid in r.profile.raids), None)
+            if profile is None:
+                raise HTTPException(404)
+            rd, prof = dict(profile.raids[rid] or {}), profile.name
+        key = f"{prof}:{rid}:{rd.get('name', rid)}:{rd.get('size')}:{rd.get('lockout_days')}"
         if key not in thumb_cache:
             thumb_cache[key] = await asyncio.to_thread(render.raid_thumb_png, rid, rd.get("name", rid), int(rd.get("size") or 0), int(rd.get("lockout_days") or 7))
         return Response(thumb_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
@@ -362,23 +508,6 @@ def create_app(bot) -> FastAPI:
     ICON_DIR = Path(__file__).resolve().parents[3] / "out" / "icons"
     ICON_DIR.mkdir(parents=True, exist_ok=True)
     ICON_CDN = "https://render.worldofwarcraft.com/us/icons/56/{name}.jpg"
-
-    def icon_url(kind: str, key: str) -> str:
-        """Blizzard's icon art (proxied + cached) when the profile names one, else our generated badge."""
-        reg = next(iter(bot.registries.by_discord.values()), None)
-        icons = reg.profile.icons if reg else {}
-        name = None
-        if kind == "class":
-            name = icons.get("classes", {}).get(key)
-        elif kind == "role":
-            name = icons.get("roles", {}).get(key)
-        elif kind == "spec":
-            name = icons.get("specs", {}).get(key)
-        elif kind == "art":
-            name = key or None
-        if name:
-            return f"/img/icon/{name}.jpg"
-        return f"/img/{kind}/{key}.png" if kind in ("class", "role") else "/img/role/melee.png"
 
     icon_miss: dict[str, float] = {}  # names the CDN answered 404 for → when that answer expires (1 h): scanners can't drive upstream fetches
     ICON_MISS_TTL = 3600
@@ -434,26 +563,28 @@ def create_app(bot) -> FastAPI:
         return {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(regs), "per_guild": per,
                 "guilds_failed": len(getattr(bot.registries, "load_errors", None) or [])}
 
-    from .api import public_info
+    from .api import public_card
 
-    def guild_info() -> dict:
-        return public_info(bot, guild_reg())
+    def guild_infos() -> list[dict]:
+        """Every configured guild's public facts (public_info + key), in Guilds.ordered() order."""
+        return [public_card(bot, r) for r in bot.registries.ordered()]
 
     @app.exception_handler(NotMember)
     async def _not_member(request: Request, exc: NotMember):
         """Wins over the generic HTTPException handler (api.py) by class. The API keeps its 403 JSON (the SPA then
-        shows the same message from /api/public); a page request gets the friendly page with the Join button."""
+        switches to a guild in `guilds`, or shows the not-a-member screen from /api/public when there is none); a page
+        request gets the friendly page with every server's Join button."""
         if request.url.path.startswith("/api/"):
             from fastapi.responses import JSONResponse
 
-            return JSONResponse({"error": exc.detail, "not_member": True}, status_code=403)
-        return HTMLResponse(not_member_page(guild_info()), status_code=403)
+            return JSONResponse({"error": exc.detail, "not_member": True, "guild": exc.requested, "guilds": exc.guilds}, status_code=403)
+        return HTMLResponse(not_member_page(guild_infos()), status_code=403)
 
     @app.get("/", response_class=HTMLResponse)
     async def home(request: Request):
         v = await viewer(request)
         if v is None:
-            return HTMLResponse(landing_page(guild_info()))
+            return HTMLResponse(landing_page(guild_infos()))
         return RedirectResponse("/app/me", status_code=302)
 
     for _old, _new in (("/admin", "/app/members"), ("/admin/build", "/app/rosters"), ("/bank", "/app/members"), ("/rosters", "/app/rosters"), ("/raids", "/app/raids"), ("/config", "/app/config"), ("/ops", "/app/ops")):
@@ -461,7 +592,7 @@ def create_app(bot) -> FastAPI:
 
     from .api import install_api
 
-    install_api(app, bot, viewer=viewer, icon_url=icon_url, privilege=privilege)
+    install_api(app, bot, viewer=viewer, privilege=privilege, guild_choices=guild_choices)
     return app
 
 

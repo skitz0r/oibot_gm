@@ -59,6 +59,16 @@ new raiders apply there with `/apply` (there is no application form on the websi
 with a Discord account that isn't in the server yet gets a short page saying so, with the Join button and a
 log-out link, instead of an error; after joining they log in again. A logged-in member goes straight to **Me**.
 
+**When the bot looks after more than one Discord server**, the homepage shows the servers side by side, each with
+its own icon, name, about text, **Join our Discord** (its own invite) and **Log in with Discord**. Once you're logged
+in, a **server selector** at the top of the left rail lists the servers you can use (you're in that Discord server, or
+you own its guild) with your role in each; pick one and every page, save and live update is for that server only. Your
+choice is remembered in this browser. Links the bot posts in Discord (Open the board, Members, Raid rules) open the
+right server. If you leave the server you had selected, the site opens on another one you're in and tells you so; if
+you're in none of them you get the not-a-member page with every server's Join button. Owners and officers are per
+server: owning or running one guild gives you nothing in the other. With one server there is no selector and the site
+looks exactly as before.
+
 Log in with Discord. Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
 your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Ops** (the bot's recent actions, the plain-text permissions, and the loot

@@ -2,7 +2,7 @@ import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useMemo, useState } from "react";
 import { ActionIcon, Badge, Box, Button, Card, Group, NumberInput, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconPencil, IconRestore } from "@tabler/icons-react";
-import { api } from "../api";
+import { api, type Meta } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { CLASS_COLOURS } from "../theme";
@@ -13,7 +13,7 @@ interface Auras { families: Family[]; buffs: Buff[]; value_keys: string[]; specs
 
 const STATUS_COLOUR: Record<string, string> = { confirmed: "teal", reported: "yellow", assumed: "gray" };
 
-export function AurasPage() {
+export function AurasPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Auras | null>(null);
   const [editing, setEditing] = useState<string | null>(null); // "b:<id>" | "f:<id>" | "f:new"
   const [ask, confirmDialog] = useConfirm();
@@ -50,7 +50,7 @@ export function AurasPage() {
   }
   return (
     <Stack gap="lg">
-      <PageTitle title="Auras" intro="What we know about Forever's buffs. A stacking family says which buffs don't stack (the strongest present one counts) and who benefits from it; each buff says who casts it, whether it reaches the party or the whole raid, how strong it is, and how sure we are. Amber marks a guild override of the game defaults. The solver, the cards and the board all read this." />
+      <PageTitle title="Auras" intro={`What we know about ${meta.game}'s buffs. A stacking family says which buffs don't stack (the strongest present one counts) and who benefits from it; each buff says who casts it, whether it reaches the party or the whole raid, how strong it is, and how sure we are. Amber marks a guild override of the game defaults. The solver, the cards and the board all read this.`} />
 
       <Card>
         <CardHeader title="Buffs" hint={data.owner ? undefined : "the owner edits these"} action={data.owner && !drafts ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} onClick={() => setDrafts(Object.fromEntries(data.buffs.map((b) => [b.id, draftOf(b)])))}>Edit auras</Button> : undefined} />

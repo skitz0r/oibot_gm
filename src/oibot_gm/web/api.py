@@ -1,6 +1,8 @@
 """JSON API for the React front end (frontend/ → static/app, served at /app).
 
-Same identity as the HTML pages (session cookie, guild membership as the whitelist). Mutations go through the
+Same identity as the HTML pages (session cookie, guild membership as the whitelist). Every route acts on the guild
+`web/app.py selected_reg` picked for the request (`v.reg`: the X-Oibot-Guild header, ?g=, the oibot_guild cookie, or
+the first guild the person may open); live updates are scoped to it too. Mutations go through the
 same Registry / raidcycle functions the Discord commands call. CSRF: every POST must carry
 `X-Requested-With: oibot` — a header a cross-site form cannot set — and the session cookie is SameSite."""
 from __future__ import annotations
@@ -23,6 +25,7 @@ from pydantic import BaseModel, ValidationError
 from .. import comp as comp_mod, raid_views as dr, raidcycle as rc, render
 from ..registry import ADHOC_SCHEDULE, CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
+from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
 
 HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
@@ -101,6 +104,11 @@ def public_info(bot, reg) -> dict:
             "icon": str(icon.with_size(128).url) if icon is not None and hasattr(icon, "with_size") else None}
 
 
+def public_card(bot, reg) -> dict:
+    """public_info plus the guild key: one card on the several-guild homepage, the not-a-member page and the selector."""
+    return {**public_info(bot, reg), "key": reg.key}
+
+
 def schedule_choice_label(reg, key: str) -> str:
     """An applicant's '<raid id>:<schedule id>' as words: 'Barrow Deeps · Tuesdays and Thursdays 7:30 PM'."""
     rid, _, sid = str(key).partition(":")
@@ -132,7 +140,7 @@ def application_json(reg, a) -> dict:
 PREVIEW_TTL = 600  # seconds a plain_change preview token stays good (Discord's Apply view waits as long)
 
 
-def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
+def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
     @contextlib.asynccontextmanager
     async def solving(reg, key: str):
         """The run's solver single-flight (RaidMixin.solving — shared with chat, MCP, the scheduler and the cards);
@@ -161,7 +169,10 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             except Exception:  # noqa: BLE001 — not logged in / not a member: still worth a line
                 v = None
             via = getattr(v, "via", "web")
-            log.info("api %s %s uid=%s status=%s%s", request.method, request.url.path, getattr(v, "uid", None), response.status_code, "" if via == "web" else f" via={via}")
+            # two guilds share out/oibot.log; POST /api/guild names the guild it switched TO
+            g = getattr(request.state, "oibot_guild", None) or getattr(getattr(v, "reg", None), "key", None)
+            log.info("api %s %s uid=%s status=%s%s%s", request.method, request.url.path, getattr(v, "uid", None), response.status_code,
+                     f" guild={g}" if g else "", "" if via == "web" else f" via={via}")
         return response
 
     # ---- resolvers: the MCP server (and any client) may name people and runs the way officers do
@@ -279,13 +290,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         return await http_exception_handler(request, exc)
 
     # ---- read
-    @app.get("/api/meta")
-    async def meta(request: Request):
-        v = await who(request)
+    async def meta_json(v) -> dict:
         reg = v.reg
         grouping = reg.profile.comp_rules.get("grouping") or {}
+        label = reg.profile.label
         return {
             "guild": reg.config.name, "tz": reg.config.timezone,
+            # the server selector (design §5.32 "Web"): the selected guild, every guild this person may open with their
+            # role there, and `moved` = the name of the guild the browser had selected that they can no longer open
+            "guild_key": reg.key, "guilds": await guild_choices(v) if v.via == "web" else [{"key": reg.key, "name": reg.config.name, "icon": None, "role": "owner"}],
+            "moved": v.moved, "profile": label, "game": label.split(": ", 1)[-1],
             "classes": {c: {s: a.get("role") for s, a in specs.items()} for c, specs in reg.profile.classes.items()},
             "icons": {k: dict(reg.profile.icons.get(k, {})) for k in ("classes", "roles", "specs")},
             "raids": [{"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "lockout_days": int(reg.raid_def(rid).get("lockout_days", 7))} for rid, rd in reg.profile.raids.items()],
@@ -298,6 +312,37 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             "class_colours": dict(render.CLASS),
             "started_at": float(getattr(bot, "started_at", STARTED)),
         }
+
+    @app.get("/api/meta")
+    async def meta(request: Request):
+        v = await who(request)
+        out = JSONResponse(await meta_json(v))
+        if v.moved:  # landed on another guild: remember it, so the notice shows once
+            set_guild_cookie(out, v.reg.key)
+        return out
+
+    @app.post("/api/guild")
+    async def choose_guild(request: Request):
+        """The server selector: {key} → that guild becomes this browser's selection (the oibot_guild cookie) when the
+        person may open it, and the answer is its meta; otherwise 403 not_member and nothing changes."""
+        if request.headers.get("x-requested-with") != "oibot":
+            raise HTTPException(403, "Missing request marker.")
+        try:
+            d = await request.json()
+        except ValueError:
+            d = {}
+        key = str((d or {}).get("key") or "").strip() if isinstance(d, dict) else ""
+        if not key:
+            raise HTTPException(400, "key required")
+        v = await viewer(request, guild=key)
+        if v is None:
+            raise HTTPException(401, "login required")
+        if v.via != "web":
+            raise HTTPException(400, "the MCP server names its guild on every call")
+        request.state.oibot_guild = v.reg.key
+        out = JSONResponse(await meta_json(v))
+        set_guild_cookie(out, v.reg.key)
+        return out
 
     def run_label(reg, rs, team_key: str) -> dict:
         """Placement asks are keyed by the run's roster key; people see the raid name and the start time instead (B3)."""
@@ -731,14 +776,16 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             return JSONResponse({"error": str(e)[:1].upper() + str(e)[1:], **board_reply(v.reg, ev)}, status_code=409)
         return board_written(v, ev, was_open, line)
 
-    # ---- live updates: one event stream per open page; a run save anywhere (site, Discord, scheduler) wakes them
-    subscribers: set[asyncio.Queue] = set()
+    # ---- live updates: one event stream per open page, tagged with the page's guild; a run save anywhere (site,
+    # Discord, scheduler) wakes that guild's pages only — two guilds with the same run key never wake each other
+    subscribers: dict[asyncio.Queue, str] = {}
 
-    def publish(topic: str) -> None:
-        """topic: `run:<key>` | `member` | `config` | `ops`. Safe from worker threads."""
+    def publish(topic: str, guild: str | None = None) -> None:
+        """topic: `run:<key>` | `member` | `config` | `ops` | `agents`. `guild` None = every page (process-wide news:
+        the agents' job status); otherwise only that guild's pages. Safe from worker threads."""
         def fan_out():
-            for q in list(subscribers):
-                if q.qsize() < 50:
+            for q, g in list(subscribers.items()):
+                if (guild is None or g == guild) and q.qsize() < 50:
                     q.put_nowait(topic)
         try:
             bot.loop.call_soon_threadsafe(fan_out)
@@ -746,14 +793,15 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             pass
 
     def run_saved(guild_key: str, run_key: str) -> None:
-        publish(f"run:{run_key}")
+        publish(f"run:{run_key}", guild_key)
 
     def reg_saved(reg, kind: str, lines) -> None:
-        publish(kind)
+        publish(kind, reg.key)
 
     def ops_line(guild_key: str | None = None) -> None:
-        publish("ops")
+        publish("ops", guild_key)
 
+    app.state.publish = publish  # the agents API and the tests reach the one fan-out through here
     from .. import ops as ops_mod, registry as registry_mod
 
     for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line)):
@@ -764,9 +812,9 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         """Server-sent events: `data: run:<key> | member | config | ops` whenever that changes. Pages reload on the topics they show."""
         from fastapi.responses import StreamingResponse
 
-        await who(request)
+        v = await who(request)  # honours ?g= (EventSource can't send headers): the stream is that guild's
         q: asyncio.Queue = asyncio.Queue()
-        subscribers.add(q)
+        subscribers[q] = v.reg.key
 
         async def stream():
             try:
@@ -778,7 +826,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
                     except asyncio.TimeoutError:
                         yield ": keepalive\n\n"  # keeps the tunnel from idling the connection out
             finally:
-                subscribers.discard(q)
+                subscribers.pop(q, None)
 
         return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -1453,6 +1501,8 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         started = float(getattr(bot, "started_at", STARTED))
         return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed_status(bot, v.reg, off="disabled"),
                 "up": int(time.time() - started), "started_at": started,
+                # several guilds: data repo, LLM and uptime are the whole bot's, not this guild's (K17: absent for one)
+                **({"scope": "bot"} if getattr(bot.registries, "many", False) else {}),
                 "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent_for(v.reg.key))],
                 "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))],
                 "precedents": list(reversed(precedents[-pl:] if pl else [])), "ledger": list(reversed(ledger[-ll:] if ll else [])),
@@ -1655,8 +1705,12 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
     # ---- recruitment (design §5.29): the homepage's public facts, the owner's settings, the officers' applications
     @app.get("/api/public")
     async def public(request: Request):
-        """Anonymous: the guild's name, blurb, invite and whether it is recruiting. Nothing personal."""
-        return public_info(bot, next(iter(bot.registries.by_discord.values()), None))
+        """Anonymous: the guild's name, blurb, invite and whether it is recruiting. Nothing personal. One guild (or none):
+        exactly that shape, as always (K13); several: {"guilds": [each one's facts + key]} in Guilds.ordered() order."""
+        regs = bot.registries.ordered()
+        if len(regs) <= 1:
+            return public_info(bot, regs[0] if regs else None)
+        return {"guilds": [public_card(bot, r) for r in regs]}
 
     def guild_role_refs(reg) -> list[dict]:
         guild = bot.get_guild(reg.config.discord_guild_id)
@@ -1838,8 +1892,19 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         target = (APP_DIR / path).resolve() if path else None
         if target and target.is_file() and APP_DIR.resolve() in target.parents:
             return FileResponse(target, headers={"Cache-Control": "public, max-age=31536000, immutable"} if path.startswith("assets/") else None)
-        if await viewer(request) is None:
+        g = (request.query_params.get("g") or "").strip()
+        try:
+            v = await viewer(request)
+        except NotMember as e:
+            if not (g and e.guilds):
+                raise
+            v = await viewer(request, query=False)  # a link to a server this person isn't in: open theirs (the app says so)
+        if v is None:
             from fastapi.responses import RedirectResponse
 
-            return RedirectResponse("/auth/login?next=" + request.url.path, status_code=307)
-        return FileResponse(APP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+            here = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            return RedirectResponse(login_href(here), status_code=307)  # the query (?g=) survives the login (K14)
+        resp = FileResponse(APP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+        if g and v.reg.key == g and v.via == "web" and request.cookies.get(GUILD_COOKIE) != g:
+            set_guild_cookie(resp, g)  # a deep link selects its guild for the pages that follow
+        return resp

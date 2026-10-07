@@ -134,10 +134,10 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     size = int(team.get("size") or rd.get("size") or 20)
     test = bool(team.get("test"))
     tag = "🧪 " if test else ""
-    web = os.environ.get("OIBOT_WEB_URL", "")
     e = discord.Embed(colour=0x8C97A8 if test else 0x98A3B5 if state in ("done", "cancelled") else TEAL)
-    if web.startswith("https") and ev.instance:
-        e.set_thumbnail(url=f"{web}/img/raid/{ev.instance}.png")
+    thumb = raid_thumb_url(reg, ev.instance)
+    if thumb:
+        e.set_thumbnail(url=thumb)
 
     def member(character: str, cls: str, spec: str, mark: str | None = None, icons: bool = True) -> str:
         return ((mark + " ") if mark else "") + ((ico("spec", f"{cls}:{spec}") + " ") if icons else "") + character
@@ -212,9 +212,17 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     return e, v
 
 
-def board_url(ev: rc.RaidEvent) -> str | None:
+def raid_thumb_url(reg: Registry, rid: str | None) -> str | None:
+    """The site's raid emblem for this guild (?g=: Discord fetches without cookies, and the URL — cached by browsers and
+    Discord's media proxy — must differ per guild, whose size / lockout / name may differ). None off https."""
     web = os.environ.get("OIBOT_WEB_URL", "")
-    return f"{web}/app/rosters#run-{ev.key}" if web.startswith("http") else None
+    return f"{web}/img/raid/{rid}.png?g={reg.key}" if web.startswith("https") and rid else None
+
+
+def board_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
+    """The run on the site's Rosters page, in this guild (?g= selects it; two guilds can hold one run key)."""
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    return f"{web}/app/rosters?g={reg.key}#run-{ev.key}" if web.startswith("http") else None
 
 
 def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
@@ -222,9 +230,9 @@ def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
     ui = discord.ui
     unix = int(ev.start.timestamp())
     text = f"## {title}\n<t:{unix}:F> · <t:{unix}:R>" + ("\n" + "\n".join(lines) if lines else "")
-    web = os.environ.get("OIBOT_WEB_URL", "")
-    if web.startswith("https") and ev.instance:
-        return ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=f"{web}/img/raid/{ev.instance}.png"))
+    thumb = raid_thumb_url(reg, ev.instance)
+    if thumb:
+        return ui.Section(ui.TextDisplay(text), accessory=ui.Thumbnail(media=thumb))
     return ui.TextDisplay(text)
 
 
@@ -388,10 +396,10 @@ def _raidwide_line(reg: Registry, ico, r, show_missing: bool = True) -> str:
     return out
 
 
-def run_actions_row(ev: rc.RaidEvent, locked: bool):
+def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
     ui = discord.ui
     items = []
-    url = board_url(ev)
+    url = board_url(reg, ev)
     if url:
         items.append(ui.Button(label="Open the board", style=discord.ButtonStyle.link, url=url))
     # one order in every state — Open · Lock · Fill · Cancel — so nothing moves when the run locks; what does not
@@ -452,7 +460,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
         parts += [ui.TextDisplay(sug), suggest_row(ev, plan), ui.Separator()]
     parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else " · first come, no confirmations")))
     if officer:
-        parts.append(run_actions_row(ev, locked=False))
+        parts.append(run_actions_row(reg, ev, locked=False))
     worst = "red" if short or (plan and plan.short["roles"]) else "amber" if missing or waiting else "green"
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour={"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}[worst]))
@@ -555,7 +563,7 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
     _soft, _hard, confirm = run_times(reg, ev, team)
     if confirms:
         tail.append(f"-# ✓ confirm by <t:{int(confirm.timestamp())}:f> · unanswered then counts as out")
-    parts += [ui.Separator(), ui.TextDisplay("\n".join(tail)), run_actions_row(ev, locked=True)]
+    parts += [ui.Separator(), ui.TextDisplay("\n".join(tail)), run_actions_row(reg, ev, locked=True)]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=TEAL))
     return view

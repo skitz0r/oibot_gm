@@ -18,14 +18,15 @@ export function OpsPage() {
   useLive(load, ["ops"]);
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const up = uptime(data.up);
+  const bot = data.scope === "bot" ? " · whole bot" : "";  // several guilds: these are the process's, not this guild's
   return (
     <Stack gap="lg">
       <PageTitle title="Ops" intro="What the bot has been doing, and where its data lives. The page refreshes itself while open." />
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
-        <Stat label="data repo" value={data.head} sub={`push ${data.push ? "on" : "off"}`} />
-        <Stat label="model" value={data.llm} />
+        <Stat label={`data repo${bot}`} value={data.head} sub={`push ${data.push ? "on" : "off"}`} />
+        <Stat label={`model${bot}`} value={data.llm} />
         <Stat label="loot feed" value={data.feed} />
-        <Stat label="uptime" value={up} />
+        <Stat label={`uptime${bot}`} value={up} />
       </SimpleGrid>
       <PlainPermissions />
       <Card>

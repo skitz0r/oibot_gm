@@ -132,12 +132,15 @@ scripts/agents/        review.py (daily 9:00 AM; no Claude session without new n
                        install/uninstall.sh; plists in scripts/launchd/
 companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests
   web/app.py           FastAPI served inside the bot (OIBOT_WEB_BIND): Discord OAuth2, landing page, icon/emblem/card images, old URLs → /app redirects;
-                       published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg)
+                       published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Several guilds: `selected_reg` picks ONE guild per
+                       request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first
+                       guild the person may open (guild_routing.member_of); homepage/not-member page = one card per server (one guild: the old page byte for byte)
   web/api_agents.py    /api/news, /api/proposals…, /api/agents (the monitor), /api/agents/profile (effective profile, overrides marked)
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
-                       Mutations reuse Registry/configops exactly like the Discord commands
+                       Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
+                       sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`
 frontend/              React + Mantine app (Vite). components/board/* (SheetCard, BoardView, SplitModal, BoardPreview, FillModal), components/Cells.tsx (icon-only cells),
-                       components/ConfirmModal.tsx (useConfirm), components/PlainPermissions.tsx (Ops page: who may do what, where), components/ScheduleCard.tsx (Raids page schedules + editor), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours). `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
+                       components/ConfirmModal.tsx (useConfirm), components/PlainPermissions.tsx (Ops page: who may do what, where), components/ScheduleCard.tsx (Raids page schedules + editor), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
                        `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = puppets of any mix + the comp sandbox) · Agents (the news review's monitor) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
