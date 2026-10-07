@@ -151,7 +151,7 @@ class Guilds:
         """Why a claim of this server can't go ahead now (None = it can)."""
         if self.for_guild(guild_id) is not None or guild_id in self._claiming:
             return "This server is already set up."
-        if self.by_discord and not self.ALLOW_SECOND:
+        if (self.by_discord or self._claiming) and not self.ALLOW_SECOND:  # a first claim still in flight counts too
             return "Serving a second server needs the next update of the bot; nothing was set up."
         return None
 
@@ -435,7 +435,7 @@ class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"ap
         return cls(match["action"], int(match["uid"]))
 
     async def callback(self, interaction: discord.Interaction):
-        reg = interaction.client.registries.for_interaction(interaction)
+        reg = interaction.client.registries.for_guild(interaction.guild_id)  # a channel-only card: strict, never a DM fallback
         if not reg or not is_officer(interaction, reg):
             await interaction.response.send_message("Officers only.", ephemeral=True)
             return

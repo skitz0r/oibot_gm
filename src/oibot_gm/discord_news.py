@@ -94,7 +94,7 @@ class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"newsp
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
-        reg = bot.registries.for_interaction(interaction)
+        reg = bot.registries.for_guild(interaction.guild_id)  # a channel-only card: strict, never a DM fallback
         if not reg or not await bot.is_officer_anywhere(reg, interaction.user.id):
             await interaction.response.send_message("Officers only.", ephemeral=True)
             return

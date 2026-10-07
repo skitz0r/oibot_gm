@@ -50,7 +50,7 @@ def person(reg, *, uid=NEW_ID, name="Newbie", roles=()):
         h.posted.append(a)
         return "posted for review in #applications"
     h.client = SimpleNamespace(ico=lambda kind, key: "", ops=FakeOps(), post_application=post_application,
-                               registries=SimpleNamespace(for_interaction=lambda i: reg), raids=SimpleNamespace(store=lambda _r: None))
+                               registries=SimpleNamespace(for_interaction=lambda i: reg, for_guild=lambda gid: reg if gid == reg.config.discord_guild_id else None), raids=SimpleNamespace(store=lambda _r: None))
     return h
 
 

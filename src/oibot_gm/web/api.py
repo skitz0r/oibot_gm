@@ -1437,10 +1437,11 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
         """Status, the ops feed, the registry change lines (`changes`, newest first, since the bot started — the
         analytics channel's change log), and the loot precedents and ledger (newest first). `member` narrows the
         precedents and ledger to one member's characters; the limits cap at 50 precedents and 100 ledger rows."""
+        from ..discord_feed import feed_status
         from ..registry import recent_changes
 
         v = await who(request, officer=True)
-        st, prov, feed = bot.registries.store, getattr(getattr(bot, "ctx", None), "provider", None), getattr(bot, "feed", None)
+        st, prov = bot.registries.store, getattr(getattr(bot, "ctx", None), "provider", None)
         precedents = st.read_jsonl(Path(v.reg.key) / "precedents.jsonl")
         ledger = st.read_jsonl(Path(v.reg.key) / "ledger.jsonl")
         if member:
@@ -1450,7 +1451,7 @@ def install_api(app: FastAPI, bot, *, viewer, icon_url, privilege) -> None:
             ledger = [r for r in ledger if str(r.get("raider") or "").lower() in names]
         pl, ll = max(0, min(int(precedents_limit), 50)), max(0, min(int(ledger_limit), 100))
         started = float(getattr(bot, "started_at", STARTED))
-        return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed.status() if feed else "disabled",
+        return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed_status(bot, v.reg, off="disabled"),
                 "up": int(time.time() - started), "started_at": started,
                 "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent_for(v.reg.key))],
                 "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))],

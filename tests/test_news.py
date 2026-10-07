@@ -211,7 +211,7 @@ def fake_client(reg, officer: bool):
     async def emit(cfg, level, text, exc=None):
         lines.append(text)
 
-    client = SimpleNamespace(registries=SimpleNamespace(for_interaction=lambda i: reg, store=reg.store), is_officer_anywhere=is_officer,
+    client = SimpleNamespace(registries=SimpleNamespace(for_interaction=lambda i: reg, for_guild=lambda gid: reg if gid == reg.config.discord_guild_id else None, store=reg.store), is_officer_anywhere=is_officer,
                              news_rows=lambda r: {}, ops=SimpleNamespace(emit=emit))
     return client, lines
 
@@ -223,18 +223,18 @@ def test_buttons_are_officer_only_and_flip_the_state(reg):
     ps = ProposalStore(reg.store, reg.key)
     p = ps.create(reg, proposal_data())
 
-    async def go():
+    async def go():  # a proposal card is pressed in its channel, in the guild's own server (server 1)
         client, lines = fake_client(reg, officer=False)
-        itx = SimpleNamespace(client=client, user=SimpleNamespace(id=9, display_name="Rando"), response=FakeResp())
+        itx = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=9, display_name="Rando"), response=FakeResp())
         await ProposalButton(p.id, "approve").callback(itx)
         assert itx.response.sent == ["Officers only."] and ps.get(p.id).state == "proposed"
         client, lines = fake_client(reg, officer=True)
-        itx = SimpleNamespace(client=client, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
+        itx = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
         await ProposalButton(p.id, "approve").callback(itx)
         q = ps.get(p.id)
         assert q.state == "approved" and q.decided_by == "Kessa" and q.decided_by_id == 5
         assert itx.response.edited and "embed" in itx.response.edited[0] and any("approved by Kessa" in x for x in lines)
-        itx2 = SimpleNamespace(client=client, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
+        itx2 = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
         await ProposalButton(p.id, "approve").callback(itx2)  # a second press: refused, nothing changes
         assert itx2.response.sent and "can't become approved" in itx2.response.sent[0]
 

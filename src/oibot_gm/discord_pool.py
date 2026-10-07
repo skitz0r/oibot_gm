@@ -204,7 +204,7 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs:(?
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
-        reg = bot.registries.for_interaction(interaction)
+        reg = bot.registries.for_guild(interaction.guild_id)  # a channel-only card: strict, never a DM fallback
         if not reg:
             await interaction.response.send_message("Not configured here.", ephemeral=True)
             return

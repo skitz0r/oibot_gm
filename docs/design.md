@@ -972,7 +972,8 @@ folder, the mock key or `out`/`fixtures`/`profiles`), the game version (`profile
 `profiles/<v>/profile.yaml`, default Forever) and the owner (the caller or a picked member). Nothing is written before
 Confirm → `OibotGM.claim_guild`: `Guilds.create` in a worker thread (`registry.create_guild`: one file, one commit
 "`<key>: guild created for <server>`"; refuses a fixtures root, a taken folder, a configured server or a claim in
-flight) → `add` on the loop → `guild_added` (analytics listener, officer roles, guild-scope command sync, icons for a
+flight — while `ALLOW_SECOND` is off, a first claim still in flight counts as a served server, so two servers claiming
+an empty deployment at once can't both get folders) → `add` on the loop → `guild_added` (analytics listener, officer roles, guild-scope command sync, icons for a
 profile not loaded before) → an ops line and a DM to every other guild's owner (once each, K5). Joining a server never
 creates a guild. In a DM it answers "Run this in the server you want to set up."
 
@@ -984,8 +985,11 @@ configured guild and that server's Manage Server counted as its officer); a DM w
 `guilds_of` (owner, or `membership` yes/unknown — tri-state, concurrent, 1.5 s timeout, K4): one → it, none → every
 server's Join link, several → "use this command in the server" until S3's picker. `/help` uses `reply=False` and adds
 its own line (K9). The chosen key lands in `interaction.extras["guild"]`; `_on_command_error` reads it, else the
-server, never a guess. Channel-only buttons (`app:`, `abs:`, `newsprop:`) resolve through the now-strict
-`for_interaction`. `officiates` grants Manage Server only in a configured server (K24; `/mock` keeps its rule). Plain
+server (strict), else in a DM that failed before `need()` (a transformer or check error) `only()` — one guild gets its
+ops line and owner DM as before; several → the log only, never a guess. Channel-only buttons (`app:`, `abs:`,
+`newsprop:`) resolve through strict `for_guild(interaction.guild_id)`: pressed anywhere but their own server they are
+refused (DM-capable buttons — `raid`, `fill`, `place`, `runact`, `reg`, `guide` — keep `for_interaction` until S3
+carries the guild in their ids). `officiates` grants Manage Server only in a configured server (K24; `/mock` keeps its rule). Plain
 DMs: `OibotGM.dm_guild` (same rules).
 
 **Per-guild process pieces (D6).** Scheduler: `scheduler_tick` runs `companion_check` and then each guild's
@@ -1000,7 +1004,7 @@ get the key, an owner's error DM is prefixed with the guild name only when `many
 `board_lock` and `configops.split_seen` are keyed (guild, run key) — two guilds can hold runs with one key. The loot
 thread check matches `s.guild`. `SetupMixin.set_channel` refuses a channel from another server (site, MCP, plain text).
 Pool listeners per guild (`attach_pool_listener`, idempotent). `OIBOT_COMMAND_SCOPE=guild` syncs the test server plus
-every configured server (`sync_servers`, deduplicated). `/gm status` and `help_extras` show this guild's ops lines and
+every configured server (`sync_servers`, deduplicated). `/gm status`, `help_extras` and `/api/ops` show this guild's ops lines and
 companions; "(whole bot)" labels appear only with several guilds (K17). `/healthz` adds `per_guild` (does the bot see
 each server) and `guilds_failed`. `check_emoji_conflicts` warns when two loaded profiles map one icon name to
 different art. **Shared on purpose:** the LLM budget (one monthly cap for the whole bot), the feed token and listener.

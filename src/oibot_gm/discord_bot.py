@@ -769,9 +769,15 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        # the guild the command resolved to (need() tags it), else the server's own; never a guess, never a prompt
+        # the guild the command resolved to (need() tags it), else the server's own (strict), else — a DM that failed before
+        # need() ran — the only guild, as with one guild before; with several, the log only. Never a guess, never a prompt.
         key = (getattr(interaction, "extras", None) or {}).get("guild")
-        reg = self.registries.by_key.get(key) if key else self.registries.for_guild(interaction.guild_id)
+        if key:
+            reg = self.registries.by_key.get(key)
+        elif interaction.guild_id:
+            reg = self.registries.for_guild(interaction.guild_id)
+        else:
+            reg = self.registries.only()
         cmd = interaction.command.qualified_name if interaction.command else "?"
         msg = f"`/{cmd}` by {interaction.user.display_name}: {type(error).__name__}: {str(error)[:200]}"
         if reg:

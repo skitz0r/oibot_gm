@@ -562,7 +562,9 @@ after **one** server: a claim in a second server is refused until the next updat
 the Discord Developer Portal, so only you can invite the bot. Commands are global (every server and DMs); the
 development mode `OIBOT_COMMAND_SCOPE=guild` puts them only in the test server and the configured servers, so a new
 server can't be claimed in that mode. A command used in the test server acts on the test server's own guild only — if
-the test server isn't the guild's server, it answers "isn't set up".
+the test server isn't the guild's server, it answers "isn't set up". Cards the bot posts in a channel (an
+application's Accept / Decline, the absences card, an agent proposal's Approve / Dismiss) answer only in the server they
+were posted in. The companions shown by `/gm status` and on the site's **Ops** page are the ones feeding this guild.
 
 `/gm config owner` in a configured server transfers ownership (first claim needs the Discord server owner or Manage Server). Handing the guild to a new owner
 is only ever this slash command, by design — not the site, plain text or MCP: an MCP token acts as the owner, so a

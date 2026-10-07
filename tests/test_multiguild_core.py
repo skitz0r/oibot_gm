@@ -191,6 +191,88 @@ def test_command_error_goes_to_the_resolved_guild_never_the_first(duo):
     del sent
 
 
+def test_command_error_in_a_dm_before_need_reaches_the_only_guild_as_before(reg, store, duo):
+    """A transformer/check error in a DM fails before need() tags the guild: with one guild it still reaches that
+    guild's ops line and owner (unchanged behaviour, D6/K17); with several, the log only."""
+    class Bot:
+        ops = RecOps()
+        _on_command_error = OibotGM._on_command_error
+    one = Bot()
+    one.registries = Guilds.of(store, reg)
+    i = itx(one, guild_id=None)
+    i.command = types.SimpleNamespace(qualified_name="me view")
+    run(one._on_command_error(i, discord.app_commands.CheckFailure("nope")))
+    assert [(k, lvl) for k, lvl, *_ in one.ops.lines] == [(GUILD, "error")] and i.response.replies
+    many = Bot()
+    many.ops, many.registries = RecOps(), duo.guilds
+    j = itx(many, guild_id=None)
+    j.command = None
+    run(many._on_command_error(j, discord.app_commands.CheckFailure("nope")))
+    assert many.ops.lines == [], "several guilds and no tag: never a guess"
+    k = itx(many, guild_id=DUO_SERVER)
+    k.command = None
+    run(many._on_command_error(k, discord.app_commands.CheckFailure("nope")))
+    assert [key for key, *_ in many.ops.lines] == [GUILD2]
+
+
+def test_channel_only_cards_resolve_their_server_strictly(duo, monkeypatch):
+    """app:/abs:/newsprop: cards live in a server channel: the server's own guild, never a DM fallback (design §4.3)."""
+    from oibot_gm import discord_news, discord_pool
+
+    seen = []
+    monkeypatch.setattr(dr, "is_officer", lambda i, r: seen.append(("officer", r.key)) or False)
+
+    async def fake_absence(interaction, reg, **kw):
+        seen.append(("absence", reg.key))
+    monkeypatch.setitem(FLOWS, "absence", fake_absence)
+
+    async def anywhere(reg, uid):
+        seen.append(("anywhere", reg.key))
+        return False
+    client = types.SimpleNamespace(registries=duo.guilds, is_officer_anywhere=anywhere)
+    cards = [(dr.ApplicationButton("accept", 5), "Officers only."), (discord_pool.AbsenceButton("new"), "Not configured here."),
+             (discord_news.ProposalButton("260101-abcd", "approve"), "Officers only.")]
+    for card, refusal in cards:
+        for server in (None, 999):  # a DM, an unconfigured server
+            i = itx(client, guild_id=server)
+            run(card.callback(i))
+            assert i.response.replies == [refusal], (card, server)
+    assert seen == []
+    for card, _ in cards:
+        run(card.callback(itx(client, guild_id=DUO_SERVER)))
+    assert seen == [("officer", GUILD2), ("absence", GUILD2), ("anywhere", GUILD2)]
+    one = types.SimpleNamespace(registries=Guilds.of(duo.a.store, duo.a), is_officer_anywhere=anywhere)
+    i = itx(one, guild_id=None)
+    run(dr.ApplicationButton("decline", 5).callback(i))
+    assert i.response.replies == ["Officers only."], "one guild too: a channel card pressed outside its server is refused"
+
+
+def test_api_ops_feed_shows_only_this_guilds_companions(duo, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from oibot_gm.feed import FeedServer
+    from oibot_gm.web import app as web
+    from test_mcp import TOKEN, FakeBot
+
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    bot = FakeBot(duo.a, duo.rs_a)
+    bot.registries = duo.guilds
+    fs = FeedServer(lambda ev, c: None, "t")
+    for peer, g in (("p1", GUILD2), ("p2", GUILD), ("p3", "")):
+        fs.companions[peer] = types.SimpleNamespace(character=f"c-{peer}", client="x", events=0, silent_for=1, guild=g)
+    bot.feed = fs
+    me = next(iter(duo.guilds.by_discord.values())).key  # the bearer's guild in S1 (S2 picks it per request)
+    body = TestClient(web.create_app(bot)).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}"}).json()
+    mine, theirs = ("c-p2", "c-p1") if me == GUILD else ("c-p1", "c-p2")
+    assert mine in body["feed"] and theirs not in body["feed"] and "c-p3" not in body["feed"], body["feed"]
+    one = FakeBot(duo.a, duo.rs_a)
+    one.feed = fs
+    body = TestClient(web.create_app(one)).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}"}).json()
+    assert "c-p2" in body["feed"] and "c-p3" in body["feed"] and "c-p1" not in body["feed"], "one guild: an untagged companion counts for it"
+    assert TestClient(web.create_app(FakeBot(duo.a, duo.rs_a))).get("/api/ops", headers={"Authorization": f"Bearer {TOKEN}"}).json()["feed"] == "disabled"
+
+
 # ---------------------------------------------------------------- DMs while S1 (no picker yet)
 
 def dm_client(duo, members=None, flaky=None):
@@ -385,6 +467,20 @@ def test_a_second_server_is_refused_until_the_next_stage_then_gets_a_unique_key(
     duo.guilds.add(reg)
     with pytest.raises(RegistryError, match="already set up"):
         duo.guilds.create(srv, 1, "forever")
+
+
+def test_a_claim_in_flight_on_an_empty_deployment_blocks_a_second_server(tmp_path, monkeypatch):
+    """K11 with nothing configured yet: two servers claiming in the same window must not both get folders."""
+    g = Guilds(scratch_root(tmp_path), ROOT)
+    assert g.claim_refusal(5) is None
+    g._claiming.add(5)  # server 5's claim is writing its folder (create() ran, add() hasn't)
+    assert g.claim_refusal(5) == "This server is already set up."
+    assert "second server" in g.claim_refusal(6)
+    with pytest.raises(RegistryError, match="second server"):
+        g.create(types.SimpleNamespace(id=6, name="Other"), 1, "forever")
+    assert not g._claiming - {5} and [p.name for p in g.store.root.iterdir() if p.name != ".git"] == ["25bg"]
+    monkeypatch.setattr(Guilds, "ALLOW_SECOND", True)
+    assert g.claim_refusal(6) is None
 
 
 def test_claim_tells_every_other_owner_once(duo, monkeypatch):
@@ -617,6 +713,18 @@ def test_owner_dm_names_the_guild_only_when_there_are_several(reg, store):
     assert len(dms) == 1 and dms[0].startswith("✖ `"), "one guild: exactly as before"
 
 
+def test_owner_dm_names_the_guild_when_there_are_several(duo):
+    dms = []
+
+    class U:
+        async def send(self, text):
+            dms.append(text)
+    client = types.SimpleNamespace(registries=duo.guilds, get_channel=lambda cid: None, get_user=lambda uid: dms.append(uid) or U())
+    duo.b.config.name = "Duo *Guild*"  # a server name is data: escaped, never formatting
+    run(ops_mod.Ops(client).emit(duo.b.config, "error", "x"))
+    assert dms[0] == OWNER2 and dms[1].startswith("**Duo \\*Guild\\*** · ✖ `"), dms
+
+
 def test_run_locks_are_per_guild_with_one_run_key(duo):
     from oibot_gm.discord_raid import RaidMixin
 
@@ -678,9 +786,40 @@ def test_pool_listener_attach_is_idempotent(duo):
     assert duo.b.listeners.count(bot.on_registry_change) == 1 and duo.a.listeners.count(bot.on_registry_change) == 1
 
 
-def test_loot_thread_check_is_per_guild():
-    src = (ROOT / "src" / "oibot_gm" / "flows_raid.py").read_text()
-    assert "s.id == ev.key and s.guild == reg.key" in src
+def test_loot_thread_check_is_per_guild(duo, monkeypatch):
+    """/raid loot in duo opens its own thread although demo already has a loot session on the SAME run key; a second
+    /raid loot in demo still finds demo's."""
+    from conftest import join
+    from test_flows_raid import FakeBot as RaidBot, FakeChannel
+
+    from oibot_gm import flows_raid  # noqa: F401 — registers raid_loot
+    from oibot_gm.discord_bot import MockEvent
+
+    monkeypatch.setattr(dr, "is_officer", lambda i, r: True)
+    monkeypatch.setattr(MockEvent, "save", lambda self, msg=None: None)
+    ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
+    for reg, rs, ev in ((duo.a, duo.rs_a, ev_a), (duo.b, duo.rs_b, ev_b)):
+        join(reg, rs, ev, reg.test_members()[:10])
+        lock_with_board(reg, rs, ev, [m.display_name for m in reg.test_members()[:10]])
+    bot = RaidBot(duo.rs_a)
+    stores = {GUILD: duo.rs_a, GUILD2: duo.rs_b}
+    bot.raids = types.SimpleNamespace(store=lambda r: stores[r.key])
+    ch = FakeChannel()  # one channel object: its fake thread ids stay unique, as Discord's are
+
+    def loot(reg, server):
+        h = Harness(reg, stores[reg.key], client=bot)
+        h.guild_id, h.channel = server, ch
+        run(FLOWS["raid_loot"](h.command(), reg))
+        return h
+    first = loot(duo.a, 1)
+    assert "Loot thread open" in first.text
+    (thread_a,) = [t for t, s in bot.events.items() if s.guild == GUILD]
+    second = loot(duo.b, DUO_SERVER)
+    assert "Loot thread open" in second.text and "already open" not in second.text, "demo's session is not duo's"
+    assert sorted((s.id, s.guild) for s in bot.events.values()) == [(ev_a.key, GUILD), (ev_b.key, GUILD2)]
+    assert duo.rs_b.events[ev_b.key].thread_id and duo.rs_a.events[ev_a.key].thread_id == thread_a
+    again = loot(duo.a, 1)
+    assert again.text.endswith(f"Loot thread already open: <#{thread_a}>") and len(bot.events) == 2
 
 
 def test_healthz_reports_each_guild(duo):
