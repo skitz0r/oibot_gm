@@ -341,7 +341,7 @@ def create_app(bot) -> FastAPI:
         """(may open it, membership answer, Discord member): the guild's owner, or in its server now (guild_routing —
         the one definition of "belongs to"; no timeout here, a page may wait for a slow fetch as it always did)."""
         answer, member = await guild_routing.member_of(bot, reg, uid, timeout=None)
-        return answer == "yes" or reg.config.owner_discord_id == uid, answer, member
+        return answer == "yes" or reg.is_owner_id(uid), answer, member
 
     async def accessible_keys(uid: int, skip=None) -> list[str]:
         regs = [r for r in bot.registries.ordered() if r is not skip]
@@ -416,7 +416,7 @@ def create_app(bot) -> FastAPI:
         reg, member, moved = await selected_reg(request, uid, guild, query)
         guild_obj = bot.get_guild(reg.config.discord_guild_id)
         officer = bot.officiates(member, guild_obj) if member else True  # per guild: owning B grants nothing in A
-        owner = reg.config.owner_discord_id == uid
+        owner = reg.is_owner_id(uid)
         name = member.display_name if member else (reg.members[uid].display_name if uid in reg.members else s.get("name", str(uid)))
         return Viewer(uid, name, reg, officer, owner, moved=moved)
 
@@ -436,13 +436,13 @@ def create_app(bot) -> FastAPI:
                 ok, _, member = looks[r.key]
                 if not ok:
                     continue
-                role = "owner" if r.config.owner_discord_id == v.uid else "officer" if member is not None and bot.officiates(member, bot.get_guild(r.config.discord_guild_id)) else "member"
+                role = "owner" if r.is_owner_id(v.uid) else "officer" if member is not None and bot.officiates(member, bot.get_guild(r.config.discord_guild_id)) else "member"
             out.append({"key": r.key, "name": r.config.name, "icon": public_info(bot, r)["icon"], "role": role})
         return out
 
     async def privilege(reg, uid: int, max_age: float = 60) -> str:
         """owner | officer | member | outside — from Discord roles (Manage Server or the configured officer role), never stored."""
-        if reg.config.owner_discord_id == uid:
+        if reg.is_owner_id(uid):
             return "owner"
         guild = bot.get_guild(reg.config.discord_guild_id)
         m = await guild_member(guild, uid, max_age=max_age) if guild else None

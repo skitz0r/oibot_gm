@@ -572,6 +572,18 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
 
 ## 8. Owner: setup
 
+**Who the owner is.** Each guild has one **owner**: the person with owner-only rights there (channels, raid rules and
+schedules, auras, timezone, recruitment, plain-text permissions, the test bench's setup, ownership transfer) and the
+person MCP acts as. When a server is set up (`/gm config owner` in it), the owner defaults to **the Discord server's
+owner**; the setup screen can pick someone else, and `/gm config owner user:` transfers it later. (Discord doesn't tell
+a bot who invited it, so "whoever added the bot" can't be read; the server's owner is the reliable stand-in.)
+
+**Superusers.** `OIBOT_SUPERUSERS` in `.env` (Discord user ids, comma-separated; restart the bot) lists the host's
+superusers: owner rights in **every** guild the bot serves, whether or not they are in that server or own it. They can
+set up any server the bot is in, open every guild on the site, and use every owner-only command and plain-text change.
+The setup screen still makes the server's own owner the guild owner, so a superuser can configure someone else's server
+without taking it over. Keep the list to the person who runs the bot.
+
 **Setting up a server.** Inviting the bot never sets anything up. In the new server, the Discord server owner (or
 someone with Manage Server) runs `/gm config owner`: a short screen shows the server's name, the guild key the bot
 picked from it (it never changes; the site and MCP use it), the game version (WoW: Forever unless you pick another) and

@@ -69,12 +69,12 @@ async def guilds_of(bot, uid: int, guilds=None) -> list:
     guilds = guilds if guilds is not None else bot.registries
     regs = guilds.ordered()
     answers = await asyncio.gather(*(membership(bot, r, uid, max_age=ROUTING_MAX_AGE_S) for r in regs))
-    return [r for r, a in zip(regs, answers) if r.config.owner_discord_id == uid or a in ("yes", "unknown")]
+    return [r for r, a in zip(regs, answers) if r.is_owner_id(uid) or a in ("yes", "unknown")]
 
 
 async def may_access(bot, reg, uid: int) -> bool:
     """The single strict "belongs to": the guild's owner, or a member of its server now."""
-    if reg.config.owner_discord_id == uid:
+    if reg.is_owner_id(uid):
         return True
     return await membership(bot, reg, uid) == "yes"
 

@@ -1139,7 +1139,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         Server counts only in a configured server (design §14 K24): an unconfigured server's admin is nobody's officer.
         `mock`: the /mock shadow sessions keep their old rule (Manage Server anywhere)."""
         reg = self.registries.for_guild(guild.id) if guild else None
-        if reg and reg.config.owner_discord_id == user.id:
+        if reg and reg.is_owner_id(user.id):
             return True
         if not isinstance(user, discord.Member):
             return False
@@ -1209,7 +1209,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         person wrote in a DM, where Discord hands over a bare User without roles."""
         guild = self.get_guild(reg.config.discord_guild_id)
         member = user if isinstance(user, discord.Member) and guild is not None and user.guild.id == guild.id else await self.cached_member(guild, user.id)
-        officer = reg.config.owner_discord_id == user.id or (member is not None and self.officiates(member, guild))
+        officer = reg.is_owner_id(user.id) or (member is not None and self.officiates(member, guild))
         return officer, ([r.id for r in member.roles] if member is not None else [])
 
     async def in_guild(self, reg, user) -> bool:
@@ -1252,7 +1252,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         # the snapshot and the parser context follow who can READ the reply: an officer asking where members read it
         # gets the member view (help_answer adds where the officer view is)
         public = not self.reply_private(reg, message.channel if message.guild else None)
-        owner = reg.config.owner_discord_id == uid
+        owner = reg.is_owner_id(uid)
         may_act = provider is not None and (owner or (mode == "self" and reg.may_plain("self", uid, officer=officer, role_ids=role_ids, channel=channel, fallback="members") is None))
 
         def apply_button(base=None):  # a newcomer who must apply gets the Apply to join button (the wizard opens from here, DMs too)

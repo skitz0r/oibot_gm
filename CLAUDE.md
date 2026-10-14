@@ -45,6 +45,8 @@ src/oibot_gm/
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
                        applies in Discord before registering: every first-character path checks it — Discord, plain text, the Me page);
                        PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check
+                       Owner rights = Registry.is_owner_id(uid): the guild's owner OR a host superuser (OIBOT_SUPERUSERS, every guild) — never compare
+                       owner_discord_id directly; a server claim defaults the owner to the Discord server's owner
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|plan main|alt|roles|char …|absent … (members);
                        /roster overview|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers; `poll` retired, PlanButton is a stub);

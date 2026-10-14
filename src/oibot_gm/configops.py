@@ -441,7 +441,7 @@ def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bo
     from it; None reads the store from disk) — a member's own Join / Bench after lock is refused like the sheet does."""
     allowed, refused = [], []
     for op in ops:
-        if op.op in HARD_OWNER_OPS and author_id != reg.config.owner_discord_id:
+        if op.op in HARD_OWNER_OPS and not reg.is_owner_id(author_id):
             if HARD_OWNER_OPS[op.op] not in refused:
                 refused.append(HARD_OWNER_OPS[op.op])
             continue

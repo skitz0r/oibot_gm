@@ -1378,7 +1378,7 @@ async def open_about(interaction: discord.Interaction, reg: Registry, **_seed) -
 
 # ---------------------------------------------------------------- claiming a server (design §5.32)
 
-CLAIMERS = "The Discord server owner (or someone with Manage Server) sets this server up."
+CLAIMERS = "The Discord server owner (or someone with Manage Server, or the bot's host superuser) sets this server up."
 DEFAULT_CLAIM_PROFILE = "forever"
 
 
@@ -1391,8 +1391,10 @@ def claim_refusal(i: discord.Interaction) -> str | None:
     registries = i.client.registries
     if registries.for_guild(i.guild_id) is not None:
         return "This server is already set up."
+    from .registry import is_superuser
+
     manages = getattr(getattr(i.user, "guild_permissions", None), "manage_guild", False)
-    if guild.owner_id != i.user.id and not manages:
+    if guild.owner_id != i.user.id and not manages and not is_superuser(i.user.id):
         return CLAIMERS
     return registries.claim_refusal(int(i.guild_id))
 
@@ -1477,7 +1479,15 @@ async def open_guild_claim(interaction: discord.Interaction, reg: Registry | Non
     if not profiles:
         await interaction.response.send_message("No game profile loads on this bot; nothing was set up.", ephemeral=True)
         return
-    await GuildClaimWizard(interaction.user.id, owner or interaction.user, profiles).start(interaction)
+    # the guild's owner defaults to the Discord server's owner (who runs the server), not necessarily whoever pressed —
+    # so a superuser setting up someone else's server leaves it owned by them; the wizard can pick someone else
+    default = owner
+    gowner = getattr(interaction.guild, "owner_id", None)
+    if default is None and gowner and gowner != interaction.user.id:
+        from types import SimpleNamespace
+
+        default = getattr(interaction.guild, "owner", None) or SimpleNamespace(id=int(gowner), bot=False)
+    await GuildClaimWizard(interaction.user.id, default or interaction.user, profiles).start(interaction)
 
 
 __all__ = ["MultiForm", "RaidConfigWizard", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "open_raid_config", "open_aura",

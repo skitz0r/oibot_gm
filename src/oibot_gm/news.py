@@ -303,7 +303,7 @@ def shared_profile_refusal(guilds, key: str, by_id: int | None) -> str | None:
     version, the approver must own every guild on it. The message names only the OTHER guilds (the proposing guild's
     officers already know their own)."""
     same = same_profile_guilds(guilds, key)
-    if not same or all(r.config.owner_discord_id is not None and r.config.owner_discord_id == by_id for r in same):
+    if not same or all(r.is_owner_id(by_id) for r in same):
         return None
     others = shared_profile_others(guilds, key)
     return (f"this edits game data that {', '.join(others)} also use{'s' if len(others) == 1 else ''}: "

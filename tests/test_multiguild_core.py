@@ -440,7 +440,7 @@ def test_claim_wizard_creates_the_guild_in_one_commit_and_serves_it(tmp_path):
     run(h.press("Confirm"))
     assert "is set up" in h.text and "/gm config ops-channel" in h.text
     cfg = yaml.safe_load((store.root / "shiny-new-se" / "guild.yaml").read_text())
-    assert cfg["key"] == "shiny-new-se" and cfg["discord_guild_id"] == 5 and cfg["owner_discord_id"] == 4242 and cfg["game_profile"] == "forever"
+    assert cfg["key"] == "shiny-new-se" and cfg["discord_guild_id"] == 5 and cfg["owner_discord_id"] == 1 and cfg["game_profile"] == "forever"  # the Discord server's owner, not the presser
     assert int(subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=store.root, capture_output=True, text=True).stdout) == commits + 1
     assert "guild created for Shiny New Server" in subprocess.run(["git", "log", "-1", "--format=%s"], cwd=store.root, capture_output=True, text=True).stdout
     assert g.for_guild(5).key == "shiny-new-se" and "shiny-new-se" in g.by_key and bot.added == ["shiny-new-se"]

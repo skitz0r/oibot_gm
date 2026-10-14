@@ -133,7 +133,7 @@ async def left_server(bot, reg: Registry, user) -> bool:
     unregistered by every plain-text path, whatever record the registry still holds — as the web treats server
     membership as the whitelist. The owner never is; a client without `in_guild` (tests, offline) counts everyone in."""
     check = getattr(bot, "in_guild", None)
-    return check is not None and reg.config.owner_discord_id != user.id and not await check(reg, user)
+    return check is not None and not reg.is_owner_id(user.id) and not await check(reg, user)
 
 
 class ConfigConfirmView(discord.ui.View):

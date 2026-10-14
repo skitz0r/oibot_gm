@@ -461,7 +461,7 @@ class RaidMixin:
             await self.run_fill(reg, rs, ev, team, by="answer")
 
     async def is_officer_anywhere(self, reg, uid: int) -> bool:
-        if reg.config.owner_discord_id == uid:
+        if reg.is_owner_id(uid):
             return True
         guild = self.get_guild(reg.config.discord_guild_id)
         if not guild:

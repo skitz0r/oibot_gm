@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from collections import deque
 from datetime import datetime, timezone
@@ -180,6 +181,21 @@ class PlainPolicy(BaseModel):
     channels: dict[str, str] = Field(default_factory=dict)  # channel id (as a string) -> mode
     dm: str = "self"
     default: str = "self"
+
+
+SUPERUSERS_ENV = "OIBOT_SUPERUSERS"  # .env: Discord user ids (comma/space separated) with owner rights in EVERY guild the bot serves
+
+
+def superusers() -> frozenset[int]:
+    """The host's superusers: owner of every guild (configure anything, claim any server the bot is in), read per call."""
+    return frozenset(int(x) for x in re.split(r"[\s,]+", os.environ.get(SUPERUSERS_ENV, "")) if x.strip().isdigit())
+
+
+def is_superuser(uid) -> bool:
+    try:
+        return uid is not None and int(uid) in superusers()
+    except (TypeError, ValueError):
+        return False
 
 
 class GuildConfig(BaseModel):
@@ -784,6 +800,10 @@ class Registry:
     # set by discord_registry.Guilds for every guild it serves: True while the process serves several, so a DM or a card
     # names its guild (design §5.32); with one guild every message reads exactly as before
     many_guilds: bool = False
+
+    def is_owner_id(self, uid) -> bool:
+        """Owner rights here: the guild's owner, or a host superuser (OIBOT_SUPERUSERS)."""
+        return uid is not None and ((self.config.owner_discord_id is not None and uid == self.config.owner_discord_id) or is_superuser(uid))
 
     def __init__(self, store: GitStore, guild_key: str, profile: GameProfile):
         self.store = store
@@ -1867,7 +1887,7 @@ class Registry:
         return ids
 
     def plain_allows(self, group: str, author_id: int, officer: bool, role_ids=()) -> bool:
-        if self.config.owner_discord_id is not None and author_id == self.config.owner_discord_id:
+        if self.is_owner_id(author_id):
             return True  # the owner can always do everything
         roles = {str(r) for r in role_ids}
         for tok in self.plain_who(group):
@@ -1890,7 +1910,7 @@ class Registry:
         allowed, otherwise the refusal line: who may, and where."""
         what = what or PLAIN_GROUPS[group][0].lower()
         mode = self.plain_mode(channel)
-        owner = self.config.owner_discord_id is not None and author_id == self.config.owner_discord_id
+        owner = self.is_owner_id(author_id)
         where = "in DMs" if channel is None else f"in <#{channel}>"
         act = self.plain_act_channels()
         go = ("use " + " or ".join(f"<#{c}>" for c in act)) if act else "use the slash commands or the site"

@@ -15,7 +15,7 @@ from discord import app_commands
 
 from . import guild_routing, ops as ops_mod
 from .profiles import GameProfile
-from .registry import GUILD_KEY_RE, RANKS, Registry, RegistryError
+from .registry import is_superuser, GUILD_KEY_RE, RANKS, Registry, RegistryError
 from .store import GitStore
 from .wizard_flows import FLOWS
 
@@ -231,7 +231,7 @@ def channel_card_guild(interaction: discord.Interaction, gk: str | None) -> Regi
 
 
 def is_officer(interaction: discord.Interaction, reg: Registry) -> bool:
-    if interaction.user.id == reg.config.owner_discord_id:
+    if reg.is_owner_id(interaction.user.id):
         return True
     m = interaction.user if isinstance(interaction.user, discord.Member) else None
     if m is None:
@@ -242,7 +242,7 @@ def is_officer(interaction: discord.Interaction, reg: Registry) -> bool:
 
 
 def is_owner(interaction: discord.Interaction, reg: Registry) -> bool:
-    return reg.config.owner_discord_id is not None and interaction.user.id == reg.config.owner_discord_id
+    return reg.is_owner_id(interaction.user.id)
 
 
 from .constants import ROLES, TEAL  # noqa: E402
@@ -915,7 +915,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         if not reg.config.owner_discord_id:  # first claim: only the server owner or someone with Manage Server
             m = interaction.user if isinstance(interaction.user, discord.Member) else None
-            if not (m and interaction.guild and (interaction.guild.owner_id == m.id or m.guild_permissions.manage_guild)):
+            if not (is_superuser(interaction.user.id) or (m and interaction.guild and (interaction.guild.owner_id == m.id or m.guild_permissions.manage_guild))):
                 await interaction.response.send_message("Nobody owns this guild yet; the Discord server owner (or someone with Manage Server) claims it first.", ephemeral=True)
                 return
         target = user or interaction.user
