@@ -1318,7 +1318,7 @@ out/dual_interface_design.md §3.1 decisions 1–4, 6 (the debounce), 7, 9, 10 a
 (out/dual_interface_decisions.md). The core every surface calls; the Discord surfaces (cards, DynamicItems, wizards),
 the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on it.
 
-- **One session, one key.** `loot/session.py: LootSession` (alias `discord_bot.MockEvent` while `/mock` lives) keyed
+- **One session, one key.** `loot/session.py: LootSession` (the `discord_bot.MockEvent` alias went with `/mock`, §5.38) keyed
   `(guild key, run key)` — `id` = the run key, `<run key>-r<n>` for one roster of a split run, `mock-<channel>` for a
   `/mock` session — stored at `<guild>/events/<id>.json`. `bot.events[(gk, id)]` plus a by-thread map
   (`LootMixin.event_for`). A real session is live iff its run is `locked` (`loot_live`); no session state. Candidates
@@ -1350,9 +1350,9 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   the ledger); `loot_reasons_pending(reg)` = the "needs a reason" list (companion rows without an active precedent);
   `correct` appends a `kind: void` ledger row + a new award, no precedent, and also takes a session id for an ended
   council (a conflict days later); `loot_conflicts_pending(reg)` lists uncorrected in-game conflicts from live sessions
-  and archives. `record_pending_reason` (the next message as the reason) is gone; LootMixin's own `loot_view` keeps
-  interim (non-persistent) Views as the default for a bot without the surface; OibotGM's are §5.36's persistent
-  LootButtons, and its thread chat is §5.36's addressed-only `loot_chat`.
+  and archives. `record_pending_reason` (the next message as the reason) is gone; the thread's buttons are §5.36's
+  persistent LootButtons (the interim Views LootMixin once kept as a default are gone, §5.38), and its thread chat is
+  §5.36's addressed-only `loot_chat`.
 - **Revs** (computed): `batch_rev` over the picks in play (pending + awards from proposals: drop → recipient, source —
   a confirm as shown keeps it, an override / re-score / discard / new batch moves it) for Confirm-all, Discard and
   Override; `drops_rev` (drop list + what Distribute would judge) for Tick and Distribute; per-item Confirm carries
@@ -1364,7 +1364,7 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   `attendance_known`). `LootAward += item_name, discord_id, tiered, by, policy_version, candidates_snapshot, drop_id,
   import_id, source, bot_pick, confirmed_at, void`.
 - **Contexts.** `bot.loot_ctx(session)`: `lootctx.RegistryLootContext` per guild (never the fixtures for a real guild;
-  `reload()` folds void rows and superseding precedents) or `FixtureLootContext` (the `/mock` shadow data).
+  `reload()` folds void rows and superseding precedents); `FixtureLootContext` went with `/mock` (§5.37).
 - **Companion** (`discord_feed`): routing within the token's guild (one live non-test council; a test council only from
   a puppet's / the tester's companion; several → by seated character; else refused: ops warn + error frame); no live
   run → held 10 min (`feed_buffer`, `feed_waiting(reg)` = the "no run live" state, replayed by `open_loot`);
@@ -1388,8 +1388,8 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   `loot_roster_changed`. Every verb writes one `ops.audited` line (per award on Confirm); a test session writes nothing
   to the ledger, precedents or learned items.
 - **Hooks the surfaces replace:** `loot_notify(reg, session, line, kind=, drop_id=)`, `loot_open_thread(reg, rs, ev,
-  session)`, `loot_ended`, `loot_closing`, `loot_held`, `loot_view` (defaults: a line in the thread with the interim
-  buttons; a distribute posts the proposals with Confirm / Discard; a plain thread on the officer channel).
+  session)`, `loot_ended`, `loot_closing`, `loot_held`, `loot_view` (minimal defaults for a client without the surface:
+  a line in the thread, no buttons, a plain thread on the officer channel — §5.38).
 - `Registry.items()` is cached against a stamp (the profile object + every item file's name/size/mtime), so a tier
   written by any path or a profile reload is read on the next call.
 - **Final review fixes (2026-10-16).** Companion `loot` matching (`FeedMixin._feed_match`, choice and write in ONE
@@ -1424,7 +1424,7 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
 out/dual_interface_design.md §3.1 decisions 5, 6 (the card side), 8, 9 (the posting side), L09–L23, L36/L37, R55; the
 owner's D1, D3, D6, D7, D9, D10 and the DM rule. The verbs are §5.35's; `discord_loot_surface.LootSurfaceMixin` (mixed
 into OibotGM before LootMixin) replaces the hooks they call after every write, so the thread always shows the state the
-verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A `/mock` session keeps the defaults.
+verbs left, whichever surface wrote (the web, MCP, plain text, the companion).
 
 - **The thread** (`loot_open_thread`): a PUBLIC thread on `officer_channel(reg, ev)` (roster channel, else ops;
   refused with "Set a roster or ops channel first" when neither is set, D1), started from a one-line "⚔ Loot council ·
@@ -1504,7 +1504,7 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   Fill · Loot · Cancel never moves) opens `raid_loot` with `key=` its own run (never the run picker: with two locked
   runs each card opens its own council) — the hub reaches the council.
 - **The scheduler's loot step** (`loot_scheduler_step`, last in each guild's minute): companion events held with no
-  council live → one line in the loot channel (else the officer channel) "📡 Drops arriving from Jon's log but no run
+  council live → one line in the officer channel (never the public loot log, §5.38) "📡 Drops arriving from Jon's log but no run
   is live — start an ad hoc run for tonight?" with **Start an ad hoc run…** (`LootStartButton` → `/raid open`'s
   wizard; nothing opens before its Confirm), edited once nothing is held; in-game awards held within 6 h after a
   council ended → ONE DM to the officers (`loot_officer_ids`: the officer roles' members the client sees, else the
@@ -1520,11 +1520,10 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   the buttons on the cards." A question → `help_answer(…, data=loot_digest(session))` (HelpExtras.data: the
   proposals in a `<data>` block, officer snapshot only). A request to act → `nl.parse_loot_feedback` over the
   numbered digest (drop numbers, so copies never collide) → `loot_changes` (names checked against the candidate table
-  and tonight's roster) → `LootChatConfirmView` (a `PendingView`: Apply · Cancel · Edit the reason… as `cfgapply`
-  ids; a reason the officer didn't write is "(inferred — edit before Apply)" and Apply stays off until edited). Apply
-  re-checks the presser live and applies with the batch_rev seen when the sentence arrived — through
-  `configops.describe` / `apply_async` for the `loot` op when configops carries it (L3), else the verbs directly
-  (`via="chat"`). The `/mock` thread chat stays `OibotGM.mock_loot_chat`.
+  and tonight's roster) → `LootChatConfirmView` — since §5.38 the plain-text pipeline's own `ConfigConfirmView` with
+  one `loot` ConfigOp per change (describe → authorize in the thread's parent channel → `apply_async`, `via="chat"`),
+  plus **Give the reason…** while a reason is missing or a guess (the line asks "why?"; Apply stays off until it is
+  given). The revs are taken when the sentence arrived: the batch_rev for "confirm the rest", `to:<pick>` per award.
 - **Bind companion…** (L10): when several councils are live and a companion's character is rostered on none (or
   several), `FeedMixin.loot_route` refuses (error ack + ops warn, as before) and records it in
   `loot_unrouted(gk)`; every live council card of the guild gains "🔌 Companion not routed …" and a `LootPick` `bind`
@@ -1535,12 +1534,12 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   the companion's next refused event.
 - **/gm precedents** (`gm_precedents`, L28): the last 25 active precedents → one (what the bot picked, who got it, why,
   who, the date as a person reads it — `flows_loot.when_label`: an ISO date → `Registry.day_label`, a stamp →
-  `Registry.local12`, never the stored ISO) → **Retire…** → the reason box → `LootMixin.retire_precedent(reg, import_id, reason, by, by_id, via,
-  restore=False)`: an append-only `kind: status` row (`lootctx` folds it); `loot_precedents(reg, active=True)` lists
-  them; a retired precedent is no longer cited.
+  `Registry.local12`, never the stored ISO) → **Retire…** → the reason box → `LootMixin.retire_precedent(reg, ref, reason, by, by_id, via,
+  restore=False)` — since §5.38 the one retire verb for every surface, wrapping `RegistryLootContext.set_precedent_status`
+  (an append-only `kind: status` row that `lootctx` folds); `loot_precedents(reg, active=True)` lists them; a retired
+  precedent is no longer cited.
 - **On ready** `loot_restore` then `loot_cards_restore` (every live council's card and proposal cards redrawn in place
-  with this version's buttons). `post_boss_tables` (the per-boss selects) is `/mock`'s only; a real council's one tick
-  path is Tick drops….
+  with this version's buttons). The council's one tick path is Tick drops… (the /mock per-boss selects are gone, §5.38).
 - Tests: `tests/test_loot_surface.py` (the card, the batch cards and their limits, every press against the verbs,
   stale presses, the Override / Tick / Correct / precedents wizards through `wizard_harness`, the item card's
   self-edit, the restart round-trips of every id incl. a modal submitted after a restart, End, the scheduler step and
@@ -1627,8 +1626,8 @@ D2, D4, D5, D8, D11, D12). Every write below calls the SAME `LootMixin` verb the
 - **/mock retired (D11).** The `/mock` group, its roster chat and views, `FixtureLootContext` and the fixtures branch of
   `loot_ctx`, the mock routing in `discord_feed` are gone; `load_sessions` skips an old `origin: mock` file (left on
   disk as written — no migration); a session is live only through a locked run. Rehearsals are test-bench runs (the
-  council is `session.test`: no ledger, precedents, learned items or public log). `GuildContext` stays: it loads the
-  demo fixtures for the LLM provider and `oibot demo`.
+  council is `session.test`: no ledger, precedents, learned items or public log). `GuildContext` stays, reduced in
+  §5.38 to the start directory's key, profile and the LLM provider (`oibot demo` loads the fixtures itself).
 - **Review fixes.** A precedent written live (`RegistryLootContext.append_precedent`, an override at Confirm) gets
   its `ref` at once (`precedent_ref(row, n)`, n = its place among the precedent rows — the name `fold_precedents`
   gives it at the next load), so Retire / `retire_precedent` / the `retire` op reach it without a restart.
@@ -1648,6 +1647,42 @@ D2, D4, D5, D8, D11, D12). Every write below calls the SAME `LootMixin` verb the
 - Tests: `tests/test_loot_web.py` (every route over the real verbs; D2 filters; D8 actor; wishlists incl. the TMB
   fixture `tests/tmb_wishlists.csv`; items + re-weight; precedents; the `loot` / `wishlist` / `tier` ops incl. a
   stale confirm-all; the public log; the harness drives `/me wishlist`; the review fixes' regressions).
+
+### 5.38 Dual interfaces, phase 1 — loot integration cleanup (built 2026-10-16)
+
+The three loot builds (§5.35 core, §5.36 Discord surface, §5.37 web / plain text / MCP) merged; this pass made them one.
+
+- **The thread chat is the plain-text pipeline.** `LootChatConfirmView` subclasses `discord_policy.ConfigConfirmView`:
+  each change is a `loot` ConfigOp (`discord_loot_surface.loot_op`), its line is `configops.describe`, Apply is
+  `ConfigConfirmView.press_apply` (authorize in the thread's parent channel, `apply_async` with `op_rev`). It stays a
+  subclass for one thing: an override whose reason is missing or the model's guess shows "why?" in the reason's place
+  (`loot_ops.describe(op, why=…)`, never the describe() error line) and **Give the reason…** (the reason modal) must be
+  answered before Apply. The revs are taken when the officer wrote: `loot:<session>` = the batch_rev (confirm-all),
+  `loot:<session>#<drop>` = `to:<pick>` (an award); `loot_revs` carries `to:<pick>` for a plain-text award too and
+  `LootMixin.override(expect_to=…)` refuses a pick that moved ("The pick changed: … now goes to …"). The fallback path
+  (`apply_loot_changes`, `loot_op_ready`, `loot_plain_group`) is gone; the capability group is `loot`.
+- **Whose override.** `LootMixin.override` decides "another officer's" by `by_id` against `Override.by_id` (design
+  §5.33; no id on either side = someone else's); names are for reading only.
+- **One retire verb.** `LootMixin.retire_precedent(reg, ref, reason, …, restore=)` = `RegistryLootContext.
+  set_precedent_status` on the guild's cached context under the guild's precedents lock, commit off the loop, one audit
+  line; `/gm precedents`, `POST /api/loot/precedents/retire` (MCP `retire_precedent`) and the `loot retire` op call it.
+- **Officer prompts never go to the public log.** The "no run is live — start an ad hoc run?" prompt goes to
+  `officer_channel` only; `loot_channel_id` carries the award line per Confirm and the correction line.
+- **D8 previews.** `api_loot.writer(actor=…, preview_ok=…)`: only confirm and the TMB import (whose handlers answer a
+  preview before any verb) skip the actor on `"preview": true`; every other decision route needs it whatever the body.
+- **Companion.** A drop / award another companion of the same council reported (same boss + items / recipient + item,
+  in-game stamps within `DUP_WINDOW_S` = 30 s) is an ops line, no tick (`FeedMixin._feed_duplicate`; per companion,
+  one duplicate per report, in memory); a kill reported twice adds one line; the drop keeps the companion's `raw` line;
+  a `@self` recipient is the companion's character; companion events, the auto-distribute and the re-judge after an
+  override are audited on their real surface (`companion`, the overrider's `via`).
+- **/mock remnants removed** (D11): discord_bot's DropsSelect / DistributeView / ConfirmView / DetailSelect and their
+  embeds, `distribute_ui`, `post_boss_tables`, `post_proposals`, `gate`, `officiates(mock=)`, `mock_loot_chat`,
+  `MockEvent`; LootMixin's interim thread Views and modals; `render.roster_png`; `LootSession.drops` / `distributed`.
+- **Help.** `help._loot` reads `RegistryLootContext` (voided awards dropped, precedents folded); the section is open to
+  members, who get their own awards only (D2).
+- Tests: the regressions in `tests/test_loot_surface.py` (chat award / confirm revs, the "why?" line, the prompt's
+  channel), `tests/test_loot_verbs.py` (override by id, companion duplicates, via), `tests/test_loot_web.py` (one retire
+  verb, previews without an actor write nothing) and `tests/test_help.py` (a member's own loot).
 
 ## 6. Architecture
 
@@ -1918,6 +1953,6 @@ These are the numbers to confirm with real usage logs.
 
 **Mobile login (2026-09-19):** on a phone `/auth/login` renders a *Continue with Discord* link instead of redirecting, because iOS/Android only hand a discord.com URL to the Discord app on a tap. The OAuth round trip then often ends in a different cookie jar than it started in (in-app browser → Discord app → system browser), so a callback without the nonce cookie no longer fails: it shows *Continue as <name>?* and `POST /auth/confirm` (signed 5-minute ticket, kind `confirm`) sets the session. The explicit confirmation replaces the nonce's job of preventing a silent sign-in to someone else's account.
 
-**Analytics cards (2026-09-20):** the analytics channel no longer posts images. `discord_pool.pool_layout` builds one native layout card per raid (readiness + comp shortfalls, icons and numbers only, links to the site); `refresh_pool` edits them in place under `analytics_message_ids["pool2:<raid>"]` and deletes any other stored id once (the bank / pool / comp / groups PNG cards). Removed: `render.health_png|bank_png|groups_png|comp_png`, `registry.bank_rows`, the web `/card/*` PNG endpoints. `render.py` keeps the /mock roster image, raid thumbnails and the generated badges.
+**Analytics cards (2026-09-20):** the analytics channel no longer posts images. `discord_pool.pool_layout` builds one native layout card per raid (readiness + comp shortfalls, icons and numbers only, links to the site); `refresh_pool` edits them in place under `analytics_message_ids["pool2:<raid>"]` and deletes any other stored id once (the bank / pool / comp / groups PNG cards). Removed: `render.health_png|bank_png|groups_png|comp_png`, `registry.bank_rows`, the web `/card/*` PNG endpoints. `render.py` keeps the /mock roster image, raid thumbnails and the generated badges (the roster image went in §5.38).
 
 **Signup sheet layout (2026-09-21):** the sheet went back from layout components to an embed (`raid_views.sheet_message` → `(Embed, View)`), because embed inline fields are the only column layout Discord offers and the owner found Raid-Helper's class columns easier to scan than wrapped text lines. Open: one inline field per class (`<class icon> (n)`, members one per line with the spec icon), then Bench / No thanks rows; locked: one inline field per group (confirmation marks), *Not rostered*, Bench / No thanks; buttons in a classic persistent `View` under the embed (same `SignupButton` custom ids). Officer cards and DMs stay layout components. A sheet message posted in the component era cannot be edited into an embed (the V2 flag is permanent), so `refresh_sheet` re-posts it once. Guards: 1024 chars per column (`_column`), spec icons dropped when the embed would near 6000.

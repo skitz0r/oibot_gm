@@ -435,3 +435,24 @@ def test_help_extras_and_help_answer_plumbing(reg, rs, monkeypatch):
     assert got["officer"] and got["extras"].privilege[boss.discord_id] == "officer"
     s = state(reg, rs, OWNER, True, f"who are the officers? is {boss.display_name} one?", got["extras"])
     assert "- Bossy [officer]" in s and "officers seen in Discord: Bossy, Unregistered Officer" in s and "  privilege: officer" in s
+
+
+def test_the_manuals_loot_section_is_one_text_true_to_the_code():
+    """Regression (integration item 10): §9 carried both builders' texts back to back (the merge's union) — the same
+    paragraphs twice, two "End" sections, and buttons that no longer exist. help.py answers from the manual."""
+    from oibot_gm import discord_policy
+    from oibot_gm.raid_buttons import LootButton
+
+    sec = discord_help.manual_section("## 9")
+    heads = [ln[4:] for ln in sec.splitlines() if ln.startswith("### ")]
+    assert heads == ["In Discord: the thread and its cards", "The companion", "Asking the bot in the thread", "End",
+                     "On the site: Loot › Tonight, History, Precedents, Items and tiers, Wishlists", "Members: your loot and your wishlist",
+                     "The public loot log", "Plain text and MCP"], heads
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", " ".join(sec.split())) if len(s.strip()) > 60]
+    twice = {s for s in sentences if sentences.count(s) > 1}
+    assert not twice, twice
+    labels = {t for t, _ in LootButton.LABELS.values()} | {t for t, _ in discord_policy.CfgApplyButton.LABELS.values()}
+    for b in ("Tick drops…", "Distribute", "Scores only", "End council", "Confirm the rest", "Discard batch", "Decide later", "Details",
+              "Override…", "Disenchant", "Give the reason", "Correct…", "Keep open", "Replace their override…", "Give the reason…"):
+        assert b in labels and b in sec, b
+    assert "Edit the reason" not in sec and "inferred — edit before Apply" not in sec and "loot channel\n(else the officer channel)" not in sec
