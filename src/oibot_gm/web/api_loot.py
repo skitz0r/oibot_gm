@@ -493,20 +493,14 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         """Retire a precedent (the bot stops citing it) or `restore` it; the reason is required and kept on it."""
         v, d = await writer(request, actor="Retiring a precedent")
         ref = str(d.get("ref") or d.get("import_id") or "").strip()
-        reason = str(d.get("reason") or "").strip()
         if not ref:
             raise HTTPException(400, "ref required (the precedent's ref from /api/loot/precedents)")
-        if len(reason) < 3:
-            return JSONResponse({"error": "Give a reason (a few words): it stays on the precedent."}, status_code=400)
-        status = "active" if d.get("restore") else "retired"
-        ctx = ctx_of(v.reg)
-        try:  # the append on the loop, like the council's own writes to this context; the git commit in a thread
-            p = ctx.set_precedent_status(ref, status, reason[:300], by_of(v))
-            await asyncio.to_thread(v.reg.store.commit, f"{v.reg.key}: precedent {ref} {status} ({by_of(v)})")
+        try:  # the one verb: the guild's precedents lock, the status row, the commit off the loop, the audit line
+            line = await bot.retire_precedent(v.reg, ref, str(d.get("reason") or ""), by=by_of(v), by_id=v.uid, via=v.via, restore=bool(d.get("restore")))
         except RegistryError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        line = f"precedent {p.get('item')} → {p.get('human')} {'restored' if status == 'active' else 'retired'} — “{reason[:120]}”"
-        await ops_mod.audited(bot.ops, v.reg, by_of(v), line, via=v.via, by_id=v.uid)
+            from ..configops import user_error
+
+            return JSONResponse({"error": user_error(e)}, status_code=400)
         publish("loot:precedents", v.reg.key)
         return {"message": line}
 

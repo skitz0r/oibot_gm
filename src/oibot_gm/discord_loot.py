@@ -835,28 +835,24 @@ class LootMixin:
         ctx.reload()
         return [dict(p) for p in ctx.precedents if not active or p.get("status", "active") == "active"]
 
-    async def retire_precedent(self, reg, import_id: str, reason: str, *, by: str, by_id: int | None = None, via: str = "discord",
+    async def retire_precedent(self, reg, ref: str, reason: str, *, by: str, by_id: int | None = None, via: str = "discord",
                                restore: bool = False) -> str:
-        """Retire (or `restore`) a precedent by its award's import_id: an append-only `kind: status` row with who and why
-        (lootctx folds it); the bot stops citing a retired one (policy_for_llm reads active only). /gm precedents, the
-        site's Loot › Precedents and MCP call this."""
+        """THE retire / restore of a precedent, for every surface (/gm precedents → Retire, the site's Loot › Precedents,
+        plain text's `loot retire`, MCP retire_precedent): RegistryLootContext.set_precedent_status on the guild's
+        cached context (what the council cites next) under the guild's precedents lock — an appended `kind: status` row
+        with who and why (append-only; the bot cites active precedents only) — then the git commit off the event loop and
+        one audit line on the caller's surface. `ref` = the precedent's ref (its award's import_id; 'row-<n>' for an
+        imported row without one). A precedent whose reason was replaced is reached by its ref (the newer, live row);
+        retiring a companion award's reason never puts the award back on the "needs a reason" list (a reason was given)."""
+        from .loot_ops import guild_ctx
+
         reason = ls.check_reason(reason)
         want = "active" if restore else "retired"
         async with self.loot_lock(reg.key, "precedents"):
-            rows = self.loot_precedents(reg, active=False)
-            p = next((x for x in reversed(rows) if x.get("import_id") == import_id and x.get("status", "active") != "superseded"), None)
-            if p is None:
-                raise RegistryError("No precedent with that id.")
-            if p.get("status", "active") == want:
-                raise RegistryError(f"That precedent is already {want}.")
-            msg = f"{reg.key}: precedent {import_id} {want} by {by}"
-            with reg.store.batch(msg):
-                reg.store.append_jsonl(Path(reg.key) / "precedents.jsonl", {"kind": "status", "import_id": import_id, "status": want, "by": by,
-                                                                            "reason": reason, "at": now_iso()})
-                reg.store.commit(msg)
-            ctx = self.__dict__.get("contexts", {}).get(reg.key)
-            if ctx is not None:
-                ctx.reload()
+            ctx = guild_ctx(self, reg)
+            ctx.reload()  # resolve the ref against the file as it is now
+            p = ctx.set_precedent_status(str(ref or "").strip(), want, reason, by)
+            await asyncio.to_thread(reg.store.commit, f"{reg.key}: precedent {p.get('ref')} {want} ({by})")
         line = (f"🗄 Precedent retired: {p.get('item')} → {p.get('human')} (was “{p.get('reason')}”) — “{reason}”" if not restore
                 else f"📌 Precedent restored: {p.get('item')} → {p.get('human')} — “{reason}”")
         await self._audit(reg, by, line, via, by_id)

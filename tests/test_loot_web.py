@@ -984,3 +984,29 @@ def test_me_wishlist_wizard_answers_before_the_write(reg, rs, monkeypatch):
         await h.press("Remove")
     asyncio.run(go())
     assert len(shown) == 2 and "Saving…" in shown[0] and "Removing…" in shown[1], shown
+
+
+# ---------------------------------------------------------------- integration cleanup (each fails without its fix)
+
+def test_every_surface_retires_a_precedent_through_the_one_verb(w, monkeypatch):
+    """Regression (integration item 2): /gm precedents had LootMixin.retire_precedent (its own status row, by import_id
+    only) while the site, plain text and MCP wrote through RegistryLootContext.set_precedent_status — two
+    implementations. Now every surface calls the verb, which wraps the context's; a precedent with no import_id (an
+    imported row, ref 'row-<n>') is reached too."""
+    w.reg.store.append_jsonl(Path(w.reg.key) / "precedents.jsonl", {"item": "Syphon", "bot": "Torsha", "human": "Eltam", "reason": "tanks"})
+    w.bot.__dict__.get("contexts", {}).clear()
+    calls: list[tuple] = []
+    real = type(w.bot).retire_precedent
+
+    async def spy(self, reg, ref, reason, **kw):
+        calls.append((ref, kw.get("via"), kw.get("restore", False)))
+        return await real(self, reg, ref, reason, **kw)
+    monkeypatch.setattr(type(w.bot), "retire_precedent", spy)
+    r = w.c.post("/api/loot/precedents/retire", json={"ref": "row-0", "reason": "old tier"}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
+    assert r.status_code == 200 and "Precedent retired" in r.json()["message"], r.text
+    back = ConfigOp(op="loot", field="retire", value="Syphon", reason="back in", text="restore")
+    assert "Precedent restored" in run(configops.apply_async(w.reg, back, "Officer", False, bot=w.bot, by_id=OFFICER, via="chat"))
+    assert calls == [("row-0", "mcp", False), ("row-0", "chat", True)]
+    assert lootctx.RegistryLootContext(w.reg, w.reg.store, None).precedents[0]["status"] == "active"
+    lines = [t for _, _, t in w.bot.ops.lines if "Precedent" in t]
+    assert len(lines) == 2 and lines[0].startswith("[mcp] u05 via MCP") and lines[1].startswith("[chat] Officer"), "one audit line each, on its surface"

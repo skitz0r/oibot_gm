@@ -15,8 +15,6 @@ D8: from MCP (`via` mcp without X-Oibot-Actor) the decisions about an award or a
 retire, tier, someone else's wishlist) are refused (`needs_actor`); the site and Discord decide by the person's role."""
 from __future__ import annotations
 
-import asyncio
-
 import re
 
 from .registry import TIER_VALUES, WISHLIST_MAX, Registry, RegistryError
@@ -420,21 +418,10 @@ async def apply_async(reg: Registry, op, by: str, bot, by_id: int | None, via: s
     f = (op.field or "").strip().lower()
     if f not in LOOT_FIELDS:
         raise RegistryError(f"loot field is one of {', '.join(LOOT_FIELDS)}")
-    if f == "retire":
-        ctx = guild_ctx(bot, reg)
-        p = _precedent(reg, op.value, ctx)
-        if len((op.reason or "").strip()) < 3:
-            raise RegistryError("Give a reason (a few words): it stays on the precedent.")
-        status = "active" if (op.text or "").strip().lower() == "restore" else "retired"
-        p = ctx.set_precedent_status(p["ref"], status, op.reason.strip()[:300], by)
-        await asyncio.to_thread(reg.store.commit, f"{reg.key}: precedent {p['ref']} {status} ({by})")  # never a git commit on the loop
-        line = f"precedent {p.get('item')} → {p.get('human')} {'restored' if status == 'active' else 'retired'} — “{op.reason.strip()[:120]}”"
-        ops = getattr(bot, "ops", None)
-        if ops is not None:
-            from . import ops as ops_mod
-
-            await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
-        return line
+    if f == "retire":  # the one verb (LootMixin.retire_precedent: lock, status row, commit off the loop, audit)
+        p = _precedent(reg, op.value, guild_ctx(bot, reg))
+        restore = (op.text or "").strip().lower() == "restore"
+        return (await bot.retire_precedent(reg, p["ref"], op.reason or "", by=by, by_id=by_id, via=via, restore=restore)).replace("**", "")
     rs, ev, idx = _run_of(reg, op.target, bot.raids.store(reg))
     kw = {"by": by, "by_id": by_id, "via": via}
     if f == "open":
