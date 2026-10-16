@@ -154,11 +154,11 @@ def rev_key(op) -> str:
     return LOOT_REV + (op.target or "").strip() + ("" if v in ALL_WORDS else "#" + v)
 
 
-def loot_revs(reg: Registry, ops, raids=None, session=None) -> dict[str, str]:
+def loot_revs(reg: Registry, ops, raids=None) -> dict[str, str]:
     """What a diff showed, for Apply to carry (configops.board_revs): a confirm-all / discard-all → the batch_rev (a
     batch someone overrode since is refused instead of recorded); a single confirm or an award → 'to:<recipient>' (the
-    pick shown on that drop: Apply records / overrides it only if it still goes there — expect_to). `session`: read
-    this live session instead of the saved files (the council thread's chat takes it when the officer wrote)."""
+    pick shown on that drop: Apply records / overrides it only if it still goes there — expect_to). The council
+    thread's chat builds the same keys itself, from the session as it was when the officer wrote."""
     from .loot import session as ls
 
     out = {}
@@ -170,11 +170,8 @@ def loot_revs(reg: Registry, ops, raids=None, session=None) -> dict[str, str]:
         if (f == "discard" and not whole) or (f == "award" and whole):
             continue
         try:
-            if session is not None:
-                s = session
-            else:
-                _, ev, idx = _run_of(reg, op.target, raids)
-                s = _pick(_store_sessions(reg, ev.key), ev, idx)
+            _, ev, idx = _run_of(reg, op.target, raids)
+            s = _pick(_store_sessions(reg, ev.key), ev, idx)
             if whole:
                 out.setdefault(rev_key(op), ls.batch_rev(s))
             else:
