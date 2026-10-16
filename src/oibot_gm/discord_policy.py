@@ -42,7 +42,7 @@ class CfgApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"cfgap
     the token is gone — edits the message to EXPIRED_RESTART instead of Discord's bare "interaction failed"."""
     LABELS = {"apply": ("Apply", discord.ButtonStyle.success), "cancel": ("Cancel", discord.ButtonStyle.secondary),
               "confirm": ("Confirm this reading", discord.ButtonStyle.success), "discard": ("Discard edit", discord.ButtonStyle.secondary),
-              "edit": ("Edit the reason…", discord.ButtonStyle.primary)}  # the loot chat diff: an inferred reason is edited before Apply
+              "edit": ("Give the reason…", discord.ButtonStyle.primary)}  # the loot chat diff: a missing / guessed reason is given before Apply
 
     def __init__(self, gk: str | None, token: str, action: str):
         label, style = self.LABELS[action]

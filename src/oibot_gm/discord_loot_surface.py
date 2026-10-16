@@ -20,8 +20,8 @@ The council sends NO DMs (the DM rule), except one: a companion award arriving a
 once with a link to correct or record it — they must act. The scheduler's loot steps (the "Start an ad hoc run for
 tonight?" prompt for drops arriving with no run live, that DM) are `loot_scheduler_step`. The addressed-only thread chat
 (@mention, a leading "?", a reply to a card) is `loot_addressed` / `loot_chat`: a question goes to help_answer with the
-proposals in a <data> block; a sentence that asks for an override or a confirm becomes a diff with Apply
-(LootChatConfirmView) — the `loot` ConfigOp when configops has it (L3), else the verbs directly."""
+proposals in a <data> block; a sentence that asks for an override or a confirm becomes `loot` ConfigOps shown as a
+diff with Apply (LootChatConfirmView, the plain-text pipeline's ConfigConfirmView: describe → authorize → apply_async)."""
 from __future__ import annotations
 
 import asyncio
@@ -629,7 +629,10 @@ class LootSurfaceMixin:
         if provider is None:
             await message.reply(LLM_DOWN)
             return
-        seen = ls.batch_rev(session)  # what the officer was looking at when they wrote
+        # what the officer was looking at when they wrote: the batch (a confirm-all) and each drop's pick (an award) —
+        # a pick added or moved while the model reads is refused at Apply with what changed, never recorded unseen
+        seen = ls.batch_rev(session)
+        seen_to = {p.drop_id: p.to for p in session.proposals}
         uid, by = message.author.id, message.author.display_name
         parent = loot_parent(session, message.channel)  # plain_mode reads a thread as its parent channel
         async with message.channel.typing():
@@ -664,7 +667,13 @@ class LootSurfaceMixin:
         if not changes:
             await message.reply("⛔ " + ("\n⛔ ".join(refused) if refused else "I couldn't tell which drop or who — use Override… on the card."))
             return
-        view = LootChatConfirmView(self, reg, session, changes, requester_id=uid, requester=by, seen=seen, channel=parent)
+        from . import loot_ops
+
+        revs = {}
+        for c in changes:
+            op = loot_op(session, c)
+            revs[loot_ops.rev_key(op)] = seen if c["kind"] == "confirm" else "to:" + (seen_to.get(c["drop_id"]) or c["bot_to"])
+        view = LootChatConfirmView(self, reg, session, changes, requester_id=uid, requester=by, revs=revs, channel=parent)
         sent = await message.reply(view.text(refused), view=view)
         view.bind(sent)
 
@@ -697,16 +706,8 @@ def loot_changes(bot, session: LootSession, fb, message: str) -> tuple[list[dict
         reason = (ch.reason or "").strip()
         inferred = not reason or reason.lower() not in low
         used.add(did)
-        out.append({"kind": "override", "drop_id": did, "item": p.item_name, "bot": p.award_to, "to": to, "reason": reason, "inferred": inferred})
+        out.append({"kind": "override", "drop_id": did, "item": p.item_name, "bot": p.award_to, "bot_to": p.to, "to": to, "reason": reason, "inferred": inferred})
     return out, refused
-
-
-def loot_plain_group() -> str:
-    """The plain-text capability group a loot write belongs to: `loot` (officers by default) once configops carries the
-    loot op and PLAIN_GROUPS has it (L3); until then `runs`, whose default is the same officers."""
-    from .registry import PLAIN_GROUPS
-
-    return "loot" if "loot" in PLAIN_GROUPS else "runs"
 
 
 def loot_parent(session: LootSession, channel) -> int | None:
@@ -721,48 +722,51 @@ async def loot_identity(bot, reg, user, *, max_age: float) -> tuple[bool, list[i
 
 
 async def loot_plain_refusal(bot, reg, user, channel, *, max_age: float) -> str | None:
-    """Registry.may_plain for a loot write from the thread: None when allowed, else the refusal line (who may, where)."""
+    """Registry.may_plain for a loot write from the thread (the `loot` capability group, officers by default): None when
+    allowed, else the refusal line (who may, where). configops.authorize makes the same check again at Apply."""
     officer, role_ids = await loot_identity(bot, reg, user, max_age=max_age)
-    return reg.may_plain(loot_plain_group(), user.id, officer=officer, role_ids=role_ids, channel=channel, what="loot awards")
+    return reg.may_plain("loot", user.id, officer=officer, role_ids=role_ids, channel=channel, what="loot awards")
 
 
-def _loot_op(session: LootSession, ch: dict):
-    """The `loot` ConfigOp a change is (configops, when L3's op is there): field = the action, target = the run's
+def loot_op(session: LootSession, ch: dict):
+    """The `loot` ConfigOp a chat change is (loot_ops): field = confirm (every pick still pending) | award, target = the
     council (session id), value = the drop, member = the recipient, reason = the reason."""
     from .configops import ConfigOp
 
     if ch["kind"] == "confirm":
         return ConfigOp(op="loot", field="confirm", target=session.id, value="all")
-    return ConfigOp(op="loot", field="award", target=session.id, value=ch["drop_id"], member=ch["to"], reason=ch["reason"])
+    return ConfigOp(op="loot", field="award", target=session.id, value=ch["drop_id"], member=ch["to"], reason=ch.get("reason") or "")
 
 
-def loot_op_ready() -> bool:
-    """configops carries the `loot` op (L3's): the diff's lines and Apply go through describe / apply_async."""
-    from . import configops
-
-    return "loot" in getattr(configops, "OP_GROUP", {})
+WHY = "why? — press Give the reason… (it becomes the precedent)"
 
 
-def _pending_view_base():
-    from .discord_policy import PendingView
+def _confirm_view_base():
+    from .discord_policy import ConfigConfirmView  # lazily: discord_policy imports every flow
 
-    return PendingView
+    return ConfigConfirmView
 
 
-class LootChatConfirmView(_pending_view_base()):
-    """The diff under an officer's loot sentence: Apply / Cancel (and Edit the reason… while a reason was inferred —
-    Apply stays off until it is edited). The buttons are CfgApplyButtons (`cfgapply.<gk>:<token>:…`): a press after a
-    restart says it expired. Apply re-checks the presser live (the requester or an officer), applies once, and checks
-    the batch the officer saw: an override never replaces another officer's (their "replace?" comes back as a refusal)."""
+class LootChatConfirmView(_confirm_view_base()):
+    """The diff under an officer's loot sentence in a council thread: the plain-text pipeline's own Apply
+    (ConfigConfirmView: one `loot` ConfigOp per change, its line from configops.describe, Apply = configops.authorize in
+    the thread's PARENT channel + configops.apply_async with the rev each op showed — the batch_rev for "confirm the
+    rest", 'to:<pick>' for an award, both taken when the officer wrote — so a pick added or moved since is refused with
+    what changed, and an override never replaces another officer's).
 
-    def __init__(self, bot, reg, session: LootSession, changes: list[dict], *, requester_id: int, requester: str, seen: str,
+    Why a subclass and not ConfigConfirmView itself: the reason of an override can be missing or only the model's guess.
+    Then the line asks "why?" in the reason's place and a third button, Give the reason… (the reason modal), must be
+    answered before Apply — the reason becomes a precedent, so the bot never records one an officer didn't write. The
+    diff is a reply in the thread (not an ephemeral /gm change answer), with CfgApplyButtons like every pending diff."""
+
+    def __init__(self, bot, reg, session: LootSession, changes: list[dict], *, requester_id: int, requester: str, revs: dict[str, str],
                  channel: int | None = None):
+        from . import configops
+
         self.ACTIONS = ("apply", "cancel", "edit") if any(c.get("inferred") for c in changes) else ("apply", "cancel")
-        super().__init__(reg, timeout=600)
+        req = configops.ConfigRequest(kind="change", reply="", ops=[loot_op(session, c) for c in changes])
+        super().__init__(reg, req, None, bot.ops, requester_id, requester, channel, revs=revs)
         self.bot, self.session, self.changes = bot, session, changes
-        self.requester_id, self.requester, self.seen = requester_id, requester, seen
-        self.channel = channel  # the thread's parent: the channel whose plain-text mode Apply is checked in
-        self.busy = False
         self._sync_apply()
 
     def _sync_apply(self) -> None:
@@ -771,42 +775,30 @@ class LootChatConfirmView(_pending_view_base()):
             apply.item.disabled = any(c.get("inferred") for c in self.changes)
 
     def line(self, ch: dict) -> str:
-        from .raid_views import loot_who
+        """configops.describe of the change's op — the same words /gm change and the site show; an override whose reason
+        is missing or a guess asks "why?" in the reason's place (never an error line)."""
+        from . import configops, loot_ops
 
-        if loot_op_ready():
-            from . import configops
-
+        op = loot_op(self.session, ch)
+        if ch["kind"] == "override" and ch.get("inferred"):
+            guess = f" (my guess: “{ch['reason']}”)" if ch.get("reason") else ""
             try:
-                text = configops.describe(self.reg, _loot_op(self.session, ch))
-            except Exception:  # noqa: BLE001 — the op's describe is L3's; fall back to ours
-                text = ""
-            if text:
-                return text + (" · reason: (inferred — edit before Apply)" if ch.get("inferred") else "")
-        if ch["kind"] == "confirm":
-            return f"Confirm the {ch['count']} proposal(s) as shown"
-        reason = "(inferred — edit before Apply)" if ch.get("inferred") else f"“{ch['reason']}”"
-        return f"**{ch['item']}**: bot picked {loot_who(ch['bot'])} → council awards **{loot_who(ch['to'])}** — {reason} · recorded at Confirm"
+                return loot_ops.describe(self.reg, op, why=WHY.replace("why?", "why?" + guess, 1))
+            except RegistryError:
+                pass  # not describable at all (the drop is gone): configops' line says why
+        return configops.describe(self.reg, op)
 
     def text(self, refused: list[str] | None = None) -> str:
         lines = ["**Proposed loot changes**"] + [f"• {self.line(c)}" for c in self.changes] + [f"⛔ {r}" for r in (refused or [])]
         return "\n".join(lines)[:1900]
 
-    async def _may_press(self, interaction: discord.Interaction) -> bool:
-        from . import guild_routing
-
-        role = await interaction.client.role_of(self.reg, interaction.user, max_age=guild_routing.PRIV_LIVE)
-        if role in ("owner", "officer"):
-            return True
-        await interaction.response.send_message(f"Only {self.requester} or an officer can apply this.", ephemeral=True)
-        return False
-
     async def press_edit(self, interaction: discord.Interaction) -> None:
-        if not await self._may_press(interaction):
+        if await self._may_press(interaction) is None:
             return
         view = self
         todo = [c for c in self.changes if c["kind"] == "override"][:5]
 
-        class EditReasons(discord.ui.Modal, title="The reasons (they become precedents)"):
+        class GiveReasons(discord.ui.Modal, title="The reasons (they become precedents)"):
             def __init__(self):
                 super().__init__(timeout=600)
                 self.boxes = []
@@ -822,80 +814,14 @@ class LootChatConfirmView(_pending_view_base()):
                 view._sync_apply()
                 await si.response.edit_message(content=view.text(), view=view)
 
-        await interaction.response.send_modal(EditReasons())
+        await interaction.response.send_modal(GiveReasons())
 
     async def press_apply(self, interaction: discord.Interaction) -> None:
-        if not await self._may_press(interaction):
-            return
         if any(c.get("inferred") for c in self.changes):
-            await interaction.response.send_message("Edit the reason first — I guessed it, and it becomes a precedent.", ephemeral=True)
+            await interaction.response.send_message("Give the reason first (Give the reason…) — it becomes a precedent, so it has to be yours.", ephemeral=True)
             return
-        if self.busy:
-            await interaction.response.send_message("Already applying, applied or cancelled — each change applies once.", ephemeral=True)
-            return
-        self.busy = True
-        self.stop()
-        await interaction.response.edit_message(content="⏳ Applying…", view=None)
-        from . import guild_routing
-
-        officer, role_ids = await loot_identity(interaction.client, self.reg, interaction.user, max_age=guild_routing.PRIV_LIVE)
-        done, refused = await apply_loot_changes(self.bot, self.reg, self.session, self.changes, seen=self.seen,
-                                                 by=interaction.user.display_name, by_id=interaction.user.id,
-                                                 officer=officer, role_ids=role_ids, channel=self.channel)
-        text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
-        try:
-            await interaction.edit_original_response(content=text[:1900] or "Nothing applied.", view=None)
-        except discord.HTTPException:
-            pass
-
-    async def press_cancel(self, interaction: discord.Interaction) -> None:
-        if not await self._may_press(interaction):
-            return
-        if self.busy:
-            await interaction.response.send_message("Too late to cancel — it is already being applied.", ephemeral=True)
-            return
-        self.busy = True
-        self.stop()
-        await interaction.response.edit_message(content="Cancelled — nothing was changed.", view=None)
+        self.req.ops = [loot_op(self.session, c) for c in self.changes]  # with the reasons as given
+        await super().press_apply(interaction)
 
 
-async def apply_loot_changes(bot, reg, session: LootSession, changes: list[dict], *, seen: str, by: str, by_id: int | None,
-                             officer: bool = True, role_ids=(), channel: int | None = None) -> tuple[list[str], list[str]]:
-    """Apply a loot diff: through configops (the `loot` op) when L3's op is there, else the verbs. Either way the
-    plain-text check (Registry.may_plain) runs for the presser in `channel` — the council thread's PARENT channel, never
-    the DM policy. The first write carries the batch_rev the officer saw; our own override moves it, so each next one
-    checks against the new rev."""
-    from . import configops
-
-    done, refused = [], []
-    if not loot_op_ready():
-        bad = reg.may_plain(loot_plain_group(), by_id or 0, officer=officer, role_ids=role_ids, channel=channel, what="loot awards")
-        if bad:
-            return [], [bad]
-    rev = seen
-    overrides = [c for c in changes if c["kind"] == "override"]
-    for c in changes:
-        try:
-            if loot_op_ready():
-                op = _loot_op(session, c)
-                allowed, no = configops.authorize(reg, [op], by_id or 0, officer=officer, role_ids=role_ids, channel=channel)
-                if no:
-                    refused += no
-                    continue
-                done.append(await configops.apply_async(reg, op, by, reg.is_owner_id(by_id), bot=bot, by_id=by_id, rev=rev, via="chat"))
-            elif c["kind"] == "confirm":
-                res = await bot.confirm(reg, session, batch_rev=rev, by=by, by_id=by_id, via="chat")
-                done.append(f"recorded {len(res['awards'])}")
-            else:
-                last = c is overrides[-1]
-                done.append((await bot.override(reg, session, c["drop_id"], c["to"], c["reason"], by=by, by_id=by_id, via="chat",
-                                                batch_rev=rev, rejudge=last)).replace("**", ""))
-            rev = ls.batch_rev(session)
-        except RegistryError as e:
-            refused.append(f"{c.get('item') or 'confirm'}: {configops.user_error(e)}")
-        except Exception as e:  # noqa: BLE001
-            refused.append(await configops.report_error(bot.ops, reg.config, e, "loot chat apply"))
-    return done, refused
-
-
-__all__ = ["LootSurfaceMixin", "LootChatConfirmView", "apply_loot_changes", "loot_changes", "loot_digest", "loot_site_url", "loot_op_ready"]
+__all__ = ["LootSurfaceMixin", "LootChatConfirmView", "loot_changes", "loot_digest", "loot_op", "loot_site_url"]

@@ -550,11 +550,16 @@ class LootMixin:
 
     # ------------------------------------------------------------ override
     async def override(self, reg, session: LootSession, drop_id: str, to: str, reason: str, *, by: str, by_id: int | None = None,
-                       via: str = "discord", batch_rev: str | None = None, replace: bool = False, rejudge: bool = True) -> str:
+                       via: str = "discord", batch_rev: str | None = None, expect_to: str | None = None, replace: bool = False,
+                       rejudge: bool = True) -> str:
         """Award a drop to someone other than the bot's pick (or `DISENCHANT`). Lives on the proposal until Confirm (the
         precedent is written then); a reason is required. A drop not yet distributed gets a deterministic proposal on the
-        spot. A second override by another officer needs `replace`; a recorded drop is refused (use Correct). The other
-        pending picks are re-judged afterwards (`rejudge`) — the batch_rev moves when a pick moved."""
+        spot. A second override by another officer needs `replace` — "another officer" is decided by Discord id
+        (`by_id` against the override's recorded `by_id`; design §5.33: names are for reading only, so an override with no
+        id on either side counts as someone else's); a recorded drop is refused (use Correct). `batch_rev`: the whole
+        batch the caller saw; `expect_to`: the recipient the caller saw on THIS drop (a plain-text / chat diff) — a pick
+        that moved since is refused with what changed. The other pending picks are re-judged afterwards (`rejudge`) —
+        the batch_rev moves when a pick moved."""
         reason = ls.check_reason(reason)
         who_in = str(to or "").strip()
         if not who_in or len(who_in) > NAME_MAX:
@@ -572,11 +577,17 @@ class LootMixin:
             ctx = self.loot_ctx(session)
             roster = self.loot_roster(session)
             p = session.pending(drop_id)
+            if expect_to is not None:
+                if p is None:
+                    raise self._changed(session, f"{d.item_name} has no pick waiting any more")
+                if p.to.lower() != str(expect_to).lower():
+                    raise self._changed(session, f"The pick changed: {d.item_name} now goes to {'disenchant' if p.to == DISENCHANT else p.to}")
             if p is None:  # never distributed: a deterministic proposal now, so the override sits on something
                 (p,) = ls.run_distribution(ctx, session, roster, [drop_id], provider=None, concurrency=1,
                                            batch=max([int(b.get("n", 0)) for b in session.batches], default=0) + 1)
                 session.proposals.append(p)
-            if p.override and not replace and p.override.by != by:
+            mine = by_id is not None and p.override is not None and p.override.by_id == by_id  # by id, never by display name
+            if p.override and not replace and not mine:
                 raise LootChanged(f"{p.override.by} already set this to {p.override.to} ('{p.override.reason}') — replace?")
             who = DISENCHANT if who_in.lower() in ("disenchant", DISENCHANT) else ls.recipient_of(reg, roster, who_in)[0]
             if who == p.award_to:
@@ -595,12 +606,13 @@ class LootMixin:
         if rejudge and others:
             # marked BEFORE the task starts: Confirm the rest refuses from the moment the override returns (decision 7)
             self._rescoring()[session.key] = len(others)
-            self._spawn(self._rejudge(reg, session, others, by))
+            self._spawn(self._rejudge(reg, session, others, by, by_id=by_id, via=via))
         return line
 
-    async def _rejudge(self, reg, session: LootSession, drop_ids: list[str], by: str) -> None:
+    async def _rejudge(self, reg, session: LootSession, drop_ids: list[str], by: str, *, by_id: int | None = None, via: str = "discord") -> None:
+        """The re-judge after an override, audited as the officer who overrode, on the surface they used."""
         try:
-            await self.distribute(reg, session, by=by, only=drop_ids, rejudge=True)
+            await self.distribute(reg, session, by=by, by_id=by_id, via=via, only=drop_ids, rejudge=True)
         except LootBusy:
             pass  # a distribute is running: it reads the override from the live session at merge time (stale → again)
         except RegistryError as e:
@@ -1287,7 +1299,7 @@ class LootMixin:
             if not todo:
                 return
             try:
-                await self.distribute(reg, session, by="auto", only=todo)
+                await self.distribute(reg, session, by="auto", via="companion", only=todo)  # the companion's drops started it
                 return
             except LootBusy:
                 continue  # another judge is running: try again after the next wait

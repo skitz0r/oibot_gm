@@ -178,6 +178,10 @@ class SurfBot(FeedMixin, LootSurfaceMixin, LootMixin):
 
         return Resolved(await self.role_of(reg, user, max_age=max_age), [], False)
 
+    async def plain_identity(self, reg, user, *, max_age=0):
+        r = await self.identity(reg, user, max_age=max_age)
+        return r.officer, r.role_ids
+
     async def fetch_user(self, uid):
         return FakeUser(uid, self.dms)
 
@@ -1060,7 +1064,8 @@ def test_an_override_sentence_becomes_a_diff_and_apply_waits_for_a_real_reason(n
     msg = Msg(n, f"? give the shard to {other}")
     run(n.bot.loot_chat(msg, n.s))
     text, view = msg.replies[-1]
-    assert isinstance(view, LootChatConfirmView) and "(inferred — edit before Apply)" in text and view.apply.item.disabled
+    assert isinstance(view, LootChatConfirmView) and f"council awards {other} — why? (my guess: “he needs it”)" in text and view.apply.item.disabled
+    assert view.edit.item.label == "Give the reason…"
     assert not n.s.pending("d1").override, "nothing before Apply"
     view.changes[0].update(reason="tanks progression first", inferred=False)
     view._sync_apply()
@@ -1110,12 +1115,10 @@ def test_a_request_to_act_follows_the_parent_channels_plain_text_mode(night, mon
 def test_the_loot_group_gates_a_chat_write(night, monkeypatch):
     """Who may change loot by plain text is the owner's PLAIN_GROUPS choice: closed to officers → refused, even in an act channel."""
     from oibot_gm import nl
-    from oibot_gm.discord_loot_surface import loot_plain_group
-
     n = night
     tick(n)
     run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
-    n.reg.config.plain.groups[loot_plain_group()] = ["owner"]
+    n.reg.config.plain.groups["loot"] = ["owner"]
     text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""))
     assert view is None and text.startswith("⛔ Only") and not n.s.awards
 
@@ -1138,7 +1141,7 @@ def test_apply_rechecks_the_parent_channels_mode_at_the_press(night, monkeypatch
 def test_apply_through_the_loot_op_authorizes_in_the_threads_parent_channel(night, monkeypatch):
     """Regression (once L3's `loot` op is in configops): configops.authorize gets channel=<the thread's parent>, never
     the DM policy (channel=None) — and the presser's live identity."""
-    from oibot_gm import configops, discord_loot_surface as surf, nl
+    from oibot_gm import configops, nl
 
     n = night
     tick(n)
@@ -1149,7 +1152,6 @@ def test_apply_through_the_loot_op_authorizes_in_the_threads_parent_channel(nigh
     def authorize(reg, ops, author_id, *, officer, role_ids=(), channel="unset", raids=None):
         seen.update(channel=channel, officer=officer, author=author_id, op=ops[0])
         return [], ["refused here"]
-    monkeypatch.setattr(surf, "loot_op_ready", lambda: True)
     monkeypatch.setattr(configops, "authorize", authorize)
     h = officer_h(n)
     run(view.press_apply(h.card_press()))
@@ -1164,13 +1166,76 @@ def test_a_chat_confirm_never_records_a_pick_added_after_the_sentence(night, mon
     tick(n)
     run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
     text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""))
-    assert isinstance(view, LootChatConfirmView) and "Confirm the 1 proposal(s) as shown" in text
+    from oibot_gm import configops
+
+    line = configops.describe(n.reg, view.req.ops[0])
+    assert isinstance(view, LootChatConfirmView) and f"• {line}" in text and "record every pick still pending — Shard of Doom →" in line, "the one describe() wording"
     monkeypatch.undo()  # the real context again for the verbs
     tick(n, name="Unseen")
     run(n.bot.distribute(n.reg, n.s, by="auto"))  # meanwhile a pick nobody saw arrives
     h = officer_h(n)
     run(view.press_apply(h.card_press()))
     assert "The batch changed" in h.text and not n.s.awards, "nothing recorded unseen"
+
+
+def test_a_chat_award_never_overrides_a_pick_that_moved_after_the_sentence(night, monkeypatch):
+    """Regression (integration item 1): the chat diff's award carries the pick the officer saw on that drop
+    ('to:<pick>' → LootMixin.override(expect_to=…)); a pick moved since — here by the same officer on the site, so the
+    another-officer rule can't catch it — is refused with what changed, never silently replaced."""
+    from oibot_gm import nl
+
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    p = n.s.pending("d1")
+    others = [c.character for c in p.result.candidates if c.character != p.to]
+    text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="override", reply="", changes=[nl.LootChange(item_id=1, award_to=others[0], reason="do it")]))
+    assert view.revs == {f"loot:{n.s.id}#d1": f"to:{p.to}"}, "the pick the officer saw"
+    monkeypatch.undo()
+    run(n.bot.override(n.reg, n.s, "d1", others[1], "changed my mind on the site", by="Mira", by_id=OFFICER, via="web", rejudge=False))
+    h = officer_h(n)
+    run(view.press_apply(h.card_press()))
+    assert f"The pick changed: Shard of Doom now goes to {others[1]}" in h.text, h.text
+    assert n.s.pending("d1").override.to == others[1] and n.s.pending("d1").override.reason == "changed my mind on the site"
+
+
+def test_two_awards_in_one_chat_diff_both_apply(night, monkeypatch):
+    """Each award checks only its own drop: the first override (our own write) never trips the second."""
+    from oibot_gm import nl
+
+    n = night
+    tick(n, copies=2)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    picks = {d: n.s.pending(d) for d in ("d1", "d2")}
+    to = {d: next(c.character for c in p.result.candidates if c.character != p.to) for d, p in picks.items()}
+    fb = nl.LootFeedback(kind="override", reply="", changes=[nl.LootChange(item_id=1, award_to=to["d1"], reason="do it"),
+                                                             nl.LootChange(item_id=2, award_to=to["d2"], reason="do it")])
+    text, view = chat_diff(n, monkeypatch, fb)
+    monkeypatch.undo()
+    h = officer_h(n)
+    run(view.press_apply(h.card_press()))
+    assert "⛔" not in h.text, h.text
+    assert [n.s.pending(d).override.to for d in ("d1", "d2")] == [to["d1"], to["d2"]]
+
+
+def test_a_chat_award_with_no_reason_asks_why_instead_of_an_error_line(night, monkeypatch):
+    """Regression (integration item 4): describe() refuses an award with no reason ("An award needs a reason") — in the
+    chat diff that error took the change's place. The line shows the change and asks "why?"; Give the reason… opens the
+    reason modal; Apply waits for it."""
+    from oibot_gm import nl
+
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    p = n.s.pending("d1")
+    other = next(c.character for c in p.result.candidates if c.character != p.to)
+    text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="override", reply="", changes=[nl.LootChange(item_id=1, award_to=other, reason="")]))
+    assert f"Shard of Doom (d1): bot picked {p.to} → council awards {other} — why? — press Give the reason…" in text, text
+    assert "needs a reason" not in text and view.apply.item.disabled and view.edit.item.label == "Give the reason…"
+    monkeypatch.undo()
+    h = officer_h(n)
+    run(view.press_apply(h.card_press()))
+    assert not n.s.pending("d1").override, "Apply waits for the reason"
 
 
 def test_a_chat_override_never_replaces_another_officers(night, monkeypatch):

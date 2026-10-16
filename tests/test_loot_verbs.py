@@ -288,6 +288,21 @@ def test_override_rules(council):
         run(c.bot.override(c.reg, c.s, "d1", a, "again", by="Jonny"))
 
 
+def test_whose_override_it_is_is_decided_by_discord_id_never_by_display_name(council):
+    """Regression (integration item 6, design §5.33): replacing another officer's pending override was decided by
+    comparing display names — two officers both called "Mira" replaced each other silently, and the same officer
+    under another name (the site's "Mira", MCP's "Mira via MCP") was asked to replace their own."""
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    a, b, d = [char(m) for m in c.members if char(m) != p.award_to][:3]
+    run(c.bot.override(c.reg, c.s, "d1", a, "first call", by="Mira", by_id=11, rejudge=False))
+    with pytest.raises(LootChanged, match=f"Mira already set this to {a}"):
+        run(c.bot.override(c.reg, c.s, "d1", b, "my call", by="Mira", by_id=22, rejudge=False))  # another person, same name
+    run(c.bot.override(c.reg, c.s, "d1", d, "second thoughts", by="Mira via MCP", by_id=11, via="mcp", rejudge=False))
+    assert c.s.pending("d1").to == d and c.s.pending("d1").override.by_id == 11, "their own override, under another name"
+
+
 def test_override_on_an_undistributed_drop_and_to_someone_off_the_roster(council):
     c = council
     tick_one(c)

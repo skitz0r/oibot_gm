@@ -151,32 +151,36 @@ def _who(to: str | None) -> str:
 
 def rev_key(op) -> str:
     """The revs key a loot op's Apply reads (configops.op_rev): the batch for a confirm-all / discard-all, the one drop
-    for a single confirm."""
+    for a single confirm or an award."""
     v = (op.value or "").strip().lower()
     return LOOT_REV + (op.target or "").strip() + ("" if v in ALL_WORDS else "#" + v)
 
 
-def loot_revs(reg: Registry, ops, raids=None) -> dict[str, str]:
+def loot_revs(reg: Registry, ops, raids=None, session=None) -> dict[str, str]:
     """What a diff showed, for Apply to carry (configops.board_revs): a confirm-all / discard-all → the batch_rev (a
-    batch someone overrode since is refused instead of recorded); a single confirm → 'to:<recipient>' (the pick shown:
-    Apply records it only if it still goes there — expect_to)."""
+    batch someone overrode since is refused instead of recorded); a single confirm or an award → 'to:<recipient>' (the
+    pick shown on that drop: Apply records / overrides it only if it still goes there — expect_to). `session`: read
+    this live session instead of the saved files (the council thread's chat takes it when the officer wrote)."""
     from .loot import session as ls
 
     out = {}
     for op in ops:
         f = (op.field or "").strip().lower()
-        if op.op != "loot" or f not in ("confirm", "discard"):
+        if op.op != "loot" or f not in ("confirm", "discard", "award"):
             continue
         whole = (op.value or "").strip().lower() in ALL_WORDS
-        if not whole and f != "confirm":
+        if (f == "discard" and not whole) or (f == "award" and whole):
             continue
         try:
-            _, ev, idx = _run_of(reg, op.target, raids)
-            s = _pick(_store_sessions(reg, ev.key), ev, idx)
+            if session is not None:
+                s = session
+            else:
+                _, ev, idx = _run_of(reg, op.target, raids)
+                s = _pick(_store_sessions(reg, ev.key), ev, idx)
             if whole:
                 out.setdefault(rev_key(op), ls.batch_rev(s))
             else:
-                p = s.pending(_drop(s, op.value, "pending").drop_id)
+                p = s.pending(_drop(s, op.value, "pending" if f == "confirm" else "open").drop_id)
                 if p is not None:
                     out.setdefault(rev_key(op), "to:" + p.to)
         except RegistryError:
@@ -186,9 +190,11 @@ def loot_revs(reg: Registry, ops, raids=None) -> dict[str, str]:
 
 # ---------------------------------------------------------------- describe (the diff line)
 
-def describe(reg: Registry, op) -> str:
+def describe(reg: Registry, op, *, why: str | None = None) -> str:
     """'Syphon of the Nathrezim (d3): bot picked Torsha → council awards Eltam — “tanks progression”' — what Apply
-    will do, from the saved state. Raises RegistryError when it can't apply (no reason on an award, no such drop)."""
+    will do, from the saved state. Raises RegistryError when it can't apply (no reason on an award, no such drop).
+    `why`: an award whose reason is still missing or only a guess (the council thread's chat) — the line shows the
+    change with this question in the reason's place instead of refusing; Apply still needs the reason."""
     if op.op == "wishlist":
         return _describe_wish(reg, op)
     if op.op == "tier":
@@ -243,9 +249,10 @@ def describe(reg: Registry, op) -> str:
     if f == "award":
         from .loot.session import check_reason
 
-        if not (op.reason or "").strip():
-            raise RegistryError("An award needs a reason — it becomes the precedent the bot cites next time.")
-        check_reason(op.reason)
+        if why is None:
+            if not (op.reason or "").strip():
+                raise RegistryError("An award needs a reason — it becomes the precedent the bot cites next time.")
+            check_reason(op.reason)
         d = _drop(s, op.value, "open")
         aw = s.awarded(d.drop_id)
         if aw is not None:
@@ -255,7 +262,7 @@ def describe(reg: Registry, op) -> str:
             raise RegistryError("Who gets it? (member = a character, or disenchant)")
         p = s.pending(d.drop_id)
         bot_pick = p.award_to if p else "not judged yet"
-        return f"{d.item_name} ({d.drop_id}): bot picked {bot_pick} → council awards {to} — “{op.reason.strip()}” · recorded at Confirm"
+        return f"{d.item_name} ({d.drop_id}): bot picked {bot_pick} → council awards {to} — " + (why or f"“{op.reason.strip()}”") + " · recorded at Confirm"
     if f == "confirm":
         if (op.value or "").strip().lower() in ALL_WORDS:
             if not s.proposals:
@@ -455,7 +462,8 @@ async def apply_async(reg: Registry, op, by: str, bot, by_id: int | None, via: s
         return (out["line"] or "nothing to judge").replace("**", "")
     if f == "award":
         d = _drop(s, op.value, "open")
-        return (await bot.override(reg, s, d.drop_id, _who(op.member), op.reason or "", **kw)).replace("**", "")
+        shown = rev[3:] if rev and rev.startswith("to:") else None  # the pick the diff showed on this drop (loot_revs)
+        return (await bot.override(reg, s, d.drop_id, _who(op.member), op.reason or "", expect_to=shown, **kw)).replace("**", "")
     if f == "confirm":
         if (op.value or "").strip().lower() in ALL_WORDS:
             out = await bot.confirm(reg, s, batch_rev=rev if rev and not rev.startswith("to:") else None, **kw)
