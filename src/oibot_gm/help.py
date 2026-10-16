@@ -4,8 +4,8 @@ No state is changed here — answers point at commands; officers' change request
 configops.
 
 The live snapshot (`guild_state`) is built in code and bounded (MAX_STATE_CHARS). It has fixed parts (settings, raids,
-live runs, the asker) and keyword-gated SECTIONS (status, loot, bank, absences, auras, readiness, news, policy,
-applications, test bench), each with its own character cap. Officer data (other people's absence reasons,
+live runs, the asker) and keyword-gated SECTIONS (status, loot — a member gets their own awards only —, bank, absences,
+auras, readiness, news, policy, applications, test bench), each with its own character cap. Officer data (other people's absence reasons,
 applications, ops, precedents, proposals, privilege) only ever reaches an officer's snapshot. Text people typed that
 is shown at length (news titles, applicants' answers, absence reasons, precedent reasons, commit subjects) sits inside
 <member-text> blocks."""
@@ -619,36 +619,55 @@ def _status(ask: Ask) -> list[str]:
 
 
 def _loot(ask: Ask) -> list[str]:
-    reg = ask.reg
-    st = reg.store
-    prec = st.read_jsonl(Path(reg.key) / "precedents.jsonl")
-    ledger = st.read_jsonl(Path(reg.key) / "ledger.jsonl")
-    items = getattr(reg.profile, "items", {}) or {}
+    """The guild's loot as the council reads it (RegistryLootContext: voided awards dropped, replaced / retired
+    precedents folded). An officer: the last precedents with their reasons, the last awards, and what the members the
+    question names got. A member (D2): their OWN awards only — item, character, day, boss, MS/OS — never a score, the
+    bot's pick, a reason, who recorded it or anyone else's loot (the guild's award log is the site's Loot log)."""
+    from .lootctx import RegistryLootContext
 
-    def item(r):
-        it = items.get(r.get("item_id")) if isinstance(items, dict) else None
-        return r.get("item") or (getattr(it, "name", None) if it else None) or f"item {r.get('item_id')}"
+    reg = ask.reg
+    ctx = RegistryLootContext(reg, reg.store, None)  # a fresh read in this worker thread (the bot's cached one lives on the loop)
+
+    def item(name, iid):
+        it = reg.item(iid or None, name) if (iid or name) else None
+        return name or (it.name if it is not None else None) or f"item {iid}"
 
     def day(v):  # the clock rule: a person reads 'Tue 15 Sep', never the stored ISO date
         return reg.day_label(str(v)[:10]) if v else "?"
 
+    def mine(a):
+        return f"{day(a.received.isoformat())} · {a.raider} · {item(a.item_name, a.item_id)}" + (f" · {a.boss}" if a.boss and a.boss != "?" else "") + f" · {'OS' if a.offspec else 'MS'}"
+
+    if not ask.officer:
+        from .loot_ops import member_awards
+
+        rows = member_awards(reg, ctx, reg.members.get(ask.user_id), 15)
+        out = ["### Your loot (member view: the asker's own awards only, newest first — scores, the bot's picks, reasons and other "
+               "people's history are officers'; the guild's award log is the site's Loot log)"]
+        return out + (_block("your-loot", [mine(a) for a in rows]) or ["  none recorded yet"])
+
     def p_line(r):
-        return f"{day(r.get('date'))} · {item(r)} · bot pick {r.get('bot') or '-'} → council {r.get('human') or '-'} · reason “{r.get('reason') or ''}” · by {r.get('by') or '?'} · {r.get('status', 'active')}"
+        return (f"{day(r.get('date'))} · {item(r.get('item'), r.get('item_id'))} · bot pick {r.get('bot') or '-'} → council {r.get('human') or '-'} · "
+                f"reason “{r.get('reason') or ''}” · by {r.get('by') or '?'} · {r.get('status', 'active')}")
 
-    def l_line(r):
-        return f"{day(r.get('received'))} · {r.get('raider', '?')} · {item(r)} · {r.get('tier', '?')}{' · offspec' if r.get('offspec') else ''} · {r.get('instance', '')} {r.get('boss', '')}".rstrip()
+    def l_line(a):
+        return f"{mine(a)} · tier {a.tier or '?'}" + (f" · {a.source}" if a.source else "") + (f" (bot picked {a.bot_pick})" if a.bot_pick and a.bot_pick != a.raider else "")
 
-    out = [f"### Loot (officers; read-only here): {len(prec)} precedent(s), {len(ledger)} ledger row(s)"]
-    out.append("last precedents (newest last):")
+    prec = [p for p in ctx.precedents if p.get("status", "active") != "superseded"]
+    ledger = sorted(ctx.ledger, key=lambda a: (a.received, a.confirmed_at or ""))
+    out = [f"### Loot (officers; read-only here): {sum(1 for p in prec if p.get('status', 'active') == 'active')} active precedent(s), {len(ledger)} award(s) in the ledger"]
+    out.append("last precedents (newest last; retired ones say so — the bot cites active ones only):")
     out += _block("precedents", [p_line(r) for r in prec[-10:]]) or ["  none"]
-    out.append("last ledger rows (newest last):")
-    out += _block("ledger", [l_line(r) for r in ledger[-10:]]) or ["  none"]
-    names = {n.lower() for m in mentioned_members(reg, ask.question) for n in [m.display_name] + [c.name for c in m.characters if c.name] + [c.label for c in m.characters if c.name]}
+    out.append("last awards (newest last):")
+    out += _block("ledger", [l_line(a) for a in ledger[-10:]]) or ["  none"]
+    named = mentioned_members(reg, ask.question)
+    names = {n.lower() for m in named for n in [m.display_name] + [c.name for c in m.characters if c.name] + [c.label for c in m.characters if c.name]}
     if names:
-        mine_l = [r for r in ledger if str(r.get("raider", "")).lower() in names]
+        ids = {m.discord_id for m in named}
+        mine_l = [a for a in ledger if a.discord_id in ids or a.raider.lower() in names]
         mine_p = [r for r in prec if str(r.get("human", "")).lower() in names or str(r.get("bot", "")).lower() in names]
-        out.append(f"for the member(s) named: {len(mine_l)} ledger row(s), {len(mine_p)} precedent(s)")
-        out += _block("loot-named", [l_line(r) for r in mine_l[-10:]] + [p_line(r) for r in mine_p[-5:]])
+        out.append(f"for the member(s) named: {len(mine_l)} award(s), {len(mine_p)} precedent(s)")
+        out += _block("loot-named", [l_line(a) for a in mine_l[-10:]] + [p_line(r) for r in mine_p[-5:]])
     return out
 
 
@@ -853,7 +872,7 @@ SECTIONS: dict[str, tuple[re.Pattern, Callable[[Ask], list[str]], int, bool]] = 
     "absences": (re.compile(r"\b(away|absen\w*|out on|next week|vacation|holiday|leave|missing (the|a) raid)\b"), _absences, 2_000, True),
     "readiness": (re.compile(r"\b(ready|readiness|short|comp|composition|missing|over ?cap|overview|analytics|pool|need more|shortfall|desired)\b"), _readiness, 4_000, True),
     "news": (re.compile(r"\b(news|proposals?|jobs?|review|agents?|patch(es)?|hotfix\w*|blue ?posts?|go(ne)? through|went through|revert\w*|(was|were|been|got|it) applied)\b"), _news, 2_500, True),
-    "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear|overrid\w*|overrode|overruled?)\b"), _loot, 2_500, True),
+    "loot": (re.compile(r"\b(loot|precedents?|ledger|award(ed|s)?|got|drops?|items?|council|gear|overrid\w*|overrode|overruled?)\b"), _loot, 2_500, False),  # members: their own
     "bank": (re.compile(r"\b(list|who|healers?|tanks?|melee|ranged|dps|unconfirmed|confirm\w*|officers?|alts?|mains?|members?|bank|characters?|ranks?|privilege)\b"), _bank, 4_000, True),
     "policy": (re.compile(r"\b(polic(y|ies)|loot rules?|comp rules?|persona|standing instructions?)\b"), _policy, 3_000, True),
     "auras": (re.compile(r"\b(auras?|buffs?|stacks?|stacking|totems?|provides?|providers?|famil(y|ies)|blessings?)\b"), _auras, 4_000, False),

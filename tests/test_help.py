@@ -260,14 +260,37 @@ def test_news_policy_loot_sections(reg, rs):
     pol = state(reg, rs, OWNER, True, "show me the loot policy")
     assert "policy loot:" in pol and "compiled no" in pol and '<member-text source="policy-loot">' in pol and '<member-text source="policy-comp">' not in pol
     m = reg.test_members()[0]
-    reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {"raider": m.main.name, "item_id": 1, "tier": "BiS", "received": "2026-09-02", "instance": "bd", "boss": "Boss", "offspec": False})
+    reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {"raider": m.main.name, "item_id": 1, "tier": "BiS", "total_weight": 1.0, "received": "2026-09-02", "instance": "bd", "boss": "Boss", "offspec": False})
     loot = state(reg, rs, OWNER, True, f"what loot did {m.main.name} get?")
-    assert "### Loot" in loot and "for the member(s) named: 1 ledger row(s)" in loot
+    assert "### Loot" in loot and "for the member(s) named: 1 award(s)" in loot
     reg.store.append_jsonl(f"{reg.key}/precedents.jsonl", {"date": "2026-09-15", "item_id": 1, "bot": "A", "human": m.main.name, "reason": "r", "by": "Boss"})
     loot = state(reg, rs, OWNER, True, f"what loot did {m.main.name} get?")
     block = loot.split("### Loot")[1].split("\n### ")[0]
     assert "Wed 02 Sep" in block and "Tue 15 Sep" in block
     assert not re.search(r"\d{4}-\d{2}-\d{2}", block), "the clock rule: no ISO dates in the loot section"
+
+
+def test_a_members_loot_question_shows_their_own_awards_only(reg, rs):
+    """Regression (integration item 11, D2): the loot section read precedents.jsonl / ledger.jsonl raw (voided awards
+    and status rows included) and was officer-only. It reads the guild's RegistryLootContext now; a member gets their
+    OWN awards (item, character, day, boss, MS/OS) — never another member's, a tier, the bot's pick or a reason."""
+    a, b = reg.test_members()[:2]
+    row = {"item_id": 0, "tier": "S", "total_weight": 1.0, "instance": "bd", "boss": "Gatekeeper", "offspec": False}
+    reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {**row, "raider": a.main.label, "discord_id": a.discord_id, "item_name": "Robe of Tests", "received": "2026-09-02",
+                                                      "import_id": "r1-d1", "source": "override", "bot_pick": b.main.label})
+    reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {**row, "raider": b.main.label, "discord_id": b.discord_id, "item_name": "Shard of Doom", "received": "2026-09-03", "import_id": "r1-d2"})
+    reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {**row, "raider": a.main.label, "discord_id": a.discord_id, "item_name": "Voided Helm", "received": "2026-09-03", "import_id": "r1-d3"})
+    reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {"kind": "void", "import_id": "r1-d3", "reason": "misclick", "by": "Mira"})
+    reg.store.append_jsonl(f"{reg.key}/precedents.jsonl", {"date": "2026-09-02", "item": "Robe of Tests", "bot": b.main.label, "human": a.main.label,
+                                                          "reason": "secret council reason", "by": "Mira", "import_id": "r1-d1"})
+    s = state(reg, rs, a.discord_id, False, "what loot did I get?")
+    block = s.split("### Your loot")[1].split("\n### ")[0].split("\n## ")[0]
+    assert f"Wed 02 Sep · {a.main.label} · Robe of Tests · Gatekeeper · MS" in block
+    for secret in ("Shard of Doom", b.main.label, "secret council reason", "tier", "override", "Voided Helm", "### Loot"):
+        assert secret not in block, secret
+    o = state(reg, rs, OWNER, True, "any loot precedents?")
+    officer = o.split("### Loot")[1].split("\n### ")[0]
+    assert "secret council reason" in officer and "Shard of Doom" in officer and "Voided Helm" not in officer, "the officer view reads the folded ledger"
 
 
 # ---------------------------------------------------------------- comp.readiness (JSON for the API and MCP later)
