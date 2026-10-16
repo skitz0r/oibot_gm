@@ -41,7 +41,7 @@ class Resp:
 
 
 def interaction(uid, log, *, officer=False, edit_fails=False, **client_kw):
-    async def plain_identity(reg, user):
+    async def plain_identity(reg, user, **_):
         return officer or uid == OWNER, []
 
     async def followup(content=None, **kw):

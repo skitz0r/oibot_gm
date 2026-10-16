@@ -115,7 +115,7 @@ def test_run_autofill_saves_through_save_board(reg, rs, monkeypatch):
 # ---------------------------------------------------------------- Apply: the preview's fingerprint, updated by the request's own writes
 
 class PressBot(Bot):
-    async def plain_identity(self, reg, user):
+    async def plain_identity(self, reg, user, **_):
         return True, []
 
 

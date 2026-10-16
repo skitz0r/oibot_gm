@@ -378,7 +378,7 @@ class SetWizard(Wizard):
             return
         lines = [f"Set **{m.display_name}** ({self.char_label()}) to **{rc.LABELS[st]}** on {run_label(self.reg, ev)}?"]
         if sheet_state(ev) == "locked":
-            seated = ev.seat_of(m.display_name)
+            seated = ev.seat_of(m)
             if st == "in":
                 lines.append("-# They keep their seat." if seated else "-# The roster is locked: they get a seat if one is free, and a DM asking them to confirm.")
             elif st == "out":
@@ -561,7 +561,7 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
     def mine(ev: rc.RaidEvent) -> bool:  # the runs they answered Join/Bench on, or hold a seat in
         m = reg.members.get(uid)
         s = ev.signups.get(str(uid))
-        return bool((s and s.status in ("in", "sub")) or (m and ev.seat_of(m.display_name)))
+        return bool((s and s.status in ("in", "sub")) or (m and ev.seat_of(m)))
 
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
         if not ev or not reg.members.get(uid):

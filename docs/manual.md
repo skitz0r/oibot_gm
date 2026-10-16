@@ -956,8 +956,9 @@ changed, with a prefix for where it came from — `[web]`, `[mcp]` or `[chat]`, 
 " (host)" after the name when the bot's host acted in a server they don't own. Who you are is decided the same way
 everywhere (a command, a button, a DM, the site, plain text): the server's owner, an officer by Manage Server or an
 officer role, a member of the server, or outside it; a Discord nick change never costs you anything — your seat on a
-locked roster, your callouts and your pending asks are tied to your Discord account, not to the name, and the bot
-keeps the name you registered under until you or an officer record the new one. An absence reason is seen by you and
+locked roster, your callouts and your pending asks are tied to your Discord account, not to the name, and the name
+on your record follows your server nick the next time the bot sees you in the server (a command, a button press) —
+a sheet keeps the name you answered under until you answer again. An absence reason is seen by you and
 the officers, nobody else. The bot DMs only for sheets, nudges, confirmations,
 released seats and fill asks; switch DMs off on the **Me** page if you'd rather not get them — with DMs off
 you are never asked to fill, and a confirmation ask is shown on the Me page instead and counts as pending

@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import discord
 
-from . import guild_routing, raidcycle as rc
+from . import guild_routing, ops as ops_mod, raidcycle as rc
 from .discord_registry import Guilds
 from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton, fill_view, place_view, sheet_view
 from .raid_commands import register_raid_commands
@@ -606,8 +606,9 @@ class RaidMixin:
         rs.save(ev, f"confirmations {sent}")
         return sent
 
-    async def after_board_change(self, reg, rs, ev, team, added, removed: list[str], by: str) -> None:
-        """Officer edits on a locked board: substitutions get a confirmation DM, removals free the seat and ask the bench."""
+    async def after_board_change(self, reg, rs, ev, team, added, removed: list[str], by: str, via: str = "web") -> None:
+        """Officer edits on a locked board: substitutions get a confirmation DM, removals free the seat and ask the bench.
+        `via` = the surface the edit came through (web | mcp | chat | discord): the audit line's prefix, never part of the verb."""
         for sg in added:
             seat = ev.seat_of(sg.discord_id)
             gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if sg.display_name in g), 0) if seat else 0
@@ -621,7 +622,7 @@ class RaidMixin:
             sent, nd = await self.run_fill(reg, rs, ev, team, by=by)
             if sent:
                 await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
-        await self.ops.emit(reg.config, "info", f"[web] {by} edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""))
+        await ops_mod.audited(self.ops, reg, by, f"edited the {ev.key} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""), via=via)
 
     # ---- the board: one writer at a time per run, whoever writes (the site's drags, MCP, plain text)
     def board_lock(self, reg, key: str) -> asyncio.Lock:
@@ -629,7 +630,7 @@ class RaidMixin:
         Keyed (guild, run key)."""
         return self.__dict__.setdefault("_board_locks", {}).setdefault((reg.key, key), asyncio.Lock())
 
-    async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str) -> str:
+    async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str, via: str = "web") -> str:
         """The one way a board is written (whole board, or the result of a single move); the caller holds board_lock.
         Before lock the groups are the layout the lock will use; after lock they ARE the roster (someone brought in
         from the bench is asked to confirm, someone taken out is freed and the fill engine asked)."""
@@ -642,20 +643,20 @@ class RaidMixin:
         # on the loop, not a worker thread (stage C L3): a Can't make it, a fill yes or the scheduler's expiry changes the
         # same rosters on the loop, and a thread could put a seat freed meanwhile back; list work plus one batch commit
         added, removed = rc.apply_layout_locked(reg, rs, ev, groups)
-        await self.after_board_change(reg, rs, ev, rc.run_team(reg, ev), added, removed, by)
+        await self.after_board_change(reg, rs, ev, rc.run_team(reg, ev), added, removed, by, via=via)
         return ((f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "")).lstrip("; ") or "groups updated"
 
-    async def save_board(self, reg, rs, ev, groups: list[list[str]], *, rev: str | None = None, by: str) -> str:
+    async def save_board(self, reg, rs, ev, groups: list[list[str]], *, rev: str | None = None, by: str, via: str = "web") -> str:
         """A whole-board write (the site's Clear / Use this split, MCP set_layout, plain text run_board). `rev` = the
         rc.board_rev the author was looking at: when the board changed since, rc.BoardChanged is raised and nothing is
-        written. Only joiners count; returns the line to show."""
+        written. Only joiners count; returns the line to show. `via`: the surface, for the audit line's prefix."""
         state = ev.state
         async with self.board_lock(reg, ev.key):
             if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state:  # a write queued behind a lock is stale
                 raise rc.BoardChanged()
-            return await self._write_board(reg, rs, ev, groups, by)
+            return await self._write_board(reg, rs, ev, groups, by, via=via)
 
-    async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None) -> str:
+    async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None, via: str = "web") -> str:
         """One move applied to the board as it is NOW (so two officers moving at once merge): `to` = (flat group
         index, position) — group index = roster × groups per roster + group — or None for the bank. Dropping on
         someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined.
@@ -666,7 +667,7 @@ class RaidMixin:
             if (rev and rev != rc.board_rev(reg, ev)) or ev.state != state:  # a move queued behind a lock is stale
                 raise rc.BoardChanged()
             groups = rc.apply_move(reg, ev, name, to)
-            return await self._write_board(reg, rs, ev, groups, by)
+            return await self._write_board(reg, rs, ev, groups, by, via=via)
 
     # ---- a member's "can't make it" with a note, and fill answers from anywhere but the DM button
     async def call_out(self, reg, rs, ev, m, note: str | None, by: str, by_id: int | None = None) -> str:

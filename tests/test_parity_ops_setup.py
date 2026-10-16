@@ -36,7 +36,7 @@ class SetupBot(Bot):
         super().__init__(reg, rs)
         self.set_channels, self.invites = [], []
 
-    async def plain_identity(self, reg, user):
+    async def plain_identity(self, reg, user, **_):
         return user.id == OWNER, []
 
     async def set_channel(self, reg, kind, channel_id, by, via="discord", by_id=None):

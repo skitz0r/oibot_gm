@@ -79,7 +79,7 @@ def test_parse_passes_the_requesters_standing(reg, officer_data):
 
 
 def chat(uid, log, *, officer):
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return officer, []
 
     async def followup(content=None, **kw):

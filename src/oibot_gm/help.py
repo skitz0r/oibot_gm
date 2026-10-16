@@ -239,7 +239,7 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
     if rs is not None:
         for ev in rs.live():
             s = ev.signups.get(str(m.discord_id))
-            seat = ev.seat_of(m.display_name) if ev.all_rosters else None
+            seat = ev.seat_of(m) if ev.all_rosters else None
             pin = ev.pins.get(str(m.discord_id))
             if s or seat:
                 out.append(f"  on {ev.key}: {s.status + ' as ' + s.character + ' (' + s.spec + ', ' + s.source + ')' if s else 'no answer'}{' — ' + s.note if s and s.note else ''}"

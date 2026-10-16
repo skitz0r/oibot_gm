@@ -1517,13 +1517,26 @@ def still_short_words(plan: Plan) -> str:
 
 
 def _reseat(ev: RaidEvent, sg: Signup) -> bool:
-    """A swap by someone already seated: update their seat in place (character, spec, role) instead of seating twice."""
+    """A swap by someone already seated: update their seat in place (character, spec, role) instead of seating twice.
+    The seat and its group entry take the signup's CURRENT display name (a re-answer after a nick change), so the
+    roster never carries two names for one person — a stale `signup_name` left a ghost in the groups once `free_seat`
+    filtered them by the old name while the board had written the new one."""
     hit = ev.seat_of(sg.discord_id)
     if not hit:
         return False
-    p = hit[1]
+    i, p = hit
     p.cls, p.spec, p.role, p.offspec, p.character = sg.cls, sg.spec, sg.role, sg.offspec, sg.character
+    relabel_seat(ev.all_rosters[i], p, sg.display_name)
     return True
+
+
+def relabel_seat(r: RosterResult, p: Player, name: str) -> None:
+    """One name per seat: `p` is now known as `name` in this roster (its Player and the group entry that carries it)."""
+    old = p.signup_name
+    if not name or name == old:
+        return
+    p.signup_name = name
+    r.groups = [[name if n == old else n for n in g] for g in r.groups]
 
 
 def tied_ask(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
@@ -2263,6 +2276,8 @@ def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: li
                 if sg and u not in before:
                     added.append(sg)
                 keep[u] = players[u]
+            elif keep[u].signup_name != players[u].signup_name:  # the groups were just written with the signup's name: the kept seat follows
+                keep[u].signup_name = players[u].signup_name
         r.selected = [keep[u] for u in want]
         r.role_counts = {role: sum(1 for p in r.selected if p.role == role) for role in ROLES}
     ev.rosters = [r for r in ev.rosters if r.selected or r is ev.rosters[0]]
@@ -2318,7 +2333,8 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str) -> Pla
     uid = player_uid(ev, p)
     r = ev.all_rosters[i]
     r.selected = [x for x in r.selected if x is not p]
-    r.groups = [[n for n in g if n != p.signup_name] for g in r.groups]
+    # the group entry goes by id as well as by name: a name the person took since (the signup's) is theirs too
+    r.groups = [[n for n in g if n != p.signup_name and (uid is None or uid_of_name(ev, n) != uid)] for g in r.groups]
     p.status = "bench"
     ev.all_rosters[0].benched.append(p)
     sg = ev.signups.get(str(uid)) if uid is not None else None

@@ -204,7 +204,7 @@ class Resp:
 
 
 def owner_interaction(log, bot):
-    async def plain_identity(reg, user):
+    async def plain_identity(reg, user, **_):
         return True, []
 
     async def followup(content=None, **kw):

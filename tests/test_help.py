@@ -161,7 +161,7 @@ def test_plain_text_reply_to_a_newcomer_carries_the_apply_button(reg, monkeypatc
     async def help_answer(reg_, uid, off, text, may_act=False, public=False):
         return says["answer"]
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return user.id == OWNER, []
 
     async def reply(content=None, **kw):

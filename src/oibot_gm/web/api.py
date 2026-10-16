@@ -140,7 +140,7 @@ def application_json(reg, a) -> dict:
 PREVIEW_TTL = 600  # seconds a plain_change preview token stays good (Discord's Apply view waits as long)
 
 
-def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
+def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_officer=None) -> None:
     @contextlib.asynccontextmanager
     async def solving(reg, key: str):
         """The run's solver single-flight (RaidMixin.solving — shared with chat, MCP, the scheduler and the cards);
@@ -278,7 +278,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             return JSONResponse({"error": str(e)}, status_code=400)
         lines = list(await maybe_await(bot.absence_cleared(reg, m, a, v.name)) or [])
         head = f"{m.display_name} back: cleared {reg.span_label(a.start, a.end)}"
-        await bot.ops.emit(reg.config, "info", f"[web] {v.name}: {head}" + (" — " + "; ".join(lines) if lines else ""))
+        await ops_mod.audited(bot.ops, reg, v.name, head + (" — " + "; ".join(lines) if lines else ""), via=v.via, by_id=v.uid)
         return {"message": "\n".join([head, *lines]), "lines": lines}
 
     @app.exception_handler(HTTPException)
@@ -406,7 +406,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             s = ev.signups.get(str(v.uid))
             team = reg.config.team(ev.team) or {"key": ev.team}
             rd = reg.raid_def(team.get("instance")) if team.get("instance") else {}
-            seat = ev.seat_of(m.display_name) if m and ev.state != "open" else None
+            seat = ev.seat_of(m) if m and ev.state != "open" else None
             sheets.append({"key": ev.key, "raid": rd.get("name") or team.get("name", ev.team), "starts_at": ev.starts_at, "when": t12(reg, ev.starts_at), "state": ev.state,
                            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
                            "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None, "kind": rc.run_kind(reg, ev),
@@ -773,7 +773,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
         groups = [[str(n) for n in g] for g in (d.get("groups") or [])]
         was_open = ev.state == "open"
         try:  # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
-            line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name)
+            line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name, via=v.via)
         except rc.BoardChanged:
             return stale(v, ev)
         return board_written(v, ev, was_open, line)
@@ -790,7 +790,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
         target = None if not to else (as_int(to.get("r"), "to.r") * n + as_int(to.get("g"), "to.g"), as_int(to.get("i", 99), "to.i"))
         was_open = ev.state == "open"
         try:
-            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name)
+            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via)
         except ValueError as e:
             return JSONResponse({"error": str(e)[:1].upper() + str(e)[1:], **board_reply(v.reg, ev)}, status_code=409)
         return board_written(v, ev, was_open, line)
@@ -901,7 +901,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                 return JSONResponse({"error": f"solver: {e}"}, status_code=400)
             ev.log.append(f"{v.name}: auto-filled the board")
             try:  # the one board write (RaidMixin.save_board), as plain text's run_autofill
-                await bot.save_board(v.reg, rs, ev, layout, rev=rev, by=v.name)
+                await bot.save_board(v.reg, rs, ev, layout, rev=rev, by=v.name, via=v.via)
             except rc.BoardChanged:
                 ev.log.pop()
                 return stale(v, ev)
@@ -924,7 +924,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         rs.save(ev, f"pin {name} {pin} by {v.name}")
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {ev.key} {name} {'pinned ' + pin if pin else 'unpinned'}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, f"{ev.key} {name} {'pinned ' + pin if pin else 'unpinned'}", via=v.via, by_id=v.uid)
         return {"message": f"{name}: {'pinned ' + pin if pin else 'unpinned'}"}
 
     @app.post("/api/run/{key}/set")
@@ -963,7 +963,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             return JSONResponse({"error": solver_text(e)}, status_code=409)
         if ev.lock_error:
             return JSONResponse({"error": solver_text(RuntimeError(ev.lock_error))}, status_code=409)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line}
 
     def send_batch_json(reg, plan) -> list[dict]:
@@ -1091,7 +1091,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             line = await bot.answer_placement_for(v.reg, m.discord_id, ev.team, yes, v.name)
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} answered for {m.display_name}: {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, f"answered for {m.display_name}: {line}", via=v.via, by_id=v.uid)
         return {"message": line}
 
     @app.post("/api/admin/fill-answer")
@@ -1108,7 +1108,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             line = await bot.answer_fill_for(v.reg, rs, ev, m, d.get("yes") in (True, "true", "yes", 1), v.name)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} answered a fill ask for {m.display_name}: {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, f"answered a fill ask for {m.display_name}: {line}", via=v.via, by_id=v.uid)
         return {"message": line}
 
     def channel_ref(reg, value) -> int | None:
@@ -1140,7 +1140,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             line = await bot.repost_sheet(v.reg, rs, ev, channel)  # refuses a channel of another server
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line}
 
     @app.post("/api/admin/test")
@@ -1178,7 +1178,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                     return JSONResponse({"error": "pick a test member"}, status_code=400)
                 if status not in rc.STATUSES:
                     return JSONResponse({"error": f"status must be one of {', '.join(rc.STATUSES)}"}, status_code=400)
-                if ev.state != "open" and status == "out" and ev.seat_of(m.display_name):
+                if ev.state != "open" and status == "out" and ev.seat_of(m):
                     await bot.drop_seated(reg, rs, ev, team, m, "callout (test)", None)
                     done.append(f"{m.display_name} called out")
                 else:
@@ -1599,7 +1599,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             line = await asyncio.to_thread(pol.begin_edit, policy_store(v.reg), doc, str(d.get("text") or ""), v.name)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line, **policy_json(v.reg, doc)}
 
     @app.post("/api/policy/{doc}/compile")
@@ -1630,7 +1630,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             line = await asyncio.to_thread(pol.confirm_pending, policy_store(v.reg), doc, v.name)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name} confirmed the compiled {doc} policy: {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, f"confirmed the compiled {doc} policy: {line}", via=v.via, by_id=v.uid)
         return {"message": line, **policy_json(v.reg, doc)}
 
     @app.post("/api/policy/{doc}/discard")
@@ -1643,7 +1643,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             line = await asyncio.to_thread(pol.discard_pending, policy_store(v.reg), doc, v.name)
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line, **policy_json(v.reg, doc)}
 
     @app.post("/api/admin/config")
@@ -1722,7 +1722,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             msg = await asyncio.to_thread(v.reg.set_plain_policy, v.reg.merge_plain_policy(patch), v.name)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e).splitlines()[0]}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)
         return {"message": msg, **plain_json(v.reg), "owner": True}
 
     # ---- recruitment (design §5.29): the homepage's public facts, the owner's settings, the officers' applications
@@ -1769,7 +1769,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
         refresh = getattr(bot, "refresh_registration_card", None)
         if refresh is not None:  # open/closed and the note show on the registration card, as with /gm config recruitment
             await maybe_await(refresh(v.reg))
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)
         return {"message": msg, **recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": True}
 
     @app.get("/api/applications")
@@ -1798,7 +1798,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         line = str(line or f"application from {a.display_name} {'accepted' if d['accept'] else 'declined'}")
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line}
 
     @app.post("/api/admin/invite")
@@ -1814,7 +1814,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             url = await maybe_await(bot.create_invite(v.reg, cid))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: created invite {url}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, f"created invite {url}", via=v.via, by_id=v.uid)
         return {"invite_url": url, "message": f"invite created: {url} (save the section to use it)"}
 
     previews: dict[str, dict] = {}  # plain_change preview token -> the authorized ops + board revs it showed (single use)
@@ -1842,6 +1842,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                 return JSONResponse({"error": "apply needs the token of a preview you made in the last "
                                               f"{PREVIEW_TTL // 60} minutes — preview again (without apply) and apply that"}, status_code=400)
             ops = [ConfigOp(**o) for o in held["ops"]]
+            if live_officer is not None:  # a write: the rights are decided now (PRIV_LIVE), not from the login's lookup
+                await live_officer(v)
             allowed, refused = configops.authorize(v.reg, ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
             out = {"kind": "change", "reply": held["reply"], "questions": [], "ops": [op.model_dump(exclude_none=True) for op in allowed],
                    "describe": held["describe"], "applied": [], "refused": refused, "error": None}

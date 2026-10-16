@@ -425,7 +425,7 @@ def router(reg, monkeypatch, help_says, officer=False):
         seen["help"].append((text, may_act))
         return db.HELP_ACT if (may_act and help_says == "act") else "an answer"
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return officer or user.id == OWNER, []
 
     stub = types.SimpleNamespace(ctx=types.SimpleNamespace(provider=object()), policies=types.SimpleNamespace(store=lambda r: None), ops=None,
@@ -494,7 +494,7 @@ class Resp:
 
 
 def interaction(uid, name, officer, log):
-    async def plain_identity(reg, user):
+    async def plain_identity(reg, user, **_):
         return officer or uid == OWNER, []
 
     async def send(content=None, **kw):

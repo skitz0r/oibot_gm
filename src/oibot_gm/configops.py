@@ -1851,8 +1851,8 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         cur = ev.signups.get(str(m.discord_id))
         now = f"now {rc.LABELS[cur.status]} as {cur.character}" if cur else "hasn't answered"
         char = f" as {op.character}" if op.character else ""
-        effect = {"in": " — rostered and asked to confirm" if ev.state == "locked" else "", "sub": " — keeps the seat until set No thanks" if ev.state == "locked" and ev.seat_of(m.display_name) else "",
-                  "out": " — seat freed, the fill engine looks for cover" if ev.state == "locked" and ev.seat_of(m.display_name) else ""}[want]
+        effect = {"in": " — rostered and asked to confirm" if ev.state == "locked" else "", "sub": " — keeps the seat until set No thanks" if ev.state == "locked" and ev.seat_of(m) else "",
+                  "out": " — seat freed, the fill engine looks for cover" if ev.state == "locked" and ev.seat_of(m) else ""}[want]
         note = (op.reason or "").strip()
         if want == "out" and note:  # a callout with its reason (RaidMixin.call_out): the note is for the officers only
             effect += f" — a callout; note for the officers: “{note}”"
@@ -2216,7 +2216,7 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
     if op.op in OWNER_OPS and not is_owner:
         raise RegistryError(f"{op.op} needs the owner")
     if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test", "application", "proposal")):
-        return await _apply_with_bot(reg, op, by, bot, by_id, rev=rev, channel_id=channel_id, self_id=self_id)
+        return await _apply_with_bot(reg, op, by, bot, by_id, rev=rev, channel_id=channel_id, self_id=self_id, via=via or "discord")
     if op.op == "job":  # launchctl: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)
     if bot is not None and op.op in ("policy", "policy_append"):
@@ -2366,7 +2366,7 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
 
 
 async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int | None, rev: str | None = None, channel_id: int | None = None,
-                          self_id: int | None = None) -> str:
+                          self_id: int | None = None, via: str = "discord") -> str:
     """The ops whose slash commands and web endpoints do Discord work: one branch per verb on the bot."""
     from . import raidcycle as rc
 
@@ -2459,7 +2459,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_move":  # the board's single drag (RaidMixin.board_move): merges with other officers' moves
         name, to, _ = _move_plan(reg, ev, op)
         try:
-            line = await bot.board_move(reg, rs, ev, name, to, by, rev=rev)
+            line = await bot.board_move(reg, rs, ev, name, to, by, rev=rev, via=via)
         except rc.BoardChanged:
             raise  # kept as itself: Apply marks the run stale so the rest of the request can't overwrite that change
         except ValueError as e:
@@ -2473,7 +2473,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             raise RegistryError("I can't post in this channel")
         return await bot.repost_sheet(reg, rs, ev, channel)
     if op.op == "run_propose":
-        return await _propose(reg, rs, ev, op, by, bot, by_id, rev)
+        return await _propose(reg, rs, ev, op, by, bot, by_id, rev, via)
     if op.op == "run_lock":
         if ev.state != "open":
             raise RegistryError(f"{ev.key} is already {ev.state}")
@@ -2501,7 +2501,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         if unknown:
             raise RegistryError(f"not joined on this sheet: {', '.join(unknown)}")
         was_open = ev.state == "open"
-        line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by)
+        line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
         return line if was_open else f"{ev.key}: {line}"  # before lock the line names the run itself
     if op.op == "run_autofill":
         if ev.state != "open":
@@ -2514,7 +2514,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
                 raise RegistryError(rc.solver_error_text(e))
             ev.log.append(f"{by}: auto-filled the board")
             try:
-                await bot.save_board(reg, rs, ev, layout, rev=rev, by=by)
+                await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
             except RegistryError:
                 ev.log.pop()
                 raise
@@ -2525,7 +2525,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     return apply(reg, op, by, True, None, raids=rs)
 
 
-async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int | None, rev: str | None) -> str:
+async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int | None, rev: str | None, via: str = "discord") -> str:
     """run_propose: the board's Propose — a solver preview in a worker thread (nothing saved), remembered per (run,
     requester) so 'another' differs from what was shown; 'use' puts the last one on the board through save_board and
     remembers its strategy, as the site's "Use this" does."""
@@ -2538,7 +2538,7 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
     if f == "use":
         if not last or not last.get("layouts"):
             raise RegistryError("no proposal to use yet — ask for one first (proposals are remembered until the bot restarts)")
-        line = await bot.save_board(reg, rs, ev, last["layouts"][-1], rev=rev, by=by)
+        line = await bot.save_board(reg, rs, ev, last["layouts"][-1], rev=rev, by=by, via=via)
         ev.split_strategy = last["strategy"]
         await asyncio.to_thread(rs.save, ev, f"split strategy {last['strategy']} ({by})")
         seen.pop(key, None)

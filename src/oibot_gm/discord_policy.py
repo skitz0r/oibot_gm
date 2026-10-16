@@ -155,7 +155,7 @@ class ConfigConfirmView(discord.ui.View):
         if await left_server(interaction.client, self.reg, interaction.user):
             await interaction.response.send_message(LEFT_SERVER, ephemeral=True)
             return None
-        officer, role_ids = await interaction.client.plain_identity(self.reg, interaction.user)
+        officer, role_ids = await interaction.client.plain_identity(self.reg, interaction.user, max_age=guild_routing.PRIV_LIVE)  # a write: decided now, never from the cache
         if interaction.user.id != self.requester_id and not officer:
             await interaction.response.send_message(f"Only {self.requester} or an officer can apply this.", ephemeral=True)
             return None

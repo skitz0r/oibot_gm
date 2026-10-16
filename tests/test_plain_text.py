@@ -69,7 +69,7 @@ class FakeBot:
     async def post_run_update(self, reg, ev, text):
         self.calls.append(("post_run_update", ev.key, text))
 
-    async def after_board_change(self, reg, rs, ev, team, added, removed, by):
+    async def after_board_change(self, reg, rs, ev, team, added, removed, by, via="web"):
         self.calls.append(("after_board_change", ev.key, [s.display_name for s in added], list(removed), by))
 
     async def absence_cleared(self, reg, m, a, by):

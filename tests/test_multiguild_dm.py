@@ -392,7 +392,7 @@ def test_help_in_a_dm_asks_then_shows_that_guilds_tiers(duo):
     register_help_commands(tree, duo.guilds, None, None)
     bot = dm_bot(duo)
 
-    async def plain_identity(reg, user):
+    async def plain_identity(reg, user, **_):
         return reg.key == GUILD2, []
     bot.plain_identity = plain_identity
 
@@ -505,7 +505,7 @@ def test_register_in_a_dm_reads_roles_from_the_guild_member(reg):
     reg.config.member_role_ids = [777]
     newcomer = 42
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return False, [777]
     dm = types.SimpleNamespace(guild_id=None, user=types.SimpleNamespace(id=newcomer, roles=[]), client=types.SimpleNamespace(plain_identity=plain_identity))
     assert run(flows_register.must_apply(dm, reg)) is False, "a member-role holder registers directly, DMs included"

@@ -252,7 +252,7 @@ class TestAnswerWizard(Wizard):
             return
         await self.working(interaction, "Answering…")
         done = []
-        if ev.state != "open" and status == "out" and ev.seat_of(m.display_name):
+        if ev.state != "open" and status == "out" and ev.seat_of(m):
             team = self.reg.config.roster(ev.team) or {"key": ev.team, "size": 20}
             await interaction.client.drop_seated(self.reg, self.rs, ev, team, m, "callout (test)", None)
             done.append(f"{m.display_name} called out")

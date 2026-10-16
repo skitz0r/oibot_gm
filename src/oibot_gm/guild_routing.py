@@ -217,6 +217,30 @@ def _tag(interaction: discord.Interaction, reg) -> None:
     extras = getattr(interaction, "extras", None)
     if isinstance(extras, dict):
         extras["guild"] = reg.key
+    sync_name(reg, getattr(interaction, "user", None))  # a command or a press in the server: the name on record follows the nick
+
+
+def sync_name(reg, who) -> bool:
+    """THE trigger of `Registry.rename` (design §2.2: verbs never rename as a side effect; this is the explicit step): a
+    discord.Member OF THE GUILD'S SERVER seen with a display name other than the one on record — a command, a button
+    press (`_tag`) or a member-update event (OibotGM.on_member_update). A bare User (a DM: no nick to read), a Member of
+    another server, someone unregistered or an unchanged name is a no-op. Seats, callouts and asks are keyed by id and a
+    run keeps the name a person answered under, so nothing else moves. Returns True when the record changed."""
+    if not isinstance(who, discord.Member):
+        return False
+    gid = getattr(getattr(reg, "config", None), "discord_guild_id", None)
+    if not gid or getattr(getattr(who, "guild", None), "id", None) != gid:
+        return False
+    m = reg.members.get(who.id)
+    name = str(getattr(who, "display_name", "") or "").strip()
+    if m is None or not name or name == m.display_name:
+        return False
+    try:
+        reg.rename(who.id, name, "Discord")
+    except Exception:  # noqa: BLE001 — a name that won't save never breaks the command it rode in on
+        log.exception("rename of %s in %s failed", who.id, reg.key)
+        return False
+    return True
 
 
 async def need(interaction: discord.Interaction, reply: bool = True, guilds=None, ask: bool | None = None):

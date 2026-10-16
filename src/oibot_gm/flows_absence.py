@@ -95,7 +95,7 @@ class AbsenceWizard(Wizard):
             if not (start <= day <= end):
                 continue
             label = f"{raid_name(self.reg, ev)} {self.reg.local12(ev.start)}"
-            if sheet_state(ev) == "locked" and m and ev.seat_of(m.display_name):
+            if sheet_state(ev) == "locked" and m and ev.seat_of(m):
                 out.append(f"• {label}: the seat is released and the bench is asked")
             elif sheet_state(ev) == "open":
                 out.append(f"• {label}: marked No thanks")

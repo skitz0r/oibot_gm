@@ -458,6 +458,18 @@ def create_app(bot) -> FastAPI:
         """owner | officer | member | outside — from Discord roles, never stored: guild_routing.role_of (design §2.6)."""
         return await guild_routing.role_of(bot, reg, uid, max_age=max_age)
 
+    async def live_officer(v: Viewer) -> bool:
+        """`v.officer` decided NOW (PRIV_LIVE) for a write that needs officer or owner rights — the plain-text apply
+        route calls it before `authorize`, as ConfigConfirmView's Apply does. The bearer (MCP, the owner) and the owner
+        need no lookup; with the guild's server itself unknown to the gateway (the bot disconnected, or no Discord at
+        all) the login-time answer stands. A member Discord can't confirm right now is no officer for this write (§2.9:
+        reads continue on the cache, officer writes don't)."""
+        if v.via == "mcp" or v.owner or v.reg is None or bot.get_guild(v.reg.config.discord_guild_id) is None:
+            return v.officer
+        r = await guild_routing.resolve_role(bot, v.reg, v.uid, max_age=guild_routing.PRIV_LIVE)
+        v.officer = r.officer
+        return v.officer
+
     # ---- auth
     @app.get("/auth/login")
     async def login(request: Request, next: str = "/"):
@@ -669,7 +681,7 @@ def create_app(bot) -> FastAPI:
 
     from .api import install_api
 
-    install_api(app, bot, viewer=viewer, privilege=privilege, guild_choices=guild_choices)
+    install_api(app, bot, viewer=viewer, privilege=privilege, guild_choices=guild_choices, live_officer=live_officer)
     return app
 
 

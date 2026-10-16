@@ -1188,7 +1188,10 @@ client as `bot.role_of(reg, user_or_uid, *, max_age)` and `bot.identity(reg, use
 refreshes the cache (`saw_member`); a Member of another server, a bare User (a DM) or a Discord id is looked up through
 `cached_member` at most `max_age` old — the named windows `PRIV_LIVE` (0: a write re-resolves now), `PRIV_ROUTING`
 (10 s: presses and DM routing), `PRIV_WEB` (60 s: the web's reads) — with `stale` set when the process's own cache
-answered rather than the gateway, a live Member or a fresh fetch. The five old checks are aliases of it in one commit:
+answered rather than the gateway, a live Member or a fresh fetch. `PRIV_LIVE` is what a write uses: `ConfigConfirmView`'s
+Apply calls `plain_identity(…, max_age=PRIV_LIVE)` and the site's plain-change apply calls `web.app.live_officer(v)`
+before `authorize` (the bearer and the owner need no lookup; a server unknown to the gateway keeps the login-time
+answer; a member Discord can't confirm now is no officer for that write). The five old checks are aliases of it in one commit:
 `discord_registry.is_officer` (the sync command check, `guild_routing.role_sync`: a bare User is no officer there),
 `RaidMixin.is_officer_anywhere`, `OibotGM.plain_identity`, `discord_help.asker_identity`, `web/app.py privilege`.
 `tests/test_dual_p0.py` drives all five with real `discord.Member` instances on a Member, a DM User, the owner and a
@@ -1206,9 +1209,16 @@ acts, and "is this the member's own answer" is `by_id == m.discord_id` — never
 equals the member's used to be read as the member). Callers that know the actor pass it (the sheet buttons, `/raid set`
 and `/raid out`, the site's `/api/run/{key}/set`, configops `run_answer` → MCP and plain text); no `by_id` = an officer
 acting. `Registry.member(uid, display_name)` names a NEW record only and never renames an existing member;
-`Registry.rename(uid, display_name, by)` is the one explicit rename (its own commit). A run keeps the name a person was
-seated under in its signups and groups; nothing in a run is relabelled by a rename, and nothing in a run depends on the
-name any more.
+`Registry.rename(uid, display_name, by)` is the one explicit rename (its own commit) and `guild_routing.sync_name(reg,
+who)` its ONE trigger: a `discord.Member` of the guild's server seen with a display name other than the record's — every
+command and persistent button press (`need` / `resolve_button` → `_tag`) and `OibotGM.on_member_update` (when the
+members intent delivers it). A bare User in a DM, a Member of another server, an unregistered person or an unchanged
+name is a no-op; no DM, no ops line. A run keeps the name a person ANSWERED under in its signups and groups until they
+answer again: then `_reseat` relabels the seat and its group entry (`relabel_seat`), `_apply_layout_locked` gives a kept
+seat the name the groups were just written with, and `free_seat` drops the group entry by id as well as by name — one
+name per seat, never a ghost entry with no seat behind it. Every caller asks `seat_of(m)` with the member, never
+`seat_of(m.display_name)` (a renamed member's seat was invisible to the sheet's Can't make it, the Me page, `/raid set`,
+the absence preview, `describe()` and `/ask`); `tests/test_dual_p0.py` guards the source for the old pattern.
 
 *One audit helper (§2.6).* `ops.audit_line(reg, by, line, via=, by_id=)` → `"[web] Jon (host): signup channel → #raids"`:
 `by` is a person's display name, the surface is the prefix from `via` (web | mcp | chat; a Discord command has none),
@@ -1216,8 +1226,11 @@ and " (host)" marks a superuser acting in a guild they don't own (no DM to that 
 reg, by, line, via, level, by_id)` writes it through any emitter (`Ops.audited` is the method). `SetupMixin.set_channel(reg,
 kind, channel_id, by, *, via, by_id)` owns the channel line (the `/gm config news-channel` command and the web's config
 route stopped writing their own); `configops.apply_async(…, via=)` writes one audited line per applied op when told the
-surface (the web's `/api/ops/change` passes `v.via`; Discord's Apply passes none and keeps its summary), and the web's
-mutation helpers go through `audited` with `v.via`, so a change made through MCP reads `[mcp] …`. `web.app.mcp_viewer`
+surface (the web's `/api/ops/change` passes `v.via`; Discord's Apply passes none and keeps its summary), and every web
+mutation route goes through `audited` with `v.via` — no route writes a literal `[web]` any more — so a change made
+through MCP reads `[mcp] …`. The board verbs (`save_board`, `board_move`, `_write_board`, `after_board_change`) take
+`via` (default web; the site passes `v.via`, configops its own), so an MCP `set_layout` is logged `[mcp]` and a
+plain-text board op `[chat]`. `web.app.mcp_viewer`
 names the bearer after the guild owner (`owner_name`: the member record, else the gateway user, else "the owner") with
 `via="mcp"` — the literal "mcp" no longer lands in `confirmed_by`, `approved_by` or commit subjects.
 

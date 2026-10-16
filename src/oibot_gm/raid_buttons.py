@@ -176,7 +176,7 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid(?:
             if sheet_state(ev) == "open":
                 await interaction.response.send_message("The sheet is still open — press **No thanks** instead.", ephemeral=True)
                 return
-            if not ev.seat_of(m.display_name):
+            if not ev.seat_of(m):
                 await interaction.response.send_message("You're not rostered for this run — nothing to do.", ephemeral=True)
                 return
             await bot.apply_signup(interaction, reg, rs, ev, m, None, "out")

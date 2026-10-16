@@ -167,7 +167,7 @@ def test_handle_change_in_a_public_channel_parses_and_answers_with_the_member_vi
     reg.apply(7_070_000_001, "nyxie", "Nyx", "Priest", "Holy", None, None, None, None, surname="Starfall")
     replies, helped = [], []
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return True, []
 
     async def help_answer(reg_, uid, officer, text, may_act=False, public=False):
@@ -208,7 +208,7 @@ def test_plain_text_mention_by_an_officer_in_a_public_channel_is_answered_public
         helped.append((officer, public))
         return "an answer"
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return True, []
 
     async def reply(content=None, **kw):
@@ -378,7 +378,7 @@ def test_a_second_apply_or_a_cancel_mid_apply_does_nothing(reg, monkeypatch):
 
     monkeypatch.setattr(configops, "apply_async", slow_apply)
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return True, []
 
     def presser():

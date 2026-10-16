@@ -480,7 +480,7 @@ def test_guide_apply_in_a_dm_reads_the_guild_members_roles(reg):
     uid = 555_000_000_000_000_777
     sent = []
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return False, [4242]  # the guild member holds a member role
 
     async def send_message(content=None, **kw):
@@ -556,7 +556,7 @@ def test_a_member_who_left_the_server_gets_the_guide_not_a_change(reg, monkeypat
 
     monkeypatch.setattr(db, "handle_change", fake_change)
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return user.id == OWNER, []
 
     present = {"yes": False}
@@ -614,7 +614,7 @@ def test_gm_change_refuses_a_member_who_left_the_server(reg):
     async def in_guild(reg_, user):
         return False
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         parsed.append("identity")
         return False, []
 
@@ -647,7 +647,7 @@ def _help_tree(reg, identity):
     discord_help.register_help_commands(tree, guilds, None, types.SimpleNamespace(help_answer=help_answer))
     said = []
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return identity
 
     async def send_message(content=None, **kw):
@@ -708,7 +708,7 @@ def test_an_officer_applying_a_members_own_no_thanks_diff_is_still_their_callout
 
     bot = Bot(reg, rs)
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, **_):
         return user.id == OWNER, []
 
     bot.plain_identity = plain_identity

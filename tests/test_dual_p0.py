@@ -581,3 +581,168 @@ def test_characters_rev_follows_the_character_list_not_updated_at(reg):
     extra = next(r for r in ("tank", "healer", "melee", "ranged") if r != primary and r not in flex)
     reg.set_flex(m.discord_id, m.main.label, [extra])
     assert reg.characters_rev(reg.members[m.discord_id]) != r0
+
+
+# ---- after review: one name per seat, every caller asks by member, the nick follows, writes decide live, one audit line
+
+def _src_hits(needle: str, skip: tuple[str, ...] = ()) -> list[str]:
+    """Lines of the package's own source carrying `needle` (a structural guard: a pattern that must not come back)."""
+    from pathlib import Path
+
+    root = Path(rc.__file__).parent
+    return [f"{p.relative_to(root)}:{i}" for p in sorted(root.rglob("*.py")) if p.name not in skip
+            for i, l in enumerate(p.read_text().splitlines(), 1) if needle in l]
+
+
+def test_a_renamed_member_who_re_answers_leaves_one_name_per_seat_and_no_ghost(reg, rs):
+    """Rename → Join again → the site saves the board it shows → the seat is freed: the groups never carry two names for
+    one person, and the name leaves with the seat (a ghost 'Freshnick' stood in a group with no seat behind it)."""
+    ev, seated = _locked(reg, rs)
+    m = seated[-1]
+    old = m.display_name
+    reg.rename(m.discord_id, "Freshnick", "t")
+    bot = SeatBot(reg, rs)
+    line = run(bot.set_answer(reg, rs, ev, m, "in", None, by="Freshnick", by_id=m.discord_id))  # their own Join, same character
+    assert "stays rostered" in line, line
+    seat = ev.seat_of(m)
+    assert seat and seat[1].signup_name == "Freshnick" and ev.seat_of("Freshnick")[1] is seat[1] and ev.seat_of(old) is None
+    names = [n for g in ev.roster.groups for n in g]
+    assert names.count("Freshnick") == 1 and old not in names, "the seat and its group entry follow the current name"
+    added, removed = rc.apply_layout_locked(reg, rs, ev, [list(g) for g in ev.roster.groups])  # the board, saved as shown
+    assert added == [] and removed == [] and ev.seat_of(m)[1].signup_name == "Freshnick"
+    assert rc.free_seat(reg, rs, ev, m, "declined") is not None
+    assert not ev.seat_of(m) and all("Freshnick" not in g and old not in g for g in ev.roster.groups)
+    assert len([n for g in ev.roster.groups for n in g]) == len(ev.roster.selected), "every group entry has a seat behind it"
+
+
+def test_the_board_relabels_a_kept_seat_and_free_seat_drops_the_group_entry_by_id(reg, rs):
+    """The probe as found: the signup carries the new nick, the seat's Player still the old one. A board write must not
+    leave the Player under one name and the groups under another, and free_seat must find the entry whatever name it bears."""
+    ev, seated = _locked(reg, rs)
+    m = seated[-1]
+    old = m.display_name
+    reg.rename(m.discord_id, "Freshnick", "t")
+    rc.set_signup(reg, rs, ev, m, None, "in")  # a re-answer that did not go through _reseat (an older run file)
+    assert ev.seat_of(m)[1].signup_name == old and ev.signups[str(m.discord_id)].display_name == "Freshnick"
+    added, removed = rc.apply_layout_locked(reg, rs, ev, [list(g) for g in ev.roster.groups])
+    assert added == [] and removed == []
+    assert ev.seat_of(m)[1].signup_name == "Freshnick", "the kept seat takes the name the groups were written with"
+    assert sum(n in ("Freshnick", old) for g in ev.roster.groups for n in g) == 1
+    ev.seat_of(m)[1].signup_name = old  # and even with the Player still under the old name …
+    assert rc.free_seat(reg, rs, ev, m, "declined") is not None
+    assert all("Freshnick" not in g and old not in g for g in ev.roster.groups), "… the group entry goes by id"
+
+
+def test_every_caller_asks_seat_of_with_the_member_never_the_display_name(reg, rs):
+    """After a rename the run's signup and seat still carry the old nick, so `seat_of(m.display_name)` found nothing
+    (the sheet's Can't make it said 'not rostered', the Me page showed no seat, describe() promised no freed seat)."""
+    assert _src_hits("seat_of(m.display_name)") == [] and _src_hits("seat_of(me.display_name)") == []
+    ev, seated = _locked(reg, rs)
+    m = seated[0]
+    reg.rename(m.discord_id, "Freshnick", "t")
+    assert ev.seat_of(m) and ev.seat_of(m.display_name) is None, "the run knows the old name only"
+    text = configops.describe(reg, ConfigOp(op="run_answer", target=ev.key, member="Freshnick", value="out"))
+    assert "seat freed" in text, text
+    text = configops.describe(reg, ConfigOp(op="run_answer", target=ev.key, member="Freshnick", value="sub"))
+    assert "keeps the seat" in text, text
+
+
+def test_a_nick_seen_in_the_server_renames_the_record_and_nothing_else(idbot, reg, rs):
+    """Registry.rename has ONE trigger: a discord.Member of the guild's server whose display name differs from the record
+    — a command or a press (guild_routing.need / resolve_button → _tag) or on_member_update. Runs keep the name the person
+    answered under; the seat is by id."""
+    g = idbot.guild
+    m = g.people[MEMBER_UID]
+    m.display_name = "Memnew"
+    reg_, _ = run(guild_routing.need(interaction(idbot, m)))
+    assert reg_ is reg and reg.members[MEMBER_UID].display_name == "Memnew"
+    assert not guild_routing.sync_name(reg, m), "unchanged: a no-op, no commit"
+    run(guild_routing.need(interaction(idbot, User(DM_MEMBER_UID, "Deenew"), False)))  # a DM: a bare User has no nick to read
+    assert reg.members[DM_MEMBER_UID].display_name == "Dee"
+    assert not guild_routing.sync_name(reg, Member(DM_MEMBER_UID, "Elsewhere", FakeGuild(99, {})) ), "another server's nick is not this guild's"
+    assert not guild_routing.sync_name(reg, Member(777, "Nobody", g)), "unregistered: nothing to rename"
+    assert reg.members[DM_MEMBER_UID].display_name == "Dee" and 777 not in reg.members
+    # on_member_update (the gateway event, when the members intent is on): the seat survives, the run keeps its name
+    ev, seated = _locked(reg, rs)
+    p = seated[0]
+    old = p.display_name
+    run(OibotGM.on_member_update(idbot, Member(p.discord_id, old, g), Member(p.discord_id, "Nicky", g)))
+    assert reg.members[p.discord_id].display_name == "Nicky"
+    assert ev.seat_of(p) and ev.seat_of(p.discord_id) and ev.signups[str(p.discord_id)].display_name == old and ev.seat_of(p)[1].signup_name == old
+    run(OibotGM.on_member_update(idbot, Member(5, "x", FakeGuild(99, {})), Member(5, "y", FakeGuild(99, {}))))  # an unconfigured server: ignored
+    _, itx = run(guild_routing.resolve_button(interaction(idbot, Member(p.discord_id, "Nickier", g)), reg.key))
+    assert reg.members[p.discord_id].display_name == "Nickier", "a persistent button's press is a sighting too"
+
+
+def test_writes_decide_the_rights_live_on_discord_apply_and_the_web_apply(idbot, reg, rs, monkeypatch):
+    """PRIV_LIVE is used: ConfigConfirmView's Apply and the site's plain-change apply re-resolve the presser NOW
+    (max_age 0), while a preview and a press keep the routing window."""
+    from oibot_gm.configops import ConfigRequest
+    from oibot_gm.discord_policy import ConfigConfirmView
+
+    seen = []
+    real = guild_routing.resolve_role
+
+    async def spy(bot, reg_, who, *, max_age=guild_routing.PRIV_ROUTING):
+        seen.append(max_age)
+        return await real(bot, reg_, who, max_age=max_age)
+
+    monkeypatch.setattr(guild_routing, "resolve_role", spy)
+    g = idbot.guild
+    view = SimpleNamespace(reg=reg, requester_id=MEMBER_UID, requester="Mem")
+    assert run(ConfigConfirmView._may_press(view, interaction(idbot, g.people[OFFICER_UID]))) == (True, [OFFICER_ROLE])
+    assert seen[-1] == guild_routing.PRIV_LIVE
+    assert run(idbot.plain_identity(reg, g.people[OFFICER_UID])) == (True, [OFFICER_ROLE]) and seen[-1] == guild_routing.PRIV_ROUTING
+    # the web: preview as an officer, lose the role, apply → decided live, refused; the lookup was the live window
+    idbot.ctx = SimpleNamespace(provider=object())
+    puppet = reg.test_members()[0]
+    monkeypatch.setattr(configops, "parse", lambda *a, **k: ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", member=puppet.display_name, value="off")]))
+    c = TestClient(web.create_app(idbot), follow_redirects=False)
+    c.cookies.set(web.COOKIE, URLSafeSerializer(SECRET, salt="session").dumps({"uid": str(OFFICER_UID), "name": "x", "iat": time.time()}))
+    H = {"X-Requested-With": "oibot"}
+    d = c.post("/api/ops/change", json={"text": "dm off"}, headers=H).json()
+    assert d.get("token"), d
+    # between the preview and the Apply the gateway loses the officer and the process's cache still says "officer": the
+    # request-time check (PRIV_WEB-style, from the cache) lets the request in, the apply re-resolves live and finds no answer
+    officer = g.people.pop(OFFICER_UID)
+    idbot._member_cache = {(SERVER, OFFICER_UID): (time.time(), officer)}
+    seen.clear()
+    r = c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=H)
+    assert r.status_code == 200, r.text
+    assert guild_routing.PRIV_LIVE in seen, seen
+    d2 = r.json()
+    assert d2["applied"] == [] and d2["refused"] and not reg.members[puppet.discord_id].dm_opt_out, d2
+    # the same route with the officer back in the server: applied, and the ops line carries the web prefix through ops.audited
+    g.people[OFFICER_UID] = officer
+    d = c.post("/api/ops/change", json={"text": "dm off"}, headers=H).json()
+    d2 = c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=H).json()
+    assert d2["applied"] and reg.members[puppet.discord_id].dm_opt_out
+    assert idbot.ops.lines[-1][1].startswith("[web] Offi: "), idbot.ops.lines[-1]
+
+
+def test_no_surface_prefix_is_written_by_hand_and_the_board_line_carries_via(reg, rs, monkeypatch):
+    """§2.6: the surface is a prefix from `via`, never baked into a line — so an MCP edit through a web route reads [mcp]."""
+    assert _src_hits('"[web]', skip=("ops.py",)) == [] and _src_hits('"[mcp]', skip=("ops.py",)) == [], "no literal surface tag in a line"
+    ev, seated = _locked(reg, rs)
+
+    class Bot(SeatBot):
+        after_board_change = RaidMixin.after_board_change
+
+    bot = Bot(reg, rs)
+    team = rc.run_team(reg, ev)
+    run(bot.after_board_change(reg, rs, ev, team, [], [seated[0].display_name], "Jon", via="mcp"))
+    assert bot.lines[-1] == ("info", f"[mcp] Jon: edited the {ev.key} board -1")
+    run(bot.after_board_change(reg, rs, ev, team, [], [seated[1].display_name], "Jon"))
+    assert bot.lines[-1] == ("info", f"[web] Jon: edited the {ev.key} board -1"), "the board is the web's by default"
+    run(bot.after_board_change(reg, rs, ev, team, [], [seated[2].display_name], "Jon", via="discord"))
+    assert bot.lines[-1] == ("info", f"Jon: edited the {ev.key} board -1")
+    # a web route reached with the MCP bearer: the pin line is the owner's, prefixed [mcp]
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    fb = FakeBot(reg, rs)
+    c = TestClient(web.create_app(fb))
+    ev2 = open_test_run(reg, rs, instance="barrow_deeps", days=5)
+    pool = reg.test_members()
+    join(reg, rs, ev2, pool[:3])
+    r = c.post(f"/api/run/{ev2.key}/pin", json={"member": pool[0].display_name, "pin": "in"}, headers={"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot"})
+    assert r.status_code == 200, r.text
+    assert fb.ops.lines[-1] == ("info", f"[mcp] the owner: {ev2.key} {pool[0].display_name} pinned in"), fb.ops.lines

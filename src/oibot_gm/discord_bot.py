@@ -1214,11 +1214,20 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         """(role, role_ids) — what Registry.may_plain needs (unpacks as a pair; `.stale` says the cache answered)."""
         return await guild_routing.identity(self, reg, user, max_age=max_age)
 
-    async def plain_identity(self, reg, user) -> tuple[bool, list[int]]:
+    async def plain_identity(self, reg, user, *, max_age: float = guild_routing.PRIV_ROUTING) -> tuple[bool, list[int]]:
         """(officer, role ids) for the plain-text check (Registry.may_plain) — an alias of `identity`: a bare User from a
-        DM is looked up as the guild member (Discord hands over no roles there)."""
-        r = await self.identity(reg, user)
+        DM is looked up as the guild member (Discord hands over no roles there). A write passes `max_age=PRIV_LIVE`
+        (ConfigConfirmView's Apply): the answer is fetched now, never the cache's."""
+        r = await self.identity(reg, user, max_age=max_age)
         return r.officer, r.role_ids
+
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        """A nick change in a configured server (needs the members intent to arrive): the registered member's display
+        name follows (guild_routing.sync_name → Registry.rename, the one rename path). Seats, callouts and asks are by
+        id, so nothing else moves and no run is relabelled."""
+        reg = self.registries.by_discord.get(after.guild.id) if getattr(after, "guild", None) is not None else None
+        if reg is not None:
+            guild_routing.sync_name(reg, after)
 
     async def in_guild(self, reg, user) -> bool:
         """Whether `user` is a member of the guild's Discord server now (the gateway cache, else one cached fetch: a
