@@ -1465,3 +1465,15 @@ def test_the_unrouted_companion_block_names_no_companion_option_that_doesnt_exis
     ack = run(bot.handle_feed_event({"type": "drop", "items": [{"name": "X"}], "idem": "u1"}, Companion("Lootmaster", "test", GUILD, "peer")))
     body = text_of(world.channels[s_a.raid_thread_id].message(s_a.cards["loot"]).view)
     assert "Companion not routed" in body and "--run" not in body and "--run" not in ack["error"]
+
+
+def test_retiring_a_companion_awards_reason_never_puts_it_back_on_the_needs_a_reason_list(night):
+    n = night
+    companion_mismatch(n)
+    run(n.bot.set_reason(n.reg, n.s, "d1", "raid leader's call", by="Mira", by_id=OFFICER))
+    iid = f"{n.s.id}-d1"
+    run(n.bot.retire_precedent(n.reg, iid, "no longer policy", by="Jonny", by_id=OFFICER))
+    assert not [p for p in n.bot.loot_precedents(n.reg) if p.get("import_id") == iid], "retired: no longer cited"
+    assert not n.bot.loot_reasons_pending(n.reg), "a retired reason was still given"
+    with pytest.raises(ls.LootChanged, match="already gave a reason"):
+        run(n.bot.set_reason(n.reg, n.s, "d1", "sneaking it back", by="Jonny"))
