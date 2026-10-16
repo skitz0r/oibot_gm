@@ -1103,7 +1103,9 @@ never need it (§8b).
 
 **Precedents** (Loot › Precedents): every council override with its reason, newest first — what the bot cites next
 time. **Retire** one (a reason is required and stays on it; the bot stops citing it, the record keeps it) or
-**Restore** it. *Needs a reason* lists awards recorded in game against the bot's pick that still have none.
+**Restore** it — a precedent whose reason was replaced is retired by its newer reason (the one the bot cites). *Needs a
+reason* lists awards recorded in game against the bot's pick that still have none; retiring a reason never puts its
+award back on that list.
 
 **Items and tiers** (Loot › Items): the **untiered** items — learned from drops by name, or on the tables without tiers —
 with when each was first seen, how often it dropped and how many awards it has. A row opens the **tier grid**: one tier

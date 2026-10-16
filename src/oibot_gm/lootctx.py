@@ -67,6 +67,14 @@ def precedent_ref(r: dict, n: int) -> str:
     return r.get("import_id") or f"row-{n}"
 
 
+def find_precedent(precedents: list[dict], ref: str) -> dict | None:
+    """The precedent a ref names: after a replaced reason two rows share one import_id ref — the newest one that is not
+    superseded is the live one (the one a status row folds onto), so Retire / Restore reach it; the superseded row is
+    only returned when nothing else carries the ref."""
+    rows = [p for p in precedents if p.get("ref") == ref]
+    return next((p for p in reversed(rows) if p.get("status", "active") != "superseded"), rows[-1] if rows else None)
+
+
 def fold_precedents(rows: list[dict]) -> list[dict]:
     """Precedent rows with status applied: a later precedent with the same import_id supersedes the earlier one; a
     `kind: status` row sets the status of the precedent it names (`import_id` = precedent_ref) — retire / restore,
@@ -129,7 +137,7 @@ class RegistryLootContext:
 
         if status not in ("retired", "active"):
             raise RegistryError("status is retired or active")
-        hit = next((p for p in self.precedents if p.get("ref") == ref), None)
+        hit = find_precedent(self.precedents, ref)
         if hit is None:
             raise RegistryError(f"No precedent {ref}.")
         if hit.get("status") == "superseded":

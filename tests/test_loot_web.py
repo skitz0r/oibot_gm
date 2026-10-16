@@ -876,3 +876,111 @@ def test_wishlist_provenance_says_where_the_lists_came_from(reg):
     p = ctx.provenance
     assert "1 character(s) with entries made through the bot" in p and "1 with entries imported from a ThatsMyBIS export" in p
     assert "1 from an older guild wishlist file" in p, "a character with its own list no longer counts as the file's"
+
+
+# ---------------------------------------------------------------- final review fixes (each fails without its fix)
+
+def _replaced_reason(w):
+    """A companion award against the bot's pick, its reason given and then replaced: two precedent rows, one ref."""
+    opened(w)
+    tick(w, "Shard of Doom")
+    c = council(distribute(w))
+    p = c["proposals"][0]
+    other = next(m.main.label for m in w.ms if m.main.label != p["to"])
+    from oibot_gm.feed import Companion
+
+    run(w.bot.handle_feed_event({"type": "loot", "recipient": other, "item_name": "Shard of Doom", "idem": "fx1"}, Companion("Scribe", "c", "", "p")))
+    s = w.bot.events[(GUILD, w.ev.key)]
+    run(w.bot.set_reason(w.reg, s, "d1", "first reason", by="Mira"))
+    run(w.bot.set_reason(w.reg, s, "d1", "replaced reason", by="Mira", replace=True))
+    return f"{w.ev.key}-d1"
+
+
+def test_a_precedent_whose_reason_was_replaced_can_be_retired_on_every_surface(w):
+    ref = _replaced_reason(w)
+    ctx = lootctx.RegistryLootContext(w.reg, w.reg.store, None)
+    assert [(p["ref"], p["status"], p["reason"]) for p in ctx.precedents] == [(ref, "superseded", "first reason"), (ref, "active", "replaced reason")]
+    hdr = H | {"X-Oibot-Actor": str(OFFICER)}
+    r = w.c.post("/api/loot/precedents/retire", json={"ref": ref, "reason": "old tier"}, headers=hdr)
+    assert r.status_code == 200 and "retired" in r.json()["message"], r.text
+    assert lootctx.RegistryLootContext(w.reg, w.reg.store, None).precedent_for(ref) is None, "the live (newer) one is retired"
+    back = ConfigOp(op="loot", field="retire", value=ref, reason="back in", text="restore")
+    assert "replaced reason" in configops.describe(w.reg, back), "the plain-text diff names the newer reason"
+    assert "restored" in run(configops.apply_async(w.reg, back, "Officer", False, bot=w.bot, by_id=OFFICER, via="chat"))
+    assert lootctx.RegistryLootContext(w.reg, w.reg.store, None).precedent_for(ref)["reason"] == "replaced reason"
+
+
+def test_retiring_a_companion_awards_reason_never_puts_it_back_on_the_needs_a_reason_list(w):
+    ref = _replaced_reason(w)
+    hdr = H | {"X-Oibot-Actor": str(OFFICER)}
+    assert w.c.post("/api/loot/precedents/retire", json={"ref": ref, "reason": "old tier"}, headers=hdr).status_code == 200
+    assert w.c.get("/api/loot/precedents", headers=H).json()["needs_reason"] == [], "a retired reason was still given"
+
+
+def test_end_refuses_an_unlocked_run_on_the_web_mcp_and_plain_text(w):
+    from datetime import timedelta
+
+    from oibot_gm import raidcycle as rc
+
+    start = (w.reg.now_local() + timedelta(days=9)).replace(second=0, microsecond=0)
+    sheet = rc.open_run(w.reg, w.rs, "barrow_deeps", start, by="t")  # next week's open signup sheet
+    r = w.c.post(f"/api/loot/{sheet.key}/end", json={}, headers=H)
+    assert r.status_code == 400 and "No locked run to end" in r.json()["error"], r.text
+    assert w.c.post(f"/api/loot/{sheet.key}/end", json={"preview": True}, headers=H).status_code == 400
+    op = ConfigOp(op="loot", field="end", target=sheet.key)
+    from oibot_gm import loot_ops
+
+    with pytest.raises(RegistryError, match="No locked run to end"):
+        loot_ops.describe(w.reg, op)
+    assert "No locked run to end" in configops.describe(w.reg, op), "the plain-text diff says so before Apply"
+    with pytest.raises(RegistryError, match="No locked run to end"):
+        run(configops.apply_async(w.reg, op, "Officer", False, bot=w.bot, by_id=OFFICER, via="chat"))  # Apply: the verb refuses too
+    assert w.rs.events[sheet.key].state == "open", "the signup sheet lives on"
+    assert w.c.post(f"/api/loot/{w.ev.key}/end", json={}, headers=H).status_code == 200, "a locked run still ends"
+
+
+def test_the_precedent_retire_route_commits_off_the_event_loop(w, monkeypatch):
+    w.reg.store.append_jsonl(Path(w.reg.key) / "precedents.jsonl", {"item": "Syphon", "bot": "Torsha", "human": "Eltam", "reason": "tanks", "import_id": "r1-d1"})
+    w.bot.__dict__.get("contexts", {}).clear()
+    seen: list[bool] = []
+    real = w.reg.store.commit
+
+    def rec(*a, **k):
+        try:
+            asyncio.get_running_loop()
+            seen.append(True)  # called on the event loop's thread
+        except RuntimeError:
+            seen.append(False)
+        return real(*a, **k)
+    monkeypatch.setattr(w.reg.store, "commit", rec)
+    r = w.c.post("/api/loot/precedents/retire", json={"ref": "r1-d1", "reason": "old tier"}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
+    assert r.status_code == 200 and seen and not any(seen), "the git commit ran on the event loop"
+
+
+def test_me_wishlist_wizard_answers_before_the_write(reg, rs, monkeypatch):
+    from wizard_harness import Harness
+
+    from oibot_gm.wizard_flows import FLOWS
+
+    tiered_item(reg, 90001, "Robe of Tests")
+    m = reg.test_members()[0]
+    h = Harness(reg, rs, user=types.SimpleNamespace(id=m.discord_id, display_name=m.display_name, mention="@x"))
+    shown: list[str] = []
+    for name in ("wish_add", "wish_remove"):
+        real = getattr(reg, name)
+
+        def rec(*a, _real=real, **k):
+            shown.append(h.text)  # what the person sees while the write runs
+            return _real(*a, **k)
+        monkeypatch.setattr(reg, name, rec)
+
+    async def go():
+        await FLOWS["me_wishlist"](h.command(), reg)
+        await h.pick("Add an item…", "90001")
+        await h.submit(h.modal, rank="1", kind="ms", note="")
+        await h.press("Confirm")
+        await h.press("Remove one…")
+        await h.pick("Pick the item", "Robe of Tests")
+        await h.press("Remove")
+    asyncio.run(go())
+    assert len(shown) == 2 and "Saving…" in shown[0] and "Removing…" in shown[1], shown

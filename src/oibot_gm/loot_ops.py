@@ -15,6 +15,8 @@ D8: from MCP (`via` mcp without X-Oibot-Actor) the decisions about an award or a
 retire, tier, someone else's wishlist) are refused (`needs_actor`); the site and Discord decide by the person's role."""
 from __future__ import annotations
 
+import asyncio
+
 import re
 
 from .registry import TIER_VALUES, WISHLIST_MAX, Registry, RegistryError
@@ -212,6 +214,8 @@ def describe(reg: Registry, op) -> str:
         n = len(ev.all_rosters)
         return f"open the loot council for {title}: a thread in {where}" + (f" (one per roster: {n})" if n > 1 else "")
     if f == "end":
+        if ev.state != "locked" and not sessions:  # LootMixin.end_run's rule, refused at the diff already (every surface)
+            raise RegistryError("No locked run to end." if ev.state not in ("done", "cancelled") else f"{title} is already {ev.state}.")
         n_aw = sum(1 for s in sessions for a in s.awards if not a.void)
         n_p = sum(len(s.proposals) for s in sessions)
         n_u = sum(len(s.undistributed()) for s in sessions)
@@ -298,9 +302,11 @@ def _describe_retire(reg: Registry, op) -> str:
 def _precedent(reg: Registry, ref: str | None, ctx=None) -> dict:
     from .lootctx import RegistryLootContext
 
+    from .lootctx import find_precedent
+
     ctx = ctx or RegistryLootContext(reg, reg.store, None)
     r = (ref or "").strip()
-    hit = next((p for p in ctx.precedents if p.get("ref") == r), None)
+    hit = find_precedent(ctx.precedents, r)
     if hit is None and r:
         low = r.lower()
         named = [p for p in reversed(ctx.precedents) if str(p.get("item") or "").lower() == low and p.get("status", "active") != "superseded"]
@@ -414,7 +420,7 @@ async def apply_async(reg: Registry, op, by: str, bot, by_id: int | None, via: s
             raise RegistryError("Give a reason (a few words): it stays on the precedent.")
         status = "active" if (op.text or "").strip().lower() == "restore" else "retired"
         p = ctx.set_precedent_status(p["ref"], status, op.reason.strip()[:300], by)
-        reg.store.commit(f"{reg.key}: precedent {p['ref']} {status} ({by})")
+        await asyncio.to_thread(reg.store.commit, f"{reg.key}: precedent {p['ref']} {status} ({by})")  # never a git commit on the loop
         line = f"precedent {p.get('item')} → {p.get('human')} {'restored' if status == 'active' else 'retired'} — “{op.reason.strip()[:120]}”"
         ops = getattr(bot, "ops", None)
         if ops is not None:

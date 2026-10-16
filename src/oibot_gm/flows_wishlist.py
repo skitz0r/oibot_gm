@@ -197,6 +197,7 @@ class WishlistWizard(Wizard):
     async def save(self, interaction: discord.Interaction) -> None:
         d = self.draft
         it = self.reg.items().get(d["item"]) if d["item"] else None
+        await self.working(interaction, "Saving…")  # answered before the write (the commit, then the ops line): Discord's 3 seconds
         try:
             line = await asyncio.to_thread(  # a git commit: off the event loop
                 self.reg.wish_add, self.owner_id, d["character"], int(it.id) if it is not None and it.id else d["name"], by=self.display_name,
@@ -219,6 +220,7 @@ class WishlistWizard(Wizard):
         name = values[0]
 
         async def go(i: discord.Interaction) -> None:
+            await self.working(i, "Removing…")  # answered before the write
             try:
                 line = await asyncio.to_thread(self.reg.wish_remove, self.owner_id, self.draft["character"], name, by=self.display_name)
             except RegistryError as e:

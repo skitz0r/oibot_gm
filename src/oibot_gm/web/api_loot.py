@@ -379,7 +379,9 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         """End the run and its council(s): archived with the summary (what was never confirmed stays inside it), the
         run marked done. `preview`: the End sentence ("End …: 6 awards, 1 override, 2 drops never distributed")."""
         v, d = await writer(request)
-        rs, ev, _ = run_of(v.reg, run)
+        rs, ev, sessions = run_of(v.reg, run)
+        if ev.state != "locked" and not sessions:  # the verb's rule, shown at the preview too (Discord: "No locked run to end.")
+            return JSONResponse({"error": "No locked run to end." if ev.state not in ("done", "cancelled") else f"That run is already {ev.state}."}, status_code=400)
         if d.get("preview"):
             return {"preview": bot.end_consequence(v.reg, rs, ev)}
 
@@ -498,9 +500,9 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             return JSONResponse({"error": "Give a reason (a few words): it stays on the precedent."}, status_code=400)
         status = "active" if d.get("restore") else "retired"
         ctx = ctx_of(v.reg)
-        try:  # on the loop, like the council's own writes to this context (a quick append)
+        try:  # the append on the loop, like the council's own writes to this context; the git commit in a thread
             p = ctx.set_precedent_status(ref, status, reason[:300], by_of(v))
-            v.reg.store.commit(f"{v.reg.key}: precedent {ref} {status} ({by_of(v)})")
+            await asyncio.to_thread(v.reg.store.commit, f"{v.reg.key}: precedent {ref} {status} ({by_of(v)})")
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         line = f"precedent {p.get('item')} → {p.get('human')} {'restored' if status == 'active' else 'retired'} — “{reason[:120]}”"

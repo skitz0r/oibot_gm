@@ -1515,6 +1515,12 @@ D2, D4, D5, D8, D11, D12). Every write below calls the SAME `LootMixin` verb the
   from a ThatsMyBIS export · an older guild file). The SheetCard action bar carries **Open loot council** while
   `ev_json.loot.may_open` (the same `/open` route as Loot › Tonight) and **Loot council** (→ /loot) once open; Rosters
   listens on `loot:` too.
+- **Final review fixes.** After a replaced reason two precedent rows share one import_id ref; `lootctx.find_precedent`
+  (used by `set_precedent_status` and `loot_ops._precedent`) takes the newest row that is not superseded, so Loot ›
+  Precedents, MCP `retire_precedent` and the `retire` op reach the live one. End refuses a run that isn't locked (and
+  has no open council) on every surface: the verb (`LootMixin.end_run`), `POST /api/loot/{run}/end` (preview too) and
+  `loot_ops.describe('end')` — "No locked run to end." The retire route and the `retire` op commit in
+  `asyncio.to_thread`. The `/me wishlist` wizard's Confirm / Remove show `working` before the write (Discord's 3 s).
 - Tests: `tests/test_loot_web.py` (every route over the real verbs; D2 filters; D8 actor; wishlists incl. the TMB
   fixture `tests/tmb_wishlists.csv`; items + re-weight; precedents; the `loot` / `wishlist` / `tier` ops incl. a
   stale confirm-all; the public log; the harness drives `/me wishlist`; the review fixes' regressions).
