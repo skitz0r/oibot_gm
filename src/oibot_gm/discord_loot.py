@@ -546,8 +546,12 @@ class LootMixin:
                          via: str = "discord", replace: bool = False) -> str:
         """The reason for an award the companion recorded against the bot's pick (bound to the drop and its recipient):
         becomes the precedent. Idempotent on the award's import_id — a second reason needs `replace` ("Mira already gave
-        a reason at 8:20 PM — replace?"); a replaced reason supersedes the old precedent (append-only)."""
+        a reason at 8:20 PM — replace?"); a replaced reason supersedes the old precedent (append-only). `session` may be
+        a run key (str) for a council that has ended: the award is found in the ledger by its import_id (days later, from
+        the site's "needs a reason" list)."""
         reason = ls.check_reason(reason)
+        if isinstance(session, str):
+            return await self._reason_after_end(reg, session, drop_id, reason, by=by, by_id=by_id, via=via, replace=replace)
         async with self.loot_lock(*session.key):
             aw = session.awarded(drop_id)
             if aw is None:
@@ -574,6 +578,42 @@ class LootMixin:
         line = f"📌 Precedent: {aw.item_name} → {aw.raider} over {prec['bot']} — “{reason}”"
         await self._audit(reg, by, f"loot {session.run_key or session.id}: {line}", via, by_id)
         await self.loot_notify(reg, session, line, kind="reason")
+        return line
+
+    def loot_reasons_pending(self, reg) -> list[dict]:
+        """Awards the companion recorded against the bot's pick with no reason yet (the "needs a reason" list): ledger
+        rows with source `companion` whose import_id has no active precedent — live councils and ended ones alike."""
+        from .lootctx import RegistryLootContext
+
+        ctx = self.__dict__.setdefault("contexts", {}).get(reg.key) or RegistryLootContext(reg, reg.store, None)
+        out = []
+        for a in ctx.ledger:
+            if a.source == "companion" and a.import_id and not a.void and ctx.precedent_for(a.import_id) is None:
+                out.append({"import_id": a.import_id, "run": a.import_id.rsplit("-", 1)[0], "drop_id": a.drop_id, "item": a.item_name,
+                            "recipient": a.raider, "bot": a.bot_pick, "received": a.received.isoformat()})
+        return out
+
+    async def _reason_after_end(self, reg, run_key: str, drop_id: str, reason: str, *, by: str, by_id, via: str, replace: bool) -> str:
+        live = next((s for s in self.events.values() if s.guild == reg.key and (s.run_key == run_key or s.id == run_key)), None)
+        if live is not None:
+            return await self.set_reason(reg, live, drop_id, reason, by=by, by_id=by_id, via=via, replace=replace)
+        ctx = self.loot_ctx(LootSession(id=run_key, run_key=run_key, instance="", date="1970-01-01", guild=reg.key, origin="raid"))
+        import_id = f"{run_key}-{drop_id}"
+        async with self.loot_lock(reg.key, run_key):
+            aw = next((a for a in ctx.ledger if a.import_id == import_id and not a.void), None)
+            if aw is None:
+                raise RegistryError("Nothing is recorded on that drop.")
+            have = ctx.precedent_for(import_id)
+            if have is not None and not replace:
+                raise LootChanged(f"{have.get('by', '?')} already gave a reason at {self.loot_clock(reg, have.get('at'))} — replace?")
+            prec = {"date": aw.received.isoformat(), "event": run_key, "item": aw.item_name, "item_id": aw.item_id, "drop_id": drop_id,
+                    "import_id": import_id, "bot": aw.bot_pick or "?", "human": aw.raider, "reason": reason, "by": by, "at": now_iso(),
+                    "policy_version": aw.policy_version, "status": "active"}
+            with reg.store.batch(f"{reg.key}: loot {run_key}: reason for {aw.item_name} ({by})"):
+                ctx.append_precedent(prec)
+                reg.store.commit(f"{reg.key}: loot {run_key}: reason for {aw.item_name} ({by})")
+        line = f"📌 Precedent: {aw.item_name} → {aw.raider} over {prec['bot']} — “{reason}”"
+        await self._audit(reg, by, f"loot {run_key}: {line}", via, by_id)
         return line
 
     async def correct(self, reg, session: LootSession, drop_id: str, to: str, reason: str, *, by: str, by_id: int | None = None,

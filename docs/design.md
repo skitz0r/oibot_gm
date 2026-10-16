@@ -1339,8 +1339,10 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   session, the ledger rows the awards imply that the ledger lacks (`sync_ledger`, by import_id — also the crash repair
   on ready), the precedents of the confirmed overrides. Discard drops pending overrides. A companion mismatch records
   the row at once with `pending_reasons[{drop_id, recipient, bot}]`; `set_reason` is idempotent on the import_id
-  (`replace` appends a superseding precedent); `correct` appends a `kind: void` ledger row + a new award, no precedent.
-  `record_pending_reason` (the next message as the reason) is gone.
+  (`replace` appends a superseding precedent) and also takes a run key for a council that has ended (the award found in
+  the ledger); `loot_reasons_pending(reg)` = the "needs a reason" list (companion rows without an active precedent);
+  `correct` appends a `kind: void` ledger row + a new award, no precedent. `record_pending_reason` (the next message as
+  the reason) is gone.
 - **Revs** (computed): `batch_rev` over the picks in play (pending + awards from proposals: drop → recipient, source —
   a confirm as shown keeps it, an override / re-score / discard / new batch moves it) for Confirm-all, Discard and
   Override; `drops_rev` (drop list + what Distribute would judge) for Tick and Distribute; per-item Confirm carries

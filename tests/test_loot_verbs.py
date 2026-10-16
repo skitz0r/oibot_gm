@@ -482,6 +482,22 @@ def test_set_reason_is_idempotent_and_a_replacement_supersedes(council):
     assert not c.s.pending_reasons
 
 
+def test_a_reason_can_be_given_days_later_after_the_council_ended(council):
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    other = next(char(m) for m in c.members if char(m) != p.to)
+    run(c.bot.handle_feed_event({"type": "loot", "recipient": other, "item_name": "Shard of Doom", "idem": "x2"}, scribe()))
+    text = run(c.bot.end_run(c.reg, c.rs, c.ev, by="Mira"))
+    assert "1 award(s) still waiting for a reason" in text
+    (need,) = c.bot.loot_reasons_pending(c.reg)
+    assert need["drop_id"] == "d1" and need["recipient"] == other and need["run"] == c.ev.key
+    run(c.bot.set_reason(c.reg, c.ev.key, "d1", "decided after the raid", by="Mira"))
+    assert precedents(c.reg)[-1]["reason"] == "decided after the raid" and not c.bot.loot_reasons_pending(c.reg)
+    with pytest.raises(LootChanged, match="already gave a reason"):
+        run(c.bot.set_reason(c.reg, c.ev.key, "d1", "again", by="Jonny"))
+
+
 def test_correct_voids_the_row_and_records_anew_without_a_precedent(council):
     c = council
     tick_one(c)
