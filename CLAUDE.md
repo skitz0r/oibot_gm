@@ -20,6 +20,11 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
   inside a wizard; an argument Discord already renders as a WIDGET (a member, a role, a channel, a fixed Choice, a bool)
   stays. Prose (a reason, a note, a character name) may be typed — it is validated, not parsed. Numbers are preset
   selects. The command opens the wizard; the wizard writes nothing before its Confirm.
+- **DM rule (user decision 2026-10-15):** the bot DMs a person only when they must ACT (a confirmation, a fill or pre-lock ask, an
+  application decision they wait on) or for a dire backfill. Never courtesy, FYI or audit DMs (no DM to a server owner about a
+  superuser's change, none to regulars when a schedule goes, no "you're a leftover" unless a seat is offered). Outcomes reach people as
+  notices on the Me page / `/me view` and as the Discord card edited to its final state. The one exception is the owner's error alerts
+  (one DM per distinct error per 30 min). Decisions: out/dual_interface_decisions.md.
 - **Iconography rule (user decision 2026-09-17):** in-game icons stand on their own — class, spec, role and aura icons never get a text label beside them on the site; a role count is the role icon plus a number; a buff row is icons only (tooltips carry the names). Don't add "3 tank" style labels, "seated" totals or buff-name strings next to icons. A **spec icon alone** denotes role + spec on a member line (no role icon beside it; role icons are for counts only). DMs and Discord cards reuse the board's group layout — one member per line, never the whole roster on one line.
 - **Native vs foreign data.** Native guild state (characters, events, ledger, precedents, policy) lives in the private sibling repo `../oibot_gm-data` via `store.py` (file per entity, commit per change, debounced push; git log = audit trail). Foreign reference data (profiles/) lives here. `fixtures/demo` is an anonymized copy for public use; never commit real guild data to this repo.
 
