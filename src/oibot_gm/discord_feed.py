@@ -7,9 +7,10 @@ warn and an error ack the companion prints). No live run at all → the event is
 replayed when a council opens) and the guild's 'no run live' state shows it.
 
   drop  → tick (unknown items by name, learned) + auto-distribute ~20 s after the boss's last drop (per raid switch)
-  loot  → the effective recipient (override or bot pick) → confirm; someone else → the ledger row at once, precedent
-          pending a reason (Give the reason / Mistake — correct…); no proposal → recorded as a manual award; a drop
-          already recorded to someone else → a conflict line (Correct?)
+  loot  → matched to ONE copy of the item under the session lock: the open copy whose pick names the recipient →
+          confirm; a copy an officer already recorded to them → already recorded; else the first open copy: someone
+          else → the ledger row at once, precedent pending a reason (Give the reason / Mistake — correct…), no
+          proposal → recorded as a manual award; every copy recorded to others → a conflict line (Correct?)
   kill  → the boss is down (and starts the auto-distribute wait)
   hello/heartbeat → presence (live / quiet / disconnected, feed_presence)
 Idempotency: the session keeps the companion's idem keys (`seen_idem`), so a re-send after a reconnect is acked, not
@@ -121,9 +122,11 @@ class FeedMixin:
         reg = (getattr(self.registries, "by_key", {}) or {}).get(gk) if gk else None
         if real:
             # routing by run window first (design §3.1): a council kept open past its run's close (picks still waiting)
-            # never competes with tonight's
-            current = [s for s in real if not self._past_close(reg, s)]
-            real = current or real
+            # never takes a companion event — not even when it is the only one live: tonight's events wait (held) for
+            # tonight's council instead of landing in last week's run
+            real = [s for s in real if not self._past_close(reg, s)]
+            if not real:
+                return None, "no run live"
             tester = self._is_tester_companion(reg, comp)
             pool = [s for s in real if s.test] if tester else [s for s in real if not s.test]
             if tester and not pool:
@@ -135,7 +138,7 @@ class FeedMixin:
                 if len(hit) == 1:
                     return hit[0], None
                 return None, (f"several loot councils are live and {comp.character} is rostered on " + ("none of them" if not hit else "more than one")
-                              + " — start the companion with --run <run key>, or bind it on the council card")
+                              + " — bind it on the council card")
             if not pool:
                 return None, ("only a test council is live; a rehearsal takes drops from a puppet's or the tester's companion only"
                               if not tester else "no test council is live")
@@ -226,7 +229,7 @@ class FeedMixin:
                     self.feed_buffer(gk, ev, comp)  # persisted: survives a restart; what expires unrecorded is announced
                     return {"note": "no run live; held for 10 minutes — open the loot council (/raid loot), or the ops channel lists it as not recorded", "held": True}
                 return {"note": "no active raid; event ignored"}
-            if cfg:
+            if cfg and self._feed_warn_due(gk, comp.character, why):  # the companion retries a refusal: one warn per 10 min
                 await self.ops.emit(cfg, "warn", f"companion {comp.character}: {why}")
             return {"error": why}
         if not raid.remember_idem(ev.get("idem")):
@@ -246,6 +249,14 @@ class FeedMixin:
             raise
         return {**out, "session": skey}
 
+    def _feed_warn_due(self, gk, character, why: str, every_s: float = 600) -> bool:
+        seen = self.__dict__.setdefault("_feed_warned", {})
+        key, now = (gk, character, why), datetime.now().timestamp()
+        if now - seen.get(key, 0) < every_s:
+            return False
+        seen[key] = now
+        return True
+
     async def _feed_drop(self, reg, raid, ev, comp, by) -> dict:
         boss = self._resolve_boss(ev.get("boss"), None, raid)
         add = [{"item_id": it.get("id"), "name": it.get("name"), "boss": boss} for it in ev.get("items", []) if it.get("id") or it.get("name")]
@@ -262,6 +273,7 @@ class FeedMixin:
     async def _feed_kill(self, reg, raid, ev) -> dict:
         boss = self._resolve_boss(ev.get("boss"), None, raid)
         async with self.loot_lock(*raid.key):
+            self.loot_check_live(raid)
             if boss not in raid.bosses_done:
                 raid.bosses_done.append(boss)
                 raid.current_boss = boss
@@ -271,76 +283,106 @@ class FeedMixin:
         return {"boss": boss}
 
     async def _feed_loot(self, reg, raid, ev, comp, by) -> dict:
-        """An in-game award. The drop is the first of that item not yet recorded (one with a pending proposal first)."""
+        """An in-game award, matched to ONE copy of the item — the choice and the write in one section under the
+        session lock (two copies of a token in one kill is ordinary loot, and the master looter hands them out in any
+        order):
+          1. an open copy whose pending pick names the recipient (the effective recipient; or the bot's pick under an
+             override the master looter didn't follow — the override is dropped) → confirmed;
+          2. a copy already recorded to the recipient that no in-game award has matched yet (an officer confirmed it
+             first) → already recorded (the copy is marked seen);
+          3. the first open copy (one with a pending pick first) → a mismatch (someone else got it: recorded, reason
+             pending) or, with no pick, a manual award;
+          4. every copy recorded: to the recipient → already recorded; else a conflict on the copy the game has not
+             matched yet.
+        An item never ticked is ticked first (the drop is game truth), then matched."""
         ctx = self.loot_ctx(raid)
         iid = int(ev.get("item_id") or 0)
         name = str(ev.get("item_name") or "").strip()
         item = ctx.item(iid or None, name or None)
-        roster = self.loot_roster(raid)
-        who, _uid, _seat = ls.recipient_of(reg, roster, ev.get("recipient", "?"))
 
         def same(d) -> bool:
             if iid and d.item_id:
                 return d.item_id == iid
             n = (item.name if item is not None else name).lower()
             return bool(n) and d.item_name.lower() == n
-        drops = [d for d in raid.drop_list if same(d)]
-        open_ = [d for d in drops if not raid.awarded(d.drop_id)]
-        target = next((d for d in open_ if raid.pending(d.drop_id)), None) or (open_[0] if open_ else None)
-        if target is None and drops:  # every copy is recorded already
-            done = next((d for d in drops if (a := raid.awarded(d.drop_id)) and a.raider.lower() == who.lower()), None)
-            if done is not None:
-                return {"result": "already_recorded"}
-            d = drops[-1]
-            a = raid.awarded(d.drop_id)
+        out = None
+        for attempt in range(2):
             async with self.loot_lock(*raid.key):
-                raid.conflicts.append({"drop_id": d.drop_id, "item": d.item_name, "in_game": who, "recorded": a.raider, "at": ls.now_iso()})
-                raid.save(f"{raid.guild}: loot {raid.id}: {d.item_name} went to {who} in game, recorded to {a.raider}")
-            await self.loot_notify(reg, raid, f"⚠ **{d.item_name}**: in game it went to **{who}**, recorded earlier to **{a.raider}** — Correct?", kind="conflict", drop_id=d.drop_id)
-            return {"result": "conflict"}
-        if target is None:  # never ticked: tick it now (the drop is game truth)
-            res = await self.tick(reg, raid, add=[{"item_id": iid or None, "name": name or None, "boss": raid.current_boss}], by=by, source="companion")
-            target = res["added"][0]
-        prop = raid.pending(target.drop_id)
-        if prop is not None and prop.override and prop.award_to.lower() == who.lower():
-            prop.override = None  # the master looter gave it to the bot's pick after all: no override happened, no precedent
-        if prop is not None and prop.to.lower() == who.lower():
-            await self.confirm(reg, raid, only={target.drop_id}, by=by)
-            return {"result": "confirmed"}
-        if prop is not None:
-            return await self._feed_mismatch(reg, raid, target, prop, who, by)
-        # no proposal: record first, correct second (the Dec 9 common case)
-        async with self.loot_lock(*raid.key):
-            a = ls.make_award(ctx, raid, target, who, roster, source="manual", by=by, reg=reg)
-            with raid.store().batch(f"{raid.guild}: loot {raid.id}: {target.item_name} → {who} (in game, no proposal)"):
-                raid.awards.append(a)
-                raid.note_change(by, f"{comp.character}'s log recorded {target.item_name} → {who}")
-                raid.save(f"{raid.guild}: loot {raid.id}: manual award {target.item_name} → {who}")
-                if not raid.test:
-                    ls.sync_ledger(ctx, raid)
-        await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {target.item_name} → {who} (in game, no proposal)", "discord", None)
-        await self.loot_notify(reg, raid, f"📒 **{target.item_name}** → **{who}** · recorded — wrong? Correct…", kind="manual", drop_id=target.drop_id)
-        return {"result": "manual"}
+                self.loot_check_live(raid)
+                drops = [d for d in raid.drop_list if same(d)]
+                if drops or attempt:
+                    roster = self.loot_roster(raid)
+                    who, _uid, _seat = ls.recipient_of(reg, roster, ev.get("recipient", "?"))
+                    out = self._feed_match(reg, raid, drops, who, ctx, roster, comp, by)
+                    break
+            # never ticked: tick it now (the tick verb: learned item, thread line, card), then match under the lock again
+            await self.tick(reg, raid, add=[{"item_id": iid or None, "name": name or None, "boss": raid.current_boss}], by=by, source="companion")
+        res, d, who = out["result"], out.get("drop"), out.get("who")
+        if res == "confirmed":
+            await self._after_record(reg, raid, out["awards"], by, None, "discord")
+        elif res == "conflict":
+            await self.loot_notify(reg, raid, f"⚠ **{d.item_name}**: in game it went to **{who}**, recorded earlier to **{out['recorded']}** — Correct?", kind="conflict", drop_id=d.drop_id)
+        elif res == "recorded_reason_pending":
+            bot = out["bot"]
+            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} in game (bot picked {bot}); reason pending", "discord", None)
+            await self.loot_notify(reg, raid, f"⚠ **{d.item_name}** → **{who}** in game, but the bot proposed **{bot}**. Recorded — give the reason so it becomes a precedent (or correct it if it was a mistake).", kind="mismatch", drop_id=d.drop_id)
+        elif res == "manual":
+            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} (in game, no proposal)", "discord", None)
+            await self.loot_notify(reg, raid, f"📒 **{d.item_name}** → **{who}** · recorded — wrong? Correct…", kind="manual", drop_id=d.drop_id)
+        return {"result": res}
 
-    async def _feed_mismatch(self, reg, raid, d, prop, who: str, by: str) -> dict:
-        """In game the item went to someone neither the bot nor a pending override named: the award is recorded now
-        (game truth), the precedent waits for a reason bound to (drop, recipient)."""
-        ctx = self.loot_ctx(raid)
-        roster = self.loot_roster(raid)
-        async with self.loot_lock(*raid.key):
-            a = ls.make_award(ctx, raid, d, who, roster, source="companion", by=by, cands=prop.result.candidates, bot_pick=prop.award_to, reg=reg)
-            with raid.store().batch(f"{raid.guild}: loot {raid.id}: {d.item_name} → {who} in game (bot: {prop.award_to})"):
+    def _feed_match(self, reg, raid, drops, who: str, ctx, roster, comp, by: str) -> dict:
+        """_feed_loot's choice and write (the caller holds the session lock): {result, drop, who, …}."""
+        from .discord_loot import NOBODY
+
+        low = who.lower()
+        open_ = [d for d in drops if not raid.awarded(d.drop_id)]
+        hit = next((d for d in open_ if (p := raid.pending(d.drop_id)) is not None and p.to != NOBODY and p.to.lower() == low), None) or next(
+            (d for d in open_ if (p := raid.pending(d.drop_id)) is not None and p.override and p.award_to.lower() == low), None)
+        if hit is not None:  # 1. the pick the council made (or the bot's, an override not followed) — confirmed
+            prop = raid.pending(hit.drop_id)
+            if prop.override and prop.award_to.lower() == low:
+                prop.override = None  # the master looter gave it to the bot's pick after all: no override happened, no precedent
+            hit.seen_in_game = True
+            return {"result": "confirmed", "drop": hit, "who": who, "awards": self._record(reg, raid, [prop], by, None)}
+        mine = next((d for d in drops if (a := raid.awarded(d.drop_id)) is not None and a.raider.lower() == low and not d.seen_in_game), None)
+        if mine is not None:  # 2. an officer recorded this copy to them before the game did
+            mine.seen_in_game = True
+            raid.save(f"{raid.guild}: loot {raid.id}: {mine.item_name} → {who} seen in game (already recorded)")
+            return {"result": "already_recorded", "drop": mine, "who": who}
+        target = next((d for d in open_ if raid.pending(d.drop_id)), None) or (open_[0] if open_ else None)
+        if target is None:  # 4. every copy is recorded already
+            if any((a := raid.awarded(d.drop_id)) is not None and a.raider.lower() == low for d in drops):
+                return {"result": "already_recorded", "drop": None, "who": who}
+            d = next((d for d in reversed(drops) if not d.seen_in_game), drops[-1])
+            a = raid.awarded(d.drop_id)
+            d.seen_in_game = True
+            raid.conflicts.append({"drop_id": d.drop_id, "item": d.item_name, "in_game": who, "recorded": a.raider, "at": ls.now_iso()})
+            raid.save(f"{raid.guild}: loot {raid.id}: {d.item_name} went to {who} in game, recorded to {a.raider}")
+            return {"result": "conflict", "drop": d, "who": who, "recorded": a.raider}
+        target.seen_in_game = True
+        prop = raid.pending(target.drop_id)
+        if prop is not None:  # 3a. someone neither the bot nor a pending override named: recorded now, the reason pending
+            a = ls.make_award(ctx, raid, target, who, roster, source="companion", by=by, cands=prop.result.candidates, bot_pick=prop.award_to, reg=reg)
+            with raid.store().batch(f"{raid.guild}: loot {raid.id}: {target.item_name} → {who} in game (bot: {prop.award_to})"):
                 raid.awards.append(a)
-                raid.proposals = [x for x in raid.proposals if x.drop_id != d.drop_id]
-                raid.pending_reasons.append({"drop_id": d.drop_id, "item": d.item_name, "recipient": who, "bot": prop.award_to,
+                raid.proposals = [x for x in raid.proposals if x.drop_id != target.drop_id]
+                raid.pending_reasons.append({"drop_id": target.drop_id, "item": target.item_name, "recipient": who, "bot": prop.award_to,
                                              "override": prop.override.model_dump() if prop.override else None, "import_id": a.import_id, "at": ls.now_iso()})
-                raid.note_change(by, f"{d.item_name} went to {who} in game (the bot picked {prop.award_to})")
-                raid.save(f"{raid.guild}: loot {raid.id}: in-game award {d.item_name} → {who}, reason pending")
+                raid.note_change(by, f"{target.item_name} went to {who} in game (the bot picked {prop.award_to})")
+                raid.save(f"{raid.guild}: loot {raid.id}: in-game award {target.item_name} → {who}, reason pending")
                 if not raid.test:
                     ls.sync_ledger(ctx, raid)
-        await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} in game (bot picked {prop.award_to}); reason pending", "discord", None)
-        await self.loot_notify(reg, raid, f"⚠ **{d.item_name}** → **{who}** in game, but the bot proposed **{prop.award_to}**. Recorded — give the reason so it becomes a precedent (or correct it if it was a mistake).", kind="mismatch", drop_id=d.drop_id)
-        return {"result": "recorded_reason_pending"}
+            return {"result": "recorded_reason_pending", "drop": target, "who": who, "bot": prop.award_to}
+        # 3b. no proposal: record first, correct second (the Dec 9 common case)
+        a = ls.make_award(ctx, raid, target, who, roster, source="manual", by=by, reg=reg)
+        with raid.store().batch(f"{raid.guild}: loot {raid.id}: {target.item_name} → {who} (in game, no proposal)"):
+            raid.awards.append(a)
+            raid.note_change(by, f"{comp.character}'s log recorded {target.item_name} → {who}")
+            raid.save(f"{raid.guild}: loot {raid.id}: manual award {target.item_name} → {who}")
+            if not raid.test:
+                ls.sync_ledger(ctx, raid)
+        return {"result": "manual", "drop": target, "who": who}
 
     async def feed_disconnected(self, comp: Companion) -> None:
         """A companion's socket closed: one line on the council it fed (and one more when it reconnects)."""

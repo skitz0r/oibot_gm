@@ -71,7 +71,14 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             await interaction.response.send_message("That council's run is gone.", ephemeral=True)
             return
         # LootMixin.end_run: every session of the run archived with its summary, the run done (the ops line is the verb's)
-        text = await bot.end_run(reg, rs, ev, by=interaction.user.display_name, by_id=interaction.user.id)
+        from .configops import user_error
+        from .registry import RegistryError
+
+        try:
+            text = await bot.end_run(reg, rs, ev, by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:  # a judge in flight (wait or retry), or the run is not locked
+            await interaction.response.send_message(user_error(e), ephemeral=True)
+            return
         await interaction.response.send_message(text[:1900])
 
     @raid.command(name="set", description="Officer: set someone's answer on a sheet (join / bench / out)")

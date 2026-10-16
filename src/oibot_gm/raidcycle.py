@@ -2353,7 +2353,7 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str) -> Pla
     name = sg.display_name if sg else p.signup_name
     ev.log.append(f"seat freed: {name} ({why})")
     rs.save(ev, f"seat freed {name}")
-    on_roster_change(rs.key, ev, removed=[uid if uid is not None else name])
+    on_roster_change(rs.key, ev, removed=[uid if uid is not None else name], roster_of={uid if uid is not None else name: i})
     return p
 
 
@@ -2377,12 +2377,15 @@ def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
     return None
 
 
-def on_roster_change(guild_key: str | None, ev: RaidEvent, added=(), removed=(), changed=()) -> None:
+def on_roster_change(guild_key: str | None, ev: RaidEvent, added=(), removed=(), changed=(), roster_of: dict | None = None) -> None:
     """Tell ROSTER_LISTENERS that a locked run's seats moved (seat_player, free_seat, an alt / offspec reseat, the board
-    after lock — set_answer and drop_seated reach these). A listener never breaks the seat change."""
+    after lock — set_answer and drop_seated reach these). `roster_of`: removed uid → the roster index the seat was freed
+    from (a split run's councils each hear only of their own roster). A listener never breaks the seat change."""
     if not guild_key or not (added or removed or changed):
         return
     change = {"added": list(added), "removed": list(removed), "changed": list(changed)}
+    if roster_of:
+        change["roster_of"] = {str(k): v for k, v in roster_of.items()}
     for fn in list(ROSTER_LISTENERS):
         try:
             fn(guild_key, ev.key, change)
