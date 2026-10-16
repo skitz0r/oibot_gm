@@ -1786,7 +1786,8 @@ class Registry:
         for (uid, label), got in per.items():
             m = self.members[uid]
             c = next(x for x in m.characters if x.label == label)
-            natives = [e for e in c.wishlist if e.source != "tmb"]
+            # copies: the renumbering below must not touch the live list (a preview writes nothing, not even in memory)
+            natives = [e.model_copy() for e in c.wishlist if e.source != "tmb"]
             report["replaced"] += sum(1 for e in c.wishlist if e.source == "tmb")
             imported: list[WishlistEntry] = []
             for _, _, r in sorted(got, key=lambda t: (t[0], t[1])):

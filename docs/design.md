@@ -1481,9 +1481,19 @@ D2, D4, D5, D8, D11, D12). Every write below calls the SAME `LootMixin` verb the
   disk as written — no migration); a session is live only through a locked run. Rehearsals are test-bench runs (the
   council is `session.test`: no ledger, precedents, learned items or public log). `GuildContext` stays: it loads the
   demo fixtures for the LLM provider and `oibot demo`.
+- **Review fixes.** A precedent written live (`RegistryLootContext.append_precedent`, an override at Confirm) gets
+  its `ref` at once (`precedent_ref(row, n)`, n = its place among the precedent rows — the name `fold_precedents`
+  gives it at the next load), so Retire / `retire_precedent` / the `retire` op reach it without a restart.
+  `import_tmb_wishlists(preview=True)` renumbers copies, never the live entries (a preview changed `wishlist_rev` and
+  left duplicate ranks for the next save). The `wishlist` / `tier` plain-text ops and the `/me wishlist` wizard's
+  Confirm / Remove commit in `asyncio.to_thread`. The provenance block's wishlist line is counted from the data
+  (`RegistryLootContext.wishlist_provenance`: entered through the bot by the raider or an officer for them · imported
+  from a ThatsMyBIS export · an older guild file). The SheetCard action bar carries **Open loot council** while
+  `ev_json.loot.may_open` (the same `/open` route as Loot › Tonight) and **Loot council** (→ /loot) once open; Rosters
+  listens on `loot:` too.
 - Tests: `tests/test_loot_web.py` (every route over the real verbs; D2 filters; D8 actor; wishlists incl. the TMB
   fixture `tests/tmb_wishlists.csv`; items + re-weight; precedents; the `loot` / `wishlist` / `tier` ops incl. a
-  stale confirm-all; the public log; the harness drives `/me wishlist`).
+  stale confirm-all; the public log; the harness drives `/me wishlist`; the review fixes' regressions).
 
 ## 6. Architecture
 

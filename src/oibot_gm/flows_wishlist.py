@@ -7,6 +7,7 @@ Registry.wish_add / wish_remove (the plain-text `wishlist` op's verbs). The publ
 button opens this wizard on its item."""
 from __future__ import annotations
 
+import asyncio
 import os
 
 import discord
@@ -197,8 +198,9 @@ class WishlistWizard(Wizard):
         d = self.draft
         it = self.reg.items().get(d["item"]) if d["item"] else None
         try:
-            line = self.reg.wish_add(self.owner_id, d["character"], int(it.id) if it is not None and it.id else d["name"], by=self.display_name,
-                                     rank=d["rank"], offspec=d["offspec"], note=d["note"] or None, name=d["name"])
+            line = await asyncio.to_thread(  # a git commit: off the event loop
+                self.reg.wish_add, self.owner_id, d["character"], int(it.id) if it is not None and it.id else d["name"], by=self.display_name,
+                rank=d["rank"], offspec=d["offspec"], note=d["note"] or None, name=d["name"])
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.open_details, "Change")
             return
@@ -218,7 +220,7 @@ class WishlistWizard(Wizard):
 
         async def go(i: discord.Interaction) -> None:
             try:
-                line = self.reg.wish_remove(self.owner_id, self.draft["character"], name, by=self.display_name)
+                line = await asyncio.to_thread(self.reg.wish_remove, self.owner_id, self.draft["character"], name, by=self.display_name)
             except RegistryError as e:
                 await self.refuse(i, str(e), self.home, "Back")
                 return

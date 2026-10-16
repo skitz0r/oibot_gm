@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Accordion, ActionIcon, Badge, Box, Button, Group, Menu, Stack, Text, Tooltip } from "@mantine/core";
-import { IconBulb, IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconUserOff, IconUsersPlus } from "@tabler/icons-react";
+import { IconBulb, IconDiamond, IconDotsVertical, IconLock, IconPin, IconPinnedOff, IconUserOff, IconUsersPlus } from "@tabler/icons-react";
+import { Link } from "react-router-dom";
 import type { Meta, Sheet, Signup } from "../../api";
 import { classColour } from "../../theme";
 import { GameIcon } from "../Icons";
@@ -140,6 +141,13 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
             <Button size="xs" variant="default" leftSection={<IconUsersPlus size={13} />} disabled={!locked} onClick={() => setFillOpen(true)}>Fill seats</Button>
           </Tooltip>
           <Button size="xs" leftSection={<IconLock size={13} />} disabled={locked} loading={busy === `lock${e.key}`} onClick={lockNow}>{locked ? `Locked${e.timeline?.locked_at ? ` ${e.timeline.locked_at}` : ""}` : "Lock now"}</Button>
+          {/* after lock, the next step is the loot council (design §3.1): open it here (the same route as Loot › Tonight), or go to it */}
+          {e.loot?.may_open && (
+            <Tooltip label={`opens the council: a thread in the officer channel${(e.n_rosters || 1) > 1 ? ` — one per roster (${e.n_rosters})` : ""}`}>
+              <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} loading={busy === `loot${e.key}`} onClick={() => onAct(`loot${e.key}`, `/api/loot/${e.key}/open`)}>Open loot council</Button>
+            </Tooltip>
+          )}
+          {e.loot?.open && <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} component={Link} to="/loot">Loot council</Button>}
         </Group>
       </Group>
       <Detail e={e} />

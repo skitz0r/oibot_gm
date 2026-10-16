@@ -762,3 +762,117 @@ def test_a_single_confirm_from_chat_records_only_the_pick_the_diff_showed(w):
     revs = configops.board_revs(reg, [conf])
     run(configops.apply_async(reg, conf, "Officer", False, bot=bot, by_id=OFFICER, via="chat", rev=configops.op_rev(conf, None, revs)))
     assert ledger(reg)[0]["raider"] == other
+
+
+# ---------------------------------------------------------------- L3 review fixes (regressions)
+
+def test_a_precedent_recorded_at_confirm_can_be_retired_in_the_same_process(w):
+    """A precedent written live (an override at Confirm) carries its `ref` at once, like one folded at load: Loot ›
+    Precedents, MCP retire_precedent and the plain-text `retire` by item name all reach it without a restart."""
+    hdr = H | {"X-Oibot-Actor": str(OFFICER)}
+    opened(w)
+    tick(w, "Shard of Doom")
+    c = council(distribute(w))
+    to = next(m.main.label for m in w.ms if m.main.label != c["proposals"][0]["bot"])
+    assert w.c.post(f"/api/loot/{w.ev.key}/override", json={"drop_id": "d1", "to": to, "reason": "tank progression"}, headers=hdr).status_code == 200
+    r = w.c.post(f"/api/loot/{w.ev.key}/confirm", json={"only": ["d1"], "expect_to": to}, headers=hdr)
+    assert r.status_code == 200, r.text
+    rows = w.c.get("/api/loot/precedents", headers=H).json()["rows"]
+    assert rows[0]["ref"] == f"{w.ev.key}-d1", rows[0]
+    r = w.c.post("/api/loot/precedents/retire", json={"ref": rows[0]["ref"], "reason": "old tier"}, headers=hdr)
+    assert r.status_code == 200 and "retired" in r.json()["message"], r.text
+    back = ConfigOp(op="loot", field="retire", value="Shard of Doom", reason="back in", text="restore")
+    assert "restored" in run(configops.apply_async(w.reg, back, "Officer", False, bot=w.bot, by_id=OFFICER, via="chat"))
+    assert w.c.get("/api/loot/precedents", headers=H).json()["rows"][0]["status"] == "active"
+
+
+def test_append_precedent_names_a_row_without_an_import_id_by_its_place(reg):
+    ctx = lootctx.RegistryLootContext(reg, reg.store, None)
+    ctx.append_precedent({"item": "A", "bot": "x", "human": "y", "reason": "r"})
+    ctx.append_precedent({"item": "B", "bot": "x", "human": "y", "reason": "r", "import_id": "r1-d2"})
+    assert [p["ref"] for p in ctx.precedents] == ["row-0", "r1-d2"]
+    assert [p["ref"] for p in lootctx.RegistryLootContext(reg, reg.store, None).precedents] == ["row-0", "r1-d2"], "the same names after a reload"
+
+
+def test_a_tmb_preview_changes_nothing_not_even_in_memory(reg):
+    """Regression: the preview renumbered the live entries (a native entry after the TMB rows jumped to #1), so the
+    member's open Me › Wishlist got a 409 and the next save of that member wrote duplicate ranks."""
+    a = reg.test_members()[0]
+    text = ("character_name,item_name,item_id,sort_order,is_offspec,note,received_at\n"
+            f"{a.main.label},Gloves A,0,1,0,,\n{a.main.label},Helm B,0,2,0,,\n")
+    reg.import_tmb_wishlists(text, "Officer")
+    reg.wish_add(a.discord_id, None, "Sash", by="t")
+    c = reg.wish_character(a.discord_id)[1]
+    before = [(e.name, e.rank, e.source) for e in c.wishlist]
+    assert before == [("Gloves A", 1, "tmb"), ("Helm B", 2, "tmb"), ("Sash", 3, "native")]
+    rev = reg.wishlist_rev(a, c.label)
+    pv = reg.import_tmb_wishlists(text, "Officer", preview=True)
+    assert pv["characters"] == 1
+    assert [(e.name, e.rank, e.source) for e in reg.wish_character(a.discord_id)[1].wishlist] == before
+    assert reg.wishlist_rev(a, c.label) == rev
+
+
+def _off_loop(monkeypatch, reg, name):
+    import threading
+
+    seen: list = []
+    real = getattr(reg, name)
+
+    def rec(*a, **k):
+        seen.append(threading.current_thread() is threading.main_thread())
+        return real(*a, **k)
+
+    monkeypatch.setattr(reg, name, rec)
+    return seen
+
+
+def test_plain_text_wishlist_and_tier_ops_commit_off_the_event_loop(w, monkeypatch):
+    m = w.ms[0]
+    seen = _off_loop(monkeypatch, w.reg, "wish_add")
+    op = ConfigOp(op="wishlist", field="add", value="Robe of Tests", member=f"<@{m.discord_id}>")
+    assert "+ Robe of Tests" in run(configops.apply_async(w.reg, op, m.display_name, False, bot=w.bot, by_id=m.discord_id, via="chat"))
+    assert seen == [False], "the git commit ran on the event loop"
+    tiered_item(w.reg, 90001, "Robe of Tests")
+    tiers = _off_loop(monkeypatch, w.reg, "set_item_tiers")
+    t = ConfigOp(op="tier", target="Robe of Tests", field="Priest:Holy", value="A")
+    assert "Priest:Holy A" in run(configops.apply_async(w.reg, t, "Officer", False, bot=w.bot, by_id=OFFICER, via="chat"))
+    assert tiers == [False]
+
+
+def test_me_wishlist_wizard_saves_and_removes_off_the_event_loop(reg, rs, monkeypatch):
+    from wizard_harness import Harness
+
+    from oibot_gm.wizard_flows import FLOWS
+
+    tiered_item(reg, 90001, "Robe of Tests")
+    m = reg.test_members()[0]
+    adds, removes = _off_loop(monkeypatch, reg, "wish_add"), _off_loop(monkeypatch, reg, "wish_remove")
+    h = Harness(reg, rs, user=types.SimpleNamespace(id=m.discord_id, display_name=m.display_name, mention="@x"))
+
+    async def go():
+        await FLOWS["me_wishlist"](h.command(), reg)
+        await h.pick("Add an item…", "90001")
+        await h.submit(h.modal, rank="1", kind="ms", note="")
+        await h.press("Confirm")
+        await h.press("Remove one…")
+        await h.pick("Pick the item", "Robe of Tests")
+        await h.press("Remove")
+    asyncio.run(go())
+    assert adds == [False] and removes == [False]
+    assert not reg.wish_character(m.discord_id)[1].wishlist
+
+
+def test_wishlist_provenance_says_where_the_lists_came_from(reg):
+    """The provenance the model reads names who entered the wishlists (D5): through the bot, from a TMB import, or the
+    older guild file — never 'guild file' for lists the members made."""
+    ctx = lootctx.RegistryLootContext(reg, reg.store, None)
+    a, b = reg.test_members()[:2]
+    ctx._legacy_wishlists = {}
+    assert "Wishlists: none recorded." in ctx.provenance
+    ctx._legacy_wishlists = {"Oldname": [{"item": 1, "rank": 1}], a.main.label: [{"item": 2, "rank": 1}]}
+    assert "Wishlists: 2 from an older guild wishlist file." in ctx.provenance
+    reg.wish_add(a.discord_id, None, "Sash", by="t")
+    reg.import_tmb_wishlists(f"character_name,item_name,item_id,sort_order,is_offspec,note,received_at\n{b.main.label},Helm B,0,1,0,,\n", "Officer")
+    p = ctx.provenance
+    assert "1 character(s) with entries made through the bot" in p and "1 with entries imported from a ThatsMyBIS export" in p
+    assert "1 from an older guild wishlist file" in p, "a character with its own list no longer counts as the file's"

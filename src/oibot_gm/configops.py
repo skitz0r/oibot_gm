@@ -2322,7 +2322,8 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
             if bot is None or not hasattr(bot, "open_council"):
                 return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)  # refused: needs the bot
             return await loot_ops.apply_async(reg, op, by, bot, by_id, via or "discord", rev=rev)
-        return loot_ops.apply_sync(reg, op, by, ctx=loot_ops.guild_ctx(bot, reg) if bot is not None else None)
+        ctx = loot_ops.guild_ctx(bot, reg) if bot is not None else None
+        return await asyncio.to_thread(loot_ops.apply_sync, reg, op, by, ctx)  # a git commit: off the event loop
     if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test", "application", "proposal")):
         return await _apply_with_bot(reg, op, by, bot, by_id, rev=rev, channel_id=channel_id, self_id=self_id, via=via or "discord")
     if op.op == "job":  # launchctl: off the event loop

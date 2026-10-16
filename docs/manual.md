@@ -1010,7 +1010,8 @@ attendance, rank, wishlist, discounted by recent loot and by a second item in th
 judges the top candidates against the guild's written loot policy, explains, and flags close calls. Officers decide.
 Attendance nobody has tracked yet counts as **neutral** (it never lowers anyone's score).
 
-**Open the council** on a locked run with `/raid loot`, **Open loot council** on Loot › Tonight, "open the loot council
+**Open the council** on a locked run with `/raid loot`, **Open loot council** on Loot › Tonight or under the locked run's
+board on Rosters (it becomes **Loot council**, a link to Loot › Tonight, once open), "open the loot council
 for tonight" in plain text, or MCP `open_loot`. It lives in one thread under the officer channel (the roster channel,
 else the ops channel); with neither set the bot refuses and says so. A run split into several rosters gets one council
 per roster (thread *"loot · Roster 2 · …"*; one block per roster on the site), each judging only its own roster's

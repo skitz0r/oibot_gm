@@ -224,7 +224,10 @@ class RegistryLootContext:
         for p in self.precedents:
             if iid and p.get("import_id") == iid and p.get("status", "active") == "active":
                 p["status"] = "superseded"
-        self.precedents.append(dict(row))
+        row = dict(row)
+        # the same name fold_precedents gives it at load: its place among the precedent rows (status rows never land here)
+        row["ref"] = precedent_ref(row, len(self.precedents))
+        self.precedents.append(row)
 
     def precedent_for(self, import_id: str) -> dict | None:
         return next((p for p in reversed(self.precedents) if p.get("import_id") == import_id and p.get("status", "active") == "active"), None)
@@ -242,16 +245,37 @@ class RegistryLootContext:
         """The loot policy an award was judged under: a short hash of its text (stamped on ledger and precedent rows)."""
         return hashlib.sha1(self.policy.encode()).hexdigest()[:10]
 
+    def wishlist_provenance(self) -> str:
+        """Where the wishlists the model reads come from, counted from the data (D5): entered through the bot (site or
+        Discord — by the raider, or an officer for them), imported from ThatsMyBIS, or the older guild file."""
+        native = tmb = 0
+        labels: set[str] = set()
+        for m in self.reg.members.values():
+            for c in m.characters:
+                if c.status == "retired" or not c.wishlist:
+                    continue
+                labels.add(c.label)
+                native += any(e.source != "tmb" for e in c.wishlist)
+                tmb += any(e.source == "tmb" for e in c.wishlist)
+        legacy = sum(1 for k in self._legacy_wishlists if k not in labels)
+        parts = []
+        if native:
+            parts.append(f"{native} character(s) with entries made through the bot (site or Discord, by the raider or an officer for them)")
+        if tmb:
+            parts.append(f"{tmb} with entries imported from a ThatsMyBIS export")
+        if legacy:
+            parts.append(f"{legacy} from an older guild wishlist file")
+        return "; ".join(parts) if parts else "none recorded"
+
     @property
     def provenance(self) -> str:
-        n_wl = len(self.wishlists)
         return (
             "- Roster, classes, specs, ranks: REAL, from the guild registry (members registered themselves; officers confirmed).\n"
             "- Loot history / 14d loot power: REAL, awards recorded through the bot or the in-game feed.\n"
             "- Attendance: from the weekly sheets once raids have run; may be empty early on (then it counts as neutral).\n"
             "- Item tiers per spec: from the game profile's item table and the guild's own tiers (curated, unverified against the game); "
             "an item without tier data is scored the same for everyone. "
-            f"Wishlists: {'guild file with ' + str(n_wl) + ' characters' if n_wl else 'none recorded'}.\n"
+            f"Wishlists: {self.wishlist_provenance()}.\n"
             "- Loot policy: the guild's own document, compiled and confirmed by an officer.\n"
             "Never describe tiers as something a raider submitted unless wishlists say so."
         )
