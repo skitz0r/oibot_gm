@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, ops as ops_mod, raid_views as dr, raidcycle as rc, render
+from ..consequences import consequences_json
 from ..registry import ADHOC_SCHEDULE, CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
@@ -157,6 +158,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise HTTPException(401, "login required")
         if officer and not v.officer:
             raise HTTPException(403, "Officers only.")
+        request.state.reg = v.reg  # the guild an unexpected error's ops line goes to (_api_errors)
         return v
 
     @app.middleware("http")
@@ -236,14 +238,41 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return v, (d if isinstance(d, dict) else {})
 
     async def run(request: Request, fn, officer: bool = False):
-        """Apply a mutation and answer {message}; RegistryError/ValueError → 400 with the reason."""
+        """Apply a mutation and answer {message}; RegistryError/ValueError → 400 with the reason. Anything else is a bug:
+        500 with configops.GENERIC_ERROR for the person and an ops error line (the owner's DM) with the details — never
+        a type name in a reply (dual interfaces §2.7, configops.user_error)."""
+        from ..configops import GENERIC_ERROR, report_error
+
         v, d = await body(request, officer=officer)
         try:
             msg = await asyncio.to_thread(fn, v, d)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001 — refusals read as written; bugs read as GENERIC_ERROR
+            text = await report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} {request.url.path}")
+            return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)
         await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)  # '[web] Jon: …' / '[mcp] Jon: …'
         return {"message": msg}
+
+    @app.exception_handler(Exception)
+    async def _api_errors(request: Request, exc: Exception):
+        """A route that raised anything else under /api/: the person (and an MCP tool, whose ToolError repeats the
+        `error` text) reads configops.user_error, never a traceback; the owner gets the details through ops."""
+        from ..configops import GENERIC_ERROR, user_error
+
+        if not request.url.path.startswith("/api/"):
+            raise exc
+        text = user_error(exc)
+        if text == GENERIC_ERROR:
+            log.exception("api %s failed", request.url.path, exc_info=exc)
+            try:
+                reg = getattr(getattr(request, "state", None), "reg", None)
+                cfg = reg.config if reg is not None else None
+                if cfg is not None:
+                    await bot.ops.emit(cfg, "error", f"[web] {request.url.path}: {type(exc).__name__}: {str(exc)[:300]}", exc=exc)
+            except Exception:  # noqa: BLE001 — the reply still goes out
+                log.exception("ops emit failed")
+        return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)
 
     async def maybe_await(value):
         """Bot verbs are coroutines when they talk to Discord; registry verbs are plain. Callers don't care which."""
@@ -393,8 +422,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return [{"series": k, "label": reg.series_label(k), "character": c.label, "cls": c.cls, "spec": c.spec, "role": reg.profile.spec(c.cls, c.spec).role}
                 for k, c in (reg.regular_series_of(m) if m else [])]
 
-    def absence_json(a) -> dict:
-        return {"start": a.start, "end": a.end, "reason": a.reason}
+    def absence_json(reg, a) -> dict:
+        return {"start": a.start, "end": a.end, "reason": a.reason, "span": reg.span_label(a.start, a.end)}  # `span` = the days in words (the clock rule); ISO is for the clear call
 
     @app.get("/api/me")
     async def me(request: Request):
@@ -419,7 +448,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "must_apply": must_apply(v),  # a newcomer: the page points to the Discord application instead of the character table
             "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in (m.active() if m else [])],
             "roles": {"primary": primary, "flex": list(flex)},
-            "absences": [absence_json(a) for a in (m.upcoming_absences(today) if m else [])],
+            "absences": [absence_json(reg, a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
             "sheets": sheets,
             "regulars": regulars_json(reg, m),  # the recurring raids they're a regular of (Step down on the Me page)
@@ -530,11 +559,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     # ---- runs: the officer panel (sheets per raid, the board, lock, confirmations)
     def t12(reg, value) -> str:
         """'Wed 09 Dec 4:00 PM' in guild time (12-hour clock everywhere the site shows a run time)."""
-        return reg.local(value, "%a %d %b ") + clock12(reg, value)
+        return reg.local12(value)  # THE formatter (Registry.local12); nothing here composes a clock of its own
 
     def clock12(reg, value) -> str:
-        t = reg.local(value, "%I:%M %p")
-        return t[1:] if t.startswith("0") else t
+        return reg.local12(value, "%I:%M %p")
 
     def rel(reg, value) -> str:
         t = datetime.fromisoformat(str(value)) if not isinstance(value, datetime) else value
@@ -666,7 +694,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 # the planner's suggestions (computed on view, never stored): what an officer's Ask / Suggest would send
                 "plan": plan_json(reg, rc.role_plan(reg, rs, ev)) if live else None,
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late, "note": c.note} for c in ev.callouts], "log": list(ev.log),
-                "health": health_json(reg, ev, t) if ev.state == "open" else None}
+                "health": health_json(reg, ev, t) if ev.state == "open" else None,
+                # the confirm sentences for lock / cancel / clear / release, from code (consequences.py): the browser prints, never composes
+                "consequences": consequences_json(reg, ev)}
 
     def health_json(reg, ev, t) -> dict:
         """The open sheet's health card as data (MCP get_run, the help context): headcount against the seats the run
@@ -1380,7 +1410,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             if not chars:
                 continue
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else p,
-                         "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in chars], "absences": [absence_json(a) for a in m.upcoming_absences(today)],
+                         "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in chars], "absences": [absence_json(reg, a) for a in m.upcoming_absences(today)],
                          "asks": [{"roster": a["roster"], "answer": a.get("answer"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-3:] if a.get("answer") is None]})
         return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone}
 
@@ -1417,7 +1447,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return {"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else await privilege(reg, m.discord_id),
                 "test": bool(m.test), "dm": not m.dm_opt_out, "roles": {"primary": primary, "flex": list(flex)},
                 "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))],
-                "absences": [absence_json(a) for a in sorted(m.absences, key=lambda a: a.start)],
+                "absences": [absence_json(reg, a) for a in sorted(m.absences, key=lambda a: a.start)],
                 "asks": [{"roster": a["roster"], "answer": a.get("answer"), "asked_at": a.get("asked_at"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-5:]],
                 "sheets": [{"key": e.key, "status": e.signups[str(m.discord_id)].status, "character": e.signups[str(m.discord_id)].character} for e in rs.live() if str(m.discord_id) in e.signups]}
 
@@ -1527,7 +1557,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 **({"scope": "bot"} if getattr(bot.registries, "many", False) else {}),
                 "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent_for(v.reg.key))],
                 "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))],
-                "precedents": list(reversed(precedents[-pl:] if pl else [])), "ledger": list(reversed(ledger[-ll:] if ll else [])),
+                "precedents": [{**p, "date_label": v.reg.day_label(p.get("date"), with_year=True) if p.get("date") else ""} for p in reversed(precedents[-pl:] if pl else [])],
+                "ledger": [{**r, "received_label": v.reg.day_label(r.get("received"), with_year=True) if r.get("received") else ""} for r in reversed(ledger[-ll:] if ll else [])],
                 "member": m.display_name if member else None}
 
     @app.get("/api/config")
@@ -1869,8 +1900,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         stale.add(key)  # keep the old rev: the rest of this request can't overwrite that change either
                     continue
                 except Exception as e:  # noqa: BLE001 — Discord or the solver: never a 500 after a partial apply; the caller sees what landed
-                    log.exception("plain change %s failed", op.op)
-                    failed(op, f"{type(e).__name__}: {e}")
+                    failed(op, await configops.report_error(bot.ops, v.reg.config, e, f"[web] plain change {op.op}"))
                     continue
                 configops.refresh_revs(v.reg, revs, raids, stale, before)  # this request's own write is not someone else's change
                 out["applied"].append(line)  # apply_async(via=) wrote the audit line

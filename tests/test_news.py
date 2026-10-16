@@ -228,15 +228,33 @@ def test_buttons_are_officer_only_and_flip_the_state(reg):
         itx = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=9, display_name="Rando"), response=FakeResp())
         await ProposalButton(reg.key, p.id, "approve").callback(itx)
         assert itx.response.sent == ["Officers only."] and ps.get(p.id).state == "proposed"
+        # an officer: the ONE decide screen (news.consequence · Approve · Approve with a note… · Back), the write on the press
+        from wizard_harness import Harness
+
         client, lines = fake_client(reg, officer=True)
-        itx = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
-        await ProposalButton(reg.key, p.id, "approve").callback(itx)
+        edits = []
+
+        async def card_edit(**kw):
+            edits.append(kw)
+        h = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)
+        press = h.card_press()
+        press.message.edit = card_edit
+        await ProposalButton(reg.key, p.id, "approve").callback(press)
+        assert "apply job" in h.text and h.buttons() == ["Approve", "Approve with a note…", "Back"] and ps.get(p.id).state == "proposed"
+        await h.press("Approve with a note…")
+        await h.submit(note="checked the patch notes")
         q = ps.get(p.id)
-        assert q.state == "approved" and q.decided_by == "Kessa" and q.decided_by_id == 5
-        assert itx.response.edited and "embed" in itx.response.edited[0] and any("approved by Kessa" in x for x in lines)
+        assert q.state == "approved" and q.decided_by == "Kessa" and q.decided_by_id == 5 and q.note == "checked the patch notes"
+        assert edits and "embed" in edits[0] and any("approved by Kessa" in x for x in lines) and "the card is updated" in h.text
         itx2 = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
-        await ProposalButton(reg.key, p.id, "approve").callback(itx2)  # a second press: refused, nothing changes
+        await ProposalButton(reg.key, p.id, "approve").callback(itx2)  # a second press: refused before any screen, nothing changes
         assert itx2.response.sent and "can't become approved" in itx2.response.sent[0]
+        # D34: Dismiss gets the same screen (an approved proposal can still be dismissed until the job picks it up)
+        h2 = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)
+        await ProposalButton(reg.key, p.id, "dismiss").callback(h2.card_press())
+        assert "withdraws the approval" in h2.text and h2.buttons()[0] == "Dismiss"
+        await h2.press("Back")
+        assert ps.get(p.id).state == "approved" and "Nothing was changed" in h2.text
 
     run(go())
 

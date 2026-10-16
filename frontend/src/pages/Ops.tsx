@@ -47,7 +47,7 @@ export function OpsPage() {
             <Table.Thead><Table.Tr><Table.Th>Date</Table.Th><Table.Th>Item</Table.Th><Table.Th>Bot picked</Table.Th><Table.Th>Council awarded</Table.Th><Table.Th>Reason</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>
               {data.precedents.length === 0 && <Table.Tr><Table.Td colSpan={5}><Text c="dimmed" size="sm">none yet</Text></Table.Td></Table.Tr>}
-              {data.precedents.map((p, i) => <Table.Tr key={i}><Table.Td><Text size="xs" c="dimmed">{p.date}</Text></Table.Td><Table.Td>{p.item}</Table.Td><Table.Td>{p.bot}</Table.Td><Table.Td>{p.human}</Table.Td><Table.Td>{p.reason}</Table.Td></Table.Tr>)}
+              {data.precedents.map((p, i) => <Table.Tr key={i}><Table.Td><Text size="xs" c="dimmed">{p.date_label || p.date}</Text></Table.Td><Table.Td>{p.item}</Table.Td><Table.Td>{p.bot}</Table.Td><Table.Td>{p.human}</Table.Td><Table.Td>{p.reason}</Table.Td></Table.Tr>)}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
@@ -59,7 +59,7 @@ export function OpsPage() {
             <Table.Thead><Table.Tr><Table.Th>Received</Table.Th><Table.Th>Raider</Table.Th><Table.Th>Item</Table.Th><Table.Th>Source</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>
               {data.ledger.length === 0 && <Table.Tr><Table.Td colSpan={4}><Text c="dimmed" size="sm">none yet</Text></Table.Td></Table.Tr>}
-              {data.ledger.map((a, i) => <Table.Tr key={i}><Table.Td><Text size="xs" c="dimmed">{a.received}</Text></Table.Td><Table.Td>{a.raider}</Table.Td><Table.Td>{a.item_name || a.item_id}</Table.Td><Table.Td><Text size="xs" c="dimmed">{a.source}</Text></Table.Td></Table.Tr>)}
+              {data.ledger.map((a, i) => <Table.Tr key={i}><Table.Td><Text size="xs" c="dimmed">{a.received_label || a.received}</Text></Table.Td><Table.Td>{a.raider}</Table.Td><Table.Td>{a.item_name || a.item_id}</Table.Td><Table.Td><Text size="xs" c="dimmed">{a.source}</Text></Table.Td></Table.Tr>)}
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>

@@ -502,7 +502,11 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, **_see
         await wiz.working(i, "Opening the loot thread…")
         instance = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
         players = rc.players_for(reg, ev)
-        e = discord.Embed(title=f"⚔ {run_title(reg, ev)}", colour=TEAL, description=f"<t:{int(ev.start.timestamp())}:F>\nRoster ({len(ev.roster.selected)}): " + ", ".join(p.character or p.signup_name for p in ev.roster.selected)[:3800])
+        # the board's group layout, one member per line (the iconography rule) — never the whole roster on one line
+        from .raid_views import _group_block
+
+        groups = [_group_block(reg, bot.ico, r, gi, show_missing=False) for r in ev.all_rosters for gi in range(len(r.groups)) if r.groups[gi]]
+        e = discord.Embed(title=f"⚔ {run_title(reg, ev)}", colour=TEAL, description=(f"<t:{int(ev.start.timestamp())}:F> · {len(ev.roster.selected)} rostered\n\n" + "\n\n".join(groups))[:3800])
         e.set_footer(text="loot council: tick drops (or let the companion feed do it) → Distribute → chat to adjust → Confirm · /raid end for the summary")
         msg = await i.channel.send(embed=e)
         thread = await msg.create_thread(name=f"loot · {run_title(reg, ev)}"[:100])

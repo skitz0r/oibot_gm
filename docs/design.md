@@ -689,7 +689,7 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **Gating.** `open_register` checks `must_apply` for every first-character path (the card's Register / Add an alt, `/register`, `/me plan main|alt`, `/me char add`) and turns the flow into the application with "New here? Apply first — the officers take it from there." Plain-text self-service `character add` is refused in `configops.authorize` (it has the author's role ids) with a pointer to `/apply`. The website's own add-character path is not gated here.
 
-**Review and decision.** `application_embed`: full name, class/spec icons, logs, schedules in words (`wizard_opts.schedule_names`), every answer a field; kept within 25 fields / 1024 per value / 6000 total by sharing the space left among long answers (shortest stay whole), each cut with "…", plus a link to the site's full answers only when `OIBOT_WEB_URL` is https. The card's Accept / Decline… are persistent `ApplicationButton`s (`app:accept|decline:<uid>`). One decide path: `OibotGM.decide_application(reg, discord_id, accept, by, note) -> str` (→ `discord_registry.settle_application`): registry decide, DM, card edited in place, ops line, returns the verdict line (raises RegistryError when nothing is open) — the buttons, `DeclineModal`, `/roster applicant`, the web and MCP all call it. Nothing in it touches server membership.
+**Review and decision.** `application_embed`: full name, class/spec icons, logs, schedules in words (`wizard_opts.schedule_names`), every answer a field; kept within 25 fields / 1024 per value / 6000 total by sharing the space left among long answers (shortest stay whole), each cut with "…", plus a link to the site's full answers only when `OIBOT_WEB_URL` is https. The card's Accept / Decline… are persistent `ApplicationButton`s (`app:accept|decline:<uid>`). One decide path: `OibotGM.decide_application(reg, discord_id, accept, by, note) -> str` (→ `discord_registry.settle_application`): registry decide, DM, card edited in place, ops line, returns the verdict line (raises RegistryError when nothing is open) — the buttons (through `application_decide`, the one `decide` screen — `DeclineModal` is retired, §5.33), `/roster applicant`, the web and MCP all call it. Nothing in it touches server membership.
 
 **Owner settings.** `/gm config recruitment` (`flows_recruit`): one hub with the draft — open/closed toggle, note (modal), questions (add / edit / remove / move up / down; each checked on the spot with `Registry._check_questions`), member roles (Discord's RoleSelect), invite link (modal; `set_recruitment` checks the format) — and Save = ONE `set_recruitment` call with what changed; owner-only, re-checked on every press. The registration card is edited in place after a change and on start (so a card posted before the Apply button gets it). Plain text: op `recruit` (group *setup*, owner) with field `open` (true|false) | `note` | `question_add` (value = the question, `reason` = hint, `text` = required|optional) | `question_remove` (value = the question or its number) | `invite`.
 
@@ -1253,6 +1253,64 @@ them when the diff is shown, `op_rev` hands the right one to `apply(rev=)`, `sna
 section like a board (this request's own write refreshes; someone else's change marks it stale) — so Discord's
 `ConfigConfirmView` and the web's preview token carry config revs with no change of their own. The web admin routes do
 not send revs yet (phase 3). Tests: `tests/test_dual_p0.py`.
+
+### 5.34 Dual interfaces, phase 0: consequence + decide, errors, persistence, parity (built 2026-10-15)
+
+The dual-interface design (out/dual_interface_design.md §2, owner decisions in out/dual_interface_decisions.md) makes
+Discord, the site, plain text and MCP callers of the same verbs with the same words. Phase 0 lays the parts the later
+phases ride on:
+
+- **Consequence from code (§2.3).** `consequences.consequence(verb, reg, ev) -> list[str]` for `lock | cancel | clear |
+  release`, computed from the run as it stands (joiners, DMs-off count, the confirm deadline in `Registry.local12`
+  words, the layout; an ad hoc run says *"Joining was the commitment — nobody is asked to confirm."*; a test run says
+  where the puppets' DMs go). `ev_json.consequences{lock,cancel,clear,release,release_named}` carries them to the site,
+  and `SheetCard` / `BoardView` print them instead of composing their own (the old lock text promised confirmation DMs
+  on ad hoc runs — §4 item 5). `release_named` is the release sentence about one member with `consequences.NAME_TOKEN`
+  (`{name}`) where the name goes: the board's drag-to-bank substitutes the dragged member and nothing else, so the
+  per-member copy survives without the browser composing a word. The after-lock clear/release sentences describe
+  today's `drop_seated` DM; if the DM rule (DMs only when the person must act) retires that FYI DM, the sentence
+  changes here, in code, not on a surface. `news.consequence(p, reg, state)` says what Approve / Dismiss does by kind and state;
+  `news.decision_refusal` is `ProposalStore.move`'s officer checks read without writing, so a card refuses at once.
+- **The ONE Discord confirm screen.** `wizard.Wizard.decide(interaction, text, *, do, note=None, do_label="Do it",
+  danger=False, back_label="Back")`: the consequence text, then `[Do it]` `[Do it with a note…]` `[Back]`; the note button
+  opens a one-field `Form` (prose only) whose Submit IS the write; `working()` is sent before `do(interaction, note)`
+  runs; the owner-only check and the guard run on every press and again on the note's submit (a Modal has no
+  interaction_check). Used by the lock and cancel `RunButton`s (`raid_buttons.lock_decide` / `cancel_decide`; the ad hoc
+  60-second View is gone and the card's cancel now takes the reason every other surface records), the application
+  card's Accept / Decline (`discord_registry.application_decide`; `DeclineModal` retired — both verdicts take the
+  note), `/gm test clear` (`flows_misc.test_clear`) and the proposal card's Approve / Dismiss (D34: Dismiss too).
+  `tests/wizard_harness.Harness` drives each one (`test_dual_phase0.py`).
+- **Web.** `useConfirm` takes `note?: {label, maxLength}` and resolves to `false | true | {note}`; the sheet's cancel
+  sends the note as the reason.
+- **One error helper (§2.7).** `configops.user_error(e)`: `RegistryError | ValueError` → its text; anything else →
+  `GENERIC_ERROR` ("Something went wrong and nothing was changed. The owner has the details."); `report_error(ops,
+  cfg, e, where)` adds the ops error line (the owner's DM) for the generic case. Used by `web/api.py run()` (a bug is
+  a 500 with the generic text, never a type name), a catch-all `/api/*` exception handler (what an MCP `ToolError`
+  repeats; a GET route that raises reads the same way — tested on `/api/member`), `/api/ops/change`'s per-op failures,
+  the `/mock` roster and loot chat replies, and the wizards' `on_error`.
+- **Persistence (§2.9).** `ConfigConfirmView` and `CompileConfirmView` are `PendingView`s: their buttons are
+  `CfgApplyButton` DynamicItems (`cfgapply.<gk>:<token>:apply|cancel|confirm|discard`) resolving a token in process
+  memory (`discord_policy.PENDING_CONFIRMS`); `on_timeout` edits the diff to *Expired — say it again.*; a press after
+  a restart (token gone) edits it to *Expired after a restart — nothing was changed* instead of "interaction failed".
+  Pending diffs stay in memory by design; the DynamicItem only resolves the token or reports expiry.
+- **Parity matrix (§2.10).** `configops.BY_DESIGN_EXEMPT: {op: {surface: reason}}` (the board ops, pin, job and
+  plain on Discord — §2.1's web-only list), `BY_DESIGN_ONLY: {feature: {surface, path, reason}}` for §2.1's single-surface
+  features that are not ops (Discord: server claim, owner transfer, the application wizard, the registration and
+  absences cards, the guide, the DM picker; web: the board, the comp sandbox, test-bench compose, applications review,
+  the policy editor, history, the plain-permissions grid — each path must exist) and `PARITY_PENDING` (confirm_for and dm on Discord, comp targets
+  everywhere — each naming its phase); `tests/test_parity_matrix.py` holds the matrix op → {discord, web, mcp} and
+  asserts every `OP_GROUP` key has each surface's path (a FLOWS entry, a slash path from the offline command tree or a
+  DynamicItem; a declared web route; an MCP tool) or a written exemption, and that every cited path exists.
+- **Rule sweep (§4 item 16).** Clock: `absence_json.span` (Me page, `/api/member`), the absences card's Upcoming
+  field and the *My absences* reply, `/roster absences`, the companion's kill line (`_log_clock`, 12-hour), the Ops
+  tables' `date_label` / `received_label`, `/gm config show` as words (`configops.config_summary`); one 12-hour
+  formatter behind `Registry.local12`'s siblings (`constants.fmt12` ← `wizard.fmt12`, `flows_config.fmt12`,
+  `raid_views.clock12 = reg.local12`, `agents.clock12`, the web's `t12`/`clock12`). Iconography: the sheet's shortfall
+  badge is role icon + number, `/roster overview`'s role and buff lines carry no name beside an icon, the loot thread's
+  roster is the board's group layout one member per line. Wizard rule: `/roster absences days:int` → a horizon select
+  (`flows_roster.roster_absences`, an `OfficerWizard`: the list is officer-only data, so standing is re-checked on
+  every horizon press like every other officer wizard), `/me plan roles` lost the discarded `primary` argument; `/mock signup date_` and
+  `/mock set name` are left for D11's retirement of `/mock`.
 
 ## 6. Architecture
 

@@ -104,7 +104,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   only one), then type first and last name.
 - `/me char spec|main|retire` take no arguments: pick the character from your own list. Spec choices are always
   that character's class, and retire asks you to confirm. `/apply` is the application (§3a).
-- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` adds roles your main
+- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` (up to three flex roles,
+  picked from a list — the primary is never asked, it follows the main's spec) adds roles your main
   would play beyond that, and telling the bot sets them on any of your characters ("I can also tank on Xanthe", "no
   extra roles on Jonny"). The site has no flex toggles yet; officers can also set a character's flex list over MCP
   (`save_characters`).
@@ -154,9 +155,11 @@ at a time; *My status* on the card tells you it is waiting.
 link, the schedules the applicant can make in words, and every answer as its own line. A very long application is
 shortened on the card with "…", and its last line says where the full answers are: ask the bot ("show Kessa's
 application", officers) or MCP `list_applications` — the site has no applications page.
-**Accept** registers the character as the applicant's main, rank trial, already confirmed; **Decline…** takes an
-optional note. Either way the applicant gets a DM, the card updates to show the decision, and the ops channel logs
-it. The same decision is on `/roster applicant`, in plain text ("accept Nyx", "decline nyxie: we're full on
+**Accept** registers the character as the applicant's main, rank trial, already confirmed; **Decline…** turns them
+down. Both open the same small screen first: one sentence saying exactly what happens to the applicant, then
+**Accept** (or **Decline**), **… with a note…** (a box for a note that goes into their DM) and **Back**. Nothing is
+written before that press. Either way the applicant gets a DM, the card updates to show the decision, and the ops
+channel logs it. The same decision is on `/roster applicant`, in plain text ("accept Nyx", "decline nyxie: we're full on
 healers" — officers by default, and the note goes to the applicant) and over MCP (`decide_application`), all through
 the same code. A newcomer who tells the bot to register a character is refused with *"New here? Apply first"* and
 gets the **Apply to join** button on that reply. A declined applicant is never
@@ -376,7 +379,11 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    line says so, and says when that needs offspecs or alts. Nothing is sent for it: open another run, or ask people,
    yourself. After lock the leftovers are simply the bench — the first people Fill asks when a seat frees up.
    **Cancel run** withdraws every open confirmation ask (nothing lingers on anyone's Me page) and warns you that
-   rostered members are not told automatically — say so in the signup channel yourself.
+   rostered members are not told automatically — say so in the signup channel yourself. On every surface the cancel
+   first shows the same sentence — what closes, how many seats and asks are withdrawn, who is and isn't told — and
+   takes an optional reason (shown in the channel and the run's thread): the card's button opens *Cancel the run* /
+   *Cancel the run with a note…* / *Back*, the site's dialog has the same sentence and a reason box, `/raid cancel`,
+   plain text and MCP carry the reason as before.
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. A roster that came out under its tank/healer minimum
@@ -387,7 +394,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    ("You're rostered as **Protection**, your offspec"). The Me page shows the same ask. With confirmations off (the ad hoc default) nobody is asked and
    no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable: moving people
    between groups changes nothing else; dragging someone in from the bank is a substitution (they get the
-   confirmation DM); dragging someone out releases the seat (they get a DM) and the bench is asked.
+   confirmation DM); dragging someone out releases the seat (they get a DM) and the bench is asked — the confirm names
+   them and says exactly what the bot will do, in the same words as the Discord card.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and they are DMed that it was.
 6. **Fill** — the fill engine DMs people on its own only after lock (before lock an officer sends suggestions, see
@@ -445,7 +453,14 @@ confirm only when the run asks for confirmations (an ad hoc run with confirmatio
 run* far left, then *Fill seats* and *Lock now* on the right; what does not apply yet is greyed with the reason
 (Fill before lock, Lock after it); before lock **Suggest** sits beside the sheet's *short* badge. The board's own tools sit above the groups: *Auto-fill empty seats*, *Propose
 roster/splits*, and *Clear* set apart. Officer cards in Discord use the same fixed order — Open the board · Lock now ·
-Fill seats · Cancel run (the *Suggested* block has its own row: **Ask** · **Suggest…**) — and cancelling asks *Keep the run* / *Cancel the run*. Tables (Me, Members, Raids, Auras)
+Fill seats · Cancel run (the *Suggested* block has its own row: **Ask** · **Suggest…**). **One confirm screen, the same
+words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
+a news proposal, the bot shows one sentence computed from the run as it stands — for a lock: *"The board becomes the
+roster. 18 rostered get a confirmation DM (2 with DMs off see it on the site). Confirm by Tue 6:30 PM."*; on an ad hoc
+run: *"Joining was the commitment — nobody is asked to confirm."* — then **Do it** (named for the verb: *Lock now*,
+*Cancel the run*, *Approve*…), **… with a note…** where a note makes sense, and **Back**. The site's dialogs print the
+very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would
+not send. Tables (Me, Members, Raids, Auras)
 share one edit mode: an Edit button in the header, then a footer with any reset far left and *Cancel* / *Save changes*
 on the right. Config saves each field as you change it and marks it *✓ saved*. Pages update on their own; *Refresh* in
 the left rail is the manual fallback. Every yes/no DM (confirmations and fill asks) reads **Confirm / Can't make it**;
@@ -505,7 +520,9 @@ returns to the game defaults.
 
 - Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`. They take at most a member
   (Discord's own picker); the character, rank or schedule is picked from a list and confirmed before anything saves.
-  `/roster confirm` alone walks the unconfirmed characters.
+  `/roster confirm` alone walks the unconfirmed characters. `/roster absences` lists the guild's upcoming absences
+  (days in words, with reasons) for the next 30 days; a select switches the horizon (a week … three months) — no
+  number is typed. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
 - Regulars: `/roster add` (pick the recurring schedule, then the member — or name them in the command — then the
   character), `/roster remove`, `/roster members` (a schedule's regulars by role, one per line). Same list as the
   Rosters page's *Regulars* tab, plain text and MCP `set_regular` (§4 *Regulars*).
@@ -529,7 +546,11 @@ returns to the game defaults.
   question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses
   Apply needs the rights for the change (§8c); a slow change (a lock, fill DMs, a compile, a proposal) is acknowledged
   at once — the buttons go, the diff reads *Applying…* and turns into the result when it is done, and a second press
-  (or Cancel) by anyone is refused, so nothing applies twice. A board change (a move, the groups, auto-fill, using a
+  (or Cancel) by anyone is refused, so nothing applies twice. A diff nobody presses within ten minutes turns into
+  *Expired — say it again.*; a press on a diff (or a policy reading) from before a bot restart answers *Expired after a
+  restart — nothing was changed* instead of Discord's "interaction failed". When something breaks inside a change,
+  every surface says the same thing — *Something went wrong and nothing was changed. The owner has the details.* — and
+  the owner gets the details in the ops channel and a DM; a refusal ("that run is locked") always reads as written. A board change (a move, the groups, auto-fill, using a
   proposal) is refused with *"the board changed since you looked"* when someone else changed that board between the
   diff and your Apply — nothing is overwritten, even when an unrelated step of the request (a DM setting) comes first;
   the request's own earlier steps (a pin, a move) never count as a change, and once one board step is refused the request's later board steps on that run are refused too. Absences
@@ -537,7 +558,10 @@ returns to the game defaults.
   does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
   before" can't fail half way.
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, recent ops),
-  `/gm config show`.
+  `/gm config show` (the effective configuration in words: channels and roles by name, raids with their schedules and
+  hours, recruitment, plain-text defaults — never the raw file).
+- Every refusal and error reads the same on Discord, the site, in plain text and over MCP: a refusal as written, a bug
+  as *Something went wrong and nothing was changed. The owner has the details.* (the details go to the ops channel).
 
 ## 7a. News proposals (officers)
 
@@ -547,7 +571,9 @@ guild's own overrides. When a post clearly contradicts one of those, it posts a 
 channel: the change in words, what it touches, the sentence from the news it rests on, links to the posts, and a
 confidence (low / medium / high). Most days there is no card: nothing new, or nothing that contradicts anything.
 
-- **Approve** (officers) records who approved it and when. It changes nothing by itself: the apply job on the host
+- **Approve** (officers) first shows what approving does (a setting applied within 15 minutes, or a game-data edit
+  with a commit and a restart — and for every server on that game version), then *Approve* / *Approve with a note…* /
+  *Back*; **Dismiss** gets the same screen. Approving records who approved it and when. It changes nothing by itself: the apply job on the host
   checks every 15 minutes and carries it out. A **guild setting** (a raid's lockout, what the guild knows about a
   buff) is applied like the same change on the Raids or Auras page, without a restart. A **game data** change edits
   the bot's profile file for the game version, runs the full test suite, commits, restarts the bot and checks it
@@ -846,7 +872,8 @@ cadence, so the unchanged scheduler goes through nudge →
 lock → confirmations → expiry → fill → close within the hour. `/gm test answer` offers **Random mix** (how many
 Join, Bench and No thanks) or **One member** (pick a puppet, then Join, Bench or No thanks), and stays open so you
 can answer again; after lock a puppet's *No thanks* is a
-callout. `/gm test clear` cancels the test runs and deletes every puppet and their placements.
+callout. `/gm test clear` cancels the test runs and deletes every puppet and their placements — after one screen that
+says how many test runs and puppets go, then *Clear the test bench* / *Back*.
 
 **Any mix, on the Members page.** Officers get a **Test bench** card under the members table: the bench as spec icons
 with a count each (− / + to change it), the role totals, and a class → spec picker with **Add** for a spec it doesn't

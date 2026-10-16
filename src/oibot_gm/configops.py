@@ -16,6 +16,32 @@ from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, Reg
 
 log = logging.getLogger(__name__)
 
+# ---- refusal wording (dual interfaces §2.7): one helper every surface answers an exception with
+GENERIC_ERROR = "Something went wrong and nothing was changed. The owner has the details."
+
+
+def user_error(e: BaseException) -> str:
+    """What a person reads when a verb raised: a RegistryError or ValueError is a refusal written for them (its text);
+    anything else is a bug they can't act on — GENERIC_ERROR, and the caller gives the owner the details with
+    `report_error` (an ops error line, which also DMs the owner). Never a type name or a traceback in a reply."""
+    if isinstance(e, (RegistryError, ValueError)):
+        return str(e) or GENERIC_ERROR
+    return GENERIC_ERROR
+
+
+async def report_error(ops, cfg, e: BaseException, where: str) -> str:
+    """`user_error`, plus the ops error line (with the traceback) when the error is not a refusal. Returns the text to
+    show the person. `ops` None (offline, tests) → logged only."""
+    text = user_error(e)
+    if text == GENERIC_ERROR:
+        log.exception("%s failed", where, exc_info=e)
+        if ops is not None and cfg is not None:
+            try:
+                await ops.emit(cfg, "error", f"{where}: {type(e).__name__}: {str(e)[:300]}", exc=e)
+            except Exception:  # noqa: BLE001 — the reply still goes out
+                log.exception("ops emit failed")
+    return text
+
 SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never guess)
 Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
   roster_channel (officer channel for health cards and roster proposals), registration_channel (public card with the
@@ -383,6 +409,52 @@ OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other op
     "confirm_for": ("your confirmation", "someone else's confirmation"), "rank": ("ranks", "ranks"), "confirm": ("character confirmations", "character confirmations"),
     "run_sheet": ("where a sheet is posted", "where a sheet is posted"),
     "regular": ("whether you're a regular (ask an officer to add you)", "a schedule's regulars"),
+}
+
+# ---- the parity matrix (dual interfaces §2.1, §2.10; tests/test_parity_matrix.py). Every op in OP_GROUP has a Discord
+# path (a FLOWS entry or a slash command), a web route and an MCP tool — or an entry here saying which surface it is
+# missing from BY DESIGN and why. {op: {surface: reason}}; surfaces are "discord" | "web" | "mcp". Adding a verb to one
+# surface fails the test until its exemption is written down.
+BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
+    "run_board": {"discord": "the board is web-only (§2.1): Discord gets the lock card as a read-only mirror, never a second editor"},
+    "run_move": {"discord": "the board is web-only (§2.1): a drag has no Discord shape", "mcp": "MCP writes the whole layout (set_layout); single moves are the browser's drags"},
+    "run_propose": {"discord": "the board's Propose / Use this split is web-only (§2.1); the lock does the same solve"},
+    "run_strategy": {"discord": "a board setting (web-only, §2.1); the lock card shows the split it produced"},
+    "run_autofill": {"discord": "the board's auto-fill is web-only (§2.1); after lock Discord has Fill seats (run_fill)"},
+    "pin": {"discord": "a board control (web-only, §2.1): pins are set from the sheet's member menu on the site"},
+    "job": {"discord": "the host's jobs are the web Agents page and MCP (§2.1); the ops channel gets the proposal cards"},
+    "plain": {"discord": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
+}
+# ops a surface is still missing from, with the plan that adds it — temporary, unlike BY_DESIGN_EXEMPT; the parity test
+# accepts these too but lists them apart, so the gap is written down rather than silent
+PARITY_PENDING: dict[str, dict[str, str]] = {
+    "confirm_for": {"discord": "phase 2 B5: an officer's Confirm / Can't make it for a member joins the lock card's menu"},
+    "dm": {"discord": "phase 3 (Registry.set_dm): a Discord toggle; today the Me page, plain text and MCP"},
+    "comp_target": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page (Registry.set_comp_targets)", "mcp": "phase 3: set_comp_target"},
+    "comp_target_clear": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
+    "comp_groups": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
+}
+# features that live on ONE surface by design (§2.1) and are not ops at all — written down so the parity test can refuse a
+# second editor appearing elsewhere, and so the reason is read, not remembered. {feature: {surface, path, reason}}; `path`
+# is the surface's entry point in the matrix's own notation ("flow:", "slash:", "button:", "fn:" for Discord; "METHOD /api/…"
+# for the web). The Items/tier grid (§2.1, D4) is not built yet (phase 1) and joins this table with it.
+BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
+    # Discord-only: the MCP token IS the owner, so claiming and handing over a server is done by a person in the server
+    "guild_claim": {"surface": "discord", "path": "flow:guild_claim", "reason": "a server claim is made in the server by the person claiming it; the MCP token is the owner and the web has no viewer yet"},
+    "owner_transfer": {"surface": "discord", "path": "slash:gm config owner", "reason": "ownership moves the identity MCP acts as: only the owner, in Discord, hands it over (one decide screen, D50)"},
+    "application_wizard": {"surface": "discord", "path": "slash:apply", "reason": "a newcomer's first touch is Discord (design §5.29): the questions are asked where they already are; the web reviews (D32)"},
+    "registration_card": {"surface": "discord", "path": "button:oibot_gm.discord_registry.RegisterButton", "reason": "the registration card is a Discord message by nature; the Me page is the web's own registration"},
+    "absences_card": {"surface": "discord", "path": "button:oibot_gm.discord_pool.AbsenceButton", "reason": "the absences card is a Discord message by nature; the absence verb itself is on every surface (op `absence`)"},
+    "guide": {"surface": "discord", "path": "slash:help", "reason": "the static guide answers in Discord by tier; the site gets the manual page (D38), not a second guide"},
+    "dm_picker": {"surface": "discord", "path": "fn:oibot_gm.guild_picker.choose_guild", "reason": "a DM has no server: the picker exists only where a message can arrive without one (asked every time, D23)"},
+    # Web-only: tables and two-dimensional editing; Discord gets a link plus a read-only mirror, never a second editor
+    "board": {"surface": "web", "path": "POST /api/run/{key}/layout", "reason": "the board (drag, auto-fill, propose, clear) is two-dimensional editing; the lock card is Discord's read-only mirror"},
+    "comp_sandbox": {"surface": "web", "path": "POST /api/admin/test", "reason": "the comp sandbox is a spec x count grid on the Members page's test card (TestBench.tsx)"},
+    "test_bench_compose": {"surface": "web", "path": "POST /api/admin/test", "reason": "composing a bench of any mix is a table; /gm test seed offers the presets"},
+    "applications_review": {"surface": "web", "path": "GET /api/applications", "reason": "the full answers are long prose: the review page is the web's; the Discord card keeps Accept / Decline (D32)"},
+    "policy_editor": {"surface": "web", "path": "PUT /api/policy/{doc}", "reason": "the policy document is long text with a diff; Discord appends a rule (op `policy_append`) and shows the reading"},
+    "history": {"surface": "web", "path": "GET /api/rosters", "reason": "history views (past runs, the award log) are tables; Discord has the closed card"},
+    "plain_permissions_grid": {"surface": "web", "path": "POST /api/admin/plain-permissions", "reason": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
 }
 
 
@@ -2552,3 +2624,45 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
         raise RegistryError(rc.solver_error_text(e))
     seen[key] = {"strategy": strategy, "layouts": avoid + [layout]}
     return propose_text(reg, ev, strategy, layout, rosters, len(avoid) + 1)
+
+
+# ---------------------------------------------------------------- /gm config show (words, never raw YAML)
+
+def config_summary(reg: Registry) -> list[str]:
+    """The effective configuration as a person reads it (the clock rule: Registry.local12 and schedule words, never
+    the stored 'Tue 19:30' or ISO; channels and roles as mentions, which Discord renders by name). Officer-facing —
+    the owner's host facts stay on the site's Config page. One line per item, under Discord's 2000 characters."""
+    from .discord_pool import CHANNEL_KINDS
+
+    cfg = reg.config
+    now = reg.now_local()
+    lines = [f"**{cfg.name}** · {reg.profile.label} · {cfg.timezone} (now {reg.local12(now)})",
+             f"Owner: <@{cfg.owner_discord_id}>" + (" · officer roles: " + ", ".join(f"<@&{r}>" for r in cfg.officer_role_ids) if cfg.officer_role_ids else " · no officer role set (Manage Server counts)")]
+    chans = [f"{kind}: <#{getattr(cfg, attr)}>" for kind, attr in CHANNEL_KINDS.items() if getattr(cfg, attr, None)]
+    unset = [kind for kind, attr in CHANNEL_KINDS.items() if not getattr(cfg, attr, None)]
+    lines.append("Channels — " + (", ".join(chans) or "none set") + (f" · not set: {', '.join(unset)}" if unset else ""))
+    for rid in reg.profile.raids:
+        rd = reg.raid_def(rid)
+        scheds = reg.schedules(rid)
+        words = "; ".join(f"{s['name']}: {reg.schedule_label(rid, s)}" + ("" if s.get("active", True) else " (paused)") for s in scheds) or "no schedule"
+        lines.append(f"**{rd.get('name', rid)}** ({rd.get('size')}) — {words} · opens {_hours_words(rd.get('signup_lead_hours'))} before, locks {_hours_words(rd.get('lock_hours_before'))} before, "
+                     f"confirm by {_hours_words(rd.get('confirm_hours_before'))} before · autofill {'on' if rd.get('autofill', True) else 'off'}")
+    rec = cfg.recruitment
+    lines.append(f"Recruitment: {'open' if rec.open else 'closed'}" + (f" — {rec.note}" if getattr(rec, 'note', None) else "") + (f" · {len(rec.questions)} question(s)" if rec.questions else "")
+                 + (" · invite link set" if getattr(rec, "invite_url", None) else ""))
+    lines.append(f"Plain text: DMs {reg.plain_mode(None)} · elsewhere {cfg.plain.default} by default" + (f" · {len(cfg.plain.channels)} channel(s) set" if cfg.plain.channels else "")
+                 + f" · questions from: {cfg.ask_audience}")
+    if cfg.about:
+        lines.append(f"About: {cfg.about[:200]}")
+    lines.append("-# Everything here is on the site's Config page; `/gm config …` changes it.")
+    return lines
+
+
+def _hours_words(h) -> str:
+    try:
+        v = float(h)
+    except (TypeError, ValueError):
+        return "?"
+    if v >= 48 and v % 24 == 0:
+        return f"{int(v // 24)} days"
+    return f"{v:g} h"

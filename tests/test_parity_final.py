@@ -166,6 +166,6 @@ def test_cancel_claims_the_diff_so_a_pending_apply_refuses():
     assert not view.busy
     # the Cancel handler sets busy before its first await on the edit: Apply's own check then refuses
     import inspect
-    src = inspect.getsource(dp.ConfigConfirmView.cancel)
+    src = inspect.getsource(dp.ConfigConfirmView.press_cancel)
     assert src.index("self.busy = True") < src.index("await interaction.response.edit_message")
     _ = SimpleNamespace

@@ -611,14 +611,20 @@ def test_card_lock_button_answers_a_busy_or_locked_run_quietly(reg, rs, why):
     async def is_officer_anywhere(reg_, uid):
         return True
 
+    from wizard_harness import Harness
+
     bot = types.SimpleNamespace(registries=types.SimpleNamespace(for_interaction=lambda i: reg), raids=types.SimpleNamespace(store=lambda r: rs),
-                                is_officer_anywhere=is_officer_anywhere, lock_run=lock_run, ops=feed)
-    inter = press(log, "Officer")
-    inter.client = bot
-    asyncio.run(RunButton(reg.key, ev.key, "lock").callback(inter))
-    sent = [c for k, c, _ in log if k == "followup"]
-    assert sent and "lock failed" not in sent[0], sent
-    assert ("the solver is already working" in sent[0]) if why == "busy" else ("already locked" in sent[0])
+                                is_officer_anywhere=is_officer_anywhere, lock_run=lock_run, ops=feed, ico=lambda k, v: "")
+    h = Harness(reg, rs, user=types.SimpleNamespace(id=OWNER, display_name="Officer"), client=bot)
+
+    async def go():
+        await RunButton(reg.key, ev.key, "lock").callback(h.card_press())  # the decide screen (consequence · Lock now · Back)
+        assert "The board becomes the roster." in h.text and h.buttons() == ["Lock now", "Back"]
+        await h.press("Lock now")
+
+    asyncio.run(go())
+    assert "lock failed" not in h.text, h.text
+    assert ("the solver is already working" in h.text) if why == "busy" else ("already locked" in h.text)
     assert feed.lines == [], feed.lines
 
 

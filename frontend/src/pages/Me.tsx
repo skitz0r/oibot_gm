@@ -51,7 +51,7 @@ export function MePage({ meta }: { meta: Meta }) {
   }
   async function setDm(on: boolean) { try { await api.post("/api/me/dm", { on }); ok(on ? "DMs on" : "DMs off"); load(); } catch (e) { fail(e); } }
   async function clearAbs(a: Me["absences"][number]) {
-    const span = `${a.start}${a.end !== a.start ? ` → ${a.end}` : ""}`;
+    const span = a.span || `${a.start}${a.end !== a.start ? ` → ${a.end}` : ""}`;  // the days in words from the server (the clock rule)
     if (!(await ask({ title: "Back after all?", message: `Your absence ${span} is cleared and the sheets on those days re-open for you — your No thanks on them goes; answer them again if you can come.`, confirmLabel: "I'm back" }))) return;
     try { const r = await api.post<{ message: string }>("/api/me/absence/clear", { start: a.start }); ok(r.message); load(); } catch (e) { fail(e); }
   }
@@ -190,7 +190,7 @@ export function MePage({ meta }: { meta: Meta }) {
               {me.absences.length === 0 && <Text c="dimmed" size="sm">None upcoming.</Text>}
               {me.absences.map((a) => (
                 <Group key={a.start} justify="space-between">
-                  <Text size="sm" ff="monospace">{a.start}{a.end !== a.start ? ` → ${a.end}` : ""}</Text>
+                  <Text size="sm">{a.span || `${a.start}${a.end !== a.start ? ` → ${a.end}` : ""}`}</Text>
                   <Group gap="xs">{a.reason && <Badge variant="outline" color="gray">{a.reason}</Badge>}<Tooltip label="I'm back after all"><ActionIcon variant="subtle" color="gray" size="sm" onClick={() => clearAbs(a)}><IconTrash size={14} /></ActionIcon></Tooltip></Group>
                 </Group>
               ))}

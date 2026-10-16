@@ -11,7 +11,7 @@ Routes to the active raid (today: the mock event in `raid` state) and:
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -179,7 +179,7 @@ class FeedMixin:
             if boss not in raid.bosses_done:
                 raid.bosses_done.append(boss)
                 raid.save(f"{raid.id}: {boss} down")
-            await self.feed_post(raid, f"☠ **{boss}** down ({ev.get('ts', '')[11:16]})")
+            await self.feed_post(raid, f"☠ **{boss}** down" + (f" ({_log_clock(ev['ts'])} log time)" if ev.get('ts') else ""))  # 12-hour, never HH:MM (the clock rule)
             return {"boss": boss}
         if kind == "loot":
             item = self._resolve_item(ev.get("item_id"), raid)
@@ -234,3 +234,13 @@ class FeedMixin:
         db._store().append_jsonl(Path(raid.guild) / "precedents.jsonl", precedent)
         raid.save(f"{raid.id}: precedent {pr['item']} → {pr['human']}")
         return f"📌 Precedent recorded: {pr['item']} → {pr['human']} over {pr['bot']} — “{text.strip()}”"
+
+
+def _log_clock(ts: str) -> str:
+    """The companion's chat-log stamp (the raider's PC clock, no zone) as a person reads it: '8:15 PM', never '20:15'."""
+    from .constants import fmt12
+
+    try:
+        return fmt12(datetime.fromisoformat(str(ts)), "%I:%M %p")
+    except ValueError:
+        return str(ts)[11:16]

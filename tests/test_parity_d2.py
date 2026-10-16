@@ -445,7 +445,9 @@ def test_web_plain_change_lists_every_op_and_goes_on_past_a_failure(reg, rs, mon
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["applied"] == [f"{z}: DMs off"], "the op after the failures still applied"
-    assert len(d["refused"]) == 2 and "not today" in d["refused"][0] and "RuntimeError: Discord said 503" in d["refused"][1]
+    # a refusal reads as written; a bug reads as GENERIC_ERROR (never a type name) and the owner gets an ops error line (§2.7)
+    assert len(d["refused"]) == 2 and "not today" in d["refused"][0] and configops.GENERIC_ERROR in d["refused"][1] and "RuntimeError" not in d["refused"][1]
+    assert any(lvl == "error" and "Discord said 503" in text for lvl, text in bot.ops.lines)
     assert d["error"] == "not today"
 
 

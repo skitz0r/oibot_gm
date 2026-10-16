@@ -67,7 +67,7 @@ export interface Meta {
 }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null }
-export interface Absence { start: string; end: string; reason: string | null }
+export interface Absence { start: string; end: string; reason: string | null; span?: string }  // `span` = the days in words (the clock rule); start/end stay ISO for the clear call
 export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean }
 /** One recurring schedule the viewer is a regular of (the Me page's My regular raids). */
 export interface MyRegular { series: string; label: string; character: string; cls: string; spec: string; role: string }
@@ -106,6 +106,9 @@ export interface Sheet {
   /** the planner's suggestions (computed on view, never stored): what an officer's Suggest / Ask would send */
   plan?: Plan | null;
   callouts?: { display_name: string; hours_before: number; late: boolean }[]; log?: string[];
+  /** the confirm sentences for lock / cancel / clear / release, from the server (consequences.py) — the browser prints them, never composes its own;
+   *  `release_named` is the release sentence about one member with `{name}` where the name goes (the board substitutes the dragged member) */
+  consequences?: { lock: string; cancel: string; clear: string; release: string; release_named?: string };
 }
 export interface RaidRuns {
   id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null;
@@ -160,7 +163,7 @@ export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }
 /** `scope: "bot"` (several guilds only): head, push, llm and uptime are the whole bot's, the rest is this guild's. */
-export interface Ops { scope?: "bot"; head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }
+export interface Ops { scope?: "bot"; head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }  // precedents carry `date_label`, ledger rows `received_label` (days in words)
 /** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
 export interface RoleRef { id: string; name: string }
 /** GET /api/public (anonymous): what the homepage and the not-a-member screen show. One guild: this shape; several:

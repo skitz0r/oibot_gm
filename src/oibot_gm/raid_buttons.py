@@ -100,39 +100,76 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
             if ev.state != "open":
                 await interaction.response.send_message("Already locked.", ephemeral=True)
                 return
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                line = await bot.lock_run(reg, rs, ev, by=by)
-            except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open: nothing happened
-                await interaction.followup.send(str(e), ephemeral=True)
-                return
-            except Exception as e:  # noqa: BLE001 — lock_run reports solver failures itself; this is anything else
-                await interaction.followup.send(f"lock failed: {e}", ephemeral=True)
-                await bot.ops.emit(reg.config, "warn", f"{ev.key}: lock by {by} failed — {e}")
-                return
-            await interaction.followup.send(line, ephemeral=True)
-            if not ev.lock_error:
-                await bot.ops.emit(reg.config, "info", line)
+            await lock_decide(interaction, bot, reg, rs, ev)
             return
         if self.action == "cancel":
-            view = discord.ui.View(timeout=60)
-            keep = discord.ui.Button(label="Keep the run", style=discord.ButtonStyle.secondary)
-            yes = discord.ui.Button(label="Cancel the run", style=discord.ButtonStyle.danger)
+            await cancel_decide(interaction, bot, reg, rs, ev)
 
-            async def kept(i: discord.Interaction):
-                await i.response.edit_message(content="Nothing changed — the run stays.", view=None)
 
-            keep.callback = kept
+# ---------------------------------------------------------------- the ONE confirm screen for lock and cancel (§2.3)
 
-            async def do(i: discord.Interaction):
-                await i.response.edit_message(content="Cancelling…", view=None)
-                line = await bot.cancel_run(reg, rs, ev, by=by, reason=None)
-                await i.edit_original_response(content=line)
+def officer_wizard(bot, reg, interaction: discord.Interaction, title: str):
+    """A Wizard for an officer's card press: the guard re-checks officer standing (is_officer_anywhere) at every press."""
+    from .wizard import Wizard
 
-            yes.callback = do
-            view.add_item(keep)  # the safe choice first, the destructive one last and red
-            view.add_item(yes)
-            await interaction.response.send_message(f"Cancel {run_label(reg, ev)}? Rostered members are not told automatically.", view=view, ephemeral=True)
+    async def guard(i: discord.Interaction) -> str | None:
+        return None if await bot.is_officer_anywhere(reg, i.user.id) else "Officers only."
+
+    return Wizard(reg, interaction.user.id, title=title, guard=guard)
+
+
+async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
+    """Lock from a card: the consequence sentence (consequences.consequence — the same words the site's confirm shows),
+    then Lock now / Back. The lock itself is RaidMixin.lock_run, after the screen has acknowledged the press."""
+    from .configops import report_error
+    from .consequences import consequence
+
+    wiz = officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
+    key = ev.key
+
+    async def do(i: discord.Interaction, _note: str | None) -> None:
+        cur = rs.events.get(key)  # re-read: the scheduler or another officer may have locked it meanwhile
+        if not cur or cur.state in ("done", "cancelled"):
+            await wiz.finish(i, "That run is closed — nothing was changed.")
+            return
+        if cur.state != "open":
+            await wiz.finish(i, "Already locked — nothing was changed.")
+            return
+        by = i.user.display_name
+        try:
+            line = await bot.lock_run(reg, rs, cur, by=by)
+        except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open: nothing happened
+            await wiz.finish(i, str(e))
+            return
+        except Exception as e:  # noqa: BLE001 — lock_run reports solver failures itself; this is anything else
+            await wiz.finish(i, await report_error(bot.ops, reg.config, e, f"{key}: lock by {by}"))
+            return
+        await wiz.finish(i, line)
+        if not cur.lock_error:
+            await bot.ops.emit(reg.config, "info", line)
+
+    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("lock", reg, ev)), do=do, do_label="Lock now")
+
+
+async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
+    """Cancel from a card: the consequence, then Cancel the run / Cancel the run with a note… / Back. The note is the
+    reason every other surface records (the command's modal, plain text, MCP, the site)."""
+    from .consequences import consequence
+
+    wiz = officer_wizard(bot, reg, interaction, f"Cancel {raid_name(reg, ev)}")
+    key = ev.key
+
+    async def do(i: discord.Interaction, note: str | None) -> None:
+        cur = rs.events.get(key)
+        if not cur or cur.state in ("done", "cancelled"):
+            await wiz.finish(i, "That run already closed — nothing was changed.")
+            return
+        line = await bot.cancel_run(reg, rs, cur, by=i.user.display_name, reason=note)
+        await wiz.finish(i, line)
+
+    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("cancel", reg, ev)), do=do,
+                     note={"label": "Why? (optional)", "max_length": 300, "placeholder": "shown in the channel and the run's thread"},
+                     do_label="Cancel the run", danger=True)
 
 
 # ---------------------------------------------------------------- persistent buttons
@@ -332,4 +369,4 @@ def _live(bot, reg, key: str) -> bool:
 
 # text helpers the callbacks format with; imported last so `raid_views` (which places these buttons and imports them at
 # its own bottom) always finds the classes above bound, whichever module is imported first
-from .raid_views import SUGGEST_LINES, run_label, sheet_state  # noqa: E402
+from .raid_views import SUGGEST_LINES, raid_name, run_label, sheet_state  # noqa: E402

@@ -9,7 +9,6 @@ works (the partially initialised module already has every name the other one bin
 from __future__ import annotations
 
 import os
-import re
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
@@ -19,7 +18,7 @@ from . import raidcycle as rc
 from .constants import MARK, ROLES, TEAL
 from .registry import Registry, RegistryError
 
-CLOCK12 = "%a %d %b %I:%M %p"  # plain-text stamps (thread names, autocomplete) where Discord can't render <t:…>
+from .constants import CLOCK12  # noqa: E402 — re-exported for discord_raid; plain-text stamps where Discord can't render <t:…>
 
 # How a released seat is explained to the member (drop_seated / expiry). Keys are the `why` values the callers pass.
 RELEASE_WHY = {"declined": "you said you can't make it", "callout": "you called out", "callout (test)": "you called out", "absence": "you're marked away",
@@ -37,7 +36,7 @@ def run_label(reg: Registry, ev: rc.RaidEvent, style: str = "F") -> str:
 
 def clock12(reg: Registry, t) -> str:
     """Guild-time 12-hour stamp for places Discord can't render timestamps (thread names, choice labels)."""
-    return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", reg.local(t, CLOCK12))
+    return reg.local12(t)
 
 
 def run_title(reg: Registry, ev: rc.RaidEvent) -> str:

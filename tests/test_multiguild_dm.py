@@ -40,6 +40,7 @@ class Resp:
     async def send_message(self, content=None, **kw):
         assert not self._done, "a second response to one interaction"
         self._done = True
+        self.itx._sent_id = 700_000 + len(self.itx.said)
         self.itx.said.append(content if content is not None else kw.get("embed"))
         self.itx.views.append(kw.get("view"))
 
@@ -65,6 +66,7 @@ class Itx:
         self.views: list = []
         self.edits: list = []
         self.original_edits: list = []
+        self._sent_id = None
         self.response = Resp(self)
         self.message = CardMessage("the question")
         self.type = discord.InteractionType.component
@@ -77,6 +79,9 @@ class Itx:
 
     async def edit_original_response(self, **kw):
         self.original_edits.append(kw)
+
+    async def original_response(self):
+        return types.SimpleNamespace(id=self._sent_id)
 
 
 def dm_bot(duo, members=None, flaky=None):
@@ -218,7 +223,12 @@ def test_a_sheet_join_and_an_officer_lock_land_in_their_own_guild(duo):
     bot = dm_bot(duo)
     run(SignupButton(GUILD2, ev_b.key, "in").callback(Itx(bot)))
     i = Itx(bot)
-    run(RunButton(GUILD2, ev_b.key, "lock").callback(i))
+    run(RunButton(GUILD2, ev_b.key, "lock").callback(i))  # the decide screen first (consequence · Lock now · Back): nothing locked yet
+    assert [d for d in bot.did if d[0] == "lock"] == [] and i.views[-1] is not None
+    screen = i.views[-1]
+    press = Itx(bot)
+    press.message = types.SimpleNamespace(id=screen.message_id)
+    run(next(b for b in screen.children if b.label == "Lock now").callback(press))
     assert [d for d in bot.did if d[0] in ("signup", "lock")] == [("signup", GUILD2, "in"), ("lock", GUILD2)]
 
 
@@ -527,7 +537,7 @@ def test_every_persistent_custom_id_in_the_source_carries_the_guild():
 
     src = Path(__file__).resolve().parents[1] / "src" / "oibot_gm"
     templates = re.findall(r'DynamicItem\[[^\]]+\], template=r"([^"]+)"', "\n".join(p.read_text() for p in src.glob("*.py")))
-    assert len(templates) == 9 and all(r"(?:\.(?P<g>[a-z0-9_-]{1,16}))?" in t for t in templates), templates
+    assert len(templates) == 10 and all(r"(?:\.(?P<g>[a-z0-9_-]{1,16}))?" in t for t in templates), templates  # + cfgapply (the diff Apply/Cancel)
 
 
 def test_help_in_a_dm_when_the_picker_runs_out_answers_once(duo, monkeypatch):

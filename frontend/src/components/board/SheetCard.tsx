@@ -21,7 +21,8 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
   const byClass = Object.entries(joined.reduce((m, s) => { (m[s.cls] ||= []).push(s); return m; }, {} as Record<string, Signup[]>)).sort((a, b) => b[1].length - a[1].length);
   const conf = e.confirmations || [];
   const counts = { yes: conf.filter((c) => c.answer === "yes").length, pending: conf.filter((c) => c.answer === null).length, no: conf.filter((c) => c.answer === "no" || c.answer === "expired").length };
-  const short = n ? [n.headcount ? `${n.headcount} seat${n.headcount === 1 ? "" : "s"}` : null, ...Object.entries(n.roles).map(([role, k]) => `${k} ${role}`)].filter(Boolean).join(", ") : "";
+  const shortRoles = n ? Object.entries(n.roles).filter(([, k]) => k > 0) : [];
+  const isShort = !!n && (n.headcount > 0 || shortRoles.length > 0);
   const [ask, confirmDialog] = useConfirm();
   const [fillOpen, setFillOpen] = useState(false);
   const suggestN = (e.plan?.seats || []).length;  // seats the planner works on (before lock: the tank/healer minimums)
@@ -55,13 +56,17 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
     </Menu>
   );
 
+  // the confirm sentences come from the server (`e.consequences`, consequences.py): the same words the Discord card's
+  // decide screen shows — the page never promises a DM the bot would not send (ad hoc runs ask nobody to confirm)
   async function lockNow() {
-    if (!(await ask({ title: `Lock ${name} now?`, message: "The board becomes the roster and everyone rostered gets a confirmation DM.", confirmLabel: "Lock now" }))) return;
+    if (!(await ask({ title: `Lock ${name} now?`, message: e.consequences?.lock || "The board becomes the roster.", confirmLabel: "Lock now" }))) return;
     await onAct(`lock${e.key}`, `/api/run/${e.key}/lock`);
   }
   async function cancelRun() {
-    if (!(await ask({ title: `Cancel ${name}?`, message: `The sheet closes for everyone on it${locked ? `; the ${e.rostered} rostered seat${e.rostered === 1 ? "" : "s"} and any open confirmation asks are withdrawn` : ""}. Rostered members are not told automatically — say so in the channel.`, confirmLabel: "Cancel the run", color: "red" }))) return;
-    await onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`);
+    const r = await ask({ title: `Cancel ${name}?`, message: e.consequences?.cancel || "The sheet closes.", confirmLabel: "Cancel the run", color: "red",
+      note: { label: "Why? (optional)", maxLength: 300, placeholder: "shown in the channel and the run's thread" } });
+    if (!r) return;
+    await onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason: typeof r === "object" ? r.note : "" });
   }
 
   return (
@@ -107,7 +112,16 @@ export function SheetCard({ e, meta, busy, onAct, onBoard, onReload }: { e: Shee
       <Group gap="xs" mt={8} justify="space-between" wrap="wrap">
         <Group gap="xs"><Eyebrow>Away that day</Eyebrow>{(e.absences || []).length === 0 ? <Text size="sm" c="dimmed">nobody</Text> : e.absences!.map((a) => <Text key={a.display_name} size="sm">{a.display_name}{a.reason ? <Text span c="dimmed"> ({a.reason})</Text> : null}</Text>)}</Group>
         <Group gap="xs">
-          {short ? <Badge variant="filled" color="red">short: {short}</Badge> : <Badge variant="light" color="teal">full</Badge>}
+          {/* the iconography rule: a shortfall is the word, then icon + number per role (never "2 tank"); a bare number = seats */}
+          {isShort ? (
+            <Group gap={6} wrap="nowrap">
+              <Badge variant="filled" color="red">short</Badge>
+              {n!.headcount > 0 && <Tooltip label={`${n!.headcount} seat${n!.headcount === 1 ? "" : "s"}`}><Text size="xs" fw={700} c="red" style={{ fontVariantNumeric: "tabular-nums" }}>{n!.headcount}</Text></Tooltip>}
+              {shortRoles.map(([role, k]) => (
+                <Group key={role} gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={16} title={role} /><Text size="xs" fw={700} c="red" style={{ fontVariantNumeric: "tabular-nums" }}>{k}</Text></Group>
+              ))}
+            </Group>
+          ) : <Badge variant="light" color="teal">full</Badge>}
           {!locked && (
             <Tooltip label={suggestN ? `the planner's suggestions for the tank/healer minimums (${suggestN} seat${suggestN === 1 ? "" : "s"}) — nothing is sent until you press Send` : "the tank/healer minimums are covered by who joined and the regulars yet to answer"}>
               <Button size="xs" variant={suggestN ? "light" : "default"} color={suggestN ? "yellow" : undefined} leftSection={<IconBulb size={13} />} onClick={() => setFillOpen(true)}>Suggest</Button>

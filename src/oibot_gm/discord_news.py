@@ -94,23 +94,50 @@ class ProposalButton(discord.ui.DynamicItem[discord.ui.Button], template=r"newsp
         return cls(match["g"], match["pid"], match["action"])
 
     async def callback(self, interaction: discord.Interaction):
+        """Approve / Dismiss open the ONE confirm screen (wizard.Wizard.decide, D34: Dismiss too): news.consequence,
+        then the verdict, the verdict with a note…, Back. A press that `move` would refuse (already decided, needs a
+        developer, a shared game-data edit by someone who doesn't own every guild on it) is refused here at once."""
         from .discord_registry import channel_card_guild
+        from .wizard import Wizard
 
         bot = interaction.client
         reg = channel_card_guild(interaction, self.gk)  # a channel-only card: strict, never a DM fallback
         if not reg or not await bot.is_officer_anywhere(reg, interaction.user.id):
             await interaction.response.send_message("Officers only.", ephemeral=True)
             return
-        ps = ProposalStore(bot.registries.store, reg.key)
-        by = interaction.user.display_name
+        store = bot.registries.store
+        ps = ProposalStore(store, reg.key)
         state = "approved" if self.action == "approve" else "dismissed"
-        try:
-            p = await asyncio.to_thread(ps.move, self.pid, state, by, officer=True, job=False, by_id=interaction.user.id)
-        except (ProposalError, PermissionError) as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
+        why = news.decision_refusal(store, reg, self.pid, state, interaction.user.id)
+        if why:
+            await interaction.response.send_message(why, ephemeral=True)
             return
-        await interaction.response.edit_message(embed=proposal_embed(p, bot.news_rows(reg)), view=proposal_view(p, reg.key))
-        await bot.ops.emit(reg.config, "info", f"news proposal {p.id} {state} by {by}: {p.title}")
+        p = ps.get(self.pid)
+        verb = "Approve" if state == "approved" else "Dismiss"
+        card = interaction.message  # the proposal card: edited to its new state after the write
+
+        async def guard(i: discord.Interaction) -> str | None:
+            return None if await bot.is_officer_anywhere(reg, i.user.id) else "Officers only."
+
+        wiz = Wizard(reg, interaction.user.id, title=f"{verb} proposal {p.id}", guard=guard)
+
+        async def do(i: discord.Interaction, note: str | None) -> None:
+            by = i.user.display_name
+            try:
+                moved = await asyncio.to_thread(ps.move, self.pid, state, by, officer=True, job=False, by_id=i.user.id, note=note)
+            except (ProposalError, PermissionError) as e:
+                await wiz.finish(i, str(e))
+                return
+            try:
+                if card is not None:
+                    await card.edit(embed=proposal_embed(moved, bot.news_rows(reg)), view=proposal_view(moved, reg.key))
+            except Exception as e:  # noqa: BLE001 — the decision is saved; the card is a convenience
+                log.warning("proposal card edit failed: %s", e)
+            await wiz.finish(i, f"{STATE_TEXT.get(moved.state, moved.state)} — the card is updated.")
+            await bot.ops.emit(reg.config, "info", f"news proposal {moved.id} {state} by {by}: {moved.title}" + (f" — {note}" if note else ""))
+
+        text = "\n".join(news.consequence(p, reg, state, guilds=bot.registries)) + f"\n-# {p.title[:150]}"
+        await wiz.decide(interaction, text, do=do, note={"label": "Note (optional)", "max_length": 300, "placeholder": "kept on the proposal"}, do_label=verb)
 
 
 class NewsMixin:

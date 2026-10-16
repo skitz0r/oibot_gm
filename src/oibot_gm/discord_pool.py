@@ -225,7 +225,7 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs(?:
         if not ups:
             await interaction.response.send_message("No upcoming absences.", ephemeral=True)
             return
-        await interaction.response.send_message("\n".join(f"• {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") for a in ups), view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)
+        await interaction.response.send_message("\n".join(f"• {reg.span_label(a.start, a.end)}" + (f" — {a.reason}" if a.reason else "") for a in ups), view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)  # days in words (the clock rule)
 
 
 def clear_absences_view(reg: Registry, m, absences: list) -> discord.ui.View:
@@ -258,7 +258,7 @@ def absences_card(reg: Registry) -> discord.Embed:
     e = discord.Embed(title=f"{reg.config.name} · away", colour=TEAL,
                       description="Going to miss some days? Press **I'll be away**. Sheets on those days have you as *No thanks* automatically, and if you were already rostered the seat is handed back. Reasons stay with the officers.")
     if rows:
-        e.add_field(name="Upcoming", value="\n".join(f"**{m.display_name}** · {a.start}" + (f" → {a.end}" if a.end != a.start else "") for m, a in rows[:25])[:1000], inline=False)
+        e.add_field(name="Upcoming", value="\n".join(f"**{m.display_name}** · {reg.span_label(a.start, a.end)}" for m, a in rows[:25])[:1000], inline=False)  # D28: names + days in words
     e.set_footer(text="Also: /me absent add · the Me page on the website")
     return e
 

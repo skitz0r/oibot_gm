@@ -447,7 +447,20 @@ def test_the_card_buttons_use_the_clients_decide_path(reg, monkeypatch):
     h.client.decide_application = decide
     view = discord_registry.ApplicationView(reg, NEW_ID)
     assert [b.item.custom_id for b in view.children] == [f"app.{reg.key}:accept:{NEW_ID}", f"app.{reg.key}:decline:{NEW_ID}"]
-    run(view.children[0].callback(h.card_press()))
-    assert calls == [(NEW_ID, True, "Officer", None)] and h.text == "✅ line from the client"
-    run(view.children[1].callback(h.card_press()))
-    assert isinstance(h.modal, discord_registry.DeclineModal)
+
+    async def go():
+        # Accept: the ONE decide screen (consequence from code, Accept · Accept with a note… · Back), then the client's path
+        await view.children[0].callback(h.card_press())
+        assert "registered as **Kessa Dawnfire**" in h.text and h.buttons() == ["Accept", "Accept with a note…", "Back"]
+        assert calls == [], "nothing is written before the press"
+        await h.press("Accept")
+        assert calls == [(NEW_ID, True, "Officer", None)] and h.text.endswith("✅ line from the client")
+        # Decline with a note: the note is a Form (prose), its Submit is the write — DeclineModal is retired
+        await view.children[1].callback(h.card_press())
+        assert "wasn't accepted" in h.text and h.buttons() == ["Decline", "Decline with a note…", "Back"]
+        await h.press("Decline with a note…")
+        assert h.modal is not None and not hasattr(discord_registry, "DeclineModal")
+        await h.submit(note="try again next tier")
+        assert calls[-1] == (NEW_ID, False, "Officer", "try again next tier")
+
+    run(go())
