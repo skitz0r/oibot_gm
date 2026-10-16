@@ -970,6 +970,19 @@ def test_drops_with_no_run_live_prompt_an_ad_hoc_run_once(reg, rs):
     assert not bot.dms
 
 
+def test_the_ad_hoc_prompt_goes_to_the_officer_channel_never_the_public_loot_log(reg, rs):
+    """Regression (integration item 3): the "no run is live — start an ad hoc run?" prompt is officer-only; with the
+    public loot log's channel set it still goes to the officer channel, and the log channel gets nothing."""
+    world = World()
+    bot = SurfBot(reg, rs, world)
+    log_ch = world.chan("loot-log")
+    reg.config.loot_channel_id, reg.config.loot_log = log_ch.id, True
+    held(bot, reg)
+    run(bot.loot_scheduler_step(reg))
+    assert [m for m in bot.officer_ch.sent if "no run is live" in (m.content or "")], "the officer channel has the prompt"
+    assert not log_ch.sent, "the public loot log carries award lines only"
+
+
 def test_an_award_after_the_council_ended_dms_the_officers_once(night, monkeypatch):
     n = night
     run(n.bot.end_run(n.reg, n.rs, n.ev, by="Mira"))

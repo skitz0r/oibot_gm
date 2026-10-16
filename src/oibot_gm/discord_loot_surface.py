@@ -479,16 +479,15 @@ class LootSurfaceMixin:
 
     # ------------------------------------------------------------ the scheduler's loot steps
     def _loot_prompt_channel(self, reg):
-        cfg = reg.config
-        get = getattr(self, "get_channel", None)
-        lid = getattr(cfg, "loot_channel_id", None)
-        return (get(lid) if get and lid else None) or self.officer_channel(reg, None)
+        """Where an officer-only loot prompt goes: the officer channel (roster, else ops) — never the public loot log
+        (`loot_channel_id` carries only the one award line per Confirm and the correction line, LootLogMixin)."""
+        return self.officer_channel(reg, None)
 
     async def loot_scheduler_step(self, reg) -> None:
         """Every minute, per guild: in-game awards held with no council live shortly after one ended → one DM to the
         officers with the link to correct or record them (they must act — and no ad hoc prompt when that is all that
-        waits); other companion events held while no council is live → one line in the loot channel (else the officer
-        channel) with "Start an ad hoc run…", edited once the held events went somewhere."""
+        waits); other companion events held while no council is live → one line in the officer channel (roster, else
+        ops; never the public loot log) with "Start an ad hoc run…", edited once the held events went somewhere."""
         st = self._surface()["prompts"]
         w = self.feed_waiting(reg)
         live = [s for s in self.loot_sessions(reg) if s.origin == "raid"]
