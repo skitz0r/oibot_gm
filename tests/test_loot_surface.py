@@ -1477,3 +1477,17 @@ def test_retiring_a_companion_awards_reason_never_puts_it_back_on_the_needs_a_re
     assert not n.bot.loot_reasons_pending(n.reg), "a retired reason was still given"
     with pytest.raises(ls.LootChanged, match="already gave a reason"):
         run(n.bot.set_reason(n.reg, n.s, "d1", "sneaking it back", by="Jonny"))
+
+
+def test_an_ended_council_gets_no_batch_cards_and_its_file_is_never_written_again(night):
+    """End landing between a distribute's merge and its after-write hook: the hook posts nothing into the archived
+    thread and saves no card ids (that would re-create events/<id>.json and load the council as live after a restart)."""
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    run(n.bot.end_run(n.reg, n.rs, n.ev, by="Mira"))
+    live = n.reg.store.root / GUILD / "events" / f"{n.s.id}.json"
+    sent = len(n.thread.sent)
+    run(n.bot.loot_notify(n.reg, n.s, "⚖️ 1 proposal(s)", kind="distribute"))
+    run(n.bot._loot_cards_save(n.s, {"batch:x": 1}, message="late"))
+    assert not live.exists() and len(n.thread.sent) == sent and (GUILD, n.s.id) not in ls.load_sessions(n.reg.store)

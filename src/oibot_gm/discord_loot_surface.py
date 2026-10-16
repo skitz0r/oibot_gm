@@ -144,6 +144,8 @@ class LootSurfaceMixin:
             for k in drop:
                 session.cards.pop(k, None)
             session.cards.update(update)
+            if self.events.get(session.key) is not session:
+                return  # the council ended (archived): never write its live file again — a restart would load it as live
             session.save(f"{session.guild}: loot {session.id}: {message}", touch=False)  # card ids are not activity
 
     def loot_presence(self, reg, session: LootSession) -> list[dict]:
@@ -276,6 +278,8 @@ class LootSurfaceMixin:
         errors never reach the verb (the write already happened)."""
         if session.origin != "raid":
             return await super().loot_notify(reg, session, line, kind=kind, drop_id=drop_id)
+        if self.events.get(session.key) is not session:
+            return  # ended between the write and this hook: its card is the summary; no batch cards in an archived thread
         try:
             if kind == "distribute":
                 stale = bool(line and "changed while judging" in line)

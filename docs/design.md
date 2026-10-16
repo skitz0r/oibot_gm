@@ -1463,7 +1463,9 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   its write (`flows_loot._ack_submit`: a defer as an update of the message it came from, else "thinking"; Keep open
   defers; the Tick wizard's Tick / Un-tick show `working`) — the verb's git commit, ops line and card edits can outlast
   the 3 seconds on a raid night; the outcome then edits the original response or follows up. A typed "not on the
-  roster" name is one or two letter-only words (`NAME_RE`, the box takes 49: WoW: Forever's "First Last").
+  roster" name is one or two letter-only words (`NAME_RE`, the box takes 49: WoW: Forever's "First Last"). A council
+  that ended between a verb's write and its hook gets nothing more: `loot_notify` returns, `_loot_cards_save` keeps the
+  ids in memory only (never re-creating the archived session's live file).
 - **Thread lines** (`loot_view`, persistent buttons): Give the reason + Mistake — correct… under a companion award
   against the bot's pick (L20), Wrong? Fix… under an in-game award with no proposal (L21), Correct… under a conflict,
   Distribute under a human tick (never under a companion tick while auto-distribute is on) and under the restart's
