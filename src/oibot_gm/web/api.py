@@ -158,7 +158,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise HTTPException(401, "login required")
         if officer and not v.officer:
             raise HTTPException(403, "Officers only.")
-        request.state.reg = v.reg  # the guild an unexpected error's ops line goes to (_api_errors)
+        request.state.reg, request.state.via = v.reg, v.via  # the guild and surface an unexpected error's ops line goes to (_api_errors)
         return v
 
     @app.middleware("http")
@@ -266,10 +266,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if text == GENERIC_ERROR:
             log.exception("api %s failed", request.url.path, exc_info=exc)
             try:
-                reg = getattr(getattr(request, "state", None), "reg", None)
+                state = getattr(request, "state", None)
+                reg = getattr(state, "reg", None)
                 cfg = reg.config if reg is not None else None
-                if cfg is not None:
-                    await bot.ops.emit(cfg, "error", f"[web] {request.url.path}: {type(exc).__name__}: {str(exc)[:300]}", exc=exc)
+                if cfg is not None:  # the surface tag comes from the viewer when one was resolved, so an MCP call is tagged as MCP
+                    via = getattr(state, "via", None) or ("mcp" if request.headers.get("authorization") else "web")
+                    await bot.ops.emit(cfg, "error", f"[{via}] {request.url.path}: {type(exc).__name__}: {str(exc)[:300]}", exc=exc)
             except Exception:  # noqa: BLE001 — the reply still goes out
                 log.exception("ops emit failed")
         return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)
@@ -1900,7 +1902,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         stale.add(key)  # keep the old rev: the rest of this request can't overwrite that change either
                     continue
                 except Exception as e:  # noqa: BLE001 — Discord or the solver: never a 500 after a partial apply; the caller sees what landed
-                    failed(op, await configops.report_error(bot.ops, v.reg.config, e, f"[web] plain change {op.op}"))
+                    failed(op, await configops.report_error(bot.ops, v.reg.config, e, f"[{v.via}] plain change {op.op}"))
                     continue
                 configops.refresh_revs(v.reg, revs, raids, stale, before)  # this request's own write is not someone else's change
                 out["applied"].append(line)  # apply_async(via=) wrote the audit line

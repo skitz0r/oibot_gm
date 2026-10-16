@@ -453,7 +453,7 @@ def test_a_press_after_a_restart_says_so_instead_of_interaction_failed(reg):
     # a live token dispatches to the view: Cancel claims the diff
     view = discord_policy.ConfigConfirmView(reg, ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", value="off")]), None, None, OWNER, "Owner", None)
 
-    async def plain_identity(reg_, user):
+    async def plain_identity(reg_, user, *, max_age=None):  # the real one takes max_age: a press re-resolves live (PRIV_LIVE)
         return True, []
     client = SimpleNamespace(plain_identity=plain_identity, in_guild=None)
     itx2 = SimpleNamespace(response=Resp(), user=officer_user(), client=client)
