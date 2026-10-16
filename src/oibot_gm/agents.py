@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from .registry import CLOCK12
+from .constants import fmt12
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "out" / "agents"
@@ -63,7 +63,7 @@ def clock12(value, tz=None) -> str:
     t = aware(value)
     if t is None:
         return ""
-    return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", t.astimezone(tz).strftime(CLOCK12))
+    return fmt12(t.astimezone(tz))
 
 
 # ---------------------------------------------------------------- status files

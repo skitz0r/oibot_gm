@@ -437,20 +437,53 @@ async def decide_application(interaction: discord.Interaction, reg: Registry, di
     await interaction.followup.send(verdict, ephemeral=True)
 
 
-class DeclineModal(discord.ui.Modal, title="Decline application"):
-    note = discord.ui.TextInput(label="Note to the applicant (optional)", style=discord.TextStyle.paragraph, required=False, max_length=400)
+def application_consequence(reg: Registry, a, accept: bool) -> list[str]:
+    """What Accept / Decline does to the applicant, from code (dual interfaces §2.3) — the `decide` screen's text. The
+    DM is one they are waiting on (the DM rule); a note typed on the screen rides along with it."""
+    if accept:
+        return [f"{a.display_name} is registered as **{a.label}** ({a.cls} {a.spec}), rank trial, confirmed, and gets a DM with the decision (your note included).",
+                "The review card shows it decided."]
+    return [f"{a.display_name} gets a DM that the application for **{a.label}** wasn't accepted this time (your note included); they keep the server and can apply again.",
+            "The review card shows it decided."]
 
-    def __init__(self, reg: Registry, discord_id: int):
-        super().__init__()
-        self.reg, self.discord_id = reg, discord_id
 
-    async def on_submit(self, interaction: discord.Interaction):
-        await decide_application(interaction, self.reg, self.discord_id, False, str(self.note.value))
+async def application_decide(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool) -> None:
+    """The ONE confirm screen for an application decision (wizard.Wizard.decide): the consequence, then Accept /
+    Accept with a note… / Back (Decline likewise — the note is the old DeclineModal's box, now on both verdicts). The
+    write is `decide_application` → the client's decide path; the officer check is re-run at every press."""
+    from .wizard import Wizard
+
+    a = reg.applicants.get(discord_id)
+    if not a or a.status != "open":
+        await interaction.response.send_message("That application is already decided." if a else "No open application for them.", ephemeral=True)
+        return
+    verb = "Accept" if accept else "Decline"
+
+    async def guard(i: discord.Interaction) -> str | None:
+        return None if is_officer(i, reg) else "Officers only."
+
+    wiz = Wizard(reg, interaction.user.id, title=f"{verb} {a.display_name}'s application", guard=guard)
+
+    async def do(i: discord.Interaction, note: str | None) -> None:
+        client = i.client
+        try:
+            if hasattr(client, "decide_application"):
+                verdict = await client.decide_application(reg, discord_id, accept, i.user.display_name, note)
+            else:
+                verdict = await settle_application(client, reg, discord_id, accept, i.user.display_name, note)
+        except RegistryError as e:
+            await wiz.finish(i, f"❌ {e}")
+            return
+        await wiz.finish(i, verdict)
+
+    await wiz.decide(interaction, "\n".join(application_consequence(reg, a, accept)), do=do,
+                     note={"label": "Note to the applicant (optional)", "max_length": 400, "placeholder": "goes into their DM"}, do_label=verb, danger=not accept)
 
 
 class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"app(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>accept|decline):(?P<uid>[0-9]{1,20})"):
     """Accept / Decline… on a review card; persistent, so a card posted before a restart still works. The id carries
-    the guild (`app.<gk>:…`); a card only works in its own server either way (an old id: that server's guild)."""
+    the guild (`app.<gk>:…`); a card only works in its own server either way (an old id: that server's guild). Both
+    open the same `decide` screen (consequence · verdict · verdict with a note… · Back) — DeclineModal is retired."""
 
     def __init__(self, action: str, discord_id: int, gk: str | None):
         label, style = ("Accept", discord.ButtonStyle.success) if action == "accept" else ("Decline…", discord.ButtonStyle.secondary)
@@ -466,10 +499,7 @@ class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"ap
         if not reg or not is_officer(interaction, reg):
             await interaction.response.send_message("Officers only.", ephemeral=True)
             return
-        if self.action == "accept":
-            await decide_application(interaction, reg, self.discord_id, True, None)
-        else:
-            await interaction.response.send_modal(DeclineModal(reg, self.discord_id))
+        await application_decide(interaction, reg, self.discord_id, self.action == "accept")
 
 
 class ApplicationView(discord.ui.View):
@@ -579,20 +609,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await FLOWS["register"](interaction, reg, slot="alt", plan_only=True)
 
     @plan.command(name="roles", description="Extra roles your main can play besides its spec (flex); or tell the bot, per character")
-    @app_commands.choices(primary=ROLE_CHOICES, flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
-    async def plan_roles(interaction: discord.Interaction, primary: app_commands.Choice[str], flex1: app_commands.Choice[str] | None = None, flex2: app_commands.Choice[str] | None = None, flex3: app_commands.Choice[str] | None = None):
+    @app_commands.choices(flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
+    @app_commands.describe(flex1="a role your main can also play", flex2="another", flex3="another")
+    async def plan_roles(interaction: discord.Interaction, flex1: app_commands.Choice[str] | None = None, flex2: app_commands.Choice[str] | None = None, flex3: app_commands.Choice[str] | None = None):
+        # no `primary` argument: the primary role follows the main's spec and was discarded (the wizard rule — never ask
+        # for a value the command won't use); the flex roles are fixed Choices, a widget Discord renders itself
         reg, interaction = await need(interaction)
         if not reg:
             return
         flex = [f.value for f in (flex1, flex2, flex3) if f]
         try:
-            m = reg.set_roles(interaction.user.id, interaction.user.display_name, primary.value, flex)
+            m = reg.set_roles(interaction.user.id, interaction.user.display_name, "", flex)
         except RegistryError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        main_role, flex_now = reg.roles_of(m)  # primary always follows the main's spec; the rest is flex on the main
-        await interaction.response.send_message(f"✅ Roles: **{main_role or primary.value}**" + (f", also {', '.join(flex_now)}" if flex_now else ""), ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} roles: {main_role or primary.value}" + (f" (+{', '.join(flex_now)})" if flex_now else ""))
+        main_role, flex_now = reg.roles_of(m)  # the primary follows the main's spec; the rest is flex on the main
+        await interaction.response.send_message(f"✅ Roles: **{main_role or '?'}**" + (f", also {', '.join(flex_now)}" if flex_now else " — no flex roles"), ephemeral=True)
+        await ops.emit(reg.config, "info", f"{m.display_name} roles: {main_role or '?'}" + (f" (+{', '.join(flex_now)})" if flex_now else ""))
 
 
     # ---------------- /char
@@ -797,7 +830,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 need_min = bounds.get(r, {}).get("min", 0)
                 flex = s["flex"].get(r, [])
                 mark = "🟢" if not need_min or have >= need_min else ("🟡" if have + len(flex) >= need_min else "🔴")
-                role_lines.append(f"{mark} {ico('role', r)} {r}: **{have}**" + (f" / need {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
+                # the iconography rule: the role icon stands alone — icon + number (have / need), then who could flex into it
+                role_lines.append(f"{mark} {ico('role', r)} **{have}**" + (f" / {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
             name = reg.raid_def(rid).get("name", rid) if rid else "a raid"
             e.add_field(name=f"Roles vs {name} ({n})", value="\n".join(role_lines), inline=True)
         n, rid = sized[0]
@@ -806,11 +840,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         missing = [b for b, who in s["providers"].items() if not who]
         thin = [(b, who[0]) for b, who in s["providers"].items() if len(who) == 1]
         if missing or thin:
-            val = ""
+            val = ""  # icons only (the iconography rule): the buff icon carries the name; a provider's name is a member, not a label
             if missing:
-                val += "Nobody: " + " ".join(f"{ico('buff', ids.get(b, ''))}" for b in missing) + "\n" + ", ".join(missing) + "\n"
+                val += "Nobody: " + " ".join(ico('buff', ids.get(b, '')) or b for b in missing) + "\n"  # the name only stands in for a missing emoji
             if thin:
-                val += "Only one: " + ", ".join(f"{ico('buff', ids.get(b, ''))} {b} ({who})" for b, who in thin)
+                val += "Only one: " + " · ".join(f"{ico('buff', ids.get(b, '')) or b} {who}" for b, who in thin)
             e.add_field(name="Buff coverage", value=val[:1000], inline=False)
         from . import raidcycle as rc
 
@@ -852,18 +886,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         await FLOWS["roster_members"](interaction, reg)
 
-    @roster.command(name="absences", description="Upcoming absences across the guild (with reasons)")
-    @app_commands.describe(days="How far ahead to look (default 30)")
-    async def roster_absences(interaction: discord.Interaction, days: int = 30):
+    @roster.command(name="absences", description="Upcoming absences across the guild (with reasons): pick how far ahead")
+    async def roster_absences(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
-        if not reg:
-            return
-        from datetime import timedelta
-
-        today = reg.now_local().date()
-        rows = reg.absences_between(today.isoformat(), (today + timedelta(days=days)).isoformat())
-        lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {a.start}" + (f" → {a.end}" if a.end != a.start else "") + (f" — {a.reason}" if a.reason else "") + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
-        await interaction.response.send_message("\n".join(lines)[:1900] or f"No absences in the next {days} days.", ephemeral=True)
+        if reg:  # the horizon is a preset select (the wizard rule), the days read as words (the clock rule)
+            await FLOWS["roster_absences"](interaction, reg)
 
     @roster.command(name="absent", description="Record an absence on a member's behalf: pick the days, no typing")
     @app_commands.describe(member="who is away")
@@ -1111,9 +1138,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not is_officer(interaction, reg):
             await interaction.response.send_message("Officers only.", ephemeral=True)
             return
-        import yaml as _y
+        from .configops import config_summary  # words, mentions and 12-hour times — never the raw YAML (the clock rule)
 
-        await interaction.response.send_message("```yaml\n" + _y.safe_dump(reg.config.model_dump(), sort_keys=False)[:1800] + "\n```", ephemeral=True)
+        await interaction.response.send_message("\n".join(config_summary(reg))[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     async def roster_regcard(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
@@ -1175,12 +1202,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
     @test.command(name="clear", description="Officer: end the test — cancel test runs, remove every test member and their placements")
     async def test_clear(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
-        if not reg:
-            return
-        await interaction.response.defer(ephemeral=True)
-        line = await interaction.client.test_bench_clear(reg, interaction.user.display_name)
-        await interaction.followup.send(f"🧪 {line}", ephemeral=True)
-        await ops.emit(reg.config, "warn", f"test bench: {line} (by {interaction.user.display_name})")
+        if reg:  # the decide screen (consequence · Clear the test bench · Back), then SetupMixin.test_bench_clear
+            await FLOWS["test_clear"](interaction, reg)
 
     tree.add_command(gm)
     # exported for other command modules

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import discord
 from discord import app_commands
@@ -15,6 +16,8 @@ from .wizard_flows import FLOWS
 
 from .constants import TEAL  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 
 class PolicyContext:
     def __init__(self, guilds: Guilds):
@@ -25,18 +28,112 @@ class PolicyContext:
         return self.stores.setdefault(reg.key, policy_mod.PolicyStore(self.guilds.store, reg.key))
 
 
+# ---------------------------------------------------------------- pending confirms that survive a restart gracefully (§2.9)
+
+EXPIRED = "Expired — say it again."
+EXPIRED_RESTART = "Expired after a restart — nothing was changed. Say it again."
+PENDING_CONFIRMS: dict[str, "PendingView"] = {}  # token -> the live diff / reading; process memory by design (a restart forgets them)
+PENDING_KEEP = 50  # finished entries kept so a late press on an applied diff still answers "each change applies once"
+
+
+class CfgApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"cfgapply(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<token>[A-Za-z0-9_-]{8,32}):(?P<action>apply|cancel|confirm|discard)"):
+    """Apply / Cancel under a plain-text diff and Confirm / Discard under a policy reading, as persistent ids: the press
+    resolves its token to the pending view in this process (`PendingView.press`), and a press after a restart — when
+    the token is gone — edits the message to EXPIRED_RESTART instead of Discord's bare "interaction failed"."""
+    LABELS = {"apply": ("Apply", discord.ButtonStyle.success), "cancel": ("Cancel", discord.ButtonStyle.secondary),
+              "confirm": ("Confirm this reading", discord.ButtonStyle.success), "discard": ("Discard edit", discord.ButtonStyle.secondary)}
+
+    def __init__(self, gk: str | None, token: str, action: str):
+        label, style = self.LABELS[action]
+        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"cfgapply{'.' + gk if gk else ''}:{token}:{action}"))
+        self.gk, self.token, self.action = gk, token, action
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match, /):
+        return cls(match["g"], match["token"], match["action"])
+
+    async def callback(self, interaction: discord.Interaction):
+        view = PENDING_CONFIRMS.get(self.token)
+        if view is None:
+            try:
+                await interaction.response.edit_message(content=EXPIRED_RESTART, embed=None, view=None)
+            except discord.HTTPException:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(EXPIRED_RESTART, ephemeral=True)
+            return
+        await view.press(interaction, self.action)
+
+
+class PendingView(discord.ui.View):
+    """A View whose buttons are CfgApplyButtons bound to this instance by a token. `bind(editor)` gives it the way to
+    edit its own message (a Message.edit, a WebhookMessage.edit or edit_original_response) so `on_timeout` can turn
+    the buttons into EXPIRED; `press(interaction, action)` dispatches to `press_<action>`."""
+
+    ACTIONS: tuple[str, ...] = ()
+
+    def __init__(self, reg: Registry, timeout: float):
+        super().__init__(timeout=timeout)
+        import secrets
+
+        self.reg = reg
+        self.token = secrets.token_urlsafe(12)
+        self.editor = None
+        for a in self.ACTIONS:
+            item = CfgApplyButton(reg.key, self.token, a)
+            self.add_item(item)
+            setattr(self, a, item)  # view.apply.callback(interaction) is how a press reaches it (and how tests drive it)
+        _register(self)
+
+    def bind(self, sent) -> "PendingView":
+        """Remember how to edit the message this view went out on: `sent` is what `send` returned (a Message or
+        WebhookMessage with .edit, an InteractionCallbackResponse with .resource), or an edit coroutine function."""
+        edit = sent if callable(sent) and not hasattr(sent, "edit") else getattr(sent, "edit", None) or getattr(getattr(sent, "resource", None), "edit", None)
+        self.editor = edit
+        return self
+
+    async def expire(self, text: str = EXPIRED) -> None:
+        """Buttons off, the text says to say it again. Called by on_timeout; safe to call twice."""
+        PENDING_CONFIRMS.pop(self.token, None)
+        if self.editor is None:
+            return
+        try:
+            await self.editor(content=text, embed=None, view=None)
+        except Exception as e:  # noqa: BLE001 — the message may be gone; nothing was changed either way
+            log.debug("confirm view expiry edit failed: %s", e)
+        self.editor = None
+
+    async def on_timeout(self) -> None:
+        await self.expire(EXPIRED)
+
+    async def press(self, interaction: discord.Interaction, action: str) -> None:
+        if action not in self.ACTIONS:
+            await interaction.response.send_message(EXPIRED, ephemeral=True)
+            return
+        await getattr(self, f"press_{action}")(interaction)
+
+
+def _register(view: PendingView) -> None:
+    PENDING_CONFIRMS[view.token] = view
+    done = [t for t, v in PENDING_CONFIRMS.items() if v.is_finished()]
+    for t in done[:-PENDING_KEEP] if len(done) > PENDING_KEEP else []:
+        PENDING_CONFIRMS.pop(t, None)
+
+
 # ---------------------------------------------------------------- compile-and-confirm
 
-class CompileConfirmView(discord.ui.View):
+class CompileConfirmView(PendingView):
     """Confirm / Discard under the bot's reading of a policy edit. Every Discord policy edit is the one pending edit
     in policy.PENDING (begin_edit / compile_pending — the site, MCP and plain text share it). `text` is the exact
     text the reading was compiled from: both buttons refuse once the document no longer reads that way (someone
     edited it since — this reading is stale); `previous` is the text before the edit, Discard's fallback when the
-    pending entry is gone."""
+    pending entry is gone. The buttons are CfgApplyButtons (a press after a restart says so; a timeout says
+    EXPIRED)."""
+
+    ACTIONS = ("confirm", "discard")
 
     def __init__(self, ps: policy_mod.PolicyStore, doc: str, compiled, previous: str, ops: Ops, reg: Registry, text: str | None = None):
-        super().__init__(timeout=900)
-        self.ps, self.doc, self.compiled, self.previous, self.ops, self.reg = ps, doc, compiled, previous, ops, reg
+        super().__init__(reg, timeout=900)
+        self.ps, self.doc, self.compiled, self.previous, self.ops = ps, doc, compiled, previous, ops
         self.text = text if text is not None else ps.read(doc)
 
     async def _stale(self, interaction: discord.Interaction) -> bool:
@@ -47,8 +144,7 @@ class CompileConfirmView(discord.ui.View):
         self.stop()
         return True
 
-    @discord.ui.button(label="Confirm this reading", style=discord.ButtonStyle.success)
-    async def confirm(self, interaction: discord.Interaction, _: discord.ui.Button):
+    async def press_confirm(self, interaction: discord.Interaction):
         if await self._stale(interaction):
             return
         self.ps.confirm(self.doc, self.compiled, interaction.user.display_name)
@@ -57,8 +153,7 @@ class CompileConfirmView(discord.ui.View):
         await self.ops.emit(self.reg.config, "info", f"{interaction.user.display_name} confirmed the compiled {self.doc} policy ({configops.compiled_count(self.compiled)} items)")
         self.stop()
 
-    @discord.ui.button(label="Discard edit", style=discord.ButtonStyle.secondary)
-    async def discard(self, interaction: discord.Interaction, _: discord.ui.Button):
+    async def press_discard(self, interaction: discord.Interaction):
         if await self._stale(interaction):
             return
         held = policy_mod.PENDING.pop((self.ps.key, self.doc), None)
@@ -75,7 +170,10 @@ async def send_compiled(send, reg: Registry, ps: policy_mod.PolicyStore, doc: st
     `text`: what the reading was compiled from (the view refuses once the document differs)."""
     e = discord.Embed(title=f"My reading of the {doc} policy", colour=TEAL, description=policy_mod.render_compiled(doc, compiled)[:4000])
     e.set_footer(text="Confirm to make this the live compiled form; Discard restores the previous text. Questions above need an edit, not a guess.")
-    return await send(embed=e, view=CompileConfirmView(ps, doc, compiled, previous, ops, reg, text=text), **kw)
+    view = CompileConfirmView(ps, doc, compiled, previous, ops, reg, text=text)
+    sent = await send(embed=e, view=view, **kw)
+    view.bind(sent)
+    return sent
 
 
 async def compile_and_confirm(interaction: discord.Interaction, reg: Registry, ps: policy_mod.PolicyStore, doc: str, provider, ops: Ops, followup: bool = False):
@@ -136,17 +234,21 @@ async def left_server(bot, reg: Registry, user) -> bool:
     return check is not None and not reg.is_owner_id(user.id) and not await check(reg, user)
 
 
-class ConfigConfirmView(discord.ui.View):
+class ConfigConfirmView(PendingView):
     """Apply / Cancel under a plain-text diff. The requester or an officer may press; the presser's rights decide
     (the ops are authorized again for them, in the channel the request was made in). `revs`: the board fingerprint of
     each run a board op touches, as the diff showed it (configops.board_revs) — Apply refuses a board changed since.
     Single-flight: the first Apply claims the view before anything awaits (buttons gone, "Applying…"); a second press
-    (a double click, another officer) and a Cancel mid-apply are refused, so nothing is applied twice."""
+    (a double click, another officer) and a Cancel mid-apply are refused, so nothing is applied twice. The buttons are
+    CfgApplyButtons (`cfgapply.<gk>:<token>:apply|cancel`): a timeout edits the diff to EXPIRED, a press after a
+    restart answers EXPIRED_RESTART — never Discord's "interaction failed"."""
+
+    ACTIONS = ("apply", "cancel")
 
     def __init__(self, reg: Registry, req: configops.ConfigRequest, ps: policy_mod.PolicyStore, ops: Ops, requester_id: int, requester: str, channel,
                  revs: dict[str, str] | None = None):
-        super().__init__(timeout=600)
-        self.reg, self.req, self.ps, self.ops = reg, req, ps, ops
+        super().__init__(reg, timeout=600)
+        self.req, self.ps, self.ops = req, ps, ops
         self.requester_id, self.requester, self.channel = requester_id, requester, channel
         self.revs = dict(revs or {})
         self.busy = False  # set by the first Apply, never cleared: this diff applies once
@@ -161,8 +263,8 @@ class ConfigConfirmView(discord.ui.View):
             return None
         return officer, role_ids
 
-    @discord.ui.button(label="Apply", style=discord.ButtonStyle.success)
-    async def apply(self, interaction: discord.Interaction, _: discord.ui.Button):
+
+    async def press_apply(self, interaction: discord.Interaction):
         who = await self._may_press(interaction)
         if who is None:
             return
@@ -216,8 +318,8 @@ class ConfigConfirmView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, _: discord.ui.Button):
+
+    async def press_cancel(self, interaction: discord.Interaction):
         if await self._may_press(interaction) is None:
             return
         if self.busy:
@@ -299,8 +401,11 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if any(op.op in configops.RUN_OPS or op.op == "test" for op in allowed):
         e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
     revs = configops.board_revs(reg, allowed, raids)  # the boards as this diff shows them
-    view = apply_button(ConfigConfirmView(reg, req, ps, ops, author.id, name, channel, revs=revs))
-    await send(req.reply[:500] if req.reply else None, embed=e, view=view, ephemeral=True)
+    confirm = ConfigConfirmView(reg, req, ps, ops, author.id, name, channel, revs=revs)
+    view = apply_button(confirm)
+    sent = await send(req.reply[:500] if req.reply else None, embed=e, view=view, ephemeral=True)
+    # how the view edits its own message when it expires (EXPIRED): the reply Message, or the interaction's original response
+    confirm.bind(sent if is_msg else getattr(interaction_or_message, "edit_original_response", None))
 
 
 def preview_line(reg: Registry, op: configops.ConfigOp, channel=configops._UNSET) -> str:

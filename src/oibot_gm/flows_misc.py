@@ -385,3 +385,43 @@ async def open_rule(interaction: discord.Interaction, reg: Registry, *, doc: str
 
 __all__ = ["TEMPOS", "TestRunWizard", "TestAnswerWizard", "TestSeedWizard", "RuleWizard", "seed_opts", "policy_tail", "as_bullet",
            "open_test_run", "open_test_answer", "open_test_seed", "open_rule"]
+
+
+# ---------------------------------------------------------------- /gm test clear
+
+def test_clear_consequence(reg: Registry, rs) -> list[str]:
+    """What clearing the test bench does, from the state (dual interfaces §2.3): the `decide` screen's text, and the
+    site's Delete-all confirm reads the same numbers."""
+    from . import raidcycle as rc
+
+    puppets = len(reg.test_members())
+    runs = [ev for ev in rs.live() if rc.is_test_run(reg, ev)]
+    if not puppets and not runs:
+        return ["Nothing to clear — no test members and no test runs."]
+    parts = []
+    if runs:
+        parts.append(f"cancels {len(runs)} test run{'s' if len(runs) != 1 else ''}")
+    if puppets:
+        parts.append(f"removes {puppets} test member{'s' if puppets != 1 else ''} and their placements")
+    return ["This " + " and ".join(parts) + ".", "Real members and their answers are untouched; the analytics cards go back to the real pool."]
+
+
+@flow("test_clear")
+async def open_test_clear(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """/gm test clear: the consequence, then Clear the test bench / Back — the same screen every destructive verb gets
+    (wizard.Wizard.decide). The write is SetupMixin.test_bench_clear, as the site's Delete all and plain text use."""
+    if await _refuse_non_officer(interaction, reg):
+        return
+    rs = interaction.client.raids.store(reg)
+    lines = test_clear_consequence(reg, rs)
+    if lines[0].startswith("Nothing to clear"):
+        await interaction.response.send_message(lines[0], ephemeral=True)
+        return
+    wiz = Wizard(reg, interaction.user.id, title="Clear the test bench", guard=_officer_guard(reg))
+
+    async def do(i: discord.Interaction, _note: str | None) -> None:
+        line = await i.client.test_bench_clear(reg, i.user.display_name)
+        await wiz.finish(i, f"🧪 {line}")
+        await _ops(i, reg, "warn", f"test bench: {line} (by {i.user.display_name})")
+
+    await wiz.decide(interaction, "\n".join(lines), do=do, do_label="Clear the test bench", danger=True)

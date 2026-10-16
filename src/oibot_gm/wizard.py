@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from .registry import MAX_ABSENCE_DAYS, Registry, RegistryError
+from .registry import CLOCK12, MAX_ABSENCE_DAYS, Registry, RegistryError
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +103,9 @@ class Form(discord.ui.Modal):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         log.exception("wizard form failed", exc_info=error)
-        text = f"❌ {error}" if isinstance(error, RegistryError) else "❌ Something went wrong; nothing was changed."
+        from .configops import user_error
+
+        text = f"❌ {user_error(error)}"
         if interaction.response.is_done():
             await interaction.followup.send(text, ephemeral=True)
         else:
@@ -202,7 +204,9 @@ class Wizard(discord.ui.View):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
         log.exception("wizard %s failed", self.title, exc_info=error)
-        text = f"❌ {error}" if isinstance(error, RegistryError) else "❌ Something went wrong; nothing was changed. Run the command again."
+        from .configops import user_error
+
+        text = f"❌ {user_error(error)}"
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(text, ephemeral=True)
@@ -243,6 +247,50 @@ class Wizard(discord.ui.View):
         self._last = interaction
         await interaction.response.send_modal(form)
 
+    # ---- the ONE confirm screen (dual interfaces §2.3)
+    async def decide(self, interaction: discord.Interaction, text: str, *, do: Callable[[discord.Interaction, str | None], Awaitable[None]],
+                     note: Field | dict | None = None, do_label: str = "Do it", danger: bool = False, back_label: str = "Back") -> None:
+        """The consequence, then `[Do it]` `[Do it with a note…]` `[Back]`. `text` is the consequence sentence(s) from
+        code (consequences.consequence, news.consequence) — never composed here. `do(interaction, note)` is the write:
+        this screen has already acknowledged the press (`working`) before calling it, so `do` may run a solver or a DM
+        fan-out and ends with `finish` (or `refuse`). `note`: a Field (prose only — a TextInput never parses) or
+        {label, max_length, description}: the note button opens a one-field Form whose Submit IS the write (a modal is
+        the only place a text box lives). Owner-only presses and the guard are re-checked on every press (the View's
+        interaction_check) and again on the note's submit (a Modal has no interaction_check)."""
+        field = note if isinstance(note, Field) else (Field("note", str(note.get("label") or "Note"), required=False, paragraph=True,
+                                                            max_length=int(note.get("max_length") or 400), description=note.get("description"),
+                                                            placeholder=note.get("placeholder")) if note else None)
+        style = discord.ButtonStyle.danger if danger else discord.ButtonStyle.success
+
+        async def run(i: discord.Interaction, value: str | None) -> None:
+            await self.working(i)
+            await do(i, (value or "").strip() or None)
+
+        async def plain(i: discord.Interaction) -> None:
+            await run(i, None)
+
+        async def submitted(si: discord.Interaction, values: dict[str, str]) -> None:
+            if si.user.id != self.owner_id:
+                await si.response.send_message("This belongs to someone else's wizard.", ephemeral=True)
+                return
+            why = await self.guard(si) if self.guard else None
+            if why:
+                await self.finish(si, why)
+                return
+            await run(si, values.get(field.key) if field else None)
+
+        async def with_note(i: discord.Interaction) -> None:
+            await self.open_form(i, Form(f"{self.title}: a note"[:MAX_TITLE], [field], submitted))
+
+        async def back(i: discord.Interaction) -> None:
+            await self.finish(i, "Nothing was changed.")
+
+        items = [self.button(do_label, plain, style)]
+        if field is not None:
+            items.append(self.button(f"{do_label} with a note…", with_note, discord.ButtonStyle.secondary))
+        items.append(self.button(back_label, back, discord.ButtonStyle.secondary))
+        await self.show(interaction, text, *items)
+
 
 # ---------------------------------------------------------------- dates and times (never typed)
 
@@ -268,7 +316,17 @@ def when_note(note: str, dt: datetime) -> str:
 
 
 def clock12(dt: datetime) -> str:
+    """The time of day alone ('7:30 PM'), for a line that already names the day."""
     return f"{dt.hour % 12 or 12}:{dt.minute:02d} {'AM' if dt.hour < 12 else 'PM'}"
+
+
+def fmt12(dt: datetime, fmt: str = CLOCK12) -> str:
+    """THE 12-hour formatter for a datetime in its OWN zone ('Tue 22 Sep 7:30 PM', leading zero stripped) — the one
+    implementation behind every place that is not `Registry.local12` (which converts to the guild zone first):
+    raid_views.clock12, flows_config.fmt12, agents.clock12. Never `%H:%M` where a person reads."""
+    from .constants import fmt12 as _fmt12
+
+    return _fmt12(dt, fmt)
 
 
 def day_opts(reg: Registry, start: date, n: int = MAX_OPTIONS, *, default: date | None = None, note: Callable[[date], str | None] | None = None,
@@ -403,5 +461,5 @@ def flow(name: str) -> Callable[[Flow], Flow]:
     return deco
 
 
-__all__ = ["Opt", "Field", "Form", "Wizard", "FLOWS", "flow", "resolve_local", "when_note", "clock12", "day_opts", "week_opts", "hour_opts",
+__all__ = ["Opt", "Field", "Form", "Wizard", "FLOWS", "flow", "resolve_local", "when_note", "clock12", "fmt12", "day_opts", "week_opts", "hour_opts",
            "minute_opts", "duration_opts", "span_end", "when_fields", "combine_when", "both_clocks", "lint", "DURATIONS", "Flow"]

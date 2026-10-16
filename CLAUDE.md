@@ -35,7 +35,8 @@ profiles/forever/      Classic-era buff matrix: `slot` = one totem per element p
                        `families:` = stacking families with the beneficiary map (buffs point at one; guild overrides in guild.yaml buffs/families → Registry.profile)
 fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg, gitignored): REAL (BisCouncil ledger, WCL attendance/roster) + MOCK (tiers, wishlists, policy, ranks)
 src/oibot_gm/
-  constants.py         ROLES / MARK / LEVEL_COLOUR / TEAL shared by Discord, web and render (no per-module copies)
+  constants.py         ROLES / MARK / LEVEL_COLOUR / TEAL shared by Discord, web and render (no per-module copies); CLOCK12 + fmt12 = the one 12-hour formatter behind every clock that is not Registry.local12
+  consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release: the ONE confirm sentence from code (design §5.33); ev_json.consequences carries it to the site, wizard.decide shows it in Discord
   presets.py           shared presets: raid cadence PRESETS (standard/short/same_week), test-run TEMPOS; used by the wizards, plain text and the web
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
@@ -105,7 +106,7 @@ src/oibot_gm/
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
                        @mentions and DMs routed by intent under the plain-text policy)
-  wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms
+  wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms; Wizard.decide = THE confirm screen (consequence · Do it · Do it with a note… · Back; guard re-run on every press)
                        (a select inside ui.Label, or a TextInput only for prose), owner-only presses + a guard re-checked on
                        every press, FLOWS registry (@flow), no-typing dates/times (day/hour/minute selects, 12-hour,
                        resolve_local = DST-safe), lint() = what the Discord API would refuse, checked offline
@@ -117,7 +118,8 @@ src/oibot_gm/
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id; schedule_set field = <schedule id>.<setting>), describe() diff,
                        apply() via the same code paths as commands, apply_async(bot=) for card-posting channels and announced absences; request text in <request>;
                        OP_GROUP (every op in one capability group), bind_self (own-record scope decided in code, never by the model),
-                       authorize → Registry.may_plain; confirm_for (an officer records a member's Confirm/Can't through answer_placement_for)
+                       authorize → Registry.may_plain; confirm_for (an officer records a member's Confirm/Can't through answer_placement_for);
+                       user_error/report_error = THE refusal wording (§2.7); BY_DESIGN_EXEMPT / PARITY_PENDING / BY_DESIGN_ONLY (single-surface features, with their path) = the parity matrix's exemptions (tests/test_parity_matrix.py); config_summary = /gm config show in words
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr
   mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
                        that call the RUNNING bot's /api/* over HTTP as the OWNER OF THE CHOSEN GUILD (every tool's optional `guild` = key or name,

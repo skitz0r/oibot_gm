@@ -26,9 +26,9 @@ from zoneinfo import ZoneInfo, available_timezones
 import discord
 
 from .presets import PRESETS  # (key, name, opens, nudge, lock, confirm), shared with plain text
-from .registry import (ADHOC_DEFAULTS, CLOCK12, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
+from .registry import (ADHOC_DEFAULTS, DEFAULT_RAID_SIZE, DEFAULT_SCHEDULE, DEFAULT_SCHEDULE_NAME, MAX_SCHEDULE_ROSTERS, RAID_WEIGHT_DEFAULTS, SPLIT_POLICIES, Registry,
                        RegistryError, parse_slots, schedule_def_of, schedule_value, schedules_of)
-from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, hour_opts, minute_opts, week_opts, when_fields, when_note
+from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, fmt12, hour_opts, minute_opts, week_opts, when_fields, when_note
 
 # ---------------------------------------------------------------- shared pieces
 
@@ -69,9 +69,6 @@ async def _owner_or_refuse(i: discord.Interaction, reg: Registry) -> bool:
     return False
 
 
-def fmt12(dt: datetime) -> str:
-    """A datetime in ITS OWN zone, 12-hour (Registry.local12 always converts to the guild zone)."""
-    return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", dt.strftime(CLOCK12))
 
 
 def num(x) -> str:

@@ -54,7 +54,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
   const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to });
 
   async function clear() {
-    if (placed > 0 && !(await ask({ title: "Clear the board?", message: `${placed} placement${placed === 1 ? "" : "s"} go back to the bank. Nobody is told — nothing has been sent before lock.`, confirmLabel: "Clear", color: "red" }))) return;
+    if (placed > 0 && !(await ask({ title: "Clear the board?", message: e.consequences?.clear || `${placed} placement${placed === 1 ? "" : "s"} go back to the bank.`, confirmLabel: "Clear", color: "red" }))) return;  // the sentence comes from the server (consequences.py)
     commit(board.rosters.map((r) => r.groups.map(() => [])));
   }
 
@@ -65,7 +65,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
     if (d.from) L[d.from.r][d.from.g] = L[d.from.r][d.from.g].filter((n) => n !== d.name);
     if (target === "bank") {
       if (!d.from) return;
-      if (locked && !(await ask({ title: `Take ${d.name} off the roster?`, message: `${d.name} is told their seat was released and the bench is asked to fill it.`, confirmLabel: "Release the seat", color: "red" }))) return;
+      if (locked && !(await ask({ title: `Take ${d.name} off the roster?`, message: e.consequences?.release || `${d.name} is told their seat was released and the bench is asked to fill it.`, confirmLabel: "Release the seat", color: "red" }))) return;
       move(d.name, null); return;
     }
     const g = L[target.r][target.g];

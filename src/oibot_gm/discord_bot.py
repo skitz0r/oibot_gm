@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from . import configops, nl, render
 from .discord_feed import FeedMixin
-from .discord_policy import PolicyContext, handle_change, left_server, register_policy_commands
+from .discord_policy import CfgApplyButton, PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_tokens
@@ -766,7 +766,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             walk(c)
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
-        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton)
+        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton, CfgApplyButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -1308,7 +1308,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
                 try:
                     req = await asyncio.to_thread(nl.parse_roster_request, self.ctx.provider, ev.raid_name, roster_text(ev), message.content, message.author.display_name)
                 except Exception as e:  # noqa: BLE001
-                    await message.reply(f"Couldn't parse that ({type(e).__name__}).")
+                    await message.reply(await configops.report_error(self.ops, reg.config if reg else None, e, "roster chat"))  # §2.7: refusals as written, bugs as GENERIC_ERROR + an ops error
                     return
                 if req.kind == "ignore":
                     return
@@ -1333,7 +1333,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
                 try:
                     fb = await asyncio.to_thread(nl.parse_loot_feedback, ctx.provider, ctx.policy_for_llm(), proposal_text(ev), message.content, message.author.display_name)
                 except Exception as e:  # noqa: BLE001
-                    await message.reply(f"Couldn't parse that ({type(e).__name__}: {str(e)[:160]}).")
+                    await message.reply(await configops.report_error(self.ops, reg.config if reg else None, e, "loot chat"))
                     return
                 if fb.kind == "ignore":
                     return

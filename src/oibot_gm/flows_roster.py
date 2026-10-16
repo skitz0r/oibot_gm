@@ -733,3 +733,43 @@ async def open_roster_members(interaction: discord.Interaction, reg: Registry, *
 
 __all__ = ["ConfirmWizard", "RankWizard", "SetMainWizard", "RegularAddWizard", "RegularRemoveWizard", "RegularListWizard", "confirm_pending_view", "roster_name",
            "open_roster_confirm", "open_roster_rank", "open_roster_set_main", "open_roster_add", "open_roster_remove", "open_roster_members", "open_regular_step_down"]
+
+
+# ---------------------------------------------------------------- /roster absences
+
+ABSENCE_HORIZONS = ((7, "the next week"), (14, "the next 2 weeks"), (30, "the next 30 days"), (60, "the next 2 months"), (90, "the next 3 months"))
+DEFAULT_ABSENCE_HORIZON = 30
+
+
+def absences_text(reg: Registry, days: int) -> str:
+    """Upcoming absences across the guild for `days` ahead, days in words (reg.span_label — never ISO where a person
+    reads), the reason and who recorded it (officers only see this list)."""
+    from datetime import timedelta
+
+    today = reg.now_local().date()
+    rows = reg.absences_between(today.isoformat(), (today + timedelta(days=days)).isoformat())
+    lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {reg.span_label(a.start, a.end)}" + (f" — {a.reason}" if a.reason else "")
+             + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
+    label = next((name for d, name in ABSENCE_HORIZONS if d == days), f"the next {days} days")
+    return "\n".join(lines)[:1900] or f"No absences in {label}."
+
+
+@flow("roster_absences")
+async def open_roster_absences(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """/roster absences: how far ahead is a preset select (the wizard rule: a number is never typed), the list under it."""
+    from .discord_registry import is_officer
+
+    if not is_officer(interaction, reg):
+        await interaction.response.send_message("Officers only.", ephemeral=True)
+        return
+    wiz = Wizard(reg, interaction.user.id, title="Upcoming absences")
+
+    async def show(i: discord.Interaction, days: int) -> None:
+        opts = [Opt(str(d), name.capitalize(), default=d == days) for d, name in ABSENCE_HORIZONS]
+
+        async def picked(pi: discord.Interaction, values: list[str]) -> None:
+            await show(pi, int(values[0]))
+
+        await wiz.show(i, absences_text(reg, days), wiz.select("How far ahead?", opts, picked))
+
+    await show(interaction, DEFAULT_ABSENCE_HORIZON)

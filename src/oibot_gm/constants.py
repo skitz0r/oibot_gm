@@ -14,3 +14,15 @@ LEVEL_COLOUR = {"green": 0x2E9E6B, "amber": 0xE0A448, "red": 0xC0392B}
 LEVEL_DOT = {"green": "🟢", "amber": "🟡", "red": "🔴"}
 
 TEAL = 0x2B7A78  # the bot's embed colour
+
+# the one human-facing clock (the clock rule): 12-hour, no leading zero. Registry.local12 converts to the guild zone and
+# formats with this; `fmt12` is the same formatting for a datetime already in the zone it should read in.
+CLOCK12 = "%a %d %b %I:%M %p"
+
+
+def fmt12(dt, fmt: str = CLOCK12) -> str:
+    """'Tue 22 Sep 7:30 PM' for a datetime in its own zone (leading zero stripped). The single implementation behind
+    wizard.fmt12, raid_views.clock12, flows_config.fmt12 and agents.clock12; never `%H:%M` where a person reads."""
+    import re
+
+    return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", dt.strftime(fmt))

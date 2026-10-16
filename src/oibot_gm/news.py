@@ -326,6 +326,43 @@ def duplicate_profile_proposal(guilds, reg, data: dict) -> str | None:
     return None
 
 
+def decision_refusal(store: GitStore, reg, pid: str, state: str, by_id: int | None) -> str | None:
+    """Why an officer's Approve / Dismiss of `pid` would be refused right now, or None — the same checks `move` makes
+    for an officer, read without writing, so the confirm screen refuses at once instead of after a press. `move` runs
+    them again at the write (the state may move in between)."""
+    ps = ProposalStore(store, reg.key)
+    try:
+        p = ps.get(pid)
+    except ProposalError as e:
+        return str(e)
+    if (p.state, state) not in OFFICER_MOVES:
+        return f"{p.id} is {p.state}: it can't become {state}"
+    if state == "approved" and p.kind == "needs_developer":
+        return "this one needs a developer: the apply job can't do it (dismiss it once it's handled)"
+    if state == "approved" and p.kind == "profile":
+        return shared_profile_refusal(getattr(store, "guilds", None), reg.key, by_id)
+    return None
+
+
+def consequence(p: Proposal, reg, state: str, guilds=None) -> list[str]:
+    """What Approve / Dismiss does, in words, from the proposal's kind and state (dual interfaces §2.3; D34: Dismiss
+    gets the same screen). The Discord `decide` screen and the site print these lines; neither composes its own."""
+    if state == "approved":
+        if p.kind == "guild_setting":
+            return ["Approved: the apply job makes this guild setting within 15 minutes — no restart."]
+        if p.kind == "profile":
+            others = shared_profile_others(guilds, reg) if guilds is not None else []
+            who = f" for every server on this game version ({', '.join(others)} too)" if others else ""
+            return [f"Approved: within 15 minutes the apply job edits the game data file, runs the tests, commits and restarts the bot{who} — about two minutes."]
+        return ["This one needs a developer: the apply job can't do it."]
+    if state == "dismissed":
+        lines = ["Dismissed: nothing changes, and the review won't propose it again unless newer news says more."]
+        if p.state == "approved":
+            lines.insert(0, "This withdraws the approval before the job picks it up.")
+        return lines
+    return []
+
+
 def validate_edit(reg, p: Proposal) -> None:
     """The typed edit must match the kind: a whitelisted config op that `configops.describe` understands, or a
     profile file of this game version. Raises ProposalError."""
