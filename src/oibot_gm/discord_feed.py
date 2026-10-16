@@ -113,6 +113,27 @@ class FeedMixin:
         low = str(name or "").strip().lower()
         return bool(low) and any((p.character or "").lower() == low or p.signup_name.lower() == low for p in self.loot_roster(session))
 
+    # ---- "Bind companion…" (design §3.1 L10): a companion several live councils could take is bound by an officer on a
+    # council card; in memory (a restart forgets it — the card offers the select again on the companion's next event)
+    def _loot_binds(self) -> dict:
+        return self.__dict__.setdefault("loot_binds_state", {})
+
+    def _loot_unrouted(self) -> dict:
+        return self.__dict__.setdefault("loot_unrouted_state", {})
+
+    def loot_unrouted(self, gk: str) -> list[str]:
+        """The companions of guild `gk` refused because several live councils could take them (the card's select)."""
+        return sorted(name for (g, _), name in self._loot_unrouted().items() if g == gk)
+
+    def loot_bind(self, gk: str, session_id: str, character: str) -> bool:
+        """Bind a companion (by its character) to one council of its guild; False when it is no longer waiting."""
+        key = (gk, str(character or "").strip().lower())
+        name = self._loot_unrouted().pop(key, None)
+        if name is None:
+            return False
+        self._loot_binds()[key] = session_id
+        return True
+
     def loot_route(self, comp: Companion | None):
         """(session, None) or (None, why) — why is 'no run live' (the event may be held) or a refusal to show."""
         gk = self.companion_guild(comp)
@@ -128,12 +149,16 @@ class FeedMixin:
             pool = [s for s in real if s.test] if tester else [s for s in real if not s.test]
             if tester and not pool:
                 pool = [s for s in real if not s.test and self._seats_character(s, comp.character)]
-            if len(pool) == 1:
-                return pool[0], None
-            if len(pool) > 1:
+            ckey = (gk, str(getattr(comp, "character", "") or "").strip().lower())
+            bound = self._loot_binds().get(ckey)
+            hit = [s for s in pool if s.id == bound] if bound else []
+            if not hit and len(pool) > 1:
                 hit = [s for s in pool if self._seats_character(s, comp.character)]
-                if len(hit) == 1:
-                    return hit[0], None
+            if len(pool) == 1 or len(hit) == 1:  # one council, the one an officer bound it to, or the one seating it
+                self._loot_unrouted().pop(ckey, None)  # routed again: no card offers to bind it
+                return (pool[0] if len(pool) == 1 and not hit else hit[0]), None
+            if len(pool) > 1:
+                self._loot_unrouted()[ckey] = comp.character  # the council cards offer "Bind companion…"
                 return None, (f"several loot councils are live and {comp.character} is rostered on " + ("none of them" if not hit else "more than one")
                               + " — start the companion with --run <run key>, or bind it on the council card")
             if not pool:
@@ -228,6 +253,8 @@ class FeedMixin:
                 return {"note": "no active raid; event ignored"}
             if cfg:
                 await self.ops.emit(cfg, "warn", f"companion {comp.character}: {why}")
+            if reg is not None and comp.character in self.loot_unrouted(reg.key) and hasattr(self, "loot_unrouted_changed"):
+                await self.loot_unrouted_changed(reg, comp.character)  # the live council cards gain "Bind companion…"
             return {"error": why}
         if not raid.remember_idem(ev.get("idem")):
             return {"dup": True, "session": skey}

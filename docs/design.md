@@ -1428,7 +1428,7 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   are redrawn.
 - **Persistent ids** (`raid_buttons`): `LootButton` `loot.<gk>:<session id>:<drop id|->:<action>[:<arg>]` (session:
   tick · dist · scores · end · all · discard · keep; per drop: ok · ovr · later · info · iok · iovr · ide · why · whyr ·
-  fix · rm · ovrr), `LootPick` `lootpick.<gk>:<session id>:<kind>` (owed · remove · whynot.<drop>), `LootStartButton`
+  fix · rm · ovrr · guest), `LootPick` `lootpick.<gk>:<session id>:<kind>` (owed · remove · bind · whynot.<drop>), `LootStartButton`
   `lootstart.<gk>:open`, all `add_dynamic_items`; the reason boxes are `flows_loot.LootModal` with
   `lootmodal.<gk>:<session id>:<drop>:<why|ovr|de|fix>[:<arg>]` ids — a box opened before a restart and submitted
   after it is resolved by `OibotGM.on_interaction` → `flows_loot.loot_modal_raw` (the same `loot_modal_submit`). A
@@ -1449,7 +1449,11 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   Rostered tonight · Disenchant · Someone not on the roster… (and "Someone else rostered…" → the member picker past 25)
   — then the reason modal (`LootModal`, title "<item> → <who>", 3–300 chars) whose Submit IS the write: two presses.
   Correct… is the same shape (mode `correct`: "a mistake, not a decision", no precedent). A name is typed only for
-  someone not on the roster and is validated as a character name (letters only, 2–24). The wizard is always a new
+  someone not on the roster: validated as a character name (letters only, 2–24), then against who it can be
+  (`flows_loot.offroster_name`, L16): the run's signups (any answer), the registered characters (`Registry.find`; two
+  sharing the name → "use the full name"), the guests the ledger already records by name — a match records at once in
+  that spelling; nobody by that name → "Nobody called X …" with **Record X as a guest** (`LootButton` `guest`, the
+  submitted who + reason stashed per officer in memory) — a typo never becomes an award silently. The wizard is always a new
   ephemeral message (a card is a components-v2 layout, which an edit can never turn back into text + buttons; the
   item card's own Disenchant edits the card itself). A second officer's override comes back as "Jonny already set this … — replace?" with
   **Replace their override…** (the modal again, prefilled); a second reason likewise ("Replace with my reason…").
@@ -1467,7 +1471,8 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   distributed …") · End · Not yet. `loot_ended` posts the summary, turns the session card into its final state
   (`loot_closed_layout`, no buttons), stubs the proposal cards, edits the closing notice and the starter line, archives
   the thread. The lock card's **Loot** `RunButton` (`runact.<gk>:<run>:loot`, disabled until locked; the order Lock ·
-  Fill · Loot · Cancel never moves) opens `raid_loot` — the hub reaches the council.
+  Fill · Loot · Cancel never moves) opens `raid_loot` with `key=` its own run (never the run picker: with two locked
+  runs each card opens its own council) — the hub reaches the council.
 - **The scheduler's loot step** (`loot_scheduler_step`, last in each guild's minute): companion events held with no
   council live → one line in the loot channel (else the officer channel) "📡 Drops arriving from Jon's log but no run
   is live — start an ad hoc run for tonight?" with **Start an ad hoc run…** (`LootStartButton` → `/raid open`'s
@@ -1477,7 +1482,11 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   prompt.
 - **Chat** (decision 8, D9): in a council thread only an @mention, a leading "?" or a reply to one of the council's
   cards (`loot_addressed`) reaches the model; replies to lines are banter; members' messages are ignored; the thread's
-  parent channel's plain-text mode `ignore` silences it; no provider → "The bot can't read sentences right now — use
+  parent channel's plain-text mode `ignore` silences it; a request to ACT passes `Registry.may_plain` (the one
+  plain-text check) for the loot capability group in the PARENT channel (`loot_parent`: `act` needed, `self`/`answer`
+  answer questions only) — `loot_plain_group()` is `loot` once PLAIN_GROUPS has it (L3), until then `runs` (the same
+  officers by default) — refused with may_plain's line before any parse, and again at Apply for the presser at
+  PRIV_LIVE (`configops.authorize(…, channel=<parent>)` on the op path, never the DM policy); no provider → "The bot can't read sentences right now — use
   the buttons on the cards." A question → `help_answer(…, data=loot_digest(session))` (HelpExtras.data: the
   proposals in a `<data>` block, officer snapshot only). A request to act → `nl.parse_loot_feedback` over the
   numbered digest (drop numbers, so copies never collide) → `loot_changes` (names checked against the candidate table
@@ -1486,8 +1495,17 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   re-checks the presser live and applies with the batch_rev seen when the sentence arrived — through
   `configops.describe` / `apply_async` for the `loot` op when configops carries it (L3), else the verbs directly
   (`via="chat"`). The `/mock` thread chat stays `OibotGM.mock_loot_chat`.
+- **Bind companion…** (L10): when several councils are live and a companion's character is rostered on none (or
+  several), `FeedMixin.loot_route` refuses (error ack + ops warn, as before) and records it in
+  `loot_unrouted(gk)`; every live council card of the guild gains "🔌 Companion not routed …" and a `LootPick` `bind`
+  select (redrawn once per companion, `loot_unrouted_changed`, not on each event). Picking it on a card →
+  `LootSurfaceMixin.loot_bind_companion` → `FeedMixin.loot_bind(gk, session id, character)`: that companion's events
+  route to this council from then on (checked before the one-pool / seated-character rules), a thread line, an
+  `ops.audited` line, the select leaves every card. In memory: a restart forgets it and the card offers it again on
+  the companion's next refused event.
 - **/gm precedents** (`gm_precedents`, L28): the last 25 active precedents → one (what the bot picked, who got it, why,
-  who) → **Retire…** → the reason box → `LootMixin.retire_precedent(reg, import_id, reason, by, by_id, via,
+  who, the date as a person reads it — `flows_loot.when_label`: an ISO date → `Registry.day_label`, a stamp →
+  `Registry.local12`, never the stored ISO) → **Retire…** → the reason box → `LootMixin.retire_precedent(reg, import_id, reason, by, by_id, via,
   restore=False)`: an append-only `kind: status` row (`lootctx` folds it); `loot_precedents(reg, active=True)` lists
   them; a retired precedent is no longer cited.
 - **On ready** `loot_restore` then `loot_cards_restore` (every live council's card and proposal cards redrawn in place

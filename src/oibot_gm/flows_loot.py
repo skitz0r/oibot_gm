@@ -49,12 +49,28 @@ def loot_wizard(bot, reg: Registry, interaction: discord.Interaction, title: str
     return Wizard(reg, interaction.user.id, title=title, guard=guard)
 
 
-async def say(interaction: discord.Interaction, text: str) -> None:
+async def say(interaction: discord.Interaction, text: str, *, view: discord.ui.View | None = None) -> None:
     """An ephemeral answer, whether or not the press was acknowledged already."""
+    kw = {"view": view} if view is not None else {}
     if interaction.response.is_done():
-        await interaction.followup.send(text[:1900], ephemeral=True)
+        await interaction.followup.send(text[:1900], ephemeral=True, **kw)
     else:
-        await interaction.response.send_message(text[:1900], ephemeral=True)
+        await interaction.response.send_message(text[:1900], ephemeral=True, **kw)
+
+
+def when_label(reg: Registry, value) -> str:
+    """A stored date or stamp as a person reads it (the clock rule): an ISO date → 'Thu 24 Dec', a stamp →
+    'Thu 24 Dec 8:12 PM' (Registry.local12). Precedent rows carry either (a council override: the session's date; a
+    companion award's reason: when it was received)."""
+    v = str(value or "").strip()
+    if not v:
+        return ""
+    if re.fullmatch(r"\d{4}-\d\d-\d\d", v):
+        return reg.day_label(v)
+    try:
+        return reg.local12(v)
+    except (TypeError, ValueError):
+        return v
 
 
 def _err(e: BaseException) -> str:
@@ -91,7 +107,7 @@ async def loot_press(interaction: discord.Interaction, btn) -> None:
         await say(interaction, "Officers only.")
         return
     session = _target(bot, reg, btn.sid)
-    if session is None and btn.action not in ("why", "whyr", "fix"):
+    if session is None and btn.action not in ("why", "whyr", "fix", "guest"):
         await say(interaction, ENDED)
         return
     handler = ACTIONS.get(btn.action)
@@ -305,7 +321,8 @@ ACTIONS = {"tick": _press_tick, "dist": _press_dist, "scores": _press_scores, "e
 
 async def loot_pick(interaction: discord.Interaction, pick, values: list[str]) -> None:
     """Every LootPick choice: `owed` (why.<drop> → the reason modal, fix.<drop> → Correct…), `remove` (a candidate who
-    left the roster), `whynot.<drop>` (code's comparison of the pick with the chosen candidate)."""
+    left the roster), `bind` (a companion no council could take → this council), `whynot.<drop>` (code's comparison of
+    the pick with the chosen candidate)."""
     from .guild_routing import resolve_button
 
     bot = interaction.client
@@ -335,6 +352,15 @@ async def loot_pick(interaction: discord.Interaction, pick, values: list[str]) -
         except RegistryError as e:
             await say(interaction, _err(e))
         return
+    if kind == "bind":  # Bind companion…: that companion's events go to this council
+        await _defer(interaction)
+        try:
+            line = await bot.loot_bind_companion(reg, session, value, by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:
+            await say(interaction, _err(e))
+            return
+        await say(interaction, line)
+        return
     if kind.startswith("whynot."):
         from .raid_views import why_not_text
 
@@ -360,7 +386,7 @@ class LootModal(discord.ui.Modal):
         self.who_item = None
         if who_text:
             self.who_item = discord.ui.TextInput(custom_id="who", max_length=24, min_length=2, placeholder="their character's name")
-            self.add_item(discord.ui.Label(text="Who (not on the roster)", description="a character name; unregistered ones are recorded by name", component=self.who_item))
+            self.add_item(discord.ui.Label(text="Who (not on the roster)", description="a character name — checked against the signups, the roster and past guests", component=self.who_item))
         elif who:
             from .raid_views import loot_who
 
@@ -461,7 +487,41 @@ async def _answer_submit(interaction: discord.Interaction, text: str, *, kind: s
             pass
 
 
-async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values: dict[str, str]) -> None:
+def offroster_name(bot, reg: Registry, target, who: str) -> str | None:
+    """A typed 'not on the roster' name checked against who it can be (design §3.1 L16): the run's signups (any answer:
+    bench, no thanks), the guild's registered characters, then the guests the ledger already records by name (a sub or a
+    pug, no member). Returns the spelling found there, or None (nobody by that name). Two registered characters sharing
+    the name → the registry's "use the full name" refusal."""
+    low = who.strip().lower()
+    if not isinstance(target, str):
+        _rs, ev = bot.loot_run(target)
+        for sg in (ev.signups.values() if ev is not None else ()):
+            if (sg.character or "").lower() == low:
+                return sg.character
+    hit = reg.find(who)
+    if hit and hit[1].name:
+        return hit[1].label
+    try:
+        ctx = bot.loot_ctx(target) if not isinstance(target, str) else bot._guild_ctx(reg)
+        ledger = list(getattr(ctx, "ledger", None) or [])
+    except Exception:  # noqa: BLE001 — no ledger to read: only the signups and the registry decide
+        ledger = []
+    return next((a.raider for a in ledger if a.discord_id is None and (a.raider or "").lower() == low), None)
+
+
+async def _press_guest(interaction, bot, reg, target, btn) -> None:
+    """'Record <name> as a guest': the override / correction the officer submitted, with the unknown name accepted."""
+    held = bot._surface()["reasons"].pop((reg.key, btn.sid, btn.drop, interaction.user.id, "guest"), None)
+    if not held:
+        await say(interaction, "That expired — pick them again with Override… (or Correct…).")
+        return
+    await loot_modal_submit(interaction, held["ids"], {"who": held["who"], "reason": held["reason"]}, guest_ok=True)
+
+
+ACTIONS["guest"] = _press_guest
+
+
+async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values: dict[str, str], *, guest_ok: bool = False) -> None:
     """The write behind every reason modal: why (set_reason; `r` = replace), ovr (override; arg = the batch_rev seen,
     `r` = replace another officer's), de (disenchant and record at once), fix (correct)."""
     from .guild_routing import resolve_button
@@ -502,6 +562,17 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
         if kind in ("ovr", "fix") and who not in (DISENCHANT,) and not _on_roster(bot, reg, target, who):
             if not NAME_RE.fullmatch(who):
                 raise RegistryError("That isn't a character name (letters only, 2–24) — check the spelling.")
+            known = offroster_name(bot, reg, target, who)
+            if known:
+                who = known  # the spelling the run's signups, the registry or the ledger already have
+            elif not guest_ok:
+                # nobody by that name: a typo, or a new guest — recording them is a second, deliberate press
+                stash[(reg.key, sid, drop, by_id, "guest")] = {"ids": tuple(ids), "who": who, "reason": reason}
+                view = discord.ui.View(timeout=None)
+                view.add_item(LootButton(reg.key, sid, drop, "guest", label=f"Record {who} as a guest"[:80]))
+                await say(interaction, f"Nobody called **{who}** signed up for this run, is registered or was recorded as a guest before — "
+                                       "check the spelling (Override… again), or record them as a new guest.", view=view)
+                return
         if kind == "ovr":
             try:
                 line = await bot.override(reg, session, drop, who, reason, by=by, by_id=by_id, batch_rev=None if arg in (None, "r") else arg, replace=arg == "r")
@@ -907,7 +978,7 @@ async def open_loot_distribute(interaction: discord.Interaction, reg: Registry, 
     for s in todo[:MAX_OPTIONS]:
         _, ev = bot.loot_run(s)
         name = raid_name(reg, ev) if ev is not None else s.instance
-        opts.append(Opt(s.id, f"{loot_label(s)}{name} · {reg.local12(ev.start) if ev is not None else s.date}", f"{len(s.undistributed())} to judge"))
+        opts.append(Opt(s.id, f"{loot_label(s)}{name} · {reg.local12(ev.start) if ev is not None else when_label(reg, s.date)}", f"{len(s.undistributed())} to judge"))
 
     async def picked(i: discord.Interaction, values: list[str]) -> None:
         s = _target(bot, reg, values[0])
@@ -990,7 +1061,7 @@ async def open_gm_precedents(interaction: discord.Interaction, reg: Registry, **
     by_id = {p["import_id"]: p for p in rows}
 
     def line(p: dict) -> str:
-        return f"**{p.get('item')}**: bot picked {p.get('bot')}, council gave {p.get('human')} — “{p.get('reason')}” · {p.get('by', '?')}, {p.get('date', '')}"
+        return f"**{p.get('item')}**: bot picked {p.get('bot')}, council gave {p.get('human')} — “{p.get('reason')}” · {p.get('by', '?')}, {when_label(reg, p.get('date'))}"
 
     async def picked(i: discord.Interaction, values: list[str]) -> None:
         p = by_id.get(values[0])

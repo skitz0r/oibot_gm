@@ -791,10 +791,11 @@ def loot_status_text(reg: Registry, session, ev, *, judging: dict | None = None,
     return line + (f"\n{chip}" if chip else "")
 
 
-def loot_layout(reg: Registry, ev, session, ico, *, status: str, show_distribute: bool = True) -> discord.ui.LayoutView:
+def loot_layout(reg: Registry, ev, session, ico, *, status: str, show_distribute: bool = True, unrouted=()) -> discord.ui.LayoutView:
     """The session card: run label with the native stamp, the roster (the board's groups: one member per line, the spec
     icon alone), the drops per boss, the status line, what still needs an officer (reasons owed, corrections, members
-    who left the roster), and the controls: Tick drops… · Distribute · Scores only · End council."""
+    who left the roster, companions no council could take — `unrouted`, a "Bind companion…" select), and the controls:
+    Tick drops… · Distribute · Scores only · End council."""
     ui = discord.ui
     title = ("🧪 Rehearsal · " if session.test else "⚔ Loot council · ") + loot_label(session) + raid_name(reg, ev)
     rosters = ev.all_rosters if session.roster_index is None else ev.all_rosters[session.roster_index:session.roster_index + 1]
@@ -827,6 +828,12 @@ def loot_layout(reg: Registry, ev, session, ico, *, status: str, show_distribute
         parts.append(ui.TextDisplay("**Left the roster** — still candidates: " + ", ".join(names[:12])))
         opts = [discord.SelectOption(label=(p.character or p.signup_name)[:100], value=str(p.discord_id or p.character or p.signup_name)[:100]) for p in session.departed][:25]
         parts.append(ui.ActionRow(LootPick(reg.key, session.id, "remove", opts, placeholder="Remove a candidate…")))
+    if unrouted:
+        names = list(unrouted)
+        parts.append(ui.TextDisplay("🔌 **Companion not routed** — several councils are live and it can't tell which: "
+                                    + ", ".join(names[:12]) + ". Bind it to this council, or start it with --run <run key>."))
+        opts = [discord.SelectOption(label=n[:100], value=n[:100], description="its drops and awards come here") for n in names][:25]
+        parts.append(ui.ActionRow(LootPick(reg.key, session.id, "bind", opts, placeholder="Bind companion…")))
     und = bool(session.undistributed())
     buttons = [LootButton(reg.key, session.id, "-", "tick")]
     if show_distribute:

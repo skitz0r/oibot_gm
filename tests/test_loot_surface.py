@@ -173,6 +173,11 @@ class SurfBot(FeedMixin, LootSurfaceMixin, LootMixin):
         uid = getattr(user, "id", user)
         return "officer" if uid in self.officers else "member"
 
+    async def identity(self, reg, user, *, max_age=0):
+        from oibot_gm.guild_routing import Resolved
+
+        return Resolved(await self.role_of(reg, user, max_age=max_age), [], False)
+
     async def fetch_user(self, uid):
         return FakeUser(uid, self.dms)
 
@@ -497,8 +502,37 @@ def test_override_for_someone_not_on_the_roster_takes_a_validated_name(night):
         await h.submit(modal, who="Bad Name 9", reason="a guest helped us")
         assert "isn't a character name" in h.text and not n.s.pending("d1").override
         await h.submit(flows_loot.reason_modal(GUILD, n.s.id, "d1", "ovr", item="Shard of Doom", who_text=True), who="Strangér", reason="a guest helped us")
+        # nobody by that name (not signed up, not registered, never a guest): a typo or a new guest — a second press
+        assert "Nobody called **Strangér**" in h.text and not n.s.pending("d1").override
+        guest = button(h.screen["view"], "Record Strangér as a guest")
+        assert re.fullmatch(rf"loot\.{GUILD}:{re.escape(n.s.id)}:d1:guest", guest.item.custom_id)
+        await guest.callback(h.card_press())
     run(go())
-    assert n.s.pending("d1").override.to == "Strangér"
+    o = n.s.pending("d1").override
+    assert o.to == "Strangér" and o.reason == "a guest helped us"
+
+
+def test_a_typed_name_takes_the_spelling_the_signups_registry_or_ledger_have(night):
+    """L16: 'not on the roster' is validated against the run's signups (a benched joiner), the registered characters and
+    the guests the ledger already knows — a match records at once, in their spelling."""
+    n = night
+    benched = n.reg.test_members()[10]
+    join(n.reg, n.rs, n.ev, [benched], status="sub")
+    bench_char = n.ev.signups[str(benched.discord_id)].character
+    tick(n, copies=3)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    h = officer_h(n)
+    run(h.submit(flows_loot.reason_modal(GUILD, n.s.id, "d1", "ovr", item="Shard of Doom", who_text=True), who=bench_char.upper(), reason="bench gets one"))
+    assert n.s.pending("d1").override.to == bench_char and "Nobody called" not in h.text
+    # a registered character who never signed up
+    seated = {(p.character or p.signup_name).lower() for p in n.bot.loot_roster(n.s)} | {bench_char.lower()}
+    other = next(c for m in n.reg.members.values() for c in m.characters if c.name and c.label.lower() not in seated and " " not in c.label)
+    run(h.submit(flows_loot.reason_modal(GUILD, n.s.id, "d2", "ovr", item="Shard of Doom", who_text=True), who=other.label.lower(), reason="an alt's turn"))
+    assert n.s.pending("d2").override.to == other.label
+    # a guest the ledger recorded by name before
+    n.bot.loot_ctx(n.s).ledger.append(types.SimpleNamespace(raider="Pugzilla", discord_id=None))
+    run(h.submit(flows_loot.reason_modal(GUILD, n.s.id, "d3", "ovr", item="Shard of Doom", who_text=True), who="pugzilla", reason="our regular pug"))
+    assert n.s.pending("d3").override.to == "Pugzilla"
 
 
 def test_a_second_officers_override_asks_to_replace(night):
@@ -835,6 +869,26 @@ def test_the_lock_cards_loot_button_opens_the_council_flow(reg, rs, monkeypatch,
     assert s is not None and s.raid_thread_id and f"<#{s.raid_thread_id}>" in h.text
 
 
+def test_the_lock_cards_loot_button_opens_its_own_runs_council_when_two_are_locked(reg, rs, monkeypatch, officer):
+    """Regression: the button carries its run's key — never the 'Which run?' picker, never the other run's council."""
+    world = World()
+    ev_a, _ = real_run(reg, rs, days=2)
+    ev_b, _ = real_run(reg, rs, days=5)
+    assert ev_a.key != ev_b.key and ev_a.state == ev_b.state == "locked"
+    reg.config.roster_channel_id = 4242
+    bot = SurfBot(reg, rs, world)
+    h = Harness(reg, rs, client=bot, user=types.SimpleNamespace(id=OFFICER, display_name="Mira", mention="@Mira"))
+
+    async def anywhere(self, r, uid):
+        return True
+    monkeypatch.setattr(type(bot), "is_officer_anywhere", anywhere, raising=False)
+    run(RunButton(reg.key, ev_b.key, "loot").callback(h.card_press()))
+    assert "Which run?" not in h.text
+    s = bot.events.get((GUILD, ev_b.key))
+    assert s is not None and s.run_key == ev_b.key and f"<#{s.raid_thread_id}>" in h.text
+    assert (GUILD, ev_a.key) not in bot.events, "run A's council was not opened by run B's card"
+
+
 # ---------------------------------------------------------------- closing, the scheduler's loot steps
 
 def test_closing_notice_has_keep_open_and_the_press_edits_it(night):
@@ -855,6 +909,48 @@ def held(bot, reg, kind="drop"):
     comp = Companion("Lootmaster", "test", GUILD, "peer")
     ev = {"type": "drop", "boss": "Gatekeeper", "items": [{"name": "Shard"}]} if kind == "drop" else {"type": "loot", "item_name": "Shard", "recipient": "Bob"}
     return run(bot.handle_feed_event(ev, comp))
+
+
+def test_a_companion_two_councils_could_take_is_bound_on_a_card(reg, rs):
+    """L10: two live councils and a companion rostered on neither → refused (the error ack, an ops warn) and every live
+    council card offers Bind companion…; binding it on run B's card sends its next drop to B."""
+    from oibot_gm.feed import Companion
+
+    world = World()
+    ev_a, _ = real_run(reg, rs, days=2)
+    ev_b, _ = real_run(reg, rs, days=5)
+    reg.config.roster_channel_id = 4242
+    bot = SurfBot(reg, rs, world)
+    s_a, _ = run(bot.open_loot(reg, rs, ev_a, by="Officer", by_id=OFFICER))
+    s_b, _ = run(bot.open_loot(reg, rs, ev_b, by="Officer", by_id=OFFICER))
+    comp = Companion("Lootmaster", "test", GUILD, "peer")
+    drop = {"type": "drop", "boss": "Gatekeeper", "items": [{"name": "Shard of Doom"}]}
+    ack = run(bot.handle_feed_event(dict(drop, idem="e1"), comp))
+    assert "several loot councils are live" in ack["error"] and not s_a.drop_list and not s_b.drop_list
+    assert bot.loot_unrouted(GUILD) == ["Lootmaster"]
+
+    def card_of(s):
+        return world.channels[s.raid_thread_id].message(s.cards["loot"]).view
+
+    for s in (s_a, s_b):
+        picks = [it for it in items_of(card_of(s)) if isinstance(it, LootPick) and it.kind == "bind"]
+        assert picks and picks[0].item.placeholder == "Bind companion…" and [o.value for o in picks[0].item.options] == ["Lootmaster"]
+        assert re.fullmatch(LootPick.__discord_ui_compiled_template__, picks[0].item.custom_id)
+        assert "Companion not routed" in text_of(card_of(s))
+    edits = len(world.channels[s_a.raid_thread_id].edits)
+    run(bot.handle_feed_event(dict(drop, idem="e2"), comp))
+    assert len(world.channels[s_a.raid_thread_id].edits) == edits, "the card is redrawn once per companion, not per event"
+
+    h = Harness(reg, rs, client=bot, user=types.SimpleNamespace(id=OFFICER, display_name="Mira", mention="@Mira"))
+    pick = LootPick(GUILD, s_b.id, "bind", [discord.SelectOption(label="Lootmaster", value="Lootmaster")])
+    run(flows_loot.loot_pick(h.card_press(), pick, ["Lootmaster"]))
+    assert "Lootmaster's companion now feeds this council (bound by Mira)" in h.text
+    assert not bot.loot_unrouted(GUILD) and not any(isinstance(it, LootPick) and it.kind == "bind" for it in items_of(card_of(s_a)))
+    assert any("Lootmaster's companion bound" in t for _, _, t in bot.ops.lines)
+    ack = run(bot.handle_feed_event(dict(drop, idem="e3"), comp))
+    assert ack.get("session") == f"{GUILD}:{s_b.id}" and [d.item_name for d in s_b.drop_list] == ["Shard of Doom"] and not s_a.drop_list
+    run(flows_loot.loot_pick(h.card_press(), pick, ["Lootmaster"]))
+    assert "isn't waiting to be bound any more" in h.text
 
 
 def test_drops_with_no_run_live_prompt_an_ad_hoc_run_once(reg, rs):
@@ -942,8 +1038,14 @@ def test_without_a_model_the_chat_points_at_the_buttons(night):
     assert msg.replies[0][0].startswith("The bot can't read sentences right now")
 
 
+def act_here(n, mode="act"):
+    """The plain-text mode of the council thread's parent (the officer channel): a thread reads its parent's mode."""
+    n.reg.config.plain.channels[str(n.ch.id)] = mode
+
+
 def test_an_override_sentence_becomes_a_diff_and_apply_waits_for_a_real_reason(night, monkeypatch):
     n = night
+    act_here(n)
     from oibot_gm import nl
     from oibot_gm.discord_help import ACT
 
@@ -972,17 +1074,87 @@ def test_an_override_sentence_becomes_a_diff_and_apply_waits_for_a_real_reason(n
     assert o.to == other and o.reason == "tanks progression first" and o.by == "Mira"
 
 
-def chat_diff(n, monkeypatch, fb):
+def chat_diff(n, monkeypatch, fb, mode="act"):
     from oibot_gm import nl
     from oibot_gm.discord_help import ACT
 
     n.bot.loot_provider = object()
     n.bot.help_reply = ACT
+    if mode is not None:
+        act_here(n, mode)
     monkeypatch.setattr(n.bot, "loot_ctx", lambda s: types.SimpleNamespace(provider=object(), policy_for_llm=lambda: "policy"))
     monkeypatch.setattr(nl, "parse_loot_feedback", lambda *a: fb)
     msg = Msg(n, "? do it")
     run(n.bot.loot_chat(msg, n.s))
     return msg.replies[-1]
+
+
+def test_a_request_to_act_follows_the_parent_channels_plain_text_mode(night, monkeypatch):
+    """Design §3.1 decision 8: a thread reads its parent channel's plain-text mode and the loot group gates writes
+    (Registry.may_plain, the one plain-text check). A 'self' or 'answer' parent answers questions only."""
+    from oibot_gm import nl
+
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    for mode in ("self", "answer"):
+        text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""), mode=mode)
+        assert view is None and text.startswith("⛔ Plain text") and f"<#{n.ch.id}>" in text, text
+    n.reg.config.plain.dm = "act"  # the DM policy is never what a thread reads
+    text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""), mode="answer")
+    assert view is None and "only answers questions" in text
+    text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""), mode="act")
+    assert isinstance(view, LootChatConfirmView) and view.channel == n.ch.id
+
+
+def test_the_loot_group_gates_a_chat_write(night, monkeypatch):
+    """Who may change loot by plain text is the owner's PLAIN_GROUPS choice: closed to officers → refused, even in an act channel."""
+    from oibot_gm import nl
+    from oibot_gm.discord_loot_surface import loot_plain_group
+
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    n.reg.config.plain.groups[loot_plain_group()] = ["owner"]
+    text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""))
+    assert view is None and text.startswith("⛔ Only") and not n.s.awards
+
+
+def test_apply_rechecks_the_parent_channels_mode_at_the_press(night, monkeypatch):
+    """The diff was drawn in an act channel; the owner turned it to 'answer' before Apply → nothing is recorded."""
+    from oibot_gm import nl
+
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""))
+    monkeypatch.undo()
+    act_here(n, "answer")
+    h = officer_h(n)
+    run(view.press_apply(h.card_press()))
+    assert "only answers questions" in h.text and not n.s.awards
+
+
+def test_apply_through_the_loot_op_authorizes_in_the_threads_parent_channel(night, monkeypatch):
+    """Regression (once L3's `loot` op is in configops): configops.authorize gets channel=<the thread's parent>, never
+    the DM policy (channel=None) — and the presser's live identity."""
+    from oibot_gm import configops, discord_loot_surface as surf, nl
+
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    text, view = chat_diff(n, monkeypatch, nl.LootFeedback(kind="confirm", reply=""))
+    seen = {}
+
+    def authorize(reg, ops, author_id, *, officer, role_ids=(), channel="unset", raids=None):
+        seen.update(channel=channel, officer=officer, author=author_id, op=ops[0])
+        return [], ["refused here"]
+    monkeypatch.setattr(surf, "loot_op_ready", lambda: True)
+    monkeypatch.setattr(configops, "authorize", authorize)
+    h = officer_h(n)
+    run(view.press_apply(h.card_press()))
+    assert seen["channel"] == n.ch.id and seen["officer"] is True and seen["author"] == OFFICER
+    assert seen["op"].op == "loot" and seen["op"].field == "confirm" and "refused here" in h.text and not n.s.awards
 
 
 def test_a_chat_confirm_never_records_a_pick_added_after_the_sentence(night, monkeypatch):
@@ -1041,6 +1213,8 @@ def test_gm_precedents_retires_one_with_a_reason(night):
         assert h.selects() == ["Pick a precedent"]
         await h.pick("Pick a precedent", iid)
         assert "promised last week" in h.text and h.buttons() == ["Retire…", "Back"]
+        # the clock rule: the precedent's stored date (ISO) is never what a person reads
+        assert not re.search(r"\d{4}-\d\d-\d\d|T\d\d:|\b\d\d:\d\d\b(?! [AP]M)", h.text), h.text
         await h.press("Retire…")
         await h.submit(reason="policy changed this tier")
     run(go())
@@ -1049,6 +1223,30 @@ def test_gm_precedents_retires_one_with_a_reason(night):
     assert rows[-1] == {**rows[-1], "kind": "status", "import_id": iid, "status": "retired", "by": "Mira", "reason": "policy changed this tier"}
     assert not n.bot.loot_precedents(n.reg), "the bot stops citing it"
     assert "promised last week" not in n.bot._guild_ctx(n.reg).policy_for_llm()
+
+
+def test_precedent_dates_read_as_a_person_reads_them(reg):
+    """Regression (clock rule): a companion award's reason stores `received` as a full ISO stamp, a council override
+    the session's ISO date — /gm precedents and the session picker show neither raw."""
+    stamp = flows_loot.when_label(reg, "2026-10-15T23:30:00+00:00")
+    assert stamp == reg.local12("2026-10-15T23:30:00+00:00") and re.search(r"\d{1,2}:\d\d [AP]M$", stamp)
+    assert "T23" not in stamp and "2026-" not in stamp and "23:30" not in stamp
+    assert flows_loot.when_label(reg, "2026-12-24") == "Thu 24 Dec"
+    assert flows_loot.when_label(reg, None) == "" and flows_loot.when_label(reg, "someday") == "someday"
+
+
+def test_gm_precedents_shows_a_companion_reasons_stamp_in_12_hour_time(reg, rs, monkeypatch):
+    bot = SurfBot(reg, rs, World())
+    row = {"import_id": "x-d1", "item": "Shard", "bot": "Ann", "human": "Bob", "reason": "promised", "by": "Mira",
+           "date": "2026-10-15T23:30:00+00:00"}
+    monkeypatch.setattr(type(bot), "loot_precedents", lambda self, r, active=True: [row], raising=False)
+    h = Harness(reg, rs, client=bot, user=types.SimpleNamespace(id=OFFICER, display_name="Mira", mention="@Mira"))
+
+    async def go():
+        await FLOWS["gm_precedents"](h.command(), reg)
+        await h.pick("Pick a precedent", "x-d1")
+    run(go())
+    assert reg.local12("2026-10-15T23:30:00+00:00") in h.text and "2026-10-15T23:30" not in h.text
 
 
 def test_gm_precedents_with_none_says_so(reg, rs):

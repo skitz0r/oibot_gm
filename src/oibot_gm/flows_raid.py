@@ -481,7 +481,9 @@ async def open_raid_lock(interaction: discord.Interaction, reg: Registry, **_see
 
 
 @flow("raid_loot")
-async def open_raid_loot(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+async def open_raid_loot(interaction: discord.Interaction, reg: Registry, *, key: str | None = None, **_seed) -> None:
+    """/raid loot (the run picker when several are locked) or the lock card's Loot button (`key`: that card's run,
+    never a picker — two locked runs each open their own council from their own card)."""
     if not await officer_only(interaction, reg):
         return
 
@@ -513,6 +515,11 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, **_see
         for session, created in opened:
             if not created and session.id in had_thread:  # a thread made just now (it was pending) got its re-post from loot_ensure_thread
                 await bot.loot_repost(reg, session)
+    if key:
+        rs = interaction.client.raids.store(reg)
+        wiz = Wizard(reg, interaction.user.id, title="Loot council", guard=officer_guard(reg))
+        await body(interaction, wiz, rs, rs.events.get(key))
+        return
     await with_run(interaction, reg, title="Loot council", then=body, states=("locked",), officer=True)
 
 

@@ -390,7 +390,7 @@ class LootButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot(?:\.
     · keep (Keep open); per drop: ok (Confirm) · ovr (Override…) · later (Decide later) · info (Details) · iok / iovr /
     ide (the ephemeral item card's Confirm / Override… / Disenchant, which edit that card) · why (Give the reason) ·
     whyr (replace a reason) · ovrr (replace another officer's override) · fix (Correct… / Mistake — correct…) · rm (Remove a
-    candidate who left, arg = their id)."""
+    candidate who left, arg = their id) · guest (record a typed name nobody knows as a new guest)."""
     LABELS = {
         "tick": ("Tick drops…", discord.ButtonStyle.secondary), "dist": ("Distribute", discord.ButtonStyle.primary),
         "scores": ("Scores only", discord.ButtonStyle.secondary), "end": ("End council", discord.ButtonStyle.danger),
@@ -403,6 +403,7 @@ class LootButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot(?:\.
         "why": ("Give the reason", discord.ButtonStyle.primary), "whyr": ("Replace with my reason…", discord.ButtonStyle.danger),
         "fix": ("Correct…", discord.ButtonStyle.secondary), "rm": ("Remove", discord.ButtonStyle.secondary),
         "ovrr": ("Replace their override…", discord.ButtonStyle.danger),
+        "guest": ("Record as a guest", discord.ButtonStyle.secondary),
     }
 
     def __init__(self, gk: str | None, sid: str, drop: str, action: str, *, arg: str | None = None, label: str | None = None,
@@ -428,6 +429,7 @@ class LootButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot(?:\.
 class LootPick(discord.ui.DynamicItem[discord.ui.Select], template=r"lootpick(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<sid>[A-Za-z0-9_\-]+):(?P<kind>[a-z]{2,8}(?:\.d\d+)?)"):
     """A council select: `owed` (the session card's Give a reason or correct… over every award still owed one —
     values `why.<drop>` / `fix.<drop>`), `remove` (Remove a candidate… who left the roster — values their id or name),
+    `bind` (Bind companion… — values the companion's character),
     `whynot.<drop>` (the item card's Why not… — values candidate names)."""
 
     def __init__(self, gk: str | None, sid: str, kind: str, options: list[discord.SelectOption], placeholder: str = "Pick…"):

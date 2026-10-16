@@ -983,7 +983,7 @@ Attendance nobody has tracked yet counts as **neutral** (it never lowers anyone'
 ### In Discord: the thread and its cards
 
 **Open the council** on a locked run with `/raid loot`, or the **Loot** button on the run's lock card (the raid-night
-hub). It lives in one thread under the officer channel (the roster channel, else the ops channel); with neither set the
+hub; it opens that card's own run, even when another run is locked too). It lives in one thread under the officer channel (the roster channel, else the ops channel); with neither set the
 bot refuses and says so. The channel gets one line *"⚔ Loot council · <run> → #thread"*. A run split into several
 rosters gets one council per roster (thread *"loot · Roster 2 · …"*), each judging only its own roster's seats. A
 test-bench run opens a **rehearsal** (*"rehearsal · …"*): everything works, nothing reaches the guild's loot history.
@@ -1030,7 +1030,9 @@ press that card shows what happened (*"✅ recorded by you · 8:14 PM"*).
 
 **Override…** is two presses: pick who gets it instead — *In the table* (the top candidates), *Rostered tonight*,
 *Disenchant*, or *Someone not on the roster…* (type their character's name) — then write the **reason** (required)
-and submit. An override is shown as pending and is **not recorded until Confirm**; the reason becomes a precedent the
+and submit. A typed name is checked against the run's signups, the guild's registered characters and anyone recorded
+before as a guest, and is recorded in their spelling; if nobody has that name the bot says so and offers **Record
+<name> as a guest** — a second, deliberate press, so a typo never becomes an award. An override is shown as pending and is **not recorded until Confirm**; the reason becomes a precedent the
 bot cites next time only when the award is confirmed. If another officer already set that drop, you are asked whether
 to replace theirs. **Discard batch** asks first: the ticks stay, pending overrides go with the proposals, nothing was
 recorded so nothing is undone.
@@ -1045,7 +1047,8 @@ recorded to, then what went wrong (the old record is kept, marked void). A reaso
 disagrees with the record both stay fixable after the council ends. A companion's events go to its own server's live
 council (each server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first, and when
 several are live it picks the one whose roster has the companion's character — when it can't tell it refuses and says
-why. Drops arriving when no run is live are held for 10 minutes (a restart keeps them) and the loot channel (else the
+why, and every live council card shows **Bind companion…**: pick it on the right council and its drops and awards go
+there from then on (until the bot restarts; the card offers it again if needed). Drops arriving when no run is live are held for 10 minutes (a restart keeps them) and the loot channel (else the
 officer channel) asks once *"Drops arriving from Jon's log but no run is live — start an ad hoc run for tonight?"* with
 **Start an ad hoc run…**; held drops go in when a council opens, and anything still held after 10 minutes is listed in
 the ops channel as **not recorded**, so you can add it by hand. An in-game award that arrives shortly after a council
@@ -1061,6 +1064,9 @@ line too). A question (*"? why Kestrel over Mira"*) is answered from the proposa
 (*"? give the Syphon to Mira, she's our main tank"*) comes back as a change with **Apply** / **Cancel**: nothing happens
 before Apply, names are checked against the candidates and tonight's roster, and if the bot had to guess the reason it
 says *"(inferred — edit before Apply)"* and Apply waits until you **Edit the reason…** — the reason becomes a precedent.
+Requests follow the plain-text permissions (§8c) of the channel the thread sits in: where plain text may act there
+(and for whoever the Ops page lets change runs — officers by default) you get the change; where it only answers
+questions the bot says so and points at the card's buttons. Apply checks again for whoever presses it.
 When the bot can't read sentences (Claude unavailable) it says so and the buttons keep working.
 
 **End.** `/raid end` (with several locked runs it asks which, the one with a council first) or **End council** on the

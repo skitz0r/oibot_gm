@@ -168,7 +168,37 @@ class LootSurfaceMixin:
         status = loot_status_text(reg, session, ev, judging=self._surface()["judging"].get(session.key), provider=provider, auto=auto, presence=presence)
         live = any(r.get("state") == "live" for r in presence)
         by_hand = any(d.source != "companion" for d in session.undistributed())
-        return loot_layout(reg, ev, session, self.ico, status=status, show_distribute=not (auto and live) or by_hand)
+        unrouted = self.loot_unrouted(reg.key) if hasattr(self, "loot_unrouted") and self.loot_live(session) else []
+        return loot_layout(reg, ev, session, self.ico, status=status, show_distribute=not (auto and live) or by_hand, unrouted=unrouted)
+
+    async def loot_unrouted_changed(self, reg, character: str | None = None) -> None:
+        """A companion several live councils could take (FeedMixin.loot_route refused it): every live council card of
+        the guild offers "Bind companion…" — redrawn once per companion, not on each of its events."""
+        shown = self._surface().setdefault("unrouted_shown", set())
+        if character is not None:
+            if (reg.key, character.lower()) in shown:
+                return
+            shown.add((reg.key, character.lower()))
+        for s in list(self.events.values()):
+            if s.origin == "raid" and s.guild == reg.key and self.loot_live(s):
+                await self.loot_card_refresh(reg, s)
+
+    async def loot_bind_companion(self, reg, session: LootSession, character: str, *, by: str, by_id: int | None = None) -> str:
+        """The card's Bind companion…: that companion's events go to this council from now on (until a restart). A
+        thread line, an ops line; every council card of the guild is redrawn (the select leaves the others)."""
+        from . import ops as opsmod
+        from .raid_views import loot_label
+
+        if not self.loot_live(session):
+            raise RegistryError("This council isn't live any more — bind the companion on tonight's card.")
+        if not self.loot_bind(reg.key, session.id, character):
+            raise RegistryError(f"{character}'s companion isn't waiting to be bound any more.")
+        self._surface().setdefault("unrouted_shown", set()).discard((reg.key, character.lower()))
+        line = f"🔌 {character}'s companion now feeds this council (bound by {by})"
+        await opsmod.audited(self.ops, reg, by, f"loot {session.run_key}: {character}'s companion bound to {loot_label(session) or 'its council'}", via="discord", by_id=by_id)
+        await self.loot_notify(reg, session, line, kind="presence")
+        await self.loot_unrouted_changed(reg)
+        return line
 
     # ------------------------------------------------------------ hooks: open
     async def loot_open_thread(self, reg, rs, ev, session: LootSession):
@@ -596,6 +626,7 @@ class LootSurfaceMixin:
             return
         seen = ls.batch_rev(session)  # what the officer was looking at when they wrote
         uid, by = message.author.id, message.author.display_name
+        parent = loot_parent(session, message.channel)  # plain_mode reads a thread as its parent channel
         async with message.channel.typing():
             try:
                 answer = await self.help_answer(reg, uid, True, text, may_act=True, public=False, data=loot_digest(session))
@@ -604,6 +635,12 @@ class LootSurfaceMixin:
                 return
             if answer is not None and answer != ACT:
                 await message.reply(answer[:1900])
+                return
+            # a request to act: the plain-text check (Registry.may_plain) on the `loot` group in the parent channel's
+            # mode — the same check configops.authorize makes at Apply
+            bad = await loot_plain_refusal(self, reg, message.author, parent, max_age=guild_routing.PRIV_ROUTING)
+            if bad:
+                await message.reply("⛔ " + bad + " The card's buttons still work.")
                 return
             if not session.proposals:
                 await message.reply("Nothing is proposed yet — tick the drops and press Distribute; then tell me who should get what.")
@@ -622,7 +659,7 @@ class LootSurfaceMixin:
         if not changes:
             await message.reply("⛔ " + ("\n⛔ ".join(refused) if refused else "I couldn't tell which drop or who — use Override… on the card."))
             return
-        view = LootChatConfirmView(self, reg, session, changes, requester_id=uid, requester=by, seen=seen)
+        view = LootChatConfirmView(self, reg, session, changes, requester_id=uid, requester=by, seen=seen, channel=parent)
         sent = await message.reply(view.text(refused), view=view)
         view.bind(sent)
 
@@ -659,6 +696,31 @@ def loot_changes(bot, session: LootSession, fb, message: str) -> tuple[list[dict
     return out, refused
 
 
+def loot_plain_group() -> str:
+    """The plain-text capability group a loot write belongs to: `loot` (officers by default) once configops carries the
+    loot op and PLAIN_GROUPS has it (L3); until then `runs`, whose default is the same officers."""
+    from .registry import PLAIN_GROUPS
+
+    return "loot" if "loot" in PLAIN_GROUPS else "runs"
+
+
+def loot_parent(session: LootSession, channel) -> int | None:
+    """The channel a council thread's plain-text mode is read from: the thread's parent (the officer channel)."""
+    return getattr(channel, "parent_id", None) or session.cards.get("channel") or getattr(channel, "id", None)
+
+
+async def loot_identity(bot, reg, user, *, max_age: float) -> tuple[bool, list[int]]:
+    """(officer, role ids) for Registry.may_plain — guild_routing.identity, the one predicate."""
+    r = await bot.identity(reg, user, max_age=max_age)
+    return r.officer, list(r.role_ids)
+
+
+async def loot_plain_refusal(bot, reg, user, channel, *, max_age: float) -> str | None:
+    """Registry.may_plain for a loot write from the thread: None when allowed, else the refusal line (who may, where)."""
+    officer, role_ids = await loot_identity(bot, reg, user, max_age=max_age)
+    return reg.may_plain(loot_plain_group(), user.id, officer=officer, role_ids=role_ids, channel=channel, what="loot awards")
+
+
 def _loot_op(session: LootSession, ch: dict):
     """The `loot` ConfigOp a change is (configops, when L3's op is there): field = the action, target = the run's
     council (session id), value = the drop, member = the recipient, reason = the reason."""
@@ -688,11 +750,13 @@ class LootChatConfirmView(_pending_view_base()):
     restart says it expired. Apply re-checks the presser live (the requester or an officer), applies once, and checks
     the batch the officer saw: an override never replaces another officer's (their "replace?" comes back as a refusal)."""
 
-    def __init__(self, bot, reg, session: LootSession, changes: list[dict], *, requester_id: int, requester: str, seen: str):
+    def __init__(self, bot, reg, session: LootSession, changes: list[dict], *, requester_id: int, requester: str, seen: str,
+                 channel: int | None = None):
         self.ACTIONS = ("apply", "cancel", "edit") if any(c.get("inferred") for c in changes) else ("apply", "cancel")
         super().__init__(reg, timeout=600)
         self.bot, self.session, self.changes = bot, session, changes
         self.requester_id, self.requester, self.seen = requester_id, requester, seen
+        self.channel = channel  # the thread's parent: the channel whose plain-text mode Apply is checked in
         self.busy = False
         self._sync_apply()
 
@@ -767,8 +831,12 @@ class LootChatConfirmView(_pending_view_base()):
         self.busy = True
         self.stop()
         await interaction.response.edit_message(content="⏳ Applying…", view=None)
+        from . import guild_routing
+
+        officer, role_ids = await loot_identity(interaction.client, self.reg, interaction.user, max_age=guild_routing.PRIV_LIVE)
         done, refused = await apply_loot_changes(self.bot, self.reg, self.session, self.changes, seen=self.seen,
-                                                 by=interaction.user.display_name, by_id=interaction.user.id)
+                                                 by=interaction.user.display_name, by_id=interaction.user.id,
+                                                 officer=officer, role_ids=role_ids, channel=self.channel)
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
         try:
             await interaction.edit_original_response(content=text[:1900] or "Nothing applied.", view=None)
@@ -786,19 +854,26 @@ class LootChatConfirmView(_pending_view_base()):
         await interaction.response.edit_message(content="Cancelled — nothing was changed.", view=None)
 
 
-async def apply_loot_changes(bot, reg, session: LootSession, changes: list[dict], *, seen: str, by: str, by_id: int | None) -> tuple[list[str], list[str]]:
-    """Apply a loot diff: through configops (the `loot` op) when L3's op is there, else the verbs. The first write
-    carries the batch_rev the officer saw; our own override moves it, so each next one checks against the new rev."""
+async def apply_loot_changes(bot, reg, session: LootSession, changes: list[dict], *, seen: str, by: str, by_id: int | None,
+                             officer: bool = True, role_ids=(), channel: int | None = None) -> tuple[list[str], list[str]]:
+    """Apply a loot diff: through configops (the `loot` op) when L3's op is there, else the verbs. Either way the
+    plain-text check (Registry.may_plain) runs for the presser in `channel` — the council thread's PARENT channel, never
+    the DM policy. The first write carries the batch_rev the officer saw; our own override moves it, so each next one
+    checks against the new rev."""
     from . import configops
 
     done, refused = [], []
+    if not loot_op_ready():
+        bad = reg.may_plain(loot_plain_group(), by_id or 0, officer=officer, role_ids=role_ids, channel=channel, what="loot awards")
+        if bad:
+            return [], [bad]
     rev = seen
     overrides = [c for c in changes if c["kind"] == "override"]
     for c in changes:
         try:
             if loot_op_ready():
                 op = _loot_op(session, c)
-                allowed, no = configops.authorize(reg, [op], by_id or 0, officer=True)
+                allowed, no = configops.authorize(reg, [op], by_id or 0, officer=officer, role_ids=role_ids, channel=channel)
                 if no:
                     refused += no
                     continue
