@@ -52,6 +52,13 @@ def _run_of(session_id: str) -> str:
     return re.sub(r"-r\d+$", "", session_id)
 
 
+def precedent_any(ctx, import_id: str) -> dict | None:
+    """The latest precedent row of an award, whatever its status (active, superseded, retired) — "was a reason ever
+    given?" (the needs-a-reason list, set_reason's replace step). What the model cites stays `ctx.precedent_for`
+    (active only)."""
+    return next((p for p in reversed(getattr(ctx, "precedents", None) or []) if p.get("import_id") == import_id), None)
+
+
 def _utc(s: str | None) -> datetime | None:
     if not s:
         return None
@@ -745,9 +752,11 @@ class LootMixin:
                 raise RegistryError("Nothing is recorded on that drop.")
             ctx = self.loot_ctx(session)
             pr = next((x for x in session.pending_reasons if x.get("drop_id") == drop_id), None)
-            have = next((o for o in reversed(session.overrides) if o.get("import_id") == aw.import_id and o.get("status", "active") == "active"), None)
+            # ANY precedent of the award (active, superseded or retired): a retired one stays retired unless an officer
+            # deliberately replaces it — the "needs a reason" list never undoes a retire
+            have = next((o for o in reversed(session.overrides) if o.get("import_id") == aw.import_id), None)
             if have is None and not session.test:
-                have = ctx.precedent_for(aw.import_id)
+                have = precedent_any(ctx, aw.import_id)
             if have is not None and not replace:
                 raise LootChanged(f"{have.get('by', '?')} already gave a reason at {self.loot_clock(reg, have.get('at'))} — replace?")
             prec = ls.precedent_row(session, aw, reason, by, bot=(pr or {}).get("bot") or aw.bot_pick)
@@ -769,13 +778,14 @@ class LootMixin:
 
     def loot_reasons_pending(self, reg) -> list[dict]:
         """Awards the companion recorded against the bot's pick with no reason yet (the "needs a reason" list): ledger
-        rows with source `companion` whose import_id has no active precedent — live councils and ended ones alike."""
+        rows with source `companion` whose import_id has no precedent at all (a retired one counts: retiring a reason
+        never puts the award back on the list) — live councils and ended ones alike."""
         from .lootctx import RegistryLootContext
 
         ctx = self.__dict__.setdefault("contexts", {}).get(reg.key) or RegistryLootContext(reg, reg.store, None)
         out = []
         for a in ctx.ledger:
-            if a.source == "companion" and a.import_id and not a.void and ctx.precedent_for(a.import_id) is None:
+            if a.source == "companion" and a.import_id and not a.void and precedent_any(ctx, a.import_id) is None:
                 sid = a.import_id.rsplit("-", 1)[0]
                 out.append({"import_id": a.import_id, "run": sid, "session": sid, "drop_id": a.drop_id, "item": a.item_name,
                             "recipient": a.raider, "bot": a.bot_pick, "received": a.received.isoformat()})
@@ -904,7 +914,7 @@ class LootMixin:
             aw = next((a for a in ctx.ledger if a.import_id == import_id and not a.void), None)
             if aw is None:
                 raise RegistryError("Nothing is recorded on that drop.")
-            have = ctx.precedent_for(import_id)
+            have = precedent_any(ctx, import_id)
             if have is not None and not replace:
                 raise LootChanged(f"{have.get('by', '?')} already gave a reason at {self.loot_clock(reg, have.get('at'))} — replace?")
             prec = {"date": aw.received.isoformat(), "event": _run_of(run_key), "item": aw.item_name, "item_id": aw.item_id, "drop_id": drop_id,

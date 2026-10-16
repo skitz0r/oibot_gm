@@ -1047,7 +1047,8 @@ record is fixed, no precedent). A drop nobody distributed is recorded straight a
 with **Wrong? Fix…**; a sub who isn't registered is recorded by name. A reason given twice asks before replacing the
 first. **Correct…** (and *Mistake — correct…*, *Wrong? Fix…*) is the same two presses as Override: who it should be
 recorded to, then what went wrong (the old record is kept, marked void); a correction also retires the precedent of the
-award it fixed — the bot never cites a council decision that, per the correction, never happened. A reason owed and an in-game award that
+award it fixed — the bot never cites a council decision that, per the correction, never happened; an award whose reason
+was given (even if that precedent was later retired) never goes back on the "needs a reason" list. A reason owed and an in-game award that
 disagrees with the record both stay fixable after the council ends. A companion's events go to its own server's live
 council (each server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first — a council
 kept open past its raid's end (a pick still waiting) never takes the companion's events — and when several are live it
