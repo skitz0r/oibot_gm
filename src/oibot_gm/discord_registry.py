@@ -231,14 +231,10 @@ def channel_card_guild(interaction: discord.Interaction, gk: str | None) -> Regi
 
 
 def is_officer(interaction: discord.Interaction, reg: Registry) -> bool:
-    if reg.is_owner_id(interaction.user.id):
-        return True
-    m = interaction.user if isinstance(interaction.user, discord.Member) else None
-    if m is None:
-        return False
-    if m.guild_permissions.manage_guild:
-        return True
-    return reg.config.officer_by_roles(m.roles)  # by role id (legacy names only until the bot resolved them)
+    """The command's officer check — an alias of guild_routing.role_sync (design §2.6): the owner, or a Member of the
+    guild's server with Manage Server or an officer role. A bare User (a DM) is not an officer here; the async paths
+    (`asker_identity`, `plain_identity`) look the person up."""
+    return guild_routing.role_sync(interaction.client, reg, interaction.user) in ("owner", "officer")
 
 
 def is_owner(interaction: discord.Interaction, reg: Registry) -> bool:
@@ -1058,13 +1054,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
         try:
-            msg = await interaction.client.set_channel(reg, "news", channel.id, interaction.user.display_name)
+            msg = await interaction.client.set_channel(reg, "news", channel.id, interaction.user.display_name, by_id=interaction.user.id)
         except ValueError as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
         await interaction.response.send_message(f"✅ {msg}. New posts there are filtered by our game version, raids and the news keywords; "
                                                 "the daily review turns contradictions into proposal cards in the ops channel.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"news channel → #{channel.name} (by {interaction.user.display_name})")
 
     @config.command(name="ask-audience", description="Owner: who may ask the bot free-form questions (/ask, DMs, @mentions); others get the static guide")
     @app_commands.choices(audience=[app_commands.Choice(name=a, value=a) for a in ("officers", "confirmed", "registered", "everyone")])

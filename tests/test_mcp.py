@@ -67,7 +67,7 @@ class FakeBot:
     async def refresh_sheet(self, reg, ev):
         self.refreshed = [*getattr(self, "refreshed", []), ev.key]
 
-    async def set_answer(self, reg, rs, ev, m, status, character, by):
+    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None):
         return rc.LABELS[rc.set_signup(reg, rs, ev, m, character, status, source="officer").status] + f" for {m.display_name}"
 
 
@@ -88,7 +88,7 @@ def test_bearer_token_is_the_owner(client):
     r = client.get("/api/meta", headers=bearer())
     assert r.status_code == 200, r.text
     v = r.json()["viewer"]
-    assert v == {"uid": str(OWNER), "name": "mcp", "officer": True, "owner": True}
+    assert v == {"uid": str(OWNER), "name": "the owner", "officer": True, "owner": True}  # the owner's name, never "mcp" (no record, no gateway user here)
 
 
 def test_wrong_or_missing_token_is_nobody(client):

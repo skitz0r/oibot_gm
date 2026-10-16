@@ -14,6 +14,7 @@ import re
 import discord
 
 from . import comp as comp_mod
+from . import ops as ops_mod
 from . import raid_views as views
 from .discord_registry import registration_card, registration_view
 from .registry import Registry
@@ -329,9 +330,17 @@ CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_
 
 
 class SetupMixin:
-    async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str) -> str:
-        """The web's version of /gm config <kind>-channel: sets the id and does what the command does (post the
-        registration or absences card, refresh the analytics cards)."""
+    async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, *, via: str = "discord", by_id: int | None = None) -> str:
+        """THE channel-setting verb (/gm config <kind>-channel, the Config page, plain text, MCP): sets the id and does what
+        the command does (post the registration or absences card, refresh the analytics cards), then writes the one
+        audit line (ops.audited: `by` is the person, `via` the surface, `by_id` marks a host superuser)."""
+        line = await self._set_channel(reg, kind, channel_id, by)
+        ops = getattr(self, "ops", None)
+        if ops is not None:
+            await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
+        return line
+
+    async def _set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str) -> str:
         attr = CHANNEL_KINDS.get(kind)
         if not attr:
             raise ValueError(f"unknown channel kind {kind}")

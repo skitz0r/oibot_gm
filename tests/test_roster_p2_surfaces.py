@@ -57,7 +57,7 @@ def test_web_preview_and_send_before_lock(reg, rs, client_bot):
     assert stale.status_code == 409 and stale.json()["plan"]["rev"] == plan["rev"] and not ev.fill_asks
     ok = c.post(f"/api/run/{ev.key}/fill", json={"rev": plan["rev"], "picks": {"1": 1}}, headers=bearer())
     assert ok.status_code == 200 and ok.json()["message"] == "asked Kael (swap), Wren (swap)"
-    assert [(a.display_name, a.phase, a.approved_by) for a in ev.fill_asks] == [("Kael", "prelock", "mcp"), ("Wren", "prelock", "mcp")]
+    assert [(a.display_name, a.phase, a.approved_by) for a in ev.fill_asks] == [("Kael", "prelock", "the owner"), ("Wren", "prelock", "the owner")]
     run_json = c.get(f"/api/run/{ev.key}", headers=bearer()).json()
     assert run_json["plan"]["waiting"] == ["Kael", "Wren"] and run_json["fill_asks"][0]["phase"] == "prelock"
 

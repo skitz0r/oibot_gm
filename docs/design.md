@@ -1174,6 +1174,73 @@ Tests: `test_parity_routes.py` (sheet in another server), `test_mcp_multiguild.p
 `test_agents_multiguild.py` (jobs set the lock), `test_multiguild_core.py` (feed tokens, routing, fresh membership),
 `test_multiguild_dm.py` (help expiry, error after the picker, DM modes).
 
+### 5.33 Dual interfaces, phase 0 — identity, seats by id, audit, locks, revs (built 2026-10-15)
+
+The foundations the dual-interface design (out/dual_interface_design.md §2, §6 Phase 0; owner decisions in
+out/dual_interface_decisions.md, which override it) rests on. Rule kept throughout: one verb, every surface a caller;
+verbs never check permissions, callers do, with one predicate.
+
+*One identity predicate (§2.6).* `guild_routing.resolve_role(bot, reg, who, max_age=)` → `Resolved(role, role_ids,
+stale, member)`, role one of owner | officer | member | outside; `role_of` and `identity` are its two names, bound on the
+client as `bot.role_of(reg, user_or_uid, *, max_age)` and `bot.identity(reg, user)` (unpacks as `(role, role_ids)` for
+`Registry.may_plain`). The owner and the host's superusers (`Registry.is_owner_id`) are owner everywhere. A
+`discord.Member` OF THE GUILD'S SERVER decides live from its roles (Manage Server or an officer role → officer) and
+refreshes the cache (`saw_member`); a Member of another server, a bare User (a DM) or a Discord id is looked up through
+`cached_member` at most `max_age` old — the named windows `PRIV_LIVE` (0: a write re-resolves now), `PRIV_ROUTING`
+(10 s: presses and DM routing), `PRIV_WEB` (60 s: the web's reads) — with `stale` set when the process's own cache
+answered rather than the gateway, a live Member or a fresh fetch. The five old checks are aliases of it in one commit:
+`discord_registry.is_officer` (the sync command check, `guild_routing.role_sync`: a bare User is no officer there),
+`RaidMixin.is_officer_anywhere`, `OibotGM.plain_identity`, `discord_help.asker_identity`, `web/app.py privilege`.
+`tests/test_dual_p0.py` drives all five with real `discord.Member` instances on a Member, a DM User, the owner and a
+superuser, and asserts they agree.
+
+*Seats, callouts and `free_seat` keyed by the member's id (§2.2).* `RaidEvent.seat_of(who)` takes a Member, a Discord id
+or a display name and finds the seat by `player_uid` (Player.discord_id, else the run's own signup under the seated
+name — files from before ids were stored); a bare name matches a seat only when the run can resolve no id for it.
+`free_seat(reg, rs, ev, who, why)` the same; `_reseat`, `expire_confirmations`, `confirmations()`, `send_confirmations`,
+`after_board_change`, `absence_effects` and `forget_test_members` go by id; `_apply_layout_locked` resolves the board's
+names once (`uid_of_name`: the signup, else the seat still carrying the name from before a nick change) and compares
+seats by id, so a layout written in the old name neither frees nor re-adds the person. `RaidMixin.set_answer(…, by,
+by_id=None)` and `call_out(…, by, by_id=None)`: `by` is the display name people read, `by_id` the Discord id of whoever
+acts, and "is this the member's own answer" is `by_id == m.discord_id` — never a name compare (an officer whose nick
+equals the member's used to be read as the member). Callers that know the actor pass it (the sheet buttons, `/raid set`
+and `/raid out`, the site's `/api/run/{key}/set`, configops `run_answer` → MCP and plain text); no `by_id` = an officer
+acting. `Registry.member(uid, display_name)` names a NEW record only and never renames an existing member;
+`Registry.rename(uid, display_name, by)` is the one explicit rename (its own commit). A run keeps the name a person was
+seated under in its signups and groups; nothing in a run is relabelled by a rename, and nothing in a run depends on the
+name any more.
+
+*One audit helper (§2.6).* `ops.audit_line(reg, by, line, via=, by_id=)` → `"[web] Jon (host): signup channel → #raids"`:
+`by` is a person's display name, the surface is the prefix from `via` (web | mcp | chat; a Discord command has none),
+and " (host)" marks a superuser acting in a guild they don't own (no DM to that owner: the DM rule). `ops.audited(ops,
+reg, by, line, via, level, by_id)` writes it through any emitter (`Ops.audited` is the method). `SetupMixin.set_channel(reg,
+kind, channel_id, by, *, via, by_id)` owns the channel line (the `/gm config news-channel` command and the web's config
+route stopped writing their own); `configops.apply_async(…, via=)` writes one audited line per applied op when told the
+surface (the web's `/api/ops/change` passes `v.via`; Discord's Apply passes none and keeps its summary), and the web's
+mutation helpers go through `audited` with `v.via`, so a change made through MCP reads `[mcp] …`. `web.app.mcp_viewer`
+names the bearer after the guild owner (`owner_name`: the member record, else the gateway user, else "the owner") with
+`via="mcp"` — the literal "mcp" no longer lands in `confirmed_by`, `approved_by` or commit subjects.
+
+*Locks and batches (§2.4).* `Registry.config_lock` (a `threading.RLock`) is held by `save_config` and by every
+mutate-validate-save config verb — `set_officer_role`, `set_recruitment`, `set_schedule`, `remove_schedule`,
+`set_raid_override(s)`, `clear_raid_override`, `set_buff_override`, `set_family_override`, `clear_aura_overrides`,
+`set_plain_policy` (the `_config_verb` decorator) and configops' `set` branch — because web mutations run in
+`asyncio.to_thread` while Discord mutates on the loop and `store.lock` guards only the file write. `GitStore.batch` depth
+and its message list are thread-local: another thread's commit lands at once instead of being deferred into, or folded
+into, a batch it is not part of. `Registry.preview(fn)` runs `fn` on `shadow()` (its own lock, never written) and the raid
+wizard's preview uses it instead of mutating the live config and restoring it.
+
+*Section revs (§2.4).* `Registry.config_rev(section)` for `settings` | `raids:<id>` | `buffs` | `recruitment` | `plain`:
+a hash of the section's canonical YAML, computed on demand (never stored), excluding `rosters[]` and every
+`*_message_id` field so the scheduler's bookkeeping during a raid week never makes an owner's edit stale;
+`characters_rev(member)` hashes the character list, not `updated_at`. Every config verb takes `rev=`; `ConfigChanged`
+(a `RegistryError`, sibling of `rc.BoardChanged`, carries `.section`) is raised before anything is touched when it
+differs. configops carries them in the existing revs dict under `config:<section>` (like `plan:`): `board_revs` adds
+them when the diff is shown, `op_rev` hands the right one to `apply(rev=)`, `snapshot_revs`/`refresh_revs` treat a
+section like a board (this request's own write refreshes; someone else's change marks it stale) — so Discord's
+`ConfigConfirmView` and the web's preview token carry config revs with no change of their own. The web admin routes do
+not send revs yet (phase 3). Tests: `tests/test_dual_p0.py`.
+
 ## 6. Architecture
 
 ```mermaid

@@ -302,15 +302,29 @@ def mcp_guild(request, bot):
     return reg
 
 
+def owner_name(bot, reg) -> str:
+    """The guild owner's display name: their member record, else the gateway's user, else 'the owner'. What MCP writes
+    are attributed to (`by`), the surface being the `[mcp]` prefix from `via` (design §2.6) — never the word "mcp" as a name."""
+    uid = reg.config.owner_discord_id
+    m = reg.members.get(uid) if uid is not None else None
+    if m is not None:
+        return m.display_name
+    get_user = getattr(bot, "get_user", None)
+    u = get_user(uid) if get_user is not None and uid is not None else None
+    name = getattr(u, "display_name", None) or getattr(u, "global_name", None) or getattr(u, "name", None)
+    return str(name) if name else "the owner"
+
+
 def mcp_viewer(request, bot, token: str | None) -> Viewer | None:
-    """The bearer identity: the OWNER OF THE CHOSEN GUILD (mcp_guild; every write is attributed to them, name 'mcp',
-    via='mcp'). None = not authorized (mcp_authorized); 400 = no guild chosen, an unknown one, or one without an owner."""
+    """The bearer identity: the OWNER OF THE CHOSEN GUILD (mcp_guild; every write is attributed to them by their display
+    name, `via='mcp'` gives the audit prefix). None = not authorized (mcp_authorized); 400 = no guild chosen, an unknown
+    one, or one without an owner."""
     if not mcp_authorized(request, token):
         return None
     reg = mcp_guild(request, bot)
     if not reg.config.owner_discord_id:
         raise HTTPException(400, f"{reg.config.name} has no owner yet")
-    return Viewer(int(reg.config.owner_discord_id), "mcp", reg, officer=True, owner=True, via="mcp")
+    return Viewer(int(reg.config.owner_discord_id), owner_name(bot, reg), reg, officer=True, owner=True, via="mcp")
 
 
 def create_app(bot) -> FastAPI:
@@ -440,15 +454,9 @@ def create_app(bot) -> FastAPI:
             out.append({"key": r.key, "name": r.config.name, "icon": public_info(bot, r)["icon"], "role": role})
         return out
 
-    async def privilege(reg, uid: int, max_age: float = 60) -> str:
-        """owner | officer | member | outside — from Discord roles (Manage Server or the configured officer role), never stored."""
-        if reg.is_owner_id(uid):
-            return "owner"
-        guild = bot.get_guild(reg.config.discord_guild_id)
-        m = await guild_member(guild, uid, max_age=max_age) if guild else None
-        if m is None:
-            return "outside"
-        return "officer" if bot.officiates(m, guild) else "member"
+    async def privilege(reg, uid: int, max_age: float = guild_routing.PRIV_WEB) -> str:
+        """owner | officer | member | outside — from Discord roles, never stored: guild_routing.role_of (design §2.6)."""
+        return await guild_routing.role_of(bot, reg, uid, max_age=max_age)
 
     # ---- auth
     @app.get("/auth/login")

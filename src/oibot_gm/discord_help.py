@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 
 from . import guild_routing, help as help_mod
-from .discord_registry import Guilds, is_officer
+from .discord_registry import Guilds
 from .ops import Ops
 
 from .constants import TEAL  # noqa: E402
@@ -167,7 +167,8 @@ async def asker_identity(interaction: discord.Interaction, reg) -> tuple[bool, l
     (OibotGM.plain_identity) — else an officer or a member-role holder with no character got the Apply button."""
     if interaction.guild_id is None and getattr(interaction.client, "plain_identity", None) is not None:
         return await interaction.client.plain_identity(reg, interaction.user)
-    return is_officer(interaction, reg), [r.id for r in getattr(interaction.user, "roles", None) or []]
+    r = await guild_routing.resolve_role(interaction.client, reg, interaction.user)  # a Member decides live; same predicate as is_officer
+    return r.officer, r.role_ids
 
 
 def guide_view(reg) -> discord.ui.View:

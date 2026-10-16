@@ -51,7 +51,11 @@ src/oibot_gm/
                        applies in Discord before registering: every first-character path checks it — Discord, plain text, the Me page);
                        PlainPolicy on GuildConfig.plain (who per PLAIN_GROUPS, mode per channel / DMs / default), may_plain = THE plain-text check
                        Owner rights = Registry.is_owner_id(uid): the guild's owner OR a host superuser (OIBOT_SUPERUSERS, every guild) — never compare
-                       owner_discord_id directly; a server claim defaults the owner to the Discord server's owner
+                       owner_discord_id directly; a server claim defaults the owner to the Discord server's owner.
+                       Dual interfaces phase 0 (design §5.33): `config_lock` (RLock) held by save_config and every config verb (`_config_verb`);
+                       `config_rev(section)` for settings | raids:<id> | buffs | recruitment | plain (computed, excludes rosters[] / *_message_id),
+                       `characters_rev(member)`, verbs take `rev=` and raise `ConfigChanged`; `preview(fn)` runs on shadow(); `member(uid, name)`
+                       never renames — `rename(uid, name, by)` is the explicit step
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|plan main|alt|roles|char …|absent … (members);
                        /roster overview|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers; `poll` retired, PlanButton is a stub);
@@ -68,7 +72,11 @@ src/oibot_gm/
   guild_routing.py     THE resolver: need(interaction, reply=True) → (reg, interaction) — every command rebinds both; an unconfigured server is told
                        "isn't set up" and never reaches another guild; DMs: only() → else guilds_of (owner / membership yes|no|unknown) → one, none (Join links),
                        several → the DM server picker (guild_picker.choose_guild: asked EVERY time, asker only, 2 min; the command continues on
-                       the press); resolve_button(interaction, g, legacy) for persistent buttons; may_access = the strict "belongs to" (the web uses it)
+                       the press); resolve_button(interaction, g, legacy) for persistent buttons; may_access = the strict "belongs to" (the web uses it).
+                       THE identity predicate (design §2.6/§5.33): resolve_role(bot, reg, who, max_age=) → Resolved(role owner|officer|member|outside,
+                       role_ids, stale); role_of / identity are its names (bot.role_of, bot.identity); windows PRIV_LIVE=0 (writes) / PRIV_ROUTING=10 /
+                       PRIV_WEB=60; role_sync = the no-lookup form. is_officer, is_officer_anywhere, plain_identity, asker_identity and app.py privilege
+                       are aliases — never a sixth check
   raidcycle.py         signup-driven cycle (design.md §5.20): raid SCHEDULES (§5.27: Registry.schedules/schedule_def; weekly slots · day N of each
                        lockout · pickup templates; `default` = the raid's own slots) + cadence (schedule_def: slots, signup_lead/lock/confirm hours,
                        weights) → upcoming/schedule_starts/open_run(schedule=) (ephemeral roster per run, key suffix -<schedule id> unless default);
@@ -83,7 +91,8 @@ src/oibot_gm/
                        coverage + 4-week forecast: Registry.series_coverage / rc.series_outlook (officer-only).
                        split_reason / split_reason_text: why the joiners make fewer runs than the headcount (what the next run is short, in code);
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run
-  discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer (the one path for an answer), lock_run → roster
+  discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer / call_out (the one path for an answer; `by` = a
+                       display name to read, `by_id` = the actor's Discord id decides "their own" — never a name compare; seats found by id, ev.seat_of(member)), lock_run → roster
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
@@ -137,7 +146,10 @@ src/oibot_gm/
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token, idempotent acks; status(guild) per guild
   discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence. Routed by the companion's
                        hello `guild` (active_raid(comp), companion_key; with several guilds raiding, a companion without --guild routes nowhere)
-  ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key
+  ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key.
+                       ONE audit format: audit_line / audited(ops, reg, by, line, via, level, by_id) → "[web] Jon (host): …" — `by` is a display name,
+                       the surface is the prefix from via (web|mcp|chat; none for Discord), " (host)" = a superuser in a guild they don't own, no DM.
+                       set_channel, apply_async(via=) and the web's mutation helpers write through it
 scripts/agents/        loop EVERY guild (Api().guilds()): review.py (daily 9:00 AM; one tagged run per guild, its own since, a Claude session only for a
                        guild with new news, pinned with OIBOT_MCP_GUILD), apply.py (every 15 min; oldest approval across guilds; guild settings by the bot, profile
                        edits by Claude then checks/commit/push/restart/health/revert by the SCRIPT; --pr), menubar.py (rumps via uv --with),

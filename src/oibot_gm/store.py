@@ -47,8 +47,9 @@ class GitStore:
         self.push_enabled = (os.environ.get("OIBOT_DATA_PUSH", "1") == "1") if push is None else push
         self._push_timer: threading.Timer | None = None
         self._unpushed = False  # a commit happened since the last successful push
-        self._batch_depth = 0
-        self._batch_messages: list[str] = []
+        # batch() state is PER THREAD: web mutations run in worker threads while Discord commits on the loop, so another
+        # thread's commit is never folded into (or deferred by) a batch it isn't part of
+        self._batch = threading.local()
         if self.is_repo and self.push_enabled:
             self._git("pull", "--rebase", "--quiet", check=False)
         atexit.register(self.flush)  # a clean interpreter exit still pushes what the debounce timer was holding
@@ -108,9 +109,14 @@ class GitStore:
             return False
         with self.lock:
             if self._batch_depth:
-                self._batch_messages.append(message)
+                self._batch.messages.append(message)
                 return False
             return self._commit_now(message)
+
+    @property
+    def _batch_depth(self) -> int:
+        """This thread's open batch() nesting (0 = commits land at once)."""
+        return getattr(self._batch, "depth", 0)
 
     def _commit_now(self, message: str) -> bool:
         with self.lock:
@@ -126,15 +132,17 @@ class GitStore:
     def batch(self, message: str | None = None) -> Iterator["GitStore"]:
         """Defer commits until the block exits: every `commit()` inside becomes one commit (the messages are folded
         into its body, or `message` names it). Nested batches fold into the outermost one."""
-        with self.lock:
-            self._batch_depth += 1
+        tls = self._batch
+        tls.depth = getattr(tls, "depth", 0) + 1
+        if not hasattr(tls, "messages"):
+            tls.messages = []
         try:
             yield self
         finally:
+            tls.depth -= 1
             with self.lock:
-                self._batch_depth -= 1
-                if self._batch_depth == 0 and self._batch_messages:
-                    msgs, self._batch_messages = self._batch_messages, []
+                if tls.depth == 0 and tls.messages:
+                    msgs, tls.messages = tls.messages, []
                     if message:
                         head = message
                     elif len(msgs) == 1:

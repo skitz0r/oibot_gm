@@ -79,6 +79,124 @@ async def may_access(bot, reg, uid: int) -> bool:
     return await membership(bot, reg, uid) == "yes"
 
 
+# ---- who is an officer (dual interfaces, phase 0 — design §2.6): ONE predicate, every surface an alias
+# Freshness windows for a lookup by id (a discord.Member in hand always decides live from its roles):
+PRIV_LIVE = 0.0       # a write that needs officer or owner rights: fetch now, never a cached answer
+PRIV_ROUTING = ROUTING_MAX_AGE_S  # DM routing and button presses: at most 10 s old
+PRIV_WEB = 60.0       # the web's reads: a minute
+ROLE_RANK = {"owner": 3, "officer": 2, "member": 1, "outside": 0}
+
+
+class Resolved:
+    """The answer of `resolve_role`: `role` owner | officer | member | outside, the Discord `role_ids` the person holds in
+    that server (for Registry.may_plain), `stale` when the answer came from the process's own cache rather than the
+    gateway, a live Member or a fresh fetch, and the `member` object when there is one."""
+
+    __slots__ = ("role", "role_ids", "stale", "member")
+
+    def __init__(self, role: str, role_ids: list[int], stale: bool, member=None):
+        self.role, self.role_ids, self.stale, self.member = role, list(role_ids), stale, member
+
+    @property
+    def officer(self) -> bool:
+        return self.role in ("owner", "officer")
+
+    def __iter__(self):  # so `role, role_ids = await identity(...)` reads naturally
+        yield self.role
+        yield self.role_ids
+
+
+def _uid(who) -> int | None:
+    if who is None:
+        return None
+    if isinstance(who, int):
+        return who
+    uid = getattr(who, "id", None)
+    try:
+        return int(uid) if uid is not None else int(who)
+    except (TypeError, ValueError):
+        return None
+
+
+def _live_member(who, guild):
+    """`who` as a discord.Member OF THAT SERVER, else None (a Member of another server or a bare User decides nothing)."""
+    if guild is None or not isinstance(who, discord.Member):
+        return None
+    return who if getattr(getattr(who, "guild", None), "id", None) == guild.id else None
+
+
+def _role_of_member(bot, reg, member, guild) -> str:
+    officiates = getattr(bot, "officiates", None)
+    return "officer" if (officiates is not None and officiates(member, guild)) else "member"
+
+
+def role_sync(bot, reg, who) -> str | None:
+    """The role decided WITHOUT a lookup: the owner (or a superuser) anywhere; a discord.Member of the guild's server from
+    its roles (Manage Server or an officer role → officer). None when it can't be told here (a bare User in a DM):
+    callers that may await use `resolve_role`."""
+    uid = _uid(who)
+    if uid is None:
+        return None
+    if reg.is_owner_id(uid):
+        return "owner"
+    get_guild = getattr(bot, "get_guild", None)
+    guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
+    m = _live_member(who, guild)
+    if m is None:
+        return None
+    saw = getattr(bot, "saw_member", None)
+    if saw is not None:  # evidence beats the cache: the person is in the server now, with these roles
+        saw(guild.id, m)
+    return _role_of_member(bot, reg, m, guild)
+
+
+async def resolve_role(bot, reg, who, *, max_age: float = PRIV_ROUTING) -> Resolved:
+    """THE identity predicate (design §2.6). `who` is a discord.Member, a discord.User or a Discord id. The owner and the
+    host's superusers (Registry.is_owner_id) are `owner` everywhere. A Member of the guild's server decides live from
+    its roles and refreshes the cache; anyone else is looked up by id through `bot.cached_member` at most `max_age`
+    seconds old (PRIV_LIVE for a write, PRIV_ROUTING for routing and presses, PRIV_WEB for the web's reads) — not in the
+    server, or the server unreachable, is `outside`."""
+    uid = _uid(who)
+    if uid is None:
+        return Resolved("outside", [], False)
+    get_guild = getattr(bot, "get_guild", None)
+    guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
+    live = _live_member(who, guild)
+    if live is not None:
+        saw = getattr(bot, "saw_member", None)
+        if saw is not None:
+            saw(guild.id, live)
+        role = "owner" if reg.is_owner_id(uid) else _role_of_member(bot, reg, live, guild)
+        return Resolved(role, [r.id for r in getattr(live, "roles", None) or []], False, live)
+    member, stale = None, False
+    cached_member = getattr(bot, "cached_member", None)
+    if guild is not None and cached_member is not None:
+        fresh = guild.get_member(uid) if hasattr(guild, "get_member") else None
+        try:
+            member = await cached_member(guild, uid, max_age=max_age)
+        except Exception:  # noqa: BLE001 — a lookup Discord didn't answer: no member, never a crash on a permission check
+            member = None
+        if member is not None and fresh is None:
+            hit = getattr(bot, "__dict__", {}).get("_member_cache", {}).get((guild.id, uid))
+            stale = bool(hit and hit[1] is member)  # the process's cache answered, not the gateway or a fetch
+    role_ids = [r.id for r in getattr(member, "roles", None) or []] if member is not None else []
+    if reg.is_owner_id(uid):
+        return Resolved("owner", role_ids, stale, member)
+    if member is None:
+        return Resolved("outside", [], stale, None)
+    return Resolved(_role_of_member(bot, reg, member, guild), role_ids, stale, member)
+
+
+async def role_of(bot, reg, who, *, max_age: float = PRIV_ROUTING) -> str:
+    """owner | officer | member | outside — `resolve_role`'s role alone."""
+    return (await resolve_role(bot, reg, who, max_age=max_age)).role
+
+
+async def identity(bot, reg, who, *, max_age: float = PRIV_ROUTING) -> Resolved:
+    """(role, role_ids) for Registry.may_plain — `resolve_role` under the name the plain-text paths use (unpacks as a pair)."""
+    return await resolve_role(bot, reg, who, max_age=max_age)
+
+
 def join_lines(regs) -> str:
     """Each server's name and its Join link (when it has one) — for someone who is in none of them."""
     out = []

@@ -401,7 +401,7 @@ class SetWizard(Wizard):
             return
         await self.working(interaction, "Saving…")
         try:
-            line = await interaction.client.set_answer(self.reg, self.rs, ev, m, self.draft["status"], want, by=interaction.user.display_name)
+            line = await interaction.client.set_answer(self.reg, self.rs, ev, m, self.draft["status"], want, by=interaction.user.display_name, by_id=interaction.user.id)
         except ValueError as e:
             line = f"❌ {e}"
         await self.finish(interaction, line)
@@ -578,7 +578,7 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
             # the shared verb (the site, MCP and plain text call it too): callout, seat freed after lock, the note for
             # the officers only (the run's updates thread and the ops feed, never the public signup channel)
             try:
-                line = await si.client.call_out(reg, rs, cur, m, v.get("note") or None, by=m.display_name)
+                line = await si.client.call_out(reg, rs, cur, m, v.get("note") or None, by=m.display_name, by_id=m.discord_id)
             except ValueError as e:
                 line = f"❌ {e}"
             await wiz.finish(si, line)

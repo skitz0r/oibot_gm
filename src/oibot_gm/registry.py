@@ -5,10 +5,13 @@ Characters belong to exactly one member; one of them is the main. Officers
 confirm characters and set ranks. Every change is a store commit."""
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import logging
 import os
 import re
+import threading
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -286,6 +289,43 @@ class GuildConfig(BaseModel):
 
 class RegistryError(ValueError):
     pass
+
+
+class ConfigChanged(RegistryError):
+    """A config write made against a section that changed since its author looked (its `rev` is stale) — the sibling of
+    rc.BoardChanged for guild settings (design §2.4). Nothing was written; the caller re-reads and shows the current state."""
+
+    def __init__(self, section: str, msg: str | None = None):
+        self.section = section
+        super().__init__(msg or f"The {section_words(section)} changed since you looked — check them and try again.")
+
+
+def section_words(section: str) -> str:
+    if section.startswith("raids:"):
+        return f"{section[6:]} raid settings"
+    return {"settings": "guild settings", "buffs": "aura settings", "recruitment": "recruitment settings", "plain": "plain-text permissions"}.get(section, section)
+
+
+def _config_verb(section):
+    """A mutate-validate-save config verb: runs under the Registry's `config_lock` (web mutations run in worker threads
+    while Discord mutates on the loop) and accepts `rev=` — the section rev its author saw (Registry.config_rev); a
+    different one raises ConfigChanged before anything is touched. `section` is the name or a callable of the call's
+    arguments (raids:<id>)."""
+
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(self, *args, rev=None, **kwargs):
+            with self.config_lock:
+                self.check_rev(section(self, *args, **kwargs) if callable(section) else section, rev)
+                return fn(self, *args, **kwargs)
+
+        return wrapper
+
+    return deco
+
+
+def _raid_section(self, instance, *a, **k) -> str:
+    return f"raids:{instance}"
 
 
 # ---- guild identity (design §5.32): the folder name IS the key; it never changes after creation. 1–16 characters of
@@ -815,6 +855,9 @@ class Registry:
         self.listeners: list = []
         self._snap: dict[int, dict] = {}  # last saved state per member, for diff lines
         self.role_names: dict[int, str] = {}  # Discord role id -> name, cached by resolve_officer_roles (display + name lookups off the bot thread)
+        # every mutate-validate-save config verb and save_config hold this: the web mutates in worker threads while
+        # Discord mutates on the loop, and store.lock guards only the file write (design §2.4)
+        self.config_lock = threading.RLock()
         self.config = self.load_config()
         self.refresh_profile()
         self.reload()
@@ -863,6 +906,7 @@ class Registry:
         low = s.lstrip("@").lower()
         return next((rid for rid, name in self.role_names.items() if name.lower() == low), None)
 
+    @_config_verb("settings")
     def set_officer_role(self, value, add: bool, by: str) -> str:
         """Add or remove one officer role by id, mention, or name. A name the cache can't resolve (no bot yet) is parked in
         the legacy list, granting nothing until the bot resolves it on its next ready/role event. Returns the one-line result."""
@@ -966,14 +1010,58 @@ class Registry:
         return GuildConfig(**yaml.safe_load(p.read_text()))
 
     def save_config(self, message: str, notify: bool = True) -> None:
-        self.refresh_profile()
-        if getattr(self, "_shadow", False):  # a preview copy (Registry.shadow): validated, never written
-            return
-        p = Path(self.key) / "guild.yaml"
-        self.store.write_text(p, "# oibot_GM guild config — edit via /gm config or by PR.\n" + yaml.safe_dump(self.config.model_dump(), sort_keys=False))
-        self.store.commit(f"{self.key}: {message}")
+        with self.config_lock:
+            self.refresh_profile()
+            if getattr(self, "_shadow", False):  # a preview copy (Registry.shadow): validated, never written
+                return
+            p = Path(self.key) / "guild.yaml"
+            self.store.write_text(p, "# oibot_GM guild config — edit via /gm config or by PR.\n" + yaml.safe_dump(self.config.model_dump(), sort_keys=False))
+            self.store.commit(f"{self.key}: {message}")
         if notify:
             self._notify("config", [message])
+
+    # ---- section revs (design §2.4): computed on demand from the stored shape, never a stored field bumped by hand
+    REV_SECTIONS = ("settings", "buffs", "recruitment", "plain")  # plus raids:<instance id>
+    # what no rev covers: the scheduler's own bookkeeping (run rosters, card and sheet message ids) — an owner's edit during a
+    # raid week must never be refused because a card was re-posted
+    REV_SKIP = ("rosters",)
+
+    def _section_blob(self, section: str):
+        cfg = self.config.model_dump()
+        own = {"raids", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain"}
+        if section.startswith("raids:"):
+            return cfg.get("raids", {}).get(section[6:]) or {}
+        if section == "buffs":
+            return {"buffs": cfg.get("buffs") or {}, "families": cfg.get("families") or {}}
+        if section == "recruitment":
+            return {"recruitment": cfg.get("recruitment"), "invite_url": cfg.get("invite_url"), "member_role_ids": cfg.get("member_role_ids")}
+        if section == "plain":
+            return cfg.get("plain")
+        if section == "settings":
+            return {k: v for k, v in cfg.items() if k not in own and k not in self.REV_SKIP and "_message_id" not in k}
+        raise RegistryError(f"unknown config section {section} (one of {', '.join(self.REV_SECTIONS)}, raids:<id>)")
+
+    def config_rev(self, section: str) -> str:
+        """A fingerprint of one config section as stored: `settings` (channels, timezone, roles, owner, about…),
+        `raids:<id>`, `buffs` (auras and families), `recruitment`, `plain`. A write carrying an older one is stale."""
+        blob = yaml.safe_dump(self._section_blob(section), sort_keys=True, default_flow_style=False)
+        return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+    def check_rev(self, section: str, rev: str | None) -> None:
+        """Raise ConfigChanged when `rev` (what the author saw) isn't the section's rev now; None checks nothing."""
+        if rev and rev != self.config_rev(section):
+            raise ConfigChanged(section)
+
+    def characters_rev(self, m: Member) -> str:
+        """A fingerprint of a member's character list (what a table save edits) — not `updated_at`, which every DM
+        toggle and placement ask bumps."""
+        rows = [c.model_dump() for c in m.characters]
+        return hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+    def preview(self, fn):
+        """Run `fn(shadow)` on a throw-away copy of this registry (`shadow`) and return its result: the config as it would
+        be after a change, validated by the same verbs, with the live config never touched (design §2.4)."""
+        return fn(self.shadow())
 
     def shadow(self) -> "Registry":
         """A throw-away copy for previews: its own deep-copied config (members shared, read-only by convention), whose
@@ -984,6 +1072,7 @@ class Registry:
         sh = copy.copy(self)
         sh.config = self.config.model_copy(deep=True)
         sh.listeners = []
+        sh.config_lock = threading.RLock()  # its own: a preview never waits on, nor holds, the live lock
         sh._shadow = True
         sh.refresh_profile()
         return sh
@@ -1077,6 +1166,7 @@ class Registry:
         return out
 
     # ---- recruitment settings (owner): open/closed, the note, the questions, the invite
+    @_config_verb("recruitment")
     def set_recruitment(self, by: str, *, open: bool | None = None, note: str | None = None, questions: list[dict] | None = None,
                         invite_url: str | None = None, member_role_ids: list[int] | None = None) -> str:
         """One validated write for any mix of the recruitment settings (the Config page, /gm config recruitment, plain text,
@@ -1169,13 +1259,28 @@ class Registry:
 
     # ---- lookups
     def member(self, discord_id: int, display_name: str | None = None, create: bool = False) -> Member:
+        """The member by id. `display_name` names a NEW record only (`create`); an existing member's name is never changed
+        here — a rename is its own explicit step (`rename`), so a verb can't relabel someone as a side effect while runs
+        and asks still carry the old name (design §2.2)."""
         m = self.members.get(discord_id)
         if m is None:
             if not create:
                 raise RegistryError("You have no registered characters yet. Use /register first.")
             m = Member(discord_id=discord_id, display_name=display_name or str(discord_id))
-        elif display_name and m.display_name != display_name:
-            m.display_name = display_name
+        return m
+
+    def rename(self, discord_id: int, display_name: str, by: str) -> Member:
+        """The one way a member's display name changes (a nick change an officer or the person records). Seats, callouts
+        and asks are keyed by id, so nothing else moves; the change is its own commit."""
+        m = self.member(discord_id)
+        name = str(display_name or "").strip()
+        if not name:
+            raise RegistryError("A display name can't be empty.")
+        if name == m.display_name:
+            return m
+        old = m.display_name
+        m.display_name = name
+        self.save(m, f"{old} is now {name} (by {by})")
         return m
 
     def find(self, name: str) -> tuple[Member, RegisteredCharacter] | None:
@@ -1345,6 +1450,7 @@ class Registry:
         """The raid definition as schedule `sid` sees it (see schedule_def_of)."""
         return schedule_def_of(self.raid_def(instance), sid)
 
+    @_config_verb(_raid_section)
     def set_schedule(self, instance: str, sid: str, fields: dict, by: str) -> list[str]:
         """Change (or create) one schedule of a raid: `fields` = {setting: value} from SCHEDULE_FIELDS, a cadence value
         of None / 'inherit' going back to the raid's. A new id needs what it is first — a kind, run times, or lockout
@@ -1396,6 +1502,7 @@ class Registry:
         after = next((s for s in self.schedules(instance) if s["id"] == sid), None) or {"id": sid}
         return [f"{rd.get('name', instance)} · {after.get('name') or sid}: " + ("new schedule, " if before is None else "") + self.schedule_label(instance, after)]
 
+    @_config_verb(_raid_section)
     def remove_schedule(self, instance: str, sid: str, by: str) -> str:
         """Drop one schedule. `default` is the raid's own run times: removing it clears the raid's slots. Runs already
         opened from it keep their times."""
@@ -1415,6 +1522,7 @@ class Registry:
         self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} removed (by {by})")
         return f"{rd.get('name', instance)}: schedule {have.get('name') or sid} removed"
 
+    @_config_verb(_raid_section)
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
         """Owner override for a raid (validated): a refused value never stays in memory — the override dict is
         restored, so the next save_config can't commit it."""
@@ -1430,6 +1538,7 @@ class Registry:
                 self.config.raids[instance] = before
             raise
 
+    @_config_verb(_raid_section)
     def set_raid_overrides(self, instance: str, fields: dict, by: str, message: str | None = None) -> list[str]:
         """Several raid fields as ONE change: every field is applied, the cross-field rules are checked once on the
         result, and it is saved in a single commit. A refused value leaves the stored config exactly as it was — no
@@ -1742,6 +1851,7 @@ class Registry:
             raise RegistryError(f"unknown spec {spec}")
         raise RegistryError(f"benefit key {key!r} must be one of {', '.join(self.VALUE_KEYS)} or spec:<Name>")
 
+    @_config_verb("buffs")
     def set_buff_override(self, bid: str, field: str, value, by: str) -> str:
         """scope | family (a family id, another buff's id, or 'own' to stand alone) | strength | status | note."""
         self.buff(bid)
@@ -1777,6 +1887,7 @@ class Registry:
         self.save_config(f"aura {bid} {field} → {value} (by {by})")
         return f"{bid}: {field} = {value}"
 
+    @_config_verb("buffs")
     def set_family_override(self, fid: str, field: str, value, by: str) -> str:
         """name | status | note | value (whole map as 'all: 3, mana: 2') | value:<key> (one entry; 0 or blank removes it)."""
         fid = str(fid or "").strip().lower().replace(" ", "_")
@@ -1828,6 +1939,7 @@ class Registry:
         self.save_config(f"aura family {fid} {field} → {value} (by {by})")
         return f"family {fid}: {field} = {value}"
 
+    @_config_verb("buffs")
     def clear_aura_overrides(self, by: str, bid: str | None = None) -> str:
         if bid:
             self.config.buffs.pop(bid, None)
@@ -1838,6 +1950,7 @@ class Registry:
         self.save_config(f"aura overrides cleared (by {by})")
         return "auras: back to the game defaults"
 
+    @_config_verb(_raid_section)
     def clear_raid_override(self, instance: str, by: str) -> str:
         self.config.raids.pop(instance, None)
         self.save_config(f"raid {instance} overrides cleared (by {by})")
@@ -1940,6 +2053,7 @@ class Registry:
                 channels[key] = mode
         return {"groups": groups, "channels": channels, "dm": patch.get("dm") or cur.dm, "default": patch.get("default") or cur.default}
 
+    @_config_verb("plain")
     def set_plain_policy(self, policy: dict, by: str) -> str:
         """Owner: replace the plain-text policy (validated: known groups, who tokens, modes). One commit."""
         p = PlainPolicy.model_validate(policy or {})

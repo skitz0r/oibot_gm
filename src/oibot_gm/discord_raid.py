@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import discord
 
-from . import raidcycle as rc
+from . import guild_routing, raidcycle as rc
 from .discord_registry import Guilds
 from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton, fill_view, place_view, sheet_view
 from .raid_commands import register_raid_commands
@@ -138,18 +138,20 @@ class RaidMixin:
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            line = await self.set_answer(reg, rs, ev, m, status, character, by=m.display_name)
+            line = await self.set_answer(reg, rs, ev, m, status, character, by=m.display_name, by_id=m.discord_id)
         except ValueError as e:
             line = f"❌ {e}"
         await interaction.followup.send(line, ephemeral=True)
 
-    async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str) -> str:
-        """The one path for setting someone's answer on a sheet — the member (by == their name) or an officer.
+    async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str, by_id: int | None = None) -> str:
+        """The one path for setting someone's answer on a sheet — the member themself or an officer. `by` is a display
+        name people read; `by_id` is the Discord id of whoever acts and DECIDES whose answer it is: the member's own when
+        `by_id == m.discord_id` (never a name compare — nicks change, design §2.2). No `by_id` = an officer acting.
         Open sheet: the signup + sheet refresh. Locked: Join seats them (if not already) and asks them to confirm;
         No thanks frees a rostered seat (drop_seated: DM, thread line, fill); Bench is the signup only. Returns a line."""
         if status not in rc.STATUSES:
             raise ValueError(f"status must be one of {rc.STATUSES}")
-        mine = by == m.display_name
+        mine = by_id is not None and int(by_id) == int(m.discord_id)
         source = "member" if mine else "officer"
         team = rc.run_team(reg, ev)
         if team.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(team.get("test_by") or ""):
@@ -165,7 +167,7 @@ class RaidMixin:
                 await self.refresh_cards(reg, ev)
             line = f"✅ {who}{s.character} {rc.LABELS[s.status]} for {label}" + (f" — {s.note}" if s.note and s.status != status else "")
         elif status == "out":
-            if ev.seat_of(m.display_name):
+            if ev.seat_of(m):
                 if mine:  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
                     rc.callout(reg, rs, ev, m, team, None)
                 await self.drop_seated(reg, rs, ev, team, m, "callout" if mine else "officer", None)
@@ -178,7 +180,7 @@ class RaidMixin:
                 line = f"✅ {who}No thanks for {label} (wasn't rostered)"
         elif status == "in":
             s = rc.set_signup(reg, rs, ev, m, character, "in", source=source)
-            seat = ev.seat_of(m.display_name)
+            seat = ev.seat_of(m)
             if seat:
                 rc._reseat(ev, s)  # a character swap keeps the seat
                 rs.save(ev, f"{m.display_name} seat updated")
@@ -190,7 +192,7 @@ class RaidMixin:
                     line = f"✅ {who}{s.character} Join for {label} — every seat is taken, so not rostered (move them in on the board)"
                 else:
                     rs.save(ev, f"{m.display_name} rostered by {by}")
-                    gi = next((k for k, g in enumerate(ev.all_rosters[i].groups) if m.display_name in g), 0)
+                    gi = next((k for k, g in enumerate(ev.all_rosters[i].groups) if s.display_name in g), 0)
                     sent = await self.confirm_one(reg, ev, s, i, gi, by)
                     asks = rc.run_confirms(reg, ev)
                     await self.post_run_update(reg, ev, f"✏️ {by} rostered {m.display_name} ({s.character})" + ("" if not asks else " — asked to confirm" if sent else " — DMs off, the ask waits on the site" if m.dm_opt_out else ""))
@@ -200,7 +202,7 @@ class RaidMixin:
         else:  # sub after lock: the signup only; a rostered member keeps the seat until set out
             s = rc.set_signup(reg, rs, ev, m, character, "sub", source=source)
             await self.refresh_sheet(reg, ev)
-            line = f"✅ {who}{s.character} Bench for {label}" + (" — still rostered; set No thanks to free the seat" if ev.seat_of(m.display_name) else "")
+            line = f"✅ {who}{s.character} Bench for {label}" + (" — still rostered; set No thanks to free the seat" if ev.seat_of(m) else "")
         if not mine:
             await self.ops.emit(reg.config, "info", f"{by} set {m.display_name} {status} on {ev.key}")
         return line
@@ -453,7 +455,7 @@ class RaidMixin:
         if ask.answer == "yes" and ev.state != "open":
             for done in [ask] + ([both] if both is not None else []):
                 m = reg.members.get(done.discord_id)
-                if m and ev.seat_of(m.display_name):  # a yes that found no free seat is a Join, not a rostered seat
+                if m and ev.seat_of(m):  # a yes that found no free seat is a Join, not a rostered seat
                     a = reg.add_placement_ask(m.discord_id, ev.team, done.character, "fill")
                     a["answer"], a["answered_at"] = "yes", rc.now()
                     reg.save(m, f"{m.display_name} rostered on {ev.team} via fill")
@@ -461,13 +463,8 @@ class RaidMixin:
             await self.run_fill(reg, rs, ev, team, by="answer")
 
     async def is_officer_anywhere(self, reg, uid: int) -> bool:
-        if reg.is_owner_id(uid):
-            return True
-        guild = self.get_guild(reg.config.discord_guild_id)
-        if not guild:
-            return False
-        m = await self.cached_member(guild, uid)  # TTL cache on the client: button presses don't hit the API each time
-        return bool(m) and self.officiates(m, guild)
+        """Officer or owner of `reg` by Discord id (a button press, a DM) — an alias of guild_routing.role_of (design §2.6)."""
+        return await guild_routing.role_of(self, reg, uid, max_age=guild_routing.PRIV_ROUTING) in ("owner", "officer")
 
     async def cleanup_ephemeral(self, reg, rs) -> None:
         """Drop run rosters whose sheet is done/cancelled (who held a seat stays in the run file; no member file
@@ -601,7 +598,8 @@ class RaidMixin:
         for i, r in enumerate(ev.all_rosters):
             for gi, g in enumerate(r.groups):
                 for n in g:
-                    sg = next((s for s in ev.signups.values() if s.display_name == n), None)
+                    uid = rc.uid_of_name(ev, n)
+                    sg = ev.signups.get(str(uid)) if uid is not None else None
                     if sg and await self.confirm_one(reg, ev, sg, i, gi, by):
                         sent += 1
         ev.log.append(f"confirmation DMs sent to {sent}")
@@ -611,7 +609,7 @@ class RaidMixin:
     async def after_board_change(self, reg, rs, ev, team, added, removed: list[str], by: str) -> None:
         """Officer edits on a locked board: substitutions get a confirmation DM, removals free the seat and ask the bench."""
         for sg in added:
-            seat = ev.seat_of(sg.display_name)
+            seat = ev.seat_of(sg.discord_id)
             gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if sg.display_name in g), 0) if seat else 0
             await self.confirm_one(reg, ev, sg, seat[0] if seat else 0, gi, by)
         if added or removed:
@@ -671,21 +669,22 @@ class RaidMixin:
             return await self._write_board(reg, rs, ev, groups, by)
 
     # ---- a member's "can't make it" with a note, and fill answers from anywhere but the DM button
-    async def call_out(self, reg, rs, ev, m, note: str | None, by: str) -> str:
+    async def call_out(self, reg, rs, ev, m, note: str | None, by: str, by_id: int | None = None) -> str:
         """Someone can't make a run, with an optional note for the officers (/raid out, the site's No thanks with a
         note, MCP set_answer(note), plain text): recorded as a callout (hours before, late after the lock cutoff); a
         rostered seat after lock is freed (drop_seated: DM, thread line, fill); otherwise the sheet is refreshed and
-        one line goes to the run's updates thread — never the note in the public channel. Returns the line to show."""
+        one line goes to the run's updates thread — never the note in the public channel. `by_id` (the actor's Discord
+        id) decides whether it is the member's own callout, as in set_answer. Returns the line to show."""
         t = rc.run_team(reg, ev)
         if t.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(t.get("test_by") or ""):
             raise RegistryError(f"{run_title(reg, ev)} is a test run: only test members and the officer running it can answer it")
         co = rc.callout(reg, rs, ev, m, t, note)
         released = await self.release_asks_of(reg, rs, ev, m, "called out")
         when = f"{co.hours_before:.0f}h before{', after lock' if co.late else ''}"
-        mine = by == m.display_name
+        mine = by_id is not None and int(by_id) == int(m.discord_id)
         line = (f"Noted: out for {run_label(reg, ev)} ({when}). Thanks for saying so." if mine
                 else f"{m.display_name} is out of {run_title(reg, ev)} ({when})" + (" — noted for the officers" if note else ""))
-        if sheet_state(ev) == "locked" and ev.seat_of(m.display_name):
+        if sheet_state(ev) == "locked" and ev.seat_of(m):
             await self.drop_seated(reg, rs, ev, t, m, "callout" if mine else "officer", note)
             return line + " — seat freed"
         await self.refresh_sheet(reg, ev)
@@ -750,7 +749,7 @@ class RaidMixin:
 
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True) -> None:
         """A rostered member is out after lock: free the seat, tell them, post it, ask the bench to fill."""
-        rc.free_seat(reg, rs, ev, m.display_name, why)
+        rc.free_seat(reg, rs, ev, m, why)
         await self.dm_seat_released(reg, ev, m, why)
         if announce:
             await self.post_run_update(reg, ev, f"↩️ {m.display_name} is out ({why}{f': {note}' if note else ''}) — seat freed")
@@ -843,7 +842,7 @@ class RaidMixin:
             team = rc.run_team(reg, ev)
             sg = ev.signups.get(str(m.discord_id))
             released = await self.release_asks_of(reg, rs, ev, m, "away that day")  # before drop_seated, so its fill sees the seat free
-            if ev.state != "open" and ev.seat_of(m.display_name):
+            if ev.state != "open" and ev.seat_of(m):
                 await self.drop_seated(reg, rs, ev, team, m, "absence", None)
             else:
                 if not sg or sg.status != "out":

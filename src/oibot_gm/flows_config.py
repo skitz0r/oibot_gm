@@ -258,20 +258,16 @@ class RaidConfigWizard(OwnerWizard):
         """The raid as it would be with the draft applied, or the registry's refusal — validated by the registry's own
         rules (the same calls set_raid_overrides makes) and restored at once, so nothing stays in memory or git."""
         draft = self.draft if draft is None else draft
-        reg, raid = self.reg, self.raid
-        had, before = raid in reg.config.raids, copy.deepcopy(reg.config.raids.get(raid))
+        raid = self.raid
+
+        def applied(sh):  # Registry.preview: the same verb on a throw-away copy; the live config is never touched
+            sh.set_raid_overrides(raid, dict(draft), "preview")
+            return sh.raid_def(raid)
+
         try:
-            for f, v in draft.items():
-                reg._apply_raid_override(raid, f, v, "preview", commit=False)
-            reg._check_raid(raid)
-            return reg.raid_def(raid), None
+            return self.reg.preview(applied), None
         except RegistryError as e:
             return None, str(e)
-        finally:
-            if had:
-                reg.config.raids[raid] = before
-            else:
-                reg.config.raids.pop(raid, None)
 
     def size(self) -> int:
         return int(self.reg.raid_def(self.raid).get("size") or DEFAULT_RAID_SIZE)

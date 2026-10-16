@@ -927,7 +927,8 @@ Members can be named by display name, character name or Discord id; runs by key,
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
 
 **Safety.** The server acts as the **owner of the chosen server's guild** (owner-only settings included) and every
-change is logged as that owner via `mcp`. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
+change is logged under the owner's own display name with an `[mcp]` prefix (`[mcp] Jon: signup channel → #raids`) —
+the word "mcp" is never the name on a record. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
 put it in `.mcp.json` or a commit. **Local only** (on by default): the bot accepts the token only from a call made on
 the machine it runs on, which is where the MCP server runs. The same token arriving from anywhere else, through the
 public site's tunnel included, is refused as if it were wrong, and the bot logs a warning (never the token), because
@@ -950,7 +951,14 @@ for data discovered in game.
 ## 10. Data, privacy, cost
 
 Guild state lives in a private git repository (one commit per change, so every edit has an author and a
-time). An absence reason is seen by you and the officers, nobody else. The bot DMs only for sheets, nudges, confirmations,
+time). The ops channel's audit lines read the same whatever the surface: the person's display name, then what
+changed, with a prefix for where it came from — `[web]`, `[mcp]` or `[chat]`, nothing for a Discord command — and
+" (host)" after the name when the bot's host acted in a server they don't own. Who you are is decided the same way
+everywhere (a command, a button, a DM, the site, plain text): the server's owner, an officer by Manage Server or an
+officer role, a member of the server, or outside it; a Discord nick change never costs you anything — your seat on a
+locked roster, your callouts and your pending asks are tied to your Discord account, not to the name, and the bot
+keeps the name you registered under until you or an officer record the new one. An absence reason is seen by you and
+the officers, nobody else. The bot DMs only for sheets, nudges, confirmations,
 released seats and fill asks; switch DMs off on the **Me** page if you'd rather not get them — with DMs off
 you are never asked to fill, and a confirmation ask is shown on the Me page instead and counts as pending
 until you answer it there. **My absences** on the absences card lists yours with a **Clear** button each; clearing

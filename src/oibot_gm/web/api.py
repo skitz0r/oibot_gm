@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from .. import comp as comp_mod, raid_views as dr, raidcycle as rc, render
+from .. import comp as comp_mod, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from ..registry import ADHOC_SCHEDULE, CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
@@ -242,7 +242,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             msg = await asyncio.to_thread(fn, v, d)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)  # '[web] Jon: …' / '[mcp] Jon: …'
         return {"message": msg}
 
     async def maybe_await(value):
@@ -942,9 +942,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
             return JSONResponse({"error": "a note goes with No thanks (status out): it is the reason they can't make it"}, status_code=400)
         try:  # set_answer / call_out refresh the sheet and cards and write the ops line themselves; the reply is Discord-flavoured
             if note or (status == "out" and d.get("callout")):  # a callout (/raid out's verb): with a reason (officers only), or MCP's No thanks
-                line = await bot.call_out(v.reg, rs, ev, m, note, v.name)
+                line = await bot.call_out(v.reg, rs, ev, m, note, v.name, by_id=v.uid)
             else:
-                line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name))
+                line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line.replace("**", "").removeprefix("✅ ")}
@@ -1660,7 +1660,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                     if len(hits) != 1:
                         return JSONResponse({"error": f"no channel named #{want}" if not hits else f"#{want}: several channels match"}, status_code=400)
                     value = hits[0]["id"]
-                msg = await bot.set_channel(v.reg, field[8:], as_int(str(value).strip("<#>"), "channel id") if value else None, v.name)
+                msg = await bot.set_channel(v.reg, field[8:], as_int(str(value).strip("<#>"), "channel id") if value else None, v.name, via=v.via, by_id=v.uid)
             elif field == "officer_roles":
                 # the editor sends the whole list of role IDS (as /gm config officer-role stores them); applied as the
                 # command's role_add / role_remove ops so the same code path and audit lines are used
@@ -1682,7 +1682,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                 return JSONResponse({"error": f"unknown setting {field}"}, status_code=400)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {msg}")
+        await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)  # '[web] Jon: …' / '[mcp] Jon: …'
         return {"message": msg}
 
     # ---- plain-text permissions (design §5.25): officers read, the owner edits
@@ -1860,7 +1860,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                 before = configops.snapshot_revs(v.reg, revs, raids)
                 try:
                     line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid, channel_id=PLAIN_WEB,  # authorize() allowed it
-                                                       rev=configops.op_rev(op, key, revs))
+                                                       rev=configops.op_rev(op, key, revs), via=v.via)
                 except (RegistryError, ValueError) as e:
                     failed(op, e)
                     if isinstance(e, rc.BoardChanged) and key:
@@ -1871,8 +1871,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices) -> None:
                     failed(op, f"{type(e).__name__}: {e}")
                     continue
                 configops.refresh_revs(v.reg, revs, raids, stale, before)  # this request's own write is not someone else's change
-                out["applied"].append(line)
-                await bot.ops.emit(v.reg.config, "info", f"[web] {v.name}: {line}")
+                out["applied"].append(line)  # apply_async(via=) wrote the audit line
             return out
         text = str(d.get("text") or "").strip()
         if not text:

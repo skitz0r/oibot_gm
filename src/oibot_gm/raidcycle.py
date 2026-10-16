@@ -188,10 +188,18 @@ class RaidEvent(BaseModel):
     def seated(self) -> list[Player]:
         return [p for r in self.all_rosters for p in r.selected]
 
-    def seat_of(self, display_name: str) -> tuple[int, Player] | None:
+    def seat_of(self, who) -> tuple[int, Player] | None:
+        """(roster index, Player) of the seat `who` holds, or None. `who` is a Member (or anything with `discord_id`), a
+        Discord id, or a display name. Seats are keyed by the member's id (Player.discord_id, else the run's own signup
+        under the seated name: `player_uid`), so a nick change mid-run keeps the seat; a bare name matches a seat only
+        when no id can be found for it (a run file from before ids were stored)."""
+        uid = seat_uid(self, who)
+        name = who if isinstance(who, str) else None
         for i, r in enumerate(self.all_rosters):
             for p in r.selected:
-                if p.signup_name == display_name:
+                if uid is not None and player_uid(self, p) == uid:
+                    return i, p
+                if uid is None and name is not None and p.signup_name == name:
                     return i, p
         return None
 
@@ -481,8 +489,9 @@ def forget_test_members(reg: Registry, rs: "RaidStore", uids: list[int], by: str
     """Remove chosen puppets and take them off every open sheet (answer, pin, board place). Refused, with nothing
     changed, when one is rostered on a locked run: its seat would need the fill engine, so cancel the run or clear the
     bench instead. Returns the sheets that changed (the caller refreshes their messages)."""
-    names = {reg.members[u].display_name for u in uids if u in reg.members}
-    held = [(n, e.key) for e in rs.live() for n in sorted(names) if e.seat_of(n)]
+    by_uid = {u: reg.members[u].display_name for u in uids if u in reg.members}
+    names = set(by_uid.values())
+    held = [(by_uid[u], e.key) for e in rs.live() for u in sorted(by_uid, key=by_uid.get) if e.seat_of(u)]  # seats by id
     if held:
         raise RegistryError(f"{', '.join(n for n, _ in held)} {'is' if len(held) == 1 else 'are'} rostered on a locked run "
                             f"({', '.join(sorted({k for _, k in held}))}): cancel it or clear the whole bench")
@@ -885,7 +894,7 @@ def absence_effects(reg: Registry, rs: RaidStore, m: Member | None, start: str, 
         if m is not None and not on_bench_side(reg, ev, m):
             continue  # a puppet's absence never touches a real sheet (nor a real member's a test run)
         sg = ev.signups.get(str(m.discord_id)) if m is not None else None
-        if m is not None and ev.state != "open" and ev.seat_of(m.display_name):
+        if m is not None and ev.state != "open" and ev.seat_of(m):
             out.append((ev, "seat freed"))
         elif sg is not None and sg.status == "out":
             out.append((ev, "already No thanks"))
@@ -1509,7 +1518,7 @@ def still_short_words(plan: Plan) -> str:
 
 def _reseat(ev: RaidEvent, sg: Signup) -> bool:
     """A swap by someone already seated: update their seat in place (character, spec, role) instead of seating twice."""
-    hit = ev.seat_of(sg.display_name)
+    hit = ev.seat_of(sg.discord_id)
     if not hit:
         return False
     p = hit[1]
@@ -1771,6 +1780,32 @@ def player_uid(ev: RaidEvent, p: Player) -> int | None:
         return p.discord_id
     sg = signup_by_name(ev, p.signup_name)
     return sg.discord_id if sg else None
+
+
+def uid_of_name(ev: RaidEvent, name: str) -> int | None:
+    """A board name as a member id: the run's signup under that name, else a seat still carrying it (the name the
+    person had when seated, before a nick change). None when the run knows nobody by it."""
+    sg = signup_by_name(ev, name)
+    if sg is not None:
+        return sg.discord_id
+    p = next((p for p in ev.seated() if p.signup_name == name), None)
+    return player_uid(ev, p) if p is not None else None
+
+
+def seat_uid(ev: RaidEvent, who) -> int | None:
+    """`who` (a Member, a Discord id, a display name, a Signup or a Player) as the member id seats are keyed by."""
+    if who is None:
+        return None
+    if isinstance(who, bool):
+        return None
+    if isinstance(who, int):
+        return who
+    if isinstance(who, str):
+        return int(who) if who.isdigit() else uid_of_name(ev, who)
+    uid = getattr(who, "discord_id", None)
+    if uid is None and isinstance(who, Player):
+        return player_uid(ev, who)
+    return int(uid) if uid is not None else None
 
 
 def last_window(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[RaidEvent]:
@@ -2199,33 +2234,40 @@ def apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: lis
 
 
 def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]]) -> tuple[list[Signup], list[str]]:
+    # the board is names (what people drag); seats are keyed by member id, so a name is resolved once (uid_of_name: the
+    # signup, else the seat still carrying the name from before a nick change) and the groups are rewritten with the
+    # current names
     n = groups_per_roster(reg, run_size(reg, ev))
-    before = {p.signup_name for p in ev.seated()}
-    after = {m for g in layout for m in g}
-    removed = [m for m in before if m not in after]
-    for m in removed:
-        free_seat(reg, rs, ev, m, "moved to bench")
-    players = {p.signup_name: p for p in players_for(reg, ev)}
+    before = {player_uid(ev, p): p for p in ev.seated()}
+    players = {player_uid(ev, p): p for p in players_for(reg, ev)}
+    layout_uids = [[u for u in (uid_of_name(ev, m) for m in g) if u is not None and u in players] for g in layout]
+    after = {u for g in layout_uids for u in g}
+    removed_uids = [u for u in before if u not in after]
+    removed = [before[u].signup_name for u in removed_uids]
+    for u in removed_uids:
+        free_seat(reg, rs, ev, u, "moved to bench")
+    players = {player_uid(ev, p): p for p in players_for(reg, ev)}  # after the frees: a freed signup is out, not on the bench
     added: list[Signup] = []
-    for i in range(max(len(ev.all_rosters), -(-len(layout) // n))):
-        groups = [[m for m in g if m in players] for g in layout[i * n:(i + 1) * n]] + [[] for _ in range(n - len(layout[i * n:(i + 1) * n]))]
+    for i in range(max(len(ev.all_rosters), -(-len(layout_uids) // n))):
+        guids = layout_uids[i * n:(i + 1) * n] + [[] for _ in range(n - len(layout_uids[i * n:(i + 1) * n]))]
+        groups = [[players[u].signup_name for u in g] for g in guids]
         if i >= len(ev.rosters):
             ev.rosters.append(RosterResult(selected=[], benched=[], groups=groups, group_reports=[], objective=0, synergy_value=0, role_counts={}, advisories=[]))
         r = ev.rosters[i]
         r.groups = groups
-        want = [m for g in groups for m in g]
-        keep = {p.signup_name: p for p in r.selected if p.signup_name in want}
-        for m in want:
-            if m not in keep:
-                sg = next((s for s in ev.signups.values() if s.display_name == m), None)
-                if sg and m not in before:
+        want = [u for g in guids for u in g]
+        keep = {player_uid(ev, p): p for p in r.selected if player_uid(ev, p) in want}
+        for u in want:
+            if u not in keep:
+                sg = ev.signups.get(str(u))
+                if sg and u not in before:
                     added.append(sg)
-                keep[m] = players[m]
-        r.selected = [keep[m] for m in want]
+                keep[u] = players[u]
+        r.selected = [keep[u] for u in want]
         r.role_counts = {role: sum(1 for p in r.selected if p.role == role) for role in ROLES}
     ev.rosters = [r for r in ev.rosters if r.selected or r is ev.rosters[0]]
-    seated = {p.signup_name for p in ev.seated()}
-    ev.rosters[0].benched = [p for m, p in players.items() if m not in seated and p.status == "signed"]
+    seated = {player_uid(ev, p) for p in ev.seated()}
+    ev.rosters[0].benched = [p for u, p in players.items() if u not in seated and p.status == "signed"]
     for sg in added:
         sg.joined_at = sg.order_at if sg.status == "in" else now()
         sg.status, sg.source, sg.updated_at = "in", "officer", now()
@@ -2241,8 +2283,10 @@ def confirmations(reg: Registry, ev: RaidEvent) -> list[dict]:
     out = []
     for i, r in enumerate(ev.all_rosters):
         for p in r.selected:
-            found = reg.find(p.character) if p.character else None
-            m = found[0] if found else next((mm for mm in reg.members.values() if mm.display_name == p.signup_name), None)
+            m = reg.members.get(player_uid(ev, p)) if player_uid(ev, p) is not None else None
+            if m is None:
+                found = reg.find(p.character) if p.character else None
+                m = found[0] if found else next((mm for mm in reg.members.values() if mm.display_name == p.signup_name), None)
             ask = next((a for a in reversed(m.placement_asks) if a["roster"] == ev.team), None) if m else None
             out.append({"uid": str(m.discord_id) if m else None, "display_name": p.signup_name, "character": p.character or p.signup_name, "cls": p.cls, "spec": p.spec, "role": p.role,
                         "roster": i + 1, "answer": (ask or {}).get("answer"), "asked_at": (ask or {}).get("asked_at"), "channel": (ask or {}).get("channel", "dm")})
@@ -2263,22 +2307,28 @@ def withdraw_confirmations(reg: Registry, ev: RaidEvent, why: str) -> list[str]:
     return gone
 
 
-def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, display_name: str, why: str) -> Player | None:
-    """Take someone off the locked roster (decline, callout, absence, missed confirmation): seat opens, signup → out."""
-    hit = ev.seat_of(display_name)
+def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str) -> Player | None:
+    """Take someone off the locked roster (decline, callout, absence, missed confirmation): seat opens, signup → out.
+    `who`: a Member, a Discord id or a display name (ev.seat_of) — the seat is found by id, so a nick change mid-run
+    can't leave it standing."""
+    hit = ev.seat_of(who)
     if not hit:
         return None
     i, p = hit
+    uid = player_uid(ev, p)
     r = ev.all_rosters[i]
-    r.selected = [x for x in r.selected if x.signup_name != display_name]
-    r.groups = [[n for n in g if n != display_name] for g in r.groups]
+    r.selected = [x for x in r.selected if x is not p]
+    r.groups = [[n for n in g if n != p.signup_name] for g in r.groups]
     p.status = "bench"
     ev.all_rosters[0].benched.append(p)
-    sg = next((s for s in ev.signups.values() if s.display_name == display_name), None)
+    sg = ev.signups.get(str(uid)) if uid is not None else None
+    if sg is None:
+        sg = next((s for s in ev.signups.values() if s.display_name == p.signup_name), None)
     if sg:
         sg.status, sg.source, sg.updated_at = "out", why, now()
-    ev.log.append(f"seat freed: {display_name} ({why})")
-    rs.save(ev, f"seat freed {display_name}")
+    name = sg.display_name if sg else p.signup_name
+    ev.log.append(f"seat freed: {name} ({why})")
+    rs.save(ev, f"seat freed {name}")
     return p
 
 
@@ -2328,6 +2378,6 @@ def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[st
                 if ask:
                     ask["answer"], ask["answered_at"] = "expired", now()
                     reg.save(m, f"{m.display_name} didn't confirm {ev.team} in time")
-                free_seat(reg, rs, ev, row["display_name"], "no-confirm")
+                free_seat(reg, rs, ev, int(row["uid"]), "no-confirm")
                 gone.append(row["display_name"])
     return gone

@@ -72,7 +72,7 @@ class FakeBot:
         ev.channel_id, ev.message_id = channel.id, 4242
         self.calls.append(("post_sheet", ev.key, channel.id))
 
-    async def set_answer(self, reg, rs, ev, m, status, character, by):
+    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None):
         self.calls.append(("set_answer", ev.key, m.display_name, status, character, by))
         return f"✅ {m.display_name} {status}"
 

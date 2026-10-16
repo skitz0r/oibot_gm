@@ -29,7 +29,7 @@ import yaml
 from discord import app_commands
 from pydantic import BaseModel, Field
 
-from . import configops, nl, render
+from . import configops, guild_routing, nl, render
 from .discord_feed import FeedMixin
 from .discord_policy import PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
@@ -1204,13 +1204,21 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         ref = message.reference.resolved if message.reference else None
         return isinstance(ref, discord.Message) and ref.author.id == self.user.id
 
+    # ---- identity (dual interfaces, phase 0 — design §2.6): guild_routing.resolve_role is THE predicate; these are its names
+    async def role_of(self, reg, user_or_uid, *, max_age: float = guild_routing.PRIV_ROUTING) -> str:
+        """owner | officer | member | outside for a Member (live from its roles), a bare User or a Discord id (the cached
+        lookup at most `max_age` old: PRIV_LIVE for writes, PRIV_ROUTING for presses, PRIV_WEB for the web)."""
+        return await guild_routing.role_of(self, reg, user_or_uid, max_age=max_age)
+
+    async def identity(self, reg, user, *, max_age: float = guild_routing.PRIV_ROUTING) -> guild_routing.Resolved:
+        """(role, role_ids) — what Registry.may_plain needs (unpacks as a pair; `.stale` says the cache answered)."""
+        return await guild_routing.identity(self, reg, user, max_age=max_age)
+
     async def plain_identity(self, reg, user) -> tuple[bool, list[int]]:
-        """(officer, role ids) for the plain-text check (Registry.may_plain): from the guild member — fetched when the
-        person wrote in a DM, where Discord hands over a bare User without roles."""
-        guild = self.get_guild(reg.config.discord_guild_id)
-        member = user if isinstance(user, discord.Member) and guild is not None and user.guild.id == guild.id else await self.cached_member(guild, user.id)
-        officer = reg.is_owner_id(user.id) or (member is not None and self.officiates(member, guild))
-        return officer, ([r.id for r in member.roles] if member is not None else [])
+        """(officer, role ids) for the plain-text check (Registry.may_plain) — an alias of `identity`: a bare User from a
+        DM is looked up as the guild member (Discord hands over no roles there)."""
+        r = await self.identity(reg, user)
+        return r.officer, r.role_ids
 
     async def in_guild(self, reg, user) -> bool:
         """Whether `user` is a member of the guild's Discord server now (the gateway cache, else one cached fetch: a

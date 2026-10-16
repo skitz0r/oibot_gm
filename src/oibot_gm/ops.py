@@ -19,6 +19,34 @@ RECENT_LINES = 30  # ring kept for /gm status
 
 LISTENERS: list = []  # fn(guild_key) after every emitted line (the web's event stream, scoped per guild)
 
+# the surface a change came through → the prefix people read in the ops channel (design §2.6: the surface is a prefix,
+# never part of the name); Discord itself has none
+VIA_PREFIX = {"web": "[web] ", "mcp": "[mcp] ", "chat": "[chat] ", "discord": "", "": ""}
+
+
+def audit_line(reg, by: str, line: str, *, via: str = "discord", by_id: int | None = None) -> str:
+    """'[web] Jon (host): signup channel → #raids' — ONE format for every surface: `by` is a person's display name, the
+    surface is the prefix from `via`, and a superuser acting in a guild they don't own is marked ' (host)' (Registry.is_owner_id
+    counts both; `config.owner_discord_id` tells them apart). No DM follows (the DM rule: DMs only when someone must act)."""
+    from .registry import is_superuser
+
+    prefix = VIA_PREFIX.get((via or "").lower(), f"[{via}] ")
+    who = str(by or "?")
+    cfg = getattr(reg, "config", reg)
+    owner = getattr(cfg, "owner_discord_id", None)
+    if by_id is not None and is_superuser(by_id) and (owner is None or int(by_id) != int(owner)):
+        who += " (host)"
+    return f"{prefix}{who}: {line}"
+
+
+async def audited(ops, reg, by: str, line: str, via: str = "discord", level: str = "info", by_id: int | None = None) -> str:
+    """Write the audit line of an action a person took (`audit_line`) through `ops.emit` — `ops` is the process's Ops (or
+    anything with `emit(cfg, level, text)`). set_channel, apply_async and the web's mutation routes all come through here,
+    so the format, the via tag and the host suffix live once. Returns the text written; `reg` is a Registry or its GuildConfig."""
+    text = audit_line(reg, by, line, via=via, by_id=by_id)
+    await ops.emit(getattr(reg, "config", reg), level, text)
+    return text
+
 
 class Ops:
     """One per process; the recent-lines ring is kept PER GUILD (`recent_for(key)`), so one guild's status or /api/ops
@@ -30,6 +58,10 @@ class Ops:
 
     def recent_for(self, key: str | None) -> list[tuple[str, str, str]]:
         return list(self._recent.get(key or "", []))
+
+    async def audited(self, reg, by: str, line: str, via: str = "discord", level: str = "info", by_id: int | None = None) -> str:
+        """The audit line of an action a person took, to the guild's ops channel, ring and log (the module's `audited`)."""
+        return await audited(self, reg, by, line, via=via, level=level, by_id=by_id)
 
     async def emit(self, cfg, level: str, text: str, exc: BaseException | None = None, dm: bool = True) -> None:
         """One ops line: the guild's ops channel, its ring, the process log; an error also DMs the guild's owner (`dm`

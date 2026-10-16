@@ -764,17 +764,17 @@ def coalesce(ops: list[ConfigOp]) -> list[ConfigOp]:
     return out
 
 
-def _apply_merged(reg: Registry, op: MergedOp, by: str) -> str:
+def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) -> str:
     if op.op == "raid_set":
         fields: dict = {}
         for p in op.parts:
             fields.update(_raid_fields(p))
-        return "; ".join(reg.set_raid_overrides(op.target or "", fields, by))
+        return "; ".join(reg.set_raid_overrides(op.target or "", fields, by, rev=rev))
     sid = _schedule_ref(op)[0]
     fields = {}
     for p in op.parts:
         fields.update(_schedule_fields(_schedule_ref(p)[1], p.value))
-    return "; ".join(reg.set_schedule(op.target or "", sid, fields, by))
+    return "; ".join(reg.set_schedule(op.target or "", sid, fields, by, rev=rev))
 
 
 def _test_op(value: str | None) -> tuple[str, str]:
@@ -1055,7 +1055,13 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
 
     out = {}
     for op in ops:
-        if op.op in BOARD_OPS:
+        sec = config_section(op)
+        if sec is not None:  # a config write: the section as the diff showed it (Apply refuses one changed since)
+            try:
+                out.setdefault(CONFIG_REV + sec, reg.config_rev(sec))
+            except RegistryError:
+                pass
+        elif op.op in BOARD_OPS:
             try:
                 _, ev = _live_event(reg, op.target, raids)
             except RegistryError:
@@ -1071,11 +1077,25 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
 
 
 PLAN_REV = "plan:"  # board_revs key prefix for a run's plan fingerprint (never a run key: those hold no ':')
+CONFIG_REV = "config:"  # … and for a config section's fingerprint (Registry.config_rev; design §2.4)
+_SECTION_OF = {"set": "settings", "role_add": "settings", "role_remove": "settings", "recruit": "recruitment", "plain": "plain",
+               "aura_set": "buffs", "family_set": "buffs", "aura_reset": "buffs"}
+_RAID_SECTION_OPS = {"raid_set", "raid_reset", "schedule_set", "schedule_remove"}
+
+
+def config_section(op: ConfigOp) -> str | None:
+    """The config section an op writes (what its rev is taken of), or None for anything that isn't a config write."""
+    if op.op in _RAID_SECTION_OPS:
+        return f"raids:{(op.target or '').strip()}" if op.target else None
+    return _SECTION_OF.get(op.op)
 
 
 def op_rev(op: ConfigOp, key: str | None, revs: dict[str, str]) -> str | None:
     """The fingerprint Apply passes with an op: a board op → its run's board_rev; run_fill → the plan_rev the diff
-    showed; anything else → None."""
+    showed; a config write → its section's config_rev; anything else → None."""
+    sec = config_section(op)
+    if sec is not None:
+        return revs.get(CONFIG_REV + sec)
     if not key:
         return None
     if op.op in BOARD_OPS:
@@ -1090,9 +1110,11 @@ def snapshot_revs(reg: Registry, revs: dict[str, str], raids) -> dict[str, str]:
     op's own write from someone else's change made earlier."""
     from . import raidcycle as rc
 
+    out = {k: reg.config_rev(k[len(CONFIG_REV):]) for k in revs if k.startswith(CONFIG_REV)}
     if raids is None:
-        return {}
-    return {k: rc.board_rev(reg, ev) for k in revs if (ev := raids.events.get(k)) is not None}
+        return out
+    out.update({k: rc.board_rev(reg, ev) for k in revs if not k.startswith(CONFIG_REV) and (ev := raids.events.get(k)) is not None})
+    return out
 
 
 def refresh_revs(reg: Registry, revs: dict[str, str], raids, stale: set, before: dict[str, str]) -> None:
@@ -1102,11 +1124,17 @@ def refresh_revs(reg: Registry, revs: dict[str, str], raids, stale: set, before:
     later board op of this request (and no unrelated op in between) can absorb and overwrite that change."""
     from . import raidcycle as rc
 
-    if raids is None:
-        return
     for k in revs:
-        ev = raids.events.get(k)
-        if ev is None or k in stale:
+        if k in stale:
+            continue
+        if k.startswith(CONFIG_REV):  # a config section: the same rule as a board
+            if before.get(k) != revs[k]:
+                stale.add(k)
+            else:
+                revs[k] = reg.config_rev(k[len(CONFIG_REV):])
+            continue
+        ev = raids.events.get(k) if raids is not None else None
+        if ev is None:
             continue
         if before.get(k) != revs[k]:
             stale.add(k)
@@ -1913,8 +1941,10 @@ def _fill_ask(ev, m):
     return next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.open), None)
 
 
-def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, raids=None) -> str:
-    """Apply one op through the same code paths as the slash commands. Raises RegistryError on refusal.
+def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, raids=None, rev: str | None = None) -> str:
+    """Apply one op through the same code paths as the slash commands. Raises RegistryError on refusal. `rev`: for a
+    config write, the section fingerprint the author saw (board_revs under "config:"); a section changed since raises
+    ConfigChanged and nothing is written.
     Synchronous: channel kinds that post a card and absences that should be announced are completed by `apply_async`
     when a bot is available; here they only record the setting. `raids`: the bot's RaidStore for ops on live runs
     (pin); without one the store is read from disk. `is_owner`: the right to the owner-only ops — the plain-text
@@ -1923,49 +1953,23 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op in OWNER_OPS and not is_owner:
         raise RegistryError(f"{op.op} needs the owner")
     if isinstance(op, MergedOp):
-        return _apply_merged(reg, op, by)
+        return _apply_merged(reg, op, by, rev=rev)
     if op.op == "plain":  # HARD_OWNER_OPS: authorize() let only the owner through
         patch, _ = _plain_patch(reg, op)
-        return reg.set_plain_policy(reg.merge_plain_policy(patch), by)
+        return reg.set_plain_policy(reg.merge_plain_policy(patch), by, rev=rev)
     if op.op == "set":
-        if op.path == "timezone":
-            from zoneinfo import ZoneInfo
-
-            ZoneInfo(op.value or "")
-            cfg.timezone = op.value or cfg.timezone
-        elif op.path == "ask_audience":
-            if op.value not in ("officers", "confirmed", "registered", "everyone"):
-                raise RegistryError("ask_audience is officers|confirmed|registered|everyone")
-            cfg.ask_audience = op.value
-        elif op.path == "about":
-            cfg.about = (op.value or "").strip()[:600] or None
-        elif op.path == "news_keywords":
-            words = [w.strip() for w in (op.value or "").replace("\n", ",").split(",") if w.strip()]
-            if len(words) > 40 or any(len(w) > 60 for w in words):
-                raise RegistryError("news_keywords: at most 40 words or phrases of up to 60 characters")
-            cfg.news_keywords = list(dict.fromkeys(words))
-        elif op.path in CHANNEL_PATHS and _clear_word(op.value):
-            setattr(cfg, f"{op.path}_id", None)
-            reg.save_config(f"{op.path} cleared (by {by})")
-            return f"{op.path} cleared"
-        elif op.path in CHANNEL_PATHS:
-            cid = _channel_id(op.value)
-            if not cid:
-                raise RegistryError(f"{op.path}: need a channel mention")
-            setattr(cfg, f"{op.path}_id", cid)
-        else:
-            raise RegistryError(f"unknown setting {op.path}")
-        reg.save_config(f"{op.path} → {op.value} (by {by})")
-        return f"{op.path} = {op.value}"
+        with reg.config_lock:  # mutate-validate-save under the registry's lock, like its own verbs (design §2.4)
+            reg.check_rev("settings", rev)
+            return _apply_set(reg, op, by)
     if op.op == "recruit":
         kw, _ = _recruit(reg, op)
         if "invite_create" in kw:
             raise RegistryError(f"invite_create {NEEDS_BOT}")
-        return reg.set_recruitment(by, **kw)
+        return reg.set_recruitment(by, rev=rev, **kw)
     if op.op in ("role_add", "role_remove"):
         # stored by role id: a mention/id applies at once; a name resolves through the registry's role cache (filled by
         # the bot), otherwise it is parked in the legacy list and resolved on the bot's next ready / role event
-        return reg.set_officer_role(op.value, op.op == "role_add", by)
+        return reg.set_officer_role(op.value, op.op == "role_add", by, rev=rev)
     if op.op == "rank":
         rank = op.rank or op.value or ""
         reg.set_rank(op.character or "", rank, by)
@@ -2008,21 +2012,21 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op == "raid_set":
         if (op.field or "").strip() == "cadence":  # a preset: four fields, one write
-            return "; ".join(reg.set_raid_overrides(op.target or "", _raid_fields(op), by))
-        return reg.set_raid_override(op.target or "", op.field or "", op.value, by)
+            return "; ".join(reg.set_raid_overrides(op.target or "", _raid_fields(op), by, rev=rev))
+        return reg.set_raid_override(op.target or "", op.field or "", op.value, by, rev=rev)
     if op.op == "raid_reset":
-        return reg.clear_raid_override(op.target or "", by)
+        return reg.clear_raid_override(op.target or "", by, rev=rev)
     if op.op == "schedule_set":
         sid, setting = _schedule_ref(op)
-        return "; ".join(reg.set_schedule(op.target or "", sid, _schedule_fields(setting, op.value), by))
+        return "; ".join(reg.set_schedule(op.target or "", sid, _schedule_fields(setting, op.value), by, rev=rev))
     if op.op == "schedule_remove":
-        return reg.remove_schedule(op.target or "", (op.field or op.value or "").strip(), by)
+        return reg.remove_schedule(op.target or "", (op.field or op.value or "").strip(), by, rev=rev)
     if op.op == "aura_set":
-        return reg.set_buff_override(op.target or "", op.field or "", op.value, by)
+        return reg.set_buff_override(op.target or "", op.field or "", op.value, by, rev=rev)
     if op.op == "family_set":
-        return reg.set_family_override(op.target or "", op.field or "", op.value, by)
+        return reg.set_family_override(op.target or "", op.field or "", op.value, by, rev=rev)
     if op.op == "aura_reset":
-        return reg.clear_aura_overrides(by, op.target or None)
+        return reg.clear_aura_overrides(by, op.target or None, rev=rev)
     if op.op == "comp_groups":
         key = _key(reg, op)
         t = cfg.roster(key)
@@ -2184,7 +2188,23 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
 
 
 async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, bot=None, by_id: int | None = None,
-                      rev: str | None = None, channel_id: int | None = None, self_id: int | None = None) -> str:
+                      rev: str | None = None, channel_id: int | None = None, self_id: int | None = None, via: str | None = None) -> str:
+    """`_apply_async` plus the audit line: with `via` ("web" | "mcp" | "chat" | "discord") the applied op is written to the
+    ops feed through `ops.audited` (one format everywhere: prefix from via, ' (host)' for a superuser in a guild they
+    don't own); without it the caller writes its own summary (Discord's Apply). A channel setting is audited by
+    `set_channel` itself."""
+    line = await _apply_async(reg, op, by, is_owner, policy_store, bot, by_id, rev, channel_id, self_id, via)
+    ops = getattr(bot, "ops", None) if bot is not None else None
+    channel_op = op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None
+    if via is not None and ops is not None and not channel_op:
+        from . import ops as ops_mod
+
+        await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
+    return line
+
+
+async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store, bot, by_id: int | None,
+                       rev: str | None, channel_id: int | None, self_id: int | None, via: str | None) -> str:
     """`apply`, plus the Discord side effects the slash commands have: every channel setting goes through
     `bot.set_channel` (SetupMixin: visibility checked, cards posted or dropped), an absence is announced with
     `bot.announce_absence` like `/me absent add`, and the run / member / test-bench ops go through the same RaidMixin
@@ -2206,7 +2226,7 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
         if cid is None and not _clear_word(op.value):
             raise RegistryError(f"{op.path}: need a channel mention (or none to clear it)")
         try:  # the Config page's verb: checks the bot can see it, posts / drops the card that lives there
-            return await bot.set_channel(reg, op.path.removesuffix("_channel"), cid, by)
+            return await bot.set_channel(reg, op.path.removesuffix("_channel"), cid, by, via=via or "discord", by_id=by_id)
         except ValueError as e:
             raise RegistryError(str(e))
     if bot is not None and op.op == "absence":
@@ -2227,7 +2247,7 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
                 raise RegistryError(str(e))
             line = reg.set_recruitment(by, invite_url=url) + f" — {url}"
         else:
-            line = apply(reg, op, by, is_owner, policy_store)
+            line = apply(reg, op, by, is_owner, policy_store, rev=rev)
         refresh = getattr(bot, "refresh_registration_card", None)
         if refresh is not None:
             await refresh(reg)  # open/closed, the note and the invite show on the card
@@ -2235,7 +2255,7 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
     raids = bot.raids.store(reg) if bot is not None and getattr(bot, "raids", None) is not None else None  # the live events, not a fresh read
     if op.op in ("run_autofill", "run_fill"):  # the solver / candidate search: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store, raids)
-    return apply(reg, op, by, is_owner, policy_store, raids=raids)
+    return apply(reg, op, by, is_owner, policy_store, raids=raids, rev=rev)
 
 
 async def _warm_roles(reg: Registry, bot) -> None:
@@ -2243,6 +2263,41 @@ async def _warm_roles(reg: Registry, bot) -> None:
     guild = bot.get_guild(reg.config.discord_guild_id) if getattr(bot, "get_guild", None) else None
     if guild is not None:
         await asyncio.to_thread(reg.resolve_officer_roles, guild)
+
+
+def _apply_set(reg: Registry, op: ConfigOp, by: str) -> str:
+    """The `set` op's write (one guild setting): called by apply() under config_lock after the rev check."""
+    cfg = reg.config
+    if op.path == "timezone":
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(op.value or "")
+        cfg.timezone = op.value or cfg.timezone
+    elif op.path == "ask_audience":
+        if op.value not in ("officers", "confirmed", "registered", "everyone"):
+            raise RegistryError("ask_audience is officers|confirmed|registered|everyone")
+        cfg.ask_audience = op.value
+    elif op.path == "about":
+        cfg.about = (op.value or "").strip()[:600] or None
+    elif op.path == "news_keywords":
+        words = [w.strip() for w in (op.value or "").replace("\n", ",").split(",") if w.strip()]
+        if len(words) > 40 or any(len(w) > 60 for w in words):
+            raise RegistryError("news_keywords: at most 40 words or phrases of up to 60 characters")
+        cfg.news_keywords = list(dict.fromkeys(words))
+    elif op.path in CHANNEL_PATHS and _clear_word(op.value):
+        setattr(cfg, f"{op.path}_id", None)
+        reg.save_config(f"{op.path} cleared (by {by})")
+        return f"{op.path} cleared"
+    elif op.path in CHANNEL_PATHS:
+        cid = _channel_id(op.value)
+        if not cid:
+            raise RegistryError(f"{op.path}: need a channel mention")
+        setattr(cfg, f"{op.path}_id", cid)
+    else:
+        raise RegistryError(f"unknown setting {op.path}")
+    reg.save_config(f"{op.path} → {op.value} (by {by})")
+    return f"{op.path} = {op.value}"
+
 
 
 def absence_preview(reg: Registry, m, start: str, end: str | None, raids=None) -> str:
@@ -2385,9 +2440,9 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         note = (op.reason or "").strip()
         own = m.discord_id in {by_id, self_id} - {None}  # the presser's own, or the asker's own when someone else applies their diff
         if want == "out" and (note or own):  # a callout (/raid out's verb): anyone's with a reason, and every "I can't make it" of one's own
-            return await bot.call_out(reg, rs, ev, m, note or None, by)
+            return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id)
         try:
-            line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by)
+            line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id)
         except ValueError as e:
             raise RegistryError(str(e))
         return str(line).replace("**", "").removeprefix("✅ ")

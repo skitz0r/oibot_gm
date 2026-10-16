@@ -136,8 +136,7 @@ def test_sat_out_credit_survives_a_rename(reg, rs):
     lock_with_board(reg, rs, first, [m.display_name for m in seated])
     first.state = "done"
     rs.save(first, "done")
-    reg.member(sat.discord_id, "Renamedperson")  # Discord rename: the member file follows the new name
-    reg.save(sat, "rename")
+    reg.rename(sat.discord_id, "Renamedperson", "t")  # a Discord rename, recorded as its own step (member() never renames)
     second = open_test_run(reg, rs, days=2)
     join(reg, rs, second, seated + [sat])
     players = rc.players_for(reg, second)
@@ -168,7 +167,7 @@ def test_cant_make_it_after_lock_records_a_callout(reg, rs):
     join(reg, rs, ev, seated)
     bot = _locked_with_confirmations(reg, rs, ev, seated)
     m = seated[-1]
-    run(bot.set_answer(reg, rs, ev, m, "out", None, by=m.display_name))  # the sheet's Can't make it
+    run(bot.set_answer(reg, rs, ev, m, "out", None, by=m.display_name, by_id=m.discord_id))  # the sheet's Can't make it
     assert not ev.seat_of(m.display_name)
     co = [c for c in ev.callouts if c.discord_id == m.discord_id]
     assert len(co) == 1 and co[0].late, "after lock the callout is late"

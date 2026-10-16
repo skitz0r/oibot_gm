@@ -182,7 +182,7 @@ def test_call_out_before_lock_keeps_the_note_for_officers(reg, rs):
     assert m.display_name in line and "noted for the officers" in line and "work trip" not in line
     assert ev.signups[str(m.discord_id)].status == "out" and ev.callouts[-1].note == "work trip"
     assert any("work trip" in t for _, t in bot.ops.lines)  # the ops feed (officers) carries the note
-    mine = run(bot.call_out(reg, rs, ev, m, None, by=m.display_name))
+    mine = run(bot.call_out(reg, rs, ev, m, None, by=m.display_name, by_id=m.discord_id))
     assert mine.startswith("Noted: out for")
 
 

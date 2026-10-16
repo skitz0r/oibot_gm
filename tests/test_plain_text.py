@@ -36,7 +36,7 @@ class FakeBot:
     async def _emit(self, cfg, level, text, exc=None):
         self.ops_lines.append((level, text))
 
-    async def set_answer(self, reg, rs, ev, m, status, character, by):
+    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None):
         self.calls.append(("set_answer", ev.key, m.display_name, status, character, by))
         s = rc.set_signup(reg, rs, ev, m, character, status, source="officer")
         return f"✅ {m.display_name}: **{s.character}** {rc.LABELS[status]}"
