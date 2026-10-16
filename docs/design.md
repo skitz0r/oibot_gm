@@ -1415,6 +1415,9 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   departed member lands on their own roster's council only. The companion (`companion/oibot_companion.py: Outbox`)
   keeps an event until the ack with its idem, re-sends the in-flight one after a reconnect and retries a refusal every
   30 s for 10 min (the bot warns once per 10 min per refusal); the refusal text no longer names a `--run` option.
+  `loot_reasons_pending` and set_reason's "already gave a reason — replace?" step read ANY precedent row of the award
+  (`precedent_any`: active, superseded or retired), so retiring a reason never puts its award back on the "needs a
+  reason" list; what the model cites stays active-only (`precedent_for`).
 - Tests: `tests/test_loot_verbs.py` (verbs, revs, snapshot vs concurrent writes, restart, companion, routing,
   idempotency, end, scheduler, migration, items), `tests/test_companion_outbox.py`.
 

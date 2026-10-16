@@ -1444,3 +1444,21 @@ def test_the_routing_refusal_names_no_companion_option_that_doesnt_exist(reg, rs
     run(bot.open_loot(reg, rs, ev2, by="Officer"))
     _, why = bot.loot_route(Companion("Nobody", "c", "", "p"))
     assert "--run" not in why and "bind it on the council card" in why
+
+
+def test_a_retired_reason_never_puts_the_award_back_on_the_needs_a_reason_list(council):
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    other = next(char(m) for m in c.members if char(m) != p.to)
+    run(c.bot.handle_feed_event({"type": "loot", "recipient": other, "item_name": "Shard of Doom", "idem": "rr1"}, scribe()))
+    run(c.bot.set_reason(c.reg, c.s, "d1", "raid leader's call", by="Mira"))
+    run(c.bot.end_run(c.reg, c.rs, c.ev, by="Mira"))
+    iid = f"{c.ev.key}-d1"
+    c.reg.store.append_jsonl(Path(c.reg.key) / "precedents.jsonl", {"kind": "status", "import_id": iid, "status": "retired", "by": "Jonny",
+                                                                    "reason": "no longer policy", "at": ls.now_iso()})  # what Retire writes
+    c.bot._guild_ctx(c.reg).reload()
+    assert c.bot._guild_ctx(c.reg).precedent_for(iid) is None, "the bot stops citing it"
+    assert not c.bot.loot_reasons_pending(c.reg), "retired is not 'never given'"
+    with pytest.raises(LootChanged, match="Mira already gave a reason"):
+        run(c.bot.set_reason(c.reg, c.ev.key, "d1", "sneaking it back", by="Jonny"))

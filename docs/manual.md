@@ -1026,7 +1026,8 @@ can add it by hand. A rehearsal takes drops only from a puppet's or the tester's
 
 **Correct** fixes a recorded award (a reason is required; the old record is kept and marked void), from the
 **Correct…** button under the line. A correction also retires the precedent of the award it fixed — the bot never cites
-a council decision that, per the correction, never happened. A reason owed and an in-game award that disagrees with the record both stay
+a council decision that, per the correction, never happened. An award whose reason was given (even if that precedent
+was later retired) never goes back on the "needs a reason" list. A reason owed and an in-game award that disagrees with the record both stay
 fixable after the council ends. **Roster changes** after the council opened count at once: someone who joins the roster
 is a candidate straight away; someone who leaves stays a candidate until an officer removes them — on a split run only on
 their own roster's council.
