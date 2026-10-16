@@ -739,8 +739,9 @@ def test_old_thread_keyed_session_files_migrate_once(reg, rs):
     s = ls.load_sessions(reg.store)[(GUILD, ev.key)]
     assert [(x.drop_id, x.item_id) for x in s.drop_list] == [("d1", 32262), ("d2", 32263)]
     assert s.awards[0].drop_id == "d1" and s.pending("d2").override.to == "Fen" and s.pending("d2").award_to == "Kes"
-    m = ls.load_sessions(reg.store)[(GUILD, "mock-4242")]
+    m = LootSession.model_validate_json((d / "mock-4242.json").read_text())
     assert m.label == "BLA-0915" and m.origin == "mock"
+    assert (GUILD, "mock-4242") not in ls.load_sessions(reg.store), "/mock is retired (D11): the file is renamed, never loaded"
 
 
 def test_registry_items_tiers_and_loot_cfg(reg):
@@ -782,29 +783,23 @@ def test_feed_presence_has_three_states():
     assert {r["character"]: r["state"] for r in fs.presence("demo")} == {"A": "live", "B": "quiet", "C": "disconnected"}
 
 
-def test_mock_sessions_still_load_and_run_on_the_fixtures(reg, rs, store):
-    """/mock is kept until D11's retirement: a mock session (id mock-<channel>) runs the same verbs on the shadow
-    fixtures' context and never reads a real guild's."""
-    from oibot_gm import discord_bot
-    from oibot_gm.lootctx import FixtureLootContext
-
-    ROOT = Path(__file__).resolve().parents[1]
-    gctx = discord_bot.GuildContext(ROOT / "fixtures" / "demo", "signup_2026-09-15.yaml")
-    gctx.provider = None
+def test_retired_mock_sessions_never_load_and_no_session_reads_the_fixtures(reg, rs, store):
+    """D11: /mock is retired. An old mock session file (id mock-<channel>) stays on disk as written but nothing loads it,
+    a session is never live without a locked run, and a session with no registered guild has no context — the demo
+    fixtures are never a loot context."""
+    s = LootSession(id="mock-5", channel_id=5, instance="black_temple", date="2026-09-15", guild=reg.key, origin="mock", state="raid").attach(store)
+    s.save("an old /mock session")
+    f = store.root / reg.key / "events" / "mock-5.json"
+    assert f.exists()
+    assert (reg.key, "mock-5") not in ls.load_sessions(store), "a retired /mock session is not loaded"
     bot = LootBot(reg, rs)
-    bot.ctx = gctx
-    s = LootSession(id="mock-5", channel_id=5, instance="black_temple", date="2026-09-15", guild=gctx.guild_key, origin="mock", state="raid",
-                    signups=gctx.seed_players).attach(store)
-    from oibot_gm.roster import solver
+    assert not bot.loot_live(s) and bot.loot_roster(s) == []
+    ghost = LootSession(id="x", run_key="x", instance="barrow_deeps", date="2026-09-15", guild="nobody", origin="raid")
+    with pytest.raises(RuntimeError, match="no registry"):
+        bot.loot_ctx(ghost)
+    import oibot_gm.lootctx as lootctx
 
-    s.roster = solver.solve(gctx.profile, s.active_signups(), "black_temple", solver.SolveOptions(time_limit_s=5))
-    bot.loot_index(s)
-    assert isinstance(bot.loot_ctx(s), FixtureLootContext)
-    first = next(iter(gctx.profile.items.values()))
-    run(bot.tick(None, s, add=[{"item_id": first.id, "boss": first.boss}], by="Officer"))
-    (p,) = run(bot.distribute(None, s, by="Officer"))["proposals"]
-    run(bot.confirm(None, s, by="Officer"))
-    assert s.awards[0].item_id == first.id and s.awards[0].import_id == "mock-5-d1"
+    assert not hasattr(lootctx, "FixtureLootContext")
 
 
 def test_a_drop_nobody_can_take_is_never_recorded_to_nobody(council):

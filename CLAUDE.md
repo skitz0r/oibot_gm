@@ -46,7 +46,8 @@ src/oibot_gm/
                        run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS) — design §5.35
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
-  discord_bot.py       OibotGM client; /mock flow on shadow data (MockEvent = LootSession, id mock-<channel>); bot.events[(gk, session id)]
+  discord_bot.py       OibotGM client: the gateway events and on_message routing; bot.events[(gk, session id)]; /mock is retired (D11: rehearse with a
+                       test run — its council is session.test); GuildContext still loads the demo fixtures for the provider and `oibot demo`
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
                        (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock; loot_ctx / loot_roster
                        (live from the run) / loot_live (run locked); open_council (one session per roster of a split run, <run>-r<N>); auto-distribute;
@@ -54,7 +55,10 @@ src/oibot_gm/
                        only LootSession.blocks_close — picks/undistributed — holds it, once announced; reasons/conflicts outlive it: set_reason/correct take a
                        session id after the end); loot_ensure_thread (a pending thread retried on /raid loot, on_resumed, ready); hooks the surfaces replace:
                        loot_notify(…, kind, drop_id) / loot_view (interim thread buttons) / loot_open_thread / loot_ended / loot_closing / loot_held
-  lootctx.py           RegistryLootContext (one per guild, reload(); void rows + superseding precedents folded) / FixtureLootContext (/mock): one interface
+  lootctx.py           RegistryLootContext (one per guild, reload(); void / reweight rows and superseding / status precedents folded; wishlists derived
+                       live from Registry.wishlists; set_precedent_status = Retire/Restore; reweight (D12)); LEDGER_LISTENERS on every new award row
+  loot_ops.py          the `loot` / `wishlist` / `tier` plain-text ops (configops' loot branch → LootMixin verbs / Registry wishlist + tier verbs),
+                       SCHEMA (into SCHEMA_TEXT), needs_actor (D8), loot_revs (batch_rev on a confirm-all diff), loot_log_state, member_awards, loot_block
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
                        schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules);
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
@@ -67,7 +71,7 @@ src/oibot_gm/
                        `characters_rev(member)`, verbs take `rev=` and raise `ConfigChanged`; `preview(fn)` runs on shadow(); `member(uid, name)`
                        never renames — `rename(uid, name, by)` is the explicit step
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
-                       /me view|plan main|alt|roles|char …|absent … (members);
+                       /me view|wishlist|plan main|alt|roles|char …|absent … (members; /me wishlist = flows_wishlist, the Me page builds long lists);
                        /roster overview|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers; `poll` retired, PlanButton is a stub);
                        Rosters (design §5.30, out of the roster redesign): a run's roster is ephemeral in config `rosters[]` (key/size/cutoffs per run) and WHO
                        holds a seat lives only in the run file (rc.rostered_runs reads it); RegisteredCharacter.rosters holds only REGULARS, as series keys
@@ -75,7 +79,7 @@ src/oibot_gm/
                        or AD HOC (pickup templates, ADHOC_SCHEDULE one-offs) — rc.run_kind; ad hoc = first come (Signup.joined_at), no confirmations, lighter
                        timing. Regulars are never pre-filled; officers see who hasn't answered. Officer posts go to `roster_channel_id`. Internal helpers still
                        say "team" (aliases) — don't rename them casually.
-                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py); /mock … (demo)
+                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news/loot channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py)
                        `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only), by_key, ordered(),
                        get(key|name), for_guild (strict), only(), many, cfg_for, load_errors; `/gm config owner` in an UNCONFIGURED server is the bootstrap
                        (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; any number of servers — Guilds.ALLOW_SECOND is on since S3)
@@ -118,6 +122,8 @@ src/oibot_gm/
                        card per raid (pool_layout: readiness + comp shortfalls, edited in place, no images) + change log (Registry.listeners, debounced);
                        absences channel (AbsencesMixin: card + "I'll be away" modal → announce_absence → sheets updated);
                        SetupMixin: set_channel (web Config page + plain-text `set …_channel` via configops.apply_async), guild_channels/roles, test_bench_clear.
+                       LootLogMixin: the public loot log (LEDGER_LISTENERS → one line per award in the loot channel, else the run's updates thread; never
+                       the signup channel; loot_log off = nothing) with LootWishButton (`lootwish.<gk>:<item key>` → /me wishlist on that item)
                        Test bench: Member.test puppets, /gm test seed|run|answer|clear; RaidMixin.send_member_dm routes puppet DMs to the TESTER's own DMs
                        (never the roster channel), may_answer_for lets the tester press their buttons, a test run's pool is puppets + tester only and its
                        sheet refuses presses from real members
@@ -132,7 +138,7 @@ src/oibot_gm/
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
   wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow) · flows_raid ·
                        flows_config · flows_roster · flows_register (incl. the Discord application: picks → names → schedules → the guild's
-                       questions five per modal → review) · flows_recruit (/gm config recruitment) · flows_misc. Commands and card buttons call FLOWS[name].
+                       questions five per modal → review) · flows_recruit (/gm config recruitment) · flows_wishlist (/me wishlist) · flows_misc. Commands and card buttons call FLOWS[name].
                        tests/wizard_harness.py drives a flow end to end with fake interactions and lints every screen
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id; schedule_set field = <schedule id>.<setting>), describe() diff,
                        apply() via the same code paths as commands, apply_async(bot=) for card-posting channels and announced absences; request text in <request>;
@@ -146,7 +152,9 @@ src/oibot_gm/
                        list_guilds; the bot never reads OIBOT_MCP_GUILD) (`Authorization: Bearer $OIBOT_MCP_TOKEN` → web/app.py `mcp_authorized` + `mcp_guild` → `mcp_viewer`,
                        via=mcp in the request log; LOCAL ONLY by default — OIBOT_MCP_LOCAL_ONLY, web/app.py local_request: loopback client and no proxy
                        headers, so the token never works through the tunnel). Never a second code path: every write is the site's route. `.mcp.json` (repo root, no secrets)
-                       registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py
+                       registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py.
+                       Loot tools (§5.36): reads / tick / distribute / discard / end as the token; DECISIONS (loot_confirm/award/reason/correct,
+                       retire_precedent, tier_item, set_wishlist, import_wishlists) send X-Oibot-Actor = OIBOT_MCP_ACTOR (D8; app.py mcp_actor validates it)
   discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change; handle_change for every plain-text path (ConfigConfirmView re-authorizes the presser)
   news.py              news review (design §5.26): keyword filter of #news webhook embeds (profiles/<v>/news.yaml version_terms + raid names +
                        guild news_keywords) → <guild>/news.jsonl (dedupe by url); Proposal/ProposalStore (<guild>/proposals/<id>.yaml,
@@ -175,15 +183,19 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first
                        guild the person may open (guild_routing.member_of); homepage/not-member page = one card per server (one guild: the old page byte for byte)
   web/api_agents.py    /api/news, /api/proposals…, /api/agents (the monitor), /api/agents/profile (effective profile, overrides marked)
+  web/api_loot.py      the loot council on the web (design §5.36): /api/loot (+ /run/{run}), /api/loot/{run}/open|tick|distribute|override|confirm|
+                       discard|reason|correct|end|… (the LootMixin verbs; LootChanged/LootBusy → 409 + `state`), history, precedents (+ retire), items
+                       (+ tiers with the D12 re-weight ask), wishlists (+ TMB import), /api/me/loot, /api/me/wishlist, /api/members/wishlist, /api/loot/log
+                       (members logged in; officers' `scores` filtered server-side, D2). D8: decisions from MCP need X-Oibot-Actor (app.py mcp_actor)
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
                        sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`
 frontend/              React + Mantine app (Vite). components/board/* (SheetCard, BoardView, SplitModal, BoardPreview, FillModal), components/Cells.tsx (icon-only cells),
                        components/ConfirmModal.tsx (useConfirm), components/PlainPermissions.tsx (Ops page: who may do what, where), components/ScheduleCard.tsx (Raids page schedules + editor), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = puppets of any mix + the comp sandbox) · Agents (the news review's monitor) · Ops · Config (Mantine, left rail,
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist) · Loot log (members) · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = puppets of any mix + the comp sandbox) · Loot (components/loot/*: Tonight · History · Precedents · Items · Wishlists) · Agents (the news review's monitor) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
-  render.py            /mock roster PNG, raid thumbnails, generated emoji badges (no analytics images any more);  report_html.py → out/coverage.html
+  render.py            roster PNG (`oibot roster`), raid thumbnails, generated emoji badges (no analytics images any more);  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`
 out/                   generated reports/logs only (event state is in the data repo)
 ```
@@ -200,7 +212,7 @@ After touching `frontend/`: `cd frontend && npm run build` (commit the bundle). 
 - Python 3.12, `uv`, Pydantic models in `models.py` double as LLM output schemas.
 - Deterministic first: add a rule to `scoring.py`/`comp_rules.yaml`, not to a prompt.
 - Anything slow (solver, LLM) runs in `asyncio.to_thread`; Discord interactions must respond within 3 s.
-- Verify offline before touching Discord: copy the data repo to a scratch dir, `GitStore(scratch, push=False)`, drive `Registry`/`raidcycle`/`MockEvent` directly (see git history for examples); build a `CommandTree` on a bare `discord.Client` to validate command decorators.
-- Real guild state is keyed by the guild's folder key → `<data>/<key>/guild.yaml` (fixed for good; `Guilds` maps the Discord server id to it). Several guilds run in one process: never take "the first guild" — use `Guilds.for_guild/only/by_key/ordered`, route commands through `guild_routing.need`, and key per-run process state (locks, caches) by (guild key, run key). `/mock` uses the shadow fixtures. Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template, and every persistent `custom_id` carries the guild key (`<prefix>.<gk>:…`, an optional group in the template; old ids still resolve via `guild_routing.resolve_button`). DMs and cards name their guild only when the bot serves several (`Registry.many_guilds`); with one guild every message reads as before.
+- Verify offline before touching Discord: copy the data repo to a scratch dir, `GitStore(scratch, push=False)`, drive `Registry`/`raidcycle`/`LootSession` directly (see git history for examples); build a `CommandTree` on a bare `discord.Client` to validate command decorators.
+- Real guild state is keyed by the guild's folder key → `<data>/<key>/guild.yaml` (fixed for good; `Guilds` maps the Discord server id to it). Several guilds run in one process: never take "the first guild" — use `Guilds.for_guild/only/by_key/ordered`, route commands through `guild_routing.need`, and key per-run process state (locks, caches) by (guild key, run key). No loot session reads the shadow fixtures (`/mock` is retired). Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template, and every persistent `custom_id` carries the guild key (`<prefix>.<gk>:…`, an optional group in the template; old ids still resolve via `guild_routing.resolve_button`). DMs and cards name their guild only when the bot serves several (`Registry.many_guilds`); with one guild every message reads as before.
 - Item data in `profiles/tbc/items/*.yaml` is unverified; `equippable()` is the safety net. Verify ids against the Blizzard API before relying on them.
 - Model routing lives in `llm/provider.py:ROUTES`; override per workload with `OIBOT_MODEL_<WORKLOAD>`.

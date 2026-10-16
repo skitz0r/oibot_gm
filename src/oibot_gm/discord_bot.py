@@ -1,25 +1,15 @@
-"""Discord front end — mock event flow (shadow data; nothing real is written).
-
-  /mock signup instance:<raid>   seed a signup sheet from the fixture (one event per channel)
-  /mock set name status          tweak a signup (signed | bench | absent)
-  /mock lock                     lock signups, propose roster + groups; chat in the channel to
-                                 request changes ("swap Olnick and Rhozlad", "bench Zyro, bring thilly")
-  /mock accept                   accept the proposed roster (or press the button)
-  /mock start                    open the raid thread (instance carried from the signup)
-  pick a boss → multi-select what dropped → /mock distribute (or the button)
-  chat in the thread to adjust  ("give the drape to Paldebaran, Boviche just got Syphon")
-  Confirm awards → next boss     /mock end for the summary
-"""
+"""The Discord client: OibotGM mixes in every surface (raids, loot, feed, pool cards, setup, help, news) and owns the
+gateway events (on_message's routing, member updates, ready). `/mock` is retired (owner decision D11): a rehearsal is a
+test-bench run whose council is a test session (nothing reaches the guild's ledger). `GuildContext` still loads the
+demo fixtures on start for the LLM provider and the `oibot demo` path; no guild's loot reads them."""
 from __future__ import annotations
 
 import asyncio
-import copy
 import json
 import logging
 import os
 import re
 import time
-from io import BytesIO
 from pathlib import Path
 
 import discord
@@ -33,7 +23,7 @@ from .discord_policy import CfgApplyButton, PolicyContext, handle_change, left_s
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_tokens
-from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
+from .discord_pool import AbsenceButton, AbsencesMixin, LootLogMixin, LootWishButton, SetupMixin
 from .discord_news import NewsMixin, ProposalButton
 from .discord_raid import RaidContext, RaidMixin
 from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton
@@ -45,17 +35,17 @@ from .ops import Ops
 from .llm.provider import Provider, get_provider
 from .loot import session as loot_session
 from .loot.session import DISENCHANT, LootChanged, LootSession, Proposal, table_signature  # noqa: F401 — re-exported (old import sites)
-from .models import DropResult, LootAward, Player, RosterResult
+from .models import DropResult, LootAward, RosterResult
 from .profiles import GameProfile, Item
 from .registry import RegistryError
-from .roster import coverage as cov_mod, explain, solver
+from .roster import coverage as cov_mod
 from .store import GitStore, resolve_data_root
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "out"
 log = logging.getLogger(__name__)
 STORE: GitStore | None = None  # set in run(); None = fixtures-only mode (no git)
-# The mock fixtures' guild key: the directory name of the guild dir the bot was started on (run() sets it from
+# The demo fixtures' guild key: the directory name of the guild dir the bot was started on (run() sets it from
 # the real path; before that, OIBOT_GUILD_DIR or the public demo fixtures). Never a real guild's name in code.
 GUILD_KEY = Path(os.environ.get("OIBOT_GUILD_DIR") or "fixtures/demo").name
 
@@ -65,7 +55,7 @@ def _store() -> GitStore:
     return STORE
 
 CLASS_COLOURS = {"Warrior": 0xC79C6E, "Paladin": 0xF58CBA, "Hunter": 0xABD473, "Rogue": 0xFFF569, "Priest": 0xFFFFFF, "Shaman": 0x0070DE, "Mage": 0x69CCF0, "Warlock": 0x9482C9, "Druid": 0xFF7D0A}
-from .constants import ROLES, TEAL  # noqa: E402
+from .constants import TEAL  # noqa: E402
 MEMBER_BLIP_RETRY_S = 15  # cached_member: a transient fetch failure is retried after this, never cached as a miss
 ROLE_ICON = {"tank": "🛡", "healer": "✚", "melee": "⚔", "ranged": "🏹"}
 # Filled at startup with application emojis (class_<name>, role_<name>); falls back to text.
@@ -117,8 +107,8 @@ class GuildContext:
 
 # ---------------------------------------------------------------- event state
 
-# The loot session lives in loot/session.py (keyed (guild key, run key), drop ids); `MockEvent` is its old name, kept
-# while /mock lives (D11 retires it). Its verbs are discord_loot.LootMixin.
+# The loot session lives in loot/session.py (keyed (guild key, run key), drop ids); `MockEvent` is its old name (an alias
+# for old import sites; /mock itself is retired, D11). Its verbs are discord_loot.LootMixin.
 MockEvent = LootSession
 
 
@@ -128,49 +118,6 @@ def load_events() -> dict:
 
 
 # ---------------------------------------------------------------- rendering
-
-def signup_embed(ev: MockEvent, ctx: GuildContext) -> discord.Embed:
-    active = ev.active_signups()
-    signed = [p for p in active if p.status == "signed"]
-    bench = [p for p in active if p.status == "bench"]
-    counts = {r: sum(1 for p in signed if p.role == r) for r in ROLES}
-    e = discord.Embed(title=f"{ev.raid_name} signup · {ev.id}", colour=TEAL, description=f"{ev.date} · **{len(signed)}** signed (+{len(bench)} bench) · " + " · ".join(f"{ico('role', r)} {n}" for r, n in counts.items()))
-    by_cls: dict[str, list[Player]] = {}
-    for p in sorted(signed, key=lambda p: p.pos):
-        by_cls.setdefault(p.cls, []).append(p)
-    for cls, ps in by_cls.items():
-        e.add_field(name=f"{ico('class', cls)} {cls} ({len(ps)})", value="\n".join(f"{ico('role', p.role)} `{p.pos:>2}` **{p.signup_name}** · {p.spec}" for p in ps), inline=True)
-    if bench:
-        e.add_field(name=f"Bench ({len(bench)})", value="\n".join(f"{ico('class', p.cls)} {p.signup_name} · {p.spec}" for p in bench), inline=False)
-    e.set_footer(text=f"state: {ev.state} · /mock set to tweak · /mock lock to propose a roster")
-    return e
-
-
-def roster_text(ev: MockEvent) -> str:
-    r = ev.roster
-    assert r
-    by = {p.signup_name: p for p in ev.signups}
-    lines = []
-    for gi, names in enumerate(r.groups, 1):
-        lines.append(f"Group {gi} (+{r.group_reports[gi-1].value}): " + ", ".join(f"{n} [{by[n].cls} {by[n].spec}]" for n in names))
-    lines.append("Bench: " + (", ".join(f"{p.signup_name} [{p.cls} {p.spec}]" for p in r.benched) or "nobody"))
-    return "\n".join(lines)
-
-
-def roster_embed(ev: MockEvent, ctx: GuildContext, note: str | None = None) -> tuple[discord.Embed, discord.File]:
-    """Roster card as an image (class colours, coverage matrix) + a slim embed with the text that matters."""
-    r = ev.roster
-    assert r
-    png = render.roster_png(ctx.profile, ev.active_signups(), r, f"{ev.raid_name} · {ev.id}", f"{len(r.selected)} in · synergy {r.synergy_value} · {ev.date}")
-    file = discord.File(BytesIO(png), filename="roster.png")
-    e = discord.Embed(title=f"Proposed roster · {ev.raid_name} · {ev.id}", colour=TEAL, description=(note + "\n\n" if note else "") + f"{len(r.selected)} in · " + " · ".join(f"{ico('role', k)} {v}" for k, v in r.role_counts.items()) + f" · synergy **{r.synergy_value}**")
-    e.set_image(url="attachment://roster.png")
-    e.add_field(name="Bench", value="\n".join(f"{ico('class', p.cls)} {p.signup_name} · {p.spec}" for p in r.benched) or "nobody", inline=False)
-    if r.advisories:
-        e.add_field(name="Advisories", value="\n".join(f"• {a[:300]}" for a in r.advisories[:4])[:1000], inline=False)
-    e.set_footer(text="Type changes here (“swap Olnick and Rhoz”, “bench Zyro, bring thilly”, “why not thilly?”) · Accept to lock")
-    return e, file
-
 
 def wowhead(item, profile: GameProfile | None = None) -> str | None:
     """A link to the item on the profile's database site (`integrations.yaml: wowhead_item_url`, `{id}` filled), or
@@ -282,133 +229,7 @@ def proposal_text(ev: MockEvent) -> str:
     return "\n".join(out)
 
 
-# ---------------------------------------------------------------- roster ops
-
-def apply_ops(ctx: GuildContext, ev: MockEvent, ops: list[nl.RosterOp]) -> list[str]:
-    """Apply structured roster ops with code. Returns human-readable change notes."""
-    assert ev.roster
-    players = ev.active_signups()
-    names = {p.signup_name.lower(): p.signup_name for p in players}
-    notes: list[str] = []
-    groups = [list(g) for g in ev.roster.groups]
-
-    def find(n: str | None) -> str | None:
-        if not n:
-            return None
-        return names.get(n.lower()) or next((v for k, v in names.items() if k.startswith(n.lower())), None)
-
-    def loc(n: str) -> int | None:
-        return next((gi for gi, g in enumerate(groups) if n in g), None)
-
-    resolve_needed = False
-    opts = solver.SolveOptions(
-        time_limit_s=10,
-        force_in=tuple(ev.force_in),
-        force_out=tuple(ev.force_out),
-        keep_together=tuple(tuple(x) for x in ev.keep_together),
-        keep_apart=tuple(tuple(x) for x in ev.keep_apart),
-    )
-    for op in ops:
-        a, b = find(op.a), find(op.b)
-        if op.type == "swap" and a and b:
-            ga, gb = loc(a), loc(b)
-            if ga is not None and gb is not None:
-                groups[ga][groups[ga].index(a)], groups[gb][groups[gb].index(b)] = b, a
-                notes.append(f"swapped {a} (G{ga+1}) ↔ {b} (G{gb+1})")
-            elif ga is not None and gb is None:
-                groups[ga][groups[ga].index(a)] = b
-                notes.append(f"{b} takes {a}'s slot in G{ga+1}; {a} to bench")
-            elif gb is not None and ga is None:
-                groups[gb][groups[gb].index(b)] = a
-                notes.append(f"{a} takes {b}'s slot in G{gb+1}; {b} to bench")
-        elif op.type == "move" and a and op.group and 1 <= op.group <= len(groups):
-            ga, gt = loc(a), op.group - 1
-            if ga is None:
-                notes.append(f"{a} is not in the raid; use promote first")
-                continue
-            if ga == gt:
-                continue
-            if len(groups[gt]) < ctx.profile.comp_rules["group_size"]:
-                groups[ga].remove(a)
-                groups[gt].append(a)
-                notes.append(f"moved {a} G{ga+1} → G{gt+1}")
-            else:  # swap with whichever member of the target group costs least
-                best, best_syn = None, -1
-                for partner in groups[gt]:
-                    trial = [list(g) for g in groups]
-                    trial[ga][trial[ga].index(a)], trial[gt][trial[gt].index(partner)] = partner, a
-                    _, syn = solver.group_reports(ctx.profile, players, trial)
-                    if syn > best_syn:
-                        best, best_syn = partner, syn
-                groups[ga][groups[ga].index(a)], groups[gt][groups[gt].index(best)] = best, a
-                notes.append(f"moved {a} G{ga+1} → G{gt+1}, {best} back to G{ga+1}")
-        elif op.type == "bench" and a:
-            if a in ev.force_in:
-                ev.force_in.remove(a)
-            if a not in ev.force_out:
-                ev.force_out.append(a)
-            opts.force_out = tuple(ev.force_out)
-            opts.force_in = tuple(ev.force_in)
-            opts.pins = {**(opts.pins or {}), **{n: gi for gi, g in enumerate(groups) for n in g if n != a and n not in ev.force_out}}
-            resolve_needed = True
-            notes.append(f"benched {a}; solver fills the slot")
-        elif op.type == "promote" and a:
-            if a in ev.force_out:
-                ev.force_out.remove(a)
-            if a not in ev.force_in:
-                ev.force_in.append(a)
-            opts.force_in = tuple(ev.force_in)
-            opts.force_out = tuple(ev.force_out)
-            resolve_needed = True
-            notes.append(f"bringing {a}; solver re-seats the raid")
-        elif op.type == "keep_together" and a and b:
-            ev.keep_together.append([a, b])
-            opts.keep_together = opts.keep_together + ((a, b),)
-            resolve_needed = True
-            notes.append(f"rule: keep {a} with {b}")
-        elif op.type == "keep_apart" and a and b:
-            ev.keep_apart.append([a, b])
-            opts.keep_apart = opts.keep_apart + ((a, b),)
-            resolve_needed = True
-            notes.append(f"rule: keep {a} away from {b}")
-        elif op.type == "regenerate":
-            resolve_needed = True
-            notes.append("regenerated from scratch")
-        else:
-            notes.append(f"could not apply {op.type} ({op.a}, {op.b})")
-
-    before = ev.roster.synergy_value
-    if resolve_needed:
-        if opts.force_in and opts.pins:
-            opts.pins = None  # promote needs a free slot
-        try:
-            result = solver.solve(ctx.profile, players, ev.instance, opts)
-        except RuntimeError as e:
-            notes.append(f"infeasible: {e}")
-            return notes
-        ev.roster = explain.annotate(ctx.profile, players, ev.instance, result, whatif=False)
-    else:
-        ev.roster = solver.rebuild(ctx.profile, players, groups, ev.roster)
-        ev.roster = explain.annotate(ctx.profile, players, ev.instance, ev.roster, whatif=False)
-    notes.append(f"synergy {before} → {ev.roster.synergy_value}")
-    ev.roster_log.extend(notes)
-    ev.save()
-    return notes
-
-
 # ---------------------------------------------------------------- views
-
-class RosterView(discord.ui.View):
-    def __init__(self, bot: "OibotGM", ev: MockEvent):
-        super().__init__(timeout=None)
-        self.bot, self.ev = bot, ev
-
-    @discord.ui.button(label="Accept roster", style=discord.ButtonStyle.success)
-    async def accept(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if not await self.bot.gate(interaction):
-            return
-        await self.bot.accept_roster(self.ev, interaction)
-
 
 def boss_embed(bot: "OibotGM", ev: MockEvent, boss: str, items: list[Item]) -> discord.Embed:
     states = {}
@@ -512,7 +333,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
+class OibotGM(FeedMixin, LootMixin, LootLogMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
     ico = staticmethod(ico)
 
     async def post_application(self, reg, a) -> str:
@@ -563,8 +384,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
         self.contexts: dict = {}  # guild key -> RegistryLootContext (lazy, one per guild; reload() after an import)
         for s in self.events.values():
             self.loot_index(s)  # + the by-thread map event_for reads
-        self._register()
-        # real (non-mock) surface: registry, officer tools, ops feed
+        # the guilds: registry, officer tools, ops feed
         self.ops = Ops(self)
         self.registries = Guilds(_store(), ROOT)
         register_commands(self.tree, self.registries, self.ops, ico)
@@ -592,7 +412,8 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             walk(c)
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
-        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton, CfgApplyButton)
+        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton, CfgApplyButton,
+                               LootWishButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -623,25 +444,6 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
                 await target.response.send_message(text, ephemeral=True)
         except Exception:  # noqa: BLE001
             pass
-
-    # ---- helpers (loot_ctx, event_for, loot_reg … are LootMixin's)
-    def loot_reg(self, session):
-        """A /mock session has no registry (its context is the fixtures'); a real one has its guild's."""
-        if getattr(session, "origin", "raid") != "raid":
-            return None
-        return LootMixin.loot_reg(self, session)
-
-    async def accept_roster(self, ev: MockEvent, interaction: discord.Interaction):
-        if not ev.roster:
-            await interaction.response.send_message("No roster proposed yet — /mock lock first.", ephemeral=True)
-            return
-        ev.state = "roster_locked"
-        ev.save()
-        await interaction.response.send_message(f"🔒 Roster accepted for **{ev.raid_name}** ({len(ev.roster.selected)} in, {len(ev.roster.benched)} benched). `/mock start` opens the raid thread.")
-
-    async def propose_roster(self, ev: MockEvent, note: str | None = None) -> tuple[discord.Embed, discord.ui.View, discord.File]:
-        embed, file = await asyncio.to_thread(roster_embed, ev, self.ctx, note)
-        return embed, RosterView(self, ev), file
 
     async def ensure_emojis(self) -> None:
         """Upload class/role badges as application emojis once; map names → emoji strings."""
@@ -766,21 +568,6 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
     async def post_proposals(self, ev: MockEvent, dest, prefix: str | None = None):
         """Compact: item → character by boss, then character → items. Full cards via the Details dropdown."""
         await dest.send(content=prefix, embeds=[proposal_summary(ev), by_character_embed(ev, self.loot_ctx(ev))], view=ConfirmView(self, ev))
-
-    async def end_mock_session(self, ev: MockEvent, interaction: discord.Interaction) -> None:
-        """/mock end: the summary, then the session is archived (a real council ends through LootMixin.end_run)."""
-        summary = self.loot_summary(None, ev)
-        e = discord.Embed(title=f"Raid summary · {ev.raid_name} · {ev.label or ev.id}", colour=TEAL, description=summary["text"][:4000])
-        if ev.roster_log:
-            e.add_field(name="Roster history", value="\n".join(f"• {l}" for l in ev.roster_log[-8:])[:1000], inline=False)
-        ctx = self.loot_ctx(ev)
-        if ctx.provider:
-            e.add_field(name="LLM usage (this bot process)", value=ctx.provider.summary()[:1000], inline=False)
-        e.set_footer(text=f"data repo {_store().head()}")
-        ev.state = "ended"
-        ev.archive(summary)
-        self.loot_forget(ev)
-        await interaction.response.send_message(embed=e)
 
     async def cached_member(self, guild, uid: int, max_age: float = 300):
         """A guild member by id without the privileged members intent: the gateway cache first, else one REST
@@ -993,7 +780,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             await self.resolve_officer_roles(reg)
 
     async def gate(self, interaction: discord.Interaction) -> bool:
-        """Refuse non-officers on the /mock decision buttons; returns True when the press may proceed."""
+        """Refuse non-officers on the interim loot views (Manage Server anywhere; the persistent loot buttons check role_of); True = proceed."""
         if self.officiates(interaction.user, interaction.guild, mock=True):
             return True
         await interaction.response.send_message("Officers only.", ephemeral=True)
@@ -1114,7 +901,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             return
         reg = self.registries.for_guild(message.guild.id)
         # an @mention: routed by intent and by the channel's plain-text mode (the ops and analytics channels act by default;
-        # the mock loot/roster channels keep their own chat below)
+        # a loot thread keeps its own chat below)
         if reg and self._addressed(message) and (message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) or not self.event_for(message.channel.id)):
             text = re.sub(r"<@[!&]?\d+>", "", message.content).strip()
             if text:
@@ -1125,27 +912,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             return
         if not self.officiates(message.author, message.guild, mock=True):
             return  # members may chat in the roster/loot channels; only officers steer the bot
-        if ev.state == "roster_proposed" and message.channel.id == ev.channel_id and ev.roster:
-            async with message.channel.typing():
-                try:
-                    req = await asyncio.to_thread(nl.parse_roster_request, self.ctx.provider, ev.raid_name, roster_text(ev), message.content, message.author.display_name)
-                except Exception as e:  # noqa: BLE001
-                    await message.reply(await configops.report_error(self.ops, reg.config if reg else None, e, "roster chat"))  # §2.7: refusals as written, bugs as GENERIC_ERROR + an ops error
-                    return
-                if req.kind == "ignore":
-                    return
-                if req.kind == "accept":
-                    ev.state = "roster_locked"
-                    ev.save()
-                    await message.reply(f"🔒 Roster accepted. `/mock start` opens the raid thread.")
-                    return
-                if req.kind == "question":
-                    await message.reply(req.reply[:1900])
-                    return
-                notes = await asyncio.to_thread(apply_ops, self.ctx, ev, req.ops)
-                embed, view, file = await self.propose_roster(ev, (req.reply + "\n" if req.reply else "") + "Changes: " + "; ".join(notes))
-                await message.reply(embed=embed, view=view, file=file)
-        elif message.channel.id == ev.raid_thread_id and self.loot_live(ev) and ev.proposals:
+        if message.channel.id == ev.raid_thread_id and self.loot_live(ev) and ev.proposals:
             await self.loot_chat(message, ev)
 
     async def loot_chat(self, message: discord.Message, ev: MockEvent) -> None:
@@ -1206,140 +973,6 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             else:
                 await self.post_proposals(ev, message.channel, prefix=text)
 
-    # ---- commands
-    def _register(self):
-        bot = self
-
-        class MockGroup(app_commands.Group):
-            async def interaction_check(self, interaction: discord.Interaction) -> bool:  # officers only: it spends LLM budget
-                if bot.officiates(interaction.user, interaction.guild, mock=True):
-                    return True
-                await interaction.response.send_message("Officers only.", ephemeral=True)
-                return False
-
-        mock = MockGroup(name="mock", description="Officer: mock event on shadow data — signup → roster → raid → loot council")
-        raid_choices = [app_commands.Choice(name=r["name"], value=rid) for rid, r in self.ctx.profile.raids.items()]
-
-        @mock.command(name="signup", description="Seed a mock signup sheet for this channel")
-        @app_commands.choices(instance=raid_choices)
-        async def signup(interaction: discord.Interaction, instance: app_commands.Choice[str], date_: str = ""):
-            d = date_ or self.ctx.seed_event["starts_at"][:10]
-            ev = MockEvent(id=f"mock-{interaction.channel_id}", label=f"{instance.value.split('_')[0].upper()[:3]}-{d[5:].replace('-', '')}", channel_id=interaction.channel_id, instance=instance.value, date=d, guild=self.ctx.guild_key, signups=copy.deepcopy(self.ctx.seed_players))
-            old = self.events.get(ev.key)
-            if old is not None:
-                old.archive()
-            ev.attach(_store())
-            self.loot_index(ev)
-            ev.save()
-            await interaction.response.send_message(embed=signup_embed(ev, self.ctx))
-
-        @mock.command(name="set", description="Change a signup: signed / bench / absent")
-        @app_commands.choices(status=[app_commands.Choice(name=s, value=s) for s in ("signed", "bench", "absent")])
-        async def set_(interaction: discord.Interaction, name: str, status: app_commands.Choice[str]):
-            ev = self.event_for(interaction.channel_id)
-            if not ev or ev.state != "signup_open":
-                await interaction.response.send_message("No open signup here (/mock signup first, or it's already locked).", ephemeral=True)
-                return
-            p = next((p for p in ev.signups if p.signup_name.lower() == name.lower()), None)
-            if not p:
-                await interaction.response.send_message(f"No signup named {name}. Names: " + ", ".join(s.signup_name for s in ev.signups), ephemeral=True)
-                return
-            p.status = status.value
-            ev.save()
-            await interaction.response.send_message(embed=signup_embed(ev, self.ctx))
-
-        @mock.command(name="lock", description="Lock signups and propose roster + groups")
-        async def lock(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if not ev:
-                await interaction.response.send_message("No signup here — /mock signup first.", ephemeral=True)
-                return
-            await interaction.response.defer(thinking=True)
-            players = ev.active_signups()
-
-            def build():
-                r = solver.solve(self.ctx.profile, players, ev.instance, solver.SolveOptions(time_limit_s=12))
-                return explain.annotate(self.ctx.profile, players, ev.instance, r, whatif=True)
-
-            ev.roster = await asyncio.to_thread(build)
-            ev.state = "roster_proposed"
-            ev.roster_log = ["proposed by solver"]
-            ev.save()
-            embed, view, file = await self.propose_roster(ev)
-            await interaction.followup.send(embed=embed, view=view, file=file)
-
-        @mock.command(name="accept", description="Accept the proposed roster")
-        async def accept(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if not ev:
-                await interaction.response.send_message("No event here.", ephemeral=True)
-                return
-            await self.accept_roster(ev, interaction)
-
-        @mock.command(name="start", description="Start the raid with the accepted roster (opens a thread)")
-        async def start(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if not ev or ev.state not in ("roster_locked", "raid"):
-                await interaction.response.send_message("Accept a roster first (/mock lock → /mock accept).", ephemeral=True)
-                return
-            assert ev.roster
-            roster_txt = ", ".join(p.character or p.signup_name + "?" for p in ev.roster.selected)
-            e = discord.Embed(title=f"⚔ {ev.raid_name} · {ev.id} · {ev.date}", colour=TEAL, description=f"Roster ({len(ev.roster.selected)}): {roster_txt}"[:4000])
-            e.add_field(name="Ledger", value=f"{len(self.ctx.ledger)} real awards loaded + {len(ev.awards)} from this raid. Awards feed the loot divisor for later drops.", inline=False)
-            e.set_footer(text=f"loot judgment: {self.ctx.provider.name if self.ctx.provider else 'deterministic'} · tick drops per boss → Distribute → chat to adjust → Confirm")
-            await interaction.response.send_message(embed=e)
-            msg = await interaction.original_response()
-            thread = await msg.create_thread(name=f"{ev.raid_name} · {ev.id}"[:100])
-            ev.raid_thread_id = thread.id
-            ev.state = "raid"
-            ev.save()
-            self.loot_index(ev)
-            await self.post_boss_tables(ev, thread)
-
-        @mock.command(name="bosses", description="Re-post the boss loot tables in the raid thread")
-        async def bosses(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if not ev or ev.state != "raid":
-                await interaction.response.send_message("Not in a raid thread.", ephemeral=True)
-                return
-            await interaction.response.send_message("Loot tables:")
-            await self.post_boss_tables(ev, interaction.channel)
-
-        @mock.command(name="distribute", description="Run the loot council on the recorded drops")
-        async def distribute(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if not ev or ev.state != "raid":
-                await interaction.response.send_message("Not in a raid thread.", ephemeral=True)
-                return
-            await self.distribute_ui(ev, interaction)
-
-        @mock.command(name="status", description="Where is this channel's mock event?")
-        async def status(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if not ev:
-                await interaction.response.send_message("No event here.", ephemeral=True)
-                return
-            spend = self.ctx.provider.summary() if self.ctx.provider else "LLM off"
-            await interaction.response.send_message(f"**{ev.id}** {ev.raid_name} · state `{ev.state}` · signups {len(ev.active_signups())} · roster {'yes' if ev.roster else 'no'} · ticked drops {len(ev.drop_list)} (undistributed {len(ev.undistributed())}) · awards {len(ev.awards)} · overrides {len(ev.overrides)}\n{spend}"[:1900], ephemeral=True)
-
-        @mock.command(name="end", description="Summarise the raid's awards and overrides")
-        async def end(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if not ev:
-                await interaction.response.send_message("No event here.", ephemeral=True)
-                return
-            await self.end_mock_session(ev, interaction)
-
-        @mock.command(name="reset", description="Forget this channel's mock event (archived, not deleted)")
-        async def reset(interaction: discord.Interaction):
-            ev = self.event_for(interaction.channel_id)
-            if ev:
-                self.loot_forget(ev)
-                ev.archive()
-            await interaction.response.send_message("Reset (event archived). /mock signup to start over.", ephemeral=True)
-
-        self.tree.add_command(mock)
-
     def sync_servers(self) -> list[int]:
         """The servers a guild-scoped sync covers: the test server and every configured server, each once."""
         ids = ([self.test_guild] if self.test_guild else []) + [int(r.config.discord_guild_id) for r in self.registries.ordered()]
@@ -1368,6 +1001,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
         self.loop.create_task(self.scheduler())
         self.attach_pool_listeners()
         self.attach_loot_listeners()  # a seat change on a run with a council → "now a candidate" (candidates are read live)
+        self.attach_loot_log()  # every new award row → one line in the public loot log (LootLogMixin)
         token, bind = feed_config()
         per_guild = guild_tokens()  # OIBOT_FEED_TOKEN_<KEY>: a token that feeds one guild only
         if token or per_guild:
@@ -1388,7 +1022,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
         await self.resolve_officer_roles()  # legacy officer role names → ids, name cache for display
         st = _store()
         regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.registries.ordered())
-        print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · loot sessions: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
+        print(f"oibot_GM online as {self.user} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · loot sessions: {len(self.events)}")
         for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
             print(f"guild NOT loaded — {err}")
             log.error("guild not loaded: %s", err)

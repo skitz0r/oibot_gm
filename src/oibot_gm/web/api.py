@@ -698,7 +698,33 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late, "note": c.note} for c in ev.callouts], "log": list(ev.log),
                 "health": health_json(reg, ev, t) if ev.state == "open" else None,
                 # the confirm sentences for lock / cancel / clear / release, from code (consequences.py): the browser prints, never composes
-                "consequences": consequences_json(reg, ev)}
+                "consequences": consequences_json(reg, ev),
+                # where the run lives in Discord (sheet, updates thread, loot thread) and its loot council in one line (design §2.5)
+                "links": links_json(reg, ev), "loot": loot_json(reg, ev)}
+
+    def discord_url(reg, channel_id, message_id=None) -> str | None:
+        if not channel_id:
+            return None
+        return f"https://discord.com/channels/{reg.config.discord_guild_id}/{channel_id}" + (f"/{message_id}" if message_id else "")
+
+    def run_sessions(reg, ev) -> list:
+        return [s for s in getattr(bot, "events", {}).values() if getattr(s, "guild", None) == reg.key and getattr(s, "run_key", None) == ev.key]
+
+    def links_json(reg, ev) -> dict:
+        sessions = run_sessions(reg, ev)
+        thread = next((s.raid_thread_id for s in sessions if s.raid_thread_id), None)
+        return {"sheet": discord_url(reg, ev.channel_id, ev.message_id) if ev.message_id else None,
+                "updates": discord_url(reg, ev.updates_thread_id), "loot": discord_url(reg, thread)}
+
+    def loot_json(reg, ev) -> dict:
+        """The run's loot council at a glance (the SheetCard / lock card hub): open or not, its thread, awards recorded,
+        picks waiting for Confirm, reasons owed. Loot › Tonight has the whole council (GET /api/loot)."""
+        sessions = run_sessions(reg, ev)
+        if not sessions:
+            return {"open": False, "councils": 0, "thread": None, "awards": 0, "pending": 0, "reasons": 0, "may_open": ev.state == "locked"}
+        return {"open": True, "councils": len(sessions), "thread": discord_url(reg, next((s.raid_thread_id for s in sessions if s.raid_thread_id), None)),
+                "awards": sum(1 for s in sessions for a in s.awards if not a.void), "pending": sum(len(s.proposals) for s in sessions),
+                "reasons": sum(len(s.pending_reasons) for s in sessions), "may_open": False}
 
     def health_json(reg, ev, t) -> dict:
         """The open sheet's health card as data (MCP get_run, the help context): headcount against the seats the run
@@ -1540,33 +1566,22 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     # ---- ops, config (read-only)
     @app.get("/api/ops")
-    async def ops(request: Request, precedents_limit: int = 50, ledger_limit: int = 100, member: str | None = None, changes_limit: int = 50):
-        """Status, the ops feed, the registry change lines (`changes`, newest first, since the bot started — the
-        analytics channel's change log), and the loot precedents and ledger (newest first). `member` narrows the
-        precedents and ledger to one member's characters; the limits cap at 50 precedents and 100 ledger rows."""
+    async def ops(request: Request, changes_limit: int = 50):
+        """Bot health: status, the ops feed and the registry change lines (`changes`, newest first, since the bot started —
+        the analytics channel's change log). The loot precedents and the award log live on the Loot pages now
+        (GET /api/loot/precedents, /api/loot/log — design §3.1: Ops keeps bot health only)."""
         from ..discord_feed import feed_status
         from ..registry import recent_changes
 
         v = await who(request, officer=True)
         st, prov = bot.registries.store, getattr(getattr(bot, "ctx", None), "provider", None)
-        precedents = st.read_jsonl(Path(v.reg.key) / "precedents.jsonl")
-        ledger = st.read_jsonl(Path(v.reg.key) / "ledger.jsonl")
-        if member:
-            m = resolve_member(v.reg, member)
-            names = {m.display_name.lower(), *((c.name or "").lower() for c in m.characters if c.name)}
-            precedents = [p for p in precedents if str(p.get("human") or "").lower() in names or str(p.get("bot") or "").lower() in names]
-            ledger = [r for r in ledger if str(r.get("raider") or "").lower() in names]
-        pl, ll = max(0, min(int(precedents_limit), 50)), max(0, min(int(ledger_limit), 100))
         started = float(getattr(bot, "started_at", STARTED))
         return {"head": st.head(), "push": st.push_enabled, "llm": prov.summary() if prov else "off", "feed": feed_status(bot, v.reg, off="disabled"),
                 "up": int(time.time() - started), "started_at": started,
                 # several guilds: data repo, LLM and uptime are the whole bot's, not this guild's (K17: absent for one)
                 **({"scope": "bot"} if getattr(bot.registries, "many", False) else {}),
                 "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent_for(v.reg.key))],
-                "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))],
-                "precedents": [{**p, "date_label": v.reg.day_label(p.get("date"), with_year=True) if p.get("date") else ""} for p in reversed(precedents[-pl:] if pl else [])],
-                "ledger": [{**r, "received_label": v.reg.day_label(r.get("received"), with_year=True) if r.get("received") else ""} for r in reversed(ledger[-ll:] if ll else [])],
-                "member": m.display_name if member else None}
+                "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))]}
 
     @app.get("/api/config")
     async def config(request: Request):
@@ -1575,6 +1590,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         from ..discord_pool import CHANNEL_KINDS
         from ..policy import PolicyStore
+        from .api_loot import loot_log_state
 
         reg, cfg = v.reg, v.reg.config
         ps = PolicyStore(bot.registries.store, reg.key)
@@ -1592,6 +1608,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                  "missing": bool(getattr(cfg, attr)) and guild is not None and str(getattr(cfg, attr)) not in chans} for k, attr in CHANNEL_KINDS.items()},
                 "guild_channels": bot.guild_channels(reg), "guild_roles": guild_roles,
                 "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles, "news_keywords": list(cfg.news_keywords),
+                             "loot_log": bool(cfg.loot_log), "loot_log_state": loot_log_state(reg),
                              "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None,
                              "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids]},
                 "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner,
@@ -1711,10 +1728,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 for rid in sorted(want - have):
                     await configops.apply_async(v.reg, configops.ConfigOp(op="role_add", value=str(rid)), v.name, True, bot=bot)
                 msg = ("officer roles: " if want != have else "officer roles unchanged: ") + (", ".join(bot.officer_role_names(v.reg)) or "(none; Manage Server only)")
-            elif field in ("timezone", "ask_audience", "about", "news_keywords"):
+            elif field in ("timezone", "ask_audience", "about", "news_keywords", "loot_log"):
                 from .. import configops
 
-                text = ", ".join(str(w) for w in value) if isinstance(value, list) else str(value or "")  # news_keywords: a list from the page
+                text = ", ".join(str(w) for w in value) if isinstance(value, list) else ("true" if value is True else "false" if value is False else str(value or ""))  # news_keywords: a list from the page
                 msg = await configops.apply_async(v.reg, configops.ConfigOp(op="set", path=field, value=text), v.name, True, bot=bot)
             else:
                 return JSONResponse({"error": f"unknown setting {field}"}, status_code=400)
@@ -1857,6 +1874,19 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     previews: dict[str, dict] = {}  # plain_change preview token -> the authorized ops + board revs it showed (single use)
 
+    def mcp_actor_rule(v, allowed, refused):
+        """D8: from MCP without X-Oibot-Actor, the loot decisions (an award, a confirm, a reason, a correction, a retired
+        precedent, tiers, someone else's wishlist) are refused — the owner's token is not the officer who decided."""
+        if v.via != "mcp" or getattr(v, "actor", None):
+            return allowed, refused
+        from ..loot_ops import needs_actor
+
+        keep = [op for op in allowed if not needs_actor(op, v.uid)]
+        if len(keep) != len(allowed):
+            refused = [*refused, "Loot decisions (an award, a confirm, a reason, a correction, tiers, someone else's wishlist) from MCP need the "
+                                 "X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
+        return keep, refused
+
     @app.post("/api/ops/change")
     async def ops_change(request: Request):
         """Plain-text configuration (what `/gm change` and the ops-channel @mention do), in two calls like Discord's
@@ -1883,6 +1913,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             if live_officer is not None:  # a write: the rights are decided now (PRIV_LIVE), not from the login's lookup
                 await live_officer(v)
             allowed, refused = configops.authorize(v.reg, ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
+            allowed, refused = mcp_actor_rule(v, allowed, refused)
             out = {"kind": "change", "reply": held["reply"], "questions": [], "ops": [op.model_dump(exclude_none=True) for op in allowed],
                    "describe": held["describe"], "applied": [], "refused": refused, "error": None}
             revs, stale = dict(held["revs"]), set()
@@ -1924,6 +1955,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
         # the same policy check as Discord: the site (and MCP, as the owner) counts as a channel where plain text acts
         allowed, refused = configops.authorize(v.reg, req.ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
+        allowed, refused = mcp_actor_rule(v, allowed, refused)
         req.ops = allowed
         ops = [op.model_dump(exclude_none=True) for op in req.ops]
         desc = []
@@ -1943,6 +1975,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
 
     install_agents_api(app, bot, who=who, body=body, publish=publish)
+
+    from .api_loot import install_loot_api  # the loot council, history, precedents, the award log, items, wishlists (design §3.1)
+
+    install_loot_api(app, bot, who=who, body=body, publish=publish, find_live=find_live, resolve_member=resolve_member, live_officer=live_officer)
 
     # ---- the built SPA (history-mode routes fall back to index.html)
     @app.get("/app")

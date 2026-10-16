@@ -68,6 +68,11 @@ SURFACES: dict[str, dict[str, str]] = {
     "policy": {"discord": "slash:gm policy edit", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},
     "regular": {"discord": "flow:roster_add", "web": "POST /api/admin/raid/regulars", "mcp": "set_regular"},
     "test": {"discord": "slash:gm test seed", "web": "POST /api/admin/test", "mcp": "test_bench"},
+    # the loot council (dual interfaces phase 1): the thread is the Discord surface (/raid loot opens it), Loot › Tonight the
+    # web's, the loot_* tools MCP's; a wishlist is the member's own list (Me › Wishlist, /me wishlist); tiers are the grid
+    "loot": {"discord": "slash:raid loot", "web": "POST /api/loot/{run}/confirm", "mcp": "loot_confirm"},
+    "wishlist": {"discord": "flow:me_wishlist", "web": "POST /api/me/wishlist", "mcp": "set_wishlist"},
+    "tier": {"web": "POST /api/loot/items/{key}/tiers", "mcp": "tier_item"},
 }
 SURFACE_NAMES = ("discord", "web", "mcp")
 

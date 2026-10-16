@@ -706,6 +706,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         await interaction.response.send_message("\n".join(lines)[:1900], view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)
 
 
+    @me.command(name="wishlist", description="Your wishlist: add or remove items, place and main/offspec (the Me page for long lists)")
+    async def me_wishlist(interaction: discord.Interaction):
+        reg, interaction = await need(interaction)
+        if reg:
+            await FLOWS["me_wishlist"](interaction, reg)
+
     @tree.command(name="apply", description="Apply to join the guild")
     async def apply(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
@@ -735,7 +741,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(reg.span_label(a.start, a.end) for a in ups) or "none", inline=True)
-        e.set_footer(text="Sheets: answer each run in the signup channel (Join / Bench / No thanks). Attendance and loot history appear here once the raid ledger is live.")
+        from .loot_ops import guild_ctx, loot_block, member_awards
+
+        got = member_awards(reg, guild_ctx(interaction.client, reg), m, 10)
+        e.add_field(name="Loot", value=loot_block(reg, got, ico) or "nothing yet — `/me wishlist` to say what you want", inline=False)
+        wished = sum(len(c.wishlist) for c in m.active())
+        if wished:
+            e.add_field(name="Wishlist", value=f"{wished} item(s) across your characters · `/me wishlist`", inline=True)
+        e.set_footer(text="Sheets: answer each run in the signup channel (Join / Bench / No thanks). Your loot and wishlist are on the Me page too.")
         view = None
         if regular:  # D7: a member can step down from a series' regulars themselves (volunteering is a request to officers)
             view = discord.ui.View(timeout=600)
@@ -1087,6 +1100,31 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         await interaction.response.send_message(f"✅ {msg}. New posts there are filtered by our game version, raids and the news keywords; "
                                                 "the daily review turns contradictions into proposal cards in the ops channel.", ephemeral=True)
+
+    @config.command(name="loot-channel", description="Owner: the public loot log — one line per confirmed award (log off: awards stay on the site)")
+    @app_commands.describe(channel="where award lines go (empty: each run's updates thread)", log="the public loot log on or off")
+    async def cfg_loot_channel(interaction: discord.Interaction, channel: discord.TextChannel | None = None, log: bool | None = None):
+        reg, interaction = await need(interaction)
+        if not reg:
+            return
+        if not is_owner(interaction, reg):
+            await interaction.response.send_message("Owner only.", ephemeral=True)
+            return
+        lines = []
+        try:
+            if channel is not None:
+                lines.append(await interaction.client.set_channel(reg, "loot", channel.id, interaction.user.display_name, by_id=interaction.user.id))
+            if log is not None:
+                from . import configops
+
+                lines.append(await configops.apply_async(reg, configops.ConfigOp(op="set", path="loot_log", value="true" if log else "false"),
+                                                         interaction.user.display_name, True, bot=interaction.client, by_id=interaction.user.id, via="discord"))
+        except (ValueError, RegistryError) as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        from .loot_ops import loot_log_state
+
+        await interaction.response.send_message(("✅ " + " · ".join(lines) + "\n" if lines else "") + loot_log_state(reg)["text"], ephemeral=True)
 
     @config.command(name="ask-audience", description="Owner: who may ask the bot free-form questions (/ask, DMs, @mentions); others get the static guide")
     @app_commands.choices(audience=[app_commands.Choice(name=a, value=a) for a in ("officers", "confirmed", "registered", "everyone")])

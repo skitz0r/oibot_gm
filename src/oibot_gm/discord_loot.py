@@ -60,7 +60,7 @@ def _utc(s: str | None) -> datetime | None:
 
 class LootMixin:
     """Mixed into OibotGM. Expects: events (dict keyed (guild key, session id)), registries, raids, ops, contexts, ctx
-    (the /mock fixtures, may be None)."""
+    (its `provider` when loot_provider is unset; may be None)."""
 
     AUTO_DISTRIBUTE_S = AUTO_DISTRIBUTE_S
 
@@ -84,35 +84,25 @@ class LootMixin:
             threads.pop(tid, None)
 
     def event_for(self, channel_id: int | None) -> LootSession | None:
-        """The session a Discord channel belongs to: its loot thread, or a /mock session's channel."""
+        """The session a Discord channel belongs to: its loot thread."""
         if channel_id is None:
             return None
         key = self._loot_state()["threads"].get(channel_id)
         if key and key in self.events:
             return self.events[key]
-        return next((s for s in self.events.values() if s.raid_thread_id == channel_id or (s.origin == "mock" and s.channel_id == channel_id)), None)
+        return next((s for s in self.events.values() if s.raid_thread_id == channel_id), None)
 
     def loot_reg(self, session: LootSession):
         by_key = getattr(self.registries, "by_key", {}) or {}
         return by_key.get(session.guild)
 
     def loot_ctx(self, session: LootSession):
-        """The context a session reads and writes: the registered guild's (one per guild, cached; never the fixtures
-        for a real guild), or the /mock fixtures' for a /mock session."""
+        """The context a session reads and writes: the registered guild's (one per guild, cached). There is no other
+        kind: /mock and its fixtures context are retired (D11) — a rehearsal is a test session of a real guild."""
         contexts = self.__dict__.setdefault("contexts", {})
         reg = self.loot_reg(session)
-        if reg is None or session.origin == "mock":
-            fx = getattr(self, "ctx", None)
-            if fx is None or session.guild != getattr(fx, "guild_key", None):
-                if reg is None:
-                    raise RuntimeError(f"no registry for guild {session.guild}")
-            else:
-                key = ("fixtures", fx.guild_key)
-                if key not in contexts:
-                    from .lootctx import FixtureLootContext
-
-                    contexts[key] = FixtureLootContext(fx, getattr(session, "_store", None) or ls.STORE)
-                return contexts[key]
+        if reg is None:
+            raise RuntimeError(f"no registry for guild {session.guild}")
         if reg.key not in contexts or getattr(contexts[reg.key], "reg", None) is not reg:
             from .lootctx import RegistryLootContext
 
@@ -129,18 +119,17 @@ class LootMixin:
         return rs, rs.events.get(session.run_key)
 
     def loot_live(self, session: LootSession) -> bool:
-        """A real session is live iff its run is locked (no separate session state); a /mock one while in `raid`."""
+        """A session is live iff its run is locked (no separate session state)."""
         if session.origin != "raid":
-            return session.state == "raid"
+            return False  # a retired /mock session (D11) is never live
         _, ev = self.loot_run(session)
         return ev is not None and ev.state == "locked"
 
     def loot_roster(self, session: LootSession) -> list:
         """The candidates' Players, read LIVE from the run file (a fill yes, an alt swap or a board move after open is a
-        candidate at once), plus members who left the roster after open (`departed`, until an officer removes them).
-        A /mock session: its own accepted roster."""
+        candidate at once), plus members who left the roster after open (`departed`, until an officer removes them)."""
         if session.origin != "raid":
-            return list(session.roster.selected) if session.roster else []
+            return []
         _, ev = self.loot_run(session)
         if ev is None:
             return list(session.departed)
@@ -1284,7 +1273,7 @@ class LootMixin:
     def loot_view(self, reg, session: LootSession, kind: str, drop_id: str | None = None):
         """The buttons a thread line carries (None: none): Give the reason + Mistake — correct… under a companion
         mismatch, Correct… under a conflict or an in-game award, Distribute under ticked drops, Keep open under the
-        closing notice. A real council's only — /mock keeps its own views."""
+        closing notice."""
         if session.origin != "raid":
             return None
         try:

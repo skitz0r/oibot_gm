@@ -71,16 +71,13 @@ class FeedMixin:
 
     # ---- routing (design §5.32 + §3.1): each companion feeds a live council of ITS guild
     def companion_key(self, ref: str | None) -> str | None:
-        """The guild a companion's hello named (`--guild`: a key, or a unique name; or the mock fixtures' key), or None
-        when it named none we serve — an unknown value counts as empty (a stale $OIBOT_GUILD on the Windows box)."""
+        """The guild a companion's hello named (`--guild`: a key, or a unique name), or None when it named none we
+        serve — an unknown value counts as empty (a stale $OIBOT_GUILD on the Windows box)."""
         ref = str(ref or "").strip()
         if not ref:
             return None
         reg = self.registries.get(ref) if hasattr(self.registries, "get") else None
-        if reg is not None:
-            return reg.key
-        mock = getattr(getattr(self, "ctx", None), "guild_key", None)
-        return ref if mock and ref == mock else None
+        return reg.key if reg is not None else None
 
     def companion_guild(self, comp: Companion | None) -> str | None:
         """The guild key a companion feeds: several guilds → its token's (`bound`; what its hello names never decides);
@@ -139,15 +136,6 @@ class FeedMixin:
             if not pool:
                 return None, ("only a test council is live; a rehearsal takes drops from a puppet's or the tester's companion only"
                               if not tester else "no test council is live")
-        mock = [s for s in live if s.origin != "raid"]
-        if mock and (not gk or not any(s.guild == gk for s in self.events.values() if s.origin == "raid")):
-            want = getattr(comp, "bound", None) if comp is not None else None
-            if getattr(self.registries, "many", False) and want:
-                mine = [s for s in mock if s.guild == want or self._mock_in_server_of(s, want)]
-                if mine:
-                    return mine[0], None
-            elif not getattr(self.registries, "many", False) or not want:
-                return mock[0], None
         return None, "no run live"
 
     def _past_close(self, reg, session) -> bool:
@@ -163,14 +151,6 @@ class FeedMixin:
     def active_raid(self, comp: Companion | None = None):
         """The council a companion's events go to now (None: nowhere) — loot_route without the reason."""
         return self.loot_route(comp)[0]
-
-    def _mock_in_server_of(self, ev, key: str) -> bool:
-        """A mock session whose thread is in guild `key`'s server (or whose server can't be told: the demo flow)."""
-        get = getattr(self, "get_channel", None)
-        ch = get(ev.channel_id) if get and getattr(ev, "channel_id", None) else None
-        sid = getattr(getattr(ch, "guild", None), "id", None)
-        reg = self.registries.by_key.get(key) if hasattr(self.registries, "by_key") else None
-        return sid is None or (reg is not None and sid == reg.config.discord_guild_id)
 
     def feed_note(self, comp: Companion) -> str | None:
         """Why a companion routes nowhere (or ignores what it named) — the hello reply's `note`."""

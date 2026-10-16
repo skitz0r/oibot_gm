@@ -163,7 +163,7 @@ export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }
 /** `scope: "bot"` (several guilds only): head, push, llm and uptime are the whole bot's, the rest is this guild's. */
-export interface Ops { scope?: "bot"; head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[]; precedents: Record<string, string>[]; ledger: Record<string, string>[] }  // precedents carry `date_label`, ledger rows `received_label` (days in words)
+export interface Ops { scope?: "bot"; head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[] }  // bot health only: precedents and the award log live on the Loot pages
 /** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
 export interface RoleRef { id: string; name: string }
 /** GET /api/public (anonymous): what the homepage and the not-a-member screen show. One guild: this shape; several:
@@ -193,4 +193,53 @@ export interface Proposal {
 export interface Me {
   display_name: string; registered: boolean; must_apply?: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
   absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[]; regulars?: MyRegular[];
+}
+
+// ---- the loot council (mirror src/oibot_gm/web/api_loot.py). Every label a person reads arrives as words from the server
+// (`*_label` in 12-hour guild time, `when`, the End sentence); scores, reasons and candidates are officers' only (D2).
+export type DropState = "ticked" | "proposed" | "awarded";
+export interface LootDrop { drop_id: string; item: string; item_id: number; key: string; tiered: boolean; source: string; by: string | null; at_label: string; held: boolean; state: DropState; to: string | null }
+export interface LootCandidate {
+  character: string; cls: string; spec: string; rank: string; tier: string; offspec: boolean; upgrade: number; attendance: string; attendance_known: boolean;
+  wishlist_rank: number | null; recent_power: number; recent_items: string[]; base: number; factors: Record<string, number>; already_has: boolean; unmapped: boolean;
+}
+export interface LootOverride { to: string; reason: string; by: string; at_label: string }
+export interface LootProposal {
+  drop_id: string; item: string; item_id: number; boss: string; bot: string; to: string; source: string; override: LootOverride | null; batch: number; order: number;
+  tiered: boolean; close_call: boolean; order_sensitive: boolean; judged_by: string; justification: string; alternates: string[]; warnings: string[]; candidates: LootCandidate[]; proposed_label: string;
+}
+export interface LootAwardRow { drop_id: string | null; item: string; item_id: number; boss: string; to: string; disenchant: boolean; source: string | null; bot: string | null; by: string | null; at_label: string; tier: string; weight: number; offspec: boolean; tiered: boolean; void: boolean; import_id: string | null }
+export interface LootOwed { drop_id: string; item: string; recipient?: string; bot?: string; in_game?: string; recorded?: string; at_label?: string }
+export interface LootCouncil {
+  id: string; run: string; label: string | null; roster_index: number | null; test: boolean; live: boolean; title: string; when: string; run_state: string;
+  thread_id: string | null; thread_pending: boolean; bosses: { boss: string; drops: LootDrop[]; counts: Record<DropState, number> }[];
+  proposals: LootProposal[]; awards: LootAwardRow[]; pending_reasons: LootOwed[]; conflicts: LootOwed[]; departed: string[];
+  roster: { character: string; cls: string; spec: string; role: string | null }[];
+  pending: { proposals: number; overrides: number; reasons: number; undistributed: number; conflicts: number }; untiered: number;
+  distributing: { by: string; since_label: string; drops: number } | null; interrupted: { since_label: string; drops: number } | null; scores_only: { by: string; at_label: string } | null;
+  closing: { notice_label: string; keep_open_label: string }; last_change: string | null; opened_by: string | null; opened_label: string; batch_rev: string; drops_rev: string;
+}
+export interface LootRun { key: string; title: string; when: string; state: string; instance: string; test: boolean; rosters: number; councils: LootCouncil[]; end_consequence: string }
+export interface Companion { character: string; client?: string; state: "live" | "quiet" | "disconnected"; last_seen_label: string; events?: number; routes_to?: string | null }
+export interface LootLogState { state: "off" | "channel" | "no_channel"; channel_id: string | null; text: string }
+export interface LootOverview {
+  runs: LootRun[]; reasons_pending: { import_id: string; run: string; session: string; drop_id: string; item: string; recipient: string; bot: string | null; received_label: string }[];
+  conflicts: { drop_id: string; item: string; in_game: string; recorded: string; session: string; run: string; ended: boolean }[];
+  companions: Companion[]; feed_waiting: { count: number; since: string; characters: string[] } | null; log: LootLogState;
+}
+/** A write's answer: the line, and the run's councils as they are now (a 409 carries the same `state` with `error`). */
+export interface LootReply { message: string; state: LootRun; batch_rev?: string; drops_rev?: string }
+export interface LootHistoryRow { id: string; file: string; run: string; label: string | null; date: string; date_label: string; ended_label: string; test: boolean; awards: number; overrides: number; agreed: number; never_confirmed: number; undistributed: number; reasons_pending: number; text: string }
+export interface Precedent { ref: string; item: string; bot: string; human: string; reason: string; by?: string; date?: string; date_label: string; at_label: string; status: "active" | "retired" | "superseded"; status_by?: string | null; status_reason?: string | null; status_at_label?: string; import_id?: string }
+/** One award as the log shows it. The officer fields come only when an officer asked for `scores` (filtered on the server). */
+export interface LogRow {
+  item: string; item_id: number; key: string; character: string; disenchant: boolean; cls: string | null; spec: string | null; boss: string; instance: string; received: string; date_label: string; offspec: boolean; mine: boolean;
+  tier?: string; weight?: number; source?: string; bot?: string | null; by?: string | null; import_id?: string | null; candidates?: { character: string; spec?: string; tier?: string; base?: number }[]; reason?: string | null;
+}
+export interface WishEntry { item_id: number; name: string; key: string; rank: number; offspec: boolean; note: string | null; source: string; known: boolean; tiered: boolean; boss: string | null; received: string | null; received_label: string | null }
+export interface WishCharacter { label: string; cls: string; spec: string; is_main: boolean; rev: string; entries: WishEntry[] }
+export interface ItemBrief { key: string; id: number; name: string; boss: string | null; slot: string; type: string; tiered: boolean; learned: boolean; first_seen_label?: string; times_dropped?: number; first_run?: string; awards?: number }
+export interface ItemGrid extends ItemBrief {
+  rows: { key: string; cls: string; spec: string; role: string; tier: string; own: string | null; profile: string | null; equippable: boolean; why: string | null }[];
+  wide: Record<string, string>; own: Record<string, string>; tiers: string[]; roles: string[]; awards: number;
 }

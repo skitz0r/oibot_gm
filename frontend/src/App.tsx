@@ -3,7 +3,7 @@ import { REFRESH_EVENT } from "./hooks/usePoll";
 import { AppShell, Avatar, Box, Burger, Button, Group, Menu, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot } from "@tabler/icons-react";
+import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
@@ -15,12 +15,15 @@ import { OpsPage } from "./pages/Ops";
 import { ConfigPage } from "./pages/Config";
 import { AurasPage } from "./pages/Auras";
 import { AgentsPage } from "./pages/Agents";
+import { LootPage } from "./pages/Loot";
+import { LootLogPage } from "./pages/LootLog";
 
-const NAV = [{ to: "/me", label: "Me", icon: IconUser }];
+const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", label: "Loot log", icon: IconClipboardList }];
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
   { to: "/members", label: "Members", icon: IconUsers },
+  { to: "/loot", label: "Loot", icon: IconDiamond },
   { to: "/auras", label: "Auras", icon: IconSparkles },
   { to: "/ops", label: "Ops", icon: IconChartBar },
   { to: "/agents", label: "Agents", icon: IconRobot },
@@ -113,7 +116,7 @@ export default function App() {
   const officer = (el: React.ReactElement) => (meta.viewer.officer ? el : <Navigate to="/me" replace />);
   const several = meta.guilds.length > 1;
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
-    <NavLink key={n.to} component={Link} to={n.to} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname.startsWith(n.to)} variant="light" color="teal" style={{ borderRadius: 7 }} />
+    <NavLink key={n.to} component={Link} to={n.to} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
   );
   return (
     <AppShell navbar={{ width: 212, breakpoint: "sm", collapsed: { mobile: !opened } }} header={{ height: 52, collapsed: !mobile }} padding="lg">
@@ -151,6 +154,8 @@ export default function App() {
             <Route path="/auras" element={officer(<AurasPage meta={meta} />)} />
             <Route path="/ops" element={officer(<OpsPage />)} />
             <Route path="/agents" element={officer(<AgentsPage />)} />
+            <Route path="/loot" element={officer(<LootPage meta={meta} />)} />
+            <Route path="/loot-log" element={<LootLogPage meta={meta} />} />
             <Route path="/config" element={officer(<ConfigPage meta={meta} />)} />
             <Route path="*" element={<Navigate to="/me" replace />} />
           </Routes>

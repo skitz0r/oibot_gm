@@ -720,6 +720,9 @@ def load_sessions(store) -> dict[tuple[str, str], LootSession]:
                 continue
             if s.guild != gdir.name:
                 s.guild = gdir.name  # pre-refactor files had no guild field
+            if s.origin != "raid":  # a retired /mock session (D11): its file stays as written, nothing loads it
+                log.info("loot session %s is a retired /mock session — not loaded", f.name)
+                continue
             s.attach(store)
             if s.key in out and len(out[s.key].awards) >= len(s.awards):
                 continue  # two legacy files for one run: the one with more recorded wins (migrate archives the other)

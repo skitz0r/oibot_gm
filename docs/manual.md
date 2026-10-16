@@ -6,11 +6,11 @@ current settings, whenever someone asks the bot a question (`/ask`, a DM, or an 
 ## 1. What the bot is
 
 oibot_GM is the guild's raid administrator. It keeps the character registry, opens signup sheets on a
-schedule, checks the roster's health, builds groups, fills freed seats by DM, and — once loot tables exist —
-runs a loot council whose recommendations an officer confirms or overrides. Code does the computing
+schedule, checks the roster's health, builds groups, fills freed seats by DM, and runs a loot council whose
+recommendations an officer confirms or overrides (items the tables don't know are recorded by name, §9). Code does the computing
 (solver, scoring, schedules); Claude only explains, judges against the written policy, and turns
 plain-text requests (members' about their own record, officers' about anything the site or a slash command can do,
-except handing the guild to a new owner and the loot session — §8) into typed changes that are shown as a diff and
+except handing the guild to a new owner — §8) into typed changes that are shown as a diff and
 confirmed before they apply.
 Humans always decide: every roster, award and config change has an approve step, and overrides are
 stored with their reason as precedents.
@@ -36,7 +36,8 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   after lock the columns are the groups, with ✅ / ⏳ / ❌ for each person's confirmation.
 - **Absences channel** — a pinned card with *I'll be away*; each absence is announced there (no reason shown).
 - **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Each run's card
-  has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged.
+  has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged. The
+  **loot council's thread** lives here too (else in the ops channel), §9.
 - **Analytics channel (officers)** — one card per raid: how many mains the pool has for its size, role counts
   have/need, buffs nobody brings, and where the desired comp is short or over cap. The cards are edited in place
   (no re-posting), with a change-log line when the registry changes. Officers change comp ideals here in plain
@@ -45,6 +46,8 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   lines go to a rotating log file on the host (`out/oibot.log`).
 - **Applications channel** — one review card per application (§3a) with Accept / Decline… buttons (they keep
   working after a bot restart).
+- **Loot channel (the public loot log)** — one line per recorded award (item → character · boss), with an **Add to my
+  wishlist** button; never a reason or a score (§9). Not set: the lines go to each run's updates thread.
 - **News channel** — a Wowhead webhook posts game news there. The bot reads only the post itself (title and
   summary, never the linked article) and keeps the items about our game version, our raids, or the extra news
   keywords on the Config page. A daily review compares them with what the bot believes about the game; a
@@ -72,12 +75,14 @@ server. Owners and officers are per
 server: owning or running one guild gives you nothing in the other. With one server there is no selector and the site
 looks exactly as before.
 
-Log in with Discord. Everything below can also be done there:
+Log in with Discord. Every member gets **Me** and the **Loot log** (every award the council recorded, §9).
+Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-your sheets and confirmations, and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Ops** (the bot's recent actions, the plain-text permissions, and the loot
-**precedents** and **ledger** — read-only tables, newest first) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
+your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Loot** (Tonight — the live council; History; Precedents with Retire;
+Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
+bot's recent actions and the plain-text permissions) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
-Me, Rosters, Members, Ops and Agents update live the moment something changes (a press on a sheet, a drag by another
+Me, Rosters, Members, Loot, the Loot log, Ops and Agents update live the moment something changes (a press on a sheet, a drag by another
 officer, a change in Discord); a 45-second refresh is only the fallback when the live connection drops. There is no
 standing signup: each run is answered on its sheet in Discord, or by telling the bot ("bench me for tonight").
 
@@ -117,14 +122,19 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   get *No thanks* for you, and if you were already rostered the seat is released (you get a DM saying so) and the
   bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
   someone else with `/roster absent` and a member picker, same screens.
-- **See everything the bot has on you**: `/me view` or the *My status* button.
+- **See everything the bot has on you**: `/me view` (characters, rosters, absences, your last ten awards and how many
+  items are on your wishlist) or the *My status* button.
+- **Wishlist**: `/me wishlist` — per character, up to 10 items in the order you want them, main spec or offspec, a
+  note; the Me page's Wishlist card is the place for long lists and re-ordering (§9). **My loot** on the Me page shows
+  what your characters received.
 - All `/me` commands also work in a DM with the bot.
 - **Or just tell the bot.** DM it or @mention it: "I'll be away Nov 1–3", "back early, clear my absence",
   "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "add Jonny as my main",
   "plan my main as a Holy Priest" (a planned character, no name yet; saying it again replaces the plan and keeps
   its rank and roster placement), "delete my alt Jonny", "I can also tank on Xanthe", "bench me for tonight",
   "I can't make tonight" (a callout like `/raid out`; "… — work trip" adds a note only the officers see), "I confirm for
-  tonight" (also answers a fill ask the bot DMed you), "turn my DMs off". It shows what it will change and waits for
+  tonight" (also answers a fill ask the bot DMed you), "turn my DMs off", "put the Robe of Tests on my wishlist as #2
+  for offspec", "take the wand off Jonny's wishlist". It shows what it will change and waits for
   your **Apply** — only you (or an officer) can press it. Plain text only ever changes *your own* record: a
   request about someone else is refused with who can do it, and the rest of what you asked still applies.
   Ranks are officers' (see §8c for who may do what, and where).
@@ -425,7 +435,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    batch itself always shows in full — if even it can't fit, *Send* stays off and the site's Suggest sends it.
    `/raid fill preview:true` shows the same batch without a Send button. With `autofill` off
    nothing is asked until an officer presses Fill seats.
-7. **Raid** — `/raid loot` opens the loot council thread (when loot tables exist for the game version).
+7. **Raid** — `/raid loot` (or Loot › Tonight on the site) opens the loot council (§9).
 8. **Close** — 3 h after its scheduled end (start + the raid's length) the run is **done** and the sheet says so.
 
 Seat selection at lock is deterministic: role bounds from the raid's comp, buff synergy, the comp policy's
@@ -629,7 +639,7 @@ another server's channel). The companions shown by `/gm status` and on the site'
 this guild. **Loot companion with two servers:** each server's companion needs that server's own token —
 `OIBOT_FEED_TOKEN_<KEY>` in the bot's `.env` (the guild key in capitals, `-` as `_`; e.g. `OIBOT_FEED_TOKEN_OI`) — and
 feeds that server's raid only, whatever `--guild` says. The shared `OIBOT_FEED_TOKEN` feeds no real raid once two
-servers are looked after (the demo `/mock` flow only); to keep an existing companion as it is, give its server's token
+servers are looked after; to keep an existing companion as it is, give its server's token
 the shared value. Never hand one server's raid leader another server's token.
 
 **Moving a guild to another server** (rather than claiming the new server as a guild of its own):
@@ -643,7 +653,7 @@ a form older code doesn't read.
 is only ever this slash command, by design — not the site, plain text or MCP: an MCP token acts as the owner, so a
 transfer there would give the guild away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
-`signup-channel`, `absences-channel`, `applications-channel`, `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
+`signup-channel`, `absences-channel`, `applications-channel`, `loot-channel` (the public loot log, §9), `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
 now and the next run become before saving) — or all of these on
 the site's **Config** page (channel pickers per function, officer roles, timezone, who may ask the bot,
 the about text; changing a channel posts its card the same way the command does) — and per raid
@@ -800,9 +810,16 @@ really called All or Pending is confirmed alone); "Mira is away
   `/gm test run`: Quick starts in 20 min, nudge 16, lock 12, confirm 8 min before; Standard 40/32/25/15, the default;
   Slow 90/70/55/35 — add "and DM them" to DM every puppet when it opens, which reaches you), "test answer join 8 bench
   2 out 1" (a random mix of puppets who haven't answered; name the run when several are live), "clear the test bench".
+- *Loot council (officers, §9):* "open the loot council", "the Gatekeeper dropped the Robe of Tests", "distribute",
+  "give the Syphon to Eltam instead — tanks progression" (a reason is required), "confirm the rest", "hold the Shard for
+  later", "Mira got the wand because …" (the reason for an in-game award), "the robe should have gone to Kestrel —
+  misclick", "end tonight's run", "retire the Syphon precedent — tier changed", "tier the Robe of Tests S for holy
+  priests" (add "and re-weight its past awards" to re-weight them). *Wishlists:* your own (§3), or an officer's for
+  someone ("put the Robe on Kestrel's wishlist").
+- *Loot log (owner):* "post the loot log in #loot", "turn the loot log off".
 - Several things in one sentence become several operations, applied in order ("lock tonight's run and turn
-  DMs off for Marrow"). Loot items, tiers, wishlists and standing availability are not settable anywhere; the
-  loot session (`/raid loot`) and handing the guild to a new owner are slash commands only, by design.
+  DMs off for Marrow"). Standing availability is not settable anywhere; handing the guild to a new owner is a slash
+  command only, by design.
 
 ## 8c. Plain-text permissions (owner sets, officers read)
 
@@ -816,7 +833,8 @@ in, or make the bot ignore @mentions there, the diff says so before Apply.
 The owner can always do everything, anywhere the bot listens — an *Answers only* channel included. In an *Ignored*
 channel the bot doesn't read @mentions at all, the owner's included; there the owner uses `/gm change`.
 
-**What** — seven capability groups; every plain-text operation belongs to exactly one:
+**What** — eight capability groups; every plain-text operation belongs to exactly one (your own wishlist is *Own
+record*; someone else's is *Other people's records*):
 
 | Group | Default | Someone could type |
 |---|---|---|
@@ -827,6 +845,7 @@ channel the bot doesn't read @mentions at all, the owner's included; there the o
 | Raids & auras — raid schedules and settings, buff and family facts | the owner | "Barrow Deeps runs Tue and Thu 7:30 pm" |
 | Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite), starting the local jobs | the owner | "post raid sheets in #signups" |
 | Test bench | officers | "seed 20 puppets", "clear the test bench" |
+| Loot council — open, tick, distribute, award (override, with its reason), confirm, hold or discard, a reason or a correction for an award, end, retire a precedent, item tiers | officers | "give the Syphon to Eltam instead — tanks progression", "confirm the rest", "tier the Robe S for holy priests" |
 
 **Who** — per group, any mix of *everyone*, *registered members* (an active character), *officers*, *owner only*,
 and specific Discord roles (picked from the server's roles, stored by id, so renaming a role keeps it). An empty
@@ -928,7 +947,12 @@ news post says can make the review read or write another server.
 | `list_raids` · `get_raid` | effective raid settings and overrides; each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
 | `set_regular` | add or remove a regular of a recurring schedule (member, character, schedule; the Rosters page's route) |
 | `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record |
-| `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and ledger (up to 100), `member` narrowing both to one person |
+| `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and award log (up to 100) from the Loot pages, `member` narrowing both to one person |
+| `get_loot` · `open_loot` · `loot_tick` · `loot_distribute` · `loot_discard` · `end_loot` | the councils (every locked run, or one run in full: drops by boss, picks with their candidate tables, pending overrides, awards, reasons owed, the roster, `batch_rev` / `drops_rev`, the End sentence) · open the council on a locked run · tick drops by name or id (`remove` un-ticks) · judge the ticked drops · drop pending picks (`batch_rev`, or `only` some = decide later; `preview`) · end the run and its council (`preview` = the sentence) |
+| `loot_confirm` · `loot_award` · `loot_reason` · `loot_correct` | **decisions — need `OIBOT_MCP_ACTOR`**: record picks (one with `expect_to`, or the rest with `batch_rev`; `preview` needs no actor) · override a pick with a reason · the reason for an in-game award (an ended council too) · fix a recorded award |
+| `loot_history` · `loot_log` · `list_precedents` · `retire_precedent` | ended councils (one in full) · the award log (`scores` for officers' columns) · precedents with their refs and the awards still needing a reason · retire or restore one (actor) |
+| `list_items` · `tier_item` | the untiered items and one item's tier grid · set tiers per spec (actor); with past awards and no `reweight` answer nothing is written and the reply asks |
+| `get_wishlists` · `set_wishlist` · `import_wishlists` | who wants each item / one member's lists with their `rev` · replace a character's whole list (actor; a list changed since `rev` is refused) · a ThatsMyBIS export (preview first; writing needs the actor) |
 | `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
@@ -938,7 +962,7 @@ news post says can make the review read or write another server.
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off |
-| `set_channel` · `set_config` | a bot channel by name · timezone, ask audience, about, officer roles |
+| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles, `loot_log` on/off |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run / answer / clear / compose / comp, as `/gm test` |
@@ -952,6 +976,13 @@ news post says can make the review read or write another server.
 
 Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
+
+**Decisions are a named officer's (D8).** A decision about an award — confirming, overriding, a reason, a correction,
+retiring a precedent, tiers, someone's wishlist — is never "the owner's token": those tools send `X-Oibot-Actor` with
+`OIBOT_MCP_ACTOR` from `.env` (the Discord id of the officer at the keyboard), the bot checks that id is an officer (or
+the owner) of the chosen server right then, and acts as that person: the record and the ops line read *"Mira via MCP"*.
+Without `OIBOT_MCP_ACTOR` those tools are refused with a line saying so; reads, previews, ticks, Distribute, Discard
+and End work without it, as do the owner's own setup writes.
 
 **Safety.** The server acts as the **owner of the chosen server's guild** (owner-only settings included) and every
 change is logged under the owner's own display name with an `[mcp]` prefix (`[mcp] Jon: signup channel → #raids`) —
@@ -967,68 +998,133 @@ guild away and change whose rights the token carries — that stays `/gm config 
 
 ## 9. Loot council
 
-The loot council runs in its **thread** in Discord (the moment — pressing Confirm at 8 PM on a phone). Every action
-goes through one set of council actions that the site and the bot's other surfaces will share as they arrive, so two
-officers can never record one drop twice — the second one is told *"Already recorded (Mira, 8:14 PM)"*.
+The council has **two surfaces that act on one council**: its **thread** in Discord (the moment — pressing Confirm at
+8 PM on a phone) and **Loot › Tonight** on the site (the table — every candidate's numbers, many drops at once). Both
+call the same council actions (so do plain text and MCP), both update the moment the other acts, and two officers can
+never record one drop twice — the second one is told *"Already recorded (Mira, 8:14 PM)"*. A press made against a
+picture that changed meanwhile (someone overrode a pick, a new batch arrived) is refused with what changed, and the
+card or the page redraws so you can look again.
 
 **How a pick is made.** Code scores every candidate for a drop — the item's tier for their spec × the slot's weight,
 attendance, rank, wishlist, discounted by recent loot and by a second item in the same slot this week — and Claude
 judges the top candidates against the guild's written loot policy, explains, and flags close calls. Officers decide.
 Attendance nobody has tracked yet counts as **neutral** (it never lowers anyone's score).
 
-**Open the council** on a locked run with `/raid loot`. It lives in one thread under the officer channel (the roster
-channel, else the ops channel); with neither set the bot refuses and says so. A run split into several rosters gets one
-council per roster (thread *"loot · Roster 2 · …"*), each judging only its own roster's seats. Running `/raid loot`
-again on an open council re-posts everything still waiting (reasons owed, picks to confirm, drops nobody judged) with
-fresh buttons. If Discord can't be reached when you open it, the council opens anyway and its thread is made as soon as
-Discord answers (or on your next `/raid loot`). A test-bench run opens a **rehearsal**: everything works, nothing
-reaches the guild's loot history.
+**Open the council** on a locked run with `/raid loot`, **Open loot council** on Loot › Tonight, "open the loot council
+for tonight" in plain text, or MCP `open_loot`. It lives in one thread under the officer channel (the roster channel,
+else the ops channel); with neither set the bot refuses and says so. A run split into several rosters gets one council
+per roster (thread *"loot · Roster 2 · …"*; one block per roster on the site), each judging only its own roster's
+seats. Running `/raid loot` again on an open council re-posts everything still waiting (reasons owed, picks to confirm,
+drops nobody judged) with fresh buttons. If Discord can't be reached when you open it, the council opens anyway and its
+thread is made as soon as Discord answers (or on your next `/raid loot`); the site shows *thread pending* meanwhile. A
+test-bench run opens a **rehearsal**: everything works, nothing reaches the guild's loot history, the award log or the
+public loot log. (`/mock`, the old demo flow on shadow data, is retired: rehearse with a test run instead, §8a.)
 
-**Drops.** Every drop is its own line, even two copies of one item. Tick what dropped on the boss messages (or let the
-companion do it). An item the bot's tables don't know — every item on WoW: Forever's first night — is still recorded
-**by name**: everyone rostered is a candidate, ranked by attendance and recent loot only, and the item is remembered so
-it can be tiered later. Un-ticking a drop that is already recorded is refused.
+**Drops.** Every drop is its own line, even two copies of one item. Tick what dropped on the boss messages in the
+thread, in the *Drops* block on Loot › Tonight (an item name is enough, a boss and how many copies), or let the
+companion do it. An item the bot's tables don't know — every item on WoW: Forever's first night — is still recorded
+**by name**: everyone rostered is a candidate, ranked by attendance and recent loot only, and the item is remembered
+so it can be tiered later (*Items*, below). Un-ticking a drop that is already recorded is refused (use Correct).
 
 **Distribute** judges the ticked drops nobody has proposed or recorded yet and adds a batch of proposals (earlier
 proposals still waiting count as if given). Only one Distribute runs at a time per council — a second press says
 *"Distributing already (Jonny, 8:12 PM)"*. With the companion connected, Distribute starts by itself about 20 seconds
 after a boss's last drop (a per-raid switch, on by default). If the bot restarts mid-judgement it says *"Distribute
-was interrupted at 8:12 PM — press Distribute"*; it never re-runs on its own.
+was interrupted at 8:12 PM — press Distribute"*; it never re-runs on its own. **Scores only** (a switch on the
+council) picks by the top score with no model call — the picks say so.
 
-**Confirm, override, discard.** **Confirm awards** records the picks exactly as you were shown them; if a pick was added
-or changed meanwhile you are told what changed and asked to look again. To give a drop to someone else, say so in the
-thread in plain words ("give the Syphon to Mira, she's our main tank") — an **override needs a reason**, is shown as
-pending and is **not recorded until Confirm**; the reason becomes a precedent the bot cites next time only when the
-award is confirmed. A sentence never replaces another officer's pending override: you are told whose it is.
-**Discard** drops the waiting proposals: the ticks stay, pending overrides go with them, nothing was recorded so
-nothing is undone.
+**Confirm, override, decide later, discard.** **Confirm** records a pick exactly as you were shown it; **Confirm the
+rest (N)** records every pick still waiting, and is refused if the batch changed since you looked. To give a drop to
+someone else press **Override…** (on the site: pick from the table's top candidates, the rest of the roster,
+Disenchant, or someone not on the roster) or say it in the thread ("give the Syphon to Mira, she's our main tank") — an
+**override needs a reason**, is shown as pending (⚠, with who set it) and is **not recorded until Confirm**; the reason
+becomes a precedent the bot cites next time only when the award is confirmed. Replacing another officer's pending
+override asks first. **Decide later** drops one pick and keeps the drop ticked (it shows *held*). **Discard batch**
+drops the waiting proposals: the ticks stay, pending overrides go with them, nothing was recorded so nothing is undone.
+On the site a pick's row opens its whole candidate table — tier, upgrade, attendance, rank, wishlist place, recent
+loot, score — no model call to browse it.
 
 **The companion (in game).** When the master looter hands an item out in game, the bot matches it: to the pick shown
 (the override if there is one) → recorded; to someone else → **recorded at once** (the game is the truth) and the line
 carries two buttons — **Give the reason** (it becomes the precedent) or **Mistake — correct…** (it was a misclick: the
-record is fixed, no precedent). A drop nobody distributed is recorded straight away with a **Correct…** button; a sub
-who isn't registered is recorded by name. A reason given twice asks before replacing the first. A companion's events go
-to its own server's live council (each server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council
-comes first, and when several are live it picks the one whose roster has the companion's character — when it can't
-tell it refuses and says why. Drops arriving when no run is live are held for 10 minutes (a restart keeps them) and go
-in when the council opens; anything still held after that is listed in the ops channel as **not recorded**, so you can
-add it by hand. A rehearsal takes drops only from a puppet's or the tester's companion. The companion shows as
-**live**, **quiet** (no events for a couple of minutes — normal during trash and breaks) or **disconnected**.
+record is fixed, no precedent); the site lists the same under *Waiting for a reason or a correction*. A drop nobody
+distributed is recorded straight away with a **Correct…** button; a sub who isn't registered is recorded by name. A
+reason given twice asks before replacing the first. A companion's events go to its own server's live council (each
+server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first, and when several are live
+it picks the one whose roster has the companion's character — when it can't tell it refuses and says why. Drops
+arriving when no run is live are held for 10 minutes (a restart keeps them; the site shows them waiting) and go in when
+the council opens; anything still held after that is listed in the ops channel as **not recorded**, so you can add it
+by hand. A rehearsal takes drops only from a puppet's or the tester's companion. The companion shows as **live**,
+**quiet** (no events for a couple of minutes — normal during trash and breaks) or **disconnected**, in the thread and
+at the top of Loot › Tonight.
 
 **Correct** fixes a recorded award (a reason is required; the old record is kept and marked void), from the
-**Correct…** button under the line. A reason owed and an in-game award that disagrees with the record both stay
-fixable after the council ends. **Roster changes** after the council opened count at once: someone who joins the roster
-is a candidate straight away; someone who leaves stays a candidate until an officer removes them.
+**Correct…** button under the line or beside the award on the site. A reason owed and an in-game award that disagrees
+with the record both stay fixable after the council ends (Loot › Tonight lists them under *Still owed from ended
+councils*). **Roster changes** after the council opened count at once: someone who joins the roster is a candidate
+straight away; someone who leaves stays a candidate until an officer removes them.
 
-**End.** `/raid end` in the thread ends the council and marks the run done; the summary lists the awards, the overrides
-and anything left undecided (proposals never confirmed, drops never distributed, awards still waiting for a reason) so
-nothing anyone decided disappears. The bot ends a council by itself only after the run's scheduled end, once it has
-been idle for 30 minutes with no pick waiting for Confirm and no drop nobody judged — after one *"closing in 15 min"*
-notice with **Keep open**. If picks or drops still wait, it says so once in the thread and leaves the council open for
-an officer; the raid itself is over either way (no more fill asks, nobody shows as rostered on it).
+**End.** `/raid end` in the thread, **End council** on the site (it shows the same sentence first: *"End …: 6 awards,
+1 override, 2 drops never distributed"*), "end tonight's run" or MCP `end_loot` ends the council and marks the run done;
+the summary lists the awards, the overrides and anything left undecided (proposals never confirmed, drops never
+distributed, awards still waiting for a reason) so nothing anyone decided disappears. The bot ends a council by itself
+only after the run's scheduled end, once it has been idle for 30 minutes with no pick waiting for Confirm and no drop
+nobody judged — after one *"closing in 15 min"* notice with **Keep open**. If picks or drops still wait, it says so once
+in the thread and leaves the council open for an officer; the raid itself is over either way (no more fill asks, nobody
+shows as rostered on it). Ended councils are on **Loot › History**, each with its awards, who recorded them, its
+overrides and its summary.
 
-Every award, override, reason and correction is an ops line with the officer's name; members never see scores,
-alternates or reasons.
+**Plain text and MCP.** In the ops channel (or `/gm change`, or an @mention where plain text acts) an officer can say
+"open the loot council", "the Gatekeeper dropped the Robe of Tests and a Shard of Doom", "distribute", "give the Syphon
+to Eltam instead — tanks progression" (refused without a reason), "confirm the rest", "hold the Shard for later",
+"Mira got the wand because she's on her last piece" (the reason for an in-game award), "the robe should have gone to
+Kestrel — misclick", "end tonight's run" and "retire the Syphon precedent — tier changed": each is shown as a diff with
+**Apply**, and a "confirm the rest" whose batch changed before Apply is refused. These are the **Loot council** group
+of the plain-text permissions (officers by default, §8c). Over MCP the owner's token reads the council, ticks,
+distributes, discards and ends; **decisions about an award** — `loot_confirm`, `loot_award`, `loot_reason`,
+`loot_correct`, `retire_precedent`, `tier_item`, setting someone's wishlist — are made by a named officer:
+`OIBOT_MCP_ACTOR` in `.env` (that officer's Discord id) rides with them, the bot checks the id is an officer of that
+server, and the record and the ops line read *"Jon via MCP"*. Without it those tools are refused and say so; previews
+never need it (§8b).
+
+**Precedents** (Loot › Precedents): every council override with its reason, newest first — what the bot cites next
+time. **Retire** one (a reason is required and stays on it; the bot stops citing it, the record keeps it) or
+**Restore** it. *Needs a reason* lists awards recorded in game against the bot's pick that still have none.
+
+**Items and tiers** (Loot › Items): the **untiered** items — learned from drops by name, or on the tables without tiers —
+with when each was first seen, how often it dropped and how many awards it has. A row opens the **tier grid**: one tier
+per spec (S+, S, A, B, or – for none), the guild's over the game profile's; specs that can't equip the item are greyed.
+Saving tiers for an item that already has awards asks *"N past awards used the old weight — re-weight them?"*: **No**
+(the default) keeps them as they were; **Re-weight them** changes their weight in recent-loot scores only — who got
+what never changes. Either answer is logged. The grid is on the site only (a grid doesn't fit Discord); "tier the Robe
+S for holy priests" works in plain text, `tier_item` over MCP.
+
+**Members: your loot and your wishlist.** Every logged-in member sees **Me › My loot** (what your characters received:
+item, date, main or offspec) and the **Loot log** page (every award the council recorded: item, character, boss,
+date — never scores, the bot's pick, reasons or who recorded it; officers can switch the scores on). `/me view` shows
+your last ten awards. Your **wishlist** is per character, up to 10 items, in the order you want them, each main spec or
+offspec with an optional note: build it on **Me › Wishlist** (Edit, add items by name — an item the tables don't know
+yet is kept by name — reorder, one **Save**; if the list changed meanwhile, in another tab or in Discord, the save is
+refused with the current list and your edits kept), with `/me wishlist` in Discord (pick the character, then an item
+from the list or *Search by name…*, then its place and MS/OS, Confirm), with **Add to my wishlist** under a line of the
+public loot log, or by telling the bot ("put the Robe of Tests on my wishlist as #2 for offspec"). An item you received
+stays on the list, greyed (*received 9 Dec*), until you remove it. The council's scoring reads these lists; officers
+see who wants each item most on **Loot › Wishlists**, which also imports a **ThatsMyBIS** wishlist export (preview
+first; per character in TMB's order; an item already on someone's list stays as it is; a re-import replaces only the
+earlier TMB rows; nothing made on the site is ever deleted).
+
+**The public loot log.** With the log on (the default) every recorded award gets one line in the **loot channel**
+(*"🎁 Robe of Tests → Kestrel · Gatekeeper"*; a correction *"✎ Robe of Tests: was Kestrel, now Mira"*; a disenchant
+*"→ disenchanted"*), with an **Add to my wishlist** button. No reasons, no scores. With no loot channel set the lines go
+to the run's updates thread — never the signup channel — and the first one says so in the ops channel and the council's
+thread. With the log off nothing is posted; the site still shows every award. A rehearsal posts nothing. The owner sets
+it with `/gm config loot-channel` (a channel, and `log` on or off), on the Config page (the *Loot log* card shows which
+of the three states it is in), in plain text ("post the loot log in #loot", "turn the loot log off") or MCP
+`set_channel("loot")`.
+
+Every award, override, reason, correction, retired precedent, tier change and wishlist change is an ops line with the
+officer's (or member's) name; members never see scores, alternates or reasons. Nothing about loot is on the public
+homepage.
 
 ## 10. Data, privacy, cost
 
@@ -1134,13 +1230,13 @@ speaks to you: your application waiting, a past decision, or already a member.
 Servers: there is no per-server spending cap — the monthly budget is shared by every server the bot looks after — and
 removing a server (when the bot leaves it) or renaming a guild's key is a manual job in the data repo.
 
-Loot: add or tier loot items, record wishlists, retire a precedent, or see your own loot history on `/me` — the
-loot council only runs on the demo data until Forever's loot tables exist. The precedents and the loot ledger are
-read-only: the Ops page's tables, MCP `ops_log` (a member filter included) and `/ask` (officers) show them. Splits: the **Loot-quality**
+Loot: a ThatsMyBIS import has no Discord path (the Loot › Wishlists page and MCP `import_wishlists`); importing a
+loot history from another addon (Gargul, RCLC, BisCouncil) and drafting tiers with Claude are not built yet; the
+member's "ask the council about an item" thread doesn't exist yet. Splits: the **Loot-quality**
 split philosophy is a greyed placeholder until wishlists exist (Balanced, Raid one first and Rotation
 work). Buff facts, comp bounds, cadence and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
 repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
-standing signup to set and no attendance or loot view on
+standing signup to set and no attendance view on
 `/me` yet: each run is answered on its own sheet (or by telling the bot, or an officer for you). If you ask for one
 of these, say so plainly.

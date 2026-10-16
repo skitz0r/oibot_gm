@@ -38,7 +38,9 @@ load_dotenv(ROOT / ".env")  # OIBOT_MCP_TOKEN (never printed), OIBOT_MCP_URL —
 DEFAULT_URL = "http://127.0.0.1:8788"
 TOKEN_ENV, URL_ENV, GUILD_ENV = "OIBOT_MCP_TOKEN", "OIBOT_MCP_URL", "OIBOT_MCP_GUILD"
 LOCK_ENV = "OIBOT_MCP_GUILD_LOCK"  # "1": every call acts on OIBOT_MCP_GUILD only (the jobs' pinned sessions)
+ACTOR_ENV = "OIBOT_MCP_ACTOR"  # D8: the Discord id of the officer at the keyboard; sent ONLY by the loot / people decision tools
 GUILD_HEADER = "X-Oibot-Guild"
+ACTOR_HEADER = "X-Oibot-Actor"
 # every tool's last parameter, documented once
 Guild = Annotated[str | None, Field(description="guild: key or name; omit for OIBOT_MCP_GUILD or the only guild (list_guilds lists them)")]
 HEADERS = {"X-Requested-With": "oibot", "Accept": "application/json"}
@@ -68,9 +70,14 @@ class Api:
             raise ToolError(f"{TOKEN_ENV} is not set: add it to {ROOT / '.env'} (the same value the bot reads) and restart the MCP server")
         return {"Authorization": f"Bearer {self.token}"}
 
-    def _send(self, method: str, path: str, guild: str | None = None, scoped: bool = True, **kw) -> Any:
-        """`scoped=False`: no guild header at all (GET /api/guilds, which lists every guild for the bearer)."""
+    def _send(self, method: str, path: str, guild: str | None = None, scoped: bool = True, actor: bool = False, **kw) -> Any:
+        """`scoped=False`: no guild header at all (GET /api/guilds, which lists every guild for the bearer). `actor`: a
+        decision about an award or a person (D8) — X-Oibot-Actor carries OIBOT_MCP_ACTOR when it is set; the bot
+        validates it as an officer of the chosen guild and refuses the decision without it (the rule lives there)."""
         headers = self._headers()
+        who = (os.environ.get(ACTOR_ENV) or "").strip() if actor else ""
+        if who:
+            headers[ACTOR_HEADER] = who
         key = self.key_for(guild or self.guild) if scoped else None
         if scoped and self.lock and guild and key != self.key_for(self.guild):
             pinned = self.guild or "the bot's only guild"
@@ -147,8 +154,8 @@ class Api:
     def get(self, path: str, guild: str | None = None, **params) -> Any:
         return self._send("GET", path, guild=guild, params={k: v for k, v in params.items() if v is not None} or None)
 
-    def post(self, path: str, body: dict | None = None, guild: str | None = None) -> Any:
-        return self._send("POST", path, guild=guild, json=body or {})
+    def post(self, path: str, body: dict | None = None, guild: str | None = None, actor: bool = False) -> Any:
+        return self._send("POST", path, guild=guild, actor=actor, json=body or {})
 
     def put(self, path: str, body: dict | None = None, guild: str | None = None) -> Any:
         return self._send("PUT", path, guild=guild, json=body or {})
@@ -163,8 +170,8 @@ class Scoped:
     def get(self, path: str, **params) -> Any:
         return self.base.get(path, guild=self.guild, **params)
 
-    def post(self, path: str, body: dict | None = None) -> Any:
-        return self.base.post(path, body, guild=self.guild)
+    def post(self, path: str, body: dict | None = None, actor: bool = False) -> Any:
+        return self.base.post(path, body, guild=self.guild, actor=actor)
 
     def put(self, path: str, body: dict | None = None) -> Any:
         return self.base.put(path, body, guild=self.guild)
@@ -345,14 +352,17 @@ def list_auras(guild: Guild = None) -> dict:
 def ops_log(limit: int = 40, precedents_limit: int = 10, ledger_limit: int = 10, member: str | None = None, changes_limit: int = 20, guild: Guild = None) -> dict:
     """The bot's status (data-repo head, push, LLM usage, loot feed, uptime), the last `limit` ops-feed lines (newest
     first), the last `changes_limit` registry change lines (the analytics change log, since the bot started), and the
-    loot precedents (council overrides of the bot's pick, up to 50) and ledger rows (awards, up to 100), newest first.
-    `member` (name, character or id) narrows precedents and ledger to that member's characters."""
-    data = api(guild).get("/api/ops", precedents_limit=max(0, min(int(precedents_limit), 50)), ledger_limit=max(0, min(int(ledger_limit), 100)),
-                     member=member or None, changes_limit=max(0, min(int(changes_limit), 200)))
+    loot precedents (council overrides of the bot's pick, up to 50) and award-log rows (up to 100), newest first — those
+    two come from the Loot pages (list_precedents / loot_log have the whole views). `member` (name, character or id)
+    narrows precedents and awards to that member's characters."""
+    data = api(guild).get("/api/ops", changes_limit=max(0, min(int(changes_limit), 200)))
+    pl, ll = max(0, min(int(precedents_limit), 50)), max(0, min(int(ledger_limit), 100))
+    prec = api(guild).get("/api/loot/precedents", member=member or None, limit=pl) if pl else {"rows": []}
+    log = api(guild).get("/api/loot/log", member=member or None, limit=ll, scores="true") if ll else {"rows": []}
     n = max(1, min(int(limit), 500))
     return {"head": data.get("head"), "push": data.get("push"), "llm": data.get("llm"), "feed": data.get("feed"), "up_seconds": data.get("up"),
-            "rows": data.get("rows", [])[:n], "changes": data.get("changes", []), "precedents": data.get("precedents", []), "ledger": data.get("ledger", []),
-            "member": data.get("member")}
+            "rows": data.get("rows", [])[:n], "changes": data.get("changes", []), "precedents": prec.get("rows", [])[:pl], "ledger": log.get("rows", [])[:ll],
+            "member": prec.get("member") if member else None}
 
 
 # ---------------------------------------------------------------- writes: runs
@@ -663,14 +673,14 @@ def set_regular(raid: str, member: str, on: bool = True, schedule: str | None = 
 @mcp.tool()
 def set_channel(kind: str, channel: str | None = None, guild: Guild = None) -> str:
     """Point a bot channel at a server channel (owner): kind = ops | applications | signup | roster | registration |
-    analytics | absences | news; `channel` = a channel name (#general), an id, or empty to unset. Cards are (re)posted."""
+    analytics | absences | news | loot (the public award log); `channel` = a channel name (#general), an id, or empty to unset. Cards are (re)posted."""
     return msg(api(guild).post("/api/admin/config", {"field": f"channel:{kind}", "value": channel or None}))
 
 
 @mcp.tool()
 def set_config(field: str, value: Any, guild: Guild = None) -> str:
     """One guild setting (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
-    phrases that make a news item relevant), or officer_roles (a list of role ids
+    phrases that make a news item relevant), loot_log (true|false: the public award log), or officer_roles (a list of role ids
     — the whole list; role names are NOT resolved here, use plain_change for that)."""
     return msg(api(guild).post("/api/admin/config", {"field": field, "value": value}))
 
@@ -907,6 +917,187 @@ def run_job(job: str = "review", guild: Guild = None) -> str:
     """Start a local job now (owner): review (the news review) or apply (apply approved proposals). launchd starts it;
     refused when it is already running or not installed. Check job_status / get_job_run afterwards."""
     return msg(api(guild).post("/api/agents/run", {"job": job}))
+
+
+# ---------------------------------------------------------------- the loot council (design §3.1; D8 for decisions)
+# Reads, previews, open, tick, distribute, discard and end act as the owner's token. A decision about an award or a
+# person — confirm, award (override), reason, correct, retire a precedent, tiers, someone's wishlist, a wishlist
+# import — is made by a NAMED officer: these tools send X-Oibot-Actor = OIBOT_MCP_ACTOR, the bot checks that id is an
+# officer of the chosen guild and writes "<name> via MCP"; without it the bot refuses the decision and says so.
+
+Session = Annotated[str | None, Field(description="a split run's council: its id ('<run>-r2'), label ('Roster 2') or roster number; omit when the run has one")]
+
+
+def _loot_body(**kw) -> dict:
+    return {k: v for k, v in kw.items() if v is not None}
+
+
+@mcp.tool()
+def get_loot(run: str | None = None, guild: Guild = None) -> dict:
+    """The loot council. Without `run`: every locked run with its council(s) (or none yet), the awards still waiting
+    for a reason and the in-game conflicts (live and ended councils), the companions feeding this guild (live / quiet /
+    disconnected), drops held while no run is live, and where the public award log goes. With `run`: that run's
+    councils — drops per boss with their state, every pending pick with its candidate table (scores, tier, attendance,
+    wishlist), the bot's justification, alternates and warnings, pending overrides (who, reason), awards, reasons owed,
+    the roster (who may be named in an award), `batch_rev` / `drops_rev` (pass them back on writes) and
+    `end_consequence` (what end_loot would say). Officers' view: scores and reasons included."""
+    return api(guild).get(f"/api/loot/run/{run}") if run else api(guild).get("/api/loot")
+
+
+@mcp.tool()
+def open_loot(run: str, guild: Guild = None) -> str:
+    """Open the loot council on a LOCKED run (what /raid loot does): a thread in the officer channel (roster channel,
+    else ops channel — refused when neither is set), one council per roster of a split run. Idempotent: an open council
+    says so. Discord unreachable → the council opens with its thread pending."""
+    return msg(api(guild).post(f"/api/loot/{run}/open"))
+
+
+@mcp.tool()
+def loot_tick(run: str, items: list[str] | None = None, boss: str | None = None, copies: int = 1, remove: list[str] | None = None,
+              drops_rev: str | None = None, session: Session = None, guild: Guild = None) -> dict:
+    """Tick what dropped: `items` = item names or ids (an item the tables don't know is recorded BY NAME and scored as
+    untiered), `boss` = the boss, `copies` per item; `remove` = drop ids (d3) to un-tick (a recorded drop is refused —
+    use loot_correct). A merge (a companion tick never conflicts); `drops_rev` only when you want a stale refusal."""
+    add = [{**({"item_id": int(x)} if str(x).strip().isdigit() else {"name": str(x).strip()}), "boss": boss, "copies": max(1, int(copies))} for x in (items or []) if str(x).strip()]
+    data = api(guild).post(f"/api/loot/{run}/tick", _loot_body(add=add, remove=remove or [], drops_rev=drops_rev, session=session))
+    return {"message": data.get("message"), "drops_rev": data.get("drops_rev")}
+
+
+@mcp.tool()
+def loot_distribute(run: str, only: list[str] | None = None, drops_rev: str | None = None, session: Session = None, guild: Guild = None) -> dict:
+    """Judge the ticked drops nobody proposed yet (`only` = some drop ids): code scores every candidate, the model judges
+    the top ones against the loot policy. Adds a batch of PROPOSALS — nothing is recorded until loot_confirm. One judge
+    at a time per council (a second call says who is distributing). Returns the line and the new `batch_rev`."""
+    data = api(guild).post(f"/api/loot/{run}/distribute", _loot_body(only=only, drops_rev=drops_rev, session=session))
+    return {"message": data.get("message"), "batch_rev": data.get("batch_rev"), "stale": data.get("stale")}
+
+
+@mcp.tool()
+def loot_discard(run: str, only: list[str] | None = None, batch_rev: str | None = None, preview: bool = False, session: Session = None, guild: Guild = None) -> str:
+    """Drop pending proposals: every one (pass `batch_rev` from get_loot: a batch someone changed since is refused) or
+    `only` some drop ids ("decide later": the drop stays ticked). Pending overrides on them go too; nothing was
+    recorded, so nothing is undone. `preview=true`: the sentence only, nothing written."""
+    return msg(api(guild).post(f"/api/loot/{run}/discard", _loot_body(only=only, batch_rev=batch_rev, preview=preview or None, session=session)))
+
+
+@mcp.tool()
+def end_loot(run: str, preview: bool = False, guild: Guild = None) -> str:
+    """End the run and its loot council(s) — what /raid end does: the summary (awards, overrides, anything left
+    undecided) is archived and posted, the run is marked done. `preview=true` returns the sentence ("End …: 6 awards,
+    1 override, 2 drops never distributed") without ending; show it to the person first."""
+    data = api(guild).post(f"/api/loot/{run}/end", {"preview": True} if preview else {})
+    return str(data.get("preview") or msg(data))
+
+
+@mcp.tool()
+def loot_confirm(run: str, only: list[str] | None = None, expect_to: str | None = None, batch_rev: str | None = None, preview: bool = False,
+                 session: Session = None, guild: Guild = None) -> str:
+    """RECORD picks (a decision: needs OIBOT_MCP_ACTOR = the officer's Discord id). One drop: `only=[drop id]` +
+    `expect_to` = the recipient you were shown; every pick still pending: `batch_rev` from get_loot (a batch someone
+    changed since is refused with what changed). Writes the ledger and, for overrides, the precedents.
+    `preview=true`: the sentence only (no actor needed)."""
+    return msg(api(guild).post(f"/api/loot/{run}/confirm", _loot_body(only=only, expect_to=expect_to, batch_rev=batch_rev, preview=preview or None, session=session), actor=not preview))
+
+
+@mcp.tool()
+def loot_award(run: str, drop: str, to: str, reason: str, replace: bool = False, batch_rev: str | None = None, session: Session = None, guild: Guild = None) -> str:
+    """Override the bot's pick (a decision: needs OIBOT_MCP_ACTOR): give drop `drop` (its id, d3) to `to` (a rostered
+    character, or "disenchant") with a REQUIRED `reason` (it becomes the precedent the bot cites next time). Pending
+    until loot_confirm. Another officer's pending override needs `replace=true`; a recorded drop needs loot_correct."""
+    return msg(api(guild).post(f"/api/loot/{run}/override", _loot_body(drop_id=drop, to=to, reason=reason, replace=replace or None, batch_rev=batch_rev, session=session), actor=True))
+
+
+@mcp.tool()
+def loot_reason(run: str, drop: str, reason: str, replace: bool = False, session: Session = None, guild: Guild = None) -> str:
+    """The reason for an award the master looter gave someone other than the bot's pick (a decision: needs
+    OIBOT_MCP_ACTOR): it becomes the precedent. Works after the council ended (`session` = its id). A second reason
+    needs `replace=true`. get_loot's reasons_pending lists what is owed."""
+    return msg(api(guild).post(f"/api/loot/{run}/reason", _loot_body(drop_id=drop, reason=reason, replace=replace or None, session=session), actor=True))
+
+
+@mcp.tool()
+def loot_correct(run: str, drop: str, to: str, reason: str, session: Session = None, guild: Guild = None) -> str:
+    """Fix a recorded award — a mistake, not a decision about merit (needs OIBOT_MCP_ACTOR): the old row is voided with
+    `reason`, a new award to `to` (a character or "disenchant") is recorded, no precedent. Works after the council ended."""
+    return msg(api(guild).post(f"/api/loot/{run}/correct", _loot_body(drop_id=drop, to=to, reason=reason, session=session), actor=True))
+
+
+@mcp.tool()
+def loot_history(council: str | None = None, guild: Guild = None) -> dict:
+    """Ended councils, newest first (run, date, awards, overrides, what was left undecided, the end summary); with
+    `council` (an id or file name from the list) that council in full: drops, awards with who recorded them, overrides."""
+    return api(guild).get(f"/api/loot/history/{council}") if council else api(guild).get("/api/loot/history")
+
+
+@mcp.tool()
+def loot_log(member: str | None = None, limit: int = 100, scores: bool = True, guild: Guild = None) -> dict:
+    """The guild's award log, newest first: item, character, spec, date, boss, MS/OS; with `scores` (officers) also tier,
+    weight, source, the bot's pick, who recorded it and the precedent's reason. `member` narrows to one member."""
+    return api(guild).get("/api/loot/log", member=member or None, limit=max(1, min(int(limit), 1000)), scores="true" if scores else None)
+
+
+@mcp.tool()
+def list_precedents(status: str | None = None, member: str | None = None, guild: Guild = None) -> dict:
+    """Council overrides with their reasons (status active | retired | superseded), newest first, each with its `ref`
+    (for retire_precedent), plus `needs_reason` = awards recorded against the bot's pick that still have no reason."""
+    return api(guild).get("/api/loot/precedents", status=status or None, member=member or None)
+
+
+@mcp.tool()
+def retire_precedent(ref: str, reason: str, restore: bool = False, guild: Guild = None) -> str:
+    """Retire a precedent (the bot stops citing it) or `restore` it (a decision: needs OIBOT_MCP_ACTOR). `ref` from
+    list_precedents; `reason` is required and stays on the precedent."""
+    return msg(api(guild).post("/api/loot/precedents/retire", _loot_body(ref=ref, reason=reason, restore=restore or None), actor=True))
+
+
+@mcp.tool()
+def list_items(item: str | None = None, guild: Guild = None) -> dict:
+    """Loot › Items: the UNTIERED items (learned from drops by name, or on the tables without tiers — with when first
+    seen, times dropped and awards so far), the tiered ones and the spec rows; with `item` (a name, id or key) that
+    item's tier grid — every spec's tier (the guild's over the profile's), whether it can equip the item, awards so far."""
+    if item:
+        return api(guild).get(f"/api/loot/items/{item}")
+    return api(guild).get("/api/loot/items")
+
+
+@mcp.tool()
+def tier_item(item: str, tiers: dict[str, str], reweight: bool | None = None, guild: Guild = None) -> dict:
+    """Set tiers for an item (a decision: needs OIBOT_MCP_ACTOR): `tiers` = {spec key: tier}, a spec key 'Priest:Holy',
+    a whole class 'Priest:*' or a role 'role:healer', a tier S+ | S | A | B, '-' clears a tier the guild set. When the
+    item already has awards and `reweight` is not given, NOTHING is written and the reply asks (`ask`): "re-weight the
+    past awards?" — ask the person, then call again with reweight=true (recent-loot scores follow the new tier; who got
+    what never changes) or false (they keep their weight)."""
+    from urllib.parse import quote
+
+    data = api(guild).post(f"/api/loot/items/{quote(item, safe='')}/tiers", _loot_body(tiers=tiers, reweight=reweight), actor=True)
+    return {k: data.get(k) for k in ("message", "ask", "awards", "reweighted") if data.get(k) is not None}
+
+
+@mcp.tool()
+def get_wishlists(member: str | None = None, guild: Guild = None) -> dict:
+    """Wishlists: every member's characters with a list and, per item, who wants it most (MS before OS, by rank); with
+    `member` that member's lists with each character's `rev` (pass it to set_wishlist) and what they already received."""
+    if member:
+        return api(guild).get("/api/members/wishlist", member=member)
+    return api(guild).get("/api/loot/wishlists")
+
+
+@mcp.tool()
+def set_wishlist(member: str, rows: list[dict], character: str | None = None, rev: str | None = None, guild: Guild = None) -> str:
+    """Replace one character's WHOLE wishlist (an officer acting for someone: needs OIBOT_MCP_ACTOR). `rows` in priority
+    order: {name or item_id, offspec?: bool, note?}; up to 10, an item once. `character` = which of theirs (default
+    their only character or main); `rev` from get_wishlists(member): a list changed since is refused."""
+    return msg(api(guild).post("/api/members/wishlist", _loot_body(member=member, character=character, rows=rows, rev=rev), actor=True))
+
+
+@mcp.tool()
+def import_wishlists(csv: str, preview: bool = True, guild: Guild = None) -> dict:
+    """A ThatsMyBIS wishlist export (the CSV text) into the native wishlists (needs OIBOT_MCP_ACTOR to write). Per
+    character in TMB's order; an item already on a list is a duplicate (the native entry stays); a character's earlier
+    TMB rows are replaced; an entry made on the site is never deleted; past 10 the rest is skipped. `preview=true`
+    (default) counts only — show the person, then call with preview=false."""
+    data = api(guild).post("/api/loot/wishlists/import", {"csv": csv, "preview": bool(preview)}, actor=not preview)
+    return {"message": data.get("message"), "report": data.get("report")}
 
 
 # ---------------------------------------------------------------- policy documents (loot, comp, persona)

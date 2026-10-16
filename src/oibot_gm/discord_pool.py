@@ -326,7 +326,8 @@ class AbsencesMixin:
 # ---------------------------------------------------------------- setup from the web + test bench
 
 CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_id", "signup": "signup_channel_id", "roster": "roster_channel_id",
-                 "registration": "registration_channel_id", "analytics": "analytics_channel_id", "absences": "absences_channel_id", "news": "news_channel_id"}
+                 "registration": "registration_channel_id", "analytics": "analytics_channel_id", "absences": "absences_channel_id", "news": "news_channel_id",
+                 "loot": "loot_channel_id"}  # loot: the public award log (one line per confirmed award; LootLogMixin)
 
 
 class SetupMixin:
@@ -416,3 +417,126 @@ class SetupMixin:
         gone = await asyncio.to_thread(reg.clear_test_members, by)
         await self.cleanup_ephemeral(reg, rs)
         return f"{gone} test member(s) removed, {len(cancelled)} test run(s) cancelled" + (f" ({', '.join(cancelled)})" if cancelled else "")
+
+
+# ---------------------------------------------------------------- the public loot log (design §3.1 "Members", D2)
+
+def loot_log_line(reg: Registry, award, was: str | None, ico=None) -> str:
+    """One public line per award, as members read it: '🎁 **Robe of Tests** → <spec icon> **Kestrel** · Gatekeeper',
+    a correction '✎ **Robe of Tests**: was Kestrel, now **Mira**', a disenchant '🎁 **Robe of Tests** → disenchanted'.
+    Never a reason, a score or who recorded it (officer data)."""
+    from .loot.session import DISENCHANT
+
+    item = award.item_name or (reg.item(award.item_id).name if reg.item(award.item_id) is not None else f"item {award.item_id}")
+    if award.raider == DISENCHANT:
+        return f"✎ **{item}**: was {was}, now disenchanted" if was else f"🎁 **{item}** → disenchanted"
+    icon = ""
+    if ico is not None:
+        hit = None
+        for m in reg.members.values():
+            if award.discord_id is not None and m.discord_id != award.discord_id:
+                continue
+            hit = next((c for c in m.characters if c.label.lower() == award.raider.lower()), None)
+            if hit is not None:
+                break
+        if hit is not None:
+            icon = (ico("spec", f"{hit.cls}:{hit.spec}") or "") + " "
+    who = f"{icon}**{award.raider}**"
+    if was:
+        return f"✎ **{item}**: was {was}, now {who}"
+    return f"🎁 **{item}** → {who}" + (" (offspec)" if award.offspec else "") + (f" · {award.boss}" if award.boss and award.boss != "?" else "")
+
+
+class LootWishButton(discord.ui.DynamicItem[discord.ui.Button], template=r"lootwish(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<item>[a-z0-9-]{1,64})"):
+    """*Add to my wishlist* under a public loot-log line (where members actually see items): opens the /me wishlist
+    wizard on that item for the presser. The id carries the guild and the item key (`lootwish.<gk>:<item key>`)."""
+
+    def __init__(self, gk: str, item: str):
+        super().__init__(discord.ui.Button(label="Add to my wishlist", style=discord.ButtonStyle.secondary, emoji="⭐",
+                                           custom_id=f"lootwish.{gk}:{item}"[:100]))
+        self.gk, self.wish_item = gk, item  # never `self.item`: that is the DynamicItem's button
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["g"], match["item"])
+
+    async def callback(self, interaction: discord.Interaction):
+        from .discord_registry import channel_card_guild
+
+        reg = channel_card_guild(interaction, self.gk)
+        if not reg:
+            await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        from .wizard_flows import FLOWS
+
+        await FLOWS["me_wishlist"](interaction, reg, item=self.wish_item)
+
+
+class LootLogMixin:
+    """The public loot log: one line per award recorded in a guild's ledger (lootctx.LEDGER_LISTENERS — Confirm, a
+    companion award, a correction, the crash repair alike; a test council writes no ledger rows, so nothing), in the
+    loot channel, else (log on, no channel) the run's updates thread — never the signup channel, where 30 lines would
+    bury the sheet. Log off: nothing is posted (the site's Loot log still shows every award). The first line that has
+    to fall back says so once per guild: an ops warn and a line in the council's thread."""
+
+    def attach_loot_log(self) -> None:
+        from .lootctx import LEDGER_LISTENERS
+
+        def loot_log_award(guild_key: str, award, row: dict, was: str | None) -> None:
+            coro = self.loot_log_post(guild_key, award, row.get("event"), was)
+            try:
+                asyncio.get_running_loop().create_task(coro)
+            except RuntimeError:  # a writer off the loop (a web route's thread): hand it to the bot's loop
+                loop = getattr(self, "loop", None)
+                if loop is None or loop.is_closed():
+                    coro.close()
+                    return
+                asyncio.run_coroutine_threadsafe(coro, loop)
+
+        LEDGER_LISTENERS[:] = [f for f in LEDGER_LISTENERS if getattr(f, "__name__", "") != loot_log_award.__name__] + [loot_log_award]
+
+    def loot_log_target(self, reg: Registry, run_key: str | None):
+        """(channel, fell_back) for an award line, or (None, False): log off, or nowhere to post."""
+        cfg = reg.config
+        if not cfg.loot_log:
+            return None, False
+        get = getattr(self, "get_channel", None)
+        if cfg.loot_channel_id:
+            ch = get(cfg.loot_channel_id) if get else None
+            return ch, False
+        ev = self.raids.store(reg).events.get(run_key) if run_key and hasattr(self, "raids") else None
+        tid = getattr(ev, "updates_thread_id", None) if ev is not None else None
+        return (get(tid) if get and tid else None), True
+
+    async def loot_log_post(self, guild_key: str, award, run_key: str | None, was: str | None) -> bool:
+        reg = (getattr(self.registries, "by_key", {}) or {}).get(guild_key)
+        if reg is None:
+            return False
+        ch, fell_back = self.loot_log_target(reg, run_key)
+        if fell_back:
+            warned = self.__dict__.setdefault("_loot_log_warned", set())
+            if guild_key not in warned:
+                warned.add(guild_key)
+                note = ("The public loot log is on but no loot channel is set — award lines go to each run's updates thread. "
+                        "Pick one with /gm config loot-channel or on the Config page.")
+                ops = getattr(self, "ops", None)
+                if ops is not None:
+                    await ops.emit(reg.config, "warn", note)
+                for s in [s for s in getattr(self, "events", {}).values() if s.guild == guild_key and s.run_key == run_key][:1]:
+                    await self.loot_post(s, "ℹ️ " + note)
+        if ch is None:
+            return False
+        from .registry import item_key
+
+        text = loot_log_line(reg, award, was, getattr(self, "ico", None))
+        view = discord.ui.View(timeout=None)
+        if award.raider:  # members see items here: one press puts it on their wishlist
+            view.add_item(LootWishButton(reg.key, item_key(award.item_id, award.item_name or "")))
+        try:
+            await ch.send(text[:1900], view=view, allowed_mentions=discord.AllowedMentions.none())
+        except Exception as e:  # noqa: BLE001 — the award is recorded; the public line is a courtesy
+            ops = getattr(self, "ops", None)
+            if ops is not None:
+                await ops.emit(reg.config, "warn", f"loot log: couldn't post in #{getattr(ch, 'name', ch)} ({type(e).__name__}) — check the bot's Send Messages there")
+            return False
+        return True
