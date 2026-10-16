@@ -756,13 +756,11 @@ def absences_text(reg: Registry, days: int) -> str:
 
 @flow("roster_absences")
 async def open_roster_absences(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
-    """/roster absences: how far ahead is a preset select (the wizard rule: a number is never typed), the list under it."""
-    from .discord_registry import is_officer
-
-    if not is_officer(interaction, reg):
-        await interaction.response.send_message("Officers only.", ephemeral=True)
+    """/roster absences: how far ahead is a preset select (the wizard rule: a number is never typed), the list under it.
+    Officer-only data (reasons, who recorded them): an OfficerWizard, so standing is re-checked on every horizon press."""
+    if await _stop_at_entry(interaction, reg):
         return
-    wiz = Wizard(reg, interaction.user.id, title="Upcoming absences")
+    wiz = OfficerWizard(reg, interaction.user.id, title="Upcoming absences")
 
     async def show(i: discord.Interaction, days: int) -> None:
         opts = [Opt(str(d), name.capitalize(), default=d == days) for d, name in ABSENCE_HORIZONS]

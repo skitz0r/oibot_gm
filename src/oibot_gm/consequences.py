@@ -14,6 +14,9 @@ from . import raidcycle as rc
 from .registry import Registry
 
 VERBS = ("lock", "cancel", "clear", "release")
+NAME_TOKEN = "{name}"
+"""The placeholder in `consequences_json["release_named"]`: the board's drag-to-bank names the member it is about, and
+the only thing the browser does to the sentence is put that name where the token is (it never composes the sentence)."""
 
 
 def _n(n: int, one: str, many: str | None = None) -> str:
@@ -35,8 +38,12 @@ def consequence(verb: str, reg: Registry, ev: rc.RaidEvent, *, name: str | None 
 
 
 def consequences_json(reg: Registry, ev: rc.RaidEvent) -> dict[str, str]:
-    """`ev_json.consequences`: {lock, cancel, clear, release} as one string each (the lines joined by a space)."""
-    return {v: " ".join(consequence(v, reg, ev)) for v in VERBS}
+    """`ev_json.consequences`: {lock, cancel, clear, release} as one string each (the lines joined by a space), plus
+    `release_named`: the release sentence about one member with NAME_TOKEN where the name goes (the board fills it in
+    for the member being dragged out; before lock it is the same no-name sentence)."""
+    out = {v: " ".join(consequence(v, reg, ev)) for v in VERBS}
+    out["release_named"] = " ".join(consequence("release", reg, ev, name=NAME_TOKEN))
+    return out
 
 
 def _dms_off(reg: Registry, ids) -> int:
@@ -98,4 +105,4 @@ def _release(reg: Registry, ev: rc.RaidEvent, name: str | None) -> list[str]:
     return [f"The seat is released: they are told — {told} — and the bench is asked to fill it."]
 
 
-__all__ = ["VERBS", "consequence", "consequences_json"]
+__all__ = ["NAME_TOKEN", "VERBS", "consequence", "consequences_json"]

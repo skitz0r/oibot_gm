@@ -394,7 +394,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    ("You're rostered as **Protection**, your offspec"). The Me page shows the same ask. With confirmations off (the ad hoc default) nobody is asked and
    no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable: moving people
    between groups changes nothing else; dragging someone in from the bank is a substitution (they get the
-   confirmation DM); dragging someone out releases the seat (they get a DM) and the bench is asked.
+   confirmation DM); dragging someone out releases the seat (they get a DM) and the bench is asked — the confirm names
+   them and says exactly what the bot will do, in the same words as the Discord card.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and they are DMed that it was.
 6. **Fill** — the fill engine DMs people on its own only after lock (before lock an officer sends suggestions, see
@@ -521,7 +522,7 @@ returns to the game defaults.
   (Discord's own picker); the character, rank or schedule is picked from a list and confirmed before anything saves.
   `/roster confirm` alone walks the unconfirmed characters. `/roster absences` lists the guild's upcoming absences
   (days in words, with reasons) for the next 30 days; a select switches the horizon (a week … three months) — no
-  number is typed.
+  number is typed. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
 - Regulars: `/roster add` (pick the recurring schedule, then the member — or name them in the command — then the
   character), `/roster remove`, `/roster members` (a schedule's regulars by role, one per line). Same list as the
   Rosters page's *Regulars* tab, plain text and MCP `set_regular` (§4 *Regulars*).

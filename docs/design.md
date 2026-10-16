@@ -1183,9 +1183,13 @@ phases ride on:
 - **Consequence from code (§2.3).** `consequences.consequence(verb, reg, ev) -> list[str]` for `lock | cancel | clear |
   release`, computed from the run as it stands (joiners, DMs-off count, the confirm deadline in `Registry.local12`
   words, the layout; an ad hoc run says *"Joining was the commitment — nobody is asked to confirm."*; a test run says
-  where the puppets' DMs go). `ev_json.consequences{lock,cancel,clear,release}` carries them to the site, and
-  `SheetCard` / `BoardView` print them instead of composing their own (the old lock text promised confirmation DMs on
-  ad hoc runs — §4 item 5). `news.consequence(p, reg, state)` says what Approve / Dismiss does by kind and state;
+  where the puppets' DMs go). `ev_json.consequences{lock,cancel,clear,release,release_named}` carries them to the site,
+  and `SheetCard` / `BoardView` print them instead of composing their own (the old lock text promised confirmation DMs
+  on ad hoc runs — §4 item 5). `release_named` is the release sentence about one member with `consequences.NAME_TOKEN`
+  (`{name}`) where the name goes: the board's drag-to-bank substitutes the dragged member and nothing else, so the
+  per-member copy survives without the browser composing a word. The after-lock clear/release sentences describe
+  today's `drop_seated` DM; if the DM rule (DMs only when the person must act) retires that FYI DM, the sentence
+  changes here, in code, not on a surface. `news.consequence(p, reg, state)` says what Approve / Dismiss does by kind and state;
   `news.decision_refusal` is `ProposalStore.move`'s officer checks read without writing, so a card refuses at once.
 - **The ONE Discord confirm screen.** `wizard.Wizard.decide(interaction, text, *, do, note=None, do_label="Do it",
   danger=False, back_label="Back")`: the consequence text, then `[Do it]` `[Do it with a note…]` `[Back]`; the note button
@@ -1202,7 +1206,8 @@ phases ride on:
   `GENERIC_ERROR` ("Something went wrong and nothing was changed. The owner has the details."); `report_error(ops,
   cfg, e, where)` adds the ops error line (the owner's DM) for the generic case. Used by `web/api.py run()` (a bug is
   a 500 with the generic text, never a type name), a catch-all `/api/*` exception handler (what an MCP `ToolError`
-  repeats), `/api/ops/change`'s per-op failures, the `/mock` roster and loot chat replies, and the wizards' `on_error`.
+  repeats; a GET route that raises reads the same way — tested on `/api/member`), `/api/ops/change`'s per-op failures,
+  the `/mock` roster and loot chat replies, and the wizards' `on_error`.
 - **Persistence (§2.9).** `ConfigConfirmView` and `CompileConfirmView` are `PendingView`s: their buttons are
   `CfgApplyButton` DynamicItems (`cfgapply.<gk>:<token>:apply|cancel|confirm|discard`) resolving a token in process
   memory (`discord_policy.PENDING_CONFIRMS`); `on_timeout` edits the diff to *Expired — say it again.*; a press after
@@ -1223,7 +1228,8 @@ phases ride on:
   `raid_views.clock12 = reg.local12`, `agents.clock12`, the web's `t12`/`clock12`). Iconography: the sheet's shortfall
   badge is role icon + number, `/roster overview`'s role and buff lines carry no name beside an icon, the loot thread's
   roster is the board's group layout one member per line. Wizard rule: `/roster absences days:int` → a horizon select
-  (`flows_roster.roster_absences`), `/me plan roles` lost the discarded `primary` argument; `/mock signup date_` and
+  (`flows_roster.roster_absences`, an `OfficerWizard`: the list is officer-only data, so standing is re-checked on
+  every horizon press like every other officer wizard), `/me plan roles` lost the discarded `primary` argument; `/mock signup date_` and
   `/mock set name` are left for D11's retirement of `/mock`.
 
 ## 6. Architecture

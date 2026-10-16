@@ -65,7 +65,9 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
     if (d.from) L[d.from.r][d.from.g] = L[d.from.r][d.from.g].filter((n) => n !== d.name);
     if (target === "bank") {
       if (!d.from) return;
-      if (locked && !(await ask({ title: `Take ${d.name} off the roster?`, message: e.consequences?.release || `${d.name} is told their seat was released and the bench is asked to fill it.`, confirmLabel: "Release the seat", color: "red" }))) return;
+      // the sentence comes from the server (consequences.py); the browser only puts the member's name where the server left the {name} token
+      const released = e.consequences?.release_named ? e.consequences.release_named.replace("{name}", d.name) : e.consequences?.release;
+      if (locked && !(await ask({ title: `Take ${d.name} off the roster?`, message: released || `${d.name} is told their seat was released and the bench is asked to fill it.`, confirmLabel: "Release the seat", color: "red" }))) return;
       move(d.name, null); return;
     }
     const g = L[target.r][target.g];

@@ -106,8 +106,9 @@ export interface Sheet {
   /** the planner's suggestions (computed on view, never stored): what an officer's Suggest / Ask would send */
   plan?: Plan | null;
   callouts?: { display_name: string; hours_before: number; late: boolean }[]; log?: string[];
-  /** the confirm sentences for lock / cancel / clear / release, from the server (consequences.py) — the browser prints them, never composes its own */
-  consequences?: { lock: string; cancel: string; clear: string; release: string };
+  /** the confirm sentences for lock / cancel / clear / release, from the server (consequences.py) — the browser prints them, never composes its own;
+   *  `release_named` is the release sentence about one member with `{name}` where the name goes (the board substitutes the dragged member) */
+  consequences?: { lock: string; cancel: string; clear: string; release: string; release_named?: string };
 }
 export interface RaidRuns {
   id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null;

@@ -82,7 +82,26 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     assert consequences.consequence("release", reg, ev)[0].startswith("The seat is released: they are told")
     assert consequences.consequence("lock", reg, ev) == ["Already locked."]
     assert consequences.consequence("nonsense", reg, ev) == []
-    assert set(consequences.consequences_json(reg, ev)) == {"lock", "cancel", "clear", "release"}
+    assert set(consequences.consequences_json(reg, ev)) == {"lock", "cancel", "clear", "release", "release_named"}
+
+
+def test_release_named_is_the_per_member_sentence_with_a_token_the_board_fills_in(reg, rs):
+    """The board's drag-to-bank names the dragged member: the server writes the sentence with NAME_TOKEN where the
+    name goes and BoardView only substitutes it — the per-member copy the old browser text had, without the browser
+    composing a word of it. Before lock the named and general sentences are the same no-name line."""
+    from pathlib import Path
+
+    ev = open_test_run(reg, rs)
+    names = [m.display_name for m in reg.test_members()[:5]]
+    join(reg, rs, ev, reg.test_members()[:5])
+    before = consequences.consequences_json(reg, ev)
+    assert before["release_named"] == before["release"] == "Nothing is sent before lock — the seat only comes off the board."
+    lock_with_board(reg, rs, ev, names)
+    after = consequences.consequences_json(reg, ev)
+    assert consequences.NAME_TOKEN in after["release_named"] and consequences.NAME_TOKEN not in after["release"]
+    assert after["release_named"].replace(consequences.NAME_TOKEN, "Jonny") == " ".join(consequences.consequence("release", reg, ev, name="Jonny"))
+    board = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "BoardView.tsx").read_text()
+    assert "e.consequences.release_named.replace(\"{name}\", d.name)" in board, "BoardView fills the token, nothing more"
 
 
 def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg, rs, monkeypatch):
@@ -94,7 +113,7 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     d = c.get(f"/api/run/{adhoc.key}", headers=bearer()).json()
     assert d["consequences"]["lock"] == "The board becomes the roster. Joining was the commitment — nobody is asked to confirm."
     assert "DM" not in d["consequences"]["lock"], "the old SheetCard text promised confirmation DMs on ad hoc runs (§4 item 5)"
-    assert set(d["consequences"]) == {"lock", "cancel", "clear", "release"}
+    assert set(d["consequences"]) == {"lock", "cancel", "clear", "release", "release_named"}
     from pathlib import Path
 
     sheet = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "SheetCard.tsx"
@@ -163,6 +182,36 @@ def test_web_routes_answer_a_bug_with_the_generic_line_and_an_ops_error(reg, rs,
     r = c.post("/api/members/dm", json={"member": m.display_name, "on": False}, headers=bearer())
     assert r.status_code == 500 and r.json()["error"] == configops.GENERIC_ERROR
     assert any(lvl == "error" and "disk on fire" in text for lvl, text in bot.ops.lines), bot.ops.lines
+
+
+def test_the_catch_all_api_handler_reads_refusals_as_written_and_bugs_as_the_generic_line(reg, rs, monkeypatch):
+    """A GET route (not through run()) that raises: a ValueError is a 400 with its text, anything else a 500 with
+    GENERIC_ERROR and an ops error line to the selected guild — never a traceback or a type name for the person."""
+    from oibot_gm.registry import Registry
+
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    bot = FakeBot(reg, rs)
+    c = TestClient(web.create_app(bot), raise_server_exceptions=False)
+    m = reg.test_members()[0]
+    assert c.get("/api/member", params={"name": m.display_name}, headers=bearer()).status_code == 200
+
+    def refuses(self, uid):
+        raise ValueError("that record is being rebuilt")
+
+    monkeypatch.setattr(Registry, "verification", refuses)
+    r = c.get("/api/member", params={"name": m.display_name}, headers=bearer())
+    assert r.status_code == 400 and r.json() == {"error": "that record is being rebuilt"}
+    assert not any(lvl == "error" for lvl, _ in bot.ops.lines), "a refusal is not the owner's business"
+
+    def broken(self, uid):
+        raise RuntimeError("index corrupt")
+
+    monkeypatch.setattr(Registry, "verification", broken)
+    r = c.get("/api/member", params={"name": m.display_name}, headers=bearer())
+    assert r.status_code == 500 and r.json() == {"error": configops.GENERIC_ERROR}
+    assert "RuntimeError" not in r.text and "index corrupt" not in r.text
+    assert any(lvl == "error" and "/api/member" in text and "index corrupt" in text for lvl, text in bot.ops.lines), bot.ops.lines
 
 
 # ---------------------------------------------------------------- the ONE confirm screen (Wizard.decide)
@@ -474,6 +523,28 @@ def test_roster_absences_is_a_horizon_select_not_a_typed_number(reg, monkeypatch
         assert h.selects() == ["How far ahead?"] and "No absences in the next 30 days." in h.text
         await h.pick("How far ahead?", "90")
         assert "No absences in the next 3 months." in h.text
+
+    run(go())
+
+
+def test_roster_absences_rechecks_officer_standing_on_every_press(reg, monkeypatch):
+    """The list is officer-only data (reasons, who recorded them): an officer demoted mid-screen is refused on the
+    next horizon press and the list is not redrawn — the guard every officer wizard carries, not a check at open only."""
+    from oibot_gm import discord_registry
+
+    allowed = {"ok": True}
+    monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: allowed["ok"])
+    h = Harness(reg, user=officer_user())
+
+    async def go():
+        await FLOWS["roster_absences"](h.command(), reg)
+        listing = h.screen
+        allowed["ok"] = False
+        itx = h._on_screen()
+        assert not await listing["view"].interaction_check(itx), "the guard runs on every press, not only at the start"
+        assert "Officers only" in h.text and h.text != listing["text"]
+        allowed["ok"] = True
+        assert await listing["view"].interaction_check(h._on_screen())
 
     run(go())
 
