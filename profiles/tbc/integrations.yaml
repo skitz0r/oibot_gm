@@ -3,3 +3,4 @@ wcl_host: fresh.warcraftlogs.com
 wcl_zone_bt_hyjal: 1060
 blizzard_namespace: static-classicann-us   # TBC Anniversary (verified 2026-09-14); static-classic-us = progression
 tmb_expansion_id: 2
+wowhead_item_url: "https://www.wowhead.com/tbc/item={id}"   # discord_bot.wowhead(): the item link on cards (none = no link)

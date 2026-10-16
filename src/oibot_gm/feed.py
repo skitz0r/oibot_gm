@@ -7,7 +7,11 @@ Protocol (JSON text frames):
   client → {"type":"loot","recipient":"Boviche","item_id":32262,"item_name":"…","ts":"…","idem":"…"}
   client → {"type":"kill","boss":"Supremus","ts":"…","idem":"…"}
   client → {"type":"heartbeat","ts":"…"}
-  server → {"type":"ack","idem":"…"} | {"type":"error","message":"…"} | {"type":"welcome","routes_to":"BLA-0915"}
+  server → {"type":"ack","idem":"…","session":"<guild>:<run>"} | {"type":"error","idem":"…","message":"…"} | {"type":"welcome","routes_to":"<run>","session":"<guild>:<run>"}
+`ts` may be epoch seconds (preferred: the bot renders a native Discord stamp) or the chat log's ISO stamp. The companion
+keeps an event until its ack and re-sends it after a reconnect with the same idem; the bot dedupes per loot SESSION
+(LootSession.seen_idem), not per connection, so a re-send is acked ("dup") and never applied twice. An error reply is
+not an ack (the companion may re-send). Presence per companion: live · quiet (no event for QUIET_AFTER_S) · disconnected.
 Bind to the tailnet address (OIBOT_FEED_BIND=100.x.y.z:8787); never expose publicly.
 
 Tokens (design §5.32 "Feed"): `OIBOT_FEED_TOKEN` is the shared one (one guild served: it feeds that guild, as always);
@@ -28,6 +32,8 @@ from typing import Any, Awaitable, Callable
 from aiohttp import web
 
 Handler = Callable[[dict[str, Any], "Companion"], Awaitable[dict[str, Any] | None]]
+QUIET_AFTER_S = 120  # no event for this long: "quiet" (breaks and trash pulls are quiet every night — no line, amber)
+GONE_KEEP_S = 6 * 3600  # a disconnected companion stays listed (state "disconnected") this long
 
 
 class Companion:
@@ -40,7 +46,8 @@ class Companion:
         self.connected_at = datetime.now(timezone.utc)
         self.last_seen = self.connected_at
         self.events = 0
-        self.seen: set[str] = set()  # idempotency keys (bounded)
+        self.disconnected_at: datetime | None = None
+        self.was_disconnected = False  # the same character/guild reconnected after a drop (the "back" line)
 
     def touch(self) -> None:
         self.last_seen = datetime.now(timezone.utc)
@@ -48,6 +55,13 @@ class Companion:
     @property
     def silent_for(self) -> float:
         return (datetime.now(timezone.utc) - self.last_seen).total_seconds()
+
+    @property
+    def state(self) -> str:
+        """live | quiet | disconnected (design §3.1 L22)."""
+        if self.disconnected_at is not None:
+            return "disconnected"
+        return "quiet" if self.silent_for > QUIET_AFTER_S else "live"
 
 
 class FeedServer:
@@ -59,6 +73,8 @@ class FeedServer:
         host, _, port = bind.rpartition(":")
         self.host, self.port = host or "127.0.0.1", int(port or 8787)
         self.companions: dict[str, Companion] = {}  # peer -> companion
+        self.gone: dict[tuple, Companion] = {}  # (character, guild) -> a companion whose socket closed (presence: disconnected)
+        self.on_disconnect: Callable[["Companion"], Awaitable[None]] | None = None  # the bot's thread line
         self._runner: web.AppRunner | None = None
 
     async def start(self) -> None:
@@ -94,26 +110,32 @@ class FeedServer:
                     await ws.close()
                     break
                 comp = Companion(ev.get("character", "?"), ev.get("client", "?"), ev.get("guild", ""), peer, bound=bound)
+                if self.gone.pop((comp.character, comp.guild), None) is not None:
+                    comp.was_disconnected = True
                 self.companions[peer] = comp
                 reply = await self.handler(ev, comp)
                 await ws.send_json({"type": "welcome", **(reply or {})})
                 continue
             comp.touch()
             idem = ev.get("idem")
-            if idem and idem in comp.seen:
-                await ws.send_json({"type": "ack", "idem": idem, "dup": True})
-                continue
             try:
-                reply = await self.handler(ev, comp)
+                reply = await self.handler(ev, comp) or {}
+                if reply.get("error"):  # refused (routing): not an ack — the companion prints it and may re-send
+                    await ws.send_json({"type": "error", "idem": idem, "message": str(reply["error"])[:300]})
+                    continue
                 comp.events += 1
-                if idem:
-                    comp.seen.add(idem)
-                    if len(comp.seen) > 5000:
-                        comp.seen = set(list(comp.seen)[-2500:])
-                await ws.send_json({"type": "ack", "idem": idem, **(reply or {})})
+                await ws.send_json({"type": "ack", "idem": idem, **reply})
             except Exception as e:  # noqa: BLE001
                 await ws.send_json({"type": "error", "idem": idem, "message": str(e)[:200]})
-        self.companions.pop(peer, None)
+        if comp is not None and self.companions.get(peer) is comp:
+            self.companions.pop(peer, None)
+            comp.disconnected_at = datetime.now(timezone.utc)
+            self.gone[(comp.character, comp.guild)] = comp
+            if self.on_disconnect is not None:
+                try:
+                    await self.on_disconnect(comp)
+                except Exception:  # noqa: BLE001 — presence is a courtesy
+                    pass
         return ws
 
     def authorize(self, token: Any) -> tuple[bool, str | None]:
@@ -130,6 +152,18 @@ class FeedServer:
         if not comps:
             return "no companion connected"
         return "; ".join(f"{c.character} ({c.client}) {c.events} events, seen {int(c.silent_for)}s ago" for c in comps)
+
+    def presence(self, guild: str | None = None, resolve: Callable[["Companion"], str | None] | None = None) -> list[dict]:
+        """Connected and recently disconnected companions as rows: {character, client, guild, state, last_seen (ISO),
+        silent_s, events} — `guild`/`resolve` filter as in `status`. Disconnected ones are kept GONE_KEEP_S."""
+        now = datetime.now(timezone.utc)
+        self.gone = {k: c for k, c in self.gone.items() if c.disconnected_at and (now - c.disconnected_at).total_seconds() < GONE_KEEP_S}
+        live_keys = {(c.character, c.guild) for c in self.companions.values()}
+        comps = list(self.companions.values()) + [c for k, c in self.gone.items() if k not in live_keys]
+        if guild is not None:
+            comps = [c for c in comps if (resolve(c) if resolve else c.guild) == guild]
+        return [{"character": c.character, "client": c.client, "guild": c.guild, "state": c.state, "events": c.events,
+                 "last_seen": (c.disconnected_at or c.last_seen).isoformat(timespec="seconds"), "silent_s": int(c.silent_for)} for c in comps]
 
 
 GUILD_TOKEN_PREFIX = "OIBOT_FEED_TOKEN_"

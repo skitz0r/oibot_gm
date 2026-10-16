@@ -832,7 +832,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     subscribers: dict[asyncio.Queue, str] = {}
 
     def publish(topic: str, guild: str | None = None) -> None:
-        """topic: `run:<key>` | `member` | `config` | `ops` | `agents`. `guild` None = every page (process-wide news:
+        """topic: `run:<key>` | `loot:<run key>` | `member` | `config` | `ops` | `agents`. `guild` None = every page (process-wide news:
         the agents' job status); otherwise only that guild's pages. Safe from worker threads."""
         def fan_out():
             for q, g in list(subscribers.items()):
@@ -852,10 +852,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def ops_line(guild_key: str | None = None) -> None:
         publish("ops", guild_key)
 
+    def loot_saved(guild_key: str, session_id: str, run_key: str) -> None:
+        publish(f"loot:{run_key}", guild_key)  # LootSession.save / archive (design §2.4: every save publishes through listeners)
+
     app.state.publish = publish  # the agents API and the tests reach the one fan-out through here
     from .. import ops as ops_mod, registry as registry_mod
+    from ..loot import session as loot_session_mod
 
-    for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line)):
+    for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
+                      (loot_session_mod.LOOT_LISTENERS, loot_saved)):
         hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
 
     @app.get("/api/events")

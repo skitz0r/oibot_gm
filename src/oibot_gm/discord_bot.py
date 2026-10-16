@@ -19,18 +19,16 @@ import logging
 import os
 import re
 import time
-from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
 
 import discord
 import yaml
 from discord import app_commands
-from pydantic import BaseModel, Field
 
 from . import configops, guild_routing, nl, render
 from .discord_feed import FeedMixin
+from .discord_loot import LootMixin
 from .discord_policy import CfgApplyButton, PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
@@ -45,9 +43,11 @@ from .discord_registry import ApplicationButton, Guilds, RegisterButton, is_offi
 from .importers import biscouncil, signup as signup_mod, wcl
 from .ops import Ops
 from .llm.provider import Provider, get_provider
-from .loot import recommend as rec_mod, scoring
+from .loot import session as loot_session
+from .loot.session import DISENCHANT, LootChanged, LootSession, Proposal, table_signature  # noqa: F401 — re-exported (old import sites)
 from .models import DropResult, LootAward, Player, RosterResult
 from .profiles import GameProfile, Item
+from .registry import RegistryError
 from .roster import coverage as cov_mod, explain, solver
 from .store import GitStore, resolve_data_root
 
@@ -117,94 +117,14 @@ class GuildContext:
 
 # ---------------------------------------------------------------- event state
 
-class Proposal(BaseModel):
-    item_id: int
-    item_name: str
-    boss: str
-    award_to: str
-    source: str  # bot | override
-    reason: Optional[str] = None
-    result: DropResult
-    order: int = 0  # judging order within the batch (1 = first)
-    impact: float = 0.0  # weight × best eligible tier
-    order_sensitive: Optional[str] = None  # who would win under kill order, if different
+# The loot session lives in loot/session.py (keyed (guild key, run key), drop ids); `MockEvent` is its old name, kept
+# while /mock lives (D11 retires it). Its verbs are discord_loot.LootMixin.
+MockEvent = LootSession
 
 
-class MockEvent(BaseModel):
-    """A loot/raid session. Despite the name it serves both the mock flow (shadow
-    fixtures) and real raids opened with /raid loot; `guild` decides which context
-    (ledger, policy, precedents) it reads and writes."""
-
-    id: str
-    channel_id: int
-    instance: str
-    date: str
-    guild: str = Field(default_factory=lambda: GUILD_KEY)  # the mock fixtures' guild unless a real raid says otherwise
-    origin: str = "mock"  # mock | raid
-    state: str = "signup_open"  # signup_open | roster_proposed | roster_locked | raid | ended
-    signups: list[Player]
-    roster: Optional[RosterResult] = None
-    roster_log: list[str] = Field(default_factory=list)
-    keep_together: list[list[str]] = Field(default_factory=list)
-    keep_apart: list[list[str]] = Field(default_factory=list)
-    force_out: list[str] = Field(default_factory=list)  # benched by request, sticky across re-solves
-    force_in: list[str] = Field(default_factory=list)
-    raid_thread_id: Optional[int] = None
-    current_boss: Optional[str] = None
-    drops: dict[str, list[int]] = Field(default_factory=dict)  # boss -> selected item ids
-    distributed: list[int] = Field(default_factory=list)  # item ids already awarded/confirmed
-    pending_drops: list[int] = Field(default_factory=list)  # working set for the current distribution
-    proposals: list[Proposal] = Field(default_factory=list)
-    awards: list[LootAward] = Field(default_factory=list)
-    overrides: list[dict] = Field(default_factory=list)
-    bosses_done: list[str] = Field(default_factory=list)
-    pending_reasons: list[dict] = Field(default_factory=list)  # in-game overrides awaiting a reason
-
-    @property
-    def raid_name(self) -> str:
-        return self.instance.replace("_", " ").title()
-
-    def active_signups(self) -> list[Player]:
-        return [p for p in self.signups if p.status != "absent"]
-
-    def undistributed(self, profile: GameProfile) -> list[int]:
-        """Selected drops not yet awarded, in boss (kill) order."""
-        order = [b["name"] for b in profile.raids[self.instance]["bosses"]]
-        return [i for boss in order for i in self.drops.get(boss, []) if i not in self.distributed]
-
-    def rel_path(self) -> Path:
-        return Path(self.guild) / "events" / f"{self.channel_id}.json"
-
-    def save(self, message: str | None = None) -> None:
-        st = _store()
-        st.write_text(self.rel_path(), self.model_dump_json(indent=1))
-        st.commit(message or f"{self.id}: {self.state}")
-
-    def archive(self) -> None:
-        st = _store()
-        st.write_text(Path(self.guild) / "events" / "archive" / f"{self.id}-{self.date}-{self.channel_id}.json", self.model_dump_json(indent=1))
-        live = st.root / self.rel_path()
-        if live.exists():
-            live.unlink()
-        st.commit(f"{self.id}: archived")
-
-
-def load_events() -> dict[int, MockEvent]:
-    """Live sessions from every guild directory in the data repo."""
-    out = {}
-    for gdir in _store().root.iterdir():
-        d = gdir / "events"
-        if not d.is_dir():
-            continue
-        for f in d.glob("*.json"):
-            try:
-                ev = MockEvent.model_validate_json(f.read_text())
-                if ev.guild != gdir.name:
-                    ev.guild = gdir.name  # pre-refactor files had no guild field
-                out[ev.channel_id] = ev
-            except Exception as e:  # noqa: BLE001
-                print(f"could not load {f}: {e}")
-    return out
+def load_events() -> dict:
+    """Live loot sessions from every guild directory in the data repo, keyed (guild key, session id)."""
+    return loot_session.load_sessions(_store())
 
 
 # ---------------------------------------------------------------- rendering
@@ -252,8 +172,18 @@ def roster_embed(ev: MockEvent, ctx: GuildContext, note: str | None = None) -> t
     return e, file
 
 
-def wowhead(item: Item) -> str:
-    return f"https://www.wowhead.com/tbc/item={item.id}"
+def wowhead(item, profile: GameProfile | None = None) -> str | None:
+    """A link to the item on the profile's database site (`integrations.yaml: wowhead_item_url`, `{id}` filled), or
+    None: an item known only by name, or a profile with no such site (WoW: Forever until it has one)."""
+    if not item or not getattr(item, "id", 0):
+        return None
+    root = getattr(profile, "root", None)
+    tmpl = None
+    if root is not None:
+        f = Path(root) / "integrations.yaml"
+        if f.exists():
+            tmpl = (yaml.safe_load(f.read_text()) or {}).get("wowhead_item_url")
+    return tmpl.format(id=item.id) if tmpl else None
 
 
 def candidate_block(r: DropResult, limit: int = 7) -> str:
@@ -266,13 +196,16 @@ def candidate_block(r: DropResult, limit: int = 7) -> str:
     return "\n".join(rows)
 
 
-def drop_embed(p: Proposal, item: Item) -> discord.Embed:
+def drop_embed(p: Proposal, item=None, profile: GameProfile | None = None) -> discord.Embed:
     r, rec = p.result, p.result.recommendation
-    colour = CLASS_COLOURS.get(next((c.cls for c in r.candidates if c.character == p.award_to), ""), 0x5865F2)
-    e = discord.Embed(title=item.name, url=wowhead(item), description=f"**{item.boss}** · {item.slot.replace('_', ' ')} · {item.type}", colour=colour)
-    e.add_field(name="Candidates (tier · attendance · wishlist · 14d loot power · base)", value=candidate_block(r), inline=False)
-    if p.source == "override":
-        e.add_field(name=f"Council award → **{p.award_to}**", value=f"Overrides bot pick {rec.primary}: “{p.reason}”", inline=False)
+    colour = CLASS_COLOURS.get(next((c.cls for c in r.candidates if c.character == p.to), ""), 0x5865F2)
+    desc = f"**{p.boss}**" + (f" · {item.slot.replace('_', ' ')} · {item.type}" if item is not None and item.slot != "unknown" else "")
+    if not p.tiered:
+        desc += "\nNo tier data for this item — everyone rostered is a candidate, ranked by attendance and recent loot only."
+    e = discord.Embed(title=p.item_name, url=wowhead(item, profile), description=desc, colour=colour)
+    e.add_field(name="Candidates (tier · attendance · wishlist · 14d loot power · base)", value=candidate_block(r) or "nobody", inline=False)
+    if p.override:
+        e.add_field(name=f"Council award → **{p.to}** (pending until Confirm)", value=f"Overrides bot pick {p.award_to}: “{p.override.reason}” — {p.override.by}", inline=False)
     else:
         flags = [f for f, on in (("close call", rec.close_call), ("deviates from score", rec.deviates_from_score)) if on]
         e.add_field(name=f"Recommendation → **{rec.primary}**" + (f"  _({', '.join(flags)})_" if flags else ""), value=rec.justification[:1000], inline=False)
@@ -296,13 +229,13 @@ def proposal_summary(ev: MockEvent) -> discord.Embed:
         lines.append(f"**{boss}**")
         for p in ps:
             flags = []
-            if p.source == "override":
-                flags.append(f"override: {p.reason}")
+            if p.override:
+                flags.append(f"override by {p.override.by}: {p.override.reason}")
             if p.order_sensitive:
                 flags.append("order-sensitive")
-            if p.result.recommendation.close_call and p.source == "bot":
+            if p.result.recommendation.close_call and not p.override:
                 flags.append("close call")
-            lines.append(f"`#{p.order:>2}` {p.item_name} → **{p.award_to}**" + (f" _({'; '.join(flags)})_" if flags else ""))
+            lines.append(f"`#{p.order:>2}` {p.item_name} → **{p.to}**" + (f" _({'; '.join(flags)})_" if flags else ""))
     e.description = "\n".join(lines)[:4000]
     sens = sum(1 for p in ev.proposals if p.order_sensitive)
     e.set_footer(text=f"# = judging order (impact first) · {sens} order-sensitive · “Details for…” shows the full card · reply here to adjust · Confirm to record")
@@ -313,7 +246,7 @@ def by_character_embed(ev: MockEvent, ctx: GuildContext, proposals: list[Proposa
     ps = proposals if proposals is not None else ev.proposals
     by_char: dict[str, list[Proposal]] = {}
     for p in ps:
-        by_char.setdefault(p.award_to, []).append(p)
+        by_char.setdefault(p.to, []).append(p)
     cls_of = {(p.character or p.signup_name): p.cls for p in ev.signups}
     lines = []
     for who, items in sorted(by_char.items(), key=lambda kv: (-len(kv[1]), kv[0])):
@@ -326,15 +259,16 @@ def by_character_embed(ev: MockEvent, ctx: GuildContext, proposals: list[Proposa
 class DetailSelect(discord.ui.Select):
     def __init__(self, bot: "OibotGM", ev: MockEvent):
         self.bot, self.ev = bot, ev
-        opts = [discord.SelectOption(label=f"{p.item_name} → {p.award_to}"[:100], value=str(p.item_id), description=f"{p.boss} · judged #{p.order}"[:100]) for p in ev.proposals][:25]
+        opts = [discord.SelectOption(label=f"{p.item_name} → {p.to}"[:100], value=p.drop_id, description=f"{p.boss} · judged #{p.order}"[:100]) for p in ev.proposals][:25]
         super().__init__(placeholder="Details for…", options=opts, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction):
-        p = next((p for p in self.ev.proposals if p.item_id == int(self.values[0])), None)
+        p = self.ev.pending(self.values[0])
         if not p:
             await interaction.response.send_message("That proposal is gone (confirmed or discarded).", ephemeral=True)
             return
-        await interaction.response.send_message(embed=drop_embed(p, self.bot.ctx.profile.items[p.item_id]), ephemeral=True)
+        ctx = self.bot.loot_ctx(self.ev)  # the session's own context: a real guild's items, never the fixtures'
+        await interaction.response.send_message(embed=drop_embed(p, ctx.item(p.item_id or None, p.item_name), ctx.profile), ephemeral=True)
 
 
 def proposal_text(ev: MockEvent) -> str:
@@ -344,13 +278,8 @@ def proposal_text(ev: MockEvent) -> str:
         r = p.result
         top = "; ".join(f"{c.character} ({c.cls[:3]} {c.spec[:5]}, {c.tier}, {c.base_score:.2f}{', has it' if c.already_has else ''})" for c in r.candidates[:4])
         why = r.recommendation.justification.split(". ")[0][:160]
-        out.append(f"- item_id {p.item_id} {p.item_name} [{p.boss}] → {p.award_to} [{p.source}{': ' + p.reason if p.reason else ''}] · top: {top} · why: {why}")
+        out.append(f"- item_id {p.item_id} {p.item_name} [{p.boss}] → {p.to} [{p.source}{': ' + p.reason if p.reason else ''}] · top: {top} · why: {why}")
     return "\n".join(out)
-
-
-def table_signature(cands) -> str:
-    """What the model actually judged on: top candidates and their rounded scores."""
-    return "|".join(f"{c.character}:{c.base_score:.2f}:{c.already_has}" for c in cands[:6])
 
 
 # ---------------------------------------------------------------- roster ops
@@ -467,134 +396,6 @@ def apply_ops(ctx: GuildContext, ev: MockEvent, ops: list[nl.RosterOp]) -> list[
     return notes
 
 
-# ---------------------------------------------------------------- loot ops
-
-def _award_for(ev: MockEvent, item: Item, cands, who: str, raid_date: date) -> LootAward | None:
-    c = next((c for c in cands if c.character == who), None)
-    if not c:
-        return None
-    return LootAward(raider=who, item_id=item.id, tier=c.tier, total_weight=c.upgrade_value, offspec=c.offspec, received=raid_date, instance=ev.raid_name, boss=item.boss)
-
-
-def run_distribution(ctx: GuildContext, ev: MockEvent, keep_overrides: bool = True, progress=None, concurrency: int = 6) -> None:
-    """Two-pass: a fast deterministic pass gives provisional awards so every item's
-    table can be built up front; Claude then judges items in parallel; finally the
-    tables are re-scored against the actual picks and any ranking shift is flagged."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    assert ev.roster
-    roster = ev.roster.selected
-    raid_date = date.fromisoformat(ev.date)
-    ledger = ctx.ledger + ev.awards
-    policy = ctx.policy_for_llm()
-    if ev.overrides:
-        policy += "\n\n## Precedents (council overrides this raid, with reasons)\n" + "\n".join(f"- {o['item']}: bot picked {o['bot']}, council awarded {o['human']} — “{o['reason']}”" for o in ev.overrides)
-    prior = {p.item_id: p for p in ev.proposals if p.source == "override"} if keep_overrides else {}
-    # previous bot judgments: reused when an item's table is unchanged (saves a Claude call per item)
-    previous = {p.item_id: p for p in ev.proposals if p.source == "bot"} if keep_overrides else {}
-    kill_order = list(ev.pending_drops)
-
-    def provisional_pass(seq: list[int]) -> tuple[dict[int, list[LootAward]], dict[int, str | None]]:
-        """Deterministic sequential pass: per-item context (awards before it) and provisional winner."""
-        awards: list[LootAward] = []
-        contexts: dict[int, list[LootAward]] = {}
-        winners: dict[int, str | None] = {}
-        for item_id in seq:
-            item = ctx.profile.items[item_id]
-            contexts[item_id] = list(awards)
-            cands = scoring.candidates(ctx.profile, item, roster, ledger + awards, ctx.wishlists, raid_date)
-            who = prior[item_id].award_to if item_id in prior else ((next((c for c in cands if not c.already_has), None) or (cands[0] if cands else None)) or None)
-            who = who if isinstance(who, str) or who is None else who.character
-            winners[item_id] = who
-            if who:
-                a = _award_for(ev, item, cands, who, raid_date)
-                if a:
-                    awards.append(a)
-        return contexts, winners
-
-    # impact = weight × best eligible tier, on a clean table; big items settle first
-    impact: dict[int, float] = {}
-    for item_id in kill_order:
-        item = ctx.profile.items[item_id]
-        cands = scoring.candidates(ctx.profile, item, roster, ledger, ctx.wishlists, raid_date)
-        impact[item_id] = max((c.upgrade_value for c in cands if not c.already_has), default=0.0)
-    mode = ctx.profile.loot.get("distribution", {}).get("order", "impact")
-    order = sorted(kill_order, key=lambda i: (-impact[i], kill_order.index(i))) if mode == "impact" else kill_order
-
-    # pass 1: provisional context in the judging order, plus kill-order winners for sensitivity
-    contexts, impact_winners = provisional_pass(order)
-    _, kill_winners = provisional_pass(kill_order)
-
-    # pass 2: judgment, parallel
-    done = 0
-
-    def judge(item_id: int) -> Proposal:
-        nonlocal done
-        item = ctx.profile.items[item_id]
-        cands = scoring.candidates(ctx.profile, item, roster, ledger + contexts[item_id], ctx.wishlists, raid_date)
-        if item_id in prior:
-            p = prior[item_id]
-            res = rec_mod.recommend(ctx.profile, item, cands, policy, None)
-            out = Proposal(item_id=item_id, item_name=item.name, boss=item.boss, award_to=p.award_to, source="override", reason=p.reason, result=DropResult(**{**res.model_dump(), "recommendation": p.result.recommendation}))
-        elif item_id in previous and table_signature(cands) == table_signature(previous[item_id].result.candidates) and previous[item_id].result.source.startswith("claude"):
-            p = previous[item_id]  # same table as last time: keep the judgment, skip the call
-            out = Proposal(item_id=item_id, item_name=item.name, boss=item.boss, award_to=p.award_to, source="bot", result=DropResult(item_id=item_id, item_name=item.name, boss=item.boss, candidates=cands, recommendation=p.result.recommendation, source=p.result.source + " (unchanged)"))
-        else:
-            res = rec_mod.recommend(ctx.profile, item, cands, policy, ctx.provider)
-            out = Proposal(item_id=item_id, item_name=item.name, boss=item.boss, award_to=res.recommendation.primary, source="bot", result=res)
-        out.order = order.index(item_id) + 1
-        out.impact = impact[item_id]
-        if mode == "impact" and kill_winners.get(item_id) != impact_winners.get(item_id) and out.source == "bot":
-            out.order_sensitive = kill_winners.get(item_id)
-            out.result.recommendation.warnings.append(f"order-sensitive: under kill order this would go to {kill_winners.get(item_id)}; decide this one deliberately")
-        done += 1
-        if progress:
-            progress(done, len(order), item.name)
-        return out
-
-    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
-        results = list(pool.map(judge, order))
-
-    # pass 3: re-score against actual picks (in judging order), flag shifts
-    actual: list[LootAward] = []
-    for p in sorted(results, key=lambda p: p.order):
-        item = ctx.profile.items[p.item_id]
-        fresh = scoring.candidates(ctx.profile, item, roster, ledger + actual, ctx.wishlists, raid_date)
-        top = next((c for c in fresh if not c.already_has), None)
-        if top and p.source == "bot" and p.award_to != top.character and not p.result.recommendation.deviates_from_score:
-            rank = next((i for i, c in enumerate(fresh, 1) if c.character == p.award_to), None)
-            p.result.recommendation.warnings.insert(0, f"earlier awards moved the table: {p.award_to} now ranks #{rank}, top score is {top.character} — re-check")
-            p.result.recommendation.close_call = True
-        p.result.candidates = fresh
-        a = _award_for(ev, item, fresh, p.award_to, raid_date)
-        if a:
-            actual.append(a)
-    ev.proposals = sorted(results, key=lambda p: kill_order.index(p.item_id))  # stored/presented in kill order
-    ev.save()
-
-
-def confirm_awards(ctx: GuildContext, ev: MockEvent, only: set[int] | None = None) -> list[str]:
-    """Record proposals as awards (all, or just `only` item ids) and drop them from the pending list."""
-    raid_date = date.fromisoformat(ev.date)
-    lines = []
-    st = _store()
-    chosen = [p for p in ev.proposals if only is None or p.item_id in only]
-    for p in chosen:
-        c = next((c for c in p.result.candidates if c.character == p.award_to), None)
-        award = LootAward(raider=p.award_to, item_id=p.item_id, tier=c.tier if c else "?", total_weight=c.upgrade_value if c else 0.5, offspec=bool(c and c.offspec), received=raid_date, instance=ev.raid_name, boss=p.boss)
-        ev.awards.append(award)
-        ctx.ledger.append(award)
-        st.append_jsonl(Path(ev.guild) / "ledger.jsonl", {**award.model_dump(), "event": ev.id, "source": p.source, "bot_pick": p.result.recommendation.primary, "import_id": f"{ev.id}-{p.item_id}-{p.award_to}"})
-        lines.append(f"{p.item_name} → {p.award_to}" + (" (override)" if p.source == "override" else ""))
-        ev.distributed.append(p.item_id)
-        if p.boss not in ev.bosses_done:
-            ev.bosses_done.append(p.boss)
-    ev.proposals = [p for p in ev.proposals if p not in chosen]
-    ev.pending_drops = [i for i in ev.pending_drops if only is not None and i not in only] if ev.proposals else []
-    ev.save(f"{ev.id}: confirmed {len(lines)} awards")
-    return lines
-
-
 # ---------------------------------------------------------------- views
 
 class RosterView(discord.ui.View):
@@ -610,35 +411,48 @@ class RosterView(discord.ui.View):
 
 
 def boss_embed(bot: "OibotGM", ev: MockEvent, boss: str, items: list[Item]) -> discord.Embed:
-    chosen = set(ev.drops.get(boss, []))
+    states = {}
+    for d in ev.drop_list:
+        if d.boss == boss:
+            states.setdefault(d.item_id, []).append(ev.drop_state(d))
     e = discord.Embed(title=boss, colour=TEAL)
     lines = []
     for it in items:
-        mark = "✅" if it.id in chosen and it.id in ev.distributed else ("🟡" if it.id in chosen else "▫️")
-        lines.append(f"{mark} [{it.name}]({wowhead(it)}) · {it.slot.replace('_', ' ')}")
+        st = states.get(it.id, [])
+        mark = "✅" if st and all(x == "awarded" for x in st) else ("🟡" if st else "▫️")
+        url = wowhead(it, bot.loot_ctx(ev).profile)
+        lines.append(f"{mark} " + (f"[{it.name}]({url})" if url else it.name) + f" · {it.slot.replace('_', ' ')}" + (f" ×{len(st)}" if len(st) > 1 else ""))
     e.description = "\n".join(lines)[:4000]
-    if chosen:
-        e.set_footer(text=f"{len(chosen)} selected · 🟡 awaiting distribution · ✅ awarded")
+    if states:
+        e.set_footer(text=f"{sum(len(v) for v in states.values())} ticked · 🟡 awaiting distribution · ✅ awarded")
     else:
         e.set_footer(text="Select what dropped ↓")
     return e
 
 
 class DropsSelect(discord.ui.Select):
-    """Per-boss multi-select; the selection persists on the event and the menu re-renders with it."""
+    """Per-boss multi-select: the selection is a diff against the session's ticked drops, applied with LootMixin.tick
+    (un-ticking an awarded drop is refused there)."""
 
     def __init__(self, bot: "OibotGM", ev: MockEvent, boss: str, items: list[Item]):
         self.bot, self.ev, self.boss, self.items = bot, ev, boss, items
-        chosen = set(ev.drops.get(boss, []))
+        chosen = {d.item_id for d in ev.drop_list if d.boss == boss}
         opts = [discord.SelectOption(label=it.name[:100], value=str(it.id), description=f"{it.slot.replace('_', ' ')} · {it.type}"[:100], default=it.id in chosen) for it in items][:25]
         super().__init__(placeholder=f"What dropped from {boss}?"[:150], options=opts, min_values=0, max_values=len(opts))
 
     async def callback(self, interaction: discord.Interaction):
         if not await self.bot.gate(interaction):
             return
-        keep = [i for i in self.ev.drops.get(self.boss, []) if i in self.ev.distributed]  # never un-award via the menu
-        self.ev.drops[self.boss] = sorted(set(keep) | {int(v) for v in self.values}, key=lambda i: [it.id for it in self.items].index(i))
-        self.ev.save()
+        want = {int(v) for v in self.values}
+        mine = [d for d in self.ev.drop_list if d.boss == self.boss]
+        have = {d.item_id for d in mine}
+        add = [{"item_id": i, "boss": self.boss} for i in sorted(want - have, key=lambda i: [it.id for it in self.items].index(i))]
+        remove = [d.drop_id for d in mine if d.item_id not in want and self.ev.drop_state(d) != "awarded"]  # never un-award via the menu
+        try:
+            await self.bot.tick(self.bot.loot_reg(self.ev), self.ev, add=add, remove=remove, by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:
+            await interaction.response.send_message(configops.user_error(e), ephemeral=True)
+            return
         view = discord.ui.View(timeout=None)
         view.add_item(DropsSelect(self.bot, self.ev, self.boss, self.items))
         await interaction.response.edit_message(embed=boss_embed(self.bot, self.ev, self.boss, self.items), view=view)
@@ -653,13 +467,17 @@ class DistributeView(discord.ui.View):
     async def go(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not await self.bot.gate(interaction):
             return
-        await self.bot.distribute(self.ev, interaction)
+        await self.bot.distribute_ui(self.ev, interaction)
 
 
 class ConfirmView(discord.ui.View):
+    """Confirm / Discard the proposals as shown: both carry the batch_rev of what the presser saw (a stale press is
+    refused with what changed)."""
+
     def __init__(self, bot: "OibotGM", ev: MockEvent):
         super().__init__(timeout=None)
         self.bot, self.ev = bot, ev
+        self.rev = loot_session.batch_rev(ev)
         if ev.proposals:
             self.add_item(DetailSelect(bot, ev))
 
@@ -671,7 +489,11 @@ class ConfirmView(discord.ui.View):
             await interaction.response.send_message("Nothing pending.", ephemeral=True)
             return
         confirmed = list(self.ev.proposals)
-        confirm_awards(self.bot.ctx, self.ev)
+        try:
+            await self.bot.confirm(self.bot.loot_reg(self.ev), self.ev, batch_rev=self.rev, by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:
+            await interaction.response.send_message(configops.user_error(e), ephemeral=True)
+            return
         await interaction.response.send_message(f"✅ Recorded {len(confirmed)} awards. Select more drops above as bosses die, then distribute again.", embed=by_character_embed(self.ev, self.bot.ctx, confirmed, "Awarded"), view=DistributeView(self.bot, self.ev))
         self.stop()
 
@@ -679,16 +501,18 @@ class ConfirmView(discord.ui.View):
     async def discard(self, interaction: discord.Interaction, _: discord.ui.Button):
         if not await self.bot.gate(interaction):
             return
-        self.ev.proposals = []
-        self.ev.pending_drops = []
-        self.ev.save()
-        await interaction.response.send_message("Discarded; the selected drops are still marked and can be distributed again.", view=DistributeView(self.bot, self.ev))
+        try:
+            line = await self.bot.discard(self.bot.loot_reg(self.ev), self.ev, batch_rev=self.rev, by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:
+            await interaction.response.send_message(configops.user_error(e), ephemeral=True)
+            return
+        await interaction.response.send_message(line, view=DistributeView(self.bot, self.ev))
         self.stop()
 
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
+class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
     ico = staticmethod(ico)
 
     async def post_application(self, reg, a) -> str:
@@ -735,8 +559,10 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         self.ctx = ctx
         self.tree = app_commands.CommandTree(self)
         self.test_guild = test_guild
-        self.events: dict[int, MockEvent] = load_events()
-        self.contexts: dict[str, object] = {}  # guild key -> RegistryLootContext (lazy)
+        self.events: dict[tuple[str, str], MockEvent] = load_events()  # loot sessions by (guild key, session id)
+        self.contexts: dict = {}  # guild key -> RegistryLootContext (lazy, one per guild; reload() after an import)
+        for s in self.events.values():
+            self.loot_index(s)  # + the by-thread map event_for reads
         self._register()
         # real (non-mock) surface: registry, officer tools, ops feed
         self.ops = Ops(self)
@@ -798,25 +624,12 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         except Exception:  # noqa: BLE001
             pass
 
-    # ---- helpers
-    def loot_ctx(self, ev: MockEvent):
-        """The context a session reads/writes: the mock fixtures, or the registered guild's data."""
-        if ev.guild == self.ctx.guild_key:
-            return self.ctx
-        if ev.guild not in self.contexts:
-            from .lootctx import RegistryLootContext
-
-            reg = self.registries.by_key.get(ev.guild)
-            if reg is None:
-                raise RuntimeError(f"no registry for guild {ev.guild}")
-            self.contexts[ev.guild] = RegistryLootContext(reg, _store(), self.ctx.provider)
-        return self.contexts[ev.guild]
-
-    def event_for(self, channel_id: int) -> MockEvent | None:
-        ev = self.events.get(channel_id)
-        if ev:
-            return ev
-        return next((e for e in self.events.values() if e.raid_thread_id == channel_id), None)
+    # ---- helpers (loot_ctx, event_for, loot_reg … are LootMixin's)
+    def loot_reg(self, session):
+        """A /mock session has no registry (its context is the fixtures'); a real one has its guild's."""
+        if getattr(session, "origin", "raid") != "raid":
+            return None
+        return LootMixin.loot_reg(self, session)
 
     async def accept_roster(self, ev: MockEvent, interaction: discord.Interaction):
         if not ev.roster:
@@ -897,18 +710,14 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
                 ICON_EMOJI[name] = str(em)
         print(f"icon emojis ready: {len(ICON_EMOJI)} ({n_new} uploaded)")
 
-    async def distribute(self, ev: MockEvent, interaction: discord.Interaction):
-        ctx = self.loot_ctx(ev)
-        pending = ev.undistributed(ctx.profile)
+    async def distribute_ui(self, ev: MockEvent, interaction: discord.Interaction):
+        """The Distribute button / command: the verb (LootMixin.distribute) with a ticker, then the proposals."""
+        reg = self.loot_reg(ev)
+        pending = ev.undistributed()
         if not pending:
-            await interaction.response.send_message("Nothing selected that hasn't been awarded yet — tick drops on the boss messages first.", ephemeral=True)
+            await interaction.response.send_message("Nothing ticked that hasn't been proposed or awarded yet — tick drops on the boss messages first.", ephemeral=True)
             return
-        if ev.proposals:
-            await interaction.response.send_message("A proposal is already waiting for Confirm/Discard above.", ephemeral=True)
-            return
-        ev.pending_drops = pending
-        ev.save()
-        names = ", ".join(ctx.profile.item_name(i) for i in pending)
+        names = ", ".join(d.item_name for d in pending)
         await interaction.response.send_message(f"⚖️ Distributing **{len(pending)}** items: {names}"[:1900])
         status = await interaction.original_response()
         loop = asyncio.get_running_loop()
@@ -927,10 +736,13 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
 
         t = loop.create_task(ticker())
         try:
-            await asyncio.to_thread(run_distribution, ctx, ev, True, progress)
+            res = await self.distribute(reg, ev, by=interaction.user.display_name, by_id=interaction.user.id, progress=progress)
+        except RegistryError as e:
+            await status.edit(content=configops.user_error(e)[:1900])
+            return
         finally:
             t.cancel()
-        await status.edit(content=f"⚖️ Distributed **{len(pending)}** items — proposals below."[:1900])
+        await status.edit(content=f"⚖️ Distributed **{len(res['proposals'])}** items — proposals below." + (f" {len(res['stale'])} changed while judging; distribute again." if res["stale"] else ""))
         await self.post_proposals(ev, interaction.channel)
 
     async def post_boss_tables(self, ev: MockEvent, dest) -> None:
@@ -954,27 +766,19 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         """Compact: item → character by boss, then character → items. Full cards via the Details dropdown."""
         await dest.send(content=prefix, embeds=[proposal_summary(ev), by_character_embed(ev, self.loot_ctx(ev))], view=ConfirmView(self, ev))
 
-    async def end_session(self, ev: MockEvent, interaction: discord.Interaction) -> None:
-        ctx = self.loot_ctx(ev)
-        e = discord.Embed(title=f"Raid summary · {ev.raid_name} · {ev.id}", colour=TEAL)
-        by_char: dict[str, list[str]] = {}
-        power: dict[str, float] = {}
-        for a in ev.awards:
-            by_char.setdefault(a.raider, []).append(ctx.profile.item_name(a.item_id).replace(" (T6 token)", ""))
-            power[a.raider] = power.get(a.raider, 0.0) + a.total_weight
-        tally = "\n".join(f"• **{w}** ({len(i)}, +{power[w]:.2f}): {', '.join(i)}" for w, i in sorted(by_char.items(), key=lambda kv: (-len(kv[1]), kv[0])))
-        e.add_field(name=f"Awards ({len(ev.awards)} items, {len(by_char)} recipients)", value=tally[:1000] or "(none)", inline=False)
-        if ev.overrides:
-            e.add_field(name=f"Council overrides ({len(ev.overrides)})", value="\n".join(f"• {o['item']}: {o['bot']} → **{o['human']}** — “{o['reason']}”" for o in ev.overrides)[:1000], inline=False)
+    async def end_mock_session(self, ev: MockEvent, interaction: discord.Interaction) -> None:
+        """/mock end: the summary, then the session is archived (a real council ends through LootMixin.end_run)."""
+        summary = self.loot_summary(None, ev)
+        e = discord.Embed(title=f"Raid summary · {ev.raid_name} · {ev.label or ev.id}", colour=TEAL, description=summary["text"][:4000])
         if ev.roster_log:
             e.add_field(name="Roster history", value="\n".join(f"• {l}" for l in ev.roster_log[-8:])[:1000], inline=False)
-        agree = len(ev.awards) - len(ev.overrides)
+        ctx = self.loot_ctx(ev)
         if ctx.provider:
             e.add_field(name="LLM usage (this bot process)", value=ctx.provider.summary()[:1000], inline=False)
-        e.set_footer(text=f"council agreed with the bot on {max(agree, 0)}/{len(ev.awards)} awards · data repo {_store().head()}")
+        e.set_footer(text=f"data repo {_store().head()}")
         ev.state = "ended"
-        ev.archive()
-        self.events.pop(ev.channel_id, None)
+        ev.archive(summary)
+        self.loot_forget(ev)
         await interaction.response.send_message(embed=e)
 
     async def cached_member(self, guild, uid: int, max_age: float = 300):
@@ -1340,45 +1144,60 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
                 notes = await asyncio.to_thread(apply_ops, self.ctx, ev, req.ops)
                 embed, view, file = await self.propose_roster(ev, (req.reply + "\n" if req.reply else "") + "Changes: " + "; ".join(notes))
                 await message.reply(embed=embed, view=view, file=file)
-        elif ev.state == "raid" and message.channel.id == ev.raid_thread_id and ev.pending_reasons and not ev.proposals:
-            line = await self.record_pending_reason(ev, message.content, message.author.display_name)
-            if line:
-                await message.reply(line)
-        elif ev.state == "raid" and message.channel.id == ev.raid_thread_id and ev.proposals:
-            ctx = self.loot_ctx(ev)
-            async with message.channel.typing():
+        elif message.channel.id == ev.raid_thread_id and self.loot_live(ev) and ev.proposals:
+            await self.loot_chat(message, ev)
+
+    async def loot_chat(self, message: discord.Message, ev: MockEvent) -> None:
+        """An officer's sentence in the loot thread while proposals wait (interim — the Discord surfaces make this
+        addressed-only and route writes through the `loot` op): a question is answered; a confirm or an override goes
+        through LootMixin.confirm / override (names checked against the candidate tables), then the other picks are
+        re-judged once."""
+        ctx = self.loot_ctx(ev)
+        reg = self.loot_reg(ev)
+        cfg = reg.config if reg else (self.registries.for_guild(message.guild.id).config if message.guild and self.registries.for_guild(message.guild.id) else None)
+        async with message.channel.typing():
+            try:
+                fb = await asyncio.to_thread(nl.parse_loot_feedback, ctx.provider, ctx.policy_for_llm(), proposal_text(ev), message.content, message.author.display_name)
+            except Exception as e:  # noqa: BLE001
+                await message.reply(await configops.report_error(self.ops, cfg, e, "loot chat"))
+                return
+            if fb.kind == "ignore":
+                return
+            if fb.kind == "question":
+                await message.reply(fb.reply[:1900])
+                return
+            by, by_id = message.author.display_name, message.author.id
+            if fb.kind == "confirm":
+                confirmed = list(ev.proposals)
                 try:
-                    fb = await asyncio.to_thread(nl.parse_loot_feedback, ctx.provider, ctx.policy_for_llm(), proposal_text(ev), message.content, message.author.display_name)
-                except Exception as e:  # noqa: BLE001
-                    await message.reply(await configops.report_error(self.ops, reg.config if reg else None, e, "loot chat"))
+                    await self.confirm(reg, ev, by=by, by_id=by_id)
+                except RegistryError as e:
+                    await message.reply(configops.user_error(e))
                     return
-                if fb.kind == "ignore":
-                    return
-                if fb.kind == "question":
-                    await message.reply(fb.reply[:1900])
-                    return
-                if fb.kind == "confirm":
-                    confirmed = list(ev.proposals)
-                    confirm_awards(ctx, ev)
-                    await message.reply(f"✅ Recorded {len(confirmed)} awards. Select more drops above as bosses die, then distribute again.", embed=by_character_embed(ev, ctx, confirmed, "Awarded"), view=DistributeView(self, ev))
-                    return
-                applied = []
-                for ch in fb.changes:
-                    p = next((p for p in ev.proposals if p.item_id == ch.item_id), None)
-                    if not p or ch.award_to not in {c.character for c in p.result.candidates}:
-                        applied.append(f"couldn't apply {ch.award_to} ← item {ch.item_id}")
-                        continue
-                    precedent = {"date": ev.date, "event": ev.id, "item": p.item_name, "item_id": p.item_id, "bot": p.result.recommendation.primary, "human": ch.award_to, "reason": ch.reason, "by": message.author.display_name, "status": "active"}
-                    ev.overrides.append(precedent)
-                    ctx.precedents.append(precedent)
-                    _store().append_jsonl(Path(ev.guild) / "precedents.jsonl", precedent)
-                    p.award_to, p.source, p.reason = ch.award_to, "override", ch.reason
-                    applied.append(f"{p.item_name} → {ch.award_to}")
-                ev.save(f"{ev.id}: override {', '.join(applied)}"[:120])
-                before = len(ctx.provider.log) if ctx.provider else 0
-                await asyncio.to_thread(run_distribution, ctx, ev, True)  # re-score; re-judge only tables that changed
-                rejudged = (len(ctx.provider.log) - before) if ctx.provider else 0
-                await self.post_proposals(ev, message.channel, prefix=(fb.reply + "\n" if fb.reply else "") + "Applied: " + "; ".join(applied) + f". Re-scored all; re-judged {rejudged} item(s) whose table changed.")
+                await message.reply(f"✅ Recorded {len(confirmed)} awards. Select more drops above as bosses die, then distribute again.", embed=by_character_embed(ev, ctx, confirmed, "Awarded"), view=DistributeView(self, ev))
+                return
+            applied, touched = [], set()
+            for ch in fb.changes:
+                p = next((p for p in ev.proposals if p.item_id == ch.item_id and p.drop_id not in touched), None)
+                if not p or ch.award_to not in {c.character for c in p.result.candidates}:
+                    applied.append(f"couldn't apply {ch.award_to} ← item {ch.item_id}")
+                    continue
+                try:
+                    await self.override(reg, ev, p.drop_id, ch.award_to, ch.reason, by=by, by_id=by_id, replace=True, rejudge=False)
+                except RegistryError as e:
+                    applied.append(f"{p.item_name}: {configops.user_error(e)}")
+                    continue
+                touched.add(p.drop_id)
+                applied.append(f"{p.item_name} → {ch.award_to}")
+            rejudged = 0
+            others = [p.drop_id for p in ev.proposals if not p.override]
+            if touched and others:
+                try:
+                    res = await self.distribute(reg, ev, by=by, by_id=by_id, only=others, rejudge=True)
+                    rejudged = len(res["proposals"])
+                except RegistryError:
+                    pass
+            await self.post_proposals(ev, message.channel, prefix=(fb.reply + "\n" if fb.reply else "") + "Applied: " + "; ".join(applied) + (f". Re-scored the rest ({rejudged})." if rejudged else ".") + " Overrides are recorded at Confirm.")
 
     # ---- commands
     def _register(self):
@@ -1398,8 +1217,12 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         @app_commands.choices(instance=raid_choices)
         async def signup(interaction: discord.Interaction, instance: app_commands.Choice[str], date_: str = ""):
             d = date_ or self.ctx.seed_event["starts_at"][:10]
-            ev = MockEvent(id=f"{instance.value.split('_')[0].upper()[:3]}-{d[5:].replace('-', '')}", channel_id=interaction.channel_id, instance=instance.value, date=d, guild=self.ctx.guild_key, signups=copy.deepcopy(self.ctx.seed_players))
-            self.events[ev.channel_id] = ev
+            ev = MockEvent(id=f"mock-{interaction.channel_id}", label=f"{instance.value.split('_')[0].upper()[:3]}-{d[5:].replace('-', '')}", channel_id=interaction.channel_id, instance=instance.value, date=d, guild=self.ctx.guild_key, signups=copy.deepcopy(self.ctx.seed_players))
+            old = self.events.get(ev.key)
+            if old is not None:
+                old.archive()
+            ev.attach(_store())
+            self.loot_index(ev)
             ev.save()
             await interaction.response.send_message(embed=signup_embed(ev, self.ctx))
 
@@ -1463,6 +1286,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             ev.raid_thread_id = thread.id
             ev.state = "raid"
             ev.save()
+            self.loot_index(ev)
             await self.post_boss_tables(ev, thread)
 
         @mock.command(name="bosses", description="Re-post the boss loot tables in the raid thread")
@@ -1480,7 +1304,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             if not ev or ev.state != "raid":
                 await interaction.response.send_message("Not in a raid thread.", ephemeral=True)
                 return
-            await self.distribute(ev, interaction)
+            await self.distribute_ui(ev, interaction)
 
         @mock.command(name="status", description="Where is this channel's mock event?")
         async def status(interaction: discord.Interaction):
@@ -1489,7 +1313,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
                 await interaction.response.send_message("No event here.", ephemeral=True)
                 return
             spend = self.ctx.provider.summary() if self.ctx.provider else "LLM off"
-            await interaction.response.send_message(f"**{ev.id}** {ev.raid_name} · state `{ev.state}` · signups {len(ev.active_signups())} · roster {'yes' if ev.roster else 'no'} · selected drops {sum(len(v) for v in ev.drops.values())} (undistributed {len(ev.undistributed(self.ctx.profile))}) · awards {len(ev.awards)} · overrides {len(ev.overrides)}\n{spend}"[:1900], ephemeral=True)
+            await interaction.response.send_message(f"**{ev.id}** {ev.raid_name} · state `{ev.state}` · signups {len(ev.active_signups())} · roster {'yes' if ev.roster else 'no'} · ticked drops {len(ev.drop_list)} (undistributed {len(ev.undistributed())}) · awards {len(ev.awards)} · overrides {len(ev.overrides)}\n{spend}"[:1900], ephemeral=True)
 
         @mock.command(name="end", description="Summarise the raid's awards and overrides")
         async def end(interaction: discord.Interaction):
@@ -1497,13 +1321,13 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
             if not ev:
                 await interaction.response.send_message("No event here.", ephemeral=True)
                 return
-            await self.end_session(ev, interaction)
+            await self.end_mock_session(ev, interaction)
 
         @mock.command(name="reset", description="Forget this channel's mock event (archived, not deleted)")
         async def reset(interaction: discord.Interaction):
             ev = self.event_for(interaction.channel_id)
             if ev:
-                self.events.pop(ev.channel_id, None)
+                self.loot_forget(ev)
                 ev.archive()
             await interaction.response.send_message("Reset (event archived). /mock signup to start over.", ephemeral=True)
 
@@ -1536,11 +1360,13 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         print(f"commands synced ({scope})")
         self.loop.create_task(self.scheduler())
         self.attach_pool_listeners()
+        self.attach_loot_listeners()  # a seat change on a run with a council → "now a candidate" (candidates are read live)
         token, bind = feed_config()
         per_guild = guild_tokens()  # OIBOT_FEED_TOKEN_<KEY>: a token that feeds one guild only
         if token or per_guild:
             self.feed = FeedServer(self.handle_feed_event, token, bind,
                                    auth=lambda t: feed_authorize(t, token, per_guild, lambda: list(self.registries.by_key)))
+            self.feed.on_disconnect = self.feed_disconnected
             await self.feed.start()
         else:
             print("loot feed disabled (set OIBOT_FEED_TOKEN or OIBOT_FEED_TOKEN_<KEY>, and OIBOT_FEED_BIND)")
@@ -1555,7 +1381,7 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
         await self.resolve_officer_roles()  # legacy officer role names → ids, name cache for display
         st = _store()
         regs = ", ".join(f"{r.config.name}({len(r.members)}m/{len(r.all_characters())}c)" for r in self.registries.ordered())
-        print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · events loaded: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
+        print(f"oibot_GM online as {self.user} · mock data: {self.ctx.guild['name']} · registries: {regs} · data: {st.root} @ {st.head()} (push {'on' if st.push_enabled else 'off'}) · llm: {self.ctx.provider.name if self.ctx.provider else 'off'} · loot sessions: {len(self.events)} · ledger {len(self.ctx.ledger)} · precedents {len(self.ctx.precedents)}")
         for err in self.registries.load_errors:  # a guild that didn't load has no ops channel to tell
             print(f"guild NOT loaded — {err}")
             log.error("guild not loaded: %s", err)
@@ -1573,6 +1399,10 @@ class OibotGM(FeedMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin
                 await self.refresh_pool(reg)  # state may have changed while offline (PRs to the data repo)
             if not getattr(self, "_pool_booted", False):
                 await self.refresh_registration_card(reg)  # the card's text and buttons as this version draws them (Apply to join)
+        if not getattr(self, "_loot_booted", False):
+            self._loot_booted = True
+            for line in await self.loot_restore():  # an interrupted Distribute is reported, never re-run
+                log.info("loot restore: %s", line)
         self._pool_booted = True
 
 
@@ -1584,6 +1414,7 @@ def run(guild_dir: Path, signup_file: str) -> None:
     test_guild = int(os.environ["DISCORD_TEST_GUILD_ID"]) if os.environ.get("DISCORD_TEST_GUILD_ID") else None
     guild_dir = guild_dir.resolve()
     STORE = GitStore(guild_dir.parent)
+    loot_session.STORE = STORE  # sessions created in this process save through it
     GUILD_KEY = guild_dir.name
     ctx = GuildContext(guild_dir, signup_file)
     # logging is configured by cli.setup_logging (rotating out/oibot.log); discord.py's own handler is off

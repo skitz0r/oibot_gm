@@ -22,6 +22,8 @@ from oibot_gm import configops, discord_registry as dr, guild_routing, ops as op
 from oibot_gm import flows_config  # noqa: F401 — registers guild_claim
 from oibot_gm.discord_bot import OibotGM
 from oibot_gm.discord_feed import FeedMixin, feed_status
+from oibot_gm.discord_loot import LootMixin
+from oibot_gm.loot.session import LootSession
 from oibot_gm.discord_registry import Guilds
 from oibot_gm.raid_scheduler import RaidSchedulerMixin
 from oibot_gm.registry import GUILD_KEY_RE, GuildConfig, RegistryError, create_guild, guild_key_for
@@ -670,59 +672,87 @@ def test_nobody_left_is_said_once_per_guild_even_with_one_run_key(duo):
 
 # ---------------------------------------------------------------- the companion feed
 
-class FeedBot(FeedMixin):
-    def __init__(self, guilds, events):
+class FeedBot(FeedMixin, LootMixin):
+    """The companion routing over REAL loot sessions: a real session is live iff its run is locked (no separate
+    state); `stores` maps a guild key to its RaidStore."""
+
+    def __init__(self, guilds, sessions, stores=None):
         self.registries = guilds
-        self.events = {i: e for i, e in enumerate(events)}
+        self.events = {s.key: s for s in sessions}
+        self.raids = types.SimpleNamespace(store=lambda r: (stores or {})[r.key])
         self.ctx = types.SimpleNamespace(guild_key="mockdata")
         self.ops = RecOps()
         self.feed = None
 
 
-def session(guild, origin="raid", sid="BAR-1010"):
-    return types.SimpleNamespace(state="raid", origin=origin, guild=guild, id=f"{guild}:{sid}", raid_thread_id=None, roster=None)
+def live_session(guild, rs, ev) -> LootSession:
+    """A real council on a locked run (`ev`), keyed (guild, run key)."""
+    return LootSession(id=ev.key, run_key=ev.key, instance=ev.instance, date=ev.start.date().isoformat(), guild=guild, origin="raid", state="raid")
 
 
-def comp(guild="", bound=None):
+def mock_session(guild="mockdata") -> LootSession:
+    return LootSession(id="mock-1", channel_id=1, instance="barrow_deeps", date="2026-12-09", guild=guild, origin="mock", state="raid")
+
+
+@pytest.fixture
+def raiding(duo):
+    """Both guilds hold a locked run with ONE key, each with its council: SimpleNamespace(a, b, stores, ev_a, ev_b)."""
+    ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
+    lock_with_board(duo.a, duo.rs_a, ev_a, [m.display_name for m in duo.a.test_members()[:5]])
+    lock_with_board(duo.b, duo.rs_b, ev_b, [m.display_name for m in duo.b.test_members()[:5]])
+    return types.SimpleNamespace(a=live_session(GUILD, duo.rs_a, ev_a), b=live_session(GUILD2, duo.rs_b, ev_b),
+                                 stores={GUILD: duo.rs_a, GUILD2: duo.rs_b}, ev_a=ev_a, ev_b=ev_b)
+
+
+def comp(guild="", bound=None, character="Scribe"):
     """A connected companion: `guild` = what its hello named, `bound` = the guild its token belongs to (feed.Companion)."""
     from oibot_gm.feed import Companion
 
-    c = Companion("Scribe", "oibot-companion/0.1", guild, "peer", bound=bound)
+    c = Companion(character, "oibot-companion/0.1", guild, "peer", bound=bound)
     return c
 
 
-def test_a_companion_routes_to_its_own_tokens_guild(duo):
-    bot = FeedBot(duo.guilds, [session(GUILD), session(GUILD2)])
+def test_a_companion_routes_to_its_own_tokens_guild(duo, raiding):
+    bot = FeedBot(duo.guilds, [raiding.a, raiding.b], raiding.stores)
     assert bot.active_raid(comp("", bound=GUILD2)).guild == GUILD2 and bot.active_raid(comp("duo", bound=GUILD2)).guild == GUILD2
     reply = run(bot.handle_feed_event({"type": "hello"}, comp("duo", bound=GUILD2)))
-    assert reply["routes_to"] == f"{GUILD2}:BAR-1010" and bot.ops.lines[-1][0] == GUILD2, "the line goes to the session's guild"
+    assert reply["routes_to"] == raiding.ev_b.key and reply["session"] == f"{GUILD2}:{raiding.ev_b.key}", "the ack names the session (guild:run)"
+    assert bot.ops.lines[-1][0] == GUILD2, "the line goes to the session's guild"
 
 
-def test_a_guilds_token_never_feeds_another_guild_whatever_the_hello_names(duo):
+def test_a_guilds_token_never_feeds_another_guild_whatever_the_hello_names(duo, raiding):
     """B's raid leader holds B's token: --guild demo is ignored (the token decides), so A's live session gets nothing."""
-    bot = FeedBot(duo.guilds, [session(GUILD), session(GUILD2)])
+    bot = FeedBot(duo.guilds, [raiding.a, raiding.b], raiding.stores)
     c = comp(GUILD, bound=GUILD2)
     assert bot.active_raid(c).guild == GUILD2
     reply = run(bot.handle_feed_event({"type": "hello"}, c))
-    assert reply["routes_to"] == f"{GUILD2}:BAR-1010" and "is ignored" in reply["note"]
-    only_a = FeedBot(duo.guilds, [session(GUILD)])
+    assert reply["routes_to"] == raiding.ev_b.key and "is ignored" in reply["note"]
+    only_a = FeedBot(duo.guilds, [raiding.a], raiding.stores)
     assert only_a.active_raid(comp(GUILD, bound=GUILD2)) is None, "B's token with only A raiding: nowhere, never A's session"
 
 
-def test_a_shared_token_companion_never_feeds_a_real_raid_with_several_guilds(duo):
+def test_a_shared_token_companion_never_feeds_a_real_raid_with_several_guilds(duo, raiding):
     """Several guilds: the shared OIBOT_FEED_TOKEN is bound to no guild, so it never routes to a real raid — not when one
     guild alone is raiding (no guess), not when its hello names a guild (anyone holding it could name any)."""
-    bot = FeedBot(duo.guilds, [session(GUILD), session(GUILD2)])
+    bot = FeedBot(duo.guilds, [raiding.a, raiding.b], raiding.stores)
     assert bot.active_raid(comp("")) is None and bot.active_raid(comp("duo")) is None and bot.active_raid(comp("stale name")) is None
     reply = run(bot.handle_feed_event({"type": "hello"}, comp("")))
     assert reply["routes_to"] is None and "OIBOT_FEED_TOKEN_<KEY>" in reply["note"] and not bot.ops.lines, "no guild to tell: the log only"
-    one = FeedBot(duo.guilds, [session(GUILD2)])
+    one = FeedBot(duo.guilds, [raiding.b], raiding.stores)
     assert one.active_raid(comp("")) is None and one.active_raid(comp(GUILD)) is None, "one guild raiding: still no guess"
     ev = {"type": "drop", "boss": "X", "items": []}
     assert run(one.handle_feed_event(ev, comp(""))) == {"note": "no active raid; event ignored"}
-    mock = FeedBot(duo.guilds, [session(GUILD), session("mockdata", origin="mock")])
+    mock = FeedBot(duo.guilds, [raiding.a, mock_session()], raiding.stores)
     assert mock.active_raid(comp("", bound=GUILD2)).guild == "mockdata", "a mock session stays the fallback (K12)"
     assert mock.active_raid(comp("")).guild == "mockdata", "the shared token still reaches the demo flow"
+
+
+def test_a_council_on_a_run_that_is_not_locked_is_not_live(duo, raiding):
+    """A session is live iff its run is locked: the run done (or reopened) → the companion routes nowhere."""
+    bot = FeedBot(duo.guilds, [raiding.b], raiding.stores)
+    assert bot.active_raid(comp("", bound=GUILD2)) is raiding.b
+    raiding.ev_b.state = "done"
+    assert bot.active_raid(comp("", bound=GUILD2)) is None and bot.loot_route(comp("", bound=GUILD2))[1] == "no run live"
 
 
 def test_feed_tokens_bind_a_companion_to_its_guild():
@@ -771,11 +801,17 @@ def test_the_feed_server_binds_the_token_at_hello():
     assert seen == [("duo", "duo", "demo"), ("demo", None, "demo")], "B's token: its guild is B whatever the hello said"
 
 
-def test_single_guild_feed_routes_as_before_whatever_the_companion_says(reg, store):
+def test_single_guild_feed_routes_as_before_whatever_the_companion_says(reg, store, rs):
+    from conftest import join, open_test_run
+
     g = Guilds(store, ROOT)
-    bot = FeedBot(g, [session("mockdata", origin="mock")])
+    bot = FeedBot(g, [mock_session()], {GUILD: rs})
     assert bot.active_raid(comp("Oi Guild Name")).guild == "mockdata" and bot.active_raid(comp(GUILD)).guild == "mockdata"
-    bot2 = FeedBot(g, [session("mockdata", origin="mock"), session(GUILD)])
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:5])
+    lock_with_board(reg, rs, ev, [m.display_name for m in reg.test_members()[:5]])
+    bot2 = FeedBot(g, [mock_session(), live_session(GUILD, rs, ev)], {GUILD: rs})
+    bot2.raids = types.SimpleNamespace(store=lambda r: rs)
     assert bot2.active_raid(comp("whatever")).guild == GUILD, "a real raid first, as before"
     reply = run(bot.handle_feed_event({"type": "hello"}, comp("Oi Guild Name")))
     assert "isn't one I serve" in reply["note"] and bot.ops.lines[-1][0] == GUILD
@@ -906,7 +942,7 @@ def test_loot_thread_check_is_per_guild(duo, monkeypatch):
     from oibot_gm.discord_bot import MockEvent
 
     monkeypatch.setattr(dr, "is_officer", lambda i, r: True)
-    monkeypatch.setattr(MockEvent, "save", lambda self, msg=None: None)
+    monkeypatch.setattr(MockEvent, "save", lambda self, msg=None, touch=True: None)
     ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
     for reg, rs, ev in ((duo.a, duo.rs_a, ev_a), (duo.b, duo.rs_b, ev_b)):
         join(reg, rs, ev, reg.test_members()[:10])
@@ -915,6 +951,9 @@ def test_loot_thread_check_is_per_guild(duo, monkeypatch):
     stores = {GUILD: duo.rs_a, GUILD2: duo.rs_b}
     bot.raids = types.SimpleNamespace(store=lambda r: stores[r.key])
     ch = FakeChannel()  # one channel object: its fake thread ids stay unique, as Discord's are
+    bot.officer_ch = ch  # each guild's council goes to its officer channel (one fake channel object here)
+    for r in (duo.a, duo.b):
+        r.config.roster_channel_id = ch.id
 
     def loot(reg, server):
         h = Harness(reg, stores[reg.key], client=bot)
@@ -923,7 +962,7 @@ def test_loot_thread_check_is_per_guild(duo, monkeypatch):
         return h
     first = loot(duo.a, 1)
     assert "Loot thread open" in first.text
-    (thread_a,) = [t for t, s in bot.events.items() if s.guild == GUILD]
+    (thread_a,) = [s.raid_thread_id for s in bot.events.values() if s.guild == GUILD]
     second = loot(duo.b, DUO_SERVER)
     assert "Loot thread open" in second.text and "already open" not in second.text, "demo's session is not duo's"
     assert sorted((s.id, s.guild) for s in bot.events.values()) == [(ev_a.key, GUILD), (ev_b.key, GUILD2)]

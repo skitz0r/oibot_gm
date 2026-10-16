@@ -965,15 +965,64 @@ remotely too; leave it on unless you run the MCP server on another machine. Brow
 for handing the guild to a new owner, by design: the token *is* the owner, so a transfer through it would give the
 guild away and change whose rights the token carries — that stays `/gm config owner` in Discord.
 
-## 9. Loot (when loot tables exist)
+## 9. Loot council
 
-The council scores each drop deterministically — tier for the spec × slot weight × attendance × rank ×
-wishlist, discounted by recent loot and a same-slot repeat — and Claude judges the top candidates against
-the written loot policy, explains, and flags close calls. Officers confirm, or override with a reason; the
-reason becomes a precedent the bot cites next time. In-game awards from the companion app are matched
-to the proposal automatically (when the bot looks after several servers, each companion uses its own server's token,
-`OIBOT_FEED_TOKEN_<KEY>`, see §8; with the shared token its drops go nowhere and it is told so). WoW: Forever loot tables are not published yet, so this part is waiting
-for data discovered in game.
+The loot council is one set of actions with two places to do them: the council's **thread** in Discord (the moment —
+pressing Confirm at 8 PM on a phone) and the **site** (the table — every drop, every candidate's numbers, history).
+Whatever you do on one shows on the other; both act on the same council, so two officers can never record one drop
+twice — the second one is told *"Already recorded (Mira, 8:14 PM)"*.
+
+**How a pick is made.** Code scores every candidate for a drop — the item's tier for their spec × the slot's weight,
+attendance, rank, wishlist, discounted by recent loot and by a second item in the same slot this week — and Claude
+judges the top candidates against the guild's written loot policy, explains, and flags close calls. Officers decide.
+Attendance nobody has tracked yet counts as **neutral** (it never lowers anyone's score).
+
+**Open the council** on a locked run (`/raid loot`, or the run's card/page). It lives in one thread under the officer
+channel (the roster channel, else the ops channel); with neither set the bot refuses and says so. Opening twice gives
+you the same council. A test-bench run opens a **rehearsal**: everything works, nothing reaches the guild's loot
+history.
+
+**Drops.** Every drop is its own line, even two copies of one item. Tick what dropped (or let the companion do it). An
+item the bot's tables don't know — every item on WoW: Forever's first night — is still recorded **by name**: everyone
+rostered who could use it is a candidate, ranked by attendance and recent loot only, and the item waits on the site to
+be tiered later. Un-ticking a drop that is already recorded is refused: use **Correct**.
+
+**Distribute** judges the ticked drops nobody has proposed or recorded yet and adds a batch of proposals (earlier
+proposals still waiting count as if given). Only one Distribute runs at a time per council — a second press says
+*"Distributing already (Jonny, 8:12 PM)"*. With the companion connected, Distribute starts by itself about 20 seconds
+after a boss's last drop (a per-raid switch, on by default). If the bot restarts mid-judgement it says *"Distribute
+was interrupted at 8:12 PM — press Distribute"*; it never re-runs on its own. **Scores only** picks by score without
+asking Claude (shown on each pick).
+
+**Confirm, override, discard.** **Confirm** records a pick (one, or "the rest" — exactly the picks you were shown; if
+someone overrode one meanwhile you are told what changed and asked to look again). **Override** gives a drop to someone
+else (or disenchants it) and **needs a reason**; the override is shown as pending and is **not recorded until
+Confirm** — the reason becomes a precedent the bot cites next time only when the award is confirmed. A second officer
+overriding the same drop is asked whether to replace the first override. **Discard** drops the waiting proposals: the
+ticks stay, pending overrides go with them, nothing was recorded so nothing is undone. **Decide later** holds one drop.
+
+**The companion (in game).** When the master looter hands an item out in game, the bot matches it: to the pick shown
+(the override if there is one) → recorded; to someone else → **recorded at once** (the game is the truth) with the
+precedent waiting for a reason — **Give the reason** (it becomes the precedent) or **Mistake — correct…** (it was a
+misclick: the record is fixed, no precedent); a drop nobody distributed → recorded straight away ("Wrong? Fix…"); a sub
+who isn't registered is recorded by name. A reason given twice asks before replacing the first. A companion's events
+go to its own server's live council (each server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); when several
+councils are live it picks the one whose roster has the companion's character, and when it can't tell it refuses and
+says why. Drops arriving when no run is live are held for 10 minutes and go in when the council opens. A rehearsal
+takes drops only from a puppet's or the tester's companion. The companion shows as **live**, **quiet** (no events for
+a couple of minutes — normal during trash and breaks) or **disconnected**.
+
+**Correct** fixes a recorded award (a reason is required; the old record is kept and marked void). **Roster changes**
+after the council opened count at once: someone who joins the roster is a candidate straight away; someone who leaves
+stays a candidate until an officer removes them.
+
+**End.** `/raid end` (or End on the card/site) ends the council and marks the run done; the summary lists the awards,
+the overrides and anything left undecided (proposals never confirmed, drops never distributed, awards still waiting for
+a reason) so nothing anyone decided disappears. The bot ends a council by itself only after the run's scheduled end,
+when it has been idle for 30 minutes and nothing is pending — after one *"closing in 15 min"* notice with **Keep open**.
+
+Every award, override, reason and correction is an ops line with the officer's name; members see their own loot and the
+guild's award log, never scores, alternates or reasons.
 
 ## 10. Data, privacy, cost
 

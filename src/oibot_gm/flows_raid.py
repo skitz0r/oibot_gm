@@ -14,7 +14,6 @@ import discord
 
 from . import raidcycle as rc
 from . import wizard_opts as wo
-from .constants import TEAL
 from .raid_views import health_layout, raid_name, run_label, run_title, sheet_state
 from .registry import ADHOC_SCHEDULE, ADHOC_SCHEDULE_NAME, Registry, RegistryError, schedule_class
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
@@ -490,34 +489,25 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, **_see
             await wiz.finish(i, "Lock the roster first (/raid lock).")
             return
         bot = i.client
-        existing = next((s for s in bot.events.values() if s.id == ev.key and s.guild == reg.key and s.state == "raid"), None)
-        if existing:
-            await wiz.finish(i, f"Loot thread already open: <#{existing.raid_thread_id}>")
+        existing = bot.loot_session(reg, ev.key)
+        if existing is not None:
+            await wiz.finish(i, f"Loot thread already open: <#{existing.raid_thread_id}>" if existing.raid_thread_id else "The loot council is already open (its thread is pending).")
             return
-        if i.channel is None:
-            await wiz.finish(i, "I can't open the loot thread here — run /raid loot in a server channel.")
-            return
-        from .discord_bot import MockEvent as LootSession
-
         await wiz.working(i, "Opening the loot thread…")
-        instance = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
-        players = rc.players_for(reg, ev)
-        # the board's group layout, one member per line (the iconography rule) — never the whole roster on one line
-        from .raid_views import _group_block
-
-        groups = [_group_block(reg, bot.ico, r, gi, show_missing=False) for r in ev.all_rosters for gi in range(len(r.groups)) if r.groups[gi]]
-        e = discord.Embed(title=f"⚔ {run_title(reg, ev)}", colour=TEAL, description=(f"<t:{int(ev.start.timestamp())}:F> · {len(ev.roster.selected)} rostered\n\n" + "\n\n".join(groups))[:3800])
-        e.set_footer(text="loot council: tick drops (or let the companion feed do it) → Distribute → chat to adjust → Confirm · /raid end for the summary")
-        msg = await i.channel.send(embed=e)
-        thread = await msg.create_thread(name=f"loot · {run_title(reg, ev)}"[:100])
-        session = LootSession(id=ev.key, channel_id=thread.id, instance=instance, date=ev.start.date().isoformat(), guild=reg.key, origin="raid", signups=players, roster=ev.roster, state="raid", raid_thread_id=thread.id)
-        bot.events[thread.id] = session
-        ev.thread_id = thread.id
-        rs.save(ev, "loot thread opened")
-        session.save(f"{session.id}: loot session opened")
-        await wiz.finish(i, f"Loot thread open: <#{thread.id}>")
-        await bot.post_boss_tables(session, thread)
-        await bot.ops.emit(reg.config, "info", f"{i.user.display_name} opened loot council for {ev.key}")
+        # LootMixin.open_loot: the session keyed (guild, run), its thread in the officer channel (loot_open_thread),
+        # the ops line; idempotent (two officers at once get the same council)
+        try:
+            session, _created = await bot.open_loot(reg, rs, ev, by=i.user.display_name, by_id=i.user.id)
+        except RegistryError as e:
+            await wiz.finish(i, str(e))
+            return
+        if not session.raid_thread_id:
+            await wiz.finish(i, "The loot council is open, but I couldn't reach the officer channel — its thread is pending.")
+            return
+        await wiz.finish(i, f"Loot thread open: <#{session.raid_thread_id}>")
+        thread = bot.get_channel(session.raid_thread_id) if hasattr(bot, "get_channel") else None
+        if thread is not None:
+            await bot.post_boss_tables(session, thread)
     await with_run(interaction, reg, title="Loot council", then=body, states=("locked",), officer=True)
 
 

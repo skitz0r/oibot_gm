@@ -12,6 +12,7 @@ from conftest import join, lock_with_board, open_test_run
 from oibot_gm import discord_registry
 from oibot_gm import flows_raid  # noqa: F401 — registers the flows
 from oibot_gm import raidcycle as rc
+from oibot_gm.discord_loot import LootMixin
 from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.wizard import FLOWS
 from wizard_harness import Harness
@@ -39,9 +40,10 @@ class FakeChannel:
         return FakeMessage(self, 7000 + len(self.sent) * 10)
 
 
-class FakeBot:
+class FakeBot(LootMixin):
     """The client methods the flows call, recording each call; the Registry/RaidStore underneath are real. call_out is
-    RaidMixin's own (the shared verb /raid out, the site and MCP use), so its ripple shows up as recorded calls."""
+    RaidMixin's own (the shared verb /raid out, the site and MCP use), so its ripple shows up as recorded calls; the loot
+    verbs are LootMixin's own (open_loot keys the session (guild, run) and puts its thread in the officer channel)."""
 
     call_out = RaidMixin.call_out
     repost_sheet = RaidMixin.repost_sheet
@@ -56,6 +58,10 @@ class FakeBot:
         self.events: dict = {}
         self.ops = SimpleNamespace(emit=self._emit)
         self.ico = lambda kind, key: ""
+        self.registries = SimpleNamespace(by_key={})
+
+    def get_channel(self, cid):
+        return SimpleNamespace(id=cid)
 
     def names(self) -> list[str]:
         return [c[0] for c in self.calls]
@@ -449,12 +455,25 @@ def test_loot_opens_a_thread_on_a_locked_run(reg, rs, officer, channel, monkeypa
     join(reg, rs, ev, reg.test_members()[:10])
     lock_with_board(reg, rs, ev, names)
     h, bot = harness(reg, rs)
+    reg.config.roster_channel_id = channel.id
+    bot.officer_ch = channel  # the council's thread goes to the officer channel (D1), never "where the command ran"
     asyncio.run(FLOWS["raid_loot"](h.command(), reg))
     thread_id = 7011  # the loot embed is the first message in the channel (7010); its thread is +1
     assert channel.sent[0]["embed"] is not None
-    assert rs.events[ev.key].thread_id == thread_id and thread_id in bot.events
+    session = bot.events[(reg.key, ev.key)]  # keyed (guild, run), the file events/<run key>.json
+    assert rs.events[ev.key].thread_id == thread_id and session.raid_thread_id == thread_id and bot.event_for(thread_id) is session
     assert ("post_boss_tables", ev.key, thread_id) in bot.calls and saved
     assert f"<#{thread_id}>" in h.text
+
+
+def test_loot_refuses_without_an_officer_channel(reg, rs, officer, channel):
+    """D1: no roster or ops channel → refused, nothing opened (never a public thread wherever the command ran)."""
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:10])
+    lock_with_board(reg, rs, ev, [m.display_name for m in reg.test_members()[:10]])
+    h, bot = harness(reg, rs)
+    asyncio.run(FLOWS["raid_loot"](h.command(), reg))
+    assert "Set a roster or ops channel first" in h.text and not channel.sent and not bot.events
 
 
 def test_loot_needs_a_locked_roster(reg, rs, officer, channel):

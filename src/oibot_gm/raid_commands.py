@@ -62,16 +62,17 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if not reg:
             return
         session = bot.event_for(interaction.channel_id)
-        if not session or session.origin != "raid":
+        if not session or session.origin != "raid" or session.guild != reg.key:
             await interaction.response.send_message("Run this in the raid's loot thread.", ephemeral=True)
             return
-        await bot.end_session(session, interaction)
         rs = bot.raids.store(reg)
-        ev = rs.events.get(session.id)
-        if ev and ev.state != "done":
-            ev.state = "done"
-            rs.save(ev, "done (loot closed)")
-        await ops.emit(reg.config, "info", f"{interaction.user.display_name} closed loot council {session.id}: {len(session.awards)} awards, {len(session.overrides)} overrides")
+        ev = rs.events.get(session.run_key or session.id)
+        if ev is None:
+            await interaction.response.send_message("That council's run is gone.", ephemeral=True)
+            return
+        # LootMixin.end_run: every session of the run archived with its summary, the run done (the ops line is the verb's)
+        text = await bot.end_run(reg, rs, ev, by=interaction.user.display_name, by_id=interaction.user.id)
+        await interaction.response.send_message(text[:1900])
 
     @raid.command(name="set", description="Officer: set someone's answer on a sheet (join / bench / out)")
     @app_commands.choices(status=[app_commands.Choice(name=rc.LABELS[s], value=s) for s in rc.STATUSES])

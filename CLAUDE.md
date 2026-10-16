@@ -41,11 +41,17 @@ src/oibot_gm/
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
-  loot/                scoring.py (candidates + base score), recommend.py (Claude structured output + fallback)
+  loot/                scoring.py (candidates + base score; untiered items, neutral attendance), recommend.py (Claude structured output + fallback),
+                       session.py (LootSession keyed (guild, run), Drop/drop_id, Proposal + pending Override, batch_rev/drops_rev, LootChanged/LootBusy,
+                       run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS) — design §5.35
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
-  discord_bot.py       OibotGM client; loot sessions (MockEvent, carries `guild`/`origin`): /mock flow on shadow data, or a real raid via /raid loot
-  lootctx.py           RegistryLootContext: a registered guild's ledger/precedents/wishlists/compiled policy for the loot pipeline; bot.loot_ctx(session) picks mock vs real
+  discord_bot.py       OibotGM client; /mock flow on shadow data (MockEvent = LootSession, id mock-<channel>); bot.events[(gk, session id)]
+  discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
+                       (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock; loot_ctx / loot_roster
+                       (live from the run) / loot_live (run locked); auto-distribute, feed buffer, loot_restore, loot_may_close (scheduler auto-end);
+                       hooks the surfaces replace: loot_notify / loot_open_thread / loot_ended / loot_closing
+  lootctx.py           RegistryLootContext (one per guild, reload(); void rows + superseding precedents folded) / FixtureLootContext (/mock): one interface
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
                        schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules);
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
@@ -146,9 +152,11 @@ src/oibot_gm/
                        (ops-channel card edited in place); ProposalButton (DynamicItem Approve/Dismiss, officers only)
   agents.py            local jobs on the Mac mini: out/agents/<job>.json status + runs/<job>-<stamp>.jsonl transcripts (last 30), stream-json → steps,
                        launchctl print/kickstart, claude command lines (allow/deny lists, dontAsk; never a permission bypass)
-  feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token, idempotent acks; status(guild) per guild
-  discord_feed.py      FeedMixin: drop → tick table; loot → confirm / override (reason pending) / manual award; kill; presence. Routed by the companion's
-                       hello `guild` (active_raid(comp), companion_key; with several guilds raiding, a companion without --guild routes nowhere)
+  feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token;
+                       dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line
+  discord_feed.py      FeedMixin through the LootMixin verbs: drop → tick (+ auto-distribute); loot → confirm / mismatch (recorded, reason pending) / manual /
+                       conflict; kill. loot_route(comp): the token's guild → one live council (test only from a puppet/tester companion; several → by
+                       seated character; else refused); no live run → held 10 min; feed_presence(bot, reg) rows, feed_status the line
   ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key.
                        ONE audit format: audit_line / audited(ops, reg, by, line, via, level, by_id) → "[web] Jon (host): …" — `by` is a display name,
                        the surface is the prefix from via (web|mcp|chat; none for Discord), " (host)" = a superuser in a guild they don't own, no DM.

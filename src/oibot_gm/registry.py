@@ -239,6 +239,8 @@ class GuildConfig(BaseModel):
     buffs: dict[str, dict] = Field(default_factory=dict)  # buff id -> {scope, family, strength, status, note}
     families: dict[str, dict] = Field(default_factory=dict)  # family id -> {name, value: {key: points}, status, note}
     plain: PlainPolicy = Field(default_factory=PlainPolicy)  # who may act through plain text, and where
+    # loot scoring overrides over profiles/<game>/loot_defaults.yaml (Registry.loot_cfg merges them; untiered_weight, …)
+    loot: dict = Field(default_factory=dict)
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -393,6 +395,9 @@ RAID_HOURS_FIELDS = ("signup_lead_hours", "lock_hours_before", "confirm_hours_be
 # true/false raid settings (command + API layers parse them the same way). `confirm`: the lock asks everyone rostered to
 # Confirm / Can't make it (off: Join is the commitment, nobody is asked and no seat expires — the ad hoc default, D5)
 RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm", "confirm")
+# loot, per raid (not per schedule): loot_auto_distribute = a companion's drops are distributed ~20 s after a boss's last
+# drop (design §3.1 decision 6, default on — raid_def fills the default)
+RAID_LOOT_FIELDS = ("loot_auto_distribute",)
 # effective defaults under profiles/<game>/raids.yaml and guild overrides (nudge_hours_before is derived: halfway between open and lock)
 RAID_DEFAULTS = {"lockout_days": 7, "duration_hours": 3, "signup_lead_hours": 120, "lock_hours_before": 24, "confirm_hours_before": 6,
                  "split_policy": "balanced", "nudge": True, "fill_ask_hours": 4, "autofill": True, "open_dm": False, "confirm": True}
@@ -407,6 +412,16 @@ ADHOC_WEIGHTS = {"rank": 0, "main": 1, "sat_out": 0, "signup_order": 6, "regular
 RAID_IDENTITY = ("name", "size", "comp", "lockout_days", "duration_hours", "first_open", "notes", "comp_targets", "comp_groups", "slots", "schedules")
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
 CLOCK12 = "%a %d %b %I:%M %p"  # the one human-facing clock format; %H:%M is for machines
+UNTIERED_WEIGHT = 0.5  # loot: the upgrade value of an item with no tier data (Registry.loot_cfg `untiered_weight`)
+
+
+def item_key(item_id, name: str | None = None) -> str:
+    """An item's key in Registry.items() and its file name under <guild>/items/: the id as text, or 'n-<slug of the
+    name>' for an item known only by name (a human ticked 'Not on the table')."""
+    if item_id not in (None, "", 0, "0"):
+        return str(int(item_id))
+    slug = re.sub(r"[^a-z0-9]+", "-", str(name or "").lower()).strip("-")[:60]
+    return f"n-{slug or 'unnamed'}"
 TRUE_WORDS = ("true", "yes", "on", "1")
 
 
@@ -1361,6 +1376,116 @@ class Registry:
         self.save(m, f"{m.display_name} named planned {slot} → {c.label}")
         return m, c
 
+    # ---- items (loot, design §3.1 decision 4): the profile's item tables + what the guild learned (<guild>/items/*.yaml)
+    def items(self) -> dict:
+        """Every item the guild's loot council knows, by item key (`item_key`: the id as text, or 'n-<slug>' for an item
+        known only by name): the profile's tables, then the guild's own files layered on top — a guild file's `tiers`
+        override the profile's per spec key, and an item the profile lacks (a learned drop) is an Item with
+        `tiers: {}` (untiered) until an officer tiers it. Cached; `learn_item` resets the cache."""
+        cache = self.__dict__.get("_items_cache")
+        if cache is not None:
+            return cache
+        from .profiles import Item
+
+        out: dict = {str(i): it for i, it in self.profile.items.items()}
+        meta: dict[str, dict] = {}
+        d = self.store.root / self.key / "items"
+        if d.is_dir():
+            for f in sorted(d.glob("*.yaml")):
+                try:
+                    doc = yaml.safe_load(f.read_text()) or {}
+                except yaml.YAMLError:
+                    log.warning("%s: unreadable item file %s", self.key, f.name)
+                    continue
+                iid = int(doc.get("id") or 0)
+                key = item_key(iid, doc.get("name"))
+                base = out.get(key)
+                tiers = {**(base.tiers if base else {}), **{str(k): str(v) for k, v in (doc.get("tiers") or {}).items()}}
+                out[key] = Item(id=iid, name=str(doc.get("name") or (base.name if base else key)),
+                                slot=str(doc.get("slot") or (base.slot if base else "unknown")),
+                                type=str(doc.get("type") or (base.type if base else "unknown")),
+                                boss=str(doc.get("boss") or (base.boss if base else "?")), tiers=tiers,
+                                usable=list(doc.get("usable") or (base.usable if base else [])),
+                                token_group=doc.get("token_group") or (base.token_group if base else None),
+                                note=str(doc.get("note") or (base.note if base else "")))
+                meta[key] = {**(doc.get("learned") or {}), "file": f.name}
+        self.__dict__["_items_cache"] = out
+        self.__dict__["_items_meta"] = meta
+        return out
+
+    def item_meta(self, key: str) -> dict:
+        """What the guild recorded about a learned item (first_seen, times_dropped, first_run …); {} for a profile item."""
+        self.items()
+        return dict(self.__dict__.get("_items_meta", {}).get(key) or {})
+
+    def item(self, ref=None, name: str | None = None):
+        """An item by id (int or its text) or by name (case-insensitive), from `items()`; None when unknown."""
+        items = self.items()
+        if ref not in (None, "", 0, "0"):
+            hit = items.get(str(ref))
+            if hit is not None:
+                return hit
+        if name:
+            n = str(name).strip().lower()
+            return next((it for it in items.values() if it.name.lower() == n), None)
+        return None
+
+    def item_tier(self, item, spec) -> str | None:
+        """The tier of `item` (an Item, or an id / name `item()` resolves) for `spec` (a SpecInfo or 'Class:Spec'): the
+        guild's tiers over the profile's (`items()` merged them), most specific key first (Item.tier_for). None = no
+        tier data for that spec."""
+        it = item if hasattr(item, "tier_for") else self.item(item, item if isinstance(item, str) else None)
+        if it is None:
+            return None
+        if isinstance(spec, str):
+            cls, _, sp = spec.partition(":")
+            spec = self.profile.spec(cls, sp)
+        return it.tier_for(spec)
+
+    def learn_item(self, item_id: int | None, name: str | None, *, boss: str | None = None, instance: str | None = None,
+                   run: str | None = None, source: str = "companion"):
+        """A drop the item tables don't know (or know untiered): remember it in <guild>/items/<key>.yaml as learned
+        (first seen, times dropped, boss, the run) so it can be tiered later on Loot › Items. Returns the Item
+        (untiered until someone tiers it). An item the profile knows WITH tiers is returned as is and nothing is
+        written. Commits (inside the caller's GitStore.batch, one commit with the drop)."""
+        known = self.item(item_id, name)
+        if known is not None and known.tiers:
+            return known
+        iid = int(item_id or 0) or (known.id if known else 0)
+        nm = str(name or (known.name if known else "") or f"item {iid}").strip()
+        key = item_key(iid, nm)
+        rel = Path(self.key) / "items" / f"{key}.yaml"
+        p = self.store.root / rel
+        doc = (yaml.safe_load(p.read_text()) or {}) if p.exists() else {"id": iid or None, "name": nm, "tiers": {}}
+        doc.setdefault("name", nm)
+        if boss and not doc.get("boss"):
+            doc["boss"] = boss
+        if instance and not doc.get("instance"):
+            doc["instance"] = instance
+        learned = doc.setdefault("learned", {})
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        learned.setdefault("first_seen", stamp)
+        learned.setdefault("first_run", run)
+        learned.setdefault("source", source)
+        learned["last_seen"] = stamp
+        learned["times_dropped"] = int(learned.get("times_dropped") or 0) + 1
+        self.store.write_text(rel, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+        self.store.commit(f"{self.key}: learned item {nm}" + (f" ({iid})" if iid else ""))
+        self.__dict__.pop("_items_cache", None)
+        return self.item(iid, nm)
+
+    def loot_cfg(self) -> dict:
+        """The loot scoring settings: profiles/<game>/loot_defaults.yaml with the guild's `loot:` overrides merged (one
+        level deep: a dict value merges per key), plus `untiered_weight` (default UNTIERED_WEIGHT) — the upgrade an
+        item without tier data scores for everyone."""
+        import copy
+
+        out = copy.deepcopy(self.profile.loot or {})
+        for k, v in (self.config.loot or {}).items():
+            out[k] = {**out[k], **v} if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+        out.setdefault("untiered_weight", UNTIERED_WEIGHT)
+        return out
+
     # ---- raids (instances) = defaults from the game profile + guild overrides
     RAID_FIELDS = ("lockout_days", "duration_hours", "notes")
 
@@ -1383,6 +1508,7 @@ class Registry:
         for k, v in RAID_DEFAULTS.items():  # nudge: DM the mains who haven't answered, once, at nudge_hours_before;
             out.setdefault(k, v)  # fill_ask_hours: a fill DM with no answer counts as no after this long (never later than the run start)
         out.setdefault("nudge_hours_before", default_nudge_hours(out["signup_lead_hours"], out["lock_hours_before"]))
+        out["loot_auto_distribute"] = parse_bool(out.get("loot_auto_distribute", True))
         for k in RAID_BOOL_FIELDS:
             out[k] = parse_bool(out[k])
         out["weights"] = {**RAID_WEIGHT_DEFAULTS, **(out.get("weights") or {})}
@@ -1642,7 +1768,7 @@ class Registry:
             if num < 0:
                 raise RegistryError(f"{field} can't be negative")
             over[field] = int(num) if num == int(num) else num
-        elif field in RAID_BOOL_FIELDS:
+        elif field in RAID_BOOL_FIELDS or field in RAID_LOOT_FIELDS:
             over[field] = parse_bool(value)
         elif field == "split_policy":
             if value not in SPLIT_POLICIES:

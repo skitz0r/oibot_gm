@@ -84,6 +84,10 @@ class RosterResult(BaseModel):
 
 
 class LootAward(BaseModel):
+    """One award (a ledger row, and the session's record of it). The unit is the DROP: `drop_id` within its run, and the
+    ledger's `import_id` (`<run>-<drop_id>`) is what makes a re-derived row idempotent. An item the profile doesn't know
+    is still an award (design §3.1 decision 4): `item_id` 0, `item_name` carries it, `tiered` False."""
+
     raider: str
     item_id: int
     tier: str
@@ -92,6 +96,18 @@ class LootAward(BaseModel):
     received: date
     instance: str
     boss: str
+    item_name: Optional[str] = None  # what the item is called (the only key an unknown item has)
+    discord_id: Optional[int] = None  # the member behind the character (None: a sub / guest stored by name)
+    tiered: bool = True  # False: scored at loot_cfg.untiered_weight (no tier data when it was awarded)
+    by: Optional[str] = None  # who recorded it: an officer's display name, or "companion:<character>"
+    policy_version: Optional[str] = None  # the loot policy the award was judged under (sha of its text)
+    candidates_snapshot: list[dict] = Field(default_factory=list)  # top candidates at award time (character, spec, tier, base)
+    drop_id: Optional[str] = None
+    import_id: Optional[str] = None
+    source: Optional[str] = None  # bot | override | companion | manual | correct
+    bot_pick: Optional[str] = None
+    confirmed_at: Optional[str] = None
+    void: bool = False  # superseded by a correction (the ledger keeps the row; a void row marks it)
 
 
 class Candidate(BaseModel):
@@ -111,6 +127,8 @@ class Candidate(BaseModel):
     base_score: float
     factors: dict[str, float]
     already_has: bool = False
+    attendance_known: bool = True  # False: no run history yet — the factor is neutral (1.0), never 0.5 (design §3.1 decision 10)
+    tiered: bool = True  # False: the item has no tier data; upgrade is loot_cfg.untiered_weight for everyone
 
 
 class LootRecommendation(BaseModel):

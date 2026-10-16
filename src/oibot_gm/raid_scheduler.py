@@ -166,8 +166,12 @@ class RaidSchedulerMixin:
             elif ev.fill_state != "exhausted":
                 exhausted_posted.discard((reg.key, ev.key))
             if now >= rc.run_close_at(reg, ev):
-                ev.state = "done"
-                rs.save(ev, "done")
+                # a loot council on the run decides (LootMixin.loot_may_close): ended only past close AND idle 30 min
+                # AND nothing pending, after one "closing in 15 min" notice — never with proposals pending
+                may = getattr(self, "loot_may_close", None)
+                if may is not None and not await may(reg, rs, ev, now):
+                    continue
+                rc.end_run(reg, rs, ev, "scheduler")
                 exhausted_posted.discard((reg.key, ev.key))
                 await self.refresh_sheet(reg, ev)
                 await self.ops.emit(cfg, "info", f"{ev.key}: closed")

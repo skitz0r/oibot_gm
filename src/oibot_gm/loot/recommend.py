@@ -20,7 +20,8 @@ Be neutral, specific and brief. Never invent facts; if data is missing, say so i
 ## How the base score was computed (by code, not by you)
 base = upgrade_value × attendance_factor × rank_factor × wishlist_factor ÷ loot_divisor
 - upgrade_value: guild tier (S+ 1.0, S 0.75, A 0.20, B 0.05) × slot weight (weapons 1.5–3.0, armor 1.0, jewellery ~0.55, trinket 0.9). Offspec ×0.35.
-- attendance_factor: 0.5 + 0.5 × attendance ratio over recent raids.
+- attendance_factor: 0.5 + 0.5 × attendance ratio over recent raids; 1.0 (neutral) while attendance isn't tracked yet ("n/a").
+- An item with no tier data scores {untiered} for every candidate (tier "?"): rank by attendance and recent loot only, never by upgrade value.
 - rank_factor: core/raider 1.0, trial 0.7, alt 0.5, unregistered 0.6.
 - wishlist_factor: 1 + bonus for wishlist rank (rank 1 = +0.30 … rank 5 = +0.03).
 - loot_divisor: grows with "loot power" received in the last 14 days (sum of tier×slot weights), after a small free allowance.
@@ -53,12 +54,20 @@ def _table(cands: list[Candidate]) -> str:
     return "\n".join(rows)
 
 
-def recommend(profile: GameProfile, item: Item, cands: list[Candidate], policy: str, provider: Provider | None) -> DropResult:
+UNTIERED_NOTE = ("No tier data for this item — everyone rostered is a candidate, ranked by attendance and recent loot only. "
+                 "Do not justify by upgrade value.")
+
+
+def recommend(profile: GameProfile, item: Item, cands: list[Candidate], policy: str, provider: Provider | None,
+              cfg: dict | None = None) -> DropResult:
     eligible = [c for c in cands if not c.already_has]
+    untiered = (cfg or profile.loot).get("untiered_weight", 0.5)
     if provider and eligible:
-        system = SYSTEM_TEMPLATE.format(profile=profile.name, policy=policy)
+        system = SYSTEM_TEMPLATE.format(profile=profile.name, policy=policy, untiered=untiered)
+        tierless = "" if item.tiers else UNTIERED_NOTE + "\n\n"
         user = (
-            f"## Drop\n**{item.name}** (id {item.id}) from {item.boss}. Slot: {item.slot}, type: {item.type}.\n\n"
+            f"## Drop\n**{item.name}**" + (f" (id {item.id})" if item.id else "") + f" from {item.boss}. Slot: {item.slot}, type: {item.type}.\n\n"
+            + tierless +
             f"## Candidates (sorted by base score)\n{_table(cands)}\n\n"
             "Factors per candidate: " + "; ".join(f"{c.character}={c.factors}" for c in cands)
         )
@@ -73,6 +82,8 @@ def recommend(profile: GameProfile, item: Item, cands: list[Candidate], policy: 
     else:
         rec = _fallback(eligible)
         source = "deterministic"
+    if not item.tiers and UNTIERED_NOTE not in rec.warnings:
+        rec.warnings.insert(0, UNTIERED_NOTE)
     return DropResult(item_id=item.id, item_name=item.name, boss=item.boss, candidates=cands, recommendation=rec, source=source)
 
 

@@ -30,6 +30,10 @@ STATES = ("open", "locked", "done", "cancelled")
 LEGACY_STATES = {"proposed": "locked", "accepted": "locked"}  # pre-2026-09 files
 MAX_ROSTERS_PER_SLOT = 4
 RUN_LISTENERS: list = []  # callables (guild_key, run_key) told after every RaidStore.save
+# callables (guild_key, run_key, change) told when a locked run's seats change (on_roster_change, design §3.1): change =
+# {"added": [uid|name], "removed": [uid|name], "changed": [uid|name]}; the loot council reads its candidates live from
+# the run and uses this to say "X rostered — now a candidate". May be called from a worker thread (the web).
+ROSTER_LISTENERS: list = []
 FILL_OVERASK = 1  # ask one more person than the shortfall per batch
 FILL_MAX_OPEN = 3  # never more than this many unanswered asks per event
 FILL_ASK_HOURS_DEFAULT = RAID_DEFAULTS["fill_ask_hours"]
@@ -1516,7 +1520,7 @@ def still_short_words(plan: Plan) -> str:
     return ", ".join(bits) + " → recruit" if bits else "nothing"
 
 
-def _reseat(ev: RaidEvent, sg: Signup) -> bool:
+def _reseat(ev: RaidEvent, sg: Signup, guild_key: str | None = None) -> bool:
     """A swap by someone already seated: update their seat in place (character, spec, role) instead of seating twice.
     The seat and its group entry take the signup's CURRENT display name (a re-answer after a nick change), so the
     roster never carries two names for one person — a stale `signup_name` left a ghost in the groups once `free_seat`
@@ -1525,8 +1529,11 @@ def _reseat(ev: RaidEvent, sg: Signup) -> bool:
     if not hit:
         return False
     i, p = hit
+    before = (p.cls, p.spec, p.character)
     p.cls, p.spec, p.role, p.offspec, p.character = sg.cls, sg.spec, sg.role, sg.offspec, sg.character
     relabel_seat(ev.all_rosters[i], p, sg.display_name)
+    if before != (p.cls, p.spec, p.character):
+        on_roster_change(guild_key, ev, changed=[sg.discord_id])
     return True
 
 
@@ -1658,7 +1665,7 @@ def _apply_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: Mem
     if ask.kind in ("offspec", "flex") and str(ask.discord_id) in ev.signups and ev.signups[str(ask.discord_id)].character == ask.character:
         s = ev.signups[str(ask.discord_id)]
         s.spec, s.offspec, s.role, s.note, s.source, s.updated_at = ask.spec, s.spec, ask.role, f"switched to {ask.spec} at request", "fill", now()
-        _reseat(ev, s)
+        _reseat(ev, s, reg.key)
         ev.log.append(f"fill: {ask.display_name} switches to {ask.spec}")
         rs.save(ev, f"fill {ask.display_name} offspec")
         return f"{ask.display_name} swaps to {ask.spec} ({ask.role})"
@@ -1668,7 +1675,7 @@ def _apply_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: Mem
         s.spec, s.offspec, s.role = ask.spec, c.spec, ask.role
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"fill: {ask.display_name} in as {c.label} ({ask.kind})")
-    if ev.state != "open" and ev.all_rosters and not _reseat(ev, s) and seat_player(reg, ev, s) is None:
+    if ev.state != "open" and ev.all_rosters and not _reseat(ev, s, reg.key) and seat_player(reg, ev, s) is None:
         # every seat was taken meanwhile: a Join, not rostered (the board can move them in); never reported as seated
         ev.log.append(f"fill: no free seat for {ask.display_name}")
         rs.save(ev, f"fill {ask.display_name} in, no seat")
@@ -2288,6 +2295,7 @@ def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: li
         sg.status, sg.source, sg.updated_at = "in", "officer", now()
     ev.log.append("board: " + (f"+{', '.join(s.display_name for s in added)} " if added else "") + (f"-{', '.join(removed)}" if removed else "") or "board: groups moved")
     rs.save(ev, "board updated")
+    on_roster_change(rs.key, ev, added=[s.discord_id for s in added])  # the removed were told by free_seat
     return added, removed
 
 
@@ -2345,6 +2353,7 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str) -> Pla
     name = sg.display_name if sg else p.signup_name
     ev.log.append(f"seat freed: {name} ({why})")
     rs.save(ev, f"seat freed {name}")
+    on_roster_change(rs.key, ev, removed=[uid if uid is not None else name])
     return p
 
 
@@ -2363,8 +2372,33 @@ def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
             elif r.groups is not None:
                 r.groups.append([p.signup_name])
             ev.log.append(f"seated {sg.display_name} in roster {i + 1}")
+            on_roster_change(reg.key, ev, added=[sg.discord_id])
             return i
     return None
+
+
+def on_roster_change(guild_key: str | None, ev: RaidEvent, added=(), removed=(), changed=()) -> None:
+    """Tell ROSTER_LISTENERS that a locked run's seats moved (seat_player, free_seat, an alt / offspec reseat, the board
+    after lock — set_answer and drop_seated reach these). A listener never breaks the seat change."""
+    if not guild_key or not (added or removed or changed):
+        return
+    change = {"added": list(added), "removed": list(removed), "changed": list(changed)}
+    for fn in list(ROSTER_LISTENERS):
+        try:
+            fn(guild_key, ev.key, change)
+        except Exception:  # noqa: BLE001
+            log.exception("roster listener failed")
+
+
+def end_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> bool:
+    """A run is over: `done` (LootMixin.end_run and the scheduler's close come here). Idempotent; a cancelled run stays
+    cancelled. Returns True when it changed."""
+    if ev.state in ("done", "cancelled"):
+        return False
+    ev.state = "done"
+    ev.log.append(f"done ({by})")
+    rs.save(ev, f"done ({by})")
+    return True
 
 
 def rostered_runs(reg: Registry, rs: RaidStore, m: Member) -> list[tuple[RaidEvent, str]]:

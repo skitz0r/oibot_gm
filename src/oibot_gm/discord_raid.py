@@ -182,7 +182,7 @@ class RaidMixin:
             s = rc.set_signup(reg, rs, ev, m, character, "in", source=source)
             seat = ev.seat_of(m)
             if seat:
-                rc._reseat(ev, s)  # a character swap keeps the seat
+                rc._reseat(ev, s, reg.key)  # a character swap keeps the seat
                 rs.save(ev, f"{m.display_name} seat updated")
                 line = f"✅ {who}{s.character} stays rostered for {label}"
             else:

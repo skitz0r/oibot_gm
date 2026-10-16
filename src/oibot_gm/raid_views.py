@@ -56,7 +56,7 @@ class BotProto(Protocol):
     ops: Any            # Ops: `emit(cfg, level, text[, exc])`
     raids: Any          # RaidContext: `store(reg)` → RaidStore
     registries: Any     # Guilds: `for_guild`, `only()`, `ordered()`, `by_key`, `for_interaction(interaction)` (never "the first guild")
-    events: dict        # loot sessions (MockEvent) by thread id
+    events: dict        # loot sessions (LootSession) by (guild key, session id); LootMixin.event_for(thread id) finds one by thread
     feed: Any           # FeedServer or None: companions + presence
 
     def ico(self, kind: str, key: str) -> str: ...

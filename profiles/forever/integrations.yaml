@@ -3,3 +3,4 @@
 wcl_host: null
 blizzard_namespace: static-classic-us
 tmb_expansion_id: null
+wowhead_item_url: null   # no item database for Forever yet: cards show the name without a link

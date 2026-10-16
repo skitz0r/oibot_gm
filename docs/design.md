@@ -1312,6 +1312,68 @@ phases ride on:
   every horizon press like every other officer wizard), `/me plan roles` lost the discarded `primary` argument; `/mock signup date_` and
   `/mock set name` are left for D11's retirement of `/mock`.
 
+### 5.35 Dual interfaces, phase 1 — the loot council core (built 2026-10-16)
+
+out/dual_interface_design.md §3.1 decisions 1–4, 6 (the debounce), 7, 9, 10 and the owner's D1–D12
+(out/dual_interface_decisions.md). The core every surface calls; the Discord surfaces (cards, DynamicItems, wizards),
+the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on it.
+
+- **One session, one key.** `loot/session.py: LootSession` (alias `discord_bot.MockEvent` while `/mock` lives) keyed
+  `(guild key, run key)` — `id` = the run key, `<run key>-r<n>` for one roster of a split run, `mock-<channel>` for a
+  `/mock` session — stored at `<guild>/events/<id>.json`. `bot.events[(gk, id)]` plus a by-thread map
+  (`LootMixin.event_for`). A real session is live iff its run is `locked` (`loot_live`); no session state. Candidates
+  are read LIVE from the run (`loot_roster`: `ev.seated()` of its roster + `departed`, members who left after open,
+  until `remove_candidate`). Old thread-keyed files load as they are (the model converts them) and
+  `scripts/migrate_loot_sessions.py` (`migrate_sessions`, idempotent, one commit) rewrites them under the new names.
+- **The unit is the drop** (`Drop`: `drop_id` d1, d2 …, `item_id` 0 for an item known only by name, `tiered`, source,
+  held). Proposals carry `drop_id`, the bot's pick (`award_to`) and a pending `Override` beside it (`to` = effective
+  recipient); awards and the ledger's `import_id` (`<run>-<drop_id>`, corrections `-c<n>`) key by it.
+- **Verbs** (`discord_loot.LootMixin`, every surface a caller): `open_loot · tick · distribute · override · confirm ·
+  discard · set_reason · correct · end_run` (+ `remove_candidate · set_scores_only · keep_open`), each `(reg, session, …,
+  by, by_id, via)`, under the per-(guild, session) `loot_lock`. Distribute is single flight (`LootBusy`), judges a
+  SNAPSHOT in `asyncio.to_thread` (`run_distribution`) and `merge`s on the loop into drops still pending whose live table
+  signature (`plan`) equals the judged one — others come back `stale`. It APPENDS a batch; pending picks count as
+  provisional awards. `session.distributing` survives a restart as `interrupted` (`loot_restore`, never re-run; the same
+  drops interrupted twice judge by score only).
+- **Game truth first.** An override lives on the proposal until Confirm; Confirm writes, in one `GitStore.batch`: the
+  session, the ledger rows the awards imply that the ledger lacks (`sync_ledger`, by import_id — also the crash repair
+  on ready), the precedents of the confirmed overrides. Discard drops pending overrides. A companion mismatch records
+  the row at once with `pending_reasons[{drop_id, recipient, bot}]`; `set_reason` is idempotent on the import_id
+  (`replace` appends a superseding precedent); `correct` appends a `kind: void` ledger row + a new award, no precedent.
+  `record_pending_reason` (the next message as the reason) is gone.
+- **Revs** (computed): `batch_rev` over the picks in play (pending + awards from proposals: drop → recipient, source —
+  a confirm as shown keeps it, an override / re-score / discard / new batch moves it) for Confirm-all, Discard and
+  Override; `drops_rev` (drop list + what Distribute would judge) for Tick and Distribute; per-item Confirm carries
+  `expect_to`. `LootChanged(RegistryError)` names the last change ("Jonny overrode the Syphon at 8:13 PM").
+- **Items.** `Registry.items()` = the profile's tables + `<guild>/items/*.yaml` (guild tiers layered per spec key;
+  learned items `tiers: {}`), `item(ref, name)`, `item_tier(item, spec)`, `learn_item(...)`, `loot_cfg()` (profile
+  `loot_defaults.yaml` + `guild.yaml: loot`, `untiered_weight` default 0.5). `scoring.candidates(cfg=, items=)`: an
+  untiered item makes everyone rostered a candidate at `untiered_weight`; attendance with no history is neutral (1.0,
+  `attendance_known`). `LootAward += item_name, discord_id, tiered, by, policy_version, candidates_snapshot, drop_id,
+  import_id, source, bot_pick, confirmed_at, void`.
+- **Contexts.** `bot.loot_ctx(session)`: `lootctx.RegistryLootContext` per guild (never the fixtures for a real guild;
+  `reload()` folds void rows and superseding precedents) or `FixtureLootContext` (the `/mock` shadow data).
+- **Companion** (`discord_feed`): routing within the token's guild (one live non-test council; a test council only from
+  a puppet's / the tester's companion; several → by seated character; else refused: ops warn + error frame); no live
+  run → held 10 min (`feed_buffer`, `feed_waiting(reg)` = the "no run live" state, replayed by `open_loot`);
+  `session.seen_idem` dedupes re-sends across reconnects; acks carry `session`; drop → `tick` (+ `loot_auto_soon`:
+  `loot_auto_distribute` per raid, `RAID_LOOT_FIELDS`, ~20 s after a boss's last drop); loot → confirm / mismatch /
+  manual / conflict; presence `live | quiet | disconnected` (`FeedServer.presence`, `feed_presence(bot, reg)`;
+  `feed_status` stays the one-line form).
+- **End and the scheduler.** `end_run(reg, rs, ev, by)` archives every session of the run with `loot_summary`
+  (pending proposals / undistributed / reasons inside), flips the run done (`rc.end_run`), returns the text
+  (`loot_ended` posts it); `end_consequence` is the decide screen's sentence. The scheduler's close asks
+  `loot_may_close`: past `run_close_at` AND idle 30 min AND nothing pending → one "closing in 15 min" notice
+  (`loot_closing_state` → `closing`, Keep open = `keep_open`) → end.
+- **Listeners.** `LOOT_LISTENERS` (every session save / archive) → the web's `loot:<run key>` topic;
+  `rc.ROSTER_LISTENERS` / `rc.on_roster_change` from `seat_player`, `free_seat`, `_reseat`, the board after lock →
+  `loot_roster_changed`. Every verb writes one `ops.audited` line (per award on Confirm); a test session writes nothing
+  to the ledger, precedents or learned items.
+- **Hooks the surfaces replace:** `loot_notify(reg, session, line, kind=)`, `loot_open_thread(reg, rs, ev, session)`,
+  `loot_ended`, `loot_closing` (defaults: a line in the thread; a plain thread on the officer channel).
+- Tests: `tests/test_loot_verbs.py` (verbs, revs, snapshot vs concurrent writes, restart, companion, routing,
+  idempotency, end, scheduler, migration, items).
+
 ## 6. Architecture
 
 ```mermaid
