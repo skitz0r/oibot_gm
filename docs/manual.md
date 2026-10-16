@@ -1029,7 +1029,7 @@ once) and **Why not…** (pick someone: the bot compares them with the pick from
 press that card shows what happened (*"✅ recorded by you · 8:14 PM"*).
 
 **Override…** is two presses: pick who gets it instead — *In the table* (the top candidates), *Rostered tonight*,
-*Disenchant*, or *Someone not on the roster…* (type their character's name) — then write the **reason** (required)
+*Disenchant*, or *Someone not on the roster…* (type their character's name, first and last if they have both) — then write the **reason** (required)
 and submit. A typed name is checked against the run's signups, the guild's registered characters and anyone recorded
 before as a guest, and is recorded in their spelling; if nobody has that name the bot says so and offers **Record
 <name> as a guest** — a second, deliberate press, so a typo never becomes an award. An override is shown as pending and is **not recorded until Confirm**; the reason becomes a precedent the
@@ -1062,7 +1062,8 @@ near the run's time; never a council days early) — an event that arrives just 
 ended run and is never replayed into the next raid's council, and one a council refuses stays held. Anything still held
 after 10 minutes is listed in the ops channel as **not recorded** (naming the ended run when there is one), so you can
 add it by hand. An in-game award that arrives shortly after a council
-ended reaches the officers as **one DM** with a link to record or correct it on the site — the council's only DM. A
+ended reaches the officers as **one DM** with a link to record or correct it on the site — the council's only DM (never
+for an ended rehearsal). A
 rehearsal takes drops only from a puppet's or the tester's companion.
 
 **Roster changes** after the council opened count at once: someone who joins the roster is a candidate straight away

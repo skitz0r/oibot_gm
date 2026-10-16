@@ -517,7 +517,8 @@ class LootSurfaceMixin:
         st[reg.key] = {"since": w["since"], "channel": ch, "message": getattr(msg, "id", None)}
 
     def _loot_recent_end(self, reg) -> dict | None:
-        """The council of this guild that ended most recently, within AFTER_END_H (from its archive), or None."""
+        """The real council of this guild that ended most recently, within AFTER_END_H (from its archive), or None — a
+        rehearsal never counts (its puppet companion's late events must not DM every officer)."""
         arch = reg.store.root / reg.key / "events" / "archive"
         if not arch.is_dir():
             return None
@@ -533,8 +534,8 @@ class LootSurfaceMixin:
             except (OSError, ValueError):
                 continue
             ended = _utc((body.get("summary") or {}).get("ended_at"))
-            if body.get("origin") != "raid" or ended is None or ended < datetime.now(timezone.utc) - timedelta(hours=AFTER_END_H):
-                continue
+            if body.get("origin") != "raid" or body.get("test") or ended is None or ended < datetime.now(timezone.utc) - timedelta(hours=AFTER_END_H):
+                continue  # a rehearsal's late events are test traffic: never a DM to the officers
             if best is None or ended > best[0]:
                 best = (ended, body)
         return best[1] if best else None

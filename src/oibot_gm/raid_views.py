@@ -831,7 +831,7 @@ def loot_layout(reg: Registry, ev, session, ico, *, status: str, show_distribute
     if unrouted:
         names = list(unrouted)
         parts.append(ui.TextDisplay("🔌 **Companion not routed** — several councils are live and it can't tell which: "
-                                    + ", ".join(names[:12]) + ". Bind it to this council, or start it with --run <run key>."))
+                                    + ", ".join(names[:12]) + ". Bind it to this council."))
         opts = [discord.SelectOption(label=n[:100], value=n[:100], description="its drops and awards come here") for n in names][:25]
         parts.append(ui.ActionRow(LootPick(reg.key, session.id, "bind", opts, placeholder="Bind companion…")))
     und = bool(session.undistributed())

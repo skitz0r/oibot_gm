@@ -28,7 +28,7 @@ from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, flow
 log = logging.getLogger(__name__)
 
 TABLE_TOP = 7  # the Override select's "In the table" rows (the rest of the 25 are rostered tonight)
-NAME_RE = re.compile(r"[^\W\d_]{2,24}")  # a WoW character name: letters only (accents allowed), 2–24
+NAME_RE = re.compile(r"[^\W\d_]{2,24}( [^\W\d_]{2,24})?")  # a character name: letters only (accents allowed), 2–24 — WoW: Forever's "First Last" too
 COPIES = [Opt(str(n), f"{n} cop{'y' if n == 1 else 'ies'}", default=n == 1) for n in range(1, 6)]
 ENDED = "This council has ended — its summary is in the thread; the site keeps its history."
 NEW_BOSS, TRASH, NOT_LISTED, BY_MEMBER = "__new", "?", "__name", "__member"
@@ -192,13 +192,14 @@ async def _press_discard(interaction, bot, reg, session, btn) -> None:
 
 
 async def _press_keep(interaction, bot, reg, session, btn) -> None:
+    await _defer(interaction)  # answered before the write (a git commit + the ops line): Discord's 3 seconds
     try:
         line = await bot.keep_open(reg, session, by=interaction.user.display_name, by_id=interaction.user.id)
     except RegistryError as e:
         await say(interaction, _err(e))
         return
     try:
-        await interaction.response.edit_message(content=f"⏳ {line} ({interaction.user.display_name})", view=None)
+        await interaction.edit_original_response(content=f"⏳ {line} ({interaction.user.display_name})", view=None)
     except Exception:  # noqa: BLE001
         await say(interaction, line)
 
@@ -385,7 +386,7 @@ class LootModal(discord.ui.Modal):
         self.ids = (gk, sid, drop, kind, arg)
         self.who_item = None
         if who_text:
-            self.who_item = discord.ui.TextInput(custom_id="who", max_length=24, min_length=2, placeholder="their character's name")
+            self.who_item = discord.ui.TextInput(custom_id="who", max_length=49, min_length=2, placeholder="their character's name (first and last, if they have one)")
             self.add_item(discord.ui.Label(text="Who (not on the roster)", description="a character name — checked against the signups, the roster and past guests", component=self.who_item))
         elif who:
             from .raid_views import loot_who
@@ -475,7 +476,10 @@ async def _answer_submit(interaction: discord.Interaction, text: str, *, kind: s
     cards = set((session.cards or {}).values()) if session is not None and not isinstance(session, str) else set()
     if kind in ("ovr", "fix") and msg is not None:
         try:
-            await interaction.response.edit_message(content=text[:2000], view=None, embed=None)
+            if interaction.response.is_done():  # acknowledged before the write (loot_modal_submit)
+                await interaction.edit_original_response(content=text[:2000], view=None, embed=None)
+            else:
+                await interaction.response.edit_message(content=text[:2000], view=None, embed=None)
             return
         except Exception:  # noqa: BLE001
             pass
@@ -521,9 +525,25 @@ async def _press_guest(interaction, bot, reg, target, btn) -> None:
 ACTIONS["guest"] = _press_guest
 
 
+async def _ack_submit(interaction: discord.Interaction) -> None:
+    """Answer a submit before its write (a git commit, the ops line and the thread's card edits can outlast Discord's
+    3 seconds on a busy raid night): a submit from a message defers as an update of it (the outcome edits it or follows
+    up), one without a message as "thinking" (the outcome is the follow-up)."""
+    if interaction.response.is_done():
+        return
+    try:
+        if getattr(interaction, "message", None) is not None:
+            await interaction.response.defer()
+        else:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+    except discord.HTTPException as e:
+        log.debug("loot submit defer: %s", e)
+
+
 async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values: dict[str, str], *, guest_ok: bool = False) -> None:
     """The write behind every reason modal: why (set_reason; `r` = replace), ovr (override; arg = the batch_rev seen,
-    `r` = replace another officer's), de (disenchant and record at once), fix (correct)."""
+    `r` = replace another officer's), de (disenchant and record at once), fix (correct). Acknowledged before any write
+    (`_ack_submit`); every outcome is then an edit of the original response or a follow-up."""
     from .guild_routing import resolve_button
     from .raid_buttons import LootButton
 
@@ -545,6 +565,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
     who, reason = values.get("who", ""), values.get("reason", "")
     target = session if session is not None else sid
     stash = bot._surface()["reasons"]
+    await _ack_submit(interaction)
     try:
         if kind == "why":
             try:
@@ -553,7 +574,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
                 stash[(reg.key, sid, drop, by_id, "why")] = {"reason": reason}
                 view = discord.ui.View(timeout=None)
                 view.add_item(LootButton(reg.key, sid, drop, "whyr"))
-                await interaction.response.send_message(_err(e), view=view, ephemeral=True)
+                await say(interaction, _err(e), view=view)
                 return
             await _answer_submit(interaction, line, kind=kind, session=session)
             return
@@ -561,7 +582,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
             raise RegistryError("Pick who gets it.")
         if kind in ("ovr", "fix") and who not in (DISENCHANT,) and not _on_roster(bot, reg, target, who):
             if not NAME_RE.fullmatch(who):
-                raise RegistryError("That isn't a character name (letters only, 2–24) — check the spelling.")
+                raise RegistryError("That isn't a character name (one or two words, letters only, 2–24 each) — check the spelling.")
             known = offroster_name(bot, reg, target, who)
             if known:
                 who = known  # the spelling the run's signups, the registry or the ledger already have
@@ -583,7 +604,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
                 stash[(reg.key, sid, drop, by_id, "ovr")] = {"who": who, "reason": reason}
                 view = discord.ui.View(timeout=None)
                 view.add_item(LootButton(reg.key, sid, drop, "ovrr", label="Replace their override…"))
-                await interaction.response.send_message(_err(e), view=view, ephemeral=True)
+                await say(interaction, _err(e), view=view)
                 return
             await _answer_submit(interaction, line.replace("**", ""), kind=kind, session=session)
             return
@@ -591,7 +612,7 @@ async def loot_modal_submit(interaction: discord.Interaction, ids: tuple, values
             await bot.override(reg, session, drop, DISENCHANT, reason, by=by, by_id=by_id, batch_rev=arg, rejudge=False)
             await bot.confirm(reg, session, only={drop}, expect_to=DISENCHANT, by=by, by_id=by_id)
             try:
-                await interaction.response.edit_message(view=_item_card(bot, reg, session, drop, outcome=f"✅ disenchanted — recorded by you · {bot.loot_clock(reg)}"))
+                await interaction.edit_original_response(view=_item_card(bot, reg, session, drop, outcome=f"✅ disenchanted — recorded by you · {bot.loot_clock(reg)}"))
             except Exception:  # noqa: BLE001 — not opened from the item card
                 await say(interaction, f"✅ {_drop_name(session, drop)} disenchanted — recorded.")
             return
@@ -871,6 +892,7 @@ class TickWizard(Wizard):
             k = x.get("key")
             row = {"item_id": int(k)} if k and str(k).isdigit() else {"name": x["name"]}
             add.append({**row, "boss": boss if boss != TRASH else "?", "copies": self.draft["copies"]})
+        await self.working(interaction, "Ticking…")  # answered before the write: Discord's 3 seconds
         try:
             res = await self.bot.tick(self.reg, s, add=add, by=interaction.user.display_name, by_id=interaction.user.id)
         except RegistryError as e:
@@ -909,6 +931,7 @@ class TickWizard(Wizard):
         if s is None:
             await self.finish(interaction, ENDED)
             return
+        await self.working(interaction, "Un-ticking…")
         try:
             res = await self.bot.tick(self.reg, s, remove=self.draft.get("remove") or [], by=interaction.user.display_name, by_id=interaction.user.id)
         except RegistryError as e:

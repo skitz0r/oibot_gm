@@ -1344,3 +1344,124 @@ def test_the_client_routes_a_council_threads_messages_and_restart_modals(night, 
     itx = types.SimpleNamespace(guild_id=None, type=discord.InteractionType.modal_submit, data={"custom_id": f"lootmodal.{GUILD}:x:d1:why"}, user=None)
     run(bot.on_interaction(itx))
     assert seen == [f"lootmodal.{GUILD}:x:d1:why"]
+
+
+# ---------------------------------------------------------------- final review fixes (each fails without its fix)
+
+def _spy_answered(n, monkeypatch, verb: str, itx_box: dict) -> list[bool]:
+    """Wrap a LootMixin verb: record whether the interaction in `itx_box` was already answered when the verb ran."""
+    seen: list[bool] = []
+    orig = getattr(n.bot, verb)
+
+    async def spy(*a, **kw):
+        seen.append(itx_box["itx"].response.is_done())
+        return await orig(*a, **kw)
+    monkeypatch.setattr(n.bot, verb, spy)
+    return seen
+
+
+def _submit(h, modal, itx_box, message_id=None, **values):
+    """h.submit, keeping the interaction (so a spy can ask whether it was answered before the write)."""
+    from wizard_harness import FakeInteraction
+
+    payload = []
+    for key, item in modal._items.items():
+        if key in values:
+            payload.append({"type": 18, "component": ({"type": 3, "custom_id": item.custom_id, "values": [str(values[key])]} if isinstance(item, discord.ui.Select)
+                                                      else {"type": 4, "custom_id": item.custom_id, "value": str(values[key])})})
+    modal._refresh(None, payload, {})
+    itx_box["itx"] = FakeInteraction(h, kind=discord.InteractionType.modal_submit, message_id=message_id)
+    return modal.on_submit(itx_box["itx"])
+
+
+def test_a_reason_or_override_submit_is_answered_before_the_write(night, monkeypatch):
+    n = night
+    tick(n, copies=2)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    h, box = officer_h(n), {}
+    seen = _spy_answered(n, monkeypatch, "override", box)
+    target = next(char.main.label for char in n.members if char.main.label != n.s.pending("d1").to)
+    run(_submit(h, flows_loot.reason_modal(GUILD, n.s.id, "d1", "ovr", item="Shard of Doom", who=target), box, message_id=4321, who=target, reason="tank first"))
+    assert seen == [True], "Discord's 3 seconds: the submit is acknowledged before the git commit, the ops line and the card edits"
+    assert n.s.pending("d1").override.to == target and "not recorded until Confirm" in h.text, "the outcome still edits the wizard message"
+
+
+def test_a_give_the_reason_submit_is_answered_before_the_write(night, monkeypatch):
+    n = night
+    companion_mismatch(n)
+    h, box = officer_h(n), {}
+    seen = _spy_answered(n, monkeypatch, "set_reason", box)
+    run(_submit(h, flows_loot.reason_modal(GUILD, n.s.id, "d1", "why", item="Shard of Doom"), box, reason="raid leader's call"))
+    assert seen == [True] and "📌 Precedent" in h.text
+
+
+def test_keep_open_and_the_tick_wizard_answer_before_the_write(night, monkeypatch):
+    n = night
+    run(n.bot.loot_closing(n.reg, n.s))
+    h, box = officer_h(n), {}
+    seen = _spy_answered(n, monkeypatch, "keep_open", box)
+    box["itx"] = h.card_press()
+    run(LootButton(GUILD, n.s.id, "-", "keep").callback(box["itx"]))
+    assert seen == [True] and n.s.keep_open_until and "Kept open until" in h.text
+    seen = _spy_answered(n, monkeypatch, "tick", box)
+
+    async def go():
+        await button(card(n), "Tick drops…").callback(h.card_press())
+        await h.pick("Which boss?", flows_loot.NEW_BOSS)
+        await h.submit(boss="Gatekeeper")
+        await h.press("Not on the table…")
+        await h.submit(name="Shard of Doom", copies="1")
+        btn = next(b for b in h._items() if isinstance(b, discord.ui.Button) and b.label == "Tick")
+        box["itx"] = h._on_screen()
+        await btn.callback(box["itx"])
+    run(go())
+    assert seen == [True] and [d.item_name for d in n.s.drop_list] == ["Shard of Doom"] and "📥 Ticked" in h.text
+
+
+def test_an_off_roster_name_may_be_first_and_last(night):
+    """WoW: Forever characters are 'First Last': Someone not on the roster… takes both words (the box allows 49)."""
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    h = officer_h(n)
+    modal = flows_loot.reason_modal(GUILD, n.s.id, "d1", "ovr", item="Shard of Doom", who_text=True)
+    assert modal._items["who"].max_length >= 49
+    run(h.submit(modal, who="Kestrel Pugwood", reason="a guest helped us"))
+    assert "isn't a character name" not in h.text and "Nobody called **Kestrel Pugwood**" in h.text
+    run(button(h.screen["view"], "Record Kestrel Pugwood as a guest").callback(h.card_press()))
+    assert n.s.pending("d1").override.to == "Kestrel Pugwood"
+    run(h.submit(flows_loot.reason_modal(GUILD, n.s.id, "d1", "ovr", item="Shard of Doom", who_text=True), who="Bad Name 9", reason="x y z"))
+    assert "isn't a character name" in h.text
+
+
+def test_a_rehearsals_late_award_never_dms_the_officers(reg, rs, monkeypatch):
+    world = World()
+    start = (reg.now_local() + timedelta(days=3, hours=3)).replace(second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t", cutoffs={"soft": 2, "hard": 1.5, "confirm": 1})
+    ms = reg.test_members()[:10]
+    join(reg, rs, ev, ms)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms])
+    reg.config.roster_channel_id = 4242
+    bot = SurfBot(reg, rs, world)
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer", by_id=OFFICER))
+    assert s.test
+    run(bot.end_run(reg, rs, ev, by="Mira"))
+    monkeypatch.setattr(type(bot), "loot_officer_ids", lambda self, reg: [OFFICER, 555])
+    held(bot, reg, kind="loot")
+    run(bot.loot_scheduler_step(reg))
+    assert not bot.dms, "test traffic: never a DM to every officer (the DM rule)"
+
+
+def test_the_unrouted_companion_block_names_no_companion_option_that_doesnt_exist(reg, rs):
+    from oibot_gm.feed import Companion
+
+    world = World()
+    ev_a, _ = real_run(reg, rs, days=2)
+    ev_b, _ = real_run(reg, rs, days=5)
+    reg.config.roster_channel_id = 4242
+    bot = SurfBot(reg, rs, world)
+    s_a, _ = run(bot.open_loot(reg, rs, ev_a, by="Officer", by_id=OFFICER))
+    run(bot.open_loot(reg, rs, ev_b, by="Officer", by_id=OFFICER))
+    ack = run(bot.handle_feed_event({"type": "drop", "items": [{"name": "X"}], "idem": "u1"}, Companion("Lootmaster", "test", GUILD, "peer")))
+    body = text_of(world.channels[s_a.raid_thread_id].message(s_a.cards["loot"]).view)
+    assert "Companion not routed" in body and "--run" not in body and "--run" not in ack["error"]

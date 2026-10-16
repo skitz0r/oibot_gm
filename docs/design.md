@@ -1456,7 +1456,11 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   press reads the session from `bot.events` (loaded from disk at start); Give the reason / Correct… on a council that
   has ended pass the session id (`set_reason` / `correct` take it). Every press: `resolve_button` (the guild from the
   id, refused in another server) then `role_of(PRIV_LIVE)` officer or owner (Details / Why not… at PRIV_ROUTING); a
-  Modal has no interaction_check, so the submit re-checks.
+  Modal has no interaction_check, so the submit re-checks. Every submit and every writing press answers Discord BEFORE
+  its write (`flows_loot._ack_submit`: a defer as an update of the message it came from, else "thinking"; Keep open
+  defers; the Tick wizard's Tick / Un-tick show `working`) — the verb's git commit, ops line and card edits can outlast
+  the 3 seconds on a raid night; the outcome then edits the original response or follows up. A typed "not on the
+  roster" name is one or two letter-only words (`NAME_RE`, the box takes 49: WoW: Forever's "First Last").
 - **Thread lines** (`loot_view`, persistent buttons): Give the reason + Mistake — correct… under a companion award
   against the bot's pick (L20), Wrong? Fix… under an in-game award with no proposal (L21), Correct… under a conflict,
   Distribute under a human tick (never under a companion tick while auto-distribute is on) and under the restart's
@@ -1535,7 +1539,7 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
 - Tests: `tests/test_loot_surface.py` (the card, the batch cards and their limits, every press against the verbs,
   stale presses, the Override / Tick / Correct / precedents wizards through `wizard_harness`, the item card's
   self-edit, the restart round-trips of every id incl. a modal submitted after a restart, End, the scheduler step and
-  its one DM, the chat routing).
+  its one DM — never for a rehearsal: `_loot_recent_end` skips test archives — the chat routing).
 
 ## 6. Architecture
 
