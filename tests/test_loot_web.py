@@ -1010,3 +1010,46 @@ def test_every_surface_retires_a_precedent_through_the_one_verb(w, monkeypatch):
     assert lootctx.RegistryLootContext(w.reg, w.reg.store, None).precedents[0]["status"] == "active"
     lines = [t for _, _, t in w.bot.ops.lines if "Precedent" in t]
     assert len(lines) == 2 and lines[0].startswith("[mcp] u05 via MCP") and lines[1].startswith("[chat] Officer"), "one audit line each, on its surface"
+
+
+def _data_files(reg) -> dict[str, bytes]:
+    root = reg.store.root / reg.key
+    return {str(f.relative_to(root)): f.read_bytes() for f in sorted(root.rglob("*")) if f.is_file()}
+
+
+def test_a_preview_flag_never_skips_the_actor_on_a_decision_route(w):
+    """Regression (integration item 5, D8): `"preview": true` skipped the X-Oibot-Actor check on EVERY decision route,
+    and only confirm handled a preview — an MCP override / reason / correction / retire / tiers / someone's wishlist
+    with that flag was written as the owner's token alone. Now a preview passes without the actor only where the route
+    answers it before any verb (confirm, the TMB import); everywhere else it is a 403 and nothing is written."""
+    from oibot_gm.feed import Companion
+
+    opened(w)
+    tick(w, "Shard of Doom", "Wand of Tests")
+    c = council(distribute(w))
+    p1, p2 = c["proposals"]
+    other = {p["drop_id"]: next(m.main.label for m in w.ms if m.main.label != p["to"]) for p in (p1, p2)}
+    run(w.bot.handle_feed_event({"type": "loot", "recipient": other["d1"], "item_name": p1["item"], "idem": "pv1"}, Companion("Scribe", "c", "", "p")))
+    w.reg.store.append_jsonl(Path(w.reg.key) / "precedents.jsonl", {"item": "Syphon", "bot": "Torsha", "human": "Eltam", "reason": "tanks", "import_id": "r1-d1"})
+    w.bot.__dict__.get("contexts", {}).clear()
+    tiered_item(w.reg, 90001, "Robe of Tests")
+    m = w.ms[0]
+    csv = f"character_name,item_name,item_id,sort_order,is_offspec,note,received_at\n{m.main.label},Gloves A,0,1,0,,\n"
+    s = w.bot.events[(GUILD, w.ev.key)]
+    before, pending = _data_files(w.reg), [(p.drop_id, p.to, p.override) for p in s.proposals]
+    key = w.ev.key
+    refused = [(f"/api/loot/{key}/override", {"drop_id": "d2", "to": other["d2"], "reason": "tank progression"}),
+               (f"/api/loot/{key}/reason", {"drop_id": "d1", "reason": "she tanks tonight"}),
+               (f"/api/loot/{key}/correct", {"drop_id": "d1", "to": p1["to"], "reason": "misclick in game"}),
+               ("/api/loot/precedents/retire", {"ref": "r1-d1", "reason": "old tier"}),
+               ("/api/members/wishlist", {"member": m.display_name, "rows": [{"name": "Robe of Tests"}]}),
+               ("/api/loot/items/90001/tiers", {"tiers": {"Priest:Holy": "B"}, "reweight": False})]
+    for path, body_ in refused:
+        r = w.c.post(path, json=body_ | {"preview": True}, headers=H)
+        assert r.status_code == 403 and "X-Oibot-Actor" in r.json()["error"], (path, r.status_code, r.text)
+    r = w.c.post(f"/api/loot/{key}/confirm", json={"preview": True}, headers=H)
+    assert r.status_code == 200 and r.json()["preview"].startswith("Record "), r.text
+    r = w.c.post("/api/loot/wishlists/import", json={"csv": csv, "preview": True}, headers=H)
+    assert r.status_code == 200 and "preview" in r.json()["message"], r.text
+    assert _data_files(w.reg) == before, "no session, ledger, precedent, member or item file changed"
+    assert [(p.drop_id, p.to, p.override) for p in s.proposals] == pending, "nothing changed in memory either"

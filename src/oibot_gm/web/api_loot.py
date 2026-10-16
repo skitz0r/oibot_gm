@@ -56,13 +56,15 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         if v.via == "mcp" and not getattr(v, "actor", None):
             raise HTTPException(403, ACTOR_NEEDED.format(what=what, guild=v.reg.config.name))
 
-    async def writer(request: Request, actor: str | None = None):
+    async def writer(request: Request, actor: str | None = None, preview_ok: bool = False):
         """An officer's loot write: officer rights decided now (PRIV_LIVE, as the plain-text Apply), and for a decision
-        about an award or a person from MCP, the actor header (D8)."""
+        about an award or a person from MCP, the actor header (D8) — on EVERY such route, whatever the body says. Only
+        a route that takes `preview_ok` (its handler answers a preview before any verb runs and writes nothing: confirm,
+        the TMB import) lets `"preview": true` through without the actor; anywhere else a preview flag decides nothing."""
         v, d = await body(request, officer=True)
         if live_officer is not None and not await live_officer(v):
             raise HTTPException(403, "Officers only.")
-        if actor and not (isinstance(d, dict) and d.get("preview")):  # a preview decides nothing: no actor needed
+        if actor and not (preview_ok and isinstance(d, dict) and d.get("preview")):
             need_actor(v, actor)
         return v, d
 
@@ -308,7 +310,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
     async def loot_confirm(request: Request, run: str):
         """Record picks: one drop (`only` + `expect_to` = the recipient you saw) or every pick still pending (`batch_rev`
         of what you saw). `preview`: what would be recorded, nothing written."""
-        v, d = await writer(request, actor="Confirming an award")
+        v, d = await writer(request, actor="Confirming an award", preview_ok=True)  # the preview below returns before the verb
         rs, ev, sessions = run_of(v.reg, run)
         s = pick(ev, sessions, d, ref=run)
         only = ids(d, "only")
@@ -656,7 +658,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
     async def loot_wishlists_import(request: Request):
         """A ThatsMyBIS wishlist export (CSV text) into the native wishlists (D5): `preview` first (rows, characters,
         duplicates, unknown characters), then without it to write. An import never deletes an entry made on the site."""
-        v, d = await writer(request, actor="Importing wishlists")
+        v, d = await writer(request, actor="Importing wishlists", preview_ok=True)  # import_tmb_wishlists(preview=True) writes nothing
         text = str(d.get("csv") or "")
         if not text.strip():
             raise HTTPException(400, "csv required (the TMB wishlist export's text)")
