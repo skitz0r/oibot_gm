@@ -14,17 +14,30 @@ replayed when a council opens) and the guild's 'no run live' state shows it.
   kill  → the boss is down (and starts the auto-distribute wait)
   hello/heartbeat → presence (live / quiet / disconnected, feed_presence)
 Idempotency: the session keeps the companion's idem keys (`seen_idem`), so a re-send after a reconnect is acked, not
-applied twice; every ack names the session (`session`: "<guild>:<id>")."""
+applied twice; every ack names the session (`session`: "<guild>:<id>"). Two companions in one raid (two officers both
+running the client) see the same chat lines: a drop or an award one companion reports that ANOTHER companion of the
+same council already reported (same boss + items / recipient + item, in-game stamps within DUP_WINDOW_S) is a duplicate
+— an ops line, no tick (FeedMixin._feed_duplicate). Audit lines of companion events carry via 'companion'."""
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from typing import Any
 
 from .feed import Companion
 from .loot import session as ls
 
 log = logging.getLogger(__name__)
+
+# Cross-companion duplicates. The companion's idem (a hash of the whole chat-log line, its PC's millisecond stamp
+# included) is the primary signal and is per companion: the same line on two PCs hashes differently. The window is for
+# that case only — the two PCs' clocks disagree by a few seconds and each logs the line when its client draws it — so a
+# drop / award ANOTHER companion of the council already reported with stamps this close is the same event. One
+# companion's own events are never merged (two copies announced on two lines are two drops), and each reported event
+# absorbs at most one duplicate per other companion (two copies seen by two companions stay two).
+DUP_WINDOW_S = 30
+DUP_KEEP_S = 600  # how long a reported event is remembered for matching (in memory: a restart forgets it)
 
 
 def _routing_key(bot, reg, c) -> str | None:
@@ -211,6 +224,8 @@ class FeedMixin:
     # ---- entry point
     async def handle_feed_event(self, ev: dict[str, Any], comp: Companion) -> dict[str, Any] | None:
         kind = ev.get("type")
+        if kind == "loot" and str(ev.get("recipient") or "").strip().lower() == "@self":
+            ev = {**ev, "recipient": comp.character}  # "You receive loot" on the companion's own PC: its character got it
         raid, why = self.loot_route(comp)
         gk = raid.guild if raid is not None else self.companion_guild(comp)
         cfg = self.registries.cfg_for(gk) if gk else None  # None: the log only
@@ -241,6 +256,13 @@ class FeedMixin:
             return {"error": why}
         if not raid.remember_idem(ev.get("idem")):
             return {"dup": True, "session": skey}
+        first = self._feed_duplicate(raid, ev, comp) if kind in ("drop", "loot") else None
+        if first is not None:  # another companion of this council reported it already: logged, never ticked twice
+            what = (f"drop of {', '.join(_item_names(ev)) or '?'}" + (f" from {ev.get('boss')}" if ev.get("boss") else "")) if kind == "drop" else \
+                f"award {ev.get('item_name') or ev.get('item_id')} → {ev.get('recipient', '?')}"
+            if cfg:
+                await self.ops.emit(cfg, "info", f"companion {comp.character}: duplicate of {first['name']}'s {what} — not recorded twice")
+            return {"dup": True, "duplicate_of": first["name"], "session": skey}
         by = f"companion:{comp.character}"
         try:
             if kind == "drop":
@@ -256,6 +278,29 @@ class FeedMixin:
             raise
         return {**out, "session": skey}
 
+    def _feed_duplicate(self, raid, ev: dict, comp) -> dict | None:
+        """The earlier report of this drop / award by ANOTHER companion of the council (see DUP_WINDOW_S), or None —
+        then this one is remembered for the others. Matched on (boss, items) for a drop, (recipient, item) for an
+        award, and the in-game stamps within DUP_WINDOW_S (the bot's receipt times when a stamp is missing)."""
+        sig = _feed_sig(ev)
+        if sig is None:
+            return None
+        now = time.monotonic()
+        recent = self.__dict__.setdefault("_feed_recent", {}).setdefault(raid.key, [])
+        recent[:] = [r for r in recent if now - r["recv"] < DUP_KEEP_S]
+        who = str(getattr(comp, "character", "") or "").strip().lower()
+        t = _game_time(ev.get("ts"))
+        for r in recent:
+            if r["sig"] != sig or who in r["seen"]:
+                continue  # one companion's own events are never merged; one duplicate per other companion
+            close = abs((t - r["t"]).total_seconds()) <= DUP_WINDOW_S if t is not None and r["t"] is not None and (t.tzinfo is None) == (r["t"].tzinfo is None) \
+                else now - r["recv"] <= DUP_WINDOW_S
+            if close:
+                r["seen"].add(who)
+                return r
+        recent.append({"sig": sig, "seen": {who}, "name": getattr(comp, "character", "?"), "t": t, "recv": now})
+        return None
+
     def _feed_warn_due(self, gk, character, why: str, every_s: float = 600) -> bool:
         seen = self.__dict__.setdefault("_feed_warned", {})
         key, now = (gk, character, why), datetime.now().timestamp()
@@ -270,7 +315,7 @@ class FeedMixin:
         if not add:
             raid.save(f"{raid.guild}: loot {raid.id}: companion event", touch=False)
             return {"ticked": 0}
-        res = await self.tick(reg, raid, add=add, by=by, source="companion", raw=ev.get("line"))
+        res = await self.tick(reg, raid, add=add, by=by, via="companion", source="companion", raw=ev.get("raw"))  # the chat line, for the audit
         learned = [d for d in res["added"] if not d.tiered]
         if learned:
             await self.loot_notify(reg, raid, "🆕 " + ", ".join(d.item_name for d in learned) + " isn't tiered yet — recorded by name, scored the same for everyone; tier it on Loot › Items.", kind="untiered")
@@ -281,11 +326,13 @@ class FeedMixin:
         boss = self._resolve_boss(ev.get("boss"), None, raid)
         async with self.loot_lock(*raid.key):
             self.loot_check_live(raid)
-            if boss not in raid.bosses_done:
+            new = boss not in raid.bosses_done
+            if new:
                 raid.bosses_done.append(boss)
                 raid.current_boss = boss
-            raid.save(f"{raid.guild}: loot {raid.id}: {boss} down")
-        await self.loot_notify(reg, raid, f"☠ **{boss}** down" + (f" ({_log_clock(ev['ts'])})" if ev.get("ts") else ""), kind="kill")
+                raid.save(f"{raid.guild}: loot {raid.id}: {boss} down")
+        if new:  # a second companion's report of the same kill adds no second line
+            await self.loot_notify(reg, raid, f"☠ **{boss}** down" + (f" ({_log_clock(ev['ts'])})" if ev.get("ts") else ""), kind="kill")
         self.loot_auto_soon(reg, raid, boss)
         return {"boss": boss}
 
@@ -323,18 +370,19 @@ class FeedMixin:
                     out = self._feed_match(reg, raid, drops, who, ctx, roster, comp, by)
                     break
             # never ticked: tick it now (the tick verb: learned item, thread line, card), then match under the lock again
-            await self.tick(reg, raid, add=[{"item_id": iid or None, "name": name or None, "boss": raid.current_boss}], by=by, source="companion")
+            await self.tick(reg, raid, add=[{"item_id": iid or None, "name": name or None, "boss": raid.current_boss}], by=by, via="companion",
+                            source="companion", raw=ev.get("raw"))
         res, d, who = out["result"], out.get("drop"), out.get("who")
         if res == "confirmed":
-            await self._after_record(reg, raid, out["awards"], by, None, "discord")
+            await self._after_record(reg, raid, out["awards"], by, None, "companion")
         elif res == "conflict":
             await self.loot_notify(reg, raid, f"⚠ **{d.item_name}**: in game it went to **{who}**, recorded earlier to **{out['recorded']}** — Correct?", kind="conflict", drop_id=d.drop_id)
         elif res == "recorded_reason_pending":
             bot = out["bot"]
-            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} in game (bot picked {bot}); reason pending", "discord", None)
+            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} in game (bot picked {bot}); reason pending", "companion", None)
             await self.loot_notify(reg, raid, f"⚠ **{d.item_name}** → **{who}** in game, but the bot proposed **{bot}**. Recorded — give the reason so it becomes a precedent (or correct it if it was a mistake).", kind="mismatch", drop_id=d.drop_id)
         elif res == "manual":
-            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} (in game, no proposal)", "discord", None)
+            await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} (in game, no proposal)", "companion", None)
             await self.loot_notify(reg, raid, f"📒 **{d.item_name}** → **{who}** · recorded — wrong? Correct…", kind="manual", drop_id=d.drop_id)
         return {"result": res}
 
@@ -397,6 +445,33 @@ class FeedMixin:
         if raid is None:
             return
         await self.loot_notify(self.loot_reg(raid), raid, f"🔌 {comp.character}'s companion disconnected", kind="presence")
+
+
+def _item_names(ev: dict) -> list[str]:
+    return [str(it.get("name") or it.get("id")) for it in ev.get("items", []) or [] if it.get("id") or it.get("name")]
+
+
+def _feed_sig(ev: dict) -> tuple | None:
+    """What makes two companions' reports the same event: a drop's boss and its items (as a sorted multiset), an
+    award's recipient and item. None: nothing to match on."""
+    if ev.get("type") == "drop":
+        items = sorted(str(it.get("id") or "").strip() or str(it.get("name") or "").strip().lower() for it in ev.get("items", []) or [] if it.get("id") or it.get("name"))
+        return ("drop", str(ev.get("boss") or "").strip().lower(), tuple(items)) if items else None
+    if ev.get("type") == "loot":
+        item = str(ev.get("item_id") or "").strip() or str(ev.get("item_name") or "").strip().lower()
+        who = str(ev.get("recipient") or "").strip().lower()
+        return ("loot", who, item) if item and who else None
+    return None
+
+
+def _game_time(ts) -> datetime | None:
+    """The companion's in-game stamp (an ISO chat-log stamp, or epoch seconds) as a datetime, or None."""
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        return datetime.fromtimestamp(ts, timezone.utc)
+    try:
+        return datetime.fromisoformat(str(ts)) if ts else None
+    except ValueError:
+        return None
 
 
 def _log_clock(ts) -> str:

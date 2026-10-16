@@ -607,6 +607,78 @@ def test_companion_resends_are_acked_not_applied_twice(council):
     assert "same" in ls.load_sessions(c.reg.store)[(GUILD, c.ev.key)].seen_idem, "kept on the session (survives a restart)"
 
 
+def drop_line(idem, ts, items=("Shard of Doom",), boss="Gatekeeper"):
+    return {"type": "drop", "boss": boss, "items": [{"name": n} for n in items], "ts": ts, "idem": idem, "raw": f"[Raid] Ml: {', '.join(items)} dropped"}
+
+
+def test_two_companions_reporting_the_same_drop_tick_it_once(council):
+    """Regression (integration item 7): two officers both running the companion see the same chat line; each PC hashes
+    it with its own millisecond stamp, so the idem differs and both ticked it — a phantom copy. The second report (another
+    companion, same boss and item, in-game stamps within DUP_WINDOW_S) is an ops line, not a tick."""
+    c = council
+    a, b = scribe(), Companion("Quill", "oibot-companion/0.1", "", "peer2")
+    out = run(c.bot.handle_feed_event(drop_line("a1", "2026-10-15T20:12:01.120"), a))
+    assert out["ticked"] == 1
+    out = run(c.bot.handle_feed_event(drop_line("b1", "2026-10-15T20:12:03.870"), b))
+    assert out["dup"] and out["duplicate_of"] == "Scribe" and len(c.s.drop_list) == 1
+    assert any("companion Quill: duplicate of Scribe's drop of Shard of Doom from Gatekeeper" in t for _, _, t in c.bot.ops.lines)
+    assert c.s.drop_list[0].raw == "[Raid] Ml: Shard of Doom dropped", "the companion's chat line is kept on the drop (item 8)"
+    run(c.bot.handle_feed_event(drop_line("b2", "2026-10-15T21:40:00.000"), b))
+    assert len(c.s.drop_list) == 2, "the same item much later (another kill) is a new drop"
+
+
+def test_real_two_copy_drops_stay_two_drops(council):
+    """One companion's two lines are two drops (two copies announced separately), even with one stamp; two copies seen
+    by two companions in any order stay two (each report absorbs one duplicate per other companion)."""
+    c = council
+    a, b = scribe(), Companion("Quill", "oibot-companion/0.1", "", "peer2")
+    run(c.bot.handle_feed_event(drop_line("a1", "2026-10-15T20:12:01.000"), a))
+    run(c.bot.handle_feed_event(drop_line("a2", "2026-10-15T20:12:01.000"), a))
+    assert len(c.s.drop_list) == 2
+    run(c.bot.handle_feed_event(drop_line("b1", "2026-10-15T20:12:02.000"), b))
+    run(c.bot.handle_feed_event(drop_line("b2", "2026-10-15T20:12:02.500"), b))
+    assert len(c.s.drop_list) == 2, "B's two lines were A's two copies"
+    run(c.bot.handle_feed_event(drop_line("a3", "2026-10-15T20:30:00.000", items=("Wand of Tests",), boss="Second Boss"), a))
+    run(c.bot.handle_feed_event(drop_line("b3", "2026-10-15T20:30:01.000", items=("Wand of Tests",), boss="Second Boss"), b))
+    assert len(c.s.drop_list) == 3
+
+
+def test_two_companions_reporting_one_award_record_it_once_and_audit_as_the_companion(council):
+    """The same award line on two PCs: recorded once (no phantom mismatch on a second copy); the companion's audit lines
+    name its surface (item 8: they said nothing / 'discord')."""
+    c = council
+    tick_one(c, copies=2)
+    (p1, p2) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    b = Companion("Quill", "oibot-companion/0.1", "", "peer2")
+    out = run(c.bot.handle_feed_event({"type": "loot", "recipient": p1.to, "item_name": "Shard of Doom", "ts": "2026-10-15T20:14:00.100", "idem": "l1"}, scribe()))
+    assert out["result"] == "confirmed"
+    out = run(c.bot.handle_feed_event({"type": "loot", "recipient": p1.to, "item_name": "Shard of Doom", "ts": "2026-10-15T20:14:01.900", "idem": "l2"}, b))
+    assert out["dup"] and len(ledger(c.reg)) == 1 and c.s.pending("d2") is not None, "the second copy still waits for its own award"
+    assert any(t.startswith("[companion] companion:Scribe: loot") and "recorded" in t for _, _, t in c.bot.ops.lines), c.bot.ops.lines
+
+
+def test_the_rejudge_after_an_override_is_audited_on_the_overriders_surface(council):
+    """Regression (integration item 8): the re-judge an override starts was audited as a Discord action whatever the
+    officer used; it now carries their surface (and id)."""
+    c = council
+    tick_one(c, copies=2)
+    (p1, _) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    other = next(char(m) for m in c.members if char(m) != p1.to)
+
+    async def go():
+        await c.bot.override(c.reg, c.s, "d1", other, "tank progression", by="Mira", by_id=11, via="web")
+        await c.bot.loot_settle()
+    run(go())
+    assert any(t.startswith("[web] Mira: loot") and "distributed" in t for _, _, t in c.bot.ops.lines), c.bot.ops.lines
+
+
+def test_a_self_loot_line_is_recorded_to_the_companions_character(council):
+    c = council
+    me = char(c.members[2])
+    run(c.bot.handle_feed_event({"type": "loot", "recipient": "@self", "item_name": "Never Ticked", "idem": "s1"}, Companion(me, "c", "", "p")))
+    assert ledger(c.reg)[0]["raider"] == me
+
+
 def test_companion_with_no_live_run_is_held_then_replayed(reg, rs):
     ev, ms = real_run(reg, rs)
     tonight(reg, rs, ev)
