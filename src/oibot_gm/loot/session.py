@@ -63,6 +63,7 @@ class Drop(BaseModel):
     at: str = Field(default_factory=now_iso)
     held: bool = False  # "Decide later": dropped from its batch, still waiting
     raw: Optional[str] = None  # the companion's chat line (audit)
+    seen_in_game: bool = False  # an in-game award (the companion's `loot` event) has been matched to this copy
 
     @property
     def key(self) -> str:
@@ -509,9 +510,10 @@ def run_distribution(ctx, snap: LootSession, roster: list[Player], drop_ids: lis
     pl = plan(ctx, snap, roster, drop_ids)
     order, items, raid_date = pl["order"], pl["items"], pl["raid_date"]
     policy = ctx.policy_for_llm()
-    if snap.overrides:
+    cited = [o for o in snap.overrides if o.get("status", "active") == "active"]  # a replaced reason or a corrected award is never cited
+    if cited:
         policy += "\n\n## Precedents (council overrides this raid, with reasons)\n" + "\n".join(
-            f"- {o['item']}: bot picked {o['bot']}, council awarded {o['human']} — “{o['reason']}”" for o in snap.overrides)
+            f"- {o['item']}: bot picked {o['bot']}, council awarded {o['human']} — “{o['reason']}”" for o in cited)
     prior = {p.drop_id: p for p in snap.proposals if p.drop_id in items}
     done = 0
 
@@ -572,7 +574,9 @@ def merge(ctx, live: LootSession, snap: LootSession, roster: list[Player], resul
     """Fold a distribution's results into the LIVE session (the caller holds its lock): a drop still pending (not
     awarded meanwhile), whose pending override did not change since the snapshot, and whose live table signature
     matches the judged one, takes its new proposal; anything else is left as it is now and reported stale (judge it
-    again). Returns (merged, stale drop ids)."""
+    again). A pick the council set aside while the judge ran — re-judged, but discarded or held ("Decide later") on the
+    live session since the snapshot — is never brought back (neither merged nor stale: the council decided).
+    Returns (merged, stale drop ids)."""
     want = [p.drop_id for p in results]
     live_plan = plan(ctx, live, roster, [d for d in want if live.drop(d) is not None and not live.awarded(d)])
     merged, stale = [], []
@@ -582,6 +586,9 @@ def merge(ctx, live: LootSession, snap: LootSession, roster: list[Player], resul
             stale.append(d)
             continue
         cur, was = live.pending(d), snap.pending(d)
+        snap_d, live_d = snap.drop(d), live.drop(d)
+        if (was is not None and cur is None) or (live_d.held and not (snap_d is not None and snap_d.held)):
+            continue  # discarded or held after the snapshot: the council's decision stands
         cur_ov = cur.override.model_dump() if cur and cur.override else None
         was_ov = was.override.model_dump() if was and was.override else None
         if cur_ov != was_ov or live_plan["sigs"].get(d) != p.table_sig:

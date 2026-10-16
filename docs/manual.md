@@ -1034,29 +1034,40 @@ and submit. A typed name is checked against the run's signups, the guild's regis
 before as a guest, and is recorded in their spelling; if nobody has that name the bot says so and offers **Record
 <name> as a guest** — a second, deliberate press, so a typo never becomes an award. An override is shown as pending and is **not recorded until Confirm**; the reason becomes a precedent the
 bot cites next time only when the award is confirmed. If another officer already set that drop, you are asked whether
-to replace theirs. **Discard batch** asks first: the ticks stay, pending overrides go with the proposals, nothing was
-recorded so nothing is undone.
+to replace theirs. An override re-scores the other picks; while that runs, **Confirm the rest** waits (*"Re-scoring 2
+item(s) — Confirm the rest waits"*) — confirming one item at a time still works; a pick you held (*Decide later*) or
+discarded while a re-score ran stays held or gone. **Discard batch** asks first: the ticks stay, pending overrides go
+with the proposals, nothing was recorded so nothing is undone.
 
-**The companion (in game).** When the master looter hands an item out in game, the bot matches it: to the pick shown
-(the override if there is one) → recorded; to someone else → **recorded at once** (the game is the truth) and the line
+**The companion (in game).** When the master looter hands an item out in game, the bot matches it to one copy of the
+item: the copy whose pick names who got it (two copies of a token can be handed out in either order), or a copy an
+officer already confirmed to them (never recorded twice); to the pick shown (the override if there is one) → recorded; to someone else → **recorded at once** (the game is the truth) and the line
 carries two buttons — **Give the reason** (it becomes the precedent) or **Mistake — correct…** (it was a misclick: the
 record is fixed, no precedent). A drop nobody distributed is recorded straight away — *"[item] → Kestrel · recorded"*
 with **Wrong? Fix…**; a sub who isn't registered is recorded by name. A reason given twice asks before replacing the
 first. **Correct…** (and *Mistake — correct…*, *Wrong? Fix…*) is the same two presses as Override: who it should be
-recorded to, then what went wrong (the old record is kept, marked void). A reason owed and an in-game award that
+recorded to, then what went wrong (the old record is kept, marked void); a correction also retires the precedent of the
+award it fixed — the bot never cites a council decision that, per the correction, never happened. A reason owed and an in-game award that
 disagrees with the record both stay fixable after the council ends. A companion's events go to its own server's live
-council (each server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first, and when
-several are live it picks the one whose roster has the companion's character — when it can't tell it refuses and says
-why, and every live council card shows **Bind companion…**: pick it on the right council and its drops and awards go
-there from then on (until the bot restarts; the card offers it again if needed). Drops arriving when no run is live are held for 10 minutes (a restart keeps them) and the loot channel (else the
-officer channel) asks once *"Drops arriving from Jon's log but no run is live — start an ad hoc run for tonight?"* with
-**Start an ad hoc run…**; held drops go in when a council opens, and anything still held after 10 minutes is listed in
-the ops channel as **not recorded**, so you can add it by hand. An in-game award that arrives shortly after a council
+council (each server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first — a council
+kept open past its raid's end (a pick still waiting) never takes the companion's events — and when several are live it
+picks the one whose roster has the companion's character — when it can't tell it refuses and says why, and every live
+council card shows **Bind companion…**: pick it on the right council and its drops and awards go there from then on
+(until the bot restarts; the card offers it again if needed). The companion keeps a refused event and sends it again
+every 30 seconds for 10 minutes, so it lands once you bind it; it also re-sends an event the connection cut off before
+the bot answered. Drops arriving when no run is live are held for 10 minutes (a restart keeps them) and the loot channel
+(else the officer channel) asks once *"Drops arriving from Jon's log but no run is live — start an ad hoc run for
+tonight?"* with **Start an ad hoc run…**; held drops go into the council of **their own run** when it opens (one opened
+near the run's time; never a council days early) — an event that arrives just after a council ended stays with that
+ended run and is never replayed into the next raid's council, and one a council refuses stays held. Anything still held
+after 10 minutes is listed in the ops channel as **not recorded** (naming the ended run when there is one), so you can
+add it by hand. An in-game award that arrives shortly after a council
 ended reaches the officers as **one DM** with a link to record or correct it on the site — the council's only DM. A
 rehearsal takes drops only from a puppet's or the tester's companion.
 
 **Roster changes** after the council opened count at once: someone who joins the roster is a candidate straight away
-(a thread line says so); someone who leaves stays a candidate until an officer removes them on the card.
+(a thread line says so); someone who leaves stays a candidate until an officer removes them on the card — on a split run
+only on their own roster's council.
 
 **Asking the bot in the thread.** Only messages addressed to it count — an @mention, a message starting with **?**, or
 a reply to one of the council's cards; everything else in the thread is the officers' own chat (a reply to a companion
@@ -1072,8 +1083,9 @@ When the bot can't read sentences (Claude unavailable) it says so and the button
 **End.** `/raid end` (with several locked runs it asks which, the one with a council first) or **End council** on the
 card shows what ending means — *"End <run>: 6 awards, 1 override, 2 drops never distributed, 1 award waiting for a
 reason"* — with **End** / **Not yet**. End posts the summary in the thread (the awards, the overrides and anything left
-undecided, so nothing anyone decided disappears), turns the card into the summary, archives the thread and marks the
-run done. The bot ends a council by itself only after the run's scheduled end, once it has been idle for 30 minutes
+undecided, so nothing anyone decided disappears), turns the card into the summary, archives the thread, marks the run
+done and redraws its sheet and lock card closed. Only a locked run ends, and not while a Distribute is judging
+(*"Distributing already (…) — wait for it, or retry End"*). The bot ends a council by itself only after the run's scheduled end, once it has been idle for 30 minutes
 with no pick waiting for Confirm and no drop nobody judged — after one *"closing in 15 min"* notice with **Keep open**.
 If picks or drops still wait, it says so once in the thread and leaves the council open for an officer; the raid itself
 is over either way (no more fill asks, nobody shows as rostered on it).
