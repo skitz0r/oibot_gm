@@ -108,6 +108,13 @@ def real_run(reg, rs, n=10, days=3):
     return ev, ms
 
 
+def tonight(reg, rs, ev, minutes_ago=10):
+    """The run started `minutes_ago` minutes ago (a held companion event replays only into its own run's window)."""
+    ev.starts_at = (reg.now_local() - timedelta(minutes=minutes_ago)).replace(second=0, microsecond=0).isoformat()
+    rs.save(ev, "t: tonight")
+    return ev
+
+
 def char(m) -> str:
     return m.main.label
 
@@ -587,6 +594,7 @@ def test_companion_resends_are_acked_not_applied_twice(council):
 
 def test_companion_with_no_live_run_is_held_then_replayed(reg, rs):
     ev, ms = real_run(reg, rs)
+    tonight(reg, rs, ev)
     bot = LootBot(reg, rs)
     out = run(bot.handle_feed_event({"type": "drop", "boss": "Gatekeeper", "items": [{"name": "Early"}], "idem": "e1"}, scribe()))
     assert out["held"] and bot.feed_waiting(reg)["count"] == 1
@@ -976,6 +984,7 @@ def test_run_fill_refuses_past_the_close(reg, rs):
 
 def test_held_companion_events_survive_a_restart_and_expired_ones_are_announced(reg, rs):
     ev, ms = real_run(reg, rs)
+    tonight(reg, rs, ev)
     bot = LootBot(reg, rs)
     out = run(bot.handle_feed_event({"type": "drop", "boss": "Gatekeeper", "items": [{"name": "Early"}], "idem": "e1"}, scribe()))
     assert out["held"] and "open the loot council" in out["note"]
@@ -1135,5 +1144,316 @@ def test_the_threads_buttons_give_the_reason_and_correct(council):
         fix.to._value, fix.reason._value = p.to, "misclicked"
         await fix.on_submit(itx)
     run(go())
-    assert precedents(c.reg)[-1]["reason"] == "raid leader's call for the tank" and not c.s.pending_reasons
+    given, status = precedents(c.reg)[-2:]
+    assert given["reason"] == "raid leader's call for the tank" and not c.s.pending_reasons
+    assert status == {**status, "kind": "status", "import_id": given["import_id"], "status": "retired"}, "the corrected award's reason is retired"
     assert c.s.awarded("d1").raider == p.to and c.s.awarded("d1").source == "correct"
+
+
+# ---------------------------------------------------------------- final review fixes (each fails without its fix)
+
+def _two_copies(c):
+    """Token ×2 ticked and distributed to two different characters: (d1's pick, d2's pick)."""
+    tick_one(c, name="Token", copies=2)
+    run(c.bot.distribute(c.reg, c.s, by="Officer"))
+    a, b = c.s.pending("d1"), c.s.pending("d2")
+    if a.to == b.to:  # untiered: both may go to the top score — make the second copy someone else's (an override)
+        other = next(char(m) for m in c.members if char(m) != a.to)
+        run(c.bot.override(c.reg, c.s, "d2", other, "second copy", by="Jonny", rejudge=False))
+    return c.s.pending("d1").to, c.s.pending("d2").to
+
+
+def test_two_copies_handed_out_in_any_order_each_confirm_their_own_pick(council):
+    c = council
+    first, second = _two_copies(c)
+    out = run(c.bot.handle_feed_event({"type": "loot", "recipient": second, "item_name": "Token", "idem": "t2"}, scribe()))
+    assert out["result"] == "confirmed" and c.s.awarded("d2").raider == second, "the copy whose pick names them, not the first open one"
+    out = run(c.bot.handle_feed_event({"type": "loot", "recipient": first, "item_name": "Token", "idem": "t1"}, scribe()))
+    assert out["result"] == "confirmed" and c.s.awarded("d1").raider == first
+    assert not c.s.pending_reasons and not c.s.conflicts, "both bot picks followed: nobody owes a reason"
+    assert sorted(r["raider"] for r in ledger(c.reg)) == sorted([first, second])
+
+
+def test_a_copy_an_officer_confirmed_first_is_not_recorded_twice_when_the_game_says_so(council):
+    c = council
+    first, second = _two_copies(c)
+    run(c.bot.confirm(c.reg, c.s, only={"d1"}, expect_to=first, by="Mira"))
+    out = run(c.bot.handle_feed_event({"type": "loot", "recipient": first, "item_name": "Token", "idem": "t3"}, scribe()))
+    assert out["result"] == "already_recorded" and c.s.pending("d2").to == second, "the other copy keeps its pick"
+    assert [(r["drop_id"], r["raider"]) for r in ledger(c.reg)] == [("d1", first)], "never a double award"
+    out = run(c.bot.handle_feed_event({"type": "loot", "recipient": second, "item_name": "Token", "idem": "t4"}, scribe()))
+    assert out["result"] == "confirmed" and not c.s.pending_reasons
+    assert c.s.drop("d1").seen_in_game and c.s.drop("d2").seen_in_game
+
+
+def test_a_council_held_past_its_close_never_takes_tonights_companion_events(reg, rs):
+    ev1, ms = real_run(reg, rs)
+    bot = LootBot(reg, rs)
+    s1, _ = run(bot.open_loot(reg, rs, ev1, by="Officer"))
+    run(bot.tick(reg, s1, add=[{"name": "Forgotten", "boss": "Gatekeeper"}], by="Officer"))
+    run(bot.distribute(reg, s1, by="Officer"))  # a pick waits: the council stays live past its close
+    ev1.starts_at = (ev1.start - timedelta(days=10)).isoformat()
+    rs.save(ev1, "t: last week")
+    start = (reg.now_local() - timedelta(minutes=10)).replace(second=0, microsecond=0)
+    ev2 = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t")
+    join(reg, rs, ev2, ms)
+    lock_with_board(reg, rs, ev2, [m.display_name for m in ms])  # tonight: locked, nobody pressed /raid loot yet
+    out = run(bot.handle_feed_event({"type": "loot", "recipient": char(ms[1]), "item_name": "Tonight Blade", "idem": "n1"}, scribe()))
+    assert out.get("held") and "session" not in out, "held for tonight's council, never last week's"
+    assert [d.item_name for d in s1.drop_list] == ["Forgotten"] and not s1.awards and not ledger(reg)
+    s2, _ = run(bot.open_loot(reg, rs, ev2, by="Officer"))
+    assert [a.item_name for a in s2.awards] == ["Tonight Blade"] and ledger(reg)[0]["event"] == ev2.key
+
+
+def test_end_waits_for_an_in_flight_distribute_and_an_ended_council_is_never_written_again(reg, rs):
+    ev, ms = real_run(reg, rs)
+    prov = SlowProvider()
+    bot = LootBot(reg, rs, provider=prov)
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    live = reg.store.root / GUILD / "events" / f"{ev.key}.json"
+
+    async def go():
+        await bot.tick(reg, s, add=[{"name": "Slow Judge"}], by="Officer")
+        task = asyncio.create_task(bot.distribute(reg, s, by="Officer"))
+        while not prov.entered.is_set():
+            await asyncio.sleep(0.01)
+        with pytest.raises(LootBusy, match=r"Distributing already \(Officer.*wait for it, or retry End"):
+            await bot.end_run(reg, rs, ev, by="Mira")
+        prov.go.set()
+        await task
+        await bot.end_run(reg, rs, ev, by="Mira")
+        with pytest.raises(RegistryError, match="has ended"):  # a stale reference (a card pressed late, a web tab)
+            await bot.tick(reg, s, add=[{"name": "Late"}], by="Officer")
+        with pytest.raises(RegistryError, match="has ended"):
+            await bot.distribute(reg, s, by="Officer")
+    run(go())
+    assert not live.exists() and (GUILD, ev.key) not in ls.load_sessions(reg.store), "the archived council stays archived"
+
+
+def test_a_held_event_a_test_council_refuses_stays_held(reg, rs):
+    start = (reg.now_local() + timedelta(days=3, hours=3)).replace(second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t", cutoffs={"soft": 2, "hard": 1.5, "confirm": 1})
+    ms = reg.test_members()[:10]
+    join(reg, rs, ev, ms)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms])
+    tonight(reg, rs, ev)
+    bot = LootBot(reg, rs)
+    out = run(bot.handle_feed_event({"type": "loot", "recipient": char(ms[1]), "item_name": "Real Ring", "idem": "h1"}, scribe()))
+    assert out["held"]
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    assert s.test and not s.awards
+    rows = json.loads((reg.store.root / reg.key / "loot" / "held.json").read_text())
+    assert [r["ev"]["idem"] for r in rows] == ["h1"], "refused by the rehearsal: still held (announced if it expires), never deleted"
+
+
+def test_a_held_event_two_councils_refuse_stays_held(reg, rs):
+    ev1, ms = real_run(reg, rs, n=5, days=3)
+    tonight(reg, rs, ev1)
+    start = (reg.now_local() - timedelta(minutes=5)).replace(second=0, microsecond=0)
+    ev2 = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t")
+    other = reg.test_members()[5:10]
+    join(reg, rs, ev2, other)
+    lock_with_board(reg, rs, ev2, [m.display_name for m in other])
+    bot = LootBot(reg, rs)
+    stranger = Companion("Nobody", "c", "", "p")
+    assert run(bot.handle_feed_event({"type": "loot", "recipient": char(ms[0]), "item_name": "Ring", "idem": "h2"}, stranger))["held"]
+    run(bot.open_loot(reg, rs, ev1, by="Officer", replay=False))
+    run(bot.open_loot(reg, rs, ev2, by="Officer", replay=False))
+    assert run(bot.feed_replay(reg, ev2)) == 0
+    rows = json.loads((reg.store.root / reg.key / "loot" / "held.json").read_text())
+    assert [r["ev"]["idem"] for r in rows] == ["h2"] and not ledger(reg), "seated on none of the councils: kept, not lost"
+
+
+def test_an_event_held_after_a_run_ended_is_never_replayed_into_the_next_run(reg, rs):
+    ev1, ms = real_run(reg, rs)
+    tonight(reg, rs, ev1, minutes_ago=200)
+    bot = LootBot(reg, rs)
+    run(bot.open_loot(reg, rs, ev1, by="Officer"))
+    run(bot.end_run(reg, rs, ev1, by="Officer"))  # Gruul ends …
+    out = run(bot.handle_feed_event({"type": "loot", "recipient": char(ms[1]), "item_name": "Gruul Ring", "idem": "g1"}, scribe()))
+    assert out["held"]  # … and the master looter hands out the last item after End
+    f = reg.store.root / reg.key / "loot" / "held.json"
+    assert json.loads(f.read_text())[0]["after_end"] == ev1.key and json.loads(f.read_text())[0]["guild"] == reg.key
+    start = (reg.now_local() - timedelta(minutes=1)).replace(second=0, microsecond=0)
+    ev2 = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t")
+    join(reg, rs, ev2, ms)
+    lock_with_board(reg, rs, ev2, [m.display_name for m in ms])
+    s2, _ = run(bot.open_loot(reg, rs, ev2, by="Officer"))  # Magtheridon's council opens
+    assert not s2.awards and not s2.drop_list and not ledger(reg), "Gruul's award never lands under Magtheridon's run"
+    rows = json.loads(f.read_text())
+    rows[0]["at"] = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat(timespec="seconds")
+    f.write_text(json.dumps(rows))
+    run(bot.feed_expire(reg.key))
+    (warn,) = [t for _, lvl, t in bot.ops.lines if lvl == "warn"]
+    assert "NOT recorded" in warn and f"after {ev1.key}'s council ended" in warn
+
+
+def test_a_held_event_never_replays_into_a_council_outside_its_run_window(reg, rs):
+    ev, ms = real_run(reg, rs)  # starts in three days
+    bot = LootBot(reg, rs)
+    assert run(bot.handle_feed_event({"type": "drop", "items": [{"name": "Tonight Drop"}], "idem": "w1"}, scribe()))["held"]
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    assert not s.drop_list and bot.feed_waiting(reg)["count"] == 1, "a council opened days early takes nothing held now"
+
+
+def test_a_rejudge_never_brings_back_a_pick_held_or_discarded_meanwhile(council):
+    c = council
+    tick_one(c, copies=2)
+    run(c.bot.distribute(c.reg, c.s, by="Officer"))
+    ctx, roster = c.bot.loot_ctx(c.s), c.bot.loot_roster(c.s)
+    snap = ls.snapshot(c.s)  # the re-judge's snapshot …
+    results = ls.run_distribution(ctx, snap, roster, ["d2"], provider=None)
+    run(c.bot.discard(c.reg, c.s, only={"d2"}, by="Mira"))  # … while Mira presses Decide later on d2
+    merged, stale = ls.merge(ctx, c.s, snap, roster, results)
+    assert not merged and c.s.pending("d2") is None and c.s.drop("d2").held, "the council's Decide later stands"
+    snap = ls.snapshot(c.s)
+    results = ls.run_distribution(ctx, snap, roster, ["d1"], provider=None)
+    run(c.bot.discard(c.reg, c.s, batch_rev=ls.batch_rev(c.s), by="Mira"))  # Discard batch while it re-judged
+    merged, _ = ls.merge(ctx, c.s, snap, roster, results)
+    assert not merged and not c.s.proposals, "a discarded batch never comes back"
+
+
+def test_correct_retires_the_corrected_awards_precedent(council):
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    over, third = [char(m) for m in c.members if char(m) != p.award_to][:2]
+    run(c.bot.override(c.reg, c.s, "d1", over, "tanks progression", by="Jonny", rejudge=False))
+    run(c.bot.confirm(c.reg, c.s, only={"d1"}, by="Mira"))
+    run(c.bot.correct(c.reg, c.s, "d1", third, "ML misclicked", by="Mira"))
+    ctx = RegistryLootContext(c.reg, c.reg.store, None)
+    assert ctx.precedent_for(f"{c.ev.key}-d1") is None and "tanks progression" not in ctx.policy_for_llm(), "never cited again"
+    assert "Overrides:" not in c.bot.loot_summary(c.reg, c.s)["text"] and c.s.overrides[0]["status"] == "retired"
+    assert precedents(c.reg)[-1]["reason"] == "award corrected: ML misclicked"
+
+
+def test_a_corrected_award_after_the_end_retires_its_precedent_too(council):
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    over, third = [char(m) for m in c.members if char(m) != p.award_to][:2]
+    run(c.bot.override(c.reg, c.s, "d1", over, "tanks progression", by="Jonny", rejudge=False))
+    run(c.bot.confirm(c.reg, c.s, only={"d1"}, by="Mira"))
+    run(c.bot.end_run(c.reg, c.rs, c.ev, by="Mira"))
+    run(c.bot.correct(c.reg, c.ev.key, "d1", third, "ML misclicked", by="Mira"))
+    assert RegistryLootContext(c.reg, c.reg.store, None).precedent_for(f"{c.ev.key}-d1") is None
+
+
+class PromptProvider:
+    name = "capture"
+
+    def __init__(self):
+        self.systems: list[str] = []
+
+    def complete(self, workload, system, user, schema):
+        self.systems.append(system)
+        first = user.split("| 1 | ", 1)[1].split(" |", 1)[0] if "| 1 | " in user else "(nobody)"
+        return LootRecommendation(primary=first, justification="top [R1]", close_call=False, deviates_from_score=False)
+
+    def summary(self):
+        return "capture"
+
+
+def test_a_replaced_reason_is_never_cited_in_the_raid(reg, rs):
+    ev, ms = real_run(reg, rs)
+    prov = PromptProvider()
+    bot = LootBot(reg, rs, provider=prov)
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    run(bot.tick(reg, s, add=[{"name": "First"}], by="Officer"))
+    (p,) = run(bot.distribute(reg, s, by="Officer"))["proposals"]
+    other = next(char(m) for m in ms if char(m) != p.to)
+    run(bot.handle_feed_event({"type": "loot", "recipient": other, "item_name": "First", "idem": "r1"}, scribe()))
+    run(bot.set_reason(reg, s, "d1", "the first reason", by="Mira"))
+    run(bot.set_reason(reg, s, "d1", "the better reason", by="Mira", replace=True))
+    run(bot.tick(reg, s, add=[{"name": "Second"}], by="Officer"))
+    prov.systems.clear()
+    run(bot.distribute(reg, s, by="Officer"))
+    assert prov.systems and "the better reason" in prov.systems[-1] and "the first reason" not in prov.systems[-1]
+
+
+def test_confirm_the_rest_waits_for_the_rescore_an_override_starts(council):
+    c = council
+    tick_one(c, copies=3)
+    run(c.bot.distribute(c.reg, c.s, by="Officer"))
+    other = next(char(m) for m in c.members if char(m) != c.s.pending("d1").to)
+
+    async def go():
+        await c.bot.override(c.reg, c.s, "d1", other, "tank needs it", by="Jonny")  # spawns the re-judge of d2, d3
+        with pytest.raises(LootBusy, match=r"Re-scoring 2 item\(s\) — Confirm the rest waits"):
+            await c.bot.confirm(c.reg, c.s, batch_rev=ls.batch_rev(c.s), by="Mira")
+        await c.bot.confirm(c.reg, c.s, only={"d1"}, expect_to=other, by="Mira")  # per item stays allowed
+        await c.bot.loot_settle()
+        return await c.bot.confirm(c.reg, c.s, batch_rev=ls.batch_rev(c.s), by="Mira")
+    out = run(go())
+    assert len(out["awards"]) == 2 and not c.s.proposals
+
+
+def test_a_split_runs_departed_member_stays_on_their_own_rosters_council_only(reg, rs):
+    ev, ms = split_run(reg, rs)
+    bot = LootBot(reg, rs)
+    (s1, _), (s2, _) = run(bot.open_council(reg, rs, ev, by="Officer"))
+
+    async def go():
+        bot.loop = asyncio.get_running_loop()
+        bot.attach_loot_listeners()
+        rc.free_seat(reg, rs, ev, ms[7].discord_id, "callout")  # roster 2's member calls out
+        for _ in range(5):
+            await asyncio.sleep(0)
+        await bot.loot_settle()
+    try:
+        run(go())
+    finally:
+        rc.ROSTER_LISTENERS[:] = [f for f in rc.ROSTER_LISTENERS if getattr(f, "__name__", "") != "loot_on_roster_change"]
+    assert [p.discord_id for p in s2.departed] == [ms[7].discord_id] and not s1.departed
+    assert char(ms[7]) not in {p.character for p in bot.loot_roster(s1)}, "never a candidate for roster 1's drops"
+    assert [k for k, _ in bot.posts].count("roster") == 1, "one line, in roster 2's thread"
+
+
+def test_end_redraws_the_sheet_and_refuses_a_run_that_isnt_locked(council):
+    c = council
+    drawn = []
+
+    async def refresh_sheet(reg, ev):
+        drawn.append((ev.key, ev.state))
+    c.bot.refresh_sheet = refresh_sheet
+    run(c.bot.end_run(c.reg, c.rs, c.ev, by="Mira"))
+    assert drawn == [(c.ev.key, "done")], "the sheet and lock card leave their live buttons"
+    start = (c.reg.now_local() + timedelta(days=9)).replace(second=0, microsecond=0)
+    sheet = rc.open_run(c.reg, c.rs, "barrow_deeps", start, by="t")
+    with pytest.raises(RegistryError, match="No locked run to end"):
+        run(c.bot.end_run(c.reg, c.rs, sheet, by="Mira"))
+    assert c.rs.events[sheet.key].state == "open", "next week's signup sheet is never killed by End"
+    with pytest.raises(RegistryError, match="already done"):
+        run(c.bot.end_run(c.reg, c.rs, c.ev, by="Mira"))
+
+
+def test_the_routing_refusal_names_no_companion_option_that_doesnt_exist(reg, rs):
+    ev1, _ = real_run(reg, rs, n=5, days=3)
+    start = (reg.now_local() + timedelta(days=4, hours=3)).replace(second=0, microsecond=0)
+    ev2 = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t")
+    other = reg.test_members()[5:10]
+    join(reg, rs, ev2, other)
+    lock_with_board(reg, rs, ev2, [m.display_name for m in other])
+    bot = LootBot(reg, rs)
+    run(bot.open_loot(reg, rs, ev1, by="Officer"))
+    run(bot.open_loot(reg, rs, ev2, by="Officer"))
+    _, why = bot.loot_route(Companion("Nobody", "c", "", "p"))
+    assert "--run" not in why and "bind it on the council card" in why
+
+
+def test_a_retired_reason_never_puts_the_award_back_on_the_needs_a_reason_list(council):
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    other = next(char(m) for m in c.members if char(m) != p.to)
+    run(c.bot.handle_feed_event({"type": "loot", "recipient": other, "item_name": "Shard of Doom", "idem": "rr1"}, scribe()))
+    run(c.bot.set_reason(c.reg, c.s, "d1", "raid leader's call", by="Mira"))
+    run(c.bot.end_run(c.reg, c.rs, c.ev, by="Mira"))
+    iid = f"{c.ev.key}-d1"
+    c.reg.store.append_jsonl(Path(c.reg.key) / "precedents.jsonl", {"kind": "status", "import_id": iid, "status": "retired", "by": "Jonny",
+                                                                    "reason": "no longer policy", "at": ls.now_iso()})  # what Retire writes
+    c.bot._guild_ctx(c.reg).reload()
+    assert c.bot._guild_ctx(c.reg).precedent_for(iid) is None, "the bot stops citing it"
+    assert not c.bot.loot_reasons_pending(c.reg), "retired is not 'never given'"
+    with pytest.raises(LootChanged, match="Mira already gave a reason"):
+        run(c.bot.set_reason(c.reg, c.ev.key, "d1", "sneaking it back", by="Jonny"))

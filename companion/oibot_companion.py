@@ -9,6 +9,11 @@ writes; touches nothing else.
 
 Turn on logging in game with /chatlog (the companion warns when the file goes stale).
 Dependency: `pip install websockets`.
+
+Delivery: an event stays in the Outbox until the bot acks it (matched by its idem). A dropped socket re-sends the
+in-flight event first after the reconnect; an error reply (the bot refused it — e.g. several loot councils are live and
+this character is rostered on none, until an officer binds the companion on a council card) is retried every RETRY_S
+seconds for RETRY_FOR_S. Always with the same idem: the bot dedupes per loot session, so a re-send is never applied twice.
 """
 from __future__ import annotations
 
@@ -71,6 +76,70 @@ def parse_line(line: str, year: int | None = None) -> dict | None:
     return None
 
 
+RETRY_S = 30  # an event the bot refused (an error reply) is sent again this often …
+RETRY_FOR_S = 600  # … for this long, then dropped with a line (the bot's ops channel names what it never recorded)
+
+
+class Outbox:
+    """Events waiting for the bot's ack. `next(now)` is the event to send now (the in-flight one first, then retries
+    that are due, then new ones); `acked` drops it; `refused` keeps it for a retry in RETRY_S (dropped after RETRY_FOR_S);
+    a disconnect leaves the in-flight event at the front, so it is re-sent first after the reconnect."""
+
+    def __init__(self, retry_s: float = RETRY_S, retry_for_s: float = RETRY_FOR_S):
+        self.retry_s, self.retry_for_s = retry_s, retry_for_s
+        self.pending: list[dict] = []  # in order; [0] is in flight once sent
+        self.later: list[tuple[float, float, dict]] = []  # (due, first refused at, event)
+
+    def put(self, ev: dict) -> None:
+        self.pending.append(ev)
+
+    def next(self, now: float) -> dict | None:
+        due = [t for t in self.later if t[0] <= now]
+        if due:
+            self.later = [t for t in self.later if t[0] > now]
+            self.pending[0:0] = [ev for _, _, ev in due]
+        return self.pending[0] if self.pending else None
+
+    def acked(self, ev: dict) -> None:
+        if self.pending and self.pending[0] is ev:
+            self.pending.pop(0)
+
+    def refused(self, ev: dict, now: float, first: float | None = None) -> bool:
+        """Keep a refused event for a retry; False when it has been retried long enough (dropped)."""
+        self.acked(ev)
+        first = ev.get("_first_refused", now) if first is None else first
+        if now - first >= self.retry_for_s:
+            return False
+        self.later.append((now + self.retry_s, first, {**ev, "_first_refused": first}))
+        return True
+
+    def __len__(self) -> int:
+        return len(self.pending) + len(self.later)
+
+
+def wire(ev: dict) -> str:
+    """The frame sent for an event (the outbox's own bookkeeping keys stay local)."""
+    return json.dumps({k: v for k, v in ev.items() if not k.startswith("_")})
+
+
+async def deliver(ws, ev: dict, outbox: Outbox, verbose: bool = False) -> str:
+    """Send one event and wait for ITS reply (an ack or error with its idem; a heartbeat's reply is skipped):
+    'ack' | 'refused' | 'dropped'. A socket error propagates and leaves the event in flight (re-sent after the reconnect)."""
+    await ws.send(wire(ev))
+    while True:
+        reply = json.loads(await ws.recv())
+        if reply.get("idem") != ev.get("idem"):
+            continue  # a heartbeat's ack, or a late reply to something else
+        if reply.get("type") == "error":
+            kept = outbox.refused(ev, time.time())
+            print("server refused:", reply.get("message"), "— retrying" if kept else "— giving up on it")
+            return "refused" if kept else "dropped"
+        outbox.acked(ev)
+        if verbose:
+            print("ack", reply)
+        return "ack"
+
+
 class Tailer:
     """Follows a file that the game appends to; handles truncation/rotation."""
 
@@ -120,6 +189,10 @@ async def run(args: argparse.Namespace) -> None:
     queue: asyncio.Queue = asyncio.Queue()
     for ev in events:
         queue.put_nowait(ev)
+    outbox = Outbox()
+
+    def own(ev: dict) -> dict:
+        return {**ev, "recipient": args.character} if ev.get("recipient") in ("@self", "You") else ev
     tailer = Tailer(args.log, from_start=False) if args.log else None
 
     async def producer():
@@ -154,15 +227,16 @@ async def run(args: argparse.Namespace) -> None:
                     hb = asyncio.create_task(heartbeat())
                     try:
                         while True:
-                            ev = await queue.get()
-                            if ev.get("recipient") in ("@self", "You"):
-                                ev = {**ev, "recipient": args.character}
-                            await ws.send(json.dumps(ev))
-                            ack = json.loads(await ws.recv())
-                            if ack.get("type") == "error":
-                                print("server error:", ack.get("message"))
-                            elif args.verbose:
-                                print("ack", ack)
+                            while not queue.empty():
+                                outbox.put(own(queue.get_nowait()))
+                            ev = outbox.next(time.time())
+                            if ev is None:  # nothing to send: wait for a new event (or a retry coming due)
+                                try:
+                                    outbox.put(own(await asyncio.wait_for(queue.get(), timeout=5)))
+                                except asyncio.TimeoutError:
+                                    pass
+                                continue
+                            await deliver(ws, ev, outbox, args.verbose)  # a dropped socket leaves ev in flight
                     finally:
                         hb.cancel()
             except Exception as e:  # noqa: BLE001

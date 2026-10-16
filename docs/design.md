@@ -1394,8 +1394,32 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   buttons; a distribute posts the proposals with Confirm / Discard; a plain thread on the officer channel).
 - `Registry.items()` is cached against a stamp (the profile object + every item file's name/size/mtime), so a tier
   written by any path or a profile reload is read on the next call.
+- **Final review fixes (2026-10-16).** Companion `loot` matching (`FeedMixin._feed_match`, choice and write in ONE
+  `loot_lock` section): the open copy whose pick names the recipient (or the bot's pick under an override not
+  followed) → confirm; a copy already recorded to them that no in-game award matched yet (`Drop.seen_in_game`) →
+  already recorded; else the first open copy (mismatch / manual); all recorded → already recorded or a conflict on the
+  copy the game hasn't matched. Routing never sends a companion event to a council past its run's close (only such
+  councils live → "no run live", held). `loot_check_live(session)` right after every verb takes its lock: an ended
+  council is never saved again; `end_run` refuses while a judge is in flight (`LootBusy`, the scheduler retries next
+  minute), refuses a run that isn't locked unless a council of it is still open ("No locked run to end." — every
+  surface), and redraws the sheet (`refresh_sheet`; the scheduler's `_close_run` does it itself). Confirm the rest
+  (`confirm(only=None)`) refuses while `loot_rescoring(session)` — a re-judge marked by `override` before its task
+  starts, or any judge in flight; per-item confirm stays allowed. `merge` never brings back a pick discarded or held
+  after the snapshot. `correct` (live and after end) retires the corrected award's active precedents (a `kind: status`
+  row, `_retire_corrected`) and marks `session.overrides`; `run_distribution` cites only active `session.overrides`.
+  Held companion rows carry `guild`, `at` and `after_end` (a council of the guild ended within `FEED_AFTER_END_S`);
+  `feed_replay(reg, ev)` applies only rows of that run (`_held_for_run`: not held after another run's end, `at` within
+  start − `FEED_LEAD_S` … close), runs one at a time per guild, and rewrites `held.json` AFTER replaying with what was
+  not applied (refused or re-held rows keep their original time; `feed_buffer` writes nothing inside a replay — a
+  contextvar); expired rows name their ended run. `rc.on_roster_change(roster_of=)` (free_seat) → a split run's
+  departed member lands on their own roster's council only. The companion (`companion/oibot_companion.py: Outbox`)
+  keeps an event until the ack with its idem, re-sends the in-flight one after a reconnect and retries a refusal every
+  30 s for 10 min (the bot warns once per 10 min per refusal); the refusal text no longer names a `--run` option.
+  `loot_reasons_pending` and set_reason's "already gave a reason — replace?" step read ANY precedent row of the award
+  (`precedent_any`: active, superseded or retired), so retiring a reason never puts its award back on the "needs a
+  reason" list; what the model cites stays active-only (`precedent_for`).
 - Tests: `tests/test_loot_verbs.py` (verbs, revs, snapshot vs concurrent writes, restart, companion, routing,
-  idempotency, end, scheduler, migration, items).
+  idempotency, end, scheduler, migration, items), `tests/test_companion_outbox.py`.
 
 ### 5.36 Dual interfaces, phase 1 — the web, members, plain text, MCP; /mock retired (built 2026-10-16)
 

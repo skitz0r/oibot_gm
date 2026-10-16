@@ -19,6 +19,7 @@ overrides; a companion mismatch records the ledger row at once and leaves the pr
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -39,6 +40,9 @@ AUTO_DISTRIBUTE_S = 20.0  # auto-distribute: this long after the last drop of a 
 IDLE_END_MIN = 30  # the scheduler ends a council only past the run's close, idle this long, nothing pending
 CLOSING_NOTICE_MIN = 15  # … after one "closing in 15 min — Keep open" notice
 FEED_BUFFER_S = 600  # companion events with no live run are held this long (replayed when a council opens)
+FEED_LEAD_S = 2 * 3600  # a held event replays into a council only if it arrived after its run's start minus this …
+FEED_AFTER_END_S = 3600  # … and an event held this soon after a council ended belongs to that ended run, never the next
+_REPLAYING: contextvars.ContextVar[bool] = contextvars.ContextVar("loot_replaying", default=False)  # feed_replay's own task
 NAME_MAX = 64
 NOBODY = "(nobody)"  # recommend._fallback's pick when no candidate is eligible: never recorded
 
@@ -46,6 +50,13 @@ NOBODY = "(nobody)"  # recommend._fallback's pick when no candidate is eligible:
 def _run_of(session_id: str) -> str:
     """The run key of a session id: a split run's roster council is '<run>-r<N>', a whole run's council is the run key."""
     return re.sub(r"-r\d+$", "", session_id)
+
+
+def precedent_any(ctx, import_id: str) -> dict | None:
+    """The latest precedent row of an award, whatever its status (active, superseded, retired) — "was a reason ever
+    given?" (the needs-a-reason list, set_reason's replace step). What the model cites stays `ctx.precedent_for`
+    (active only)."""
+    return next((p for p in reversed(getattr(ctx, "precedents", None) or []) if p.get("import_id") == import_id), None)
 
 
 def _utc(s: str | None) -> datetime | None:
@@ -253,6 +264,16 @@ class LootMixin:
         last = session.last_change()
         return LootChanged(f"{fallback} ({last}) — look again." if last else f"{fallback} — look again.")
 
+    def loot_check_live(self, session: LootSession) -> None:
+        """Every verb, right after taking the session lock: a council that ended meanwhile (end_run archived and forgot
+        it) is never written again — a stale reference would re-create its live file and bring it back on a restart."""
+        if self.events.get(session.key) is not session:
+            raise RegistryError("This loot council has ended — nothing was changed. Its awards can still be corrected from the site.")
+
+    def _rescoring(self) -> dict:
+        """(guild, session id) → drops a re-judge after an override is about to re-score (set before the task starts)."""
+        return self._loot_state().setdefault("rescoring", {})
+
     # ------------------------------------------------------------ open
     async def open_loot(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord",
                         roster: int | None = None, replay: bool = True) -> tuple[LootSession, bool]:
@@ -291,7 +312,7 @@ class LootMixin:
         await self._audit(reg, by, f"opened the loot council for {ev.key}" + (f" (roster {roster + 1})" if roster is not None else "")
                           + (" (rehearsal)" if s.test else "") + ("" if thread_id else " — thread pending"), via, by_id)
         if replay:
-            await self.feed_replay(reg)
+            await self.feed_replay(reg, ev)
         return s, True
 
     async def open_council(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> list[tuple[LootSession, bool]]:
@@ -305,7 +326,7 @@ class LootMixin:
         else:
             out = [await self.open_loot(reg, rs, ev, by=by, by_id=by_id, via=via, roster=i, replay=False) for i in range(len(ev.all_rosters))]
         if any(created for _, created in out):
-            await self.feed_replay(reg)
+            await self.feed_replay(reg, ev)
         return out
 
     async def loot_ensure_thread(self, reg, session: LootSession) -> bool:
@@ -404,6 +425,7 @@ class LootMixin:
         one is refused — use Correct). A merge op: `drops_rev` only when the caller wants a stale refusal."""
         add, remove = list(add), list(remove)
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             if drops_rev is not None and drops_rev != ls.drops_rev(session):
                 raise self._changed(session, "The drops changed since you looked")
             ctx = self.loot_ctx(session)
@@ -474,6 +496,7 @@ class LootMixin:
             raise LootBusy(f"Distributing already ({flight['by']}, {flight['clock']}).")
         only = set(only) if only is not None else None
         async with self.loot_lock(*key):
+            self.loot_check_live(session)
             if st["flight"].get(key):
                 f = st["flight"][key]
                 raise LootBusy(f"Distributing already ({f['by']}, {f['clock']}).")
@@ -491,7 +514,7 @@ class LootMixin:
             fkey = ",".join(sorted(todo))
             scores_only = bool(session.scores_only) or session.failures.get(fkey, 0) >= 2 or ctx.provider is None
             n = max([int(b.get("n", 0)) for b in session.batches], default=0) + 1
-            st["flight"][key] = {"by": by, "clock": self.loot_clock(reg), "since": now_iso()}
+            st["flight"][key] = {"by": by, "clock": self.loot_clock(reg), "since": now_iso(), "rejudge": rejudge, "drops": len(todo)}
             session.distributing = {"by": by, "by_id": by_id, "since": now_iso(), "drops": todo}
             session.save(f"{session.guild}: loot {session.id}: distributing {len(todo)} ({by})")
             snap = ls.snapshot(session)
@@ -501,10 +524,14 @@ class LootMixin:
             st["flight"].pop(key, None)
             async with self.loot_lock(*key):
                 session.distributing = None
-                session.save(f"{session.guild}: loot {session.id}: distribute failed")
+                if self.events.get(key) is session:  # an ended council is never written again
+                    session.save(f"{session.guild}: loot {session.id}: distribute failed")
             raise
         async with self.loot_lock(*key):
             st["flight"].pop(key, None)
+            if self.events.get(key) is not session:  # ended while the judge ran (end_run refuses that; a stale reference)
+                session.distributing = None
+                raise RegistryError("This loot council ended while it was judging — nothing was recorded.")
             merged, stale = ls.merge(ctx, session, snap, self.loot_roster(session), results)
             new = [p for p in merged if p.batch == n]
             if new:
@@ -533,6 +560,7 @@ class LootMixin:
         if not who_in or len(who_in) > NAME_MAX:
             raise RegistryError("Name who gets it (a character), or Disenchant.")
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             d = session.drop(drop_id)
             if d is None:
                 raise RegistryError("That drop isn't on this council any more.")
@@ -565,6 +593,8 @@ class LootMixin:
         await self.loot_notify(reg, session, line, kind="override")
         others = [x.drop_id for x in session.proposals if x.drop_id != drop_id and not x.override]
         if rejudge and others:
+            # marked BEFORE the task starts: Confirm the rest refuses from the moment the override returns (decision 7)
+            self._rescoring()[session.key] = len(others)
             self._spawn(self._rejudge(reg, session, others, by))
         return line
 
@@ -575,6 +605,8 @@ class LootMixin:
             pass  # a distribute is running: it reads the override from the live session at merge time (stale → again)
         except RegistryError as e:
             log.info("loot re-judge skipped: %s", e)
+        finally:
+            self._rescoring().pop(session.key, None)
 
     # ------------------------------------------------------------ confirm
     async def confirm(self, reg, session: LootSession, *, only: Iterable[str] | None = None, expect_to: str | dict | None = None,
@@ -586,7 +618,11 @@ class LootMixin:
         confirmed (with their typed reasons). A drop already recorded → "already recorded (Mira, 8:14 PM)"."""
         only = set(only) if only is not None else None
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             if only is None:
+                busy = self.loot_rescoring(session)
+                if busy:  # decision 7: a re-score may move the very picks Confirm the rest would record
+                    raise LootBusy(f"Re-scoring {busy} item(s) — Confirm the rest waits until it's done.")
                 if batch_rev is not None and batch_rev != ls.batch_rev(session):
                     raise self._changed(session, "The batch changed")
                 chosen = list(session.proposals)
@@ -612,11 +648,24 @@ class LootMixin:
             if not chosen:
                 raise RegistryError("Nothing to confirm: every pick waiting has no candidate — override them to someone, or disenchant.")
             awards = self._record(reg, session, chosen, by, source)
+        lines = await self._after_record(reg, session, awards, by, by_id, via)
+        return {"awards": awards, "lines": lines, "batch_rev": ls.batch_rev(session)}
+
+    def loot_rescoring(self, session: LootSession) -> int:
+        """Drops a judge is re-scoring on this council now (a re-judge after an override, about to start or running, or
+        any Distribute in flight) — 0 when none. Confirm the rest refuses while it is not 0; per-item Confirm (with the
+        pick the presser saw) stays allowed."""
+        st = self._loot_state()
+        f = st["flight"].get(session.key)
+        return int(self._rescoring().get(session.key) or (f or {}).get("drops") or len((session.distributing or {}).get("drops") or []) or 0)
+
+    async def _after_record(self, reg, session: LootSession, awards, by: str, by_id: int | None, via: str) -> list[str]:
+        """After confirm's write (the caller released the lock): one ops line per award and the thread line."""
         lines = [f"{a.item_name} → {'disenchant' if a.raider == DISENCHANT else a.raider}" + (" (override)" if a.source == "override" else "") for a in awards]
         for a, ln in zip(awards, lines):
             await self._audit(reg, by, f"loot {session.run_key or session.id}: recorded {ln}" + (" (rehearsal)" if session.test else ""), via, by_id)
         await self.loot_notify(reg, session, "✅ " + " · ".join(lines), kind="confirm")
-        return {"awards": awards, "lines": lines, "batch_rev": ls.batch_rev(session)}
+        return lines
 
     def _record(self, reg, session: LootSession, chosen, by: str, source: str | None) -> list:
         """The write behind confirm (caller holds the lock): awards into the session, then ledger + precedents."""
@@ -652,6 +701,7 @@ class LootMixin:
         Ticks stay; pending overrides go with their proposals; nothing was recorded, so nothing is undone."""
         only = set(only) if only is not None else None
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             if only is None and batch_rev is not None and batch_rev != ls.batch_rev(session):
                 raise self._changed(session, "The batch changed")
             gone = [p for p in session.proposals if only is None or p.drop_id in only]
@@ -685,14 +735,17 @@ class LootMixin:
         if isinstance(session, str):
             return await self._reason_after_end(reg, session, drop_id, reason, by=by, by_id=by_id, via=via, replace=replace)
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             aw = session.awarded(drop_id)
             if aw is None:
                 raise RegistryError("Nothing is recorded on that drop.")
             ctx = self.loot_ctx(session)
             pr = next((x for x in session.pending_reasons if x.get("drop_id") == drop_id), None)
-            have = next((o for o in reversed(session.overrides) if o.get("import_id") == aw.import_id and o.get("status", "active") == "active"), None)
+            # ANY precedent of the award (active, superseded or retired): a retired one stays retired unless an officer
+            # deliberately replaces it — the "needs a reason" list never undoes a retire
+            have = next((o for o in reversed(session.overrides) if o.get("import_id") == aw.import_id), None)
             if have is None and not session.test:
-                have = ctx.precedent_for(aw.import_id)
+                have = precedent_any(ctx, aw.import_id)
             if have is not None and not replace:
                 raise LootChanged(f"{have.get('by', '?')} already gave a reason at {self.loot_clock(reg, have.get('at'))} — replace?")
             prec = ls.precedent_row(session, aw, reason, by, bot=(pr or {}).get("bot") or aw.bot_pick)
@@ -714,13 +767,14 @@ class LootMixin:
 
     def loot_reasons_pending(self, reg) -> list[dict]:
         """Awards the companion recorded against the bot's pick with no reason yet (the "needs a reason" list): ledger
-        rows with source `companion` whose import_id has no active precedent — live councils and ended ones alike."""
+        rows with source `companion` whose import_id has no precedent at all (a retired one counts: retiring a reason
+        never puts the award back on the list) — live councils and ended ones alike."""
         from .lootctx import RegistryLootContext
 
         ctx = self.__dict__.setdefault("contexts", {}).get(reg.key) or RegistryLootContext(reg, reg.store, None)
         out = []
         for a in ctx.ledger:
-            if a.source == "companion" and a.import_id and not a.void and ctx.precedent_for(a.import_id) is None:
+            if a.source == "companion" and a.import_id and not a.void and precedent_any(ctx, a.import_id) is None:
                 sid = a.import_id.rsplit("-", 1)[0]
                 out.append({"import_id": a.import_id, "run": sid, "session": sid, "drop_id": a.drop_id, "item": a.item_name,
                             "recipient": a.raider, "bot": a.bot_pick, "received": a.received.isoformat()})
@@ -796,6 +850,7 @@ class LootMixin:
             with reg.store.batch(msg):
                 ctx.void(aw.import_id, reason, by, now_iso())
                 ctx.append_ledger({**json.loads(new.model_dump_json()), "event": _run_of(sid)}, new)
+                self._retire_corrected(ctx, aw.import_id, reason, by)
                 reg.store.commit(msg)
         target = "disenchant" if who == DISENCHANT else who
         line = f"✎ **{aw.item_name}**: was {aw.raider}, now **{target}** — “{reason}”"
@@ -813,7 +868,7 @@ class LootMixin:
             aw = next((a for a in ctx.ledger if a.import_id == import_id and not a.void), None)
             if aw is None:
                 raise RegistryError("Nothing is recorded on that drop.")
-            have = ctx.precedent_for(import_id)
+            have = precedent_any(ctx, import_id)
             if have is not None and not replace:
                 raise LootChanged(f"{have.get('by', '?')} already gave a reason at {self.loot_clock(reg, have.get('at'))} — replace?")
             prec = {"date": aw.received.isoformat(), "event": _run_of(run_key), "item": aw.item_name, "item_id": aw.item_id, "drop_id": drop_id,
@@ -839,6 +894,7 @@ class LootMixin:
         if isinstance(session, str):
             return await self._correct_after_end(reg, session, drop_id, who_in, reason, by=by, by_id=by_id, via=via)
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             d = session.drop(drop_id)
             aw = session.awarded(drop_id)
             if d is None or aw is None:
@@ -857,21 +913,40 @@ class LootMixin:
                 session.awards.append(new)
                 session.pending_reasons = [x for x in session.pending_reasons if x.get("drop_id") != drop_id]
                 session.conflicts = [x for x in session.conflicts if x.get("drop_id") != drop_id]
+                for o in session.overrides:  # the council decision the correction undid is no longer cited (run_distribution, the summary)
+                    if o.get("import_id") == aw.import_id and o.get("status", "active") == "active":
+                        o["status"] = "retired"
                 session.note_change(by, f"{by} corrected the {d.item_name} to {who} at {self.loot_clock(reg)}")
                 session.save(f"{session.guild}: loot {session.id}: {d.item_name} corrected")
                 if not session.test:
                     ctx.void(aw.import_id, reason, by, now_iso())
                     ls.sync_ledger(ctx, session)
+                    self._retire_corrected(ctx, aw.import_id, reason, by)
         target = "disenchant" if who == DISENCHANT else who
         line = f"✎ **{d.item_name}**: was {aw.raider}, now **{target}** — “{reason}”"
         await self._audit(reg, by, f"loot {session.run_key or session.id}: {line.replace('**', '')}", via, by_id)
         await self.loot_notify(reg, session, line, kind="correct")
         return line
 
+    @staticmethod
+    def _retire_corrected(ctx, import_id: str, reason: str, by: str) -> int:
+        """A corrected award's precedent (the override's, or a reason given for a companion award) describes a council
+        decision that, per the correction, never happened: an appended `kind: status` row retires it (append-only stays
+        append-only; lootctx folds it) so policy_for_llm stops citing it. The caller holds the lock and a batch."""
+        hit = [p for p in ctx.precedents if p.get("import_id") == import_id and p.get("status", "active") == "active"]
+        if not hit:
+            return 0
+        ctx.store.append_jsonl(Path(ctx.guild_key) / "precedents.jsonl", {"kind": "status", "import_id": import_id, "status": "retired", "by": by,
+                                                                          "reason": f"award corrected: {reason}", "at": now_iso()})
+        for p in hit:
+            p["status"] = "retired"
+        return len(hit)
+
     async def remove_candidate(self, reg, session: LootSession, who, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """Someone who left the roster after open stops being a candidate ("still a candidate? Remove")."""
         key = str(who).lower()
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             keep = [p for p in session.departed if str(p.discord_id) != key and (p.character or p.signup_name).lower() != key]
             if len(keep) == len(session.departed):
                 raise RegistryError("They aren't on the left-the-roster list.")
@@ -887,6 +962,7 @@ class LootMixin:
     async def set_scores_only(self, reg, session: LootSession, on: bool, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
         """The Scores-only toggle: Distribute picks by score without a model call (the proposals' source says so)."""
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             session.scores_only = {"by": by, "at": now_iso()} if on else None
             session.note_change(by, f"{by} turned scores only {'on' if on else 'off'}")
             session.save(f"{session.guild}: loot {session.id}: scores only {'on' if on else 'off'}")
@@ -898,6 +974,7 @@ class LootMixin:
     async def keep_open(self, reg, session: LootSession, *, by: str, minutes: int = 60, by_id: int | None = None, via: str = "discord") -> str:
         """"Keep open": the scheduler's auto-end waits `minutes` more."""
         async with self.loot_lock(*session.key):
+            self.loot_check_live(session)
             session.keep_open_until = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds")
             session.closing_notice_at = None
             session.note_change(by, f"{by} kept the council open")
@@ -950,13 +1027,22 @@ class LootMixin:
                 parts.append(f"{n} {label}")
         return f"End {run_title(reg, ev)}: " + ", ".join(parts) + "."
 
-    async def end_run(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
+    async def end_run(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord", refresh: bool = True) -> str:
         """The run is over: every session of it is archived with its summary (pending proposals and overrides kept
-        inside), the run flips to done, the summary text is returned (posting it is the surfaces': loot_ended).
-        /raid end, the End button, the web, MCP and the scheduler all come here."""
+        inside), the run flips to done, the sheet and lock card are redrawn closed (`refresh`; the scheduler redraws
+        them itself), the summary text is returned (posting it is the surfaces': loot_ended). /raid end, the End
+        button, the web, MCP, plain text and the scheduler all come here — one rule for all: only a LOCKED run (or one
+        whose council is still open) ends, and never while a Distribute is judging (wait or retry)."""
+        sessions = [s for s in list(self.events.values()) if s.guild == reg.key and s.run_key == ev.key]
+        if ev.state != "locked" and not sessions:
+            raise RegistryError("No locked run to end." if ev.state not in ("done", "cancelled") else f"That run is already {ev.state}.")
+        self._end_busy(sessions)
         texts = []
-        for s in [s for s in list(self.events.values()) if s.guild == reg.key and s.run_key == ev.key]:
+        for s in sessions:
             async with self.loot_lock(*s.key):
+                if self.events.get(s.key) is not s:
+                    continue  # another End got here first
+                self._end_busy([s])
                 summary = self.loot_summary(reg, s)
                 s.note_change(by, f"{by} ended the council")
                 with s.store().batch(f"{reg.key}: loot {s.id}: ended by {by}"):
@@ -969,9 +1055,23 @@ class LootMixin:
                 log.warning("loot end post failed: %s", e)
         changed = rc.end_run(reg, rs, ev, by)
         await self._audit(reg, by, f"ended {ev.key}" + (f" and its loot council ({len(texts)})" if texts else ""), via, by_id)
+        if changed and refresh and hasattr(self, "refresh_sheet"):  # the sheet and lock card leave their live buttons
+            try:
+                await self.refresh_sheet(reg, ev)
+            except Exception as e:  # noqa: BLE001 — the run is done; the redraw is the surfaces'
+                log.warning("sheet refresh after end failed: %s", e)
         from .raid_views import run_title
 
         return "\n\n".join(texts) if texts else (f"{run_title(reg, ev)} is done." if changed else f"{run_title(reg, ev)} was already {ev.state}.")
+
+    def _end_busy(self, sessions) -> None:
+        """End refuses while a judge is in flight on one of the run's councils: its merge would write the archived
+        session back (and a restart would load it as live)."""
+        st = self._loot_state()
+        for s in sessions:
+            f = st["flight"].get(s.key) or s.distributing
+            if f:
+                raise LootBusy(f"Distributing already ({f.get('by', '?')}, {f.get('clock') or self.loot_clock(self.loot_reg(s), f.get('since'))}) — wait for it, or retry End.")
 
     def loot_closing_state(self, reg, rs, ev, now: datetime | None = None) -> dict | None:
         """The scheduler's view of a council on a run past its close: {'state': 'open' | 'held' | 'closing' | 'end',
@@ -1030,7 +1130,10 @@ class LootMixin:
                 await self.loot_closing(reg, s)
             return False
         if st["state"] == "end":
-            await self.end_run(reg, rs, ev, by="scheduler")
+            try:
+                await self.end_run(reg, rs, ev, by="scheduler", refresh=False)  # _close_run redraws the sheet
+            except LootBusy:
+                return False  # a judge started meanwhile: the next minute
             return True
         return False
 
@@ -1086,23 +1189,30 @@ class LootMixin:
 
     async def loot_roster_changed(self, guild_key: str, run_key: str, change: dict) -> None:
         """A seat changed on a run with a council: a newcomer is a candidate at once (read live); someone who left
-        stays a candidate (`departed`) until an officer removes them."""
+        stays a candidate (`departed`) until an officer removes them. A split run: only the council of the roster the
+        seat is on (added) or was freed from (`change["roster_of"]`, free_seat) hears of it — never every roster's."""
         reg = (getattr(self.registries, "by_key", {}) or {}).get(guild_key)
+        freed_from = {str(k): v for k, v in (change.get("roster_of") or {}).items()}
         for s in [s for s in list(self.events.values()) if s.guild == guild_key and s.run_key == run_key]:
             rs, ev = self.loot_run(s)
             if ev is None:
                 continue
             lines = []
             async with self.loot_lock(*s.key):
+                if self.events.get(s.key) is not s:
+                    continue
                 for uid in change.get("added", []) + change.get("changed", []):
                     hit = ev.seat_of(uid)
-                    if hit is None:
+                    if hit is None or (s.roster_index is not None and hit[0] != s.roster_index):
                         continue
                     p = hit[1]
                     s.departed = [x for x in s.departed if x.discord_id != p.discord_id]
                     s.roster_notes.append({"at": now_iso(), "kind": "added" if uid in change.get("added", []) else "changed", "uid": uid, "name": p.character or p.signup_name})
                     lines.append(f"➕ {p.character or p.signup_name} rostered — now a candidate")
                 for uid in change.get("removed", []):
+                    i = freed_from.get(str(uid))
+                    if s.roster_index is not None and i is not None and i != s.roster_index:
+                        continue  # left another roster of the split: never a candidate here
                     p = next((x for x in ev.all_rosters[0].benched if rc.player_uid(ev, x) == uid or x.signup_name == uid), None) if ev.all_rosters else None
                     if p is None or any(x.discord_id == p.discord_id and x.signup_name == p.signup_name for x in s.departed):
                         continue
@@ -1190,15 +1300,49 @@ class LootMixin:
         return fresh, old
 
     def feed_buffer(self, guild_key: str, ev: dict, comp) -> None:
-        """Hold a companion event that arrived with no live council (persisted; replayed when one opens)."""
-        row = {"at": now_iso(), "ev": ev, "comp": {"character": getattr(comp, "character", "?"), "client": getattr(comp, "client", "?"),
-                                                    "guild": getattr(comp, "named", getattr(comp, "guild", "")) or "", "peer": getattr(comp, "peer", "held"),
-                                                    "bound": getattr(comp, "bound", None)}}
+        """Hold a companion event that arrived with no live council (persisted; replayed when one opens). The row keeps
+        the guild it was routed to, when it arrived (`at`) and — when a council of the guild ended within
+        FEED_AFTER_END_S — that ended run (`after_end`): the master looter handing out the last item after End belongs to
+        that run, never to the next council that opens. A replay re-holding a refused event writes nothing here (the
+        replay keeps the original row with its original time)."""
+        if _REPLAYING.get():
+            return
+        row = {"at": now_iso(), "guild": guild_key, "ev": ev, "comp": {"character": getattr(comp, "character", "?"), "client": getattr(comp, "client", "?"),
+                                                                        "guild": getattr(comp, "named", getattr(comp, "guild", "")) or "", "peer": getattr(comp, "peer", "held"),
+                                                                        "bound": getattr(comp, "bound", None)}}
+        ended = self.loot_recent_end(guild_key, FEED_AFTER_END_S)
+        if ended is not None:
+            row["after_end"] = ended
         self._held_write(guild_key, self._held_rows(guild_key) + [row], f"companion event held (no run live): {ev.get('type')}")
         try:
             self._spawn(self._feed_expire_later(guild_key))
         except RuntimeError:  # no running loop (offline tools): the next ready / replay sweeps it
             pass
+
+    def loot_recent_end(self, guild_key: str, within_s: float) -> str | None:
+        """The run key of this guild's council that ended most recently, within `within_s` (from the archives' end
+        summaries, so it survives a restart), or None."""
+        reg = self._held_reg(guild_key)
+        if reg is None:
+            return None
+        arch = reg.store.root / guild_key / "events" / "archive"
+        if not arch.is_dir():
+            return None
+        now = datetime.now(timezone.utc)
+        best: tuple[datetime, str] | None = None
+        for f in arch.glob("*.json"):
+            try:
+                if now.timestamp() - f.stat().st_mtime > within_s + 60:
+                    continue
+                body = json.loads(f.read_text())
+            except (OSError, ValueError):
+                continue
+            t = _utc((body.get("summary") or {}).get("ended_at"))
+            if body.get("origin") != "raid" or t is None or (now - t).total_seconds() > within_s:
+                continue
+            if best is None or t > best[0]:
+                best = (t, str(body.get("run_key") or _run_of(str(body.get("id")))))
+        return best[1] if best else None
 
     async def _feed_expire_later(self, guild_key: str) -> None:
         await asyncio.sleep(FEED_BUFFER_S + 1)
@@ -1214,11 +1358,12 @@ class LootMixin:
     async def feed_expire(self, guild_key: str) -> list[dict]:
         """Held events past FEED_BUFFER_S leave the file and the ops channel says what was NOT recorded (a warn line,
         no DM). Returns the expired rows."""
-        rows = self._held_rows(guild_key)
-        fresh, old = self._held_split(rows, datetime.now(timezone.utc))
-        if not old:
-            return []
-        self._held_write(guild_key, fresh, f"{len(old)} held companion event(s) expired with no run live")
+        async with self.loot_lock(guild_key, "__held__"):
+            rows = self._held_rows(guild_key)
+            fresh, old = self._held_split(rows, datetime.now(timezone.utc))
+            if not old:
+                return []
+            self._held_write(guild_key, fresh, f"{len(old)} held companion event(s) expired with no council taking them")
         await self._feed_announce_lost(guild_key, old)
         return old
 
@@ -1233,9 +1378,13 @@ class LootMixin:
             if k == "kill":
                 return f"{ev.get('boss', '?')} down"
             return str(k)
+
+        def row_what(r: dict) -> str:
+            ended = r.get("after_end")
+            return what(r.get("ev") or {}) + (f" (after {ended}'s council ended — record it on that run)" if ended else "")
         chars = ", ".join(sorted({(r.get("comp") or {}).get("character", "?") for r in rows}))
-        text = (f"companion events from {chars}'s log waited {FEED_BUFFER_S // 60} min with no loot council open and were NOT recorded: "
-                + "; ".join(what(r.get("ev") or {}) for r in rows) + " — open the council (/raid loot) and record them by hand.")
+        text = (f"companion events from {chars}'s log waited {FEED_BUFFER_S // 60} min with no loot council taking them and were NOT recorded: "
+                + "; ".join(row_what(r) for r in rows) + " — record them by hand (the run's loot council, or the site).")
         cfg_for = getattr(self.registries, "cfg_for", None)
         cfg = cfg_for(guild_key) if cfg_for else None
         if cfg is not None and getattr(self, "ops", None) is not None:
@@ -1243,30 +1392,59 @@ class LootMixin:
         else:
             log.warning("[%s] %s", guild_key, text)
 
-    async def feed_replay(self, reg) -> int:
-        """A council opened: the companion events held for this guild go through again (oldest first); the ones past
-        the hold are announced as not recorded."""
-        rows = self._held_rows(reg.key)
-        if not rows:
-            return 0
-        fresh, old = self._held_split(rows, datetime.now(timezone.utc))
-        self._held_write(reg.key, [], f"{len(fresh)} held companion event(s) replayed")
+    def _held_for_run(self, reg, row: dict, ev) -> str | None:
+        """Why a held row does NOT belong to the run whose council is opening (None: it does): it was held after
+        another run's council ended (`after_end`), or it arrived outside this run's window (its start minus
+        FEED_LEAD_S … its close). Such a row stays held — another council may take it — and is announced when it expires."""
+        if ev is None:
+            return None
+        ended = row.get("after_end")
+        if ended and ended != ev.key:
+            return f"held after {ended}'s council ended"
+        t = _utc(row.get("at"))
+        if t is None or t < ev.start - timedelta(seconds=FEED_LEAD_S) or t > rc.run_close_at(reg, ev):
+            return f"outside {ev.key}'s run window"
+        return None
+
+    async def feed_replay(self, reg, ev=None) -> int:
+        """A council opened for run `ev`: the companion events held for this guild that belong to it go through again
+        (oldest first). The file is rewritten AFTER the replay with what was not applied — an event the council refused
+        (a test council, several councils with the companion seated on none) or held again stays held with its original
+        time, and one for another run (`_held_for_run`) is left for that run's council — so nothing is lost: what
+        expires unrecorded is announced in the ops channel. Rows past the hold are announced now."""
+        async with self.loot_lock(reg.key, "__held__"):  # one replay at a time per guild (an event without idem applies once)
+            rows = self._held_rows(reg.key)
+            if not rows:
+                return 0
+            fresh, old = self._held_split(rows, datetime.now(timezone.utc))
+            seen = {json.dumps(r, sort_keys=True, default=str) for r in rows}
+            from .feed import Companion
+
+            handle = getattr(self, "handle_feed_event", None)
+            keep: list[dict] = []
+            n = 0
+            for r in fresh:
+                if handle is None or self._held_for_run(reg, r, ev) is not None:
+                    keep.append(r)
+                    continue
+                c = r.get("comp") or {}
+                comp = Companion(c.get("character", "?"), c.get("client", "?"), c.get("guild", ""), c.get("peer", "held"), bound=c.get("bound"))
+                token = _REPLAYING.set(True)
+                try:
+                    out = await handle(r.get("ev") or {}, comp)
+                except Exception:  # noqa: BLE001
+                    log.exception("held companion event failed")
+                    out = {"error": "failed"}
+                finally:
+                    _REPLAYING.reset(token)
+                if not isinstance(out, dict) or out.get("error") or out.get("held"):
+                    keep.append(r)  # refused or nowhere to go: still held, never dropped
+                else:
+                    n += 1
+            arrived = [x for x in self._held_rows(reg.key) if json.dumps(x, sort_keys=True, default=str) not in seen]  # held meanwhile
+            self._held_write(reg.key, keep + arrived, f"{n} held companion event(s) replayed, {len(keep)} still held")
         if old:
             await self._feed_announce_lost(reg.key, old)
-        from .feed import Companion
-
-        handle = getattr(self, "handle_feed_event", None)
-        n = 0
-        for r in fresh:
-            if handle is None:
-                break
-            c = r.get("comp") or {}
-            comp = Companion(c.get("character", "?"), c.get("client", "?"), c.get("guild", ""), c.get("peer", "held"), bound=c.get("bound"))
-            try:
-                await handle(r.get("ev") or {}, comp)
-                n += 1
-            except Exception:  # noqa: BLE001
-                log.exception("held companion event failed")
         return n
 
     # ------------------------------------------------------------ the thread's buttons (interim: the Discord surfaces replace them)

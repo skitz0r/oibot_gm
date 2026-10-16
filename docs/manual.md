@@ -1040,34 +1040,47 @@ someone else press **Override…** (on the site: pick from the table's top candi
 Disenchant, or someone not on the roster) or say it in the thread ("give the Syphon to Mira, she's our main tank") — an
 **override needs a reason**, is shown as pending (⚠, with who set it) and is **not recorded until Confirm**; the reason
 becomes a precedent the bot cites next time only when the award is confirmed. Replacing another officer's pending
-override asks first. **Decide later** drops one pick and keeps the drop ticked (it shows *held*). **Discard batch**
+override asks first. An override re-scores the other picks; while that runs, **Confirm the rest** waits
+(*"Re-scoring 2 item(s) — Confirm the rest waits"*) — confirming one item at a time still works. **Decide later** drops
+one pick and keeps the drop ticked (it shows *held*); a pick held or discarded while a re-score ran stays held or gone.
+**Discard batch**
 drops the waiting proposals: the ticks stay, pending overrides go with them, nothing was recorded so nothing is undone.
 On the site a pick's row opens its whole candidate table — tier, upgrade, attendance, rank, wishlist place, recent
 loot, score — no model call to browse it.
 
-**The companion (in game).** When the master looter hands an item out in game, the bot matches it: to the pick shown
-(the override if there is one) → recorded; to someone else → **recorded at once** (the game is the truth) and the line
+**The companion (in game).** When the master looter hands an item out in game, the bot matches it to one copy of the
+item: the copy whose pick names who got it (two copies of a token can be handed out in either order), or a copy an
+officer already confirmed to them (never recorded twice); to the pick shown (the override if there is one) → recorded; to someone else → **recorded at once** (the game is the truth) and the line
 carries two buttons — **Give the reason** (it becomes the precedent) or **Mistake — correct…** (it was a misclick: the
 record is fixed, no precedent); the site lists the same under *Waiting for a reason or a correction*. A drop nobody
 distributed is recorded straight away with a **Correct…** button; a sub who isn't registered is recorded by name. A
 reason given twice asks before replacing the first. A companion's events go to its own server's live council (each
-server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first, and when several are live
-it picks the one whose roster has the companion's character — when it can't tell it refuses and says why. Drops
-arriving when no run is live are held for 10 minutes (a restart keeps them; the site shows them waiting) and go in when
-the council opens; anything still held after that is listed in the ops channel as **not recorded**, so you can add it
-by hand. A rehearsal takes drops only from a puppet's or the tester's companion. The companion shows as **live**,
+server uses its own token, `OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first — a council kept open past
+its raid's end (a pick still waiting) never takes the companion's events — and when several are live it picks the one
+whose roster has the companion's character — when it can't tell it refuses and says why (the companion keeps that event
+and sends it again every 30 seconds for 10 minutes, so it lands once the council can take it; it also re-sends an event
+the connection cut off before the bot answered). Drops arriving when no run is live are held for 10 minutes (a restart
+keeps them; the site shows them waiting) and go into the council of **their own run** when it opens (one opened near
+the run's time; never a council days early) — an event that arrives just after a council ended stays with that ended
+run and is never replayed into the next raid's council; one a council refuses stays held. Anything still held after 10
+minutes is listed in the ops channel as **not recorded** (naming the ended run when there is one), so you can add it by
+hand. A rehearsal takes drops only from a puppet's or the tester's companion. The companion shows as **live**,
 **quiet** (no events for a couple of minutes — normal during trash and breaks) or **disconnected**, in the thread and
 at the top of Loot › Tonight.
 
 **Correct** fixes a recorded award (a reason is required; the old record is kept and marked void), from the
-**Correct…** button under the line or beside the award on the site. A reason owed and an in-game award that disagrees
+**Correct…** button under the line or beside the award on the site. A correction also retires the precedent of the
+award it fixed — the bot never cites a council decision that, per the correction, never happened; an award whose reason
+was given (even if that precedent was later retired) never goes back on the "needs a reason" list. A reason owed and an in-game award that disagrees
 with the record both stay fixable after the council ends (Loot › Tonight lists them under *Still owed from ended
 councils*). **Roster changes** after the council opened count at once: someone who joins the roster is a candidate
-straight away; someone who leaves stays a candidate until an officer removes them.
+straight away; someone who leaves stays a candidate until an officer removes them — on a split run only on their own
+roster's council.
 
 **End.** `/raid end` in the thread, **End council** on the site (it shows the same sentence first: *"End …: 6 awards,
-1 override, 2 drops never distributed"*), "end tonight's run" or MCP `end_loot` ends the council and marks the run done;
-the summary lists the awards, the overrides and anything left undecided (proposals never confirmed, drops never
+1 override, 2 drops never distributed"*), "end tonight's run" or MCP `end_loot` ends the council and marks the run done
+and redraws its sheet and lock card closed — on every surface only a locked run ends (*"No locked run to end."*), and
+not while a Distribute is judging (*"Distributing already (…) — wait for it, or retry End"*); the summary lists the awards, the overrides and anything left undecided (proposals never confirmed, drops never
 distributed, awards still waiting for a reason) so nothing anyone decided disappears. The bot ends a council by itself
 only after the run's scheduled end, once it has been idle for 30 minutes with no pick waiting for Confirm and no drop
 nobody judged — after one *"closing in 15 min"* notice with **Keep open**. If picks or drops still wait, it says so once
