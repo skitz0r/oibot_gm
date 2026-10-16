@@ -36,12 +36,13 @@ PENDING_CONFIRMS: dict[str, "PendingView"] = {}  # token -> the live diff / read
 PENDING_KEEP = 50  # finished entries kept so a late press on an applied diff still answers "each change applies once"
 
 
-class CfgApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"cfgapply(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<token>[A-Za-z0-9_-]{8,32}):(?P<action>apply|cancel|confirm|discard)"):
+class CfgApplyButton(discord.ui.DynamicItem[discord.ui.Button], template=r"cfgapply(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<token>[A-Za-z0-9_-]{8,32}):(?P<action>apply|cancel|confirm|discard|edit)"):
     """Apply / Cancel under a plain-text diff and Confirm / Discard under a policy reading, as persistent ids: the press
     resolves its token to the pending view in this process (`PendingView.press`), and a press after a restart — when
     the token is gone — edits the message to EXPIRED_RESTART instead of Discord's bare "interaction failed"."""
     LABELS = {"apply": ("Apply", discord.ButtonStyle.success), "cancel": ("Cancel", discord.ButtonStyle.secondary),
-              "confirm": ("Confirm this reading", discord.ButtonStyle.success), "discard": ("Discard edit", discord.ButtonStyle.secondary)}
+              "confirm": ("Confirm this reading", discord.ButtonStyle.success), "discard": ("Discard edit", discord.ButtonStyle.secondary),
+              "edit": ("Edit the reason…", discord.ButtonStyle.primary)}  # the loot chat diff: an inferred reason is edited before Apply
 
     def __init__(self, gk: str | None, token: str, action: str):
         label, style = self.LABELS[action]
@@ -486,6 +487,12 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         if reg:
             await FLOWS["rule"](interaction, reg, doc="loot")
 
+
+    @gm.command(name="precedents", description="Officer: the council's precedents (overrides with their reasons) — read one, retire it")
+    async def gm_precedents(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await FLOWS["gm_precedents"](interaction, reg)
 
     @gm.command(name="change", description="Change things in plain English (shows a diff, applies on confirm; plain-text permissions decide)")
     async def gm_change(interaction: discord.Interaction, text: str):

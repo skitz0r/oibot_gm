@@ -53,7 +53,17 @@ src/oibot_gm/
                        held companion events in <guild>/loot/held.json (expired → ops warn "NOT recorded"); loot_restore; loot_may_close (scheduler auto-end:
                        only LootSession.blocks_close — picks/undistributed — holds it, once announced; reasons/conflicts outlive it: set_reason/correct take a
                        session id after the end); loot_ensure_thread (a pending thread retried on /raid loot, on_resumed, ready); hooks the surfaces replace:
-                       loot_notify(…, kind, drop_id) / loot_view (interim thread buttons) / loot_open_thread / loot_ended / loot_closing / loot_held
+                       loot_notify(…, kind, drop_id) / loot_view (interim thread buttons) / loot_open_thread / loot_ended / loot_closing / loot_held;
+                       retire_precedent / loot_precedents (/gm precedents)
+  discord_loot_surface.py  LootSurfaceMixin (OibotGM, before LootMixin; design §5.36): the council's Discord surface replacing those hooks —
+                       a PUBLIC thread on officer_channel (refused when none), the pinned session card (raid_views.loot_layout) and the proposal
+                       cards (batch_layout: ≤5 items, per boss, Confirm the rest · Discard on the newest) edited after every write from any surface,
+                       session.cards = message ids; persistent thread-line buttons; distribute's card ticker; loot_scheduler_step ("Start an ad hoc
+                       run…" prompt, the one after-end DM to officers); addressed-only thread chat (loot_addressed / loot_chat → help_answer(data=)
+                       or LootChatConfirmView, the `loot` op when configops has it, else the verbs); loot_cards_restore on ready
+  flows_loot.py        every LootButton / LootPick press and lootmodal submit (loot_press / loot_pick / loot_modal_submit; loot_modal_raw =
+                       the restart path from on_interaction); wizards loot_tick (TickWizard), loot_override (grouped select → reason modal,
+                       also Correct…), loot_distribute (/raid distribute), loot_end (/raid end + End council: the decide screen), gm_precedents
   lootctx.py           RegistryLootContext (one per guild, reload(); void rows + superseding precedents folded) / FixtureLootContext (/mock): one interface
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
                        schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules);
@@ -75,7 +85,7 @@ src/oibot_gm/
                        or AD HOC (pickup templates, ADHOC_SCHEDULE one-offs) — rc.run_kind; ad hoc = first come (Signup.joined_at), no confirmations, lighter
                        timing. Regulars are never pre-filled; officers see who hasn't answered. Officer posts go to `roster_channel_id`. Internal helpers still
                        say "team" (aliases) — don't rename them casually.
-                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|test …; /raid … (discord_raid.py); /mock … (demo)
+                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|precedents|test …; /raid … (discord_raid.py); /mock … (demo)
                        `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only), by_key, ordered(),
                        get(key|name), for_guild (strict), only(), many, cfg_for, load_errors; `/gm config owner` in an UNCONFIGURED server is the bootstrap
                        (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; any number of servers — Guilds.ALLOW_SECOND is on since S3)
@@ -107,12 +117,15 @@ src/oibot_gm/
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
-                       run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client
+                       run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client;
+                       the loot council: loot_layout (session card) / batch_layout + loot_chunks (proposal cards) / item_layout (the ephemeral item card) /
+                       loot_closed_layout / loot_stub_layout, loot_status_text + presence_line (the companion chip), why_not_text
   raid_buttons.py      persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
-                       RunButton (officer Fill/Lock/Cancel on the cards); constructors take the guild key first (`raid.<gk>:…` ids; old ids still match,
+                       RunButton (officer Lock/Fill/Loot/Cancel on the cards), LootButton `loot.<gk>:<session>:<drop|->:<action>[:<arg>]`,
+                       LootPick `lootpick.<gk>:…`, LootStartButton `lootstart.<gk>:open`; constructors take the guild key first (`raid.<gk>:…` ids; old ids still match,
                        g=None → guild_routing.resolve_button + each button's legacy matcher); raid_views ⇄ raid_buttons import each other at the bottom
   raid_scheduler.py    RaidSchedulerMixin: the minute loop (open on cadence → health → lock → expire → fill → close), calls RaidMixin
-  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|end|set|cancel|list|out|fill
+  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|loot|distribute|end|set|cancel|list|out|fill
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with one native
                        card per raid (pool_layout: readiness + comp shortfalls, edited in place, no images) + change log (Registry.listeners, debounced);

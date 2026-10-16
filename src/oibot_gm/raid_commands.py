@@ -1,4 +1,4 @@
-"""The /raid slash commands (open, sheet, health, lock, loot, end, set, cancel, list, out, fill): thin handlers that
+"""The /raid slash commands (open, sheet, health, lock, loot, distribute, end, set, cancel, list, out, fill): thin handlers that
 resolve the guild + run and call the `RaidMixin` methods on the bot. `register_raid_commands` adds the group to the tree."""
 from __future__ import annotations
 
@@ -56,23 +56,17 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["raid_loot"](interaction, reg)
 
-    @raid.command(name="end", description="Officer: close the loot council and summarise awards")
+    @raid.command(name="distribute", description="Officer: judge the ticked drops nobody has proposed yet (the loot council's Distribute)")
+    async def raid_distribute(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await FLOWS["loot_distribute"](interaction, reg)
+
+    @raid.command(name="end", description="Officer: end a locked run and its loot council (the summary posts in the thread)")
     async def raid_end(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
-        if not reg:
-            return
-        session = bot.event_for(interaction.channel_id)
-        if not session or session.origin != "raid" or session.guild != reg.key:
-            await interaction.response.send_message("Run this in the raid's loot thread.", ephemeral=True)
-            return
-        rs = bot.raids.store(reg)
-        ev = rs.events.get(session.run_key or session.id)
-        if ev is None:
-            await interaction.response.send_message("That council's run is gone.", ephemeral=True)
-            return
-        # LootMixin.end_run: every session of the run archived with its summary, the run done (the ops line is the verb's)
-        text = await bot.end_run(reg, rs, ev, by=interaction.user.display_name, by_id=interaction.user.id)
-        await interaction.response.send_message(text[:1900])
+        if reg:
+            await FLOWS["loot_end"](interaction, reg)
 
     @raid.command(name="set", description="Officer: set someone's answer on a sheet (join / bench / out)")
     @app_commands.choices(status=[app_commands.Choice(name=rc.LABELS[s], value=s) for s in rc.STATUSES])

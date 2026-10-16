@@ -462,7 +462,7 @@ def test_loot_opens_a_thread_on_a_locked_run(reg, rs, officer, channel, monkeypa
     assert channel.sent[0]["embed"] is not None
     session = bot.events[(reg.key, ev.key)]  # keyed (guild, run), the file events/<run key>.json
     assert rs.events[ev.key].thread_id == thread_id and session.raid_thread_id == thread_id and bot.event_for(thread_id) is session
-    assert ("post_boss_tables", ev.key, thread_id) in bot.calls and saved
+    assert not [c for c in bot.calls if c[0] == "post_boss_tables"] and saved  # no per-boss selects: the card's Tick drops… is the tick path
     assert f"<#{thread_id}>" in h.text
 
 
@@ -483,7 +483,7 @@ def test_loot_on_a_split_run_opens_one_council_per_roster_and_reposts_when_open(
     asyncio.run(FLOWS["raid_loot"](h.command(), reg))
     s1, s2 = bot.events[(reg.key, f"{ev.key}-r1")], bot.events[(reg.key, f"{ev.key}-r2")]
     assert "Roster 1: Loot thread open" in h.text and "Roster 2: Loot thread open" in h.text
-    assert [c[1] for c in bot.calls if c[0] == "post_boss_tables"] == [s1.id, s2.id]
+    assert s1.raid_thread_id and s2.raid_thread_id and s1.raid_thread_id != s2.raid_thread_id
     reposted = []
 
     async def loot_repost(reg_, session):

@@ -772,6 +772,41 @@ class LootMixin:
 
         return self.__dict__.setdefault("contexts", {}).get(reg.key) or RegistryLootContext(reg, reg.store, None)
 
+    # ------------------------------------------------------------ precedents: read and retire (L28)
+    def loot_precedents(self, reg, *, active: bool = True) -> list[dict]:
+        """The guild's precedents, oldest first, with status folded in (superseding reasons, retire / restore rows);
+        `active`: only the ones the bot cites."""
+        ctx = self._guild_ctx(reg)
+        ctx.reload()
+        return [dict(p) for p in ctx.precedents if not active or p.get("status", "active") == "active"]
+
+    async def retire_precedent(self, reg, import_id: str, reason: str, *, by: str, by_id: int | None = None, via: str = "discord",
+                               restore: bool = False) -> str:
+        """Retire (or `restore`) a precedent by its award's import_id: an append-only `kind: status` row with who and why
+        (lootctx folds it); the bot stops citing a retired one (policy_for_llm reads active only). /gm precedents, the
+        site's Loot › Precedents and MCP call this."""
+        reason = ls.check_reason(reason)
+        want = "active" if restore else "retired"
+        async with self.loot_lock(reg.key, "precedents"):
+            rows = self.loot_precedents(reg, active=False)
+            p = next((x for x in reversed(rows) if x.get("import_id") == import_id and x.get("status", "active") != "superseded"), None)
+            if p is None:
+                raise RegistryError("No precedent with that id.")
+            if p.get("status", "active") == want:
+                raise RegistryError(f"That precedent is already {want}.")
+            msg = f"{reg.key}: precedent {import_id} {want} by {by}"
+            with reg.store.batch(msg):
+                reg.store.append_jsonl(Path(reg.key) / "precedents.jsonl", {"kind": "status", "import_id": import_id, "status": want, "by": by,
+                                                                            "reason": reason, "at": now_iso()})
+                reg.store.commit(msg)
+            ctx = self.__dict__.get("contexts", {}).get(reg.key)
+            if ctx is not None:
+                ctx.reload()
+        line = (f"🗄 Precedent retired: {p.get('item')} → {p.get('human')} (was “{p.get('reason')}”) — “{reason}”" if not restore
+                else f"📌 Precedent restored: {p.get('item')} → {p.get('human')} — “{reason}”")
+        await self._audit(reg, by, line, via, by_id)
+        return line
+
     async def _correct_after_end(self, reg, sid: str, drop_id: str, who_in: str, reason: str, *, by: str, by_id, via: str) -> str:
         live = next((s for s in self.events.values() if s.guild == reg.key and s.id == sid), None)
         if live is not None:

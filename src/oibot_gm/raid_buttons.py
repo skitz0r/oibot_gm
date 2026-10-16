@@ -23,11 +23,12 @@ from .registry import RegistryError
 log = logging.getLogger(__name__)
 
 
-class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask)(?::(?P<rev>[0-9a-f]{6,16}))?"):
+class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot)(?::(?P<rev>[0-9a-f]{6,16}))?"):
     """Officer buttons on the health and lock cards: Fill seats (the suggestions screen: the batch, then Send), Lock now, Cancel run, and
     the Suggested block's Ask (sends what the card shows; the plan fingerprint it was drawn with rides in the id, so a
     stale card is refused and redrawn) and Suggest… (every seat with its alternates: pick, then send)."""
     LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger),
+              "loot": ("Loot", discord.ButtonStyle.secondary),
               "ask": ("Ask", discord.ButtonStyle.success), "suggest": ("Suggest…", discord.ButtonStyle.secondary)}
 
     def __init__(self, gk: str | None, key: str, action: str, disabled: bool = False, label: str | None = None, rev: str | None = None):
@@ -81,6 +82,14 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
             from .wizard import FLOWS
 
             await FLOWS["raid_suggest"](interaction, reg, key=ev.key)
+            return
+        if self.action == "loot":  # the lock card is the raid-night hub: the same flow as /raid loot, this run
+            if ev.state != "locked":
+                await interaction.response.send_message("The loot council opens once the roster is locked.", ephemeral=True)
+                return
+            from .wizard import FLOWS
+
+            await FLOWS["raid_loot"](interaction, reg, key=ev.key)
             return
         if self.action == "fill":
             if sheet_state(ev) != "locked" or not ev.all_rosters:
@@ -365,6 +374,118 @@ def _live(bot, reg, key: str) -> bool:
     """An old id with several guilds: is run `key` live in this guild?"""
     ev = bot.raids.store(reg).events.get(key)
     return bool(ev and ev.state not in ("done", "cancelled"))
+
+
+# ---------------------------------------------------------------- the loot council (dual interfaces phase 1, design §3.1)
+# Every button on the council's cards and lines is a LootButton: `loot.<gk>:<session id>:<drop id | ->:<action>[:<arg>]`
+# (the session id is the run key for a whole run's council, `<run>-r<N>` for one roster of a split run). A press after a
+# restart reads the session from disk (bot.events is loaded at start), so nothing is lost. `arg`: the batch_rev the card
+# was drawn with (Override…, Confirm the rest, Discard batch) or a hash of the recipient a Confirm showed (expect_to) — a
+# stale press is refused and the card redrawn. The callbacks live in flows_loot (one implementation per action).
+
+
+
+class LootButton(discord.ui.DynamicItem[discord.ui.Button], template=r"loot(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<sid>[A-Za-z0-9_\-]+):(?P<drop>d\d+|-):(?P<action>[a-z]{2,8})(?::(?P<arg>[A-Za-z0-9_\-]{1,24}))?"):
+    """A council button. Actions — session: tick · dist · scores · end · all (Confirm the rest) · discard (Discard batch)
+    · keep (Keep open); per drop: ok (Confirm) · ovr (Override…) · later (Decide later) · info (Details) · iok / iovr /
+    ide (the ephemeral item card's Confirm / Override… / Disenchant, which edit that card) · why (Give the reason) ·
+    whyr (replace a reason) · ovrr (replace another officer's override) · fix (Correct… / Mistake — correct…) · rm (Remove a
+    candidate who left, arg = their id)."""
+    LABELS = {
+        "tick": ("Tick drops…", discord.ButtonStyle.secondary), "dist": ("Distribute", discord.ButtonStyle.primary),
+        "scores": ("Scores only", discord.ButtonStyle.secondary), "end": ("End council", discord.ButtonStyle.danger),
+        "all": ("Confirm the rest", discord.ButtonStyle.success), "discard": ("Discard batch", discord.ButtonStyle.secondary),
+        "keep": ("Keep open", discord.ButtonStyle.secondary),
+        "ok": ("Confirm", discord.ButtonStyle.success), "ovr": ("Override…", discord.ButtonStyle.secondary),
+        "later": ("Decide later", discord.ButtonStyle.secondary), "info": ("Details", discord.ButtonStyle.secondary),
+        "iok": ("Confirm", discord.ButtonStyle.success), "iovr": ("Override…", discord.ButtonStyle.secondary),
+        "ide": ("Disenchant", discord.ButtonStyle.danger),
+        "why": ("Give the reason", discord.ButtonStyle.primary), "whyr": ("Replace with my reason…", discord.ButtonStyle.danger),
+        "fix": ("Correct…", discord.ButtonStyle.secondary), "rm": ("Remove", discord.ButtonStyle.secondary),
+        "ovrr": ("Replace their override…", discord.ButtonStyle.danger),
+    }
+
+    def __init__(self, gk: str | None, sid: str, drop: str, action: str, *, arg: str | None = None, label: str | None = None,
+                 disabled: bool = False):
+        """`label` / `disabled` are render-time only (the cards are redrawn on every change)."""
+        text, style = self.LABELS[action]
+        cid = loot_custom_id("loot", gk, sid, drop, action, arg)
+        if arg and not cid.endswith(f":{arg}"):
+            arg = None  # too long for Discord's 100: the press checks without it (a fresh read decides)
+        super().__init__(discord.ui.Button(label=(label or text)[:80], style=style, custom_id=cid, disabled=disabled))
+        self.gk, self.sid, self.drop, self.action, self.arg = gk, sid, drop, action, arg
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["g"], match["sid"], match["drop"], match["action"], arg=match["arg"])
+
+    async def callback(self, interaction: discord.Interaction):
+        from .flows_loot import loot_press
+
+        await loot_press(interaction, self)
+
+
+class LootPick(discord.ui.DynamicItem[discord.ui.Select], template=r"lootpick(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<sid>[A-Za-z0-9_\-]+):(?P<kind>[a-z]{2,8}(?:\.d\d+)?)"):
+    """A council select: `owed` (the session card's Give a reason or correct… over every award still owed one —
+    values `why.<drop>` / `fix.<drop>`), `remove` (Remove a candidate… who left the roster — values their id or name),
+    `whynot.<drop>` (the item card's Why not… — values candidate names)."""
+
+    def __init__(self, gk: str | None, sid: str, kind: str, options: list[discord.SelectOption], placeholder: str = "Pick…"):
+        opts = list(options)[:25] or [discord.SelectOption(label="—", value="-")]
+        super().__init__(discord.ui.Select(custom_id=loot_custom_id("lootpick", gk, sid, kind, None, None), placeholder=placeholder[:150],
+                                           options=opts, min_values=1, max_values=1))
+        self.gk, self.sid, self.kind = gk, sid, kind
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Select, match: re.Match[str], /):
+        me = cls(match["g"], match["sid"], match["kind"], list(getattr(item, "options", None) or []), getattr(item, "placeholder", None) or "Pick…")
+        me.item._values = list(getattr(item, "values", None) or [])
+        return me
+
+    async def callback(self, interaction: discord.Interaction):
+        from .flows_loot import loot_pick
+
+        await loot_pick(interaction, self, list(self.item.values))
+
+
+class LootStartButton(discord.ui.DynamicItem[discord.ui.Button], template=r"lootstart(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<what>open)"):
+    """'Drops arriving from Jon's log but no run is live — Start an ad hoc run for tonight?': opens /raid open's wizard
+    (the officer picks the raid and Ad hoc run…; nothing opens before its Confirm)."""
+
+    def __init__(self, gk: str | None, what: str = "open"):
+        super().__init__(discord.ui.Button(label="Start an ad hoc run…", style=discord.ButtonStyle.primary, custom_id=f"lootstart{_g(gk)}:{what}"))
+        self.gk = gk
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
+        return cls(match["g"], match["what"])
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = interaction.client
+        reg, interaction = await resolve_button(interaction, self.gk)
+        if reg is None:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Not configured here.", ephemeral=True)
+            return
+        from . import guild_routing
+
+        if await bot.role_of(reg, interaction.user, max_age=guild_routing.PRIV_LIVE) not in ("owner", "officer"):
+            await interaction.response.send_message("Officers only.", ephemeral=True)
+            return
+        from .wizard import FLOWS
+
+        await FLOWS["raid_open"](interaction, reg)
+
+
+def loot_custom_id(prefix: str, gk: str | None, sid: str, part: str, action: str | None, arg: str | None) -> str:
+    """`<prefix>.<gk>:<sid>:<part>[:<action>][:<arg>]`, the optional arg dropped when the id would pass Discord's 100."""
+    base = f"{prefix}{_g(gk)}:{sid}:{part}" + (f":{action}" if action else "")
+    full = base + (f":{arg}" if arg else "")
+    if len(full) <= 100:
+        return full
+    if len(base) > 100:
+        log.warning("loot custom id over 100 characters: %s", base)
+    return base[:100]
 
 
 # text helpers the callbacks format with; imported last so `raid_views` (which places these buttons and imports them at

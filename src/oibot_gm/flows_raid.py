@@ -506,15 +506,12 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, **_see
             if not session.raid_thread_id:
                 lines.append(f"{label}the council is open, but I couldn't reach the officer channel — its thread is pending (I try again on reconnect, or run /raid loot again).")
                 continue
-            lines.append(f"{label}" + ("Loot thread open: " if created else "Loot council is open — what still waits is re-posted in ") + f"<#{session.raid_thread_id}>")
+            lines.append(f"{label}" + ("Loot thread open: " if created else "Loot council is open — card re-posted in ") + f"<#{session.raid_thread_id}>")
         await wiz.finish(i, "\n".join(lines))
+        # a new council's session card is its thread's first message (LootSurfaceMixin.loot_open_thread: Tick drops… is
+        # the one tick path); an open one gets a fresh card and its pending picks at the bottom of the thread
         for session, created in opened:
-            thread = bot.get_channel(session.raid_thread_id) if session.raid_thread_id and hasattr(bot, "get_channel") else None
-            if thread is None:
-                continue
-            if created:
-                await bot.post_boss_tables(session, thread)
-            elif session.id in had_thread:  # a thread made just now (it was pending) got its re-post from loot_ensure_thread
+            if not created and session.id in had_thread:  # a thread made just now (it was pending) got its re-post from loot_ensure_thread
                 await bot.loot_repost(reg, session)
     await with_run(interaction, reg, title="Loot council", then=body, states=("locked",), officer=True)
 

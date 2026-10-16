@@ -181,3 +181,8 @@ class RaidSchedulerMixin:
                     await self.post_run_update(reg, ev, f"🧩 nobody left to ask — short {gaps_text(self.ico, nd)}")
             elif ev.fill_state != "exhausted":
                 exhausted_posted.discard((reg.key, ev.key))
+        # the loot council's minute (LootSurfaceMixin.loot_scheduler_step): companion drops arriving with no run live →
+        # one "Start an ad hoc run for tonight?" line; in-game awards after a council ended → the officers' one DM
+        step = getattr(self, "loot_scheduler_step", None)
+        if step is not None:
+            await step(reg)

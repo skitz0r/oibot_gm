@@ -29,6 +29,7 @@ from discord import app_commands
 from . import configops, guild_routing, nl, render
 from .discord_feed import FeedMixin
 from .discord_loot import LootMixin
+from .discord_loot_surface import LootSurfaceMixin
 from .discord_policy import CfgApplyButton, PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
@@ -36,7 +37,7 @@ from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_to
 from .discord_pool import AbsenceButton, AbsencesMixin, SetupMixin
 from .discord_news import NewsMixin, ProposalButton
 from .discord_raid import RaidContext, RaidMixin
-from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton
+from .raid_buttons import FillButton, LootButton, LootPick, LootStartButton, PlaceButton, RunButton, SignupButton
 from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
 from .discord_registry import ApplicationButton, Guilds, RegisterButton, is_officer, is_owner, register_commands
@@ -512,7 +513,7 @@ class ConfirmView(discord.ui.View):
 
 # ---------------------------------------------------------------- bot
 
-class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
+class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
     ico = staticmethod(ico)
 
     async def post_application(self, reg, a) -> str:
@@ -592,7 +593,8 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             walk(c)
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
-        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton, CfgApplyButton)
+        self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton, CfgApplyButton,
+                               LootButton, LootPick, LootStartButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -747,6 +749,9 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             await self.post_proposals(ev, interaction.channel)  # a real council's thread got them from LootMixin.loot_notify
 
     async def post_boss_tables(self, ev: MockEvent, dest) -> None:
+        """/mock's per-boss drop selects. A real council has none: its card's Tick drops… wizard is the one tick path."""
+        if ev.origin == "raid":
+            return
         ctx = self.loot_ctx(ev)
         raid = ctx.profile.raids.get(ev.instance, {"bosses": []})
         posted = 0
@@ -843,6 +848,15 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
     async def on_interaction(self, interaction: discord.Interaction) -> None:
         if interaction.guild_id:  # a listener only: the tree and the views answer the interaction itself
             self.saw_member(interaction.guild_id, interaction.user)
+        if interaction.type == discord.InteractionType.modal_submit:
+            # a loot reason box opened before a restart (no live Modal claims it): its persistent `lootmodal.<gk>:…` id
+            # carries everything the submit needs, so it is the same write as a live one (design §2.9)
+            from .flows_loot import loot_modal_raw
+
+            try:
+                await loot_modal_raw(interaction)
+            except Exception:  # noqa: BLE001
+                log.exception("loot modal (restart path) failed")
 
     # ---- several guilds (design §5.32)
     async def claim_guild(self, guild, owner_id: int, profile: str, by) -> "object":
@@ -1121,6 +1135,15 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
                 await self.plain_text(message, reg, text, message.channel.id)
             return
         ev = self.event_for(message.channel.id)
+        if ev is not None and ev.origin == "raid":
+            # a real council's thread: only an @mention, a leading "?" or a reply to one of its cards reaches the model
+            # (D9); the rest is banter. A question → help_answer with the proposals as data; an override → a diff + Apply
+            if reg is not None and ev.guild == reg.key and message.channel.id == ev.raid_thread_id:
+                text = self.loot_addressed(message, ev)
+                parent = getattr(message.channel, "parent_id", None) or ev.cards.get("channel")
+                if text and reg.plain_mode(parent) != "ignore":
+                    await self.loot_chat(message, ev, text)
+            return
         if not ev or not self.ctx.provider:
             return
         if not self.officiates(message.author, message.guild, mock=True):
@@ -1146,13 +1169,13 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
                 embed, view, file = await self.propose_roster(ev, (req.reply + "\n" if req.reply else "") + "Changes: " + "; ".join(notes))
                 await message.reply(embed=embed, view=view, file=file)
         elif message.channel.id == ev.raid_thread_id and self.loot_live(ev) and ev.proposals:
-            await self.loot_chat(message, ev)
+            await self.mock_loot_chat(message, ev)
 
-    async def loot_chat(self, message: discord.Message, ev: MockEvent) -> None:
-        """An officer's sentence in the loot thread while proposals wait (interim — the Discord surfaces make this
-        addressed-only and route writes through the `loot` op): a question is answered; a confirm or an override goes
-        through LootMixin.confirm / override (names checked against the candidate tables), then the other picks are
-        re-judged once."""
+    async def mock_loot_chat(self, message: discord.Message, ev: MockEvent) -> None:
+        """/mock only: an officer's sentence in the mock raid thread while proposals wait — a question is answered; a
+        confirm or an override goes through LootMixin.confirm / override (names checked against the candidate tables),
+        then the other picks are re-judged once. A real council's thread chat is LootSurfaceMixin.loot_chat
+        (addressed-only, writes through a diff with Apply)."""
         ctx = self.loot_ctx(ev)
         reg = self.loot_reg(ev)
         cfg = reg.config if reg else (self.registries.for_guild(message.guild.id).config if message.guild and self.registries.for_guild(message.guild.id) else None)
@@ -1410,6 +1433,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             self._loot_booted = True
             for line in await self.loot_restore():  # an interrupted Distribute is reported, never re-run; pending threads made
                 log.info("loot restore: %s", line)
+            await self.loot_cards_restore()  # every live council's cards redrawn as this version draws them
         else:
             await self.loot_threads_pending()  # a later ready (a full reconnect): a council opened while Discord was down gets its thread
         self._pool_booted = True

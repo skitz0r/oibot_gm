@@ -1034,7 +1034,7 @@ def test_items_cache_reads_a_tier_written_by_another_path(reg):
 
 
 class ChatBot(LootBot):
-    """loot_chat (discord_bot.OibotGM's) on the verbs, with a fake message."""
+    """The /mock thread chat (discord_bot.OibotGM.mock_loot_chat) on the verbs, with a fake message."""
 
     async def post_proposals(self, ev, dest, prefix=None):
         self.posts.append(("proposals", prefix or ""))
@@ -1081,7 +1081,7 @@ def test_loot_chat_never_records_a_pick_added_while_the_model_reads(reg, rs, mon
         return nl.LootFeedback(kind="confirm", reply="ok")
     monkeypatch.setattr(nl, "parse_loot_feedback", parse)
     msg = FakeMsg("confirm them")
-    run(OibotGM.loot_chat(bot, msg, s))
+    run(OibotGM.mock_loot_chat(bot, msg, s))  # /mock's chat; the real thread's is tests/test_loot_surface.py
     assert "The batch changed" in msg.replies[-1] and not s.awards and not ledger(reg), "nothing recorded unseen"
 
 
@@ -1098,7 +1098,7 @@ def test_loot_chat_never_replaces_another_officers_override(reg, rs, monkeypatch
     others = [c.character for c in p.result.candidates if c.character != p.to]
     run(bot.override(reg, s, "d1", others[0], "Jonny's call", by="Jonny", rejudge=False))
     monkeypatch.setattr(nl, "parse_loot_feedback", lambda *a: nl.LootFeedback(kind="override", reply="", changes=[nl.LootChange(item_id=it.id, award_to=others[1], reason="Mira's call")]))
-    run(OibotGM.loot_chat(bot, FakeMsg("give it to them"), s))
+    run(OibotGM.mock_loot_chat(bot, FakeMsg("give it to them"), s))
     assert s.pending("d1").override.by == "Jonny" and s.pending("d1").override.to == others[0]
     assert any("already set this" in t for _, t in bot.posts if t), "the replace? question comes back"
 

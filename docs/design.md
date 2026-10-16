@@ -1350,11 +1350,9 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   the ledger); `loot_reasons_pending(reg)` = the "needs a reason" list (companion rows without an active precedent);
   `correct` appends a `kind: void` ledger row + a new award, no precedent, and also takes a session id for an ended
   council (a conflict days later); `loot_conflicts_pending(reg)` lists uncorrected in-game conflicts from live sessions
-  and archives. `record_pending_reason` (the next message as the reason) is gone; until the Discord surfaces' persistent
-  buttons land, the thread's lines carry interim Views (`loot_view`: Give the reason + Mistake — correct… under a
-  mismatch, Correct… under a conflict / in-game award, Distribute under ticked drops, Keep open under the closing
-  notice; presses checked with `role_of(PRIV_LIVE)`); the interim thread chat (`discord_bot.loot_chat`) confirms with
-  the `batch_rev` seen when the sentence arrived and never replaces another officer's override.
+  and archives. `record_pending_reason` (the next message as the reason) is gone; LootMixin's own `loot_view` keeps
+  interim (non-persistent) Views as the default for a bot without the surface; OibotGM's are §5.36's persistent
+  LootButtons, and its thread chat is §5.36's addressed-only `loot_chat`.
 - **Revs** (computed): `batch_rev` over the picks in play (pending + awards from proposals: drop → recipient, source —
   a confirm as shown keeps it, an override / re-score / discard / new batch moves it) for Confirm-all, Discard and
   Override; `drops_rev` (drop list + what Distribute would judge) for Tick and Distribute; per-item Confirm carries
@@ -1396,6 +1394,109 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   written by any path or a profile reload is read on the next call.
 - Tests: `tests/test_loot_verbs.py` (verbs, revs, snapshot vs concurrent writes, restart, companion, routing,
   idempotency, end, scheduler, migration, items).
+
+### 5.36 Dual interfaces, phase 1 — the loot council's Discord surface (built 2026-10-16)
+
+out/dual_interface_design.md §3.1 decisions 5, 6 (the card side), 8, 9 (the posting side), L09–L23, L36/L37, R55; the
+owner's D1, D3, D6, D7, D9, D10 and the DM rule. The verbs are §5.35's; `discord_loot_surface.LootSurfaceMixin` (mixed
+into OibotGM before LootMixin) replaces the hooks they call after every write, so the thread always shows the state the
+verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A `/mock` session keeps the defaults.
+
+- **The thread** (`loot_open_thread`): a PUBLIC thread on `officer_channel(reg, ev)` (roster channel, else ops;
+  refused with "Set a roster or ops channel first" when neither is set, D1), started from a one-line "⚔ Loot council ·
+  <run> → #thread" message in that channel (edited to "— ended: …" at End); "rehearsal · …" for a test run, "loot ·
+  Roster N · …" per roster of a split run. Its first message is the **session card** (`raid_views.loot_layout`),
+  pinned: the run header with the native stamps, the roster as the board's groups (one member per line, the spec icon
+  alone), Drops per boss (▫️ ticked · 🟡 proposed · ✅ recorded counts), the status line (`loot_status_text`: judging
+  ticker, interrupted, N proposals pending, N to judge, N waiting for a reason, N to correct, the scores-only banner,
+  else waiting for drops / run starts in N h) with the companion chip (`presence_line`: 🟢 live / 🟠 quiet / 🔴
+  disconnected · last seen in guild time, L22), the untiered line, **Needs an officer** (reasons owed, conflicts) with a
+  "Give a reason or correct…" select, **Left the roster** with "Remove a candidate…", and the controls **Tick drops… ·
+  Distribute** (disabled until something waits; hidden while auto-distribute is on, the companion live and every
+  waiting drop the companion's) **· Scores only: on|off · End council**. Card ids live on the session
+  (`session.cards`: `loot`, `starter`, `channel`, `batch:<drop ids>`, `closing`), so a restart finds them.
+- **Proposal cards** (`batch_layout`, `loot_chunks`): ≤5 items per message (`LOOT_ITEMS_PER_CARD`; ≤40 components),
+  grouped by boss in kill order; per item a section `#order item → spec icon character` with flags (⚠ override · ≈
+  close call · ⇄ order-sensitive · ✎ scores only · 🆕 untiered) and one line of why, **Confirm** as its accessory
+  (`expect_to` as a hash of the recipient shown) and **Override… · Decide later · Details**; recorded items become a ✅
+  line with who recorded it, held ones a ⏸ line. The LAST card ends with **Confirm the rest (N) · Discard batch**
+  carrying the `batch_rev` it was drawn with ("Re-scoring N item(s)…" and disabled while a judge runs).
+  `loot_batches_sync` edits the cards in place while every pending pick is on one; a pick no card shows (a new batch,
+  `/raid loot` on an open council) stubs the old cards ("superseded — the current proposals are below") and posts the
+  set at the bottom, so the live controls are always on the newest messages. A stale press is refused with the
+  verb's words (`LootChanged`: "The batch changed (Jonny overrode the Syphon at 8:13 PM) — look again.") and the cards
+  are redrawn.
+- **Persistent ids** (`raid_buttons`): `LootButton` `loot.<gk>:<session id>:<drop id|->:<action>[:<arg>]` (session:
+  tick · dist · scores · end · all · discard · keep; per drop: ok · ovr · later · info · iok · iovr · ide · why · whyr ·
+  fix · rm · ovrr), `LootPick` `lootpick.<gk>:<session id>:<kind>` (owed · remove · whynot.<drop>), `LootStartButton`
+  `lootstart.<gk>:open`, all `add_dynamic_items`; the reason boxes are `flows_loot.LootModal` with
+  `lootmodal.<gk>:<session id>:<drop>:<why|ovr|de|fix>[:<arg>]` ids — a box opened before a restart and submitted
+  after it is resolved by `OibotGM.on_interaction` → `flows_loot.loot_modal_raw` (the same `loot_modal_submit`). A
+  press reads the session from `bot.events` (loaded from disk at start); Give the reason / Correct… on a council that
+  has ended pass the session id (`set_reason` / `correct` take it). Every press: `resolve_button` (the guild from the
+  id, refused in another server) then `role_of(PRIV_LIVE)` officer or owner (Details / Why not… at PRIV_ROUTING); a
+  Modal has no interaction_check, so the submit re-checks.
+- **Thread lines** (`loot_view`, persistent buttons): Give the reason + Mistake — correct… under a companion award
+  against the bot's pick (L20), Wrong? Fix… under an in-game award with no proposal (L21), Correct… under a conflict,
+  Distribute under a human tick (never under a companion tick while auto-distribute is on) and under the restart's
+  "⚠ Distribute was interrupted at 8:12 PM — press Distribute …" line (posted by `loot_restore` on ready; never
+  re-run), Keep open under the scheduler's "closing in 15 min" notice (the press edits the notice).
+- **Wizards** (`flows_loot`, all officer-guarded live at every press): **Tick drops…** (`loot_tick`, `TickWizard`):
+  boss (the raid's bosses + the council's own + Trash / other + "A boss not listed…" → a name box) → the boss's items
+  from `Registry.items()`, 25 per page with ◀ Prev / Next ▶, several at once → "Not on the table…" (a modal: the item's
+  name as prose + copies as a select) → copies (a preset select) → Tick; Un-tick… lists drops not recorded. **Override…**
+  (`loot_override`): ONE grouped select — In the table (the top 7 of the candidate table, spec icon, tier, score) ·
+  Rostered tonight · Disenchant · Someone not on the roster… (and "Someone else rostered…" → the member picker past 25)
+  — then the reason modal (`LootModal`, title "<item> → <who>", 3–300 chars) whose Submit IS the write: two presses.
+  Correct… is the same shape (mode `correct`: "a mistake, not a decision", no precedent). A name is typed only for
+  someone not on the roster and is validated as a character name (letters only, 2–24). The wizard is always a new
+  ephemeral message (a card is a components-v2 layout, which an edit can never turn back into text + buttons; the
+  item card's own Disenchant edits the card itself). A second officer's override comes back as "Jonny already set this … — replace?" with
+  **Replace their override…** (the modal again, prefilled); a second reason likewise ("Replace with my reason…").
+- **The item card** (Details, ephemeral, `item_layout`): candidates (spec icon · character · tier · base score — the
+  factor table is the site's), the recommendation and its reason, alternates, warnings, source; "No tier data for this
+  item — …" first for an untiered one; **Confirm · Override… · Disenchant** (danger; a reason, recorded at once) and a
+  **Why not…** select (`why_not_text`: code's comparison of the pick with that candidate — tier, score, the factors
+  that differ; no model call). After a press the card redraws itself with the outcome ("✅ recorded by you · 8:14 PM",
+  or the refusal) and no buttons.
+- **Distribute** (`distribute_press`, the card's button, `/raid distribute` = `loot_distribute`, the auto-distribute):
+  the presser hears "Judging 6 drop(s) — about 30 s"; `LootSurfaceMixin.distribute` wraps the verb for EVERY caller
+  with the session card's status line as the ticker (every 4 s).
+- **End** (`loot_end` for `/raid end` — `with_run(states=("locked",), prefer=has_session)` — and the card's End
+  council): the decide screen with `LootMixin.end_consequence` ("End <run>: 6 award(s), 1 override(s), 2 drop(s) never
+  distributed …") · End · Not yet. `loot_ended` posts the summary, turns the session card into its final state
+  (`loot_closed_layout`, no buttons), stubs the proposal cards, edits the closing notice and the starter line, archives
+  the thread. The lock card's **Loot** `RunButton` (`runact.<gk>:<run>:loot`, disabled until locked; the order Lock ·
+  Fill · Loot · Cancel never moves) opens `raid_loot` — the hub reaches the council.
+- **The scheduler's loot step** (`loot_scheduler_step`, last in each guild's minute): companion events held with no
+  council live → one line in the loot channel (else the officer channel) "📡 Drops arriving from Jon's log but no run
+  is live — start an ad hoc run for tonight?" with **Start an ad hoc run…** (`LootStartButton` → `/raid open`'s
+  wizard; nothing opens before its Confirm), edited once nothing is held; in-game awards held within 6 h after a
+  council ended → ONE DM to the officers (`loot_officer_ids`: the officer roles' members the client sees, else the
+  owner) with the site link to record or correct them — the council's only DM (they must act), and then no ad hoc
+  prompt.
+- **Chat** (decision 8, D9): in a council thread only an @mention, a leading "?" or a reply to one of the council's
+  cards (`loot_addressed`) reaches the model; replies to lines are banter; members' messages are ignored; the thread's
+  parent channel's plain-text mode `ignore` silences it; no provider → "The bot can't read sentences right now — use
+  the buttons on the cards." A question → `help_answer(…, data=loot_digest(session))` (HelpExtras.data: the
+  proposals in a `<data>` block, officer snapshot only). A request to act → `nl.parse_loot_feedback` over the
+  numbered digest (drop numbers, so copies never collide) → `loot_changes` (names checked against the candidate table
+  and tonight's roster) → `LootChatConfirmView` (a `PendingView`: Apply · Cancel · Edit the reason… as `cfgapply`
+  ids; a reason the officer didn't write is "(inferred — edit before Apply)" and Apply stays off until edited). Apply
+  re-checks the presser live and applies with the batch_rev seen when the sentence arrived — through
+  `configops.describe` / `apply_async` for the `loot` op when configops carries it (L3), else the verbs directly
+  (`via="chat"`). The `/mock` thread chat stays `OibotGM.mock_loot_chat`.
+- **/gm precedents** (`gm_precedents`, L28): the last 25 active precedents → one (what the bot picked, who got it, why,
+  who) → **Retire…** → the reason box → `LootMixin.retire_precedent(reg, import_id, reason, by, by_id, via,
+  restore=False)`: an append-only `kind: status` row (`lootctx` folds it); `loot_precedents(reg, active=True)` lists
+  them; a retired precedent is no longer cited.
+- **On ready** `loot_restore` then `loot_cards_restore` (every live council's card and proposal cards redrawn in place
+  with this version's buttons). `post_boss_tables` (the per-boss selects) is `/mock`'s only; a real council's one tick
+  path is Tick drops….
+- Tests: `tests/test_loot_surface.py` (the card, the batch cards and their limits, every press against the verbs,
+  stale presses, the Override / Tick / Correct / precedents wizards through `wizard_harness`, the item card's
+  self-edit, the restart round-trips of every id incl. a modal submitted after a restart, End, the scheduler step and
+  its one DM, the chat routing).
 
 ## 6. Architecture
 

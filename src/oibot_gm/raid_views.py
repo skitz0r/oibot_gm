@@ -410,10 +410,11 @@ def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
     url = board_url(reg, ev)
     if url:
         items.append(ui.Button(label="Open the board", style=discord.ButtonStyle.link, url=url))
-    # one order in every state — Open · Lock · Fill · Cancel — so nothing moves when the run locks; what does not
-    # apply is disabled in place (fill only runs on a locked roster)
+    # one order in every state — Open · Lock · Fill · Loot · Cancel — so nothing moves when the run locks; what does not
+    # apply is disabled in place (fill and the loot council only run on a locked roster)
     items.append(RunButton(reg.key, ev.key, "lock", disabled=locked, label="Locked" if locked else None))
     items.append(RunButton(reg.key, ev.key, "fill", disabled=not locked))
+    items.append(RunButton(reg.key, ev.key, "loot", disabled=not locked))  # the raid-night hub reaches the loot council (§3.1 L09)
     items.append(RunButton(reg.key, ev.key, "cancel"))
     return ui.ActionRow(*items)
 
@@ -683,6 +684,352 @@ def closed_layout(reg: Registry, ev: rc.RaidEvent, ico) -> discord.ui.LayoutView
     return view
 
 
+# ---------------------------------------------------------------- the loot council (dual interfaces phase 1, design §3.1)
+# The council's Discord surface: the session card (the thread's first, pinned message), the proposal cards (≤5 items per
+# message, grouped by boss, the controls on the newest message), the ephemeral item card and the closed states. Pure:
+# the surface (discord_loot_surface.LootSurfaceMixin) computes the status line and the companion presence and passes
+# them in; every button is a persistent LootButton / LootPick carrying the guild key (`loot.<gk>:<session>:<drop>:…`).
+
+LOOT_ITEMS_PER_CARD = 5  # a sixth item starts a second card (40 components per message, mobile thumbs)
+LOOT_CANDIDATE_LINES = 7  # the item card's candidate table
+PRESENCE_DOT = {"live": "🟢", "quiet": "🟠", "disconnected": "🔴"}
+DROP_MARK = {"ticked": "▫️", "proposed": "🟡", "awarded": "✅"}  # ▫️ ticked, nobody judged it · 🟡 a pick waits · ✅ recorded
+
+
+def loot_pick_hash(name: str) -> str:
+    """The recipient a per-item Confirm was drawn with, short enough for a custom id (expect_to by hash)."""
+    import hashlib
+
+    return hashlib.sha1(str(name or "").strip().lower().encode()).hexdigest()[:8]
+
+
+def loot_label(session) -> str:
+    """'Roster 2 · ' for one roster's council of a split run, else nothing."""
+    return f"{session.label} · " if session.roster_index is not None and session.label else ""
+
+
+def loot_who(name: str) -> str:
+    from .loot.session import DISENCHANT
+
+    return "disenchant" if name == DISENCHANT else name
+
+
+def _recipient_icon(ico, p) -> str:
+    """The spec icon of the effective recipient (from the candidate table), alone — never a class icon beside it."""
+    c = next((c for c in p.result.candidates if c.character.lower() == p.to.lower()), None)
+    icon = ico("spec", f"{c.cls}:{c.spec}") if c is not None else ""
+    return f"{icon} " if icon else ""
+
+
+def loot_drops_block(session) -> str:
+    """Per boss, in kill order: ▫️ ticked · 🟡 proposed · ✅ recorded counts (only the marks that apply)."""
+    order = session.boss_order()
+    by_boss: dict[str, dict[str, int]] = {}
+    for d in session.drop_list:
+        by_boss.setdefault(d.boss, {"ticked": 0, "proposed": 0, "awarded": 0})[session.drop_state(d)] += 1
+    if not by_boss:
+        return "**Drops** — nothing ticked yet"
+    lines = ["**Drops**"]
+    for boss in sorted(by_boss, key=lambda b: order.index(b) if b in order else len(order)):
+        c = by_boss[boss]
+        marks = " · ".join(f"{DROP_MARK[k]} {c[k]}" for k in ("ticked", "proposed", "awarded") if c[k])
+        lines.append(f"{boss_name(boss)} {marks}")
+    return "\n".join(lines)
+
+
+def boss_name(boss: str | None) -> str:
+    return "Trash / other" if boss in (None, "", "?") else str(boss)
+
+
+def presence_line(reg: Registry, rows: list[dict]) -> str:
+    """The companion chip (L22): live / quiet / disconnected, last seen in guild time — words beside a dot."""
+    if not rows:
+        return ""
+    parts = []
+    for r in rows[:3]:
+        state = r.get("state", "live")
+        seen = r.get("last_seen_label") or ""
+        parts.append(f"{PRESENCE_DOT.get(state, '⚪')} {r.get('character', '?')} {state}" + (f" · last seen {seen}" if seen and state != "live" else ""))
+    return "📡 " + " · ".join(parts)
+
+
+def loot_status_text(reg: Registry, session, ev, *, judging: dict | None = None, provider: bool = True, auto: bool = False,
+                     presence: list[dict] | None = None, now=None) -> str:
+    """The session card's status line: what the council waits for now, in words (design §3.1 L09)."""
+    from datetime import datetime as _dt, timezone as _tz
+
+    c = session.pending_count()
+    bits = []
+    if judging:
+        bits.append(f"⚖️ Judging {judging.get('total', '?')} drop(s)… {judging.get('done', 0)}/{judging.get('total', '?')}"
+                    + (f" (latest: {judging['last']})" if judging.get("last") else ""))
+    elif session.distributing:
+        bits.append(f"⚖️ Judging {len(session.distributing.get('drops') or [])} drop(s) ({session.distributing.get('by', '?')})")
+    if session.interrupted and not session.distributing and not judging:
+        bits.append(f"⚠ Distribute was interrupted at {reg.local12(session.interrupted.get('since'), '%I:%M %p')} — press Distribute")
+    if c["proposals"]:
+        bits.append(f"{c['proposals']} proposal(s) pending" + (f" ({c['overrides']} override)" if c["overrides"] else ""))
+    if c["undistributed"]:
+        bits.append(f"{c['undistributed']} to judge" + (" — auto-distribute on" if auto else ""))
+    if c["reasons"]:
+        bits.append(f"{c['reasons']} waiting for a reason")
+    if c["conflicts"]:
+        bits.append(f"{c['conflicts']} to correct")
+    if not bits:  # nothing waits for an officer: say what the council waits for
+        now = now or _dt.now(_tz.utc)
+        hours = (ev.start - now).total_seconds() / 3600 if ev is not None else 0
+        if session.drop_list:
+            bits.append("everything ticked is recorded")
+        elif 0 < hours < 24:  # the header's native stamp carries a start further out
+            bits.append(f"run starts in {round(hours)} h" if hours >= 1.5 else f"run starts in {max(1, round(hours * 60))} min")
+        else:
+            bits.append("waiting for drops")
+    if session.scores_only or not provider:  # the banner (§2.7): picks by score, no model call
+        bits.append("✎ scores only" + (f" ({session.scores_only.get('by')})" if session.scores_only else " — Claude unavailable"))
+    line = " · ".join(bits)
+    chip = presence_line(reg, presence or [])
+    return line + (f"\n{chip}" if chip else "")
+
+
+def loot_layout(reg: Registry, ev, session, ico, *, status: str, show_distribute: bool = True) -> discord.ui.LayoutView:
+    """The session card: run label with the native stamp, the roster (the board's groups: one member per line, the spec
+    icon alone), the drops per boss, the status line, what still needs an officer (reasons owed, corrections, members
+    who left the roster), and the controls: Tick drops… · Distribute · Scores only · End council."""
+    ui = discord.ui
+    title = ("🧪 Rehearsal · " if session.test else "⚔ Loot council · ") + loot_label(session) + raid_name(reg, ev)
+    rosters = ev.all_rosters if session.roster_index is None else ev.all_rosters[session.roster_index:session.roster_index + 1]
+    seated = [p for r in rosters for p in r.selected]
+    head = _header(reg, ev, title, [f"**{len(seated)}** rostered   " + _role_counts(ico, seated)])
+    parts: list = [head, ui.Separator()]
+    groups = [_group_block(reg, ico, r, gi, show_missing=False) for r in rosters for gi in range(len(r.groups or [])) if r.groups[gi]]
+    if groups:
+        parts.append(ui.TextDisplay("\n\n".join(groups)[:1800]))
+        parts.append(ui.Separator())
+    body = [loot_drops_block(session), status]
+    untiered = sorted({d.item_name for d in session.drop_list if not d.tiered})
+    if untiered:
+        body.append(f"-# 🆕 {len(untiered)} untiered tonight — scored the same for everyone; tier them on Loot › Items")
+    parts.append(ui.TextDisplay("\n".join(body)[:1800]))
+    owed = list(session.pending_reasons)
+    if owed or session.conflicts:
+        lines = ["**Needs an officer**"]
+        lines += [f"⚠ {x.get('item')} → {x.get('recipient')} in game (bot: {x.get('bot')}) — give the reason" for x in owed[:8]]
+        lines += [f"⚠ {x.get('item')}: in game {x.get('in_game')}, recorded {x.get('recorded')} — correct it" for x in session.conflicts[:8]]
+        parts.append(ui.TextDisplay("\n".join(lines)[:1500]))
+        opts = [discord.SelectOption(label=f"{x.get('item')} → {x.get('recipient')}"[:100], value=f"why.{x.get('drop_id')}", description="give the reason (becomes the precedent)")
+                for x in owed if x.get("drop_id")][:20]
+        opts += [discord.SelectOption(label=f"{x.get('item')}: {x.get('in_game')} in game"[:100], value=f"fix.{x.get('drop_id')}", description=f"recorded to {x.get('recorded')} — correct it"[:100])
+                 for x in session.conflicts if x.get("drop_id")][:25 - len(opts)]
+        if opts:
+            parts.append(ui.ActionRow(LootPick(reg.key, session.id, "owed", opts, placeholder="Give a reason or correct…")))
+    if session.departed:
+        names = [p.character or p.signup_name for p in session.departed]
+        parts.append(ui.TextDisplay("**Left the roster** — still candidates: " + ", ".join(names[:12])))
+        opts = [discord.SelectOption(label=(p.character or p.signup_name)[:100], value=str(p.discord_id or p.character or p.signup_name)[:100]) for p in session.departed][:25]
+        parts.append(ui.ActionRow(LootPick(reg.key, session.id, "remove", opts, placeholder="Remove a candidate…")))
+    und = bool(session.undistributed())
+    buttons = [LootButton(reg.key, session.id, "-", "tick")]
+    if show_distribute:
+        busy = bool(session.distributing)
+        buttons.append(LootButton(reg.key, session.id, "-", "dist", disabled=busy or not und, label="Judging…" if busy else None))
+    buttons.append(LootButton(reg.key, session.id, "-", "scores", label="Scores only: on" if session.scores_only else "Scores only: off"))
+    buttons.append(LootButton(reg.key, session.id, "-", "end"))
+    parts += [ui.Separator(), ui.ActionRow(*buttons)]
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=0x98A3B5 if session.test else TEAL))
+    return view
+
+
+def loot_closed_layout(reg: Registry, ev, session, summary: str) -> discord.ui.LayoutView:
+    """The session card once the council ended: the summary, no buttons."""
+    ui = discord.ui
+    title = ("🧪 Rehearsal ended · " if session.test else "Loot council ended · ") + loot_label(session) + (raid_name(reg, ev) if ev is not None else (session.run_key or session.id))
+    head = _header(reg, ev, title, []) if ev is not None else ui.TextDisplay(f"## {title}")
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(head, ui.Separator(), ui.TextDisplay(summary[:3500] or "Nothing was recorded."), accent_colour=0x98A3B5))
+    return view
+
+
+def loot_stub_layout(text: str) -> discord.ui.LayoutView:
+    """What an old proposal card becomes: one grey line, no buttons (only the newest cards carry controls)."""
+    ui = discord.ui
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(ui.TextDisplay(f"-# {text}"), accent_colour=0x98A3B5))
+    return view
+
+
+def loot_chunks(session) -> list[list[str]]:
+    """The pending proposals as cards: grouped by boss (kill order), at most LOOT_ITEMS_PER_CARD per card; drop ids."""
+    order = session.boss_order()
+    by_boss: dict[str, list[str]] = {}
+    for p in session.proposals:
+        by_boss.setdefault(p.boss, []).append(p.drop_id)
+    out = []
+    for boss in sorted(by_boss, key=lambda b: order.index(b) if b in order else len(order)):
+        ids = by_boss[boss]
+        out += [ids[i:i + LOOT_ITEMS_PER_CARD] for i in range(0, len(ids), LOOT_ITEMS_PER_CARD)]
+    return out
+
+
+def _flags(p) -> str:
+    rec = p.result.recommendation
+    out = []
+    if p.override:
+        out.append("⚠ override")
+    if rec.close_call and not p.override:
+        out.append("≈ close call")
+    if p.order_sensitive:
+        out.append("⇄ order-sensitive")
+    if p.result.source.startswith("deterministic"):
+        out.append("✎ scores only")
+    if not p.tiered:
+        out.append("🆕 untiered")
+    return "  " + " · ".join(out) if out else ""
+
+
+def proposal_md(reg: Registry, ico, p) -> str:
+    """One proposal: `#order item → spec icon character` with its flags, then one line of why (or the override)."""
+    first = f"`#{p.order}` **{p.item_name}** → {_recipient_icon(ico, p)}**{loot_who(p.to)}**{_flags(p)}"
+    if p.override:
+        why = f"{p.override.by} overrode the bot's {loot_who(p.award_to)}: “{p.override.reason}” — not recorded until Confirm"
+    else:
+        just = (p.result.recommendation.justification or "").strip()
+        why = just.split(". ")[0][:180] if just else ""
+        if p.result.recommendation.warnings and not why:
+            why = p.result.recommendation.warnings[0][:180]
+    return first + (f"\n-# {why}" if why else "")
+
+
+def awarded_md(reg: Registry, a) -> str:
+    stamp = reg.local12(a.confirmed_at, "%I:%M %p") if a.confirmed_at else ""
+    return f"✅ **{a.item_name}** → **{loot_who(a.raider)}** · recorded by {a.by or '?'}" + (f" · {stamp}" if stamp else "")
+
+
+def batch_layout(reg: Registry, session, drop_ids: list[str], ico, *, last: bool, note: str | None = None) -> discord.ui.LayoutView:
+    """One proposal card: a section per item (Confirm as its accessory, then Override… · Decide later · Details), items
+    already recorded or held shown as a line without buttons; the last card of the set ends with Confirm the rest (N) ·
+    Discard batch, both carrying the batch_rev the card was drawn with (a stale press is refused and the card redrawn).
+    While a judge runs, Confirm the rest is disabled and says so."""
+    from .loot import session as ls
+
+    ui = discord.ui
+    rev = ls.batch_rev(session)
+    props = [session.pending(d) for d in drop_ids]
+    drops = [session.drop(x) for x in drop_ids]
+    boss = next((p.boss for p in props if p is not None), None) or next((d.boss for d in drops if d is not None), "?")
+    pending_n = sum(1 for p in props if p is not None)
+    parts: list = [ui.TextDisplay(f"### ⚖️ {boss_name(boss)}" + (f"\n-# {note}" if note else ""))]
+    for did, p, d in zip(drop_ids, props, drops):
+        if p is not None:
+            parts.append(ui.Section(ui.TextDisplay(proposal_md(reg, ico, p)), accessory=LootButton(reg.key, session.id, did, "ok", arg=loot_pick_hash(p.to))))
+            parts.append(ui.ActionRow(LootButton(reg.key, session.id, did, "ovr", arg=rev), LootButton(reg.key, session.id, did, "later"),
+                                      LootButton(reg.key, session.id, did, "info")))
+            continue
+        a = session.awarded(did)
+        if a is not None:
+            parts.append(ui.TextDisplay(awarded_md(reg, a)))
+        elif d is not None:
+            parts.append(ui.TextDisplay(f"⏸ **{d.item_name}** — held (Decide later): Distribute judges it again"))
+        else:
+            parts.append(ui.TextDisplay("-# a drop that was un-ticked"))
+    total = len(session.proposals)
+    if last and total:
+        judging = bool(session.distributing)
+        n_judge = len((session.distributing or {}).get("drops") or [])
+        parts.append(ui.ActionRow(
+            LootButton(reg.key, session.id, "-", "all", arg=rev, disabled=judging, label=f"Re-scoring {n_judge} item(s)…" if judging else f"Confirm the rest ({total})"),
+            LootButton(reg.key, session.id, "-", "discard", arg=rev, disabled=judging)))
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=TEAL if pending_n else 0x98A3B5))
+    return view
+
+
+def candidate_md(ico, c) -> str:
+    """spec icon · **character** · tier · base score (has it) — the factor table is the site's job."""
+    icon = ico("spec", f"{c.cls}:{c.spec}")
+    return f"{icon + ' ' if icon else ''}**{c.character}** · {c.tier} · " + ("has it" if c.already_has else f"{c.base_score:.2f}")
+
+
+def item_layout(reg: Registry, session, drop_id: str, ico, *, item=None, url: str | None = None, outcome: str | None = None) -> discord.ui.LayoutView:
+    """The ephemeral item card (Details): candidates, the recommendation with its reason, alternates, warnings, source;
+    Confirm · Override… · Disenchant and a Why not… select while the pick is pending (Correct… once recorded). After a
+    press the card is redrawn with `outcome` in place of the buttons."""
+    from .loot import session as ls
+
+    ui = discord.ui
+    d = session.drop(drop_id)
+    p = session.pending(drop_id)
+    a = session.awarded(drop_id)
+    name = p.item_name if p else a.item_name if a else d.item_name if d else "?"
+    boss = p.boss if p else d.boss if d else "?"
+    sub = [boss_name(boss)]
+    if item is not None and getattr(item, "slot", "unknown") != "unknown":
+        sub.append(f"{item.slot.replace('_', ' ')} · {item.type}")
+    parts: list = [ui.TextDisplay(f"## {f'[{name}]({url})' if url else name}\n" + " · ".join(sub))]
+    if (p is not None and not p.tiered) or (p is None and d is not None and not d.tiered):
+        parts.append(ui.TextDisplay("-# No tier data for this item — everyone rostered is a candidate, ranked by attendance and recent loot only. Tier it on Loot › Items."))
+    if p is not None:
+        rec = p.result.recommendation
+        cands = "\n".join(candidate_md(ico, c) for c in p.result.candidates[:LOOT_CANDIDATE_LINES]) or "nobody"
+        parts.append(ui.TextDisplay("**Candidates**\n" + cands))
+        lines = []
+        if p.override:
+            lines.append(f"⚠ **{loot_who(p.to)}** — {p.override.by} overrode the bot's {loot_who(p.award_to)}: “{p.override.reason}” · not recorded until Confirm")
+        else:
+            lines.append(f"→ **{loot_who(rec.primary)}** — {(rec.justification or '').strip()[:400]}")
+            if rec.deviation_reason:
+                lines.append(f"-# not the top score: {rec.deviation_reason[:200]}")
+        if rec.alternates:
+            lines.append("Alternates: " + ", ".join(rec.alternates[:2]))
+        lines += [f"-# ⚠ {w[:200]}" for w in rec.warnings[:3]]
+        lines.append(f"-# judged #{p.order} · source: {p.result.source}")
+        parts.append(ui.TextDisplay("\n".join(lines)[:1800]))
+    elif a is not None:
+        parts.append(ui.TextDisplay(awarded_md(reg, a)))
+    elif d is not None:
+        parts.append(ui.TextDisplay(("⏸ held — " if d.held else "") + "not judged yet: Distribute proposes a recipient"))
+    if outcome:
+        parts.append(ui.TextDisplay(outcome))
+    elif p is not None:
+        parts.append(ui.ActionRow(LootButton(reg.key, session.id, drop_id, "iok", arg=loot_pick_hash(p.to)),
+                                  LootButton(reg.key, session.id, drop_id, "iovr", arg=ls.batch_rev(session)),
+                                  LootButton(reg.key, session.id, drop_id, "ide")))
+        others = [c for c in p.result.candidates if c.character.lower() != p.to.lower()][:25]
+        if others:
+            opts = [discord.SelectOption(label=c.character[:100], value=c.character[:100], description=f"{c.spec} · {c.tier} · {c.base_score:.2f}"[:100]) for c in others]
+            parts.append(ui.ActionRow(LootPick(reg.key, session.id, f"whynot.{drop_id}", opts, placeholder="Why not…")))
+    elif a is not None:
+        parts.append(ui.ActionRow(LootButton(reg.key, session.id, drop_id, "fix")))
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=TEAL))
+    return view
+
+
+def why_not_text(p, who: str) -> str:
+    """Code's comparison of the pick with someone else (the Why not… select): tier, base score and the factors that
+    differ — computed, never a model's guess."""
+    rows = {c.character.lower(): c for c in p.result.candidates}
+    a, b = rows.get(p.to.lower()), rows.get(str(who).lower())
+    if b is None:
+        return f"{who} isn't in the candidate table for {p.item_name}."
+    if a is None:
+        return f"{loot_who(p.to)} (the pick) isn't in the table — an override: “{p.override.reason if p.override else ''}”."
+    if b.already_has:
+        return f"{b.character} already has {p.item_name}."
+    lines = [f"**{p.item_name}**: {a.character} {a.tier} · {a.base_score:.2f}  vs  {b.character} {b.tier} · {b.base_score:.2f}"]
+    diffs = []
+    for k in sorted(set(a.factors) | set(b.factors)):
+        va, vb = a.factors.get(k), b.factors.get(k)
+        if va is not None and vb is not None and abs(va - vb) >= 0.01:
+            diffs.append(f"{k} {va:.2f} vs {vb:.2f}")
+    if diffs:
+        lines.append("-# " + " · ".join(diffs[:6]))
+    rec = p.result.recommendation
+    if rec.deviates_from_score and rec.deviation_reason:
+        lines.append(f"-# the pick isn't the top score: {rec.deviation_reason[:200]}")
+    return "\n".join(lines)
+
+
 # the buttons the layouts place; imported last so `raid_buttons` (which imports this module's helpers at its own
 # bottom) always finds every name above bound, whichever module is imported first
-from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton, sheet_view  # noqa: E402
+from .raid_buttons import FillButton, LootButton, LootPick, PlaceButton, RunButton, SignupButton, sheet_view  # noqa: E402
