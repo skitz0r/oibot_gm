@@ -47,7 +47,7 @@ def test_every_op_is_mapped_to_one_group():
     assert listed == set(configops.OP_GROUP), f"unmapped: {listed - set(configops.OP_GROUP)}, stale: {set(configops.OP_GROUP) - listed}"
     assert set(configops.OP_GROUP.values()) <= set(PLAIN_GROUPS) and "self" not in configops.OP_GROUP.values()
     assert configops.SELF_OPS <= set(configops.OP_GROUP)
-    assert set(PLAIN_GROUPS) == {"self", "members", "runs", "comp", "raids", "setup", "test"}
+    assert set(PLAIN_GROUPS) == {"self", "members", "runs", "comp", "raids", "setup", "test", "loot"}
     assert all(example for _, _, example in PLAIN_GROUPS.values())
 
 

@@ -11,6 +11,7 @@ import { CardHeader, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
+import { MyLootCard, WishlistCard } from "../components/loot/MyLoot";
 
 type Draft = { label: string | null; cls: string; spec: string; offspec: string | null; name: string; surname: string; slot: "main" | "alt"; isNew?: boolean };
 
@@ -150,7 +151,7 @@ export function MePage({ meta }: { meta: Meta }) {
               </Group>
             )}
           </Card>
-
+          {!me.must_apply && me.characters.length > 0 && <WishlistCard meta={meta} />}
         </Stack>
 
         <Stack gap="lg" style={{ minWidth: 0 }}>
@@ -184,6 +185,7 @@ export function MePage({ meta }: { meta: Meta }) {
               {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer on the sheet in Discord — Join / Bench / No thanks. Once the roster locks you confirm {me.dm ? "by DM (or here)" : "here — your DMs are off"}.</Text>}
             </Stack>
           </Card>
+          {!me.must_apply && <MyLootCard meta={meta} />}
           <Card>
             <CardHeader title="Absences" action={<Button size="xs" variant="default" leftSection={<IconPlus size={13} />} onClick={() => setAbsOpen(true)}>Add</Button>} />
             <Stack p="md" gap="xs">

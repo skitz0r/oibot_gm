@@ -183,21 +183,15 @@ def test_config_marks_missing_channels_and_names_member_roles(c, bot, reg):
     assert d["settings"]["member_roles"] == [{"id": "81", "name": "Raider"}]
 
 
-def test_ops_changes_ring_and_loot_filters(c, reg):
+def test_ops_changes_ring_and_no_loot_tables(c, reg):
+    """Ops keeps bot health only (design §3.1): the precedents and the award log moved to the Loot pages
+    (tests/test_loot_web.py covers /api/loot/precedents and /api/loot/log with their member filters)."""
     registry_mod.RECENT_CHANGES.clear()
     reg.save_config("officer roles changed (test)")
-    m = reg.test_members()[0]
-    st = reg.store
-    for i in range(60):
-        st.append_jsonl(Path(reg.key) / "precedents.jsonl", {"item": f"I{i}", "bot": "Someone", "human": m.main.name if i % 2 else "Other", "reason": "r"})
-    for i in range(120):
-        st.append_jsonl(Path(reg.key) / "ledger.jsonl", {"item": f"L{i}", "raider": m.main.name if i % 3 == 0 else "Other"})
+    reg.store.append_jsonl(Path(reg.key) / "precedents.jsonl", {"item": "I0", "bot": "Someone", "human": "Other", "reason": "r"})
     d = c.get("/api/ops", headers=H).json()
     assert d["changes"][0]["text"] == "officer roles changed (test)" and d["changes"][0]["time_label"]
-    assert len(d["precedents"]) == 50 and len(d["ledger"]) == 100 and d["ledger"][0]["item"] == "L119"
-    d = c.get("/api/ops", params={"member": m.display_name, "precedents_limit": 5, "ledger_limit": 500}, headers=H).json()
-    assert len(d["precedents"]) == 5 and all(p["human"] == m.main.name for p in d["precedents"])
-    assert len(d["ledger"]) == 40 and all(r["raider"] == m.main.name for r in d["ledger"]) and d["member"] == m.display_name
+    assert "precedents" not in d and "ledger" not in d
 
 
 # ---------------------------------------------------------------- policy: edit → compile → confirm | discard
@@ -305,7 +299,8 @@ def test_changed_tools_send_one_body(mocked):
     ms.test_bench("seed", count=0)
     assert mocked[-1][2] == {"action": "seed", "count": 0}
     ms.ops_log(member="Kessa", precedents_limit=99)
-    assert mocked[-1][:2] == ("GET", "/api/ops") and mocked[-1][2]["member"] == "Kessa" and mocked[-1][2]["precedents_limit"] == "50"
+    assert [c[1] for c in mocked[-3:]] == ["/api/ops", "/api/loot/precedents", "/api/loot/log"]
+    assert mocked[-2][2] == {"member": "Kessa", "limit": "50"} and mocked[-1][2]["member"] == "Kessa" and mocked[-1][2]["scores"] == "true"
 
 
 def test_the_tool_list_has_the_new_tools():

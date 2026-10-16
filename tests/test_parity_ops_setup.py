@@ -315,5 +315,7 @@ def test_new_ops_are_documented():
     text = configops.SCHEMA_TEXT
     for needle in ("plain:", "question_edit", "question_move", "member_role_add", "invite_create", "cadence", "seed all", "answer [<run key>]", '"none" clears it'):
         assert needle in text, needle
-    assert "handing the guild to a new owner (slash only, by design" in text and "the loot session itself" in text
+    assert "handing the guild to a new owner (slash only, by design" in text and "the loot session itself" not in text, "the loot council is settable (op loot)"
+    for needle in ("Loot council (officer, op=loot", "Wishlists (op=wishlist", "Item tiers (officer, op=tier", "reason REQUIRED"):
+        assert needle in text, needle
     assert len(ConfigOp.model_fields) <= 13

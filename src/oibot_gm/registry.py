@@ -37,6 +37,31 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+WISHLIST_MAX = 10  # items per character (D5)
+WISH_NOTE_MAX = 120
+TIER_VALUES = ("S+", "S", "A", "B")  # what Loot › Items writes per spec key ("-" clears a cell)
+
+
+class WishlistEntry(BaseModel):
+    """One wanted item on a character's wishlist (D5: shaped like a ThatsMyBIS wishlist row — per character, priority
+    order, main/offspec, a note — so a TMB export imports into it one row to one entry). `item_id` 0 = an item the
+    tables don't know yet (kept by name, matched by name until it is learned). `source` native | tmb: an import replaces
+    only its own earlier rows and never deletes a native one. Received is never stored: the API shows an entry the
+    ledger already awarded to this character as received, so the next Save can't undo it."""
+
+    item_id: int = 0
+    name: str
+    rank: int = 1  # 1 = most wanted (TMB's sort order)
+    offspec: bool = False  # MS (False) / OS (True)
+    note: Optional[str] = None
+    source: str = "native"  # native | tmb
+    added_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
+
+    @property
+    def key(self) -> str:
+        return item_key(self.item_id, self.name)
+
+
 class RegisteredCharacter(BaseModel):
     name: Optional[str] = None  # first name; None until the character exists (pre-launch "planned")
     surname: Optional[str] = None  # WoW: Forever names are first + last
@@ -53,6 +78,7 @@ class RegisteredCharacter(BaseModel):
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
     note: Optional[str] = None  # officer-only
+    wishlist: list[WishlistEntry] = Field(default_factory=list)  # ranked wanted items (Registry.set_wishlist; cap WISHLIST_MAX)
 
     @property
     def label(self) -> str:
@@ -169,6 +195,7 @@ PLAIN_GROUPS: dict[str, tuple[str, list[str], str]] = {
     "raids": ("Raids & auras", ["owner"], "Barrow Deeps runs Tue and Thu 7:30 pm · fortitude is party-wide"),
     "setup": ("Guild setup", ["owner"], "post raid sheets in #signups · add @Raid Lead as an officer role"),
     "test": ("Test bench", ["officers"], "seed 20 puppets · clear the test bench"),
+    "loot": ("Loot council", ["officers"], "award the Syphon to Eltam instead — tanks progression · confirm the rest · tier the Robe S for holy priests"),
 }
 PLAIN_WHO = ("everyone", "registered", "officers", "owner")  # plus "role:<discord role id>"
 # act = anything the person's groups allow · self = own record only (other requests are refused with where to go)
@@ -218,6 +245,8 @@ class GuildConfig(BaseModel):
     absences_channel_id: Optional[int] = None  # public: 'I'll be away' card + one line per absence (reason stays officer-only)
     absences_message_id: Optional[int] = None
     news_channel_id: Optional[int] = None  # officer/read-only: a webhook posts game news here; the bot keeps the relevant items (news.py)
+    loot_channel_id: Optional[int] = None  # public loot log: one line per confirmed award (no channel: the run's updates thread)
+    loot_log: bool = True  # the public loot log is on (off: awards are recorded and shown on the site only)
     news_keywords: list[str] = Field(default_factory=list)  # extra words that make a news item relevant (over the profile's news.yaml)
     timezone: str = "America/Los_Angeles"  # guild time: every schedule, window and displayed clock uses it
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
@@ -300,6 +329,10 @@ class ConfigChanged(RegistryError):
     def __init__(self, section: str, msg: str | None = None):
         self.section = section
         super().__init__(msg or f"The {section_words(section)} changed since you looked — check them and try again.")
+
+
+class WishlistChanged(RegistryError):
+    """A whole-wishlist save made against a list that changed since its author opened it (a stale wishlist_rev)."""
 
 
 def section_words(section: str) -> str:
@@ -422,6 +455,35 @@ def item_key(item_id, name: str | None = None) -> str:
         return str(int(item_id))
     slug = re.sub(r"[^a-z0-9]+", "-", str(name or "").lower()).strip("-")[:60]
     return f"n-{slug or 'unnamed'}"
+
+
+def _same_wish(id_a, name_a, id_b, name_b) -> bool:
+    """One item on a wishlist: the same id (both known), or the same name (either known only by name)."""
+    if id_a and id_b:
+        return int(id_a) == int(id_b)
+    return str(name_a or "").strip().lower() == str(name_b or "").strip().lower()
+
+
+def _wish_rows(entries) -> list[dict]:
+    return [{"item_id": e.item_id, "name": e.name, "rank": e.rank, "offspec": e.offspec, "note": e.note, "source": e.source} for e in entries]
+
+
+def _wish_diff(label: str, old, new) -> str | None:
+    """'Xanthe's wishlist: + Robe of Tests (OS); − Wand; re-ordered' — None when nothing changed."""
+    def sig(es):
+        return [(e.item_id, e.name.lower(), e.offspec, e.note or "") for e in es]
+    if sig(old) == sig(new):
+        return None
+    added = [e for e in new if not any(_same_wish(o.item_id, o.name, e.item_id, e.name) for o in old)]
+    gone = [o for o in old if not any(_same_wish(o.item_id, o.name, e.item_id, e.name) for e in new)]
+    parts = [f"+ {e.name}" + (" (OS)" if e.offspec else "") for e in added] + [f"− {o.name}" for o in gone]
+    kept_old = [o.name.lower() for o in old if o not in gone]
+    kept_new = [e.name.lower() for e in new if e not in added]
+    if kept_old != kept_new:
+        parts.append("re-ordered")
+    elif not parts:
+        parts.append("MS/OS or notes changed")
+    return f"{label}'s wishlist: " + "; ".join(parts) + f" ({len(new)}/{WISHLIST_MAX})"
 TRUE_WORDS = ("true", "yes", "on", "1")
 
 
@@ -1497,6 +1559,265 @@ class Registry:
             out[k] = {**out[k], **v} if isinstance(v, dict) and isinstance(out.get(k), dict) else v
         out.setdefault("untiered_weight", UNTIERED_WEIGHT)
         return out
+
+    def set_item_tiers(self, ref, tiers: dict, by: str) -> tuple[str, dict]:
+        """Loot › Items, the `tier` op and MCP tier_item: write tiers per spec key into the guild's item file
+        (<guild>/items/<key>.yaml — a learned item's file keeps its `learned` facts; a profile item gets a file of its
+        own that layers over the profile's tiers). `tiers`: {spec key: tier | None}; a spec key is 'Class:Spec',
+        'Class:*' or 'role:<role>', a tier one of TIER_VALUES, None or '-' clears a tier the guild set. Returns
+        (the change line, {key: (before, after)}). Re-weighting past awards is the caller's (D12: asked, default no)."""
+        it = self.item(ref, ref if isinstance(ref, str) else None)
+        if it is None:
+            raise RegistryError(f"No item {ref} on the tables or among the learned items.")
+        key = item_key(it.id, it.name)
+        rel = Path(self.key) / "items" / f"{key}.yaml"
+        p = self.store.root / rel
+        doc = (yaml.safe_load(p.read_text()) or {}) if p.exists() else {"id": it.id or None, "name": it.name, "slot": it.slot, "type": it.type, "boss": it.boss}
+        own = {str(k): str(v) for k, v in (doc.get("tiers") or {}).items()}
+        prof = self.profile.items.get(int(it.id)) if it.id else None
+        changes: dict[str, tuple] = {}
+        for spec_key, value in (tiers or {}).items():
+            sk = self._tier_key(str(spec_key))
+            v = None if value in (None, "", "-", "–") else str(value).strip().upper()
+            if v is not None and v not in TIER_VALUES:
+                raise RegistryError(f"{spec_key}: a tier is one of {', '.join(TIER_VALUES)} (or - to clear).")
+            before = it.tiers.get(sk)
+            if v is None:
+                if sk not in own:
+                    if prof is not None and sk in prof.tiers:
+                        raise RegistryError(f"{sk}: that tier comes from the game profile — set another tier instead of clearing it.")
+                    continue
+                own.pop(sk)
+            else:
+                own[sk] = v
+            after = v if v is not None else (prof.tiers.get(sk) if prof is not None else None)
+            if before != after:
+                changes[sk] = (before, after)
+        if not changes:
+            return f"{it.name}: tiers unchanged", {}
+        doc["tiers"] = own
+        doc.setdefault("name", it.name)
+        with self.config_lock:
+            self.store.write_text(rel, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+            self.store.commit(f"{self.key}: tiers for {it.name} ({by})")
+            self.__dict__.pop("_items_cache", None)
+        words = ", ".join(f"{k} {a or '—'}" for k, (_, a) in changes.items())
+        return f"{it.name}: {words}", changes
+
+    def _tier_key(self, spec_key: str) -> str:
+        """'Priest:Holy' / 'Priest:*' / 'role:healer' checked against the profile; anything else is refused."""
+        sk = spec_key.strip()
+        if sk.lower().startswith("role:"):
+            role = sk.split(":", 1)[1].strip().lower()
+            if role not in ROLES:
+                raise RegistryError(f"{sk}: a role is one of {', '.join(ROLES)}.")
+            return f"role:{role}"
+        cls, _, spec = sk.partition(":")
+        cls = next((c for c in self.profile.classes if c.lower() == cls.strip().lower()), None)
+        if cls is None:
+            raise RegistryError(f"{sk}: name a class and spec like 'Priest:Holy', 'Priest:*' or 'role:healer'.")
+        spec = spec.strip()
+        if spec == "*":
+            return f"{cls}:*"
+        sp = next((s for s in self.profile.classes[cls] if s.lower() == spec.lower()), None)
+        if sp is None:
+            raise RegistryError(f"{sk}: {cls} has no spec {spec or '?'} ({', '.join(self.profile.classes[cls])}).")
+        return f"{cls}:{sp}"
+
+    # ---- wishlists (D5: native, shaped for a ThatsMyBIS import — per character, priority order, MS/OS, a note)
+    def wishlist_rev(self, m: Member, label: str) -> str:
+        """A fingerprint of one character's wishlist (what Me › Wishlist saves whole): computed, never stored."""
+        c = next((c for c in m.characters if c.label == label), None)
+        rows = [e.model_dump(exclude={"added_at"}) for e in (c.wishlist if c else [])]
+        return hashlib.sha1(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+    def wish_character(self, discord_id: int, ref: str | None = None) -> tuple[Member, RegisteredCharacter]:
+        """The character a wishlist write is for: named (label or first name), else the only one, else the main."""
+        m = self.members.get(discord_id)
+        chars = [c for c in (m.characters if m else []) if c.status in ("active", "planned")]
+        if not chars:
+            raise RegistryError("You have no registered characters yet. Use /register first.")
+        r = str(ref or "").strip()
+        if r:
+            c = next((c for c in chars if c.label == r), None) or next((c for c in chars if c.matches(r)), None)
+            if c is None:
+                raise RegistryError(f"{r} isn't one of {m.display_name}'s characters ({', '.join(c.label for c in chars)}).")
+            return m, c
+        if len(chars) == 1:
+            return m, chars[0]
+        if m.main is not None:
+            return m, m.main
+        raise RegistryError("Which character? " + ", ".join(c.label for c in chars))
+
+    def wish_item(self, item_id=None, name: str | None = None) -> tuple[int, str]:
+        """(item id, name) for a wishlist row: the tables' or a learned item's when known (by id or name); an item the
+        tables don't know yet is kept by name with id 0 (D4); an unknown id with no name is refused."""
+        nm = str(name or "").strip()[:100]
+        iid = int(item_id) if str(item_id or "").strip().lstrip("-").isdigit() else 0
+        it = self.item(iid or None, nm or None)
+        if it is not None:
+            return int(it.id or 0), it.name
+        if not nm:
+            raise RegistryError(f"No item {iid} on the tables — give the item's name.")
+        return iid, nm
+
+    def set_wishlist(self, discord_id: int, character: str | None, rows: list[dict], by: str, *, rev: str | None = None) -> str:
+        """The whole wishlist of one character (Me › Wishlist's one Save, MCP set_wishlist, and the wizard / plain-text
+        add and remove through wish_add / wish_remove). Rows in priority order: {item_id?, name?, rank?, offspec? |
+        kind: ms|os, note?}; a given rank orders them, the list position breaks ties, ranks are renumbered 1..n. At most
+        WISHLIST_MAX; an item twice is refused. `rev` (wishlist_rev, what the author saw): a list someone changed
+        since → WishlistChanged, nothing written. An entry kept from before keeps its source and when it was added."""
+        with self.config_lock:
+            m, c = self.wish_character(discord_id, character)
+            if rev is not None and rev != self.wishlist_rev(m, c.label):
+                raise WishlistChanged(f"{c.label}'s wishlist changed since you opened it — reload it and try again.")
+            old = list(c.wishlist)
+            entries: list[tuple[int, int, WishlistEntry]] = []
+            for i, row in enumerate(rows or []):
+                if not isinstance(row, dict):
+                    raise RegistryError("wishlist rows must be objects")
+                iid, nm = self.wish_item(row.get("item_id"), row.get("name"))
+                if any(_same_wish(e.item_id, e.name, iid, nm) for _, _, e in entries):
+                    raise RegistryError(f"{nm} is on {c.label}'s wishlist twice.")
+                kind = str(row.get("kind") or "").strip().lower()
+                offspec = kind == "os" if kind in ("ms", "os") else bool(row.get("offspec"))
+                note = re.sub(r"\s+", " ", str(row.get("note") or "")).strip()[:WISH_NOTE_MAX] or None
+                prev = next((e for e in old if _same_wish(e.item_id, e.name, iid, nm)), None)
+                try:
+                    rank = int(row.get("rank") or (i + 1))
+                except (TypeError, ValueError):
+                    raise RegistryError("rank must be a number") from None
+                e = WishlistEntry(item_id=iid, name=nm, offspec=offspec, note=note, source=prev.source if prev else str(row.get("source") or "native"),
+                                  **({"added_at": prev.added_at} if prev else {}))
+                entries.append((rank, i, e))
+            if len(entries) > WISHLIST_MAX:
+                raise RegistryError(f"A wishlist holds up to {WISHLIST_MAX} items per character — drop one first.")
+            new = [e for _, _, e in sorted(entries, key=lambda t: (t[0], t[1]))]
+            for n, e in enumerate(new, 1):
+                e.rank = n
+            line = _wish_diff(c.label, old, new)
+            if line is None:
+                return f"{c.label}'s wishlist: unchanged"
+            c.wishlist = new
+            c.updated_at = now()
+            self.save(m, f"{line} (by {by})"[:150])
+            return line
+
+    def wish_add(self, discord_id: int, character: str | None, item, *, by: str, rank: int | None = None, offspec: bool = False,
+                 note: str | None = None, name: str | None = None) -> str:
+        """One item onto a character's wishlist at `rank` (default: after the last). Already on it: moved to that
+        rank with the new MS/OS and note. `item`: an id or a name (`name` when both are known)."""
+        m, c = self.wish_character(discord_id, character)
+        ref_id = item if isinstance(item, int) or str(item or "").strip().isdigit() else None
+        iid, nm = self.wish_item(ref_id, name or (None if ref_id is not None else item))
+        rows = [r for r in _wish_rows(c.wishlist) if not _same_wish(r["item_id"], r["name"], iid, nm)]
+        at = max(1, min(int(rank or (len(rows) + 1)), len(rows) + 1))
+        row = {"item_id": iid, "name": nm, "offspec": offspec, "note": note}
+        rows.insert(at - 1, row)
+        for n, r in enumerate(rows, 1):
+            r["rank"] = n
+        return self.set_wishlist(discord_id, c.label, rows, by)
+
+    def wish_remove(self, discord_id: int, character: str | None, item, *, by: str) -> str:
+        m, c = self.wish_character(discord_id, character)
+        ref = str(item or "").strip()
+        rows = _wish_rows(c.wishlist)
+        keep = [r for r in rows if not (str(r["item_id"]) == ref and r["item_id"]) and r["name"].lower() != ref.lower()]
+        if len(keep) == len(rows):
+            raise RegistryError(f"{ref} isn't on {c.label}'s wishlist.")
+        return self.set_wishlist(discord_id, c.label, keep, by)
+
+    def wishlists(self) -> dict[str, list[dict]]:
+        """What scoring expects (scoring.candidates' `wishlists`): {character label: [{item: id or name, rank, offspec}]},
+        from every active character's native wishlist. An entry kept by name whose item is known by now scores by id."""
+        out: dict[str, list[dict]] = {}
+        for m in self.members.values():
+            for c in m.characters:
+                if c.status == "retired" or not c.wishlist:
+                    continue
+                rows = []
+                for e in c.wishlist:
+                    item = e.item_id
+                    if not item:
+                        hit = self.item(None, e.name)
+                        item = int(hit.id) if hit is not None and hit.id else e.name
+                    rows.append({"item": item, "rank": e.rank, "offspec": e.offspec})
+                out[c.label] = rows
+        return out
+
+    def import_tmb_wishlists(self, text: str, by: str, *, preview: bool = False) -> dict:
+        """A ThatsMyBIS wishlist export (CSV: character_name, item_name, item_id, sort_order, is_offspec, note,
+        received_at; a `type` column keeps only `wishlist` rows) into the native wishlists (D5). Per character: the rows
+        in TMB's order, deduped (first wins), received rows skipped; an item already on the native list is a duplicate
+        (the native entry stays); the character's earlier TMB rows are replaced; a native entry is never deleted; past
+        WISHLIST_MAX the rest is skipped and counted. Unknown characters are named, not created. `preview`: nothing
+        written. One commit. Returns {rows, characters, added, replaced, duplicates, received, over_cap, unknown, lines}."""
+        import csv
+        import io
+
+        reader = csv.DictReader(io.StringIO(text.lstrip("﻿")))
+        norm = [{str(k or "").strip().lower(): (v or "").strip() for k, v in row.items()} for row in reader]
+        report = {"rows": len(norm), "characters": 0, "added": 0, "replaced": 0, "duplicates": 0, "received": 0, "over_cap": 0, "unknown": [], "lines": []}
+        per: dict[tuple[int, str], list[tuple[float, int, dict]]] = {}
+        for i, r in enumerate(norm):
+            if r.get("type") and r["type"].lower() not in ("wishlist", "wish"):
+                continue
+            who = r.get("character_name") or r.get("character") or ""
+            if not who:
+                continue
+            if r.get("received_at"):
+                report["received"] += 1
+                continue
+            try:
+                hit = self.find(who)
+            except RegistryError:
+                hit = None
+            if hit is None:
+                if who not in report["unknown"]:
+                    report["unknown"].append(who)
+                continue
+            m, c = hit
+            try:
+                order = float(r.get("sort_order") or r.get("order") or (i + 1))
+            except ValueError:
+                order = float(i + 1)
+            per.setdefault((m.discord_id, c.label), []).append((order, i, r))
+        writes: list[tuple[Member, RegisteredCharacter, list[WishlistEntry]]] = []
+        for (uid, label), got in per.items():
+            m = self.members[uid]
+            c = next(x for x in m.characters if x.label == label)
+            # copies: the renumbering below must not touch the live list (a preview writes nothing, not even in memory)
+            natives = [e.model_copy() for e in c.wishlist if e.source != "tmb"]
+            report["replaced"] += sum(1 for e in c.wishlist if e.source == "tmb")
+            imported: list[WishlistEntry] = []
+            for _, _, r in sorted(got, key=lambda t: (t[0], t[1])):
+                try:
+                    iid, nm = self.wish_item(r.get("item_id"), r.get("item_name") or r.get("name"))
+                except RegistryError:
+                    continue
+                if any(_same_wish(e.item_id, e.name, iid, nm) for e in natives + imported):
+                    report["duplicates"] += 1
+                    continue
+                if len(natives) + len(imported) >= WISHLIST_MAX:
+                    report["over_cap"] += 1
+                    continue
+                off = r.get("is_offspec", "").lower() in TRUE_WORDS
+                note = re.sub(r"\s+", " ", r.get("note") or "").strip()[:WISH_NOTE_MAX] or None
+                imported.append(WishlistEntry(item_id=iid, name=nm, offspec=off, note=note, source="tmb"))
+            new = natives + imported
+            for n, e in enumerate(new, 1):
+                e.rank = n
+            report["added"] += len(imported)
+            report["characters"] += 1
+            report["lines"].append(f"{label}: {len(imported)} from TMB" + (f", {len(natives)} kept from the site" if natives else ""))
+            writes.append((m, c, new))
+        if not preview and writes:
+            with self.config_lock, self.store.batch(f"{self.key}: TMB wishlists imported by {by} ({report['characters']} character(s))"):
+                for m, c, new in writes:
+                    c.wishlist = new
+                    c.updated_at = now()
+                    self.save(m, f"{c.label}'s wishlist imported from ThatsMyBIS (by {by})")
+        return report
 
     # ---- raids (instances) = defaults from the game profile + guild overrides
     RAID_FIELDS = ("lockout_days", "duration_hours", "notes")

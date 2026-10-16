@@ -232,12 +232,14 @@ class Viewer:
     """Who is asking, about which guild (`reg`, the selected one). `moved` = the name of the guild the browser had
     selected that this person can no longer open (the request landed on another; the app says so), else None."""
 
-    def __init__(self, uid: int, name: str, reg, officer: bool, owner: bool, via: str = "web", moved: str | None = None):
+    def __init__(self, uid: int, name: str, reg, officer: bool, owner: bool, via: str = "web", moved: str | None = None, actor: int | None = None):
         self.uid, self.name, self.reg, self.officer, self.owner, self.via, self.moved = uid, name, reg, officer, owner, via, moved
         self.member = reg.members.get(uid) if reg else None
+        self.actor = actor  # MCP with X-Oibot-Actor: the officer the call acts as (D8); None for the owner's token alone and the web
 
 
 MCP_TOKEN_ENV = "OIBOT_MCP_TOKEN"
+ACTOR_HEADER = "x-oibot-actor"  # D8: the officer (a Discord id, the MCP server's OIBOT_MCP_ACTOR) an MCP decision is made by
 MCP_LOCAL_ENV = "OIBOT_MCP_LOCAL_ONLY"  # on unless set to 0/false/no/off: the owner token works only from this host
 LOOPBACK = frozenset({"127.0.0.1", "::1"})
 # set by a proxy in front of the bot (the Cloudflare tunnel adds cf-connecting-ip / cf-ray / x-forwarded-for); a call made
@@ -325,6 +327,36 @@ def mcp_viewer(request, bot, token: str | None) -> Viewer | None:
     if not reg.config.owner_discord_id:
         raise HTTPException(400, f"{reg.config.name} has no owner yet")
     return Viewer(int(reg.config.owner_discord_id), owner_name(bot, reg), reg, officer=True, owner=True, via="mcp")
+
+
+def member_name(bot, reg, uid: int) -> str:
+    """A person's display name: their member record, else the gateway's user, else their id."""
+    m = reg.members.get(uid)
+    if m is not None:
+        return m.display_name
+    get_user = getattr(bot, "get_user", None)
+    u = get_user(uid) if get_user is not None else None
+    return str(getattr(u, "display_name", None) or getattr(u, "name", None) or uid)
+
+
+async def mcp_actor(request, bot, v: Viewer) -> Viewer:
+    """D8 / design §2.6: an MCP call carrying X-Oibot-Actor acts as THAT person — validated now (PRIV_LIVE) as an
+    officer or the owner of the chosen guild — so a decision about an award or a person is theirs ("<name> via MCP"),
+    never "the owner's token". Anyone else (a member, someone outside, a malformed id) is refused with a 403; the
+    header never widens what the token may do."""
+    raw = (request.headers.get(ACTOR_HEADER) or "").strip()
+    if not raw.isdigit():
+        raise HTTPException(403, "X-Oibot-Actor must be a Discord user id (OIBOT_MCP_ACTOR).")
+    uid = int(raw)
+    role = await guild_routing.role_of(bot, v.reg, uid, max_age=guild_routing.PRIV_LIVE)
+    if role not in ("owner", "officer"):
+        raise HTTPException(403, f"X-Oibot-Actor {uid} is not an officer of {v.reg.config.name} — MCP decisions are made as an officer of the guild.")
+    name = member_name(bot, v.reg, uid)
+    if name == str(uid):  # no member record, no gateway user: the server member the role check just looked up
+        guild = bot.get_guild(v.reg.config.discord_guild_id) if hasattr(bot, "get_guild") else None
+        found = await bot.cached_member(guild, uid) if guild is not None and hasattr(bot, "cached_member") else None
+        name = str(getattr(found, "display_name", None) or name)
+    return Viewer(uid, name, v.reg, officer=True, owner=role == "owner", via="mcp", actor=uid)
 
 
 def create_app(bot) -> FastAPI:
@@ -418,7 +450,10 @@ def create_app(bot) -> FastAPI:
         the selected guild: the server's membership and roles are the whitelist — there is no separate user list.
         `guild` = an explicit choice (POST /api/guild); `query=False` ignores ?g= (a deep link to someone else's server)."""
         if request.headers.get("authorization"):  # the MCP server: bearer token → the owner; a wrong token is nobody
-            return mcp_viewer(request, bot, os.environ.get(MCP_TOKEN_ENV) or None)
+            v = mcp_viewer(request, bot, os.environ.get(MCP_TOKEN_ENV) or None)
+            if v is not None and request.headers.get(ACTOR_HEADER):
+                v = await mcp_actor(request, bot, v)  # D8: the named officer, validated now
+            return v
         s = session(request)
         if not s and dev_user and request.client and request.client.host in ("127.0.0.1", "::1"):
             s = {"uid": int(dev_user), "name": "dev"}

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .llm.provider import Provider
 from .constants import ROLES
+from .loot_ops import SCHEMA as LOOT_SCHEMA
 from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError
 
 log = logging.getLogger(__name__)
@@ -166,28 +167,29 @@ Resolving a run: "tonight's run" / "the Barrow Deeps run" = the live run of that
 A member is named by display name, mention or one of their characters. A request with several parts becomes several ops, in the order asked.
 The requester's own record ("I'll be away", "my main", "I can't make tonight", "I confirm"): leave member EMPTY — the bot fills in
   the requester itself. Who may do what, and where, is decided by the bot after you answer; write the ops as asked, never refuse or widen them.
-Not settable here (say so): the loot session itself (/raid loot) and handing the guild to a new owner (slash only, by design: over
-  chat or MCP it would give the guild away). A recurring schedule's regulars ARE settable (op regular); there is no standing
-  availability (members answer each run's sheet — regulars too: nobody is answered for them), and no loot items, tiers or wishlists.
+Not settable here (say so): handing the guild to a new owner (slash only, by design: over chat or MCP it would give the guild
+  away). A recurring schedule's regulars ARE settable (op regular); there is no standing availability (members answer each run's
+  sheet — regulars too: nobody is answered for them).
 """
+SCHEMA_TEXT = SCHEMA_TEXT.replace("Resolving a run:", LOOT_SCHEMA + "Resolving a run:", 1)  # the loot council, wishlists, item tiers (loot_ops)
 
 
 class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain")
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|news_keywords|ask_audience|about")
-    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain)")
-    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier")
+    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|news_keywords|ask_audience|about")
+    target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain), item name or id (tier)")
+    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none)")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
-    rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social")
+    rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
     end: Optional[str] = None
-    reason: Optional[str] = Field(default=None, description="a note: run_cancel why, run_answer no thanks why (officers only), comp_target justification, application/proposal note, recruit hint")
+    reason: Optional[str] = Field(default=None, description="a note: run_cancel why, run_answer no thanks why (officers only), comp_target justification, application/proposal note, recruit hint; loot award/reason/correct/retire: the reason (required); wishlist: a note")
     doc: Optional[str] = Field(default=None, description="policy_append: loot|comp; policy: loot|comp|persona")
-    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional")
+    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional; loot tick: the boss; loot retire: restore; wishlist: ms|os; tier: reweight")
 
 
 class ConfigRequest(BaseModel):
@@ -375,7 +377,7 @@ OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_rese
 # never opened to anyone else, whatever the plain-text policy says (authorize checks the owner's id): an officer must not
 # widen their own rights, and the local jobs run Claude on the host
 HARD_OWNER_OPS = {"plain": "Only the owner can change the plain-text permissions.", "job": "Only the owner can start the bot's local jobs."}
-CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel")
+CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel", "loot_channel")
 
 
 RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board", "run_move", "run_propose", "run_sheet", "confirm_for"}
@@ -397,9 +399,10 @@ OP_GROUP = {
     "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup", "job": "setup", "plain": "setup",
     "application": "members", "proposal": "comp", "policy": "comp", "regular": "members",
     "test": "test",
+    "loot": "loot", "tier": "loot", "wishlist": "members",  # the loot council and item tiers (officers); a wishlist: one's own is "self"
 }
 APPLY_FIRST = "New here? Apply first with `/apply` (or *Apply to join* on the registration card) — the officers take it from there."
-SELF_OPS = {"absence", "absence_clear", "dm", "character", "set_main", "run_answer", "confirm_for", "regular"}  # regular: only a remove (stepping down, D7)
+SELF_OPS = {"absence", "absence_clear", "dm", "character", "set_main", "run_answer", "confirm_for", "regular", "wishlist"}  # regular: only a remove (stepping down, D7)
 ANYONE_OPS = {"run_sheet"}  # touch nobody's record, open to anyone like their slash command (/raid sheet): always "self"
 SHEET_HERE = "A sheet is re-posted in the channel you ask in — ask in a server channel, or use /raid sheet."
 OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other ops use their group's label
@@ -409,6 +412,7 @@ OP_NOUN = {  # op -> (own record, someone else's) for the refusal line; other op
     "confirm_for": ("your confirmation", "someone else's confirmation"), "rank": ("ranks", "ranks"), "confirm": ("character confirmations", "character confirmations"),
     "run_sheet": ("where a sheet is posted", "where a sheet is posted"),
     "regular": ("whether you're a regular (ask an officer to add you)", "a schedule's regulars"),
+    "wishlist": ("your wishlist", "someone else's wishlist"), "loot": ("the loot council", "the loot council"), "tier": ("item tiers", "item tiers"),
 }
 
 # ---- the parity matrix (dual interfaces §2.1, §2.10; tests/test_parity_matrix.py). Every op in OP_GROUP has a Discord
@@ -424,6 +428,7 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
     "pin": {"discord": "a board control (web-only, §2.1): pins are set from the sheet's member menu on the site"},
     "job": {"discord": "the host's jobs are the web Agents page and MCP (§2.1); the ops channel gets the proposal cards"},
     "plain": {"discord": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
+    "tier": {"discord": "the item × spec tier grid is web-only (§2.1, Loot › Items): Discord shows the 'N untiered tonight' line and a link"},
 }
 # ops a surface is still missing from, with the plan that adds it — temporary, unlike BY_DESIGN_EXEMPT; the parity test
 # accepts these too but lists them apart, so the gap is written down rather than silent
@@ -437,7 +442,7 @@ PARITY_PENDING: dict[str, dict[str, str]] = {
 # features that live on ONE surface by design (§2.1) and are not ops at all — written down so the parity test can refuse a
 # second editor appearing elsewhere, and so the reason is read, not remembered. {feature: {surface, path, reason}}; `path`
 # is the surface's entry point in the matrix's own notation ("flow:", "slash:", "button:", "fn:" for Discord; "METHOD /api/…"
-# for the web). The Items/tier grid (§2.1, D4) is not built yet (phase 1) and joins this table with it.
+# for the web). The Items/tier grid (§2.1, D4) is `items_grid` (its op, `tier`, is exempt from Discord in BY_DESIGN_EXEMPT).
 BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # Discord-only: the MCP token IS the owner, so claiming and handing over a server is done by a person in the server
     "guild_claim": {"surface": "discord", "path": "flow:guild_claim", "reason": "a server claim is made in the server by the person claiming it; the MCP token is the owner and the web has no viewer yet"},
@@ -455,6 +460,8 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "policy_editor": {"surface": "web", "path": "PUT /api/policy/{doc}", "reason": "the policy document is long text with a diff; Discord appends a rule (op `policy_append`) and shows the reading"},
     "history": {"surface": "web", "path": "GET /api/rosters", "reason": "history views (past runs, the award log) are tables; Discord has the closed card"},
     "plain_permissions_grid": {"surface": "web", "path": "POST /api/admin/plain-permissions", "reason": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
+    "items_grid": {"surface": "web", "path": "POST /api/loot/items/{key}/tiers", "reason": "the item × spec tier grid (Loot › Items) is two-dimensional editing; Discord shows untiered counts and links there (D4)"},
+    "loot_history": {"surface": "web", "path": "GET /api/loot/history", "reason": "ended councils, precedents and the award log are tables (Loot › History, Precedents, the Loot log); Discord has the summary on the closed card"},
 }
 
 
@@ -1145,6 +1152,10 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
             except RegistryError:
                 continue
             out.setdefault(PLAN_REV + ev.key, rc.role_plan(reg, rs, ev).rev)
+    from .loot_ops import loot_revs
+
+    for k, v in loot_revs(reg, ops, raids).items():  # a confirm-all / discard-all carries the batch the diff showed (design §2.4)
+        out.setdefault(k, v)
     return out
 
 
@@ -1168,6 +1179,10 @@ def op_rev(op: ConfigOp, key: str | None, revs: dict[str, str]) -> str | None:
     sec = config_section(op)
     if sec is not None:
         return revs.get(CONFIG_REV + sec)
+    if op.op == "loot":
+        from .loot_ops import rev_key
+
+        return revs.get(rev_key(op))
     if not key:
         return None
     if op.op in BOARD_OPS:
@@ -1660,6 +1675,13 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
     cfg = reg.config
     if isinstance(op, MergedOp):
         return "; ".join(describe(reg, p, channel) for p in op.parts) + " (saved together)"
+    if op.op in ("loot", "wishlist", "tier"):  # the loot council, wishlists, item tiers (loot_ops)
+        from . import loot_ops
+
+        try:
+            return loot_ops.describe(reg, op)
+        except (RegistryError, ValueError) as e:
+            return f"{op.op} {op.field or ''} {op.target or op.value or ''}: {e}".replace("  ", " ")
     if op.op == "plain":
         try:
             patch, line = _plain_patch(reg, op)
@@ -1673,6 +1695,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             return f"recruit {op.field or ''}: {e}"
     if op.op == "set":
         cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:60], "news_keywords": ", ".join(cfg.news_keywords),
+               "loot_log": "on" if cfg.loot_log else "off",
                **{p: (getattr(cfg, f"{p}_id", None) and f"<#{getattr(cfg, f'{p}_id')}>") for p in CHANNEL_PATHS}}.get(op.path or "", "?")
         if op.path in CHANNEL_PATHS and _clear_word(op.value):
             return f"{op.path}: {cur or '—'} → not set"
@@ -2026,6 +2049,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         raise RegistryError(f"{op.op} needs the owner")
     if isinstance(op, MergedOp):
         return _apply_merged(reg, op, by, rev=rev)
+    if op.op in ("loot", "wishlist", "tier"):  # wishlist / tier are registry writes; loot needs the bot's live council
+        from . import loot_ops
+
+        return loot_ops.apply_sync(reg, op, by)
     if op.op == "plain":  # HARD_OWNER_OPS: authorize() let only the owner through
         patch, _ = _plain_patch(reg, op)
         return reg.set_plain_policy(reg.merge_plain_policy(patch), by, rev=rev)
@@ -2268,7 +2295,8 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
     line = await _apply_async(reg, op, by, is_owner, policy_store, bot, by_id, rev, channel_id, self_id, via)
     ops = getattr(bot, "ops", None) if bot is not None else None
     channel_op = op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None
-    if via is not None and ops is not None and not channel_op:
+    verb_audits = op.op == "loot" and bot is not None and hasattr(bot, "open_council")  # LootMixin's verbs write their own line
+    if via is not None and ops is not None and not channel_op and not verb_audits:
         from . import ops as ops_mod
 
         await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
@@ -2287,6 +2315,15 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
     own record is still theirs (their own No thanks is a callout)."""
     if op.op in OWNER_OPS and not is_owner:
         raise RegistryError(f"{op.op} needs the owner")
+    if op.op in ("loot", "wishlist", "tier"):  # loot_ops: the loot council through LootMixin's verbs, wishlists, item tiers
+        from . import loot_ops
+
+        if op.op == "loot":
+            if bot is None or not hasattr(bot, "open_council"):
+                return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)  # refused: needs the bot
+            return await loot_ops.apply_async(reg, op, by, bot, by_id, via or "discord", rev=rev)
+        ctx = loot_ops.guild_ctx(bot, reg) if bot is not None else None
+        return await asyncio.to_thread(loot_ops.apply_sync, reg, op, by, ctx)  # a git commit: off the event loop
     if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test", "application", "proposal")):
         return await _apply_with_bot(reg, op, by, bot, by_id, rev=rev, channel_id=channel_id, self_id=self_id, via=via or "discord")
     if op.op == "job":  # launchctl: off the event loop
@@ -2356,6 +2393,10 @@ def _apply_set(reg: Registry, op: ConfigOp, by: str) -> str:
         if len(words) > 40 or any(len(w) > 60 for w in words):
             raise RegistryError("news_keywords: at most 40 words or phrases of up to 60 characters")
         cfg.news_keywords = list(dict.fromkeys(words))
+    elif op.path == "loot_log":
+        from .registry import parse_bool
+
+        cfg.loot_log = parse_bool(op.value)
     elif op.path in CHANNEL_PATHS and _clear_word(op.value):
         setattr(cfg, f"{op.path}_id", None)
         reg.save_config(f"{op.path} cleared (by {by})")

@@ -1545,6 +1545,109 @@ verbs left, whichever surface wrote (the web, MCP, plain text, the companion). A
   stale presses, the Override / Tick / Correct / precedents wizards through `wizard_harness`, the item card's
   self-edit, the restart round-trips of every id incl. a modal submitted after a restart, End, the scheduler step and
   its one DM — never for a rehearsal: `_loot_recent_end` skips test archives — the chat routing).
+### 5.37 Dual interfaces, phase 1 — the web, members, plain text, MCP; /mock retired (built 2026-10-16)
+
+The council's surfaces beside the Discord thread, on §5.35's verbs (out/dual_interface_design.md §3.1; owner decisions
+D2, D4, D5, D8, D11, D12). Every write below calls the SAME `LootMixin` verb the thread does; the verb audits and saves
+(`LOOT_LISTENERS` → `loot:<run>`), the surface only decides who may and translates.
+
+- **Web (`web/api_loot.py`, installed by `install_api`).** Officers: `GET /api/loot` (every locked run with its
+  councils or none yet, reasons owed and in-game conflicts from live and ended councils, companions, held drops, the
+  public log's state), `GET /api/loot/run/{run}`, `POST /api/loot/{run}/open|tick|distribute|override|confirm|discard|
+  reason|correct|end|scores-only|keep-open|candidate/remove` (a split run's council by `session` = its id / label /
+  roster number, or the route's run named `<run>-r2`). Whole-batch writes carry `batch_rev`, Tick / Distribute
+  `drops_rev`, per-item Confirm `expect_to`; `LootChanged` / `LootBusy` → **409 + the run's councils as they are now**
+  (`state`), a refusal → 400 with `configops.user_error`'s words. `preview` on confirm / discard / end returns the
+  sentence and writes nothing. After the fact: `GET /api/loot/history[/{file}]` (archives), `GET /api/loot/precedents`
+  (`status`, `member`; each row's `ref`; `needs_reason`), `POST /api/loot/precedents/retire` (reason required;
+  `restore`) — a `kind: status` row folded by `lootctx.fold_precedents`, the bot cites active ones only. Data on-ramp:
+  `GET /api/loot/items` (untiered: learned or tables without tiers, first seen, times dropped, awards; tiered; spec
+  rows), `GET /api/loot/items/{key}` (the grid: tier per spec, the guild's over the profile's, `equippable`),
+  `POST /api/loot/items/{key}/tiers` (`Registry.set_item_tiers` → `<guild>/items/<key>.yaml`, the `items` SSE topic;
+  D12: with past awards and no `reweight` answer nothing is written and the reply `ask`s; `reweight: true` appends
+  `kind: reweight` ledger rows — `fold_ledger` applies them to the award's tier/weight, who got what never changes),
+  `GET /api/loot/items/search` (members too: the wishlist picker). `GET /api/loot/wishlists` + `POST
+  /api/loot/wishlists/import` (TMB, preview first). Precedents and the ledger **left `/api/ops`** (bot health only).
+  `ev_json` gains `links{sheet, updates, loot}` and `loot{open, councils, thread, awards, pending, reasons, may_open}`.
+- **D2 (members, logged in — `who()` = member_of; nothing on `/api/public`).** `GET /api/me/loot` (own awards by
+  discord_id, by character name for rows without one), `GET /api/loot/log` (the guild's award log: item, character,
+  spec, boss, date, MS/OS, `mine`); with `scores` AND `v.officer` the server adds tier, weight, source, the bot's
+  pick, who recorded it, the candidates then and the precedent's reason — filtered in the route, never the browser.
+- **Wishlists (D5, `Registry`).** `members/<id>.yaml: characters[].wishlist[]` = `WishlistEntry{item_id (0 = known by
+  name only), name, rank, offspec, note, source native|tmb, added_at}` — shaped like a ThatsMyBIS wishlist row (per
+  character, priority order, MS/OS, note). `wishlist_rev(m, label)` (computed), `set_wishlist(uid, char, rows, by,
+  rev=)` (the whole list, ranks renumbered, ≤ `WISHLIST_MAX` 10, an item twice refused, a kept entry keeps its source;
+  stale rev → `WishlistChanged`), `wish_add` / `wish_remove` (one item; the wizard and the `wishlist` op),
+  `wishlists()` = the map scoring expects ({character: [{item: id or name, rank, offspec}]}; a name-only entry whose
+  item is known by now scores by id) — `RegistryLootContext.wishlists` derives it live (a legacy
+  `<guild>/wishlists.yaml` fills characters with no native list). `import_tmb_wishlists(csv, by, preview=)`: per
+  character in TMB's order, received rows skipped, an item already on the native list a duplicate (the native entry
+  stays), the character's earlier TMB rows replaced, a native entry never deleted, past the cap counted not written,
+  unknown characters named; one commit. Received is never stored: the API marks an entry the ledger awarded to that
+  character `received` (greyed on the page), so the next Save can't undo it. Web: `GET|POST /api/me/wishlist`
+  (`{character, rows, rev}`; 409 + the current lists), officers `GET|POST /api/members/wishlist`.
+- **Plain text (`loot_ops.py`, configops' loot branch).** `loot` (group `loot`, `PLAIN_GROUPS["loot"]` = officers):
+  field open | tick | distribute | award | confirm | discard | reason | correct | end | retire, target = the run (a
+  split run's council `<run>-r2`); `describe()` reads the saved session files (an award without a reason refuses at
+  the diff); Apply goes through `LootMixin` (the verb writes the audit line — `apply_async` skips its own for `loot`);
+  a confirm-all / discard-all carries the `batch_rev` the diff showed and a single confirm the recipient it showed
+  (`board_revs` → `loot_ops.rev_key`: `loot:<target>` / `loot:<target>#<drop>` = `to:<name>` → `expect_to`).
+  `wishlist` (group members; one's own is `self` via `bind_self`, SELF_OPS): add | remove. `tier` (group loot):
+  target item, field spec key, value S+|S|A|B|-, text `reweight`. `set loot_channel` / `set loot_log`. SCHEMA_TEXT
+  carries `loot_ops.SCHEMA`. Parity matrix rows: loot (`/raid loot`, `POST /api/loot/{run}/confirm`, `loot_confirm`),
+  wishlist (`flow:me_wishlist`, `POST /api/me/wishlist`, `set_wishlist`), tier (web + MCP; Discord exempt: the grid).
+  `BY_DESIGN_ONLY` gains `items_grid` and `loot_history`.
+- **MCP (D8).** `get_loot · open_loot · loot_tick · loot_distribute · loot_discard · end_loot · loot_history · loot_log ·
+  list_precedents · list_items · get_wishlists` act as the owner's token; `loot_confirm · loot_award · loot_reason ·
+  loot_correct · retire_precedent · tier_item · set_wishlist · import_wishlists` send `X-Oibot-Actor` =
+  `OIBOT_MCP_ACTOR` (the client sends it ONLY on those). `web/app.py mcp_actor`: the id is resolved now
+  (`role_of(PRIV_LIVE)`) and must be an officer or the owner of the chosen guild (else 403); the Viewer becomes that
+  person (`uid`, `officer`, `owner`, `actor`), and the routes write `by` = "<name> via MCP" (with `via=mcp` the audit
+  line reads "[mcp] Mira via MCP: …"). Without the header those routes refuse with `ACTOR_NEEDED`; previews never need
+  it. `/api/ops/change` (MCP `plain_change`) drops decision ops without the header (`mcp_actor_rule`,
+  `loot_ops.needs_actor`). `ops_log` reads precedents and the award log from the Loot routes.
+- **Discord (this builder's part).** `/me wishlist` (`flows_wishlist.WishlistWizard`, FLOWS `me_wishlist`): character
+  (skipped with one) → the list → one item select (learned drops first, then the tables; the 25th option *Search by
+  name…* opens a one-field form — a name is prose, matched against the items; *Keep "…" by name* for an item not on the
+  tables) → one form (place = a preset select, MS/OS, note) → Confirm (`wish_add`); *Remove one…*; nothing written
+  before Confirm. `/me view` gains a Loot block (`loot_ops.loot_block`: spec icon · character · item · `<t:…:d>` ·
+  MS/OS — no officer data) and the wishlist count. `/gm config loot-channel [channel] [log]` (owner; `set_channel`
+  and the `set loot_log` op).
+- **The public loot log (`discord_pool.LootLogMixin`).** `loot` is in `CHANNEL_KINDS`; `GuildConfig.loot_channel_id`,
+  `loot_log` (default on). `lootctx.LEDGER_LISTENERS` fire on every NEW award row (`RegistryLootContext.append_ledger` —
+  Confirm, companion awards, corrections, the crash repair; `void()` remembers who a correction replaced) →
+  `loot_log_post`: one line (`loot_log_line`: "🎁 **item** → <spec icon> **character** · boss", "✎ **item**: was X,
+  now Y", "→ disenchanted"; never a reason) with `LootWishButton` (`lootwish.<gk>:<item key>`, a DynamicItem → the
+  wizard on that item) in the loot channel; log on and no channel → the run's updates thread (never the signup channel)
+  plus, once per guild per process, an ops warn and a council-thread line; log off → nothing. Test sessions write no
+  ledger rows, so nothing. Config shows the three states (`loot_ops.loot_log_state`).
+- **Frontend.** Officers' **Loot** page (Tonight · History · Precedents · Items · Wishlists; `useLive(["loot:", "run:",
+  "items"])`), the members' **Loot log** page, Me › **My loot** + **Wishlist** (edit mode, one Save with the rev, a
+  409 keeps the edits), Config's loot channel and loot-log card; Ops lost its precedents/ledger tables.
+- **/mock retired (D11).** The `/mock` group, its roster chat and views, `FixtureLootContext` and the fixtures branch of
+  `loot_ctx`, the mock routing in `discord_feed` are gone; `load_sessions` skips an old `origin: mock` file (left on
+  disk as written — no migration); a session is live only through a locked run. Rehearsals are test-bench runs (the
+  council is `session.test`: no ledger, precedents, learned items or public log). `GuildContext` stays: it loads the
+  demo fixtures for the LLM provider and `oibot demo`.
+- **Review fixes.** A precedent written live (`RegistryLootContext.append_precedent`, an override at Confirm) gets
+  its `ref` at once (`precedent_ref(row, n)`, n = its place among the precedent rows — the name `fold_precedents`
+  gives it at the next load), so Retire / `retire_precedent` / the `retire` op reach it without a restart.
+  `import_tmb_wishlists(preview=True)` renumbers copies, never the live entries (a preview changed `wishlist_rev` and
+  left duplicate ranks for the next save). The `wishlist` / `tier` plain-text ops and the `/me wishlist` wizard's
+  Confirm / Remove commit in `asyncio.to_thread`. The provenance block's wishlist line is counted from the data
+  (`RegistryLootContext.wishlist_provenance`: entered through the bot by the raider or an officer for them · imported
+  from a ThatsMyBIS export · an older guild file). The SheetCard action bar carries **Open loot council** while
+  `ev_json.loot.may_open` (the same `/open` route as Loot › Tonight) and **Loot council** (→ /loot) once open; Rosters
+  listens on `loot:` too.
+- **Final review fixes.** After a replaced reason two precedent rows share one import_id ref; `lootctx.find_precedent`
+  (used by `set_precedent_status` and `loot_ops._precedent`) takes the newest row that is not superseded, so Loot ›
+  Precedents, MCP `retire_precedent` and the `retire` op reach the live one. End refuses a run that isn't locked (and
+  has no open council) on every surface: the verb (`LootMixin.end_run`), `POST /api/loot/{run}/end` (preview too) and
+  `loot_ops.describe('end')` — "No locked run to end." The retire route and the `retire` op commit in
+  `asyncio.to_thread`. The `/me wishlist` wizard's Confirm / Remove show `working` before the write (Discord's 3 s).
+- Tests: `tests/test_loot_web.py` (every route over the real verbs; D2 filters; D8 actor; wishlists incl. the TMB
+  fixture `tests/tmb_wishlists.csv`; items + re-weight; precedents; the `loot` / `wishlist` / `tier` ops incl. a
+  stale confirm-all; the public log; the harness drives `/me wishlist`; the review fixes' regressions).
 
 ## 6. Architecture
 

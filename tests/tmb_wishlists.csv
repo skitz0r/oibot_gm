@@ -1,0 +1,9 @@
+type,raid_group_name,member_name,character_name,character_class,character_is_alt,sort_order,item_name,item_id,is_offspec,note,received_at,item_note
+wishlist,Main,someone,{A},Warrior,0,1,Gloves of the Council,0,0,BiS hands,,
+wishlist,Main,someone,{A},Warrior,0,2,Native Ring,0,0,,,
+wishlist,Main,someone,{A},Warrior,0,3,Cloak of Tests,0,1,,,
+wishlist,Main,someone,{A},Warrior,0,4,Gloves of the Council,0,0,dup,,
+wishlist,Main,someone,{A},Warrior,0,5,Old Boots,0,0,,2026-10-01 20:15:00,
+prio,Main,someone,{A},Warrior,0,1,Prio Thing,0,0,,,
+wishlist,Main,other,{B},Priest,0,1,Helm of Order,0,0,,,
+wishlist,Main,ghost,Nobodyhere,Mage,0,1,Thing,0,0,,,

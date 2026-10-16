@@ -1,7 +1,7 @@
 import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useState } from "react";
-import { Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, TagsInput, Text, TextInput, Textarea } from "@mantine/core";
-import { api, type Meta, type RoleRef } from "../api";
+import { Alert, Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, Switch, TagsInput, Text, TextInput, Textarea } from "@mantine/core";
+import { api, type LootLogState, type Meta, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { Recruitment } from "../components/Recruitment";
 
@@ -9,7 +9,9 @@ interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
   channels: Record<string, { id: string | null; name: string | null }>; guild_channels: { id: string; name: string; category: string | null }[]; guild_roles: RoleRef[];
   /** officer_roles: by role id (renames are safe); officer_roles_pending: legacy names the bot could not match to a role */
-  settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null; news_keywords: string[] };
+  settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null; news_keywords: string[];
+    /** the public loot log: on/off, and its state in words (off · a channel · on with no channel) */
+    loot_log: boolean; loot_log_state: LootLogState };
   test_bench: { members: number; runs: string[] }; owner: boolean;
 }
 
@@ -22,6 +24,7 @@ const CHANNELS: { kind: string; label: string; hint: string }[] = [
   { kind: "applications", label: "Applications (officers)", hint: "review cards for /apply (defaults to ops)" },
   { kind: "ops", label: "Ops (officers)", hint: "one line per action the bot takes; plain-text config by @mention" },
   { kind: "news", label: "News", hint: "where the news webhook posts; the bot keeps the items about our game and raids (Agents page)" },
+  { kind: "loot", label: "Loot log", hint: "public: one line per confirmed award (no reasons, no scores); empty = each run's updates thread" },
 ];
 
 export function ConfigPage({ meta }: { meta: Meta }) {
@@ -73,6 +76,14 @@ export function ConfigPage({ meta }: { meta: Meta }) {
           <Textarea label={lab("about", "About the guild")} description="one paragraph on the public homepage and in the static guide to unregistered visitors" defaultValue={data.settings.about} disabled={ro} autosize minRows={2} onBlur={(e) => e.currentTarget.value !== data.settings.about && set("about", e.currentTarget.value)} />
           <Text size="xs" c="dimmed">Owner: {data.settings.owner_id ? `Discord id ${data.settings.owner_id}` : "not claimed — /gm config owner"} · transfer with /gm config owner</Text>
         </Stack>
+      </Card>
+
+      <Card>
+        <CardHeader title="Loot log" hint="the public award log" action={<Switch label={lab("loot_log", "on")} checked={data.settings.loot_log} disabled={ro || busy === "loot_log"} onChange={(e) => set("loot_log", e.currentTarget.checked)} />} />
+        <Box p="md">
+          <Alert color={data.settings.loot_log_state.state === "no_channel" ? "yellow" : data.settings.loot_log_state.state === "off" ? "gray" : "teal"} py="xs">{data.settings.loot_log_state.text}</Alert>
+          <Text size="xs" c="dimmed" mt="xs">The channel is picked under Channels (Loot log). Every line carries an "Add to my wishlist" button; members see the whole log on the site (logged in) and their own loot on the Me page.</Text>
+        </Box>
       </Card>
 
       <Recruitment channels={data.guild_channels} />

@@ -743,8 +743,7 @@ def test_a_shared_token_companion_never_feeds_a_real_raid_with_several_guilds(du
     ev = {"type": "drop", "boss": "X", "items": []}
     assert run(one.handle_feed_event(ev, comp(""))) == {"note": "no active raid; event ignored"}
     mock = FeedBot(duo.guilds, [raiding.a, mock_session()], raiding.stores)
-    assert mock.active_raid(comp("", bound=GUILD2)).guild == "mockdata", "a mock session stays the fallback (K12)"
-    assert mock.active_raid(comp("")).guild == "mockdata", "the shared token still reaches the demo flow"
+    assert mock.active_raid(comp("", bound=GUILD2)) is None and mock.active_raid(comp("")) is None, "/mock is retired (D11): no fallback session"
 
 
 def test_a_council_on_a_run_that_is_not_locked_is_not_live(duo, raiding):
@@ -806,7 +805,7 @@ def test_single_guild_feed_routes_as_before_whatever_the_companion_says(reg, sto
 
     g = Guilds(store, ROOT)
     bot = FeedBot(g, [mock_session()], {GUILD: rs})
-    assert bot.active_raid(comp("Oi Guild Name")).guild == "mockdata" and bot.active_raid(comp(GUILD)).guild == "mockdata"
+    assert bot.active_raid(comp("Oi Guild Name")) is None and bot.active_raid(comp(GUILD)) is None, "/mock is retired (D11): a mock session is never live"
     ev = open_test_run(reg, rs)
     join(reg, rs, ev, reg.test_members()[:5])
     lock_with_board(reg, rs, ev, [m.display_name for m in reg.test_members()[:5]])
