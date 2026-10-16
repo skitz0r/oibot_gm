@@ -88,6 +88,17 @@ class RaidSchedulerMixin:
             elif c.silent_for <= 300:
                 c.warned = False
 
+    async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:
+        """A locked run past its close: a loot council on it decides (LootMixin.loot_may_close — ended only idle 30 min
+        with no pick or drop waiting, after one "closing in 15 min" notice; never with a pick pending), else done."""
+        may = getattr(self, "loot_may_close", None)
+        if may is not None and not await may(reg, rs, ev, now):
+            return
+        rc.end_run(reg, rs, ev, "scheduler")
+        exhausted_posted.discard((reg.key, ev.key))
+        await self.refresh_sheet(reg, ev)
+        await self.ops.emit(reg.config, "info", f"{ev.key}: closed")
+
     async def scheduler_tick_guild(self, reg) -> None:
         """One guild's minute: open on cadence → health → lock → expire → fill → close."""
         # (guild key, run key) whose "nobody left to ask" line went out: two guilds can hold runs with the same key
@@ -134,6 +145,11 @@ class RaidSchedulerMixin:
                 continue
             if state != "locked":
                 continue  # the fill engine, confirmations and closing only apply to a locked roster
+            if now >= rc.run_close_at(reg, ev):
+                # past the close the raid is over: no confirmation expiry, no fill asks (a council kept open by a pick
+                # still waiting must never send fill DMs after the raid) — only the close below
+                await self._close_run(reg, rs, ev, now, exhausted_posted)
+                continue
             gone = rc.expire_confirmations(reg, rs, ev)
             if gone:
                 if ev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again
@@ -165,13 +181,3 @@ class RaidSchedulerMixin:
                     await self.post_run_update(reg, ev, f"🧩 nobody left to ask — short {gaps_text(self.ico, nd)}")
             elif ev.fill_state != "exhausted":
                 exhausted_posted.discard((reg.key, ev.key))
-            if now >= rc.run_close_at(reg, ev):
-                # a loot council on the run decides (LootMixin.loot_may_close): ended only past close AND idle 30 min
-                # AND nothing pending, after one "closing in 15 min" notice — never with proposals pending
-                may = getattr(self, "loot_may_close", None)
-                if may is not None and not await may(reg, rs, ev, now):
-                    continue
-                rc.end_run(reg, rs, ev, "scheduler")
-                exhausted_posted.discard((reg.key, ev.key))
-                await self.refresh_sheet(reg, ev)
-                await self.ops.emit(cfg, "info", f"{ev.key}: closed")

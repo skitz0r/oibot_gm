@@ -127,7 +127,7 @@ class LootSession(BaseModel):
     id: str
     run_key: Optional[str] = None  # the RaidEvent key (None for /mock)
     roster_index: Optional[int] = None  # a split run: one session per roster (None = the whole run)
-    label: Optional[str] = None  # a /mock session's old display id ("BLA-0915")
+    label: Optional[str] = None  # a /mock session's old display id ("BLA-0915"); "Roster N" for one roster of a split run
     channel_id: int = 0
     instance: str
     date: str
@@ -166,6 +166,7 @@ class LootSession(BaseModel):
     opened_at: str = Field(default_factory=now_iso)
     last_activity: str = Field(default_factory=now_iso)
     closing_notice_at: Optional[str] = None  # the scheduler's one "closing in 15 min" line went out
+    held_notice_at: Optional[str] = None  # past close and idle, but picks / drops still wait: the one "still pending" line went out
     keep_open_until: Optional[str] = None  # "Keep open": the auto-end waits until then
     schema_: int = Field(default=SCHEMA, alias="schema")
     _store = PrivateAttr(default=None)
@@ -371,6 +372,14 @@ class LootSession(BaseModel):
     def anything_pending(self) -> bool:
         c = self.pending_count()
         return bool(c["proposals"] or c["reasons"] or c["undistributed"] or c["conflicts"] or self.distributing)
+
+    def blocks_close(self) -> bool:
+        """What keeps the scheduler from ending the council past the run's close (decision 9 / D10): a pick waiting for
+        Confirm (incl. a "(nobody)" pick waiting for an override), a ticked drop nobody judged, a judge in flight.
+        A reason still owed and an in-game conflict do NOT block: both outlive the council (set_reason / correct take a
+        run key after the end; loot_reasons_pending / loot_conflicts_pending list them) and the summary names them."""
+        c = self.pending_count()
+        return bool(c["proposals"] or c["undistributed"] or self.distributing)
 
 
 # ---------------------------------------------------------------- revs (computed, never stored)
@@ -649,7 +658,7 @@ def make_award(ctx, session: LootSession, d: Drop, to: str, roster: list[Player]
         tier, weight = scoring.weight_for(ctx.profile, item, spec, ctx.loot_cfg)
         offspec = False
     snap = [{"character": x.character, "spec": f"{x.cls}:{x.spec}", "tier": x.tier, "base": x.base_score} for x in cands[:7]]
-    rid = session.run_key or session.id
+    rid = session.id  # the run key for a whole run's council; '<run>-r<N>' per roster of a split run (drop ids are per session)
     return LootAward(raider=who, item_id=item.id, item_name=item.name, tier=tier, total_weight=weight, offspec=offspec, received=raid_date,
                      instance=session.raid_name, boss=d.boss, discord_id=uid, tiered=bool(item.tiers), by=by, policy_version=ctx.policy_version(),
                      candidates_snapshot=snap, drop_id=d.drop_id, import_id=f"{rid}-{d.drop_id}", source=source, bot_pick=bot_pick, confirmed_at=now_iso())

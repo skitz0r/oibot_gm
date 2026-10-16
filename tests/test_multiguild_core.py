@@ -968,7 +968,7 @@ def test_loot_thread_check_is_per_guild(duo, monkeypatch):
     assert sorted((s.id, s.guild) for s in bot.events.values()) == [(ev_a.key, GUILD), (ev_b.key, GUILD2)]
     assert duo.rs_b.events[ev_b.key].thread_id and duo.rs_a.events[ev_a.key].thread_id == thread_a
     again = loot(duo.a, 1)
-    assert again.text.endswith(f"Loot thread already open: <#{thread_a}>") and len(bot.events) == 2
+    assert again.text.endswith(f"Loot council is open — what still waits is re-posted in <#{thread_a}>") and len(bot.events) == 2
 
 
 def test_healthz_reports_each_guild(duo):

@@ -120,6 +120,10 @@ class FeedMixin:
         real = [s for s in live if s.origin == "raid" and gk and s.guild == gk]
         reg = (getattr(self.registries, "by_key", {}) or {}).get(gk) if gk else None
         if real:
+            # routing by run window first (design §3.1): a council kept open past its run's close (picks still waiting)
+            # never competes with tonight's
+            current = [s for s in real if not self._past_close(reg, s)]
+            real = current or real
             tester = self._is_tester_companion(reg, comp)
             pool = [s for s in real if s.test] if tester else [s for s in real if not s.test]
             if tester and not pool:
@@ -145,6 +149,16 @@ class FeedMixin:
             elif not getattr(self.registries, "many", False) or not want:
                 return mock[0], None
         return None, "no run live"
+
+    def _past_close(self, reg, session) -> bool:
+        if reg is None:
+            return False
+        _, ev = self.loot_run(session)
+        if ev is None:
+            return False
+        from . import raidcycle as rc
+
+        return datetime.now(ev.start.tzinfo) >= rc.run_close_at(reg, ev)
 
     def active_raid(self, comp: Companion | None = None):
         """The council a companion's events go to now (None: nowhere) — loot_route without the reason."""
@@ -209,8 +223,8 @@ class FeedMixin:
         if raid is None:
             if why == "no run live":
                 if gk and kind in ("drop", "loot", "kill"):
-                    self.feed_buffer(gk, ev, comp)
-                    return {"note": "no run live; held for 10 minutes", "held": True}
+                    self.feed_buffer(gk, ev, comp)  # persisted: survives a restart; what expires unrecorded is announced
+                    return {"note": "no run live; held for 10 minutes — open the loot council (/raid loot), or the ops channel lists it as not recorded", "held": True}
                 return {"note": "no active raid; event ignored"}
             if cfg:
                 await self.ops.emit(cfg, "warn", f"companion {comp.character}: {why}")
@@ -282,7 +296,7 @@ class FeedMixin:
             async with self.loot_lock(*raid.key):
                 raid.conflicts.append({"drop_id": d.drop_id, "item": d.item_name, "in_game": who, "recorded": a.raider, "at": ls.now_iso()})
                 raid.save(f"{raid.guild}: loot {raid.id}: {d.item_name} went to {who} in game, recorded to {a.raider}")
-            await self.loot_notify(reg, raid, f"⚠ **{d.item_name}**: in game it went to **{who}**, recorded earlier to **{a.raider}** — Correct?", kind="conflict")
+            await self.loot_notify(reg, raid, f"⚠ **{d.item_name}**: in game it went to **{who}**, recorded earlier to **{a.raider}** — Correct?", kind="conflict", drop_id=d.drop_id)
             return {"result": "conflict"}
         if target is None:  # never ticked: tick it now (the drop is game truth)
             res = await self.tick(reg, raid, add=[{"item_id": iid or None, "name": name or None, "boss": raid.current_boss}], by=by, source="companion")
@@ -305,7 +319,7 @@ class FeedMixin:
                 if not raid.test:
                     ls.sync_ledger(ctx, raid)
         await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {target.item_name} → {who} (in game, no proposal)", "discord", None)
-        await self.loot_notify(reg, raid, f"📒 **{target.item_name}** → **{who}** · recorded — Wrong? Fix…", kind="manual")
+        await self.loot_notify(reg, raid, f"📒 **{target.item_name}** → **{who}** · recorded — wrong? Correct…", kind="manual", drop_id=target.drop_id)
         return {"result": "manual"}
 
     async def _feed_mismatch(self, reg, raid, d, prop, who: str, by: str) -> dict:
@@ -325,7 +339,7 @@ class FeedMixin:
                 if not raid.test:
                     ls.sync_ledger(ctx, raid)
         await self._audit(reg, by, f"loot {raid.run_key or raid.id}: recorded {d.item_name} → {who} in game (bot picked {prop.award_to}); reason pending", "discord", None)
-        await self.loot_notify(reg, raid, f"⚠ **{d.item_name}** → **{who}** in game, but the bot proposed **{prop.award_to}**. Recorded — give the reason so it becomes a precedent (or correct it if it was a mistake).", kind="mismatch")
+        await self.loot_notify(reg, raid, f"⚠ **{d.item_name}** → **{who}** in game, but the bot proposed **{prop.award_to}**. Recorded — give the reason so it becomes a precedent (or correct it if it was a mistake).", kind="mismatch", drop_id=d.drop_id)
         return {"result": "recorded_reason_pending"}
 
     async def feed_disconnected(self, comp: Companion) -> None:

@@ -2402,13 +2402,15 @@ def end_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> bool:
 
 
 def rostered_runs(reg: Registry, rs: RaidStore, m: Member) -> list[tuple[RaidEvent, str]]:
-    """The live locked runs where `m` holds a seat, with the character seated — read from the run files (the member
+    """The live locked runs (not past their close) where `m` holds a seat, with the character seated — read from the run files (the member
     file keeps no per-run membership: RegisteredCharacter.rosters is for regular series, roster redesign Phase 0).
     Shown by /me view, the registration card's status, help and the site's member JSON."""
     out = []
     for ev in rs.live():
         if ev.state == "open":
             continue
+        if datetime.now(ev.start.tzinfo) >= run_close_at(reg, ev):
+            continue  # the raid is over; a loot council with a pick still waiting may keep it locked — nobody is "rostered" on it
         p = next((p for p in ev.seated() if player_uid(ev, p) == m.discord_id), None)
         if p is not None:
             out.append((ev, p.character or p.signup_name))

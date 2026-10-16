@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 
 import discord
 
+from . import configops
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .raid_views import health_layout, raid_name, run_label, run_title, sheet_state
@@ -489,25 +490,32 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, **_see
             await wiz.finish(i, "Lock the roster first (/raid lock).")
             return
         bot = i.client
-        existing = bot.loot_session(reg, ev.key)
-        if existing is not None:
-            await wiz.finish(i, f"Loot thread already open: <#{existing.raid_thread_id}>" if existing.raid_thread_id else "The loot council is already open (its thread is pending).")
-            return
-        await wiz.working(i, "Opening the loot thread…")
-        # LootMixin.open_loot: the session keyed (guild, run), its thread in the officer channel (loot_open_thread),
-        # the ops line; idempotent (two officers at once get the same council)
+        await wiz.working(i, "Opening the loot council…")
+        # LootMixin.open_council: one session per roster of a split run ("loot · Roster 2"), else one for the run —
+        # keyed (guild, session), its thread in the officer channel; idempotent (two officers at once get the same
+        # council). An open council: its pending thread is tried again and what still waits is re-posted with buttons.
+        had_thread = {s.id for s in bot.events.values() if s.guild == reg.key and s.run_key == ev.key and s.raid_thread_id}
         try:
-            session, _created = await bot.open_loot(reg, rs, ev, by=i.user.display_name, by_id=i.user.id)
+            opened = await bot.open_council(reg, rs, ev, by=i.user.display_name, by_id=i.user.id)
         except RegistryError as e:
-            await wiz.finish(i, str(e))
+            await wiz.finish(i, configops.user_error(e))
             return
-        if not session.raid_thread_id:
-            await wiz.finish(i, "The loot council is open, but I couldn't reach the officer channel — its thread is pending.")
-            return
-        await wiz.finish(i, f"Loot thread open: <#{session.raid_thread_id}>")
-        thread = bot.get_channel(session.raid_thread_id) if hasattr(bot, "get_channel") else None
-        if thread is not None:
-            await bot.post_boss_tables(session, thread)
+        lines = []
+        for session, created in opened:
+            label = f"{session.label}: " if session.roster_index is not None and session.label else ""
+            if not session.raid_thread_id:
+                lines.append(f"{label}the council is open, but I couldn't reach the officer channel — its thread is pending (I try again on reconnect, or run /raid loot again).")
+                continue
+            lines.append(f"{label}" + ("Loot thread open: " if created else "Loot council is open — what still waits is re-posted in ") + f"<#{session.raid_thread_id}>")
+        await wiz.finish(i, "\n".join(lines))
+        for session, created in opened:
+            thread = bot.get_channel(session.raid_thread_id) if session.raid_thread_id and hasattr(bot, "get_channel") else None
+            if thread is None:
+                continue
+            if created:
+                await bot.post_boss_tables(session, thread)
+            elif session.id in had_thread:  # a thread made just now (it was pending) got its re-post from loot_ensure_thread
+                await bot.loot_repost(reg, session)
     await with_run(interaction, reg, title="Loot council", then=body, states=("locked",), officer=True)
 
 

@@ -296,6 +296,8 @@ class RaidMixin:
         nd = rc.needs(reg, ev, team)
         if sheet_state(ev) != "locked" or not ev.all_rosters:
             return [], nd
+        if datetime.now(ev.start.tzinfo) >= rc.run_close_at(reg, ev):
+            return [], nd  # the raid is over (a loot council may keep the run locked): never a fill DM after it
         if not nd["headcount"] and not nd["roles"]:
             if ev.fill_state in ("asking", "suggested"):
                 ev.fill_state = "filled"

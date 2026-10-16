@@ -1327,7 +1327,14 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   `scripts/migrate_loot_sessions.py` (`migrate_sessions`, idempotent, one commit) rewrites them under the new names.
 - **The unit is the drop** (`Drop`: `drop_id` d1, d2 …, `item_id` 0 for an item known only by name, `tiered`, source,
   held). Proposals carry `drop_id`, the bot's pick (`award_to`) and a pending `Override` beside it (`to` = effective
-  recipient); awards and the ledger's `import_id` (`<run>-<drop_id>`, corrections `-c<n>`) key by it.
+  recipient); awards and the ledger's `import_id` (`<session id>-<drop_id>` — the run key for a whole run,
+  `<run>-r<n>` per roster, so two rosters' d1 never collide; corrections `-c<n>`) key by it.
+- **Open.** `open_council(reg, rs, ev, by, by_id, via)` = what `/raid loot` (and later the web / MCP) calls: one
+  `open_loot(roster=i)` per roster of a split run (label "Roster N", thread "loot · Roster N · …", the embed shows that
+  roster's groups), else one for the run (a whole-run council opened before a split stays the one council); held
+  companion events replay once all are open. `/raid loot` on an open council re-posts what still waits with fresh
+  buttons (`loot_repost`). A thread that couldn't be made (Discord down) is retried by `loot_ensure_thread` — on the
+  next `/raid loot`, on `on_resumed`, on every ready (`loot_threads_pending`).
 - **Verbs** (`discord_loot.LootMixin`, every surface a caller): `open_loot · tick · distribute · override · confirm ·
   discard · set_reason · correct · end_run` (+ `remove_candidate · set_scores_only · keep_open`), each `(reg, session, …,
   by, by_id, via)`, under the per-(guild, session) `loot_lock`. Distribute is single flight (`LootBusy`), judges a
@@ -1341,8 +1348,13 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   the row at once with `pending_reasons[{drop_id, recipient, bot}]`; `set_reason` is idempotent on the import_id
   (`replace` appends a superseding precedent) and also takes a run key for a council that has ended (the award found in
   the ledger); `loot_reasons_pending(reg)` = the "needs a reason" list (companion rows without an active precedent);
-  `correct` appends a `kind: void` ledger row + a new award, no precedent. `record_pending_reason` (the next message as
-  the reason) is gone.
+  `correct` appends a `kind: void` ledger row + a new award, no precedent, and also takes a session id for an ended
+  council (a conflict days later); `loot_conflicts_pending(reg)` lists uncorrected in-game conflicts from live sessions
+  and archives. `record_pending_reason` (the next message as the reason) is gone; until the Discord surfaces' persistent
+  buttons land, the thread's lines carry interim Views (`loot_view`: Give the reason + Mistake — correct… under a
+  mismatch, Correct… under a conflict / in-game award, Distribute under ticked drops, Keep open under the closing
+  notice; presses checked with `role_of(PRIV_LIVE)`); the interim thread chat (`discord_bot.loot_chat`) confirms with
+  the `batch_rev` seen when the sentence arrived and never replaces another officer's override.
 - **Revs** (computed): `batch_rev` over the picks in play (pending + awards from proposals: drop → recipient, source —
   a confirm as shown keeps it, an override / re-score / discard / new batch moves it) for Confirm-all, Discard and
   Override; `drops_rev` (drop list + what Distribute would judge) for Tick and Distribute; per-item Confirm carries
@@ -1359,20 +1371,29 @@ the web (`/api/loot`, the Loot pages) and the `loot` op / MCP tools are built on
   a puppet's / the tester's companion; several → by seated character; else refused: ops warn + error frame); no live
   run → held 10 min (`feed_buffer`, `feed_waiting(reg)` = the "no run live" state, replayed by `open_loot`);
   `session.seen_idem` dedupes re-sends across reconnects; acks carry `session`; drop → `tick` (+ `loot_auto_soon`:
-  `loot_auto_distribute` per raid, `RAID_LOOT_FIELDS`, ~20 s after a boss's last drop); loot → confirm / mismatch /
+  `loot_auto_distribute` per raid, `RAID_LOOT_FIELDS`, ~20 s after a boss's last drop); routing prefers councils whose
+  run is not past `run_close_at`; held events are persisted in `<guild>/loot/held.json` (a restart keeps them) and the
+  ones no council took within 10 min are named in an ops warn as NOT recorded (`feed_expire`); loot → confirm / mismatch /
   manual / conflict; presence `live | quiet | disconnected` (`FeedServer.presence`, `feed_presence(bot, reg)`;
   `feed_status` stays the one-line form).
 - **End and the scheduler.** `end_run(reg, rs, ev, by)` archives every session of the run with `loot_summary`
   (pending proposals / undistributed / reasons inside), flips the run done (`rc.end_run`), returns the text
   (`loot_ended` posts it); `end_consequence` is the decide screen's sentence. The scheduler's close asks
-  `loot_may_close`: past `run_close_at` AND idle 30 min AND nothing pending → one "closing in 15 min" notice
-  (`loot_closing_state` → `closing`, Keep open = `keep_open`) → end.
+  `loot_may_close`: past `run_close_at` AND idle 30 min AND nothing blocking (`LootSession.blocks_close`: a pick
+  waiting for Confirm, a drop nobody judged, a judge in flight — a reason owed or a conflict does NOT block, both
+  outlive the council) → one "closing in 15 min" notice (`loot_closing_state` → `closing`, Keep open = `keep_open`) →
+  end. Blocked → state `held`: one "still pending" thread line (`loot_held`, `held_notice_at`), never an auto-end. Past
+  `run_close_at` the scheduler runs only the close step (no confirmation expiry, no fill asks) and `run_fill` refuses,
+  so a council held open never causes a fill DM after the raid; `rc.rostered_runs` skips runs past their close.
 - **Listeners.** `LOOT_LISTENERS` (every session save / archive) → the web's `loot:<run key>` topic;
   `rc.ROSTER_LISTENERS` / `rc.on_roster_change` from `seat_player`, `free_seat`, `_reseat`, the board after lock →
   `loot_roster_changed`. Every verb writes one `ops.audited` line (per award on Confirm); a test session writes nothing
   to the ledger, precedents or learned items.
-- **Hooks the surfaces replace:** `loot_notify(reg, session, line, kind=)`, `loot_open_thread(reg, rs, ev, session)`,
-  `loot_ended`, `loot_closing` (defaults: a line in the thread; a plain thread on the officer channel).
+- **Hooks the surfaces replace:** `loot_notify(reg, session, line, kind=, drop_id=)`, `loot_open_thread(reg, rs, ev,
+  session)`, `loot_ended`, `loot_closing`, `loot_held`, `loot_view` (defaults: a line in the thread with the interim
+  buttons; a distribute posts the proposals with Confirm / Discard; a plain thread on the officer channel).
+- `Registry.items()` is cached against a stamp (the profile object + every item file's name/size/mtime), so a tier
+  written by any path or a profile reload is read on the next call.
 - Tests: `tests/test_loot_verbs.py` (verbs, revs, snapshot vs concurrent writes, restart, companion, routing,
   idempotency, end, scheduler, migration, items).
 

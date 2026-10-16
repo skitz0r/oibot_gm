@@ -53,6 +53,7 @@ class LootBot(FeedMixin, LootMixin):
         self.loot_provider = provider
         self.ops = RecOps()
         self.posts: list[tuple[str, str]] = []
+        self.drop_posts: list[tuple[str, str]] = []
         self.feed = None
         self.thread_seq = 9000
 
@@ -60,14 +61,19 @@ class LootBot(FeedMixin, LootMixin):
         self.thread_seq += 1
         return self.thread_seq
 
-    async def loot_notify(self, reg, session, line=None, *, kind=""):
+    async def loot_notify(self, reg, session, line=None, *, kind="", drop_id=None):
         self.posts.append((kind, line or ""))
+        if drop_id:
+            self.drop_posts.append((kind, drop_id))
 
     async def loot_ended(self, reg, session, text):
         self.posts.append(("ended", text))
 
     async def loot_closing(self, reg, session):
         self.posts.append(("closing", ""))
+
+    async def loot_held(self, reg, session):
+        self.posts.append(("held", session.id))
 
 
 class SlowProvider:
@@ -821,3 +827,318 @@ def test_a_drop_nobody_can_take_is_never_recorded_to_nobody(council):
     run(c.bot.override(c.reg, c.s, "d1", "disenchant", "nobody needs it", by="Officer", rejudge=False))
     run(c.bot.confirm(c.reg, c.s, only={"d1"}, by="Officer"))
     assert c.s.awarded("d1").raider == ls.DISENCHANT and ledger(c.reg)[0]["total_weight"] == 0
+
+
+# ---------------------------------------------------------------- L1 review fixes (each fails without its fix)
+
+def split_run(reg, rs, days=3):
+    """A locked real run with TWO rosters (a split): members 0–4 on roster 1, 5–9 on roster 2."""
+    start = (reg.now_local() + timedelta(days=days, hours=3)).replace(second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, "barrow_deeps", start, by="t")
+    ms = reg.test_members()[:10]
+    join(reg, rs, ev, ms)
+    size = rc.run_size(reg, ev)
+    names = [m.display_name for m in ms]
+    ev.rosters = rc.board_rosters(reg, ev, [names[:5]], size) + rc.board_rosters(reg, ev, [names[5:]], size)
+    ev.state, ev.locked_at = "locked", rc.now()
+    rs.save(ev, "locked (split test board)")
+    assert len(ev.all_rosters) == 2
+    return ev, ms
+
+
+def test_a_split_run_opens_one_council_per_roster_judging_only_its_seats(reg, rs):
+    ev, ms = split_run(reg, rs)
+    bot = LootBot(reg, rs)
+    opened = run(bot.open_council(reg, rs, ev, by="Officer", by_id=1))
+    (s1, c1), (s2, c2) = opened
+    assert c1 and c2 and (s1.id, s2.id) == (f"{ev.key}-r1", f"{ev.key}-r2") and (s1.label, s2.label) == ("Roster 1", "Roster 2")
+    assert {p.character for p in bot.loot_roster(s1)} == {char(m) for m in ms[:5]}
+    assert {p.character for p in bot.loot_roster(s2)} == {char(m) for m in ms[5:]}, "roster 2 is judged for roster 2's drops only"
+    assert [s for s, created in run(bot.open_council(reg, rs, ev, by="Mira")) if not created] == [s1, s2], "idempotent per roster"
+    for s in (s1, s2):
+        run(bot.tick(reg, s, add=[{"name": "Split Shard", "boss": "Gatekeeper"}], by="Officer"))
+        (p,) = run(bot.distribute(reg, s, by="Officer"))["proposals"]
+        assert p.to in {p.character for p in bot.loot_roster(s)}
+        run(bot.confirm(reg, s, by="Officer"))
+    assert sorted(r["import_id"] for r in ledger(reg)) == [f"{ev.key}-r1-d1", f"{ev.key}-r2-d1"], "two rosters' d1 never share an import id"
+    text = run(bot.end_run(reg, rs, ev, by="Mira"))
+    assert "Roster 1" in text and "Roster 2" in text and not bot.events and rs.events[ev.key].state == "done"
+
+
+def test_a_roster_councils_thread_is_named_for_its_roster(reg, rs):
+    ev, ms = split_run(reg, rs)
+
+    class Thread:
+        def __init__(self, name):
+            self.name, self.id = name, 4242
+
+    class Msg:
+        async def create_thread(self, name):
+            made.append(name)
+            return Thread(name)
+
+    class Chan:
+        async def send(self, embed=None, **kw):
+            sent.append(embed)
+            return Msg()
+    made, sent = [], []
+    bot = LootBot(reg, rs)
+    bot.officer_channel = lambda reg_, ev_: Chan()
+    reg.config.roster_channel_id = 55
+    s = LootSession(id=f"{ev.key}-r2", run_key=ev.key, roster_index=1, instance=ev.instance, date="2026-12-09", guild=reg.key, origin="raid")
+    assert run(LootMixin.loot_open_thread(bot, reg, rs, ev, s)) == 4242
+    assert made[0].startswith("loot · Roster 2 · ") and sent[0].title.startswith("⚔ Roster 2 · ")
+    assert "5 rostered" in sent[0].description, "roster 2's seats only"
+
+
+def test_a_reason_owed_or_a_conflict_never_holds_the_council_open(council):
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    other = next(char(m) for m in c.members if char(m) != p.to)
+    run(c.bot.handle_feed_event({"type": "loot", "recipient": other, "item_name": "Shard of Doom", "idem": "h1"}, scribe()))
+    run(c.bot.handle_feed_event({"type": "loot", "recipient": p.to, "item_name": "Shard of Doom", "idem": "h2"}, scribe()))
+    assert c.s.pending_reasons and c.s.conflicts and not c.s.blocks_close()
+    late = max(rc.run_close_at(c.reg, c.ev), datetime.now(timezone.utc)) + timedelta(minutes=31)
+    assert not run(c.bot.loot_may_close(c.reg, c.rs, c.ev, late)) and ("closing", "") in c.bot.posts
+    assert run(c.bot.loot_may_close(c.reg, c.rs, c.ev, late + timedelta(minutes=16))), "ended: both outlive the council"
+    assert c.rs.events[c.ev.key].state == "done" and not c.bot.events
+    assert [x["drop_id"] for x in c.bot.loot_reasons_pending(c.reg)] == ["d1"]
+    (cf,) = c.bot.loot_conflicts_pending(c.reg)
+    assert cf["session"] == c.ev.key and cf["ended"] and cf["in_game"] == p.to
+    line = run(c.bot.correct(c.reg, c.ev.key, "d1", p.to, "the log was right", by="Mira"))
+    assert f"was {other}, now **{p.to}**" in line and not c.bot.loot_conflicts_pending(c.reg)
+    rows = ledger(c.reg)
+    assert rows[-2]["kind"] == "void" and rows[-1]["import_id"] == f"{c.ev.key}-d1-c1" and rows[-1]["raider"] == p.to and rows[-1]["source"] == "correct"
+
+
+def _age(session, minutes=40):
+    session.last_activity = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+
+
+def test_a_waiting_pick_holds_the_council_with_one_line_and_never_blocks_tonights_run(reg, rs):
+    ev1, ms = real_run(reg, rs)
+    bot = LootBot(reg, rs)
+    s1, _ = run(bot.open_loot(reg, rs, ev1, by="Officer"))
+    run(bot.tick(reg, s1, add=[{"name": "Forgotten", "boss": "Gatekeeper"}], by="Officer"))
+    run(bot.distribute(reg, s1, by="Officer"))
+    ev1.starts_at = (ev1.start - timedelta(days=10)).isoformat()  # last week's raid, its council still holding a pick
+    rs.save(ev1, "t")
+    _age(s1)
+    assert bot.loot_closing_state(reg, rs, ev1)["state"] == "held"
+    assert not run(bot.loot_may_close(reg, rs, ev1)) and not run(bot.loot_may_close(reg, rs, ev1))
+    assert [k for k, _ in bot.posts].count("held") == 1, "one 'still pending' line, then it waits for an officer"
+    assert rs.events[ev1.key].state == "locked", "never auto-ended with a pick pending"
+    assert rc.rostered_runs(reg, rs, ms[0]) == [], "nobody is 'rostered' on a raid that is over"
+    start = (reg.now_local() + timedelta(days=1, hours=3)).replace(second=0, microsecond=0)
+    ev2 = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t")
+    join(reg, rs, ev2, ms)
+    lock_with_board(reg, rs, ev2, [m.display_name for m in ms])
+    s2, _ = run(bot.open_loot(reg, rs, ev2, by="Officer"))
+    assert bot.active_raid(Companion(char(ms[0]), "c", "", "p")) is s2, "tonight's council takes the companion (run window first)"
+    assert [e.key for e, _ in rc.rostered_runs(reg, rs, ms[0])] == [ev2.key]
+
+
+def test_the_scheduler_sends_no_fill_or_expiry_past_the_close(reg, rs, monkeypatch):
+    from test_roster_p2_fixes import SchedBot
+
+    ev, ms = real_run(reg, rs)
+    ev.starts_at = (ev.start - timedelta(days=10)).isoformat()
+    rs.save(ev, "t")
+    bot = SchedBot(reg, rs)
+    calls = []
+
+    async def run_fill(*a, **kw):
+        calls.append("fill")
+        return [], {"headcount": 1, "roles": {}}
+
+    async def held(*a, **kw):
+        return False  # a council holds the run open (a pick waits)
+    bot.run_fill, bot.loot_may_close = run_fill, held
+    monkeypatch.setattr(rc, "expire_confirmations", lambda *a, **kw: calls.append("expire") or [])
+    monkeypatch.setattr(rc, "expire_fill_asks", lambda *a, **kw: calls.append("asks") or ([], []))
+    run(bot.scheduler_tick_guild(reg))
+    assert calls == [] and rs.events[ev.key].state == "locked", "past the close: only the close step runs"
+
+
+def test_run_fill_refuses_past_the_close(reg, rs):
+    from oibot_gm.discord_raid import RaidMixin
+
+    ev, ms = real_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[10:14], status="sub")  # benched joiners: the engine's first asks
+    rc.free_seat(reg, rs, ev, ms[0].discord_id, "callout")  # a gap the engine would ask for
+    assert rc.fill_batch(reg, rs, ev, rc.run_team(reg, ev)), "before the close somebody would be asked"
+    ev.starts_at = (ev.start - timedelta(days=10)).isoformat()
+    sent = []
+
+    async def dm(*a, **kw):
+        sent.append(a)
+        return True
+    fake = types.SimpleNamespace(send_member_dm=dm)
+    asks, _ = run(RaidMixin.run_fill(fake, reg, rs, ev, rc.run_team(reg, ev)))
+    assert asks == [] and not sent and not ev.fill_asks, "never a fill DM after the raid"
+
+
+def test_held_companion_events_survive_a_restart_and_expired_ones_are_announced(reg, rs):
+    ev, ms = real_run(reg, rs)
+    bot = LootBot(reg, rs)
+    out = run(bot.handle_feed_event({"type": "drop", "boss": "Gatekeeper", "items": [{"name": "Early"}], "idem": "e1"}, scribe()))
+    assert out["held"] and "open the loot council" in out["note"]
+    after = LootBot(reg, rs)  # a restart: a new process, nothing in memory
+    assert after.feed_waiting(reg)["count"] == 1
+    s, _ = run(after.open_loot(reg, rs, ev, by="Officer"))
+    assert [d.item_name for d in s.drop_list] == ["Early"] and after.feed_waiting(reg) is None
+    run(after.end_run(reg, rs, ev, by="Officer"))
+    run(after.handle_feed_event({"type": "loot", "recipient": char(ms[1]), "item_name": "Late Ring", "idem": "e2"}, scribe()))
+    f = reg.store.root / reg.key / "loot" / "held.json"
+    rows = json.loads(f.read_text())
+    rows[0]["at"] = (datetime.now(timezone.utc) - timedelta(minutes=11)).isoformat(timespec="seconds")
+    f.write_text(json.dumps(rows))
+    gone = run(after.feed_expire(reg.key))
+    assert len(gone) == 1 and json.loads(f.read_text()) == []
+    (warn,) = [t for _, lvl, t in after.ops.lines if lvl == "warn"]
+    assert "NOT recorded" in warn and f"Late Ring → {char(ms[1])}" in warn, "never silent: what was not recorded is named"
+
+
+def test_a_thread_pending_at_open_is_created_on_the_next_open_or_a_resume(reg, rs):
+    ev, ms = real_run(reg, rs)
+    bot = LootBot(reg, rs)
+    up = {"ok": False}
+
+    async def thread(reg_, rs_, ev_, session):
+        return 7777 if up["ok"] else None
+    bot.loot_open_thread = thread
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    assert s.raid_thread_id is None and any("thread pending" in t for _, _, t in bot.ops.lines)
+    assert run(bot.on_resumed()) is None and s.raid_thread_id is None, "still down: nothing made"
+    up["ok"] = True
+    run(bot.on_resumed())
+    assert s.raid_thread_id == 7777 and rs.events[ev.key].thread_id == 7777 and bot.event_for(7777) is s
+    assert ls.load_sessions(reg.store)[s.key].raid_thread_id == 7777
+    s.raid_thread_id = None  # and the next /raid loot does the same
+    again, created = run(bot.open_loot(reg, rs, ev, by="Mira"))
+    assert again is s and not created and s.raid_thread_id == 7777
+
+
+def test_items_cache_reads_a_tier_written_by_another_path(reg):
+    tiered_item(reg, 90002, "Cached Cloak", tiers={"role:tank": "C"})
+    assert reg.item(90002).tiers == {"role:tank": "C"}
+    f = reg.store.root / reg.key / "items" / "90002.yaml"
+    doc = yaml.safe_load(f.read_text())
+    doc["tiers"] = {"role:tank": "S", "role:healer": "A"}
+    f.write_text(yaml.safe_dump(doc))  # Loot › Items / a data-repo pull: not learn_item, no cache reset
+    assert reg.item(90002).tiers == {"role:tank": "S", "role:healer": "A"}
+    before = reg.items()
+    reg.refresh_profile()  # a guild override reload builds a new profile
+    assert reg.items() is not before
+
+
+class ChatBot(LootBot):
+    """loot_chat (discord_bot.OibotGM's) on the verbs, with a fake message."""
+
+    async def post_proposals(self, ev, dest, prefix=None):
+        self.posts.append(("proposals", prefix or ""))
+
+
+class FakeMsg:
+    def __init__(self, text="ok", who="Mira", uid=2):
+        self.content = text
+        self.author = types.SimpleNamespace(display_name=who, id=uid)
+        self.guild = None
+        self.replies: list[str] = []
+        outer = self
+
+        class Typing:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *a):
+                return False
+
+        self.channel = types.SimpleNamespace(typing=lambda: Typing())
+        self.outer = outer
+
+    async def reply(self, text=None, **kw):
+        self.replies.append(text or "")
+
+
+def test_loot_chat_never_records_a_pick_added_while_the_model_reads(reg, rs, monkeypatch):
+    from oibot_gm import nl
+    from oibot_gm.discord_bot import OibotGM
+
+    ev, ms = real_run(reg, rs)
+    bot = ChatBot(reg, rs)
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    run(bot.tick(reg, s, add=[{"name": "One"}], by="Officer"))
+    run(bot.distribute(reg, s, by="Officer"))
+    added = {}
+
+    def parse(provider, policy, digest, text, who):  # meanwhile, auto-distribute adds a pick nobody saw
+        p = s.proposals[0].model_copy(update={"drop_id": "d9", "item_name": "Unseen"})
+        s.drop_list.append(s.drop_list[0].model_copy(update={"drop_id": "d9", "item_name": "Unseen"}))
+        s.proposals.append(p)
+        added["p"] = p
+        return nl.LootFeedback(kind="confirm", reply="ok")
+    monkeypatch.setattr(nl, "parse_loot_feedback", parse)
+    msg = FakeMsg("confirm them")
+    run(OibotGM.loot_chat(bot, msg, s))
+    assert "The batch changed" in msg.replies[-1] and not s.awards and not ledger(reg), "nothing recorded unseen"
+
+
+def test_loot_chat_never_replaces_another_officers_override(reg, rs, monkeypatch):
+    from oibot_gm import nl
+    from oibot_gm.discord_bot import OibotGM
+
+    ev, ms = real_run(reg, rs)
+    bot = ChatBot(reg, rs)
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    it = tiered_item(reg, 90003, "Contested Helm")
+    run(bot.tick(reg, s, add=[{"item_id": it.id}], by="Officer"))
+    (p,) = run(bot.distribute(reg, s, by="Officer"))["proposals"]
+    others = [c.character for c in p.result.candidates if c.character != p.to]
+    run(bot.override(reg, s, "d1", others[0], "Jonny's call", by="Jonny", rejudge=False))
+    monkeypatch.setattr(nl, "parse_loot_feedback", lambda *a: nl.LootFeedback(kind="override", reply="", changes=[nl.LootChange(item_id=it.id, award_to=others[1], reason="Mira's call")]))
+    run(OibotGM.loot_chat(bot, FakeMsg("give it to them"), s))
+    assert s.pending("d1").override.by == "Jonny" and s.pending("d1").override.to == others[0]
+    assert any("already set this" in t for _, t in bot.posts if t), "the replace? question comes back"
+
+
+def test_the_threads_buttons_give_the_reason_and_correct(council):
+    from oibot_gm.discord_loot import LootCorrectModal, LootDropView, LootReasonModal
+
+    c = council
+    tick_one(c)
+    (p,) = run(c.bot.distribute(c.reg, c.s, by="Officer"))["proposals"]
+    other = next(char(m) for m in c.members if char(m) != p.to)
+    run(c.bot.handle_feed_event({"type": "loot", "recipient": other, "item_name": "Shard of Doom", "idem": "b1"}, scribe()))
+    assert ("mismatch", "d1") in c.bot.drop_posts, "the mismatch line names its drop (its buttons bind to it)"
+
+    async def role_of(reg, user, max_age=0):
+        return "officer"
+    c.bot.role_of = role_of
+    said = []
+
+    class Resp:
+        async def send_message(self, text=None, **kw):
+            said.append(text)
+
+        async def send_modal(self, modal):
+            said.append(modal)
+
+    itx = types.SimpleNamespace(user=types.SimpleNamespace(display_name="Mira", id=2), response=Resp())
+
+    async def go():
+        v = c.bot.loot_view(c.reg, c.s, "mismatch", "d1")
+        assert isinstance(v, LootDropView) and [b.label for b in v.children] == ["Give the reason", "Mistake — correct…"]
+        await v.children[0].callback(itx)
+        modal = said[-1]
+        assert isinstance(modal, LootReasonModal)
+        modal.reason._value = "raid leader's call for the tank"
+        await modal.on_submit(itx)
+        assert [b.label for b in c.bot.loot_view(c.reg, c.s, "conflict", "d1").children] == ["Correct…"]
+        fix = LootCorrectModal(v.t)
+        fix.to._value, fix.reason._value = p.to, "misclicked"
+        await fix.on_submit(itx)
+    run(go())
+    assert precedents(c.reg)[-1]["reason"] == "raid leader's call for the tank" and not c.s.pending_reasons
+    assert c.s.awarded("d1").raider == p.to and c.s.awarded("d1").source == "correct"

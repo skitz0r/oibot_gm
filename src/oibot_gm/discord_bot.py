@@ -743,7 +743,8 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
         finally:
             t.cancel()
         await status.edit(content=f"⚖️ Distributed **{len(res['proposals'])}** items — proposals below." + (f" {len(res['stale'])} changed while judging; distribute again." if res["stale"] else ""))
-        await self.post_proposals(ev, interaction.channel)
+        if ev.origin != "raid" or not ev.raid_thread_id or not res["proposals"]:
+            await self.post_proposals(ev, interaction.channel)  # a real council's thread got them from LootMixin.loot_notify
 
     async def post_boss_tables(self, ev: MockEvent, dest) -> None:
         ctx = self.loot_ctx(ev)
@@ -1155,6 +1156,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
         ctx = self.loot_ctx(ev)
         reg = self.loot_reg(ev)
         cfg = reg.config if reg else (self.registries.for_guild(message.guild.id).config if message.guild and self.registries.for_guild(message.guild.id) else None)
+        seen = loot_session.batch_rev(ev)  # what the officer was looking at when they wrote: a pick added while the model reads is never recorded unseen
         async with message.channel.typing():
             try:
                 fb = await asyncio.to_thread(nl.parse_loot_feedback, ctx.provider, ctx.policy_for_llm(), proposal_text(ev), message.content, message.author.display_name)
@@ -1170,7 +1172,7 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
             if fb.kind == "confirm":
                 confirmed = list(ev.proposals)
                 try:
-                    await self.confirm(reg, ev, by=by, by_id=by_id)
+                    await self.confirm(reg, ev, batch_rev=seen, by=by, by_id=by_id)
                 except RegistryError as e:
                     await message.reply(configops.user_error(e))
                     return
@@ -1182,11 +1184,12 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
                 if not p or ch.award_to not in {c.character for c in p.result.candidates}:
                     applied.append(f"couldn't apply {ch.award_to} ← item {ch.item_id}")
                     continue
-                try:
-                    await self.override(reg, ev, p.drop_id, ch.award_to, ch.reason, by=by, by_id=by_id, replace=True, rejudge=False)
+                try:  # never replace another officer's pending override from a sentence: their "replace?" comes back
+                    await self.override(reg, ev, p.drop_id, ch.award_to, ch.reason, by=by, by_id=by_id, batch_rev=seen, rejudge=False)
                 except RegistryError as e:
                     applied.append(f"{p.item_name}: {configops.user_error(e)}")
                     continue
+                seen = loot_session.batch_rev(ev)  # our own override moved the rev; the next one checks against it
                 touched.add(p.drop_id)
                 applied.append(f"{p.item_name} → {ch.award_to}")
             rejudged = 0
@@ -1197,7 +1200,11 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
                     rejudged = len(res["proposals"])
                 except RegistryError:
                     pass
-            await self.post_proposals(ev, message.channel, prefix=(fb.reply + "\n" if fb.reply else "") + "Applied: " + "; ".join(applied) + (f". Re-scored the rest ({rejudged})." if rejudged else ".") + " Overrides are recorded at Confirm.")
+            text = (fb.reply + "\n" if fb.reply else "") + "Applied: " + "; ".join(applied) + (f". Re-scored the rest ({rejudged})." if rejudged else ".") + " Overrides are recorded at Confirm."
+            if rejudged and ev.origin == "raid":
+                await message.reply(text[:1900])  # the re-score already posted the proposals (LootMixin.loot_notify)
+            else:
+                await self.post_proposals(ev, message.channel, prefix=text)
 
     # ---- commands
     def _register(self):
@@ -1401,8 +1408,10 @@ class OibotGM(FeedMixin, LootMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, Ab
                 await self.refresh_registration_card(reg)  # the card's text and buttons as this version draws them (Apply to join)
         if not getattr(self, "_loot_booted", False):
             self._loot_booted = True
-            for line in await self.loot_restore():  # an interrupted Distribute is reported, never re-run
+            for line in await self.loot_restore():  # an interrupted Distribute is reported, never re-run; pending threads made
                 log.info("loot restore: %s", line)
+        else:
+            await self.loot_threads_pending()  # a later ready (a full reconnect): a council opened while Discord was down gets its thread
         self._pool_booted = True
 
 

@@ -49,8 +49,11 @@ src/oibot_gm/
   discord_bot.py       OibotGM client; /mock flow on shadow data (MockEvent = LootSession, id mock-<channel>); bot.events[(gk, session id)]
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
                        (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock; loot_ctx / loot_roster
-                       (live from the run) / loot_live (run locked); auto-distribute, feed buffer, loot_restore, loot_may_close (scheduler auto-end);
-                       hooks the surfaces replace: loot_notify / loot_open_thread / loot_ended / loot_closing
+                       (live from the run) / loot_live (run locked); open_council (one session per roster of a split run, <run>-r<N>); auto-distribute;
+                       held companion events in <guild>/loot/held.json (expired → ops warn "NOT recorded"); loot_restore; loot_may_close (scheduler auto-end:
+                       only LootSession.blocks_close — picks/undistributed — holds it, once announced; reasons/conflicts outlive it: set_reason/correct take a
+                       session id after the end); loot_ensure_thread (a pending thread retried on /raid loot, on_resumed, ready); hooks the surfaces replace:
+                       loot_notify(…, kind, drop_id) / loot_view (interim thread buttons) / loot_open_thread / loot_ended / loot_closing / loot_held
   lootctx.py           RegistryLootContext (one per guild, reload(); void rows + superseding precedents folded) / FixtureLootContext (/mock): one interface
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
                        schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules);
@@ -156,7 +159,8 @@ src/oibot_gm/
                        dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line
   discord_feed.py      FeedMixin through the LootMixin verbs: drop → tick (+ auto-distribute); loot → confirm / mismatch (recorded, reason pending) / manual /
                        conflict; kill. loot_route(comp): the token's guild → one live council (test only from a puppet/tester companion; several → by
-                       seated character; else refused); no live run → held 10 min; feed_presence(bot, reg) rows, feed_status the line
+                       seated character; else refused; a council past its run's close never competes with tonight's); no live run → held 10 min
+                       (persisted); feed_presence(bot, reg) rows, feed_status the line
   ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key.
                        ONE audit format: audit_line / audited(ops, reg, by, line, via, level, by_id) → "[web] Jon (host): …" — `by` is a display name,
                        the surface is the prefix from via (web|mcp|chat; none for Discord), " (host)" = a superuser in a guild they don't own, no DM.

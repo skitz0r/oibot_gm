@@ -1381,17 +1381,28 @@ class Registry:
         """Every item the guild's loot council knows, by item key (`item_key`: the id as text, or 'n-<slug>' for an item
         known only by name): the profile's tables, then the guild's own files layered on top — a guild file's `tiers`
         override the profile's per spec key, and an item the profile lacks (a learned drop) is an Item with
-        `tiers: {}` (untiered) until an officer tiers it. Cached; `learn_item` resets the cache."""
-        cache = self.__dict__.get("_items_cache")
-        if cache is not None:
-            return cache
+        `tiers: {}` (untiered) until an officer tiers it. Cached against a stamp — the profile object (a reload or a
+        guild override builds a new one) and every item file's name, size and mtime — so a tier written by any path
+        (Loot › Items, a data-repo pull, a hand edit) is read on the next call; `learn_item` also resets it."""
         from .profiles import Item
 
+        d = self.store.root / self.key / "items"
+        files = sorted(d.glob("*.yaml")) if d.is_dir() else []
+        stamp = []
+        for f in files:
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            stamp.append((f.name, st.st_size, st.st_mtime_ns))
+        cache = self.__dict__.get("_items_cache")
+        held = self.__dict__.get("_items_stamp")
+        if cache is not None and held is not None and held[0] is self.profile and held[1] == tuple(stamp):
+            return cache
         out: dict = {str(i): it for i, it in self.profile.items.items()}
         meta: dict[str, dict] = {}
-        d = self.store.root / self.key / "items"
-        if d.is_dir():
-            for f in sorted(d.glob("*.yaml")):
+        if files:
+            for f in files:
                 try:
                     doc = yaml.safe_load(f.read_text()) or {}
                 except yaml.YAMLError:
@@ -1411,6 +1422,7 @@ class Registry:
                 meta[key] = {**(doc.get("learned") or {}), "file": f.name}
         self.__dict__["_items_cache"] = out
         self.__dict__["_items_meta"] = meta
+        self.__dict__["_items_stamp"] = (self.profile, tuple(stamp))  # holds the profile object: compared by identity, never a reused id
         return out
 
     def item_meta(self, key: str) -> dict:

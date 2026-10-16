@@ -19,9 +19,14 @@ overrides; a companion mismatch records the ledger row at once and leaves the pr
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Iterable
+
+import discord
 
 from . import raidcycle as rc
 from .loot import session as ls
@@ -36,6 +41,11 @@ CLOSING_NOTICE_MIN = 15  # … after one "closing in 15 min — Keep open" notic
 FEED_BUFFER_S = 600  # companion events with no live run are held this long (replayed when a council opens)
 NAME_MAX = 64
 NOBODY = "(nobody)"  # recommend._fallback's pick when no candidate is eligible: never recorded
+
+
+def _run_of(session_id: str) -> str:
+    """The run key of a session id: a split run's roster council is '<run>-r<N>', a whole run's council is the run key."""
+    return re.sub(r"-r\d+$", "", session_id)
 
 
 def _utc(s: str | None) -> datetime | None:
@@ -169,10 +179,22 @@ class LootMixin:
         return t
 
     # ------------------------------------------------------------ hooks the Discord surfaces (L2) replace
-    async def loot_notify(self, reg, session: LootSession, line: str | None = None, *, kind: str = "") -> None:
-        """After every write: tell the session's surfaces. Default: the line into the loot thread."""
+    async def loot_notify(self, reg, session: LootSession, line: str | None = None, *, kind: str = "", drop_id: str | None = None) -> None:
+        """After every write: tell the session's surfaces (the Discord surfaces replace this). Default: the line into
+        the loot thread with the buttons it needs (loot_view: Give the reason / Mistake — correct… on a companion
+        mismatch, Correct… on a conflict or an in-game award, Distribute on ticked drops); a distribute posts the
+        proposals with their Confirm / Discard buttons. `drop_id`: the drop the line is about."""
+        if kind == "distribute" and session.origin == "raid" and session.proposals and hasattr(self, "post_proposals"):
+            get = getattr(self, "get_channel", None)
+            ch = get(session.raid_thread_id) if get and session.raid_thread_id else None
+            if ch is not None:
+                try:
+                    await self.post_proposals(session, ch, prefix=line)
+                    return
+                except Exception as e:  # noqa: BLE001 — the write already happened; fall back to the plain line
+                    log.warning("loot proposals post failed: %s", e)
         if line:
-            await self.loot_post(session, line)
+            await self.loot_post(session, line, view=self.loot_view(reg, session, kind, drop_id))
 
     async def loot_post(self, session: LootSession, text: str, view=None) -> None:
         get = getattr(self, "get_channel", None)
@@ -194,26 +216,38 @@ class LootMixin:
         ch = self.officer_channel(reg, ev) if hasattr(self, "officer_channel") else None
         if ch is None:
             return None
-        import discord
-
         from .constants import TEAL
         from .raid_views import _group_block, run_title
 
         ico = getattr(self, "ico", lambda kind, key: "")
-        groups = [_group_block(reg, ico, r, gi, show_missing=False) for r in ev.all_rosters for gi in range(len(r.groups)) if r.groups[gi]]
-        e = discord.Embed(title=f"⚔ {run_title(reg, ev)}", colour=TEAL,
-                          description=(f"<t:{int(ev.start.timestamp())}:F> · {len(ev.seated())} rostered\n\n" + "\n\n".join(groups))[:3800])
+        idx = session.roster_index
+        rosters = ev.all_rosters if idx is None else ev.all_rosters[idx:idx + 1]
+        label = f"Roster {idx + 1} · " if idx is not None else ""
+        groups = [_group_block(reg, ico, r, gi, show_missing=False) for r in rosters for gi in range(len(r.groups or [])) if r.groups[gi]]
+        e = discord.Embed(title=f"⚔ {label}{run_title(reg, ev)}", colour=TEAL,
+                          description=(f"<t:{int(ev.start.timestamp())}:F> · {sum(len(r.selected) for r in rosters)} rostered\n\n" + "\n\n".join(groups))[:3800])
         e.set_footer(text="loot council: tick drops (or let the companion do it) → Distribute → Confirm · /raid end for the summary")
         msg = await ch.send(embed=e)
-        thread = await msg.create_thread(name=("rehearsal · " if session.test else "loot · ") + run_title(reg, ev)[:90])
+        thread = await msg.create_thread(name=(("rehearsal · " if session.test else "loot · ") + label + run_title(reg, ev))[:100])
         return thread.id
 
     async def loot_ended(self, reg, session: LootSession, text: str) -> None:
         await self.loot_post(session, text)
 
     async def loot_closing(self, reg, session: LootSession) -> None:
-        """The scheduler's one notice before an auto-end (the Discord surfaces add the Keep open button)."""
-        await self.loot_post(session, f"⏳ This council closes in {CLOSING_NOTICE_MIN} min (the run is over and nothing is pending).")
+        """The scheduler's one notice before an auto-end, with a Keep open button."""
+        owed = len(session.pending_reasons) + len(session.conflicts)
+        await self.loot_post(session, f"⏳ This council closes in {CLOSING_NOTICE_MIN} min — the run is over and no pick is waiting."
+                             + (f" {owed} award(s) still need a reason or a correction; they stay fixable after the end." if owed else ""),
+                             view=self.loot_view(reg, session, "closing"))
+
+    async def loot_held(self, reg, session: LootSession) -> None:
+        """The scheduler's one line when a council past its run's close is idle but still holds picks / drops nobody
+        decided: it is never auto-ended with a pick pending, so an officer is told once what waits."""
+        c = session.pending_count()
+        parts = ([f"{c['proposals']} pick(s) waiting for Confirm"] if c["proposals"] else []) + ([f"{c['undistributed']} drop(s) nobody judged"] if c["undistributed"] else [])
+        await self.loot_post(session, "⏳ The raid is over, but this council still has " + (" and ".join(parts) or "a judge running")
+                             + " — Confirm or Discard them, or end the council with /raid end (the summary keeps what was pending).")
 
     async def _audit(self, reg, by: str, line: str, via: str, by_id: int | None, level: str = "info") -> None:
         if reg is None or getattr(self, "ops", None) is None:
@@ -232,10 +266,11 @@ class LootMixin:
 
     # ------------------------------------------------------------ open
     async def open_loot(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord",
-                        roster: int | None = None) -> tuple[LootSession, bool]:
+                        roster: int | None = None, replay: bool = True) -> tuple[LootSession, bool]:
         """Open the council for a locked run (idempotent: an open session is returned, created=False — two officers at
-        once get the same one). `roster`: one session per roster of a split run (None = the whole run). Refuses a run
-        that isn't locked, or an instance the profile doesn't define. Buffered companion events are replayed."""
+        once get the same one — and a thread still pending is tried again). `roster`: one session per roster of a split
+        run (None = the whole run; `open_council` picks). Refuses a run that isn't locked, or an instance the profile
+        doesn't define. Buffered companion events are replayed (`replay`)."""
         if ev.state != "locked" or not ev.all_rosters:
             raise RegistryError("Lock the roster first (/raid lock).")
         if ev.instance not in reg.profile.raids:
@@ -243,25 +278,133 @@ class LootMixin:
         if roster is not None and not 0 <= roster < len(ev.all_rosters):
             raise RegistryError(f"This run has {len(ev.all_rosters)} roster(s).")
         sid = ev.key if roster is None else f"{ev.key}-r{roster + 1}"
+        have = None
         async with self.loot_lock(reg.key, sid):
             have = self.events.get((reg.key, sid))
-            if have is not None:
-                return have, False
-            s = LootSession(id=sid, run_key=ev.key, roster_index=roster, instance=ev.instance, date=ev.start.astimezone(reg.tz).date().isoformat(),
-                            guild=reg.key, origin="raid", state="raid", test=rc.is_test_run(reg, ev), opened_by=by).attach(reg.store)
-            thread_id = await self.loot_open_thread(reg, rs, ev, s)
-            s.raid_thread_id = thread_id
-            s.channel_id = thread_id or 0
-            s.note_change(by, f"{by} opened the council at {self.loot_clock(reg)}")
-            with reg.store.batch(f"{reg.key}: loot {sid}: opened by {by}"):
-                s.save(f"{reg.key}: loot {sid}: opened by {by}")
-                if thread_id:
-                    ev.thread_id = thread_id
-                    rs.save(ev, "loot thread opened")
-            self.loot_index(s)
-        await self._audit(reg, by, f"opened the loot council for {ev.key}" + (" (rehearsal)" if s.test else "") + ("" if thread_id else " — thread pending"), via, by_id)
-        await self.feed_replay(reg)
+            if have is None:
+                s = LootSession(id=sid, run_key=ev.key, roster_index=roster, instance=ev.instance, date=ev.start.astimezone(reg.tz).date().isoformat(),
+                                guild=reg.key, origin="raid", state="raid", test=rc.is_test_run(reg, ev), opened_by=by,
+                                label=f"Roster {roster + 1}" if roster is not None else None).attach(reg.store)
+                thread_id = await self.loot_open_thread(reg, rs, ev, s)
+                s.raid_thread_id = thread_id
+                s.channel_id = thread_id or 0
+                s.note_change(by, f"{by} opened the council at {self.loot_clock(reg)}")
+                with reg.store.batch(f"{reg.key}: loot {sid}: opened by {by}"):
+                    s.save(f"{reg.key}: loot {sid}: opened by {by}")
+                    if thread_id and roster in (None, 0):
+                        ev.thread_id = thread_id
+                        rs.save(ev, "loot thread opened")
+                self.loot_index(s)
+        if have is not None:
+            if not have.raid_thread_id:
+                await self.loot_ensure_thread(reg, have)
+            return have, False
+        await self._audit(reg, by, f"opened the loot council for {ev.key}" + (f" (roster {roster + 1})" if roster is not None else "")
+                          + (" (rehearsal)" if s.test else "") + ("" if thread_id else " — thread pending"), via, by_id)
+        if replay:
+            await self.feed_replay(reg)
         return s, True
+
+    async def open_council(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> list[tuple[LootSession, bool]]:
+        """/raid loot, the lock card, the web and MCP: the run's council(s) — one per roster of a split run (session
+        `<run>-r<N>`, thread "loot · Roster N · …", candidates that roster's seats only), else one for the run.
+        Idempotent per session; a whole-run council opened before the run was split stays the one council. Held
+        companion events replay once every council is open (routed by the companion's seated character)."""
+        whole = self.loot_session(reg, ev.key)
+        if whole is not None or len(ev.all_rosters) <= 1:
+            out = [await self.open_loot(reg, rs, ev, by=by, by_id=by_id, via=via, replay=False)]
+        else:
+            out = [await self.open_loot(reg, rs, ev, by=by, by_id=by_id, via=via, roster=i, replay=False) for i in range(len(ev.all_rosters))]
+        if any(created for _, created in out):
+            await self.feed_replay(reg)
+        return out
+
+    async def loot_ensure_thread(self, reg, session: LootSession) -> bool:
+        """A council whose thread is pending (Discord was unreachable at open): try to create it now — the next
+        /raid loot, a gateway resume (on_resumed) and every ready call this. True when a thread was made."""
+        if session.raid_thread_id or session.origin != "raid" or not self.loot_live(session):
+            return False
+        busy = self._loot_state().setdefault("threading", set())
+        if session.key in busy:
+            return False
+        busy.add(session.key)
+        try:
+            rs, ev = self.loot_run(session)
+            if ev is None:
+                return False
+            try:
+                tid = await self.loot_open_thread(reg, rs, ev, session)
+            except RegistryError:
+                return False  # no officer channel configured (any more): open_loot said so at the time
+            except Exception as e:  # noqa: BLE001 — still unreachable: the next try
+                log.warning("loot thread still pending for %s: %s", session.id, e)
+                return False
+            if not tid:
+                return False
+            async with self.loot_lock(*session.key):
+                session.raid_thread_id = tid
+                session.channel_id = tid
+                session.note_change("bot", f"the council's thread was created at {self.loot_clock(reg)}")
+                with session.store().batch(f"{reg.key}: loot {session.id}: thread created (was pending)"):
+                    session.save(f"{reg.key}: loot {session.id}: thread created (was pending)", touch=False)
+                    if session.roster_index in (None, 0):
+                        ev.thread_id = tid
+                        rs.save(ev, "loot thread opened")
+                self.loot_index(session)
+        finally:
+            busy.discard(session.key)
+        await self._audit(reg, "bot", f"loot {session.id}: the council's thread is up (it was pending)", "discord", None)
+        thread = self.get_channel(tid) if hasattr(self, "get_channel") else None
+        if thread is not None and hasattr(self, "post_boss_tables"):
+            try:
+                await self.post_boss_tables(session, thread)
+            except Exception as e:  # noqa: BLE001
+                log.warning("boss tables after a pending thread: %s", e)
+        await self.loot_repost(reg, session)
+        return True
+
+    async def loot_threads_pending(self) -> int:
+        """Every live council still without a thread gets one (if Discord answers now). Returns threads made."""
+        n = 0
+        for s in list(self.events.values()):
+            if s.origin == "raid" and not s.raid_thread_id:
+                reg = self.loot_reg(s)
+                if reg is not None and await self.loot_ensure_thread(reg, s):
+                    n += 1
+        return n
+
+    async def on_resumed(self) -> None:
+        """discord.Client event: the gateway came back — a council opened while Discord was down gets its thread."""
+        await self.loot_threads_pending()
+
+    async def loot_repost(self, reg, session: LootSession) -> int:
+        """Re-post what still waits into the council's thread, each with its buttons (an /raid loot on an open council,
+        a thread created late, a restart that lost the old buttons): reasons owed, conflicts, ticked drops nobody
+        judged, the pending proposals. Returns the messages posted."""
+        get = getattr(self, "get_channel", None)
+        ch = get(session.raid_thread_id) if get and session.raid_thread_id else None
+        if ch is None:
+            return 0
+        n = 0
+        for pr in session.pending_reasons:
+            await self.loot_post(session, f"⚠ **{pr.get('item')}** → **{pr.get('recipient')}** in game, but the bot proposed **{pr.get('bot')}** — still waiting for a reason.",
+                                 view=self.loot_view(reg, session, "mismatch", pr.get("drop_id")))
+            n += 1
+        for cf in session.conflicts:
+            await self.loot_post(session, f"⚠ **{cf.get('item')}**: in game it went to **{cf.get('in_game')}**, recorded to **{cf.get('recorded')}** — Correct?",
+                                 view=self.loot_view(reg, session, "conflict", cf.get("drop_id")))
+            n += 1
+        und = session.undistributed()
+        if und:
+            await self.loot_post(session, "📥 Ticked, not judged yet: " + ", ".join(d.item_name for d in und), view=self.loot_view(reg, session, "tick"))
+            n += 1
+        if session.proposals and hasattr(self, "post_proposals"):
+            try:
+                await self.post_proposals(session, ch, prefix=f"{len(session.proposals)} proposal(s) still waiting for Confirm:")
+                n += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("loot repost proposals: %s", e)
+        return n
 
     # ------------------------------------------------------------ tick
     async def tick(self, reg, session: LootSession, *, add: Iterable[dict] = (), remove: Iterable[str] = (), by: str,
@@ -589,12 +732,90 @@ class LootMixin:
         out = []
         for a in ctx.ledger:
             if a.source == "companion" and a.import_id and not a.void and ctx.precedent_for(a.import_id) is None:
-                out.append({"import_id": a.import_id, "run": a.import_id.rsplit("-", 1)[0], "drop_id": a.drop_id, "item": a.item_name,
+                sid = a.import_id.rsplit("-", 1)[0]
+                out.append({"import_id": a.import_id, "run": sid, "session": sid, "drop_id": a.drop_id, "item": a.item_name,
                             "recipient": a.raider, "bot": a.bot_pick, "received": a.received.isoformat()})
         return out
 
+    def loot_conflicts_pending(self, reg) -> list[dict]:
+        """In-game awards that disagree with what the council recorded and nobody corrected yet — live councils and
+        ended ones (their archives) alike: {session, run, drop_id, item, in_game, recorded, at, ended}. Fixed with
+        `correct(reg, <session id>, drop_id, …)`; a conflict is closed by any correction of that drop, or when the
+        live record already names the in-game recipient."""
+        ctx = self._guild_ctx(reg)
+        found: list[tuple[str, dict, bool]] = []
+        for s in self.events.values():
+            if s.guild == reg.key and s.origin == "raid":
+                found += [(s.id, cf, False) for cf in s.conflicts]
+        arch = reg.store.root / reg.key / "events" / "archive"
+        if arch.is_dir():
+            for f in sorted(arch.glob("*.json")):
+                try:
+                    body = json.loads(f.read_text())
+                except (OSError, ValueError):
+                    continue
+                if body.get("origin") == "raid":
+                    found += [(str(body.get("id")), cf, True) for cf in body.get("conflicts") or []]
+        out = []
+        for sid, cf, ended in found:
+            base = f"{sid}-{cf.get('drop_id')}"
+            if any(i.startswith(base + "-c") for i in ctx.import_ids):
+                continue
+            rows = [a for a in ctx.ledger if a.import_id == base and not a.void]
+            if rows and rows[-1].raider.lower() == str(cf.get("in_game") or "").lower():
+                continue
+            out.append({**cf, "session": sid, "run": _run_of(sid), "ended": ended})
+        return out
+
+    def _guild_ctx(self, reg):
+        from .lootctx import RegistryLootContext
+
+        return self.__dict__.setdefault("contexts", {}).get(reg.key) or RegistryLootContext(reg, reg.store, None)
+
+    async def _correct_after_end(self, reg, sid: str, drop_id: str, who_in: str, reason: str, *, by: str, by_id, via: str) -> str:
+        live = next((s for s in self.events.values() if s.guild == reg.key and s.id == sid), None)
+        if live is not None:
+            return await self.correct(reg, live, drop_id, who_in, reason, by=by, by_id=by_id, via=via)
+        from .loot import scoring
+
+        ctx = self.loot_ctx(LootSession(id=sid, run_key=_run_of(sid), instance="", date="1970-01-01", guild=reg.key, origin="raid"))
+        base = f"{sid}-{drop_id}"
+        async with self.loot_lock(reg.key, sid):
+            rows = [a for a in ctx.ledger if a.import_id and (a.import_id == base or a.import_id.startswith(base + "-c")) and not a.void]
+            if not rows:
+                raise RegistryError("Nothing is recorded on that drop.")
+            aw = rows[-1]
+            if who_in.lower() in ("disenchant", DISENCHANT):
+                who, uid, tier, weight = DISENCHANT, None, "-", 0.0
+            else:
+                who, uid, _ = ls.recipient_of(reg, [], who_in)
+                spec = None
+                m = reg.members.get(uid) if uid is not None else None
+                c = next((c for c in (m.characters if m else []) if c.label.lower() == who.lower()), None)
+                try:
+                    spec = ctx.profile.spec(c.cls, c.spec) if c else None
+                except KeyError:
+                    spec = None
+                item = ctx.item(aw.item_id or None, aw.item_name)
+                tier, weight = scoring.weight_for(ctx.profile, item, spec, ctx.loot_cfg) if item is not None else ("?", float(ctx.loot_cfg.get("untiered_weight", 0.5)))
+            if who.lower() == aw.raider.lower():
+                raise RegistryError(f"It is already recorded to {aw.raider}.")
+            n = 1 + sum(1 for i in ctx.import_ids if i.startswith(base + "-c"))
+            new = aw.model_copy(update={"raider": who, "discord_id": uid, "tier": tier, "total_weight": weight, "offspec": False, "source": "correct",
+                                        "by": by, "confirmed_at": now_iso(), "import_id": f"{base}-c{n}", "void": False})
+            msg = f"{reg.key}: loot {sid}: {aw.item_name} corrected to {who} ({by})"
+            with reg.store.batch(msg):
+                ctx.void(aw.import_id, reason, by, now_iso())
+                ctx.append_ledger({**json.loads(new.model_dump_json()), "event": _run_of(sid)}, new)
+                reg.store.commit(msg)
+        target = "disenchant" if who == DISENCHANT else who
+        line = f"✎ **{aw.item_name}**: was {aw.raider}, now **{target}** — “{reason}”"
+        await self._audit(reg, by, f"loot {sid}: {line.replace('**', '')}", via, by_id)
+        return line
+
     async def _reason_after_end(self, reg, run_key: str, drop_id: str, reason: str, *, by: str, by_id, via: str, replace: bool) -> str:
-        live = next((s for s in self.events.values() if s.guild == reg.key and (s.run_key == run_key or s.id == run_key)), None)
+        live = next((s for s in self.events.values() if s.guild == reg.key and s.id == run_key), None) or next(
+            (s for s in self.events.values() if s.guild == reg.key and s.run_key == run_key and s.roster_index is None), None)
         if live is not None:
             return await self.set_reason(reg, live, drop_id, reason, by=by, by_id=by_id, via=via, replace=replace)
         ctx = self.loot_ctx(LootSession(id=run_key, run_key=run_key, instance="", date="1970-01-01", guild=reg.key, origin="raid"))
@@ -606,7 +827,7 @@ class LootMixin:
             have = ctx.precedent_for(import_id)
             if have is not None and not replace:
                 raise LootChanged(f"{have.get('by', '?')} already gave a reason at {self.loot_clock(reg, have.get('at'))} — replace?")
-            prec = {"date": aw.received.isoformat(), "event": run_key, "item": aw.item_name, "item_id": aw.item_id, "drop_id": drop_id,
+            prec = {"date": aw.received.isoformat(), "event": _run_of(run_key), "item": aw.item_name, "item_id": aw.item_id, "drop_id": drop_id,
                     "import_id": import_id, "bot": aw.bot_pick or "?", "human": aw.raider, "reason": reason, "by": by, "at": now_iso(),
                     "policy_version": aw.policy_version, "status": "active"}
             with reg.store.batch(f"{reg.key}: loot {run_key}: reason for {aw.item_name} ({by})"):
@@ -619,11 +840,15 @@ class LootMixin:
     async def correct(self, reg, session: LootSession, drop_id: str, to: str, reason: str, *, by: str, by_id: int | None = None,
                       via: str = "discord") -> str:
         """Fix a recorded award (a mistake, not a decision): the old ledger row is voided (a `void` row carrying the
-        reason) and a new award recorded; no precedent. A pending reason for that drop is closed."""
+        reason) and a new award recorded; no precedent. A pending reason or a conflict on that drop is closed.
+        `session` may be a session id (str) for a council that has ended: the award is found in the ledger by its
+        import_id (a conflict days later, from loot_conflicts_pending)."""
         reason = ls.check_reason(reason)
         who_in = str(to or "").strip()
         if not who_in or len(who_in) > NAME_MAX:
             raise RegistryError("Name who it should be recorded to (a character), or Disenchant.")
+        if isinstance(session, str):
+            return await self._correct_after_end(reg, session, drop_id, who_in, reason, by=by, by_id=by_id, via=via)
         async with self.loot_lock(*session.key):
             d = session.drop(drop_id)
             aw = session.awarded(drop_id)
@@ -636,7 +861,7 @@ class LootMixin:
                 raise RegistryError(f"It is already recorded to {aw.raider}.")
             n = 1 + sum(1 for a in session.awards if a.drop_id == drop_id and a.source == "correct")
             new = ls.make_award(ctx, session, d, who, roster, source="correct", by=by, bot_pick=aw.bot_pick, reg=reg)
-            new.import_id = f"{session.run_key or session.id}-{drop_id}-c{n}"
+            new.import_id = f"{session.id}-{drop_id}-c{n}"
             store = session.store()
             with store.batch(f"{session.guild}: loot {session.id}: {d.item_name} corrected to {who} ({by})"):
                 aw.void = True
@@ -703,7 +928,7 @@ class LootMixin:
         by_char: dict[str, list[str]] = {}
         for a in live:
             by_char.setdefault("disenchant" if a.raider == DISENCHANT else a.raider, []).append(a.item_name or "?")
-        lines = [f"**Loot council · {session.run_key or session.id}**" + (" (rehearsal — nothing was recorded)" if session.test else "")]
+        lines = [f"**Loot council · {session.run_key or session.id}" + (f" · {session.label}" if session.roster_index is not None and session.label else "") + "**" + (" (rehearsal — nothing was recorded)" if session.test else "")]
         lines.append(f"{len(live)} award(s) to {len(by_char)} recipient(s)" + (f" · {len(overrides)} override(s)" if overrides else "") + (f" · the council agreed with the bot on {agreed}/{len(live)}" if live else ""))
         lines += [f"• **{w}**: {', '.join(i)}" for w, i in sorted(by_char.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
         if overrides:
@@ -760,22 +985,27 @@ class LootMixin:
         return "\n\n".join(texts) if texts else (f"{run_title(reg, ev)} is done." if changed else f"{run_title(reg, ev)} was already {ev.state}.")
 
     def loot_closing_state(self, reg, rs, ev, now: datetime | None = None) -> dict | None:
-        """The scheduler's view of a council on a run past its close: {'state': 'open' | 'closing' | 'end', 'until',
-        'notice_due'}. None when the run has no council or isn't past close yet. 'open' = something is pending, it was
-        used in the last IDLE_END_MIN minutes, or an officer pressed Keep open; 'closing' = the one notice is (due to
-        be) out and the council ends at `until` unless someone uses it."""
+        """The scheduler's view of a council on a run past its close: {'state': 'open' | 'held' | 'closing' | 'end',
+        'until', 'notice_due', 'pending', 'idle'}. None when the run has no council or isn't past close yet.
+        'open' = used in the last IDLE_END_MIN minutes, or an officer pressed Keep open; 'held' = idle, but a pick waits
+        for Confirm or a drop nobody judged (LootSession.blocks_close) — never auto-ended, one "still pending" line
+        (`notice_due`) and it waits for an officer; 'closing' = the one "closing in 15 min" notice is (due to be) out and
+        the council ends at `until` unless someone uses it. A reason still owed or an in-game conflict does not hold the
+        council open: both outlive it (set_reason / correct by run key)."""
         now = now or datetime.now(timezone.utc)
         sessions = [s for s in self.events.values() if s.guild == reg.key and s.run_key == ev.key]
         if not sessions or now < rc.run_close_at(reg, ev):
             return None
         last = max((_utc(s.last_activity) or now) for s in sessions)
-        pending = any(s.anything_pending() for s in sessions)
+        pending = any(s.blocks_close() for s in sessions)
         idle = now - last >= timedelta(minutes=IDLE_END_MIN)
         notices = [_utc(s.closing_notice_at) for s in sessions if s.closing_notice_at]
         notice = max(notices) if notices else None
         held = [t for t in (_utc(s.keep_open_until) for s in sessions) if t is not None]
-        if pending or not idle or (notice is None and held and max(held) > now):
+        if not idle or (notice is None and held and max(held) > now):
             return {"state": "open", "until": None, "notice_due": False, "pending": pending, "idle": idle}
+        if pending:
+            return {"state": "held", "until": None, "notice_due": not any(s.held_notice_at for s in sessions), "pending": True, "idle": True}
         if notice is None or notice < last:  # no notice yet, or the council was used after it
             return {"state": "closing", "until": None, "notice_due": True, "pending": False, "idle": True}
         until = notice + timedelta(minutes=CLOSING_NOTICE_MIN)
@@ -783,17 +1013,29 @@ class LootMixin:
 
     async def loot_may_close(self, reg, rs, ev, now: datetime | None = None) -> bool:
         """The scheduler, past a run's close time: True = close it now (no council, or the council just ended); False =
-        a council is in use / has something pending / just got its one "closing in 15 min" notice. Never auto-ends a
-        council with anything pending."""
+        a council is in use / holds a pick or drop nobody decided (one "still pending" line, then it waits for an
+        officer's Confirm, Discard or End) / just got its one "closing in 15 min" notice. Never auto-ends a council with
+        a pick pending; the scheduler's fill engine and confirmations stop at the close either way."""
         st = self.loot_closing_state(reg, rs, ev, now)
         if st is None:
             return True
         if st["state"] == "open":
             return False
+        stamp = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+        sessions = [s for s in self.events.values() if s.guild == reg.key and s.run_key == ev.key]
+        if st["state"] == "held":
+            if st["notice_due"]:
+                for s in sessions:
+                    async with self.loot_lock(*s.key):
+                        s.held_notice_at = stamp
+                        s.save(f"{reg.key}: loot {s.id}: still pending past the run's close", touch=False)  # not activity
+                    if s.blocks_close():
+                        await self.loot_held(reg, s)
+            return False
         if st["notice_due"]:
-            for s in [s for s in self.events.values() if s.guild == reg.key and s.run_key == ev.key]:
+            for s in sessions:
                 async with self.loot_lock(*s.key):
-                    s.closing_notice_at = (now or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+                    s.closing_notice_at = stamp
                     s.keep_open_until = None
                     s.save(f"{reg.key}: loot {s.id}: closing in {CLOSING_NOTICE_MIN} min", touch=False)  # the notice is not activity
                 await self.loot_closing(reg, s)
@@ -831,6 +1073,13 @@ class LootMixin:
                         out.append(f"{s.id}: {n} ledger row(s) restored")
             except RuntimeError:
                 pass
+        for gk in list((getattr(self.registries, "by_key", {}) or {})):
+            lost = await self.feed_expire(gk)  # held across the restart: still fresh ones wait for a council
+            if lost:
+                out.append(f"{gk}: {len(lost)} held companion event(s) expired")
+        made = await self.loot_threads_pending()
+        if made:
+            out.append(f"{made} pending loot thread(s) created")
         return out
 
     def attach_loot_listeners(self) -> None:
@@ -913,35 +1162,145 @@ class LootMixin:
                 return
 
     # ------------------------------------------------------------ companion buffering (no run live)
+    # Held events live in the data repo (<guild>/loot/held.json), not in process memory: the companion drops its copy
+    # on the ack, so a restart must not lose them. An event no council took within FEED_BUFFER_S is never dropped
+    # silently — the ops channel gets what was NOT recorded, so an officer can record it by hand.
+    @staticmethod
+    def _held_rel(guild_key: str) -> Path:
+        return Path(guild_key) / "loot" / "held.json"
+
+    def _held_reg(self, guild_key: str):
+        return (getattr(self.registries, "by_key", {}) or {}).get(guild_key)
+
+    def _held_rows(self, guild_key: str) -> list[dict]:
+        reg = self._held_reg(guild_key)
+        if reg is None:
+            return list(self._loot_state()["buffer"].get(guild_key) or [])
+        p = reg.store.root / self._held_rel(guild_key)
+        try:
+            rows = json.loads(p.read_text()) if p.exists() else []
+        except (OSError, ValueError):
+            log.warning("%s: unreadable held companion events", guild_key)
+            return []
+        return rows if isinstance(rows, list) else []
+
+    def _held_write(self, guild_key: str, rows: list[dict], message: str) -> None:
+        reg = self._held_reg(guild_key)
+        if reg is None:
+            self._loot_state()["buffer"][guild_key] = list(rows)
+            return
+        reg.store.write_text(self._held_rel(guild_key), json.dumps(rows, indent=1, default=str))
+        reg.store.commit(f"{guild_key}: {message}")
+
+    @staticmethod
+    def _held_split(rows: list[dict], now: datetime) -> tuple[list[dict], list[dict]]:
+        fresh, old = [], []
+        for r in rows:
+            t = _utc(r.get("at"))
+            (fresh if t is not None and now - t < timedelta(seconds=FEED_BUFFER_S) else old).append(r)
+        return fresh, old
+
     def feed_buffer(self, guild_key: str, ev: dict, comp) -> None:
-        buf = self._loot_state()["buffer"].setdefault(guild_key, [])
-        now = datetime.now(timezone.utc)
-        buf[:] = [x for x in buf if now - x[0] < timedelta(seconds=FEED_BUFFER_S)] + [(now, ev, comp)]
+        """Hold a companion event that arrived with no live council (persisted; replayed when one opens)."""
+        row = {"at": now_iso(), "ev": ev, "comp": {"character": getattr(comp, "character", "?"), "client": getattr(comp, "client", "?"),
+                                                    "guild": getattr(comp, "named", getattr(comp, "guild", "")) or "", "peer": getattr(comp, "peer", "held"),
+                                                    "bound": getattr(comp, "bound", None)}}
+        self._held_write(guild_key, self._held_rows(guild_key) + [row], f"companion event held (no run live): {ev.get('type')}")
+        try:
+            self._spawn(self._feed_expire_later(guild_key))
+        except RuntimeError:  # no running loop (offline tools): the next ready / replay sweeps it
+            pass
+
+    async def _feed_expire_later(self, guild_key: str) -> None:
+        await asyncio.sleep(FEED_BUFFER_S + 1)
+        await self.feed_expire(guild_key)
 
     def feed_waiting(self, reg) -> dict | None:
         """'No run live' state for the loot card / site: drops arriving with nowhere to go (held 10 minutes)."""
-        buf = self._loot_state()["buffer"].get(reg.key) or []
-        now = datetime.now(timezone.utc)
-        buf = [x for x in buf if now - x[0] < timedelta(seconds=FEED_BUFFER_S)]
-        if not buf:
+        fresh, _ = self._held_split(self._held_rows(reg.key), datetime.now(timezone.utc))
+        if not fresh:
             return None
-        return {"count": len(buf), "since": buf[0][0].isoformat(timespec="seconds"), "characters": sorted({getattr(c, "character", "?") for _, _, c in buf})}
+        return {"count": len(fresh), "since": fresh[0]["at"], "characters": sorted({(r.get("comp") or {}).get("character", "?") for r in fresh})}
+
+    async def feed_expire(self, guild_key: str) -> list[dict]:
+        """Held events past FEED_BUFFER_S leave the file and the ops channel says what was NOT recorded (a warn line,
+        no DM). Returns the expired rows."""
+        rows = self._held_rows(guild_key)
+        fresh, old = self._held_split(rows, datetime.now(timezone.utc))
+        if not old:
+            return []
+        self._held_write(guild_key, fresh, f"{len(old)} held companion event(s) expired with no run live")
+        await self._feed_announce_lost(guild_key, old)
+        return old
+
+    async def _feed_announce_lost(self, guild_key: str, rows: list[dict]) -> None:
+        def what(ev: dict) -> str:
+            k = ev.get("type")
+            if k == "drop":
+                items = ", ".join(str(it.get("name") or it.get("id")) for it in ev.get("items") or [])
+                return f"{items} dropped" + (f" ({ev['boss']})" if ev.get("boss") else "")
+            if k == "loot":
+                return f"{ev.get('item_name') or ev.get('item_id')} → {ev.get('recipient', '?')}"
+            if k == "kill":
+                return f"{ev.get('boss', '?')} down"
+            return str(k)
+        chars = ", ".join(sorted({(r.get("comp") or {}).get("character", "?") for r in rows}))
+        text = (f"companion events from {chars}'s log waited {FEED_BUFFER_S // 60} min with no loot council open and were NOT recorded: "
+                + "; ".join(what(r.get("ev") or {}) for r in rows) + " — open the council (/raid loot) and record them by hand.")
+        cfg_for = getattr(self.registries, "cfg_for", None)
+        cfg = cfg_for(guild_key) if cfg_for else None
+        if cfg is not None and getattr(self, "ops", None) is not None:
+            await self.ops.emit(cfg, "warn", text[:1800])
+        else:
+            log.warning("[%s] %s", guild_key, text)
 
     async def feed_replay(self, reg) -> int:
-        """A council opened: the companion events held for this guild go through again (oldest first)."""
-        buf = self._loot_state()["buffer"].pop(reg.key, None) or []
-        now = datetime.now(timezone.utc)
-        n = 0
+        """A council opened: the companion events held for this guild go through again (oldest first); the ones past
+        the hold are announced as not recorded."""
+        rows = self._held_rows(reg.key)
+        if not rows:
+            return 0
+        fresh, old = self._held_split(rows, datetime.now(timezone.utc))
+        self._held_write(reg.key, [], f"{len(fresh)} held companion event(s) replayed")
+        if old:
+            await self._feed_announce_lost(reg.key, old)
+        from .feed import Companion
+
         handle = getattr(self, "handle_feed_event", None)
-        for t, ev, comp in buf:
-            if now - t >= timedelta(seconds=FEED_BUFFER_S) or handle is None:
-                continue
+        n = 0
+        for r in fresh:
+            if handle is None:
+                break
+            c = r.get("comp") or {}
+            comp = Companion(c.get("character", "?"), c.get("client", "?"), c.get("guild", ""), c.get("peer", "held"), bound=c.get("bound"))
             try:
-                await handle(ev, comp)
+                await handle(r.get("ev") or {}, comp)
                 n += 1
             except Exception:  # noqa: BLE001
-                log.exception("buffered companion event failed")
+                log.exception("held companion event failed")
         return n
+
+    # ------------------------------------------------------------ the thread's buttons (interim: the Discord surfaces replace them)
+    def loot_view(self, reg, session: LootSession, kind: str, drop_id: str | None = None):
+        """The buttons a thread line carries (None: none): Give the reason + Mistake — correct… under a companion
+        mismatch, Correct… under a conflict or an in-game award, Distribute under ticked drops, Keep open under the
+        closing notice. A real council's only — /mock keeps its own views."""
+        if session.origin != "raid":
+            return None
+        try:
+            if kind == "mismatch" and drop_id:
+                return LootDropView(self, session, drop_id, reason=True)
+            if kind in ("conflict", "manual") and drop_id:
+                return LootDropView(self, session, drop_id, reason=False)
+            if kind == "closing":
+                return LootKeepOpenView(self, session)
+            if kind == "tick" and session.undistributed():
+                from .discord_bot import DistributeView
+
+                return DistributeView(self, session)
+        except RuntimeError:  # a View needs a running loop (offline tools)
+            return None
+        return None
 
     # ------------------------------------------------------------ helpers for callers
     @staticmethod
@@ -953,7 +1312,8 @@ class LootMixin:
         their state, pending proposals (effective recipient, override), awards, pending reasons, revs, flags."""
         reg = self.loot_reg(session)
         return {
-            "id": session.id, "run": session.run_key, "guild": session.guild, "test": session.test, "live": self.loot_live(session),
+            "id": session.id, "run": session.run_key, "roster_index": session.roster_index, "label": session.label,
+            "guild": session.guild, "test": session.test, "live": self.loot_live(session),
             "thread_id": session.raid_thread_id, "drops": [{**d.model_dump(), "state": session.drop_state(d)} for d in session.drop_list],
             "proposals": [{"drop_id": p.drop_id, "item": p.item_name, "boss": p.boss, "bot": p.award_to, "to": p.to, "source": p.source,
                            "override": p.override.model_dump() if p.override else None, "batch": p.batch, "tiered": p.tiered,
@@ -963,7 +1323,143 @@ class LootMixin:
             "pending_reasons": list(session.pending_reasons), "conflicts": list(session.conflicts),
             "departed": [p.character or p.signup_name for p in session.departed],
             "distributing": session.distributing, "interrupted": session.interrupted, "scores_only": session.scores_only,
-            "closing": {"notice_at": session.closing_notice_at, "until": session.keep_open_until},
+            "closing": {"notice_at": session.closing_notice_at, "until": session.keep_open_until, "held_notice_at": session.held_notice_at},
             "feed_waiting": self.feed_waiting(reg) if reg is not None else None,
             **self.loot_revs(session),
         }
+
+
+# ---------------------------------------------------------------- the thread's buttons (interim)
+# Non-persistent Views (timeout=None, like the boss tables' Distribute and the proposals' Confirm): a restart drops them;
+# /raid loot on an open council re-posts every pending line with fresh buttons (LootMixin.loot_repost). The Discord
+# surfaces (L2) replace them with persistent buttons and lootmodal ids.
+
+async def _officer_press(bot, interaction: discord.Interaction, reg) -> bool:
+    """Writes need an officer or the owner, decided live (PRIV_LIVE) by THE identity predicate."""
+    if reg is None:
+        gate = getattr(bot, "gate", None)
+        return bool(gate and await gate(interaction))
+    from . import guild_routing
+
+    role = await bot.role_of(reg, interaction.user, max_age=guild_routing.PRIV_LIVE)
+    if role in ("owner", "officer"):
+        return True
+    await interaction.response.send_message("Officers only.", ephemeral=True)
+    return False
+
+
+class _LootTarget:
+    """A button bound to (guild, session id, drop): the press finds the live council, or — once it ended — passes the
+    session id, which set_reason and correct take for an ended council."""
+
+    def __init__(self, bot, session: LootSession, drop_id: str | None = None):
+        self.bot, self.gk, self.sid, self.drop_id = bot, session.guild, session.id, drop_id
+
+    @property
+    def reg(self):
+        return (getattr(self.bot.registries, "by_key", {}) or {}).get(self.gk)
+
+    def target(self):
+        return self.bot.events.get((self.gk, self.sid)) or self.sid
+
+
+class LootReasonModal(discord.ui.Modal, title="Why did it go to them?"):
+    reason = discord.ui.TextInput(label="The reason (becomes the precedent)", style=discord.TextStyle.paragraph,
+                                  min_length=ls.REASON_MIN, max_length=ls.REASON_MAX)
+
+    def __init__(self, t: _LootTarget, replace: bool = False):
+        super().__init__()
+        self.t, self.replace = t, replace
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await _submit_reason(self.t, interaction, str(self.reason.value), self.replace)
+
+
+async def _submit_reason(t: _LootTarget, interaction: discord.Interaction, reason: str, replace: bool) -> None:
+    from . import configops
+
+    try:
+        line = await t.bot.set_reason(t.reg, t.target(), t.drop_id, reason, by=interaction.user.display_name, by_id=interaction.user.id, replace=replace)
+    except LootChanged as e:  # someone already gave a reason: replace it only on a second, deliberate press
+        await interaction.response.send_message(configops.user_error(e), view=LootReplaceView(t, reason), ephemeral=True)
+        return
+    except RegistryError as e:
+        await interaction.response.send_message(configops.user_error(e), ephemeral=True)
+        return
+    await interaction.response.send_message(line[:1900], ephemeral=True)
+
+
+class LootReplaceView(discord.ui.View):
+    def __init__(self, t: _LootTarget, reason: str):
+        super().__init__(timeout=300)
+        self.t, self.reason = t, reason
+
+    @discord.ui.button(label="Replace with my reason", style=discord.ButtonStyle.danger)
+    async def go(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await _officer_press(self.t.bot, interaction, self.t.reg):
+            return
+        await _submit_reason(self.t, interaction, self.reason, True)
+        self.stop()
+
+
+class LootCorrectModal(discord.ui.Modal, title="Correct the record"):
+    to = discord.ui.TextInput(label="Record it to (a character, or Disenchant)", max_length=NAME_MAX)
+    reason = discord.ui.TextInput(label="What went wrong", style=discord.TextStyle.paragraph, min_length=ls.REASON_MIN, max_length=ls.REASON_MAX)
+
+    def __init__(self, t: _LootTarget):
+        super().__init__()
+        self.t = t
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from . import configops
+
+        try:
+            line = await self.t.bot.correct(self.t.reg, self.t.target(), self.t.drop_id, str(self.to.value), str(self.reason.value),
+                                            by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:
+            await interaction.response.send_message(configops.user_error(e), ephemeral=True)
+            return
+        await interaction.response.send_message(line[:1900], ephemeral=True)
+
+
+class LootDropView(discord.ui.View):
+    """Under an award the companion recorded: Give the reason (→ the precedent, bound to this drop and its recipient)
+    and/or Mistake — correct… (→ void + a new award, no precedent)."""
+
+    def __init__(self, bot, session: LootSession, drop_id: str, reason: bool = True):
+        super().__init__(timeout=None)
+        self.t = _LootTarget(bot, session, drop_id)
+        if reason:
+            b = discord.ui.Button(label="Give the reason", style=discord.ButtonStyle.primary)
+            b.callback = self._reason
+            self.add_item(b)
+        c = discord.ui.Button(label="Mistake — correct…" if reason else "Correct…", style=discord.ButtonStyle.secondary)
+        c.callback = self._correct
+        self.add_item(c)
+
+    async def _reason(self, interaction: discord.Interaction):
+        if await _officer_press(self.t.bot, interaction, self.t.reg):
+            await interaction.response.send_modal(LootReasonModal(self.t))
+
+    async def _correct(self, interaction: discord.Interaction):
+        if await _officer_press(self.t.bot, interaction, self.t.reg):
+            await interaction.response.send_modal(LootCorrectModal(self.t))
+
+
+class LootKeepOpenView(discord.ui.View):
+    """Under the scheduler's "closing in 15 min" line."""
+
+    def __init__(self, bot, session: LootSession):
+        super().__init__(timeout=None)
+        self.t = _LootTarget(bot, session)
+
+    @discord.ui.button(label="Keep open", style=discord.ButtonStyle.secondary)
+    async def keep(self, interaction: discord.Interaction, _: discord.ui.Button):
+        if not await _officer_press(self.t.bot, interaction, self.t.reg):
+            return
+        s = self.t.target()
+        if isinstance(s, str):
+            await interaction.response.send_message("This council has ended.", ephemeral=True)
+            return
+        line = await self.t.bot.keep_open(self.t.reg, s, by=interaction.user.display_name, by_id=interaction.user.id)
+        await interaction.response.send_message(line, ephemeral=True)

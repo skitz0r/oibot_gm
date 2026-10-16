@@ -466,6 +466,35 @@ def test_loot_opens_a_thread_on_a_locked_run(reg, rs, officer, channel, monkeypa
     assert f"<#{thread_id}>" in h.text
 
 
+def test_loot_on_a_split_run_opens_one_council_per_roster_and_reposts_when_open(reg, rs, officer, channel):
+    """§3.1: a split run gets one session per roster ("loot · Roster 2"), each judged on its own seats; /raid loot on
+    an open council re-posts what still waits (never just "already open")."""
+    ev = open_test_run(reg, rs)
+    ms = reg.test_members()[:10]
+    join(reg, rs, ev, ms)
+    names = [m.display_name for m in ms]
+    size = rc.run_size(reg, ev)
+    ev.rosters = rc.board_rosters(reg, ev, [names[:5]], size) + rc.board_rosters(reg, ev, [names[5:]], size)
+    ev.state, ev.locked_at = "locked", rc.now()
+    rs.save(ev, "split")
+    h, bot = harness(reg, rs)
+    reg.config.roster_channel_id = channel.id
+    bot.officer_ch = channel
+    asyncio.run(FLOWS["raid_loot"](h.command(), reg))
+    s1, s2 = bot.events[(reg.key, f"{ev.key}-r1")], bot.events[(reg.key, f"{ev.key}-r2")]
+    assert "Roster 1: Loot thread open" in h.text and "Roster 2: Loot thread open" in h.text
+    assert [c[1] for c in bot.calls if c[0] == "post_boss_tables"] == [s1.id, s2.id]
+    reposted = []
+
+    async def loot_repost(reg_, session):
+        reposted.append(session.id)
+        return 0
+    bot.loot_repost = loot_repost
+    h2 = Harness(reg, rs, client=bot)
+    asyncio.run(FLOWS["raid_loot"](h2.command(), reg))
+    assert reposted == [s1.id, s2.id] and "re-posted" in h2.text
+
+
 def test_loot_refuses_without_an_officer_channel(reg, rs, officer, channel):
     """D1: no roster or ops channel → refused, nothing opened (never a public thread wherever the command ran)."""
     ev = open_test_run(reg, rs)
