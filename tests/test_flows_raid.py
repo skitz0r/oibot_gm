@@ -115,9 +115,6 @@ class FakeBot(LootMixin):
     def officer_channel(self, reg, ev=None):
         return self.__dict__.get("officer_ch")
 
-    async def post_boss_tables(self, session, thread):
-        self.calls.append(("post_boss_tables", session.id, thread.id))
-
 
 @pytest.fixture
 def channel(monkeypatch):
@@ -446,10 +443,10 @@ def test_health_from_the_command_and_from_the_picker(reg, rs, officer, channel):
 
 
 def test_loot_opens_a_thread_on_a_locked_run(reg, rs, officer, channel, monkeypatch):
-    from oibot_gm import discord_bot
+    from oibot_gm.loot.session import LootSession
 
     saved = []
-    monkeypatch.setattr(discord_bot.MockEvent, "save", lambda self, msg=None: saved.append(msg))
+    monkeypatch.setattr(LootSession, "save", lambda self, msg=None: saved.append(msg))
     ev = open_test_run(reg, rs)
     names = [m.display_name for m in reg.test_members()[:10]]
     join(reg, rs, ev, reg.test_members()[:10])
@@ -462,7 +459,7 @@ def test_loot_opens_a_thread_on_a_locked_run(reg, rs, officer, channel, monkeypa
     assert channel.sent[0]["embed"] is not None
     session = bot.events[(reg.key, ev.key)]  # keyed (guild, run), the file events/<run key>.json
     assert rs.events[ev.key].thread_id == thread_id and session.raid_thread_id == thread_id and bot.event_for(thread_id) is session
-    assert not [c for c in bot.calls if c[0] == "post_boss_tables"] and saved  # no per-boss selects: the card's Tick drops… is the tick path
+    assert saved
     assert f"<#{thread_id}>" in h.text
 
 

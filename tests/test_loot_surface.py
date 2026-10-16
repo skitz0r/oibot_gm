@@ -1379,15 +1379,17 @@ def test_the_thread_is_told_once_when_the_loot_budget_is_nearly_spent(night):
 # ---------------------------------------------------------------- the client's wiring
 
 def test_the_client_routes_a_council_threads_messages_and_restart_modals(night, monkeypatch):
-    """OibotGM.on_message: in a real council's thread only addressed text reaches loot_chat (the /mock chat is
-    mock_loot_chat); on_interaction hands a modal submit to flows_loot.loot_modal_raw (the restart path); the client
-    carries the surface and every loot DynamicItem."""
+    """OibotGM.on_message: in a council's thread only addressed text reaches loot_chat (the /mock chat, its views and
+    its per-boss selects are gone); on_interaction hands a modal submit to flows_loot.loot_modal_raw (the restart path);
+    the client carries the surface and every loot DynamicItem."""
     from oibot_gm import discord_bot
     from oibot_gm.discord_bot import OibotGM
 
     n = night
     assert OibotGM.__mro__.index(LootSurfaceMixin) < OibotGM.__mro__.index(LootMixin)
-    assert OibotGM.loot_chat is LootSurfaceMixin.loot_chat and hasattr(OibotGM, "mock_loot_chat")
+    assert OibotGM.loot_chat is LootSurfaceMixin.loot_chat
+    gone = ("mock_loot_chat", "distribute_ui", "post_boss_tables", "post_proposals", "gate")
+    assert not any(hasattr(OibotGM, a) for a in gone) and not any(hasattr(discord_bot, a) for a in ("DropsSelect", "DistributeView", "ConfirmView", "MockEvent"))
     src = Path(discord_bot.__file__).read_text()
     assert re.search(r"add_dynamic_items\([^)]*LootButton, LootPick, LootStartButton", src)
     bot = OibotGM.__new__(OibotGM)

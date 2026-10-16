@@ -223,10 +223,8 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         for l in lines:
             path, _, rest = l.partition(" — ")
             desc, _, who = rest.rpartition(" — ")
-            if path.startswith("/mock"):
-                continue
             tiers.setdefault(who, []).append(f"`{path}` — {desc}")
-        e = discord.Embed(title="oibot_GM — what I do", colour=TEAL, description="I run registration, one sheet per raid run, roster health with suggestions for short tank/healer seats (an officer sends them), groups, filling freed seats by DM after lock, and (later) the loot council. Ask me anything in plain words with `/ask`, or @mention me. `/help topic:<name>` shows one part of the manual.")
+        e = discord.Embed(title="oibot_GM — what I do", colour=TEAL, description="I run registration, one sheet per raid run, roster health with suggestions for short tank/healer seats (an officer sends them), groups, filling freed seats by DM after lock, and the loot council (a thread per raid night: proposals, Confirm, overrides with reasons). Ask me anything in plain words with `/ask`, or @mention me. `/help topic:<name>` shows one part of the manual.")
         e.add_field(name="Everyone", value="\n".join(tiers["member"])[:1024], inline=False)
         if officer:
             e.add_field(name="Officers", value="\n".join(tiers["officer"])[:1024], inline=False)

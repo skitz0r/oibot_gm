@@ -167,7 +167,6 @@ def test_officiates_gives_manage_server_no_rights_in_an_unconfigured_server(duo)
             return "<admin>"
     admin = M()
     assert not officiates(admin, types.SimpleNamespace(id=999)), "an unconfigured server's admin is nobody's officer (K24)"
-    assert officiates(admin, types.SimpleNamespace(id=999), mock=True), "/mock keeps its old rule"
     assert officiates(admin, types.SimpleNamespace(id=DUO_SERVER)), "Manage Server in a configured server still counts"
     assert officiates(types.SimpleNamespace(id=OWNER2), types.SimpleNamespace(id=DUO_SERVER))
     assert not officiates(types.SimpleNamespace(id=OWNER2), types.SimpleNamespace(id=1)), "owning duo grants nothing in demo"
@@ -938,10 +937,10 @@ def test_loot_thread_check_is_per_guild(duo, monkeypatch):
     from test_flows_raid import FakeBot as RaidBot, FakeChannel
 
     from oibot_gm import flows_raid  # noqa: F401 — registers raid_loot
-    from oibot_gm.discord_bot import MockEvent
+    from oibot_gm.loot.session import LootSession
 
     monkeypatch.setattr(dr, "is_officer", lambda i, r: True)
-    monkeypatch.setattr(MockEvent, "save", lambda self, msg=None, touch=True: None)
+    monkeypatch.setattr(LootSession, "save", lambda self, msg=None, touch=True: None)
     ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
     for reg, rs, ev in ((duo.a, duo.rs_a, ev_a), (duo.b, duo.rs_b, ev_b)):
         join(reg, rs, ev, reg.test_members()[:10])

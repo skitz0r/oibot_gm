@@ -310,7 +310,7 @@ def items_lookup(ids: list[int], namespace: str = "static-classic-us", region: s
 
 @app.command()
 def discord(guild: Path = GUILD, signup: str = "signup_2026-09-15.yaml"):
-    """Run the Discord bot (mock raid / loot council demo)."""
+    """Run the Discord bot (every configured guild; the data repo is the store)."""
     load_dotenv(ROOT / ".env")
     from .store import is_fixture_root
 

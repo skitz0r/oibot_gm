@@ -178,21 +178,11 @@ class LootMixin:
         t.add_done_callback(tasks.discard)
         return t
 
-    # ------------------------------------------------------------ hooks the Discord surfaces (L2) replace
+    # ------------------------------------------------------------ hooks the Discord surface (LootSurfaceMixin) replaces
     async def loot_notify(self, reg, session: LootSession, line: str | None = None, *, kind: str = "", drop_id: str | None = None) -> None:
-        """After every write: tell the session's surfaces (the Discord surfaces replace this). Default: the line into
-        the loot thread with the buttons it needs (loot_view: Give the reason / Mistake — correct… on a companion
-        mismatch, Correct… on a conflict or an in-game award, Distribute on ticked drops); a distribute posts the
-        proposals with their Confirm / Discard buttons. `drop_id`: the drop the line is about."""
-        if kind == "distribute" and session.origin == "raid" and session.proposals and hasattr(self, "post_proposals"):
-            get = getattr(self, "get_channel", None)
-            ch = get(session.raid_thread_id) if get and session.raid_thread_id else None
-            if ch is not None:
-                try:
-                    await self.post_proposals(session, ch, prefix=line)
-                    return
-                except Exception as e:  # noqa: BLE001 — the write already happened; fall back to the plain line
-                    log.warning("loot proposals post failed: %s", e)
+        """After every write: tell the session's surfaces. LootSurfaceMixin replaces this for every council (the line
+        with its persistent buttons, the proposal cards, the session card); this default only posts the line into the
+        loot thread (a client without the surface: tests, offline tools). `drop_id`: the drop the line is about."""
         if line:
             await self.loot_post(session, line, view=self.loot_view(reg, session, kind, drop_id))
 
@@ -364,12 +354,6 @@ class LootMixin:
         finally:
             busy.discard(session.key)
         await self._audit(reg, "bot", f"loot {session.id}: the council's thread is up (it was pending)", "discord", None)
-        thread = self.get_channel(tid) if hasattr(self, "get_channel") else None
-        if thread is not None and hasattr(self, "post_boss_tables"):
-            try:
-                await self.post_boss_tables(session, thread)
-            except Exception as e:  # noqa: BLE001
-                log.warning("boss tables after a pending thread: %s", e)
         await self.loot_repost(reg, session)
         return True
 
@@ -408,12 +392,10 @@ class LootMixin:
         if und:
             await self.loot_post(session, "📥 Ticked, not judged yet: " + ", ".join(d.item_name for d in und), view=self.loot_view(reg, session, "tick"))
             n += 1
-        if session.proposals and hasattr(self, "post_proposals"):
-            try:
-                await self.post_proposals(session, ch, prefix=f"{len(session.proposals)} proposal(s) still waiting for Confirm:")
-                n += 1
-            except Exception as e:  # noqa: BLE001
-                log.warning("loot repost proposals: %s", e)
+        if session.proposals:
+            await self.loot_post(session, f"⚖️ {len(session.proposals)} proposal(s) still waiting for Confirm: "
+                                 + ", ".join(f"{p.item_name} → {'disenchant' if p.to == DISENCHANT else p.to}" for p in session.proposals))
+            n += 1
         return n
 
     # ------------------------------------------------------------ tick
@@ -1490,26 +1472,10 @@ class LootMixin:
             await self._feed_announce_lost(reg.key, old)
         return n
 
-    # ------------------------------------------------------------ the thread's buttons (interim: the Discord surfaces replace them)
+    # ------------------------------------------------------------ the thread's buttons (the Discord surface's)
     def loot_view(self, reg, session: LootSession, kind: str, drop_id: str | None = None):
-        """The buttons a thread line carries (None: none): Give the reason + Mistake — correct… under a companion
-        mismatch, Correct… under a conflict or an in-game award, Distribute under ticked drops, Keep open under the
-        closing notice."""
-        if session.origin != "raid":
-            return None
-        try:
-            if kind == "mismatch" and drop_id:
-                return LootDropView(self, session, drop_id, reason=True)
-            if kind in ("conflict", "manual") and drop_id:
-                return LootDropView(self, session, drop_id, reason=False)
-            if kind == "closing":
-                return LootKeepOpenView(self, session)
-            if kind == "tick" and session.undistributed():
-                from .discord_bot import DistributeView
-
-                return DistributeView(self, session)
-        except RuntimeError:  # a View needs a running loop (offline tools)
-            return None
+        """The buttons a thread line carries: none here — LootSurfaceMixin.loot_view gives a council's lines their
+        persistent LootButtons (Give the reason · Mistake — correct… · Correct… · Distribute · Keep open)."""
         return None
 
     # ------------------------------------------------------------ helpers for callers
@@ -1537,139 +1503,3 @@ class LootMixin:
             "feed_waiting": self.feed_waiting(reg) if reg is not None else None,
             **self.loot_revs(session),
         }
-
-
-# ---------------------------------------------------------------- the thread's buttons (interim)
-# Non-persistent Views (timeout=None, like the boss tables' Distribute and the proposals' Confirm): a restart drops them;
-# /raid loot on an open council re-posts every pending line with fresh buttons (LootMixin.loot_repost). The Discord
-# surfaces (L2) replace them with persistent buttons and lootmodal ids.
-
-async def _officer_press(bot, interaction: discord.Interaction, reg) -> bool:
-    """Writes need an officer or the owner, decided live (PRIV_LIVE) by THE identity predicate."""
-    if reg is None:
-        gate = getattr(bot, "gate", None)
-        return bool(gate and await gate(interaction))
-    from . import guild_routing
-
-    role = await bot.role_of(reg, interaction.user, max_age=guild_routing.PRIV_LIVE)
-    if role in ("owner", "officer"):
-        return True
-    await interaction.response.send_message("Officers only.", ephemeral=True)
-    return False
-
-
-class _LootTarget:
-    """A button bound to (guild, session id, drop): the press finds the live council, or — once it ended — passes the
-    session id, which set_reason and correct take for an ended council."""
-
-    def __init__(self, bot, session: LootSession, drop_id: str | None = None):
-        self.bot, self.gk, self.sid, self.drop_id = bot, session.guild, session.id, drop_id
-
-    @property
-    def reg(self):
-        return (getattr(self.bot.registries, "by_key", {}) or {}).get(self.gk)
-
-    def target(self):
-        return self.bot.events.get((self.gk, self.sid)) or self.sid
-
-
-class LootReasonModal(discord.ui.Modal, title="Why did it go to them?"):
-    reason = discord.ui.TextInput(label="The reason (becomes the precedent)", style=discord.TextStyle.paragraph,
-                                  min_length=ls.REASON_MIN, max_length=ls.REASON_MAX)
-
-    def __init__(self, t: _LootTarget, replace: bool = False):
-        super().__init__()
-        self.t, self.replace = t, replace
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await _submit_reason(self.t, interaction, str(self.reason.value), self.replace)
-
-
-async def _submit_reason(t: _LootTarget, interaction: discord.Interaction, reason: str, replace: bool) -> None:
-    from . import configops
-
-    try:
-        line = await t.bot.set_reason(t.reg, t.target(), t.drop_id, reason, by=interaction.user.display_name, by_id=interaction.user.id, replace=replace)
-    except LootChanged as e:  # someone already gave a reason: replace it only on a second, deliberate press
-        await interaction.response.send_message(configops.user_error(e), view=LootReplaceView(t, reason), ephemeral=True)
-        return
-    except RegistryError as e:
-        await interaction.response.send_message(configops.user_error(e), ephemeral=True)
-        return
-    await interaction.response.send_message(line[:1900], ephemeral=True)
-
-
-class LootReplaceView(discord.ui.View):
-    def __init__(self, t: _LootTarget, reason: str):
-        super().__init__(timeout=300)
-        self.t, self.reason = t, reason
-
-    @discord.ui.button(label="Replace with my reason", style=discord.ButtonStyle.danger)
-    async def go(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if not await _officer_press(self.t.bot, interaction, self.t.reg):
-            return
-        await _submit_reason(self.t, interaction, self.reason, True)
-        self.stop()
-
-
-class LootCorrectModal(discord.ui.Modal, title="Correct the record"):
-    to = discord.ui.TextInput(label="Record it to (a character, or Disenchant)", max_length=NAME_MAX)
-    reason = discord.ui.TextInput(label="What went wrong", style=discord.TextStyle.paragraph, min_length=ls.REASON_MIN, max_length=ls.REASON_MAX)
-
-    def __init__(self, t: _LootTarget):
-        super().__init__()
-        self.t = t
-
-    async def on_submit(self, interaction: discord.Interaction):
-        from . import configops
-
-        try:
-            line = await self.t.bot.correct(self.t.reg, self.t.target(), self.t.drop_id, str(self.to.value), str(self.reason.value),
-                                            by=interaction.user.display_name, by_id=interaction.user.id)
-        except RegistryError as e:
-            await interaction.response.send_message(configops.user_error(e), ephemeral=True)
-            return
-        await interaction.response.send_message(line[:1900], ephemeral=True)
-
-
-class LootDropView(discord.ui.View):
-    """Under an award the companion recorded: Give the reason (→ the precedent, bound to this drop and its recipient)
-    and/or Mistake — correct… (→ void + a new award, no precedent)."""
-
-    def __init__(self, bot, session: LootSession, drop_id: str, reason: bool = True):
-        super().__init__(timeout=None)
-        self.t = _LootTarget(bot, session, drop_id)
-        if reason:
-            b = discord.ui.Button(label="Give the reason", style=discord.ButtonStyle.primary)
-            b.callback = self._reason
-            self.add_item(b)
-        c = discord.ui.Button(label="Mistake — correct…" if reason else "Correct…", style=discord.ButtonStyle.secondary)
-        c.callback = self._correct
-        self.add_item(c)
-
-    async def _reason(self, interaction: discord.Interaction):
-        if await _officer_press(self.t.bot, interaction, self.t.reg):
-            await interaction.response.send_modal(LootReasonModal(self.t))
-
-    async def _correct(self, interaction: discord.Interaction):
-        if await _officer_press(self.t.bot, interaction, self.t.reg):
-            await interaction.response.send_modal(LootCorrectModal(self.t))
-
-
-class LootKeepOpenView(discord.ui.View):
-    """Under the scheduler's "closing in 15 min" line."""
-
-    def __init__(self, bot, session: LootSession):
-        super().__init__(timeout=None)
-        self.t = _LootTarget(bot, session)
-
-    @discord.ui.button(label="Keep open", style=discord.ButtonStyle.secondary)
-    async def keep(self, interaction: discord.Interaction, _: discord.ui.Button):
-        if not await _officer_press(self.t.bot, interaction, self.t.reg):
-            return
-        s = self.t.target()
-        if isinstance(s, str):
-            await interaction.response.send_message("This council has ended.", ephemeral=True)
-            return
-        line = await self.t.bot.keep_open(self.t.reg, s, by=interaction.user.display_name, by_id=interaction.user.id)
-        await interaction.response.send_message(line, ephemeral=True)

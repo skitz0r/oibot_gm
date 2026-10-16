@@ -1,7 +1,7 @@
 """Loot sessions: the state of one loot council (design §3.1, dual interfaces phase 1).
 
-One `LootSession` per (guild key, run key) — per roster of a split run — stored at `<guild>/events/<id>.json`; a `/mock`
-session's id is `mock-<channel>`. The unit is the DROP (decision 2): every drop has a session-scoped `drop_id` (`d1`,
+One `LootSession` per (guild key, run key) — per roster of a split run — stored at `<guild>/events/<id>.json` (a retired
+/mock session's file, `mock-<channel>.json`, is left as written and never loaded). The unit is the DROP (decision 2): every drop has a session-scoped `drop_id` (`d1`,
 `d2`, …); proposals, awards, companion matching and the ledger `import_id` (`<run>-<drop_id>`) key by it, and two
 copies of one item are two drops. Code in here is pure state + scoring; the verbs that change a live session (under its
 lock, with ops lines and listeners) are `discord_loot.LootMixin`.
@@ -120,10 +120,10 @@ class Proposal(BaseModel):
 
 
 class LootSession(BaseModel):
-    """A loot council (alias `MockEvent` in discord_bot, kept while /mock lives). A real session's candidates are read
-    LIVE from its run (`LootMixin.loot_roster`: ev.seated() of its roster); `signups` / `roster` are the /mock flow's own
-    (shadow fixtures). A real session is live iff its run is `locked` — there is no separate session state (`state` is
-    the /mock flow's)."""
+    """A loot council. Its candidates are read LIVE from its run (`LootMixin.loot_roster`: ev.seated() of its roster);
+    it is live iff its run is `locked` — there is no separate session state. `signups` / `roster` / `state` / the
+    keep-together lists are the retired /mock flow's (D11), kept only so its old files still parse (load_sessions skips
+    them: origin != raid)."""
 
     id: str
     run_key: Optional[str] = None  # the RaidEvent key (None for /mock)
@@ -337,18 +337,6 @@ class LootSession(BaseModel):
         order = self.boss_order()
         todo = [d for d in self.drop_list if self.drop_state(d) == "ticked"]
         return sorted(todo, key=lambda d: (order.index(d.boss) if d.boss in order else len(order), self.drop_list.index(d)))
-
-    @property
-    def drops(self) -> dict[str, list[int]]:
-        """boss → item ids (the /mock boss tables' view of the drop list)."""
-        out: dict[str, list[int]] = {}
-        for d in self.drop_list:
-            out.setdefault(d.boss, []).append(d.item_id)
-        return out
-
-    @property
-    def distributed(self) -> list[int]:
-        return [a.item_id for a in self.awards if not a.void]
 
     # ---- bookkeeping
     def remember_idem(self, idem: str | None) -> bool:

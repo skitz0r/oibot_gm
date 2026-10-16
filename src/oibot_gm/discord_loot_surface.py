@@ -30,7 +30,6 @@ import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import discord
 
@@ -107,8 +106,8 @@ def loot_budget_note(provider) -> str | None:
 
 
 class LootSurfaceMixin:
-    """Mixed into OibotGM before LootMixin: its hooks replace LootMixin's defaults for a real council (origin raid); a
-    /mock session keeps the defaults."""
+    """Mixed into OibotGM before LootMixin: its hooks replace LootMixin's defaults for every council (origin raid —
+    the only kind loaded since /mock was retired; the origin guards only keep a stray old object on the defaults)."""
 
     def _surface(self) -> dict:
         return self.__dict__.setdefault("_loot_surface", {"judging": {}, "prompts": {}, "after_end": set(), "fresh": {}, "reasons": {}})

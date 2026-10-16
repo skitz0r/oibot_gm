@@ -2,8 +2,7 @@
 
 `RegistryLootContext` — a registered guild's ledger / precedents / wishlists / compiled policy / items (profile + the
 guild's learned `<guild>/items/*.yaml`) / loot settings (`Registry.loot_cfg`), one per guild (`bot.loot_ctx(session)`
-caches it; `reload()` after an import). The /mock flow's fixtures context is retired (D11): no session reads the
-demo fixtures (design §3.1).
+caches it; `reload()` after an import). It is the only kind: no session reads the demo fixtures (D11, design §3.1).
 
 The ledger and precedents are append-only jsonl: a correction appends a `kind: void` row naming the award's
 `import_id`; a replaced reason appends a new precedent with the same `import_id` (the last one is the active one)."""

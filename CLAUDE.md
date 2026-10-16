@@ -46,26 +46,27 @@ src/oibot_gm/
                        run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS) — design §5.35
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
-  discord_bot.py       OibotGM client: the gateway events and on_message routing; bot.events[(gk, session id)]; /mock is retired (D11: rehearse with a
-                       test run — its council is session.test); GuildContext still loads the demo fixtures for the provider and `oibot demo`
+  discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
+                       bot.events[(gk, session id)]; GuildContext = the start directory's key, profile and the LLM provider (rehearse loot with a
+                       test run — its council is session.test, D11)
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
                        (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock; loot_ctx / loot_roster
                        (live from the run) / loot_live (run locked); open_council (one session per roster of a split run, <run>-r<N>); auto-distribute;
                        held companion events in <guild>/loot/held.json (expired → ops warn "NOT recorded"); loot_restore; loot_may_close (scheduler auto-end:
                        only LootSession.blocks_close — picks/undistributed — holds it, once announced; reasons/conflicts outlive it: set_reason/correct take a
                        session id after the end); loot_ensure_thread (a pending thread retried on /raid loot, on_resumed, ready); hooks the surfaces replace:
-                       loot_notify(…, kind, drop_id) / loot_view (interim thread buttons) / loot_open_thread / loot_ended / loot_closing / loot_held;
-                       retire_precedent / loot_precedents (/gm precedents)
+                       loot_notify(…, kind, drop_id) / loot_view / loot_open_thread / loot_ended / loot_closing / loot_held (minimal defaults);
+                       retire_precedent = THE retire / restore (wraps RegistryLootContext.set_precedent_status; /gm precedents, the site, plain text, MCP)
   discord_loot_surface.py  LootSurfaceMixin (OibotGM, before LootMixin; design §5.36): the council's Discord surface replacing those hooks —
                        a PUBLIC thread on officer_channel (refused when none), the pinned session card (raid_views.loot_layout) and the proposal
                        cards (batch_layout: ≤5 items, per boss, Confirm the rest · Discard on the newest) edited after every write from any surface,
                        session.cards = message ids; persistent thread-line buttons; distribute's card ticker; loot_scheduler_step ("Start an ad hoc
-                       run…" prompt, the one after-end DM to officers); addressed-only thread chat (loot_addressed / loot_chat → help_answer(data=)
-                       or LootChatConfirmView, the `loot` op when configops has it, else the verbs); loot_cards_restore on ready
+                       run…" prompt in the officer channel, the one after-end DM to officers); addressed-only thread chat (loot_addressed / loot_chat →
+                       help_answer(data=) or `loot` ConfigOps in LootChatConfirmView = ConfigConfirmView + Give the reason…; the revs carry the batch /
+                       the drop's pick as the officer saw them); loot_cards_restore on ready
   flows_loot.py        every LootButton / LootPick press and lootmodal submit (loot_press / loot_pick / loot_modal_submit; loot_modal_raw =
                        the restart path from on_interaction); wizards loot_tick (TickWizard), loot_override (grouped select → reason modal,
                        also Correct…), loot_distribute (/raid distribute), loot_end (/raid end + End council: the decide screen), gm_precedents
-  lootctx.py           RegistryLootContext (one per guild, reload(); void rows + superseding precedents folded) / FixtureLootContext (/mock): one interface
   lootctx.py           RegistryLootContext (one per guild, reload(); void / reweight rows and superseding / status precedents folded; wishlists derived
                        live from Registry.wishlists; set_precedent_status = Retire/Restore; reweight (D12)); LEDGER_LISTENERS on every new award row
   loot_ops.py          the `loot` / `wishlist` / `tier` plain-text ops (configops' loot branch → LootMixin verbs / Registry wishlist + tier verbs),
@@ -209,7 +210,7 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist) · Loot log (members) · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = puppets of any mix + the comp sandbox) · Loot (components/loot/*: Tonight · History · Precedents · Items · Wishlists) · Agents (the news review's monitor) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
-  render.py            roster PNG (`oibot roster`), raid thumbnails, generated emoji badges (no analytics images any more);  report_html.py → out/coverage.html
+  render.py            raid thumbnails and generated class / role / buff badges (the emoji fallback; no roster or analytics images any more);  report_html.py → out/coverage.html
   cli.py               `oibot roster|loot|demo|discord`
 out/                   generated reports/logs only (event state is in the data repo)
 ```
@@ -227,6 +228,6 @@ After touching `frontend/`: `cd frontend && npm run build` (commit the bundle). 
 - Deterministic first: add a rule to `scoring.py`/`comp_rules.yaml`, not to a prompt.
 - Anything slow (solver, LLM) runs in `asyncio.to_thread`; Discord interactions must respond within 3 s.
 - Verify offline before touching Discord: copy the data repo to a scratch dir, `GitStore(scratch, push=False)`, drive `Registry`/`raidcycle`/`LootSession` directly (see git history for examples); build a `CommandTree` on a bare `discord.Client` to validate command decorators.
-- Real guild state is keyed by the guild's folder key → `<data>/<key>/guild.yaml` (fixed for good; `Guilds` maps the Discord server id to it). Several guilds run in one process: never take "the first guild" — use `Guilds.for_guild/only/by_key/ordered`, route commands through `guild_routing.need`, and key per-run process state (locks, caches) by (guild key, run key). No loot session reads the shadow fixtures (`/mock` is retired). Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template, and every persistent `custom_id` carries the guild key (`<prefix>.<gk>:…`, an optional group in the template; old ids still resolve via `guild_routing.resolve_button`). DMs and cards name their guild only when the bot serves several (`Registry.many_guilds`); with one guild every message reads as before.
+- Real guild state is keyed by the guild's folder key → `<data>/<key>/guild.yaml` (fixed for good; `Guilds` maps the Discord server id to it). Several guilds run in one process: never take "the first guild" — use `Guilds.for_guild/only/by_key/ordered`, route commands through `guild_routing.need`, and key per-run process state (locks, caches) by (guild key, run key). No loot session reads the shadow fixtures. Buttons that must survive restarts are `DynamicItem`s with a `custom_id` template, and every persistent `custom_id` carries the guild key (`<prefix>.<gk>:…`, an optional group in the template; old ids still resolve via `guild_routing.resolve_button`). DMs and cards name their guild only when the bot serves several (`Registry.many_guilds`); with one guild every message reads as before.
 - Item data in `profiles/tbc/items/*.yaml` is unverified; `equippable()` is the safety net. Verify ids against the Blizzard API before relying on them.
 - Model routing lives in `llm/provider.py:ROUTES`; override per workload with `OIBOT_MODEL_<WORKLOAD>`.
