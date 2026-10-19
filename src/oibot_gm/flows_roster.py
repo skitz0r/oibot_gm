@@ -236,15 +236,7 @@ class ConfirmWizard(OfficerWizard):
             return
         self.done.append(c.label)
         await _emit(interaction, self.reg, f"{by} confirmed {c.label} ({m.display_name})")
-        text = f"✅ {c.label} was confirmed by {by}. Welcome aboard."
-        try:
-            send = getattr(interaction.client, "send_member_dm", None)
-            if send is not None:  # the one DM path: names the guild when the bot serves several
-                await send(self.reg, m, text)
-            else:
-                await (await interaction.client.fetch_user(m.discord_id)).send(text)
-        except Exception:  # noqa: BLE001 — closed DMs, a test puppet, a user who left
-            pass
+        # the member is told by a notice on their Me page (Registry.confirm writes it) — never a "welcome" DM (the DM rule)
         self.page = 0
         await self.listing(interaction, f"✅ Confirmed **{c.label}** ({m.display_name}).")
 
@@ -771,3 +763,162 @@ async def open_roster_absences(interaction: discord.Interaction, reg: Registry, 
         await wiz.show(i, absences_text(reg, days), wiz.select("How far ahead?", opts, picked))
 
     await show(interaction, DEFAULT_ABSENCE_HORIZON)
+
+
+# ---------------------------------------------------------------- /raid set: anything a member can do, recorded for them (B5)
+
+SET_WHAT = {"join": "Join", "bench": "Bench", "no_thanks": "No thanks", "callout": "Can't make it (a callout)", "confirm_yes": "Confirm for them",
+            "confirm_no": "Can't make it for them (their Confirm ask)", "fill_yes": "Confirm their fill", "fill_no": "No to their fill",
+            "pin_in": "Pin to roster", "pin_out": "Keep on bench", "unpin": "Unpin"}
+STATUS_WHAT = {"in": "join", "sub": "bench", "out": "no_thanks"}  # the old `status` seed (Join / Bench / No thanks)
+
+
+class SetWizard(OfficerWizard):
+    """`/raid set member:<User> [what]` (design B5): the run first — only runs where something applies to that member
+    (one → straight on) — then ONLY the verbs that apply to them on that run (rc.member_actions: their open Confirm ask,
+    their fill ask, Record a callout, Join (as <alt>) · Bench · No thanks, the pins), in their own words; a character pick
+    when the verb needs one; THE confirm screen (Wizard.decide) with the consequence from code (inbox.action_consequence:
+    who is told, and how — a notice, their open card edited, never a DM); a callout's note on its "with a note…" button.
+    At the write the member is re-read: an answer changed since the screen was drawn is shown first ("Kestrel is now
+    Bench … — keep going?"). Every write is inbox.do_member_action → the verbs every surface shares."""
+
+    def __init__(self, reg: Registry, rs, owner_id: int, member_id: int, what: str | None = None):
+        super().__init__(reg, owner_id, title="Set for someone")
+        self.rs = rs
+        self.draft = {"member": member_id, "what": what, "key": None, "action": None, "character": None, "rev": None, "note": None}
+
+    def member(self) -> Member | None:
+        return self.reg.members.get(self.draft["member"])
+
+    def run(self):
+        return self.rs.events.get(self.draft["key"]) if self.draft["key"] else None
+
+    def runs(self, m: Member) -> list:
+        from . import raidcycle as rc
+
+        out = []
+        for ev in self.rs.live():
+            if ev.state not in ("open", "locked") or not rc.on_bench_side(self.reg, ev, m):
+                continue
+            keys = {a["key"] for a in rc.member_actions(self.reg, ev, m)}
+            if keys and (not self.draft["what"] or self.draft["what"] in keys):
+                out.append(ev)
+        return out
+
+    async def start(self, interaction: discord.Interaction) -> None:
+        from .raid_views import raid_name
+
+        m = self.member()
+        if m is None or not m.active():
+            await self.finish(interaction, "They aren't registered (no active character) — nothing to set.")
+            return
+        self.title = f"Set for {m.display_name}"
+        runs = self.runs(m)
+        if not runs:
+            what = SET_WHAT.get(self.draft["what"] or "", "")
+            await self.finish(interaction, f"Nothing to set for {m.display_name}" + (f" ({what})" if what else "") + " on a live run right now.")
+            return
+        if len(runs) == 1:
+            self.draft["key"] = runs[0].key
+            await self.verbs(interaction)
+            return
+        opts = [Opt(ev.key, f"{raid_name(self.reg, ev)} · {self.reg.local12(ev.start)}", ev.state) for ev in runs][:MAX_OPTIONS]
+        await self.show(interaction, f"Which run for **{m.display_name}**?", self.select("Pick the run", opts, self.run_picked), self.button("Cancel", self.cancel))
+
+    async def run_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["key"] = values[0]
+        await self.verbs(interaction)
+
+    async def verbs(self, interaction: discord.Interaction) -> None:
+        from . import raidcycle as rc
+
+        m, ev = self.member(), self.run()
+        if ev is None or m is None or ev.state not in ("open", "locked"):
+            await self.finish(interaction, "That run closed — nothing was changed.")
+            return
+        acts = rc.member_actions(self.reg, ev, m)
+        self.draft["rev"] = rc.member_state_rev(ev, m)
+        want = self.draft["what"]
+        hit = next((a for a in acts if a["key"] == want), None) if want else None
+        if hit:
+            await self.chosen(interaction, hit)
+            return
+        s = ev.signups.get(str(m.discord_id))
+        now = f"{rc.LABELS.get(s.status, s.status)} as {s.character}" if s else "no answer yet"
+        buttons = []
+        for a in acts:
+            async def press(i: discord.Interaction, a=a) -> None:
+                await self.chosen(i, a)
+            style = discord.ButtonStyle.danger if a["key"] in ("callout", "confirm_no", "fill_no", "no_thanks") else discord.ButtonStyle.secondary
+            buttons.append(self.button(a["label"], press, style))
+        await self.show(interaction, f"**{m.display_name}** on {rc.run_words(self.reg, ev)} — now: {now}.\nWhat do you record for them?",
+                        *buttons[:20], self.button("Cancel", self.cancel))
+
+    async def chosen(self, interaction: discord.Interaction, action: dict) -> None:
+        self.draft["action"] = action["key"]
+        chars = action.get("characters") or []
+        if action.get("needs") == "character" and len(chars) > 1:
+            m = self.member()
+            opts = [o for o in _char_opts(self.reg, m, _ico(interaction)) if o.value in chars]
+            await self.show(interaction, f"**{action['label']}** as which of {m.display_name}'s characters?",
+                            self.select("Pick the character", opts, self.character_picked), self.button("Cancel", self.cancel))
+            return
+        self.draft["character"] = chars[0] if action.get("needs") == "character" and chars else None
+        await self.confirm(interaction)
+
+    async def character_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["character"] = values[0]
+        await self.confirm(interaction)
+
+    async def confirm(self, interaction: discord.Interaction) -> None:
+        from . import inbox
+
+        m, ev, key = self.member(), self.run(), self.draft["action"]
+        if ev is None or m is None:
+            await self.finish(interaction, "That run closed, or the member isn't registered any more — nothing was changed.")
+            return
+        text = inbox.action_consequence(self.reg, ev, m, key, self.draft["character"])
+        note = {"label": "Note for the officers (optional)", "max_length": 300, "description": "Never shown on the public sheet"} if key == "callout" else None
+        label = {"callout": "Record the callout"}.get(key) or SET_WHAT.get(key, "Do it")
+        await self.decide(interaction, text, do=self.save, note=note, do_label=label[:40], danger=key in ("callout", "confirm_no", "fill_no", "no_thanks"))
+
+    async def save(self, interaction: discord.Interaction, note: str | None, *, force: bool = False) -> None:
+        from . import inbox
+        from . import raidcycle as rc
+
+        m, ev = self.member(), self.run()  # re-read: never trust the screen
+        if ev is None or m is None or ev.state not in ("open", "locked"):
+            await self.finish(interaction, "That run closed — nothing was changed.")
+            return
+        if note is not None:
+            self.draft["note"] = note
+        if not force and rc.member_state_rev(ev, m) != self.draft["rev"]:
+            async def keep(i: discord.Interaction) -> None:
+                await self.working(i)
+                await self.save(i, self.draft["note"], force=True)
+            await self.show(interaction, f"⚠️ {rc.member_change_words(self.reg, ev, m)} — keep going?",
+                            self.button("Keep going", keep, discord.ButtonStyle.primary), self.button("Back", self.cancel))
+            return
+        try:
+            line = await inbox.do_member_action(interaction.client, self.reg, self.rs, ev, m, self.draft["action"], character=self.draft["character"],
+                                                note=self.draft["note"], by=interaction.user.display_name, by_id=interaction.user.id)
+        except (RegistryError, ValueError) as e:
+            await self.finish(interaction, f"❌ {e}")
+            return
+        await self.finish(interaction, f"✅ {line}")
+
+
+def _char_opts(reg: Registry, m: Member, ico) -> list[Opt]:
+    from . import wizard_opts as wo
+
+    return [Opt(o.label, o.label, o.description, o.emoji) for o in wo.characters_of(reg, m, ico)]
+
+
+@flow("raid_set")
+async def open_raid_set(interaction: discord.Interaction, reg: Registry, *, member: discord.abc.User, what: str | None = None, status: str | None = None, **_seed) -> None:
+    """/raid set member:<User> [what] — `what` (a fixed Choice) skips the verb screen when it applies; `status` is the old
+    seed (Join / Bench / No thanks)."""
+    if await _stop_at_entry(interaction, reg):
+        return
+    rs = interaction.client.raids.store(reg)
+    await SetWizard(reg, rs, interaction.user.id, member.id, what or STATUS_WHAT.get(status or "")).start(interaction)

@@ -1799,11 +1799,95 @@ words, `officer` mark; `RaidEvent.log_at` stamped by `RaidStore.save` via `rc.st
 the page's History opens a read-only drawer (`#run-<key>`). `Registry.local12` formats through `constants.fmt12`.
 
 **Not built (by decision):** a leftovers-to-ad-hoc button (D17), reopening a cancelled run (D19), Extend one deadline
-(D15). Members' notices and the Me page asks (row 2) are the inbox build's; the web side that reads `FillAsk.channel`
+(D15). Members' notices and the Me page asks (row 2) are §5.40; so is the web side that reads `FillAsk.channel`
 too.
 
 Tests: `tests/test_raid_night.py` (each race, recovery, expiry ask-only, DM failure, remind, withdraw, pause, reopen,
 open preview across DST, cancel without DMs, every new route) and `tests/test_raid_night_flows.py` (the wizard screens).
+
+### 5.40 Dual interfaces, phase 2 — the member inbox, asks and officers on behalf (built 2026-10-19)
+
+Out of `out/dual_interface_design.md` §3.2 B1 (web answers, receipt, re-post), B2 (asks, notices, DMs-off by phase,
+on-behalf), B5 and §6 Phase 2 rows 2 and 3, with the owner's decisions D14 (DMs-off asks split by phase), D16 (pins in
+`runs`), D21 (a member's `/raid sheet` is a copy), D26 (notices) and the DM rule. Builds on §5.39 (`FillAsk.channel`,
+`edit_ask_card`, `record_placement`, the levers).
+
+**Notices (D26) — the outcome half of the DM rule.** `Member.notices` on the member file: `{id, kind, text, run, at,
+read_at}`, `NOTICE_KINDS` (not_rostered, released, answered_for_you, cancelled, schedule_removed, application,
+loot_award, ask_closed, confirmed), at most `NOTICE_CAP = 20`, kept `NOTICE_DAYS = 30`, text capped at 300 and stripped
+of markdown. `Registry.notify(uid, kind, text, run=, save=)` (unknown member → None; the same unread line for the same
+run twice in a row is kept once; `save=False` rides the caller's commit), `notices(uid, unread=)` newest first,
+`mark_read(uid, ids=None)`; `save_quiet` commits a member file without the analytics change-log listeners (the web's
+`SAVE_LISTENERS` still fire, so the Me page reloads live). Writers — every one where a courtesy DM used to be, or the
+design wanted one: `rc.leftover_notices` at lock (not rostered: seats, joined, "a freed seat would reach you"),
+`rc.seat_gone` inside `free_seat` (every path; it also closes the member's open placement ask as `released` so a later
+Confirm is refused by `already_answered`; silent for their own decline/callout and for an officer's on-behalf write,
+which tells them itself), `rc.cancel_notices` in `cancel_run` (never the reason, never the canceller),
+`rc.on_behalf_notice` from `set_answer` / `call_out` / `answer_fill_for` / `answer_placement_for` when `by_id` is not
+the member, `rc.close_parallel` (a site ask whose twin won), `Registry.remove_schedule` (its regulars; D47 no DM),
+`Registry.decide` (the application's copy; the decision DM itself stays — they wait on it), `Registry.confirm` (a
+character confirmed — the ConfirmWizard's "Welcome aboard" DM is gone) and `discord_pool.award_notice` (the public
+loot-log line's member copy, never reason or score). `tests/test_member_inbox.py::test_every_dm_is_an_ask_a_decision_or_the_owner_alert`
+greps every DM call site and fails on one without a written reason.
+
+**Asks wherever they wait (D14).** `role_plan.ok()` no longer skips `dm_opt_out`: pre-lock asks and confirmations go
+to the same people in the same order; `_send_asks` / `confirm_one` put a DMs-off member's ask on the site (`channel
+"web"`, same deadline). After lock, `rc.fill_batch` → `rc.add_parallel_twins`: inside `rc.parallel_window` (an ask can
+no longer run its whole `fill_ask_hours` before the start) a plain seat ask to someone a DM can't reach
+(`rc.reachable`) is followed by that seat's first reachable alternate, marked `FillAsk.parallel_of = <primary uid>`.
+`rc.parallel_shadowed` keeps the twin from counting as a second ask out (`role_plan.waiting/out`, `fill_batch`'s room);
+`apply_fill_answer` → `rc.close_parallel` closes the other side `released` on the first yes (a site ask gets an
+`ask_closed` notice, a DM card is edited by `after_fill_answer`). `raid_views.ask_line` marks "(site)" and "(in
+parallel)". `inbox.asks_of(reg, rs, uid)` is the one shape for every open ask (confirm on a locked run; fill / swap /
+pre-lock on an open or locked one): `{id, kind, title, run, roster, raid, when, character, cls, spec, role, as_label,
+group (inbox.group_preview: the seat's group, one member per line), deadline, channel, held, waiting_for, reason}`.
+
+**Answering on the site (B1/B2), the same verbs.** `web/api_me.py` (installed by `install_api`): `POST
+/api/me/run/{key}/answer {status, character}` → `set_answer(by_id=me)` (a Join / Bench after lock refused with
+`rc.LOCKED_JOIN`, like the sheet); `POST /api/me/run/{key}/out {note}` → `call_out`; `POST /api/me/fill/{key} {answer}`
+→ `answer_fill_for`; `POST /api/me/ask/{id} {answer}` (id = run key, `place:<run>` or roster key) →
+`answer_placement_for` (the check-and-set on the loop — a seat freed meanwhile or a second device's answer is refused
+from one place); `POST /api/me/notices/read {ids?}`. Every reply carries `rc.answer_receipt` — THE receipt: state, not
+action (joined / Bench / No thanks / rostered / in line; the ad hoc queue position; "1 of N rosters, decided at
+lock"); the sheet button's ephemeral reply is the same string. `GET /api/me` adds `asks[]` (inbox.asks_of),
+`notices[]`, `dm_sentence` (`inbox.DM_OFF_SENTENCE` / `DM_ON_SENTENCE`, also `/me view`, `/me dms`, the manual) and per
+sheet `sheet_row_extras` (`may_answer`, `may_cant`, `queue_note`, `receipt`). Me.tsx: `components/AskCard.tsx`
+(`AskCard`, `NoticesCard`) and `SheetRow` — rendered from server state only, disabled in flight, no optimistic flip.
+
+**Officers on behalf (B5).** `rc.member_actions(reg, ev, m)` is THE filtered union — `{key, label, needs character|note,
+characters}` for confirm_yes/no (their open placement ask), fill_yes/no (their open fill ask), callout (note), join (as
+<alt>; a rostered member's character swap), bench, no_thanks, pin_in/pin_out/unpin (open sheet). `inbox.action_consequence`
+says what each does and who is told (a notice; their open DM card edited — `inbox._has_card`; pins: nobody), and
+`inbox.do_member_action` writes through `set_answer` / `call_out` / `answer_placement_for` / `answer_fill_for` /
+`rc.set_pin` after re-reading the union (and `rc.on_bench_side`). `rc.member_state_rev` / `member_change_words` = the
+re-read at Confirm. Surfaces: `/raid set member:<User> [what:<Choice>]` → `flows_roster.SetWizard` (run first, then
+the verbs as buttons, a character select, `Wizard.decide` with the consequence and, for a callout, *with a note…*);
+`GET /api/admin/actions?run=&member=` (each action's consequence, `by_character` for "as <alt>", `rev`), `POST
+/api/admin/action {run, member, action, character?, note?, rev?}` (stale rev → 409 naming the change), `GET
+/api/admin/inbox?member=` (MCP `member_inbox`); SheetCard's row ⋮ menu (`components/board/MemberMenu.tsx`), also on the
+NotAnswered rows, and the header's **Someone else…**. **No thanks** = an answer change, **Can't make it** = `call_out`
+on every surface: MCP `set_answer(callout=True)` by default, `callout=False` = No thanks; a note goes with a callout
+only. `configops` `run_answer` re-checks the lock at apply (`_actor_is_officer` via `guild_routing.role_of`, PRIV_LIVE):
+a member's own Join / Bench previewed open and Applied after the lock is refused.
+
+**Re-post (D21).** `RaidMixin.repost_sheet(…, copy=False)`: an officer's re-post moves the live sheet and edits the old
+message ("Re-posted in #channel — answer there.", no buttons); `copy=True` (a member's `/raid sheet`) posts a labelled
+read-only copy that never touches `ev.channel_id/message_id`, kept in `RaidEvent.mirror_messages` (last
+`MIRRORS_KEPT = 5`) and refreshed by `refresh_sheet` without buttons. A channel whose plain mode is `ignore` is refused
+(the signup channel never is). `/raid sheet [channel]` (officers may name the channel); the site's run ⋮ menu has
+**Re-post sheet…** with a channel select (channels not in `ignore`).
+
+**Smaller pieces.** `raid_buttons.character_picker`: ≤ `PICKER_BUTTONS = 4` characters → buttons, main first; more →
+one select (main preselected) + "<verb> as <main>"; Join, Bench and No thanks all ask. `OP_GROUP["pin"] = "runs"` (D16)
+with `PLAIN_GROUPS` example text, manual §8c and the PlainPermissions copy; the open sheet's footer adds
+`rc.pin_counts` ("Pinned: 2 · Bench-pinned: 1"). `/me dms on|off` → `Registry.set_dm` (the verb the Me page, the
+Members page, plain text `dm` and MCP `set_dm` share); `/me view` leads with the inbox (`inbox.inbox_lines`) and a
+**Mark notices read** button.
+
+Tests: `tests/test_member_inbox.py` (notices, D14 ordering and the parallel twin, confirmations on the site, every
+notice writer, the receipt, the union and its sentences, D16, D21, the picker, the DM-call-site lint),
+`tests/test_member_inbox_web.py` (every route, member vs officer, a web ask after its seat was freed, two devices, the
+rev 409, MCP shapes, the run_answer re-check) and `tests/test_flows_raid.py` (the SetWizard and `/raid sheet` copy).
 
 ## 6. Architecture
 

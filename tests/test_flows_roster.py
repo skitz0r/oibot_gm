@@ -88,7 +88,9 @@ def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
         assert "Nothing left to confirm" in h.text and h.screen["view"] is None
     run(go())
     assert reg.find("Altone")[1].confirmed_by == "Tester" and reg.find("Alttwo")[1].confirmed_by == "Tester"
-    assert {uid for uid, _ in h.dms} == {a.discord_id, b.discord_id}
+    assert not h.dms, "no 'welcome aboard' DM (the DM rule)"
+    for m, label in ((a, "Altone"), (b, "Alttwo")):  # the member hears it on their Me page instead (D26)
+        assert [n["text"] for n in reg.notices(m.discord_id)] == [f"{label} was confirmed by Tester. Welcome aboard."]
     assert len(h.client.ops.lines) == 2
 
 

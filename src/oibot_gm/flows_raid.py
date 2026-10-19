@@ -358,114 +358,25 @@ async def open_raid_open(interaction: discord.Interaction, reg: Registry, **_see
     await OpenWizard(reg, interaction.client.raids.store(reg), interaction.user.id).start(interaction)
 
 
-# ---------------------------------------------------------------- /raid set
-
-class SetWizard(Wizard):
-    """Run (only if several) → the member's character (only if several) → confirm → bot.set_answer."""
-
-    def __init__(self, reg: Registry, rs, owner_id: int, member_id: int, status: str):
-        super().__init__(reg, owner_id, title="Set an answer", guard=officer_guard(reg))
-        self.rs = rs
-        self.draft = {"member": member_id, "status": status, "team": None, "character": None}
-
-    def member(self):
-        return self.reg.members.get(self.draft["member"])
-
-    async def start(self, interaction: discord.Interaction) -> None:
-        m = self.member()
-        live = [ev for ev in self.rs.live() if sheet_state(ev) in LIVE]
-        if not live or not m:
-            await self.finish(interaction, "No live sheet, or that member isn't registered.")
-            return
-        self.title = f"Set an answer · {m.display_name}"
-        if len(live) == 1:
-            self.draft["team"] = live[0].team
-            await self.character_step(interaction)
-            return
-        await self.show(interaction, "Which run?", self.select("Pick the run", wo.live_runs(self.reg, self.rs), self.run_picked), self.button("Cancel", self.cancel))
-
-    async def run_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["team"] = values[0]
-        await self.character_step(interaction)
-
-    async def character_step(self, interaction: discord.Interaction) -> None:
-        m = self.member()
-        ev = self.rs.for_team(self.draft["team"])
-        s = ev.signups.get(str(m.discord_id)) if ev and m else None
-        opts = wo.characters_of(self.reg, m, getattr(interaction.client, "ico", None), current=s.character if s else None)
-        if len(opts) <= 1:
-            self.draft["character"] = opts[0].value if opts else None
-            await self.confirm(interaction)
-            return
-        await self.show(interaction, f"Which of **{m.display_name}**'s characters?", self.select("Pick the character", opts, self.character_picked), self.button("Cancel", self.cancel))
-
-    async def character_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["character"] = values[0]
-        await self.confirm(interaction)
-
-    def char_label(self) -> str:
-        m, want = self.member(), (self.draft["character"] or "")
-        c = next((c for c in m.active() if want in (c.name, c.label)), None) if m else None
-        return c.label if c else (m.main.label if m and m.main else want or "their main")
-
-    async def confirm(self, interaction: discord.Interaction) -> None:
-        m, st = self.member(), self.draft["status"]
-        ev = self.rs.for_team(self.draft["team"])
-        if not ev or not m:
-            await self.finish(interaction, "That run closed, or the member isn't registered any more — nothing was changed.")
-            return
-        lines = [f"Set **{m.display_name}** ({self.char_label()}) to **{rc.LABELS[st]}** on {run_label(self.reg, ev)}?"]
-        if sheet_state(ev) == "locked":
-            seated = ev.seat_of(m)
-            if st == "in":
-                lines.append("-# They keep their seat." if seated else "-# The roster is locked: they get a seat if one is free, and a DM asking them to confirm.")
-            elif st == "out":
-                lines.append("-# Their seat is freed, they're told, and the bench is asked." if seated else "-# They weren't rostered; only the sheet changes.")
-            elif seated:
-                lines.append("-# They keep their seat until set to No thanks.")
-        await self.show(interaction, "\n".join(lines),
-                        self.button("Confirm", self.save, discord.ButtonStyle.success),
-                        self.button("Cancel", self.cancel))
-
-    async def save(self, interaction: discord.Interaction) -> None:
-        m = self.member()
-        ev = self.rs.for_team(self.draft["team"])  # re-read: never trust the screen
-        if not ev or sheet_state(ev) not in LIVE:
-            await self.finish(interaction, "That run closed — nothing was changed.")
-            return
-        want = self.draft["character"]
-        if not m or (want and not any(want in (c.name, c.label) for c in m.active())):
-            await self.finish(interaction, "That character isn't active any more — nothing was changed.")
-            return
-        await self.working(interaction, "Saving…")
-        try:
-            line = await interaction.client.set_answer(self.reg, self.rs, ev, m, self.draft["status"], want, by=interaction.user.display_name, by_id=interaction.user.id)
-        except ValueError as e:
-            line = f"❌ {e}"
-        await self.finish(interaction, line)
-
-
-@flow("raid_set")
-async def open_raid_set(interaction: discord.Interaction, reg: Registry, *, member: discord.abc.User, status: str, **_seed) -> None:
-    if not await officer_only(interaction, reg):
-        return
-    rs = interaction.client.raids.store(reg)
-    await SetWizard(reg, rs, interaction.user.id, member.id, status).start(interaction)
-
-
 # ---------------------------------------------------------------- run-scoped commands
 
 @flow("raid_sheet")
-async def open_raid_sheet(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+async def open_raid_sheet(interaction: discord.Interaction, reg: Registry, *, channel=None, **_seed) -> None:
+    """/raid sheet [channel] (D21): an officer MOVES the live sheet (here, or to `channel`); anyone else posts a labelled
+    read-only copy here — "copy — the live sheet is in #signups" — that never moves the live one."""
+    from .discord_registry import is_officer
+
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
         if not ev:
             await wiz.finish(i, "No live sheet.")
             return
-        if i.channel is None:
+        officer = is_officer(i, reg)
+        target = channel if (channel is not None and officer) else i.channel
+        if target is None:
             await wiz.finish(i, "I can't post the sheet here — run /raid sheet in a server channel.")
             return
         try:
-            line = await i.client.repost_sheet(reg, rs, ev, i.channel)  # the verb the site, MCP and plain text use
+            line = await i.client.repost_sheet(reg, rs, ev, target, copy=not officer)  # the verb the site, MCP and plain text use
         except RegistryError as e:  # a channel of another server
             line = str(e)
         await wiz.finish(i, line)
@@ -838,4 +749,4 @@ async def open_raid_fill(interaction: discord.Interaction, reg: Registry, *, pre
     await with_run(interaction, reg, title="Fill seats", then=body, officer=True)
 
 
-__all__ = ["with_run", "OpenWizard", "SetWizard", "officer_guard", "officer_only", "run_team"]
+__all__ = ["with_run", "OpenWizard", "officer_guard", "officer_only", "run_team"]

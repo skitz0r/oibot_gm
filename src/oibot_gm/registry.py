@@ -13,7 +13,7 @@ import os
 import re
 import threading
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -29,6 +29,12 @@ log = logging.getLogger(__name__)
 RANKS = ("trial", "raider", "core", "alt", "social")
 NAME_RE = re.compile(r"^[A-Za-zÀ-ÿ]{2,12}$")
 PLACEMENT_ASK_HISTORY = 12  # placement asks kept per member
+# the member's inbox (design §2.5 / D26): an outcome a person should know reaches them as a NOTICE on the Me page and
+# /me view — never a courtesy DM (the DM rule). Stored on the member file, oldest first; capped and expired here.
+NOTICE_CAP = 20
+NOTICE_DAYS = 30
+NOTICE_TEXT_MAX = 300
+NOTICE_KINDS = ("not_rostered", "released", "answered_for_you", "cancelled", "schedule_removed", "application", "loot_award", "ask_closed", "confirmed")
 MAX_ABSENCE_DAYS = 120
 DEFAULT_RAID_SIZE = 20  # when neither the roster nor the raid says
 
@@ -110,6 +116,9 @@ class Member(BaseModel):
     characters: list[RegisteredCharacter] = Field(default_factory=list)
     absences: list[Absence] = Field(default_factory=list)
     placement_asks: list[dict] = Field(default_factory=list)  # {roster, character, asked_at, answer yes|no|None, answered_at, by}
+    # the inbox (D26): {id, kind (NOTICE_KINDS), text, run (run key or None), at (ISO), read_at (ISO or None)} — outcomes
+    # the person should know (not rostered, seat released, answered for you, cancelled, …); Registry.notify writes them
+    notices: list[dict] = Field(default_factory=list)
     dm_opt_out: bool = False
     test: bool = False  # seeded by /gm test: the bot puppets them (DMs go to the roster channel; officers answer for them)
     created_at: str = Field(default_factory=now)
@@ -190,8 +199,8 @@ class Applicant(BaseModel):
 PLAIN_GROUPS: dict[str, tuple[str, list[str], str]] = {
     "self": ("Own record", ["registered"], "I'll be away Nov 1–3 · make Xanthe my main · I can't make tonight"),
     "members": ("Other people's records", ["officers"], "rank Jonny raider · Mira is away next week · turn Kessa's DMs off"),
-    "runs": ("Runs", ["officers"], "lock tonight's Barrow Deeps · Xanthe confirmed for tonight · fill the empty seats"),
-    "comp": ("Comp & policy", ["officers"], "we want 3–4 healers in Barrow Deeps · pin Jonny in tonight"),
+    "runs": ("Runs", ["officers"], "lock tonight's Barrow Deeps · Xanthe confirmed for tonight · pin Jonny in tonight · fill the empty seats"),
+    "comp": ("Comp & policy", ["officers"], "we want 3–4 healers in Barrow Deeps · add a loot rule"),
     "raids": ("Raids & auras", ["owner"], "Barrow Deeps runs Tue and Thu 7:30 pm · fortitude is party-wide"),
     "setup": ("Guild setup", ["owner"], "post raid sheets in #signups · add @Raid Lead as an officer role"),
     "test": ("Test bench", ["officers"], "seed 20 puppets · clear the test bench"),
@@ -1327,6 +1336,10 @@ class Registry:
             char.confirmed_by, char.confirmed_at = by, now()
             self.save(m, f"{by} accepted {a.display_name} as {a.name}")
         self.save_applicant(a, f"{by} {a.status} application from {a.display_name} ({a.name})")
+        # the decision's copy on the Me page (D26; the decision DM itself is one they wait on, the bot's to send)
+        self.notify(a.discord_id, "application", (f"Your application for {a.label} was accepted by {by} — welcome." if accept
+                                                  else f"Your application for {a.label} wasn't accepted this time ({by}).")
+                    + (f" Note: {a.decision_note}" if a.decision_note else ""))
         return a, char
 
     def save(self, m: Member, message: str) -> None:
@@ -1983,7 +1996,12 @@ class Registry:
         want: dict = {"schedules": stored}
         if sid == DEFAULT_SCHEDULE:
             want["slots"] = []
+        regulars = [m for m, _c in self.regulars(series_key(instance, sid))] if schedule_class(have.get("kind")) == "recurring" else []
+        label = self.schedule_label(instance, have)
         self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} removed (by {by})")
+        with self.store.batch(f"{self.key}: notices — {instance} schedule {sid} removed"):
+            for m in regulars:  # a notice, never a DM (D47 = no): the Me page and /me view say it
+                self.notify(m.discord_id, "schedule_removed", f"{label} was removed by {by}: no more sheets come from it, so nobody expects you on them.")
         return f"{rd.get('name', instance)}: schedule {have.get('name') or sid} removed"
 
     @_config_verb(_raid_section)
@@ -2703,6 +2721,8 @@ class Registry:
         if c.confirmed_by:  # re-confirming used to overwrite who confirmed it, silently
             raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
         c.confirmed_by, c.confirmed_at, c.updated_at = by, now(), now()
+        # the member hears it on their Me page (D26) — every surface's confirm, one commit; never a "welcome" DM (the DM rule)
+        self.notify(m.discord_id, "confirmed", f"{c.label} was confirmed by {by}. Welcome aboard.", save=False)
         self.save(m, f"{by} confirmed {c.label}")
         return m, c
 
@@ -2930,7 +2950,96 @@ class Registry:
         return [a for a in (m.placement_asks if m else []) if a.get("answer") is None]
 
     ANSWER_WORDS = {"yes": "yes", "no": "can't make it", "expired": "no answer in time", "cancelled": "the run was cancelled",
-                    "withdrawn": "withdrawn by an officer"}
+                    "withdrawn": "withdrawn by an officer", "released": "the seat was released"}
+
+    def close_placement_ask(self, discord_id: int, roster: str, answer: str, by: str | None = None, *, save: bool = True) -> dict | None:
+        """Close a member's OPEN placement ask on `roster` without an answer from them (`released`: their seat went —
+        an officer, the board, an absence — so a later Confirm on the Me page or an old card is refused from one place,
+        Registry.already_answered). Returns the ask closed, or None when none was open."""
+        m = self.members.get(int(discord_id))
+        ask = next((a for a in (m.placement_asks if m else []) if a["roster"] == roster and a.get("answer") is None), None)
+        if ask is None:
+            return None
+        ask["answer"], ask["answered_at"], ask["answered_by"] = answer, now(), by
+        if save:
+            self.save(m, f"{m.display_name}'s confirmation for {roster} closed ({answer})")
+        return ask
+
+    # ---- the member's inbox (design §2.5, D26): notices instead of courtesy DMs
+    def _fresh_notices(self, m: Member) -> list[dict]:
+        """`m`'s notices inside NOTICE_DAYS, at most NOTICE_CAP, oldest first (the stored order)."""
+        cut = (datetime.now(timezone.utc) - timedelta(days=NOTICE_DAYS)).isoformat(timespec="seconds")
+        return [n for n in m.notices if str(n.get("at") or "") >= cut][-NOTICE_CAP:]
+
+    def notify(self, discord_id: int | None, kind: str, text: str, *, run: str | None = None, save: bool = True) -> dict | None:
+        """One notice on a member's inbox (the Me page and /me view show it): an OUTCOME they should know that used to be
+        — or would have been — a courtesy DM (the DM rule, D26). Never a DM. Unknown members get nothing (None). The same
+        unread text for the same run twice in a row is kept once. `save=False`: the caller saves the member (one commit).
+        The save is quiet (save_quiet): the web's live topic hears it, the analytics change log does not."""
+        m = self.members.get(int(discord_id)) if discord_id is not None else None
+        if m is None:
+            return None
+        if kind not in NOTICE_KINDS:
+            raise ValueError(f"unknown notice kind {kind}")
+        text = str(text or "").replace("**", "").strip()[:NOTICE_TEXT_MAX]
+        if not text:
+            return None
+        last = m.notices[-1] if m.notices else None
+        if last and last.get("text") == text and last.get("run") == run and not last.get("read_at"):
+            return last
+        stamp = datetime.now(timezone.utc)
+        n = {"id": f"n{int(stamp.timestamp() * 1000):x}{len(m.notices) % 100:02d}", "kind": kind, "text": text, "run": run,
+             "at": stamp.isoformat(timespec="seconds"), "read_at": None}
+        m.notices = (self._fresh_notices(m) + [n])[-NOTICE_CAP:]
+        if save:
+            self.save_quiet(m, f"notice for {m.display_name}: {kind}")
+        return n
+
+    def notices(self, discord_id: int, *, unread: bool = False) -> list[dict]:
+        """A member's notices, newest first (inside NOTICE_DAYS, at most NOTICE_CAP); `unread` = only those not marked read."""
+        m = self.members.get(int(discord_id))
+        if m is None:
+            return []
+        out = [dict(n) for n in reversed(self._fresh_notices(m))]
+        return [n for n in out if not n.get("read_at")] if unread else out
+
+    def mark_read(self, discord_id: int, ids: list[str] | None = None) -> int:
+        """Mark notices read (`ids` None = all). Returns how many changed; nothing is saved when none did."""
+        m = self.members.get(int(discord_id))
+        if m is None:
+            return 0
+        want = None if ids is None else {str(i) for i in ids}
+        stamp, changed = now(), 0
+        for n in m.notices:
+            if not n.get("read_at") and (want is None or n.get("id") in want):
+                n["read_at"] = stamp
+                changed += 1
+        if changed:
+            m.notices = self._fresh_notices(m)
+            self.save_quiet(m, f"{m.display_name} read {changed} notice(s)")
+        return changed
+
+    def save_quiet(self, m: Member, message: str) -> None:
+        """Write and commit a member file without the change-log listeners (the analytics channel's log): for the inbox,
+        which moves nothing anyone counts. The web's SAVE_LISTENERS still hear it, so the Me page reloads live."""
+        m.updated_at = now()
+        self.store.write_text(Path(self.key) / "members" / f"{m.discord_id}.json", m.model_dump_json(indent=1))
+        self.members[m.discord_id] = m
+        self.store.commit(f"{self.key}: {message}")
+        self._snap[m.discord_id] = m.model_dump()
+        for fn in list(SAVE_LISTENERS):
+            try:
+                fn(self, "member", [])
+            except Exception:  # noqa: BLE001
+                log.exception("registry listener failed (member, quiet)")
+
+    def set_dm(self, discord_id: int, on: bool, by: str) -> str:
+        """DMs from the bot on or off — the ONE verb behind `/me dms`, the Me page's switch, the Members page, plain text
+        (op `dm`) and MCP set_dm. Off: Confirm and fill asks wait on the Me page (inbox.DM_OFF_SENTENCE)."""
+        m = self.member(discord_id)
+        m.dm_opt_out = not bool(on)
+        self.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'}" + ("" if by == m.display_name else f" (by {by})"))
+        return f"DMs {'on' if on else 'off'}" + ("" if by == m.display_name else f" for {m.display_name}")
 
     def already_answered(self, ask: dict) -> str:
         """'Already answered (yes, by Kestrel at 5:12 PM).' — the one refusal every surface shows for a second answer."""

@@ -402,7 +402,8 @@ OP_GROUP = {
     "run_open": "runs", "run_answer": "runs", "run_lock": "runs", "run_cancel": "runs", "run_fill": "runs", "run_strategy": "runs",
     "run_autofill": "runs", "run_board": "runs", "run_move": "runs", "run_propose": "runs", "run_sheet": "runs", "confirm_for": "runs",
     "run_remind": "runs", "run_pause": "runs", "run_withdraw": "runs", "run_reopen": "runs",  # raid-night levers (phase 2 A, D15/D18/B6)
-    "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
+    "pin": "runs",  # D16: a pin is a run decision (who the lock seats), not comp policy
+    "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "policy_append": "comp",
     "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
     "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup", "job": "setup", "plain": "setup",
     "application": "members", "proposal": "comp", "policy": "comp", "regular": "members",
@@ -433,7 +434,6 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
     "run_propose": {"discord": "the board's Propose / Use this split is web-only (§2.1); the lock does the same solve"},
     "run_strategy": {"discord": "a board setting (web-only, §2.1); the lock card shows the split it produced"},
     "run_autofill": {"discord": "the board's auto-fill is web-only (§2.1); after lock Discord has Fill seats (run_fill)"},
-    "pin": {"discord": "a board control (web-only, §2.1): pins are set from the sheet's member menu on the site"},
     "job": {"discord": "the host's jobs are the web Agents page and MCP (§2.1); the ops channel gets the proposal cards"},
     "plain": {"discord": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
     "tier": {"discord": "the item × spec tier grid is web-only (§2.1, Loot › Items): Discord shows the 'N untiered tonight' line and a link"},
@@ -441,8 +441,6 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
 # ops a surface is still missing from, with the plan that adds it — temporary, unlike BY_DESIGN_EXEMPT; the parity test
 # accepts these too but lists them apart, so the gap is written down rather than silent
 PARITY_PENDING: dict[str, dict[str, str]] = {
-    "confirm_for": {"discord": "phase 2 B5: an officer's Confirm / Can't make it for a member joins the lock card's menu"},
-    "dm": {"discord": "phase 3 (Registry.set_dm): a Discord toggle; today the Me page, plain text and MCP"},
     "comp_target": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page (Registry.set_comp_targets)", "mcp": "phase 3: set_comp_target"},
     "comp_target_clear": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
     "comp_groups": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
@@ -2537,6 +2535,18 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
             + ", waiting for Confirm or Discard")
 
 
+async def _actor_is_officer(bot, reg: Registry, uid: int | None) -> bool:
+    """Officer or owner rights of the presser NOW (PRIV_LIVE: a write) — guild_routing.role_of, the one predicate."""
+    if uid is None:
+        return False
+    from . import guild_routing
+
+    try:
+        return await guild_routing.role_of(bot, reg, uid, max_age=guild_routing.PRIV_LIVE) in ("owner", "officer")
+    except Exception:  # noqa: BLE001 — unknown standing: treated as a member (the stricter answer)
+        return False
+
+
 async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int | None, rev: str | None = None, channel_id: int | None = None,
                           self_id: int | None = None, via: str = "discord") -> str:
     """The ops whose slash commands and web endpoints do Discord work: one branch per verb on the bot."""
@@ -2621,6 +2631,10 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         want = _answer_value(op.value)
         note = (op.reason or "").strip()
         own = m.discord_id in {by_id, self_id} - {None}  # the presser's own, or the asker's own when someone else applies their diff
+        if own and m.discord_id == by_id and want in ("in", "sub") and ev.state != "open" and not await _actor_is_officer(bot, reg, by_id):
+            # the stale-diff gap (design B1): the diff was previewed while the sheet was open and Applied after it locked —
+            # a member's own Join / Bench after lock is refused here exactly as authorize and the sheet refuse it
+            raise RegistryError(rc.LOCKED_JOIN)
         if want == "out" and (note or own):  # a callout (/raid out's verb): anyone's with a reason, and every "I can't make it" of one's own
             return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id)
         try:

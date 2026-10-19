@@ -22,10 +22,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from .. import comp as comp_mod, ops as ops_mod, raid_views as dr, raidcycle as rc, render
+from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from ..consequences import consequence as consequence_lines, consequences_json
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
+from .api_me import sheet_row_extras
 from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
 
 HERE = Path(__file__).parent
@@ -443,7 +444,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
                            "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None, "kind": rc.run_kind(reg, ev),
                            "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
-                           "confirms": rc.run_confirms(reg, ev)})
+                           "confirms": rc.run_confirms(reg, ev), **sheet_row_extras(reg, ev, m)})
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {
@@ -453,10 +454,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "roles": {"primary": primary, "flex": list(flex)},
             "absences": [absence_json(reg, a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
+            "dm_sentence": inbox.DM_OFF_SENTENCE if (m and m.dm_opt_out) else inbox.DM_ON_SENTENCE,
             "sheets": sheets,
             "regulars": regulars_json(reg, m),  # the recurring raids they're a regular of (Step down on the Me page)
-            # `channel` says where the ask went: "dm" / "web" (DMs off, so the Me page is the only place to answer)
-            "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at"), "channel": a.get("channel"), **run_label(reg, rs, a["roster"])} for a in reg.open_placement_asks(v.uid)],
+            # every open ask wherever it waits (`channel` dm | web): Confirm / Can't, fill, swap, pre-lock (inbox.asks_of), and
+            # the notices (D26: outcomes that are never a DM) — the Me page's AskCards and its inbox
+            "asks": inbox.asks_of(reg, rs, v.uid),
+            "notices": inbox.notices_of(reg, v.uid),
         }
 
     # ---- member self-service
@@ -552,12 +556,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/me/dm")
     async def me_dm(request: Request):
-        def go(v, d):
-            m = v.reg.member(v.uid)
-            m.dm_opt_out = not bool(d.get("on"))
-            v.reg.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'}")
-            return f"DMs {'off' if m.dm_opt_out else 'on'}"
-        return await run(request, go)
+        """My DMs on / off — Registry.set_dm, the verb /me dms, the Members page, plain text and MCP share."""
+        return await run(request, lambda v, d: v.reg.set_dm(v.uid, bool(d.get("on")), v.reg.members[v.uid].display_name if v.uid in v.reg.members else v.name))
 
     # ---- runs: the officer panel (sheets per raid, the board, lock, confirmations)
     def t12(reg, value) -> str:
@@ -1687,8 +1687,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """Officer switches someone's DMs on/off (the Me page's toggle, for them)."""
         def go(v, d):
             m = resolve_member(v.reg, member_ref(d))
-            m.dm_opt_out = not bool(d.get("on"))
-            v.reg.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'} (by {v.name})")
+            v.reg.set_dm(m.discord_id, bool(d.get("on")), v.name)  # the one verb (/me dms, the Me page, plain text, MCP)
             return f"{m.display_name}: DMs {'off' if m.dm_opt_out else 'on'}"
         return await run(request, go, officer=True)
 
@@ -2133,6 +2132,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
 
     install_agents_api(app, bot, who=who, body=body, publish=publish)
+
+    from .api_me import install_me_api  # the member inbox (asks, notices, own answers) and the officers' on-behalf routes (design §5.40)
+
+    install_me_api(app, bot, who=who, body=body, find_live=find_live, resolve_member=resolve_member)
 
     from .api_loot import install_loot_api  # the loot council, history, precedents, the award log, items, wishlists (design §3.1)
 
