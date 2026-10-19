@@ -64,9 +64,11 @@ export interface Meta {
   labels: Record<string, string>;
   /** answer statuses in order (in, sub, out), split philosophies, role order, per-group role caps, class colours, bot start (epoch s) */
   statuses: string[]; split_policies: string[]; roles: string[]; group_caps: Record<string, number>; class_colours: Record<string, string>; started_at: number;
+  /** absences: the Discord wizard's For how long list (presets.DURATIONS) and the verb's caps; the member ranks (D25: per member, on the main) */
+  durations?: { days: number; label: string }[]; max_absence_days?: number; absence_reason_max?: number; ranks?: string[];
 }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
-export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null }
+export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[] }
 export interface Absence { start: string; end: string; reason: string | null; span?: string }  // `span` = the days in words (the clock rule); start/end stay ISO for the clear call
 export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean }
 /** One recurring schedule the viewer is a regular of (the Me page's My regular raids). */
@@ -160,7 +162,17 @@ export interface Plan { phase: "prelock" | "fill"; short: { headcount: number; r
   /** after lock: how many more asks may go out now (at most 3 out at once); null before lock */ room?: number | null; batch_lines?: string[] }
 /** What Fill seats would send: the shortfall, who is still being waited on, the plan, and `batch` = exactly what a send with the plan's rev (no picks) DMs now. */
 export interface FillPreview { short: { headcount: number; roles: Record<string, number>; size?: number }; waiting: string[]; batch: FillAskRow[]; plan?: Plan }
-export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: { roster: string; answer: string | null; raid: string; when: string; key: string | null }[] }
+export interface MemberRow { uid: string; display_name: string; verification: string; privilege: string; characters: Character[]; absences: Absence[]; asks: { roster: string; answer: string | null; raid: string; when: string; key: string | null }[];
+  /** the member's rank (D25: on the main), DMs on, the character table's base rev (a stale save is refused, 409) */
+  rank?: string | null; dm?: boolean; characters_rev?: string }
+/** A character-table save (THE character verb): what changed, the ripple into sheets and seats, the new base rev; `refused` per member on the Members page. */
+export interface TableSaved { message: string; lines: string[]; ripple: string[]; preview?: boolean; characters_rev?: string | null; refused?: { uid: string; display_name: string; error: string; stale: boolean }[] }
+/** GET /api/absences: officers' table (puppets only for their tester). */
+export interface AbsenceRow { uid: string; display_name: string; start: string; end: string; span: string; reason: string | null; by: string; current: boolean; test?: boolean }
+/** An absence or I'm back preview: the span and what it does to each live sheet, in words; nothing written. */
+export interface AbsencePreview { preview: true; message: string; lines: string[]; span: string; start?: string; end?: string }
+/** GET /api/owner: who owns the guild; for the owner (or a host superuser) the people who could take over. */
+export interface OwnerInfo { owner: { uid: string; name: string } | null; may_transfer: boolean; candidates?: { uid: string; name: string }[] }
 export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }
@@ -195,6 +207,7 @@ export interface Proposal {
 export interface Me {
   display_name: string; registered: boolean; must_apply?: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
   absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[]; regulars?: MyRegular[];
+  characters_rev?: string | null; rank?: string | null;
 }
 
 // ---- the loot council (mirror src/oibot_gm/web/api_loot.py). Every label a person reads arrives as words from the server

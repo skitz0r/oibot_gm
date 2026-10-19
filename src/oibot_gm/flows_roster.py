@@ -13,13 +13,13 @@ from collections.abc import Awaitable, Callable, Sequence
 
 import discord
 
+from .constants import ROLES
 from .registry import RANKS, Member, RegisteredCharacter, Registry, RegistryError
 from .wizard import MAX_OPTIONS, Opt, Wizard, flow
 
 log = logging.getLogger(__name__)
 
 OFFICERS_ONLY = "Officers only (Manage Server or a configured officer role)."
-PLAYER_RANKS = ("trial", "raider", "core")  # the ranks set_main carries from the old main to the new one
 
 
 # ---------------------------------------------------------------- shared pieces
@@ -95,12 +95,17 @@ class OfficerWizard(Wizard):
 
 
 class MemberWizard(OfficerWizard):
-    """An officer acting on one member's characters. Characters are picked by their index in the member's list and
-    re-found by label at save, so a character retired, renamed or reordered meanwhile is refused, never guessed."""
+    """One member's characters — an officer on someone (`/roster char`, /roster rank, /roster set-main) or, in SELF mode,
+    the member on their own record (`/me char`: member = the presser, no officer guard). Characters are picked by their
+    index in the member's list and re-found by label at save, so a character retired, renamed or reordered meanwhile is
+    refused, never guessed. Every write is a one-row table through THE character verb (discord_people.save_characters:
+    validated on a copy, the ripple into sheets and seats, one audit line) — never a registry primitive."""
 
-    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User, *, title: str):
-        super().__init__(reg, owner_id, title=f"{title} · {member.display_name}")
-        self.member_id, self.member_name = member.id, member.display_name
+    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User, *, title: str, self_mode: bool = False):
+        super().__init__(reg, owner_id, title=title if self_mode else f"{title} · {member.display_name}")
+        self.member_id, self.member_name, self.self_mode = member.id, member.display_name, self_mode
+        if self_mode:
+            self.guard = None  # their own record: no officer check on the presses
 
     def member(self) -> Member | None:
         return self.reg.members.get(self.member_id)
@@ -125,41 +130,266 @@ class MemberWizard(OfficerWizard):
         if c is None or c.label != label:
             c = next((x for x in m.characters if x.label == label), None)
         if c is None:
-            raise RegistryError(f"{label} is no longer registered to {m.display_name}.")
+            raise RegistryError(f"{label} is no longer registered to {'you' if self.self_mode else m.display_name}.")
         if c.status not in ("active", "planned"):
             raise RegistryError(f"{label} was retired meanwhile.")
         return m, c
 
-    def check_unique_on_member(self, m: Member, c: RegisteredCharacter) -> None:
-        """Registry calls take a name; make sure that name resolves to THIS character on this member."""
-        first = next((x for x in m.active() if x.matches(c.label)), None)
-        if first is not c:
-            raise RegistryError(f"{m.display_name} has two characters called {c.label}; change this one on the Members page.")
+    def ripple(self, interaction: discord.Interaction, rows: list[dict]) -> list[str]:
+        from .discord_people import character_preview
 
-    def check_unique_in_guild(self, m: Member, c: RegisteredCharacter) -> None:
-        """set_rank / confirm find a character guild-wide by name; refuse rather than touch someone else's."""
-        hit = self.reg.find(c.label)
-        if not hit or hit[1] is not c:
-            raise RegistryError(f"Another character is also called {c.label}; change this one on the Members page.")
+        return character_preview(interaction.client, self.reg, self.member_id, rows)
+
+    async def save_rows(self, interaction: discord.Interaction, rows: list[dict], done: str, retry=None) -> None:
+        """Write `rows` through THE character verb, then the outcome (with the ripple lines) — or the refusal, draft kept."""
+        from . import discord_people
+
+        try:
+            res = await discord_people.save_characters(interaction.client, self.reg, self.member_id, rows, interaction.user.display_name,
+                                                       by_id=interaction.user.id, officer=not self.self_mode, rev=self.draft.get("rev"), via="discord")
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), retry or self.start, "Start over")
+            return
+        await self.finish(interaction, f"✅ {done}" + "".join(f"\n• {line}" for line in res["ripple"]))
+
+
+# ---------------------------------------------------------------- /me char · /roster char: the one character hub
+
+CHAR_ACTIONS = {"spec": "Spec", "main": "Main", "flex": "Flex", "retire": "Retire", "delete": "Delete", "name": "Name", "rank": "Rank"}
+SELF_ACTIONS = ("spec", "main", "flex", "retire", "delete", "name")
+OFFICER_ACTIONS = ("spec", "main", "flex", "rank", "retire", "delete")
+DELETE_WORDS = "Deleting removes it outright — only the ops lines keep a trace. Prefer Retire if you may come back to it."
+
+
+class CharWizard(MemberWizard):
+    """The hub: `/me char [action]` (self mode) and `/roster char member: [action]` (an officer). The Choice pre-seeds
+    the action and skips the hub's action row. Spec · Main · Flex · Retire · Delete on a character, Rank on the member
+    (D25: rank lives on the main; officers only), Name hands over to the naming wizard (a planned character, self only).
+    Every action ends on THE decide screen with the ripple from code (rc.character_preview), then one table save."""
+
+    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User, *, self_mode: bool):
+        super().__init__(reg, owner_id, member, title="Your characters" if self_mode else "Characters", self_mode=self_mode)
+        self.actions = SELF_ACTIONS if self_mode else OFFICER_ACTIONS
+
+    async def start(self, interaction: discord.Interaction, action: str | None = None) -> None:
+        m = self.member()
+        if not m or not m.active():
+            await self.finish(interaction, "No characters yet — `/register` (or the registration card) adds your main." if self.self_mode
+                              else f"{self.member_name} has no registered characters.")
+            return
+        self.draft = {"rev": self.reg.characters_rev(m)}
+        if action in self.actions:
+            await self.act(interaction, action)
+            return
+        await self.hub(interaction)
+
+    async def hub(self, interaction: discord.Interaction) -> None:
+        from .discord_registry import char_line
+
+        m = self.member()
+        ico = _ico(interaction) or (lambda kind, key: "")
+        lines = [char_line(ico, c) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))]
+        rank = f"\n-# Rank: **{m.rank}** (it lives on the main)" if m.main else ""
+        buttons = [self.button(CHAR_ACTIONS[a], self._goto(a), discord.ButtonStyle.danger if a == "delete" else discord.ButtonStyle.secondary)
+                   for a in self.actions if a != "name" or m.planned()]
+        await self.show(interaction, "\n".join(lines)[:1500] + rank + "\nWhat do you want to change?", *buttons, self.button("Cancel", self.cancel))
+
+    def _goto(self, action: str):
+        async def go(interaction: discord.Interaction) -> None:
+            await self.act(interaction, action)
+        return go
+
+    def eligible(self, action: str) -> list[tuple[int, RegisteredCharacter]]:
+        if action == "main":
+            return self.indexed(lambda c: not c.is_main)
+        if action == "name":
+            return self.indexed(lambda c: c.status == "planned")
+        return self.indexed()
+
+    async def act(self, interaction: discord.Interaction, action: str) -> None:
+        self.draft["action"] = action
+        if action == "name":  # naming a planned character is the registration's own wizard (the name is prose, validated)
+            from .wizard import FLOWS
+
+            await FLOWS["char_name"](interaction, self.reg)
+            return
+        if action == "rank":
+            await self.pick_rank(interaction)
+            return
+        chars = self.eligible(action)
+        if not chars:
+            text = {"main": "There is no other character to make the main — `/me char` can add an alt with Add (or `/register`)." if self.self_mode
+                    else f"{self.member_name} has no other character to make main."}.get(action, "No character to change.")
+            await self.finish(interaction, text)
+            return
+        if len(chars) == 1:
+            await self.char_picked(interaction, [str(chars[0][0])])
+            return
+        await self.pick_char(interaction)
+
+    async def pick_char(self, interaction: discord.Interaction) -> None:
+        action = self.draft["action"]
+        prompt = {"main": "Which character becomes the main? Rank moves with it.", "spec": "Whose spec changes?", "flex": "Which character's extra roles?",
+                  "retire": "Which character retires?", "delete": "Which character is deleted?"}[action]
+        await self.show(interaction, prompt, self.select("Pick the character", self.char_opts(self.eligible(action), _ico(interaction), self.draft.get("idx")), self.char_picked),
+                        self.button("Back", self.hub), self.button("Cancel", self.cancel))
+
+    async def char_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        idx = int(values[0])
+        c = self.member().characters[idx]
+        self.draft.update(idx=idx, label=c.label, cls=c.cls, spec=c.spec, offspec=c.offspec, flex=list(c.flex))
+        await {"spec": self.spec_screen, "flex": self.flex_screen}.get(self.draft["action"], self.review)(interaction)
+
+    # ---- spec
+    async def spec_screen(self, interaction: discord.Interaction) -> None:
+        from . import wizard_opts as wopts
+
+        d, ico = self.draft, _ico(interaction)
+        offs = [o for o in wopts.specs_of(self.reg, d["cls"], ico, current=d["offspec"], none_label="none") if o.value != d["spec"]]
+        await self.show(interaction, f"**{d['label']}** · {d['cls']} — new: **{d['spec']}{'/' + d['offspec'] if d['offspec'] else ''}**",
+                        self.select("Main spec", wopts.specs_of(self.reg, d["cls"], ico, current=d["spec"]), self.on_spec),
+                        self.select("Offspec (optional)", offs, self.on_offspec),
+                        self.button("Review", self.review, discord.ButtonStyle.primary), self.button("Back", self.hub), self.button("Cancel", self.cancel))
+
+    async def on_spec(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["spec"] = values[0]
+        if self.draft.get("offspec") == values[0]:
+            self.draft["offspec"] = None
+        await self.spec_screen(interaction)
+
+    async def on_offspec(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["offspec"] = None if values[0] == "-" else values[0]
+        await self.spec_screen(interaction)
+
+    # ---- flex: roles the spec / offspec don't already give
+    async def flex_screen(self, interaction: discord.Interaction) -> None:
+        d = self.draft
+        own = {self.reg.profile.spec(d["cls"], d["spec"]).role} | ({self.reg.profile.spec(d["cls"], d["offspec"]).role} if d["offspec"] else set())
+        ico = _ico(interaction)
+        extra = [r for r in ROLES if r not in own]
+        opts = [Opt("none", "none", "no extra roles", default=not d["flex"])] + [Opt(r, r, emoji=ico("role", r) if ico else None, default=r in d["flex"]) for r in extra]
+        await self.show(interaction, f"**{d['label']}** plays {', '.join(sorted(own))} from its spec. Which other roles could it fill if asked?",
+                        self.select("Extra roles", opts, self.on_flex, min_values=1, max_values=len(opts)),
+                        self.button("Back", self.hub), self.button("Cancel", self.cancel))
+
+    async def on_flex(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["flex"] = [] if "none" in values else [v for v in values if v in ROLES]
+        await self.review(interaction)
+
+    # ---- rank (D25: on the member, i.e. the main; officers only)
+    async def pick_rank(self, interaction: discord.Interaction) -> None:
+        m = self.member()
+        if not m.main:
+            await self.finish(interaction, f"{self.member_name} has no main yet — rank lives on the main.")
+            return
+        self.draft.update(idx=m.characters.index(m.main), label=m.main.label, old=m.main.rank)
+        await self.show(interaction, f"**{self.member_name}** is **{m.main.rank}** (main: {m.main.label}). New rank?\n"
+                        "-# Rank belongs to the player and lives on the main — alts always read alt, and a new main takes the rank with it.",
+                        self.select("Pick the rank", [Opt(r, r, "current" if r == m.main.rank else None, default=r == m.main.rank) for r in RANKS], self.rank_picked),
+                        self.button("Back", self.hub), self.button("Cancel", self.cancel))
+
+    async def rank_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["rank"] = values[0]
+        if values[0] == self.draft["old"]:
+            await self.show(interaction, f"**{self.member_name}** is already **{values[0]}** — pick a different rank, or cancel.",
+                            self.button("Pick again", self.pick_rank, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))
+            return
+        await self.review(interaction)
+
+    # ---- the confirm: what changes, the ripple from code, THE decide screen
+    def rows(self) -> list[dict]:
+        d, action = self.draft, self.draft["action"]
+        if action == "spec":
+            return [{"label": d["label"], "cls": d["cls"], "spec": d["spec"], "offspec": d["offspec"]}]
+        if action == "flex":
+            return [{"label": d["label"], "flex": list(d["flex"])}]
+        if action == "main":
+            return [{"label": d["label"], "main": True}]
+        if action == "rank":
+            return [{"label": d["label"], "rank": d["rank"]}]
+        return [{"label": d["label"], action: True}]  # retire | delete
+
+    def summary(self) -> tuple[str, str, bool]:
+        """(what changes, the button's words, danger?) for the decide screen."""
+        d, action, m = self.draft, self.draft["action"], self.member()
+        whose = "your" if self.self_mode else f"{self.member_name}'s"
+        if action == "spec":
+            return f"**{d['label']}**: {d['cls']} **{d['spec']}{'/' + d['offspec'] if d['offspec'] else ''}**.", "Save the spec", False
+        if action == "flex":
+            return f"**{d['label']}** could also play: **{', '.join(d['flex']) or 'nothing extra'}**.", "Save", False
+        if action == "main":
+            old = m.main.label if m and m.main else None
+            return f"**{d['label']}** becomes {whose} main" + (f" instead of **{old}**." if old else "."), "Make it the main", False
+        if action == "rank":
+            return f"**{self.member_name}**: **{d['old']}** → **{d['rank']}**.", "Set the rank", False
+        if action == "retire":
+            return f"Retire **{d['label']}** — it leaves sheets and rosters; its history is kept.", f"Retire {d['label']}", True
+        return f"Delete **{d['label']}**. {DELETE_WORDS}", f"Delete {d['label']}", True
+
+    async def review(self, interaction: discord.Interaction) -> None:
+        try:
+            m, c = self.reread()
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), self.start, "Start over")
+            return
+        if self.draft["action"] == "spec" and (self.draft["spec"], self.draft["offspec"]) == (c.spec, c.offspec):
+            await self.show(interaction, f"**{c.label}** is already {c.spec}{'/' + c.offspec if c.offspec else ''} — pick a different spec.",
+                            self.button("Change", self.spec_screen, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))
+            return
+        what, label, danger = self.summary()
+        effects = self.ripple(interaction, self.rows())
+        text = "\n".join([what, *[f"• {e}" for e in effects]]) if effects else what + "\n-# Nothing else changes: no sheet or seat holds it."
+        await self.decide(interaction, text, do=self.save, do_label=label, danger=danger)
+
+    async def save(self, interaction: discord.Interaction, _note: str | None) -> None:
+        d, action = self.draft, self.draft["action"]
+        done = {"spec": f"{d['label']} is {d.get('spec')}" + (f"/{d['offspec']}" if d.get("offspec") else "") + ".",
+                "flex": f"{d['label']} extra roles: {', '.join(d.get('flex') or []) or 'none'}.",
+                "main": f"{d['label']} is the main now (rank moved with it).",
+                "rank": f"{self.member_name} is now **{d.get('rank')}**.",
+                "retire": f"Retired {d['label']}.", "delete": f"Deleted {d['label']}."}[action]
+        await self.save_rows(interaction, self.rows(), done)
+
+
+@flow("member_char")
+async def open_member_char(interaction: discord.Interaction, reg: Registry, *, member: discord.abc.User | None = None, action: str | None = None) -> None:
+    """`/me char [action]` (no member, or yourself: self mode) and `/roster char member: [action]` (an officer)."""
+    if member is None or member.id == interaction.user.id and action != "rank":
+        if action == "add":  # a new alt is the registration wizard (class → spec → name)
+            from .wizard import FLOWS
+
+            await FLOWS["register"](interaction, reg, slot="alt")
+            return
+        await CharWizard(reg, interaction.user.id, interaction.user, self_mode=True).start(interaction, action)
+        return
+    if await _stop_at_entry(interaction, reg):
+        return
+    await CharWizard(reg, interaction.user.id, member, self_mode=False).start(interaction, action)
 
 
 # ---------------------------------------------------------------- /roster confirm
 
 class ConfirmWizard(OfficerWizard):
-    """The unconfirmed characters as a list; pick one, confirm it, and land back on the rest ('Confirm next')."""
+    """The unconfirmed characters as a list; pick one, confirm it, and land back on the rest ('Confirm next'). The member
+    is told on their Me page (no DM — the DM rule); your own characters are not offered (self-confirm, the owner aside)."""
 
     def __init__(self, reg: Registry, owner_id: int):
         super().__init__(reg, owner_id, title="Confirm characters")
         self.page = 0
         self.done: list[str] = []
 
+    def pending(self) -> list[tuple[Member, RegisteredCharacter]]:
+        mine = not self.reg.is_owner_id(self.owner_id)
+        return [(m, c) for m, c in self.reg.pending() if not (mine and m.discord_id == self.owner_id)]
+
     def pending_opts(self, ico) -> list[Opt]:
-        return [Opt(c.label, f"{c.label} · {c.cls} {c.spec} · {m.display_name}"[:100], f"{c.rank}" + (" · main" if c.is_main else " · alt"),
-                    emoji=ico("class", c.cls) if ico else None) for m, c in self.reg.pending()]
+        return [Opt(f"{m.discord_id}|{c.label}"[:100], f"{c.label} · {c.cls} {c.spec} · {m.display_name}"[:100], c.rank + (" · main" if c.is_main else " · alt"),
+                    emoji=ico("class", c.cls) if ico else None) for m, c in self.pending()]
 
     async def start(self, interaction: discord.Interaction, name: str | None = None) -> None:
-        if name and any(c.label == name for _, c in self.reg.pending()):
-            await self.ask(interaction, name)
+        hit = next(((m, c) for m, c in self.pending() if c.label == name), None) if name else None
+        if hit:
+            await self.ask(interaction, f"{hit[0].discord_id}|{hit[1].label}")
             return
         await self.listing(interaction)
 
@@ -186,14 +416,15 @@ class ConfirmWizard(OfficerWizard):
         await self.ask(interaction, values[0])
 
     async def next_one(self, interaction: discord.Interaction) -> None:
-        pend = self.reg.pending()
+        pend = self.pending()
         if not pend:
             await self.listing(interaction)
             return
-        await self.ask(interaction, pend[0][1].label)
+        await self.ask(interaction, f"{pend[0][0].discord_id}|{pend[0][1].label}")
 
-    async def ask(self, interaction: discord.Interaction, label: str) -> None:
-        hit = next(((m, c) for m, c in self.reg.pending() if c.label == label), None)
+    async def ask(self, interaction: discord.Interaction, key: str) -> None:
+        uid, _, label = key.partition("|")
+        hit = next(((m, c) for m, c in self.pending() if str(m.discord_id) == uid and c.label == label), None)
         if not hit:
             await self.listing(interaction, f"❌ {label} is no longer waiting (confirmed or retired meanwhile).")
             return
@@ -202,7 +433,7 @@ class ConfirmWizard(OfficerWizard):
         others = [x.label for x in m.active() if x is not c]
         lines = [f"Confirm **{c.label}** · {c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''} · {'main' if c.is_main else 'alt'}, registered by **{m.display_name}**?",
                  f"-# Their other characters: {', '.join(others)}" if others else "-# Their only character.",
-                 "-# They get a DM saying you confirmed it."]
+                 "-# They see it on their Me page (no DM)."]
         await self.show(interaction, "\n".join(lines),
                         self.button("Confirm", self.save, discord.ButtonStyle.success),
                         self.button("Back", self.back),
@@ -216,11 +447,11 @@ class ConfirmWizard(OfficerWizard):
 
     async def save(self, interaction: discord.Interaction) -> None:
         label, member_id = self.draft["label"], self.draft["member_id"]
-        hit = self.reg.find(label)  # re-read: another officer may have got here first
-        if not hit or hit[0].discord_id != member_id:
+        m = self.reg.members.get(member_id)
+        c = next((x for x in (m.characters if m else []) if x.label == label), None)  # re-read: another officer may have got here first
+        if c is None:
             await self.refuse(interaction, f"{label} is no longer registered (retired or removed meanwhile).", self.back, "Back to the list")
             return
-        m, c = hit
         if c.status != "active":
             await self.refuse(interaction, f"{label} was retired meanwhile.", self.back, "Back to the list")
             return
@@ -230,21 +461,12 @@ class ConfirmWizard(OfficerWizard):
         await self.working(interaction, f"Confirming {label}…")
         by = interaction.user.display_name
         try:
-            m, c = self.reg.confirm(label, by)
+            m, c = self.reg.confirm(member_id, label, by, by_id=interaction.user.id)
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.back, "Back to the list")
             return
         self.done.append(c.label)
         await _emit(interaction, self.reg, f"{by} confirmed {c.label} ({m.display_name})")
-        text = f"✅ {c.label} was confirmed by {by}. Welcome aboard."
-        try:
-            send = getattr(interaction.client, "send_member_dm", None)
-            if send is not None:  # the one DM path: names the guild when the bot serves several
-                await send(self.reg, m, text)
-            else:
-                await (await interaction.client.fetch_user(m.discord_id)).send(text)
-        except Exception:  # noqa: BLE001 — closed DMs, a test puppet, a user who left
-            pass
         self.page = 0
         await self.listing(interaction, f"✅ Confirmed **{c.label}** ({m.display_name}).")
 
@@ -274,79 +496,26 @@ def confirm_pending_view(reg: Registry, count: int) -> discord.ui.View | None:
     return view
 
 
-# ---------------------------------------------------------------- /roster rank
+# ---------------------------------------------------------------- /roster rank · /roster set-main: entry points of the hub
 
-class RankWizard(MemberWizard):
+class RankWizard(CharWizard):
+    """`/roster rank member:` — the hub's Rank (D25: the member's rank, on the main)."""
+
     def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User):
-        super().__init__(reg, owner_id, member, title="Rank")
+        super().__init__(reg, owner_id, member, self_mode=False)
 
-    async def start(self, interaction: discord.Interaction) -> None:
-        chars = self.indexed()
-        if not chars:
-            await self.finish(interaction, f"{self.member_name} has no registered characters.")
-            return
-        if len(chars) == 1:
-            await self.char_picked(interaction, [str(chars[0][0])])
-            return
-        await self.pick_char(interaction)
+    async def start(self, interaction: discord.Interaction, action: str | None = None) -> None:
+        await super().start(interaction, "rank")
 
-    async def pick_char(self, interaction: discord.Interaction) -> None:
-        chars = self.indexed()
-        await self.show(interaction, "Which character?",
-                        self.select("Pick the character", self.char_opts(chars, _ico(interaction), self.draft.get("idx")), self.char_picked),
-                        self.button("Cancel", self.cancel))
 
-    async def char_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        idx = int(values[0])
-        m = self.member()
-        c = m.characters[idx]
-        self.draft.update(idx=idx, label=c.label, old=c.rank, many=len(self.indexed()) > 1)
-        await self.pick_rank(interaction)
+class SetMainWizard(CharWizard):
+    """`/roster set-main member:` — the hub's Main (the rank moves with it)."""
 
-    def _follows(self, c: RegisteredCharacter) -> str:
-        if c.is_main:
-            return "-# This is their **main**: rank belongs to the player and follows the main — if they switch mains, the rank moves with them."
-        return "-# This is an **alt** (alts are usually rank alt; the player's standing is the main's rank)."
+    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User):
+        super().__init__(reg, owner_id, member, self_mode=False)
 
-    async def pick_rank(self, interaction: discord.Interaction) -> None:
-        c = self.member().characters[self.draft["idx"]]
-        items = [self.select("Pick the rank", [Opt(r, r, "current" if r == c.rank else None, default=r == c.rank) for r in RANKS], self.rank_picked)]
-        if self.draft["many"]:
-            items.append(self.button("Back", self.pick_char))
-        items.append(self.button("Cancel", self.cancel))
-        await self.show(interaction, f"**{c.label}** · {c.cls} {c.spec} is **{c.rank}**. New rank?\n{self._follows(c)}", *items)
-
-    async def rank_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["rank"] = values[0]
-        m = self.member()
-        c = m.characters[self.draft["idx"]]
-        if values[0] == c.rank:
-            await self.show(interaction, f"**{c.label}** is already **{c.rank}** — pick a different rank, or cancel.",
-                            self.button("Pick again", self.pick_rank, discord.ButtonStyle.primary), self.button("Cancel", self.cancel))
-            return
-        await self.show(interaction, f"**{c.label}** ({self.member_name}): **{c.rank}** → **{values[0]}**?\n{self._follows(c)}",
-                        self.button("Confirm", self.save, discord.ButtonStyle.success),
-                        self.button("Back", self.pick_rank),
-                        self.button("Cancel", self.cancel))
-
-    async def save(self, interaction: discord.Interaction) -> None:
-        rank, by = self.draft["rank"], interaction.user.display_name
-        try:
-            m, c = self.reread()
-            if c.rank != self.draft["old"]:
-                raise RegistryError(f"{c.label}'s rank changed meanwhile (now {c.rank}).")
-            self.check_unique_in_guild(m, c)
-        except RegistryError as e:
-            await self.refuse(interaction, str(e), self.start, "Start over")
-            return
-        await self.working(interaction, "Saving…")
-        try:
-            m, c = self.reg.set_rank(c.label, rank, by)
-        except RegistryError as e:
-            await self.refuse(interaction, str(e), self.start, "Start over")
-            return
-        await _emit(interaction, self.reg, f"{by} set {c.label} → {rank}")
-        await self.finish(interaction, f"✅ **{c.label}** ({m.display_name}) is now **{rank}**.")
+    async def start(self, interaction: discord.Interaction, action: str | None = None) -> None:
+        await super().start(interaction, "main")
 
 
 @flow("roster_rank")
@@ -354,68 +523,6 @@ async def open_roster_rank(interaction: discord.Interaction, reg: Registry, *, m
     if await _stop_at_entry(interaction, reg):
         return
     await RankWizard(reg, interaction.user.id, member).start(interaction)
-
-
-# ---------------------------------------------------------------- /roster set-main
-
-class SetMainWizard(MemberWizard):
-    def __init__(self, reg: Registry, owner_id: int, member: discord.abc.User):
-        super().__init__(reg, owner_id, member, title="Set main")
-
-    async def start(self, interaction: discord.Interaction) -> None:
-        chars = self.indexed(lambda c: not c.is_main)
-        if not chars:
-            has = bool(self.indexed())
-            await self.finish(interaction, f"{self.member_name} has no other character to make main." if has else f"{self.member_name} has no registered characters.")
-            return
-        self.draft["many"] = len(chars) > 1
-        if len(chars) == 1:
-            await self.char_picked(interaction, [str(chars[0][0])])
-            return
-        await self.pick_char(interaction)
-
-    async def pick_char(self, interaction: discord.Interaction) -> None:
-        m = self.member()
-        cur = f"Their main is **{m.main.label}**." if m and m.main else "They have no main."
-        await self.show(interaction, f"{cur} Which character becomes the main?",
-                        self.select("Pick the new main", self.char_opts(self.indexed(lambda c: not c.is_main), _ico(interaction)), self.char_picked),
-                        self.button("Cancel", self.cancel))
-
-    async def char_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
-        idx = int(values[0])
-        m = self.member()
-        c, old = m.characters[idx], m.main
-        self.draft.update(idx=idx, label=c.label, old=old.label if old else None)
-        lines = [f"Make **{c.label}** · {c.cls} {c.spec} {self.member_name}'s main" + (f" (instead of **{old.label}**)?" if old else "?")]
-        if old and old.rank in PLAYER_RANKS:
-            lines.append(f"-# Rank follows the player: {c.label} becomes **{old.rank}**, {old.label} becomes **alt**.")
-        items = [self.button("Confirm", self.save, discord.ButtonStyle.success)]
-        if self.draft.get("many"):
-            items.append(self.button("Back", self.pick_char))
-        items.append(self.button("Cancel", self.cancel))
-        await self.show(interaction, "\n".join(lines), *items)
-
-    async def save(self, interaction: discord.Interaction) -> None:
-        by = interaction.user.display_name
-        try:
-            m, c = self.reread()
-            if c.is_main:
-                raise RegistryError(f"{c.label} is already {m.display_name}'s main.")
-            cur = m.main.label if m.main else None
-            if cur != self.draft["old"]:
-                raise RegistryError(f"{m.display_name}'s main changed meanwhile (now {cur or 'none'}).")
-            self.check_unique_on_member(m, c)
-        except RegistryError as e:
-            await self.refuse(interaction, str(e), self.start, "Start over")
-            return
-        await self.working(interaction, "Saving…")
-        try:
-            m, c, old = self.reg.officer_set_main(self.member_id, c.label, by)
-        except RegistryError as e:
-            await self.refuse(interaction, str(e), self.start, "Start over")
-            return
-        await _emit(interaction, self.reg, f"{by} set {m.display_name}'s main → {c.label}")
-        await self.finish(interaction, f"✅ {m.display_name}'s main is now **{c.label}**" + (f" (rank {c.rank}; {old.label} is {old.rank})." if old else "."))
 
 
 @flow("roster_set_main")
@@ -731,8 +838,9 @@ async def open_roster_members(interaction: discord.Interaction, reg: Registry, *
     await wiz.start(interaction)
 
 
-__all__ = ["ConfirmWizard", "RankWizard", "SetMainWizard", "RegularAddWizard", "RegularRemoveWizard", "RegularListWizard", "confirm_pending_view", "roster_name",
-           "open_roster_confirm", "open_roster_rank", "open_roster_set_main", "open_roster_add", "open_roster_remove", "open_roster_members", "open_regular_step_down"]
+__all__ = ["MemberWizard", "CharWizard", "ConfirmWizard", "RankWizard", "SetMainWizard", "RegularAddWizard", "RegularRemoveWizard", "RegularListWizard",
+           "confirm_pending_view", "roster_name", "open_member_char", "open_roster_confirm", "open_roster_rank", "open_roster_set_main", "open_roster_add",
+           "open_roster_remove", "open_roster_members", "open_regular_step_down", "absences_text"]
 
 
 # ---------------------------------------------------------------- /roster absences
@@ -747,11 +855,17 @@ def absences_text(reg: Registry, days: int) -> str:
     from datetime import timedelta
 
     today = reg.now_local().date()
-    rows = reg.absences_between(today.isoformat(), (today + timedelta(days=days)).isoformat())
+    rows = [(m, a) for m, a in reg.absences_between(today.isoformat(), (today + timedelta(days=days)).isoformat()) if not m.test]  # puppets stay in the rehearsal
     lines = [f"• **{m.display_name}** ({(m.main.name if m.main else '-')}) {reg.span_label(a.start, a.end)}" + (f" — {a.reason}" if a.reason else "")
              + (f" _(by {a.by})_" if a.by != m.display_name else "") for m, a in rows]
     label = next((name for d, name in ABSENCE_HORIZONS if d == days), f"the next {days} days")
-    return "\n".join(lines)[:1900] or f"No absences in {label}."
+    out = ""
+    for i, line in enumerate(lines):
+        more = f"\nand {len(lines) - i} more — the Members page lists them all"
+        if len(out) + len(line) + len(more) + 1 > 1900:
+            return out + more
+        out += ("\n" if out else "") + line
+    return out or f"No absences in {label}."
 
 
 @flow("roster_absences")

@@ -30,7 +30,7 @@ def test_planned_add_starts_a_record_and_replans_the_main(reg):
     m = reg.members[uid]
     c = m.main
     assert (c.name, c.cls, c.spec, c.status, c.is_main, c.rank) == (None, "Priest", "Holy", "planned", True, "trial")
-    reg.set_rank(c.label, "raider", "t")
+    reg.set_rank(uid, "raider", "t")  # D25: the member's rank (stored on the main)
     # re-planning the main replaces it and keeps its rank
     op = ConfigOp(op="character", member=f"<@{uid}>", field="add", value="Priest Discipline Holy", text="main")
     assert configops.describe(reg, op) == "Newbie: plan Priest Discipline/Holy (main) — replaces the planned Priest Holy"

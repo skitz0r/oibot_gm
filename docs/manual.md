@@ -77,8 +77,8 @@ looks exactly as before.
 
 Log in with Discord. Every member gets **Me** and the **Loot log** (every award the council recorded, §9).
 Everything below can also be done there:
-your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Loot** (Tonight — the live council; History; Precedents with Retire;
+your characters (press **Edit**: add a row, first + last name, spec/offspec, extra roles (*Flex*), main/alt, then one **Save changes**; the crown marks your main; each row's **⋮** menu has *Make main*, *Retire* and *Delete* — when the change reaches a sheet or a seat, the confirm says so first), absences (*Add*: **From** a day **for how long**, previewed; **I'm back** clears one),
+your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read; the owner hands the guild over there, §8), **Loot** (Tonight — the live council; History; Precedents with Retire;
 Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
 bot's recent actions and the plain-text permissions) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
@@ -100,25 +100,41 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   names). Nothing is typed but the name, and a refused name reopens the form with your picks kept.
   Pressing the button again replaces a planned main (roster placement and rank carry over). A named
   character waits for an officer to confirm it.
-- **Alts**: *Add an alt* button, `/me char add` (first and last name, like the button), `/me plan alt`.
-- **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main` (or the crown on the website).
-  **Delete**: the bin icon on the website, or telling the bot ("delete my alt Jonny"), removes a character outright
-  (a seat it already holds on a locked run is not freed by the delete — press *Can't make it* for that run); if it was your main, your next character becomes main (`/me char retire` keeps history
-  instead).
-- **Name a planned character at launch**: `/me char name`: pick the planned character (skipped when there is
-  only one), then type first and last name.
-- `/me char spec|main|retire` take no arguments: pick the character from your own list. Spec choices are always
-  that character's class, and retire asks you to confirm. `/apply` is the application (§3a).
-- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` (up to three flex roles,
-  picked from a list — the primary is never asked, it follows the main's spec) adds roles your main
-  would play beyond that, and telling the bot sets them on any of your characters ("I can also tank on Xanthe", "no
-  extra roles on Jonny"). The site has no flex toggles yet; officers can also set a character's flex list over MCP
-  (`save_characters`).
-- **Absences**: `/me absent list` shows yours with a **Clear** button on each; `/me absent clear` does the same.
+- **Your characters: `/me char`** — one command. Alone it lists your characters and asks what to change; with
+  `action:` (Spec · Main · Flex · Retire · Delete · Name a planned character · Add an alt) it goes straight there. You
+  pick the character from your own list (spec choices are always that character's class), then one confirm screen
+  says what changes — and what it does beyond your record, worked out by the bot: *"Holds a healer seat on Barrow
+  Deeps Tue 9 Dec 7:30 PM — the seat is handed back and the bench is asked"*, *"Answered Join on … — the answer now
+  reads Shadow"*, *"Regular of Barrow Deeps · Raid nights — comes off it"*. The Me page's characters card and telling
+  the bot do exactly the same (one verb behind all three).
+  - **Alts**: *Add an alt* button, `/me char action:Add an alt` (first and last name, like the button), `/me plan alt`.
+  - **Spec/offspec**: a sheet you answered shows the new spec at once (sheets keep the spec you answered with). On a
+    locked roster, a change in the same role follows your seat; a change of role (healer → damage) on a **recurring**
+    run keeps the seat as the roster was built and tells the officers on the run's card — they decide; on an **ad
+    hoc** run it hands the seat back (Join again to queue). Nobody is DMed.
+  - **Main**: your rank moves with it (below). **Retire** keeps history; **Delete** removes a character outright
+    (prefer Retire if you may come back to it). Either way a seat the character holds on a locked run is handed back
+    and the bench asked, an open sheet's Join or Bench with it is cleared (a No thanks moves to your other character),
+    and it comes off the regulars of any schedule; if it was your main, your next character becomes main.
+  - **Name a planned character at launch**: `/me char action:Name a planned character` — pick it (skipped when
+    there is only one), then type first and last name; answers and seats it holds take the new name.
+  - There is no "delete my record": a member who leaves keeps their history with the officers.
+- **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
+  it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page's rank select) — never
+  your own (the owner aside), and never on an alt.
+- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me char action:Flex` (or the Me
+  page's *Flex* column in Edit) picks roles a character could also play — only the roles its spec and offspec don't
+  already give — and telling the bot does too ("I can also tank on Xanthe", "no extra roles on Jonny").
+- **Absences**: `/me absent list` shows yours with a **Clear** button on each (they survive a bot restart); a Clear,
+  `/me absent clear` and **I'm back** on the absences card all open the same screen: pick the absence, see which
+  sheets re-open for you (a seat it handed back stays handed back), press *I'm back*.
 - **Away for a while**: press *I'll be away* on the card in the absences channel, or `/me absent add`, or the Me
   page. Nothing is typed: pick the **first day** (Today, Tomorrow, then the days after — *Later than this…* picks a
-  week further out) and **how long** (1 day up to 4 months), with an optional reason only you and the officers see. A confirm
-  screen shows the days in words and which live sheets it touches before anything is saved. Sheets on those days
+  week further out; on the site, a date picker) and **how long** (1 day up to 4 months — the same list everywhere),
+  with an optional reason (up to 200 characters) only you and the officers see. A confirm
+  screen (on the site: the preview under the pickers) shows the days in words and which live sheets it touches before
+  anything is saved. Days that overlap an absence already on file are refused with that absence named ("already away
+  Tue 9 Dec → Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"). Sheets on those days
   get *No thanks* for you, and if you were already rostered the seat is released (your confirmation card in your DMs is
   edited to say so — no new DM) and the bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
   someone else with `/roster absent` and a member picker, same screens.
@@ -328,7 +344,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
    out after answering). With more than one character you pick which one. Anyone with a registered absence that day
    is listed under **Away** instead (names only, the first 15 then "+N"; reasons stay with officers): they aren't
-   nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. On a recurring schedule with
+   nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. A Join on a day you're away
+   answers that sheet only: the receipt says *"joined for this run; your absence … still stands for the other sheets"*
+   with an **I'm back** button for the whole absence. On a recurring schedule with
    regulars, if the regulars minus anyone away can't cover a tank or healer minimum, the officer channel gets the
    health card with its *Suggested* block right away (an early warning; see *Suggestions* above). With `open_dm` on [off] everyone
    the sheet is for (the schedule's regulars, or every main while it has none) is also DMed when it opens. Officers can
@@ -581,18 +599,25 @@ returns to the game defaults.
   so the card, `/ask`, the API and MCP never disagree.
 - The **character bank** lives on the Members page and **groups** are built on the Rosters board (Auto-fill /
   Propose); the old bank, optimised-groups and comp images are gone.
-- `/roster overview` (no arguments) shows the plan summary on demand: every planned main by class, the role counts
+- `/roster overview` (no arguments) shows the plan summary on demand, only to you (officers get **Post to the roster
+  channel** under it for the officer version): every planned main by class, the role counts
   against each raid's size with who could flex in, buff coverage (nobody / only one), the alts, and the recruiting ask
-  against the biggest raid, and — for officers only — **Regulars**: each recurring schedule's regulars coverage and its
-  4-week forecast (recruit candidates and who is away are planning data; a member's overview leaves the field out). `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
+  against the biggest raid, and — for officers only — **Regulars**: one field per recurring schedule with its regulars
+  coverage and 4-week forecast (recruit candidates and who is away are planning data; a member's overview leaves them out). `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
 
 ## 7. Officers: day-to-day commands
 
-- Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`. They take at most a member
-  (Discord's own picker); the character, rank or schedule is picked from a list and confirmed before anything saves.
-  `/roster confirm` alone walks the unconfirmed characters. `/roster absences` lists the guild's upcoming absences
+- Registry: `/roster list|confirm|rank|set-main|char|add|remove|members|absences|absent|back`. They take at most a member
+  (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
+  `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete), with the
+  same ripple on the confirm screen; `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
+  member's (on the main): no character to pick. `/roster confirm` alone walks the unconfirmed characters — never your
+  own (self-confirm defeats the badge; the owner aside); the member sees it on their Me page, no DM.
+  `/roster absences` lists the guild's upcoming absences
   (days in words, with reasons) for the next 30 days; a select switches the horizon (a week … three months) — no
-  number is typed. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
+  number is typed; a long list ends "and N more — the Members page lists them all". `/roster back member:` is their
+  *I'm back*: pick the absence, see which sheets re-open, confirm. Test puppets stay out of these lists, the absences
+  card and the absences channel. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
 - Regulars: `/roster add` (pick the recurring schedule, then the member — or name them in the command — then the
   character), `/roster remove`, `/roster members` (a schedule's regulars by role, one per line). Same list as the
   Rosters page's *Regulars* tab, plain text and MCP `set_regular` (§4 *Regulars*).
@@ -710,9 +735,14 @@ roles, the invite and per-channel plain-text settings are cleared to set again i
 several-servers update is live, don't roll the bot's code back to before it: buttons posted since carry their server in
 a form older code doesn't read.
 
-`/gm config owner` in a configured server transfers ownership (first claim needs the Discord server owner or Manage Server). Handing the guild to a new owner
-is only ever this slash command, by design — not the site, plain text or MCP: an MCP token acts as the owner, so a
-transfer there would give the guild away and silently change whose rights the token carries. Then
+`/gm config owner [user]` in a configured server transfers ownership (first claim needs the Discord server owner or
+Manage Server): pick the person (Discord's member picker), then **one confirm screen** — *"X becomes the owner of …
+You lose owner rights here (you keep officer rights only if your Discord roles grant them). The site, MCP, plain text
+and the error alerts treat them as the owner from now on; nobody is DMed."* — and *Transfer ownership*. Refused: a bot,
+the current owner, yourself, someone not in the server (or a Discord lookup that can't say right now). The owner, or the
+host's superuser, may do it; so may the owner on the site's **Config** page (*Hand it over to…* → the same sentence →
+*Transfer*). Never plain text or MCP: an MCP token acts as the owner, so a transfer through it would give the guild
+away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
 `signup-channel`, `absences-channel`, `applications-channel`, `loot-channel` (the public loot log, §9), `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
 now and the next run become before saving) — or all of these on
@@ -842,11 +872,11 @@ of their characters. The bot reads each live run's board as it stands and each r
   tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
-  rank and roster placement), "delete Jon's alt Jonny" (gone outright; the diff names any run it is rostered on, by raid and
-  start time — the delete does not free that seat; retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
+  rank and roster placement), "delete Jon's alt Jonny" (gone outright; the diff names what it does beyond the record —
+  a seat it holds is handed back and the bench asked, an open sheet's answer cleared; retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
-  raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
+  raider" (the member's rank — name their main; an alt is refused), "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
   unconfirmed character at once — the diff lists them; officers' requests are read against that list; a character
 really called All or Pending is confirmed alone); "Mira is away
   Nov 1–3" (the diff lists the live sheets those days touch — No thanks, or a rostered seat freed — before anything is
@@ -1059,7 +1089,7 @@ it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (th
 remotely too; leave it on unless you run the MCP server on another machine. Browser logins are unaffected. Ask for a preview first (`propose_split`, `fill_seats` without send,
 `plain_change` without apply) and read the returned line back: it says what actually happened. There is no tool
 for handing the guild to a new owner, by design: the token *is* the owner, so a transfer through it would give the
-guild away and change whose rights the token carries — that stays `/gm config owner` in Discord.
+guild away and change whose rights the token carries — that stays with a person: `/gm config owner` or the Config page.
 
 ## 9. Loot council
 

@@ -2766,3 +2766,189 @@ def end_refusal(ev: RaidEvent, at: datetime | None = None) -> str | None:
     if (at or datetime.now(ev.start.tzinfo)) < ev.start:
         return "The run hasn't started yet — End is for after the start; before then, Cancel it."
     return None
+
+
+# ---------------------------------------------------------------- character changes ripple into runs (design §3.3, D24)
+# A character table save (Me page, Members page, /me char, /roster char, plain text, MCP — PeopleMixin.save_characters)
+# can retire, delete, respec, name or promote a character that live sheets and locked rosters already hold. Sheets
+# snapshot cls/spec/role at the press and the lock solves from the snapshot, so the run files are rewritten here (data
+# only); seats to free go back to RaidMixin.drop_seated (free_seat + the card edit + the fill engine).
+
+def _run_words(reg: Registry, ev: RaidEvent) -> str:
+    return f"{reg.raid_def(ev.instance).get('name', ev.instance or ev.team)} {reg.local12(ev.start)}"
+
+
+def character_changes(reg: Registry, m: Member | None, rows) -> list[dict]:
+    """What a table save would change for runs, read from its rows against the member AS STORED NOW (call it before the
+    save): [{kind: retire|delete|spec|name|main, label, …}]. `spec` carries cls/spec/offspec and the old and new role;
+    `name` the new label. A row the save will refuse is still listed — the save refuses before any ripple runs."""
+    out: list[dict] = []
+    if m is None:
+        return out
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or "").strip()
+        cur = next((c for c in m.active() if c.label == label), None) if label else None
+        if cur is None:
+            continue
+        if row.get("delete") or row.get("retire"):
+            out.append({"kind": "delete" if row.get("delete") else "retire", "label": cur.label})
+            continue
+        spec, off = (row.get("spec") or "").strip(), (row.get("offspec") or "").strip() or None
+        if spec and (spec, off) != (cur.spec, cur.offspec):
+            try:
+                new = reg.profile.spec(cur.cls, spec)
+            except KeyError:
+                new = None
+            if new is not None and new.spec != cur.spec:
+                out.append({"kind": "spec", "label": cur.label, "cls": cur.cls, "spec": new.spec, "offspec": off,
+                            "role": new.role, "old_role": reg.profile.spec(cur.cls, cur.spec).role, "old_spec": cur.spec})
+        name = (row.get("name") or "").strip()
+        if not cur.name and name:
+            try:
+                first = reg.normalise_name(name)
+                last = reg.normalise_name(row["surname"]) if (row.get("surname") or "").strip() else None
+            except RegistryError:
+                first, last = None, None
+            if first:
+                out.append({"kind": "name", "label": cur.label, "new_label": f"{first} {last}" if last else first})
+        if (row.get("main") or row.get("slot") == "main") and not cur.is_main:
+            out.append({"kind": "main", "label": cur.label})
+    return out
+
+
+def character_effects(reg: Registry, rs: RaidStore, m: Member, change: dict) -> list[dict]:
+    """What one character change does to the live runs, without doing it: [{ev, kind: seat|answer|regular|ask|rank,
+    action: free|keep|rewrite|clear|repoint|none, text}] in the words every surface prints (the Discord confirm screens,
+    the web's {preview: true}, plain text's diff). Rules (D24): retire / delete → an open sheet's Join or Bench with it is
+    cleared (a No thanks moves to another character), a locked seat on it is handed back and the bench asked, its
+    regular series drop it; a respec → the sheet answer is rewritten (sheets snapshot the spec), a locked seat in the
+    same role follows it, a role flip on a locked RECURRING run keeps the seat as it is and tells the officers (an ad hoc
+    run hands it back: first come); a name → answers and seats take the new name; a new main → the rank moves with it."""
+    kind, label = change["kind"], change["label"]
+    out: list[dict] = []
+    char = next((c for c in m.characters if c.label == label), None)
+    if kind == "main":
+        if m.main is not None and m.main.label != label:
+            out.append({"ev": None, "kind": "rank", "action": "none", "text": f"Rank {m.main.rank} moves to {label} with the main; {m.main.label} reads alt"})
+        return out
+    if kind in ("retire", "delete") and char is not None:
+        for k in [k for k in char.rosters if ":" in k]:
+            out.append({"ev": None, "kind": "regular", "action": "none",
+                        "text": f"Regular of {reg.series_label(k)} — comes off it ({'retired' if kind == 'retire' else 'deleted'} characters aren't regulars)"})
+    for ev in rs.live():
+        if not on_bench_side(reg, ev, m):
+            continue
+        words = _run_words(reg, ev)
+        sg = ev.signups.get(str(m.discord_id))
+        seat = ev.seat_of(m) if ev.state != "open" else None
+        if seat is not None and (seat[1].character or seat[1].signup_name) != label:
+            seat = None
+        if kind in ("retire", "delete", "spec") and any(a.discord_id == m.discord_id and a.pending and a.character == label for a in ev.fill_asks):
+            out.append({"ev": ev, "kind": "ask", "action": "clear", "text": f"Has an open ask on {words} as {label} — it closes"})
+        if seat is not None:
+            role = seat[1].role
+            if kind in ("retire", "delete"):
+                out.append({"ev": ev, "kind": "seat", "action": "free", "text": f"Holds a {role} seat on {words} — the seat is handed back and the bench is asked"})
+            elif kind == "spec" and change["role"] == role:
+                out.append({"ev": ev, "kind": "seat", "action": "rewrite", "text": f"Rostered on {words} — the seat now reads {change['spec']}"})
+            elif kind == "spec" and run_kind(reg, ev) == "recurring":
+                out.append({"ev": ev, "kind": "seat", "action": "keep",
+                            "text": f"Holds a {role} seat on {words} — {change['spec']} plays {change['role']}: the seat is kept as it is and the officers are told (they decide)"})
+            elif kind == "spec":
+                out.append({"ev": ev, "kind": "seat", "action": "free",
+                            "text": f"Holds a {role} seat on {words} — {change['spec']} plays {change['role']}, so the seat is handed back (ad hoc: Join again to queue)"})
+            elif kind == "name":
+                out.append({"ev": ev, "kind": "seat", "action": "rewrite", "text": f"Rostered on {words} — the seat now reads {change['new_label']}"})
+            continue
+        if sg is None or sg.character != label:
+            continue
+        what = LABELS.get(sg.status, sg.status)
+        if kind in ("retire", "delete"):
+            other = next((c for c in m.active() if c.label != label), None)
+            if sg.status == "out" and other is not None:
+                out.append({"ev": ev, "kind": "answer", "action": "repoint", "text": f"Answered No thanks on {words} — it stays No thanks, as {other.label}"})
+            else:
+                out.append({"ev": ev, "kind": "answer", "action": "clear", "text": f"Answered {what} on {words} with {label} — that answer is cleared (answer again with another character)"})
+        elif kind == "spec":
+            out.append({"ev": ev, "kind": "answer", "action": "rewrite", "text": f"Answered {what} on {words} — the answer now reads {change['spec']}"})
+        elif kind == "name":
+            out.append({"ev": ev, "kind": "answer", "action": "rewrite", "text": f"Answered {what} on {words} — the answer now names {change['new_label']}"})
+    return out
+
+
+def character_preview(reg: Registry, rs: RaidStore, m: Member | None, changes: list[dict]) -> list[str]:
+    """The ripple of a table save as sentences (empty = nothing outside the member's own record changes): the confirm
+    screens and {preview: true} answers print exactly these."""
+    if m is None:
+        return []
+    lines: list[str] = []
+    for ch in changes:
+        for e in character_effects(reg, rs, m, ch):
+            if e["text"] not in lines:
+                lines.append(e["text"])
+    return lines
+
+
+def after_character_change(reg: Registry, rs: RaidStore, m: Member, changes: list[dict]) -> dict:
+    """Apply the data side of a saved table's ripple (call it AFTER the registry save, on the loop): rewrite or clear
+    the sheet answers, re-label locked seats. Returns {"free": [(ev, why)], "keep": [(ev, text)], "release": [ev],
+    "touched": [ev], "lines": [text]} — the seats to hand back, the role flips to tell officers about, the runs whose
+    asks by this member close, every run touched (sheet + cards to redraw) and the sentences. Nothing is sent here."""
+    renamed = {ch["label"]: ch["new_label"] for ch in changes if ch["kind"] == "name"}
+    res: dict = {"free": [], "keep": [], "release": [], "touched": [], "lines": []}
+
+    def touch(ev):
+        if ev not in res["touched"]:
+            res["touched"].append(ev)
+
+    for ch in changes:
+        now_label = renamed.get(ch["label"], ch["label"])
+        for e in character_effects(reg, rs, m, ch):
+            ev, act = e["ev"], e["action"]
+            if e["text"] not in res["lines"]:
+                res["lines"].append(e["text"])
+            if ev is None:
+                continue
+            sg = ev.signups.get(str(m.discord_id))
+            if e["kind"] == "ask":
+                if ev not in res["release"]:
+                    res["release"].append(ev)
+                continue
+            if act == "free":
+                res["free"].append((ev, f"character {'respecced' if ch['kind'] == 'spec' else ch['kind'] + 'd'}"))
+            elif act == "keep":
+                res["keep"].append((ev, e["text"]))
+                ev.log.append(f"{m.display_name}: {ch['old_spec']} → {ch['spec']} ({ch['old_role']} → {ch['role']}), seat kept for an officer")
+                rs.save(ev, f"{m.display_name} respecced (seat kept)")
+            elif act == "clear" and sg is not None:
+                del ev.signups[str(m.discord_id)]
+                ev.log.append(f"{m.display_name}'s answer cleared ({ch['label']} {ch['kind']}d)")
+                rs.save(ev, f"{m.display_name} answer cleared")
+            elif act == "repoint" and sg is not None:
+                other = next((c for c in m.active() if c.label != ch["label"]), None)
+                if other is not None:
+                    set_signup(reg, rs, ev, m, other.label, "out", source=sg.source)
+            elif act == "rewrite" and sg is not None:
+                c = next((x for x in m.active() if x.label == now_label), None)
+                if c is not None:
+                    s = set_signup(reg, rs, ev, m, c.label, sg.status, source=sg.source if sg.status == "out" else "respec", note=sg.note)
+                    if ev.seat_of(m) is not None:
+                        _reseat(ev, s, reg.key)
+                        rs.save(ev, f"{m.display_name} seat follows {c.label}")
+            touch(ev)
+    return res
+
+
+def join_while_away(reg: Registry, ev: RaidEvent, m: Member, mine: bool = True) -> str | None:
+    """A Join on a day the member is recorded away (design §3.2 B1): Join stays pure — it answers this sheet and the
+    absence stands for the others. The receipt says so (and Discord offers I'm back). None when they aren't away."""
+    day = run_day(reg, ev)
+    a = m.absent_on(day)
+    if a is None:
+        return None
+    who = "You're" if mine else f"{m.display_name} is"
+    their = "your" if mine else "their"
+    return (f"{who} marked away {reg.day_label(day)} — joined for this run; {their} absence {reg.span_label(a.start, a.end)} "
+            "still stands for the other sheets (I'm back clears it).")

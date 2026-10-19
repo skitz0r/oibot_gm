@@ -1,5 +1,6 @@
 """Named presets every surface shares: the raid cadence presets (the /gm config raid wizard's picker, plain text's
-`raid_set field=cadence`) and the test-bench tempos (/gm test run, plain text's `test run <raid> quick|standard|slow`).
+`raid_set field=cadence`), the test-bench tempos (/gm test run, plain text's `test run <raid> quick|standard|slow`) and
+the absence lengths (the absence wizards' *For how long*, the web's absence modals via /api/meta `durations`).
 One table each, so the wizard, chat and the web can never drift apart."""
 from __future__ import annotations
 
@@ -36,3 +37,16 @@ def tempo_cutoffs(key: str, *, open_dm: bool = False, test_by: int | None = None
         raise ValueError(f"tempo is one of {', '.join(TEMPOS)}")
     _, start_in, nudge_in, lock_in, confirm_in = TEMPOS[key]
     return start_in, {"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(open_dm), "test_by": test_by}
+
+
+# An absence's length in days (inclusive of the first) → how a person reads it. The Discord absence wizards' "For how
+# long" select and the web's absence modals (GET /api/meta `durations`) offer exactly these, so an end before the start
+# or past registry.MAX_ABSENCE_DAYS can't be picked on any surface (design §3.3 cluster B).
+DURATIONS: list[tuple[int, str]] = [(1, "1 day"), (2, "2 days"), (3, "3 days"), (4, "4 days"), (5, "5 days"), (6, "6 days"), (7, "a week"),
+                                    (10, "10 days"), (14, "2 weeks"), (21, "3 weeks"), (30, "about a month"), (42, "6 weeks"),
+                                    (60, "2 months"), (90, "3 months"), (120, "4 months")]
+
+
+def duration_words(days: int) -> str:
+    """'3 days', 'a week' — a preset's own words, else 'N days'."""
+    return next((name for d, name in DURATIONS if d == days), f"{days} day{'s' if days != 1 else ''}")

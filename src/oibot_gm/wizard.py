@@ -370,8 +370,7 @@ def minute_opts(step: int = 5, default: int | None = 0) -> list[Opt]:
     return [Opt(str(m), f":{m:02d}", default=m == default) for m in quarters + rest][:MAX_OPTIONS]
 
 
-DURATIONS = [(1, "1 day"), (2, "2 days"), (3, "3 days"), (4, "4 days"), (5, "5 days"), (6, "6 days"), (7, "a week"), (10, "10 days"),
-             (14, "2 weeks"), (21, "3 weeks"), (30, "about a month"), (42, "6 weeks"), (60, "2 months"), (90, "3 months"), (120, "4 months")]
+from .presets import DURATIONS  # noqa: E402 — one table for the wizard and the web's absence modals (/api/meta durations)
 
 
 def duration_opts(upto: int = MAX_ABSENCE_DAYS, default: int = 1) -> list[Opt]:

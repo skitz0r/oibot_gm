@@ -116,13 +116,14 @@ def _overview(reg, monkeypatch, officer_flag: bool) -> dict:
 def test_roster_overview_regulars_field_is_officer_only(reg, monkeypatch):
     member = _overview(reg, monkeypatch, False)
     names = [f.name for f in member["embed"].fields]
-    assert "Regulars" not in names and member["ephemeral"] is True
+    assert not any(n.startswith("Regulars") for n in names) and member["ephemeral"] is True
     assert any(n.startswith("Roles vs") for n in names), "members keep the rest of the overview"
 
 
 def test_roster_overview_regulars_field_for_an_officer(reg, monkeypatch):
     officer_said = _overview(reg, monkeypatch, True)
-    assert any(f.name == "Regulars" for f in officer_said["embed"].fields) and officer_said["ephemeral"] is False
+    # phase 2 C: always ephemeral (§2.8); an officer posts the officer version with the Post button
+    assert any(f.name.startswith("Regulars") for f in officer_said["embed"].fields) and officer_said["ephemeral"] is True
 
 
 # ---------------------------------------------------------------- 3. fill sends show the exact batch

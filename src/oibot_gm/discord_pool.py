@@ -16,6 +16,7 @@ import discord
 from . import comp as comp_mod
 from . import ops as ops_mod
 from . import raid_views as views
+from .discord_people import PeopleMixin
 from .discord_registry import registration_card, registration_view
 from .registry import Registry
 
@@ -195,19 +196,40 @@ class PoolMixin:
 
 # ---------------------------------------------------------------- absences channel
 
-class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>new|mine)"):
-    """The absences card's buttons; the id carries the guild (`abs.<gk>:new`), and the card works only in its server."""
+class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>new|mine|back|clear)(?::(?P<uid>[0-9]{1,20}):(?P<start>[0-9]{4}-[0-9]{2}-[0-9]{2}))?"):
+    """The absences buttons; every id carries the guild (`abs.<gk>:new|mine|back`, a Clear `abs.<gk>:clear:<uid>:<start>`) and
+    holds no state, so a press after a restart works. new/mine/back live on the card (a channel card: they work only in
+    its server); a Clear sits on the "My absences" reply and opens the I'm back screen for that one absence."""
 
-    def __init__(self, action: str, gk: str | None):
-        label, style = ("I'll be away", discord.ButtonStyle.primary) if action == "new" else ("My absences", discord.ButtonStyle.secondary)
-        super().__init__(discord.ui.Button(label=label, style=style, custom_id=f"abs{'.' + gk if gk else ''}:{action}"))
-        self.action, self.gk = action, gk
+    LABELS = {"new": ("I'll be away", discord.ButtonStyle.primary), "back": ("I'm back", discord.ButtonStyle.secondary),
+              "mine": ("My absences", discord.ButtonStyle.secondary)}
+
+    def __init__(self, action: str, gk: str | None, uid: int | None = None, start: str | None = None, label: str | None = None):
+        text, style = self.LABELS.get(action, (label or "Clear", discord.ButtonStyle.secondary))
+        cid = f"abs{'.' + gk if gk else ''}:{action}" + (f":{uid}:{start}" if action == "clear" else "")
+        super().__init__(discord.ui.Button(label=(label or text)[:80], style=style, custom_id=cid))
+        self.action, self.gk, self.uid, self.start = action, gk, uid, start
 
     @classmethod
     async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match[str], /):
-        return cls(match["action"], match["g"])
+        return cls(match["action"], match["g"], int(match["uid"]) if match["uid"] else None, match["start"], label=item.label)
 
     async def callback(self, interaction: discord.Interaction):
+        from .wizard_flows import FLOWS
+
+        if self.action == "clear":  # the My absences reply (ephemeral, in a channel or a DM): the guild comes from the id
+            from . import guild_routing
+
+            reg, interaction = await guild_routing.resolve_button(interaction, self.gk, legacy=lambda r: self.uid in r.members)
+            if reg is None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("That absence's server isn't served here any more.", ephemeral=True)
+                return
+            if self.uid != interaction.user.id:
+                await interaction.response.send_message("That's someone else's absence.", ephemeral=True)
+                return
+            await FLOWS["absence_clear"](interaction, reg, start=self.start)
+            return
         from .discord_registry import channel_card_guild
 
         reg = channel_card_guild(interaction, self.gk)  # a channel-only card: strict, never a DM fallback
@@ -215,9 +237,10 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs(?:
             await interaction.response.send_message("Not configured here.", ephemeral=True)
             return
         if self.action == "new":  # the same wizard as /me absent add: pick the first day and how long, nothing typed
-            from .wizard_flows import FLOWS
-
             await FLOWS["absence"](interaction, reg)
+            return
+        if self.action == "back":  # the same screen as /me absent clear: pick the absence, see what re-opens, I'm back
+            await FLOWS["absence_clear"](interaction, reg)
             return
         m = reg.members.get(interaction.user.id)
         today = reg.now_local().date().isoformat()
@@ -225,40 +248,42 @@ class AbsenceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"abs(?:
         if not ups:
             await interaction.response.send_message("No upcoming absences.", ephemeral=True)
             return
-        await interaction.response.send_message("\n".join(f"• {reg.span_label(a.start, a.end)}" + (f" — {a.reason}" if a.reason else "") for a in ups), view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)  # days in words (the clock rule)
+        await interaction.response.send_message(my_absences_text(reg, ups), view=clear_absences_view(reg, m, ups), ephemeral=True)
+
+
+def my_absences_text(reg: Registry, ups: list) -> str:
+    """A member's own upcoming absences, days in words (the clock rule), with their reason (it's theirs)."""
+    return "\n".join(f"• {reg.span_label(a.start, a.end)}" + (f" — {a.reason}" if a.reason else "") for a in ups)[:1900]
 
 
 def clear_absences_view(reg: Registry, m, absences: list) -> discord.ui.View:
-    """One Clear button per listed absence on the ephemeral 'My absences' reply: clears it and ripples the span into the sheets."""
-    view = discord.ui.View(timeout=180)
-    for a in absences:
-        btn = discord.ui.Button(label=f"Clear {reg.span_label(a.start, a.end)}"[:80], style=discord.ButtonStyle.secondary)
-
-        async def clear(i: discord.Interaction, start=a.start):
-            bot = i.client
-            from .registry import RegistryError
-
-            await i.response.edit_message(content="Clearing…", view=None)
-            try:
-                gone = reg.clear_absence(m.discord_id, start, i.user.display_name)
-            except RegistryError as e:
-                await i.edit_original_response(content=f"❌ {e}")
-                return
-            lines = await bot.absence_cleared(reg, m, gone, i.user.display_name)
-            await i.edit_original_response(content=f"✅ Cleared your absence {reg.span_label(gone.start, gone.end)}" + ("\n" + "\n".join("• " + l for l in lines) if lines else ""))
-
-        btn.callback = clear
-        view.add_item(btn)
+    """The "My absences" reply's buttons: one Clear per absence (≤5, DynamicItems — no held state), then I'm back… to pick
+    from a longer list. Each opens the I'm back screen (what re-opens, then the clear)."""
+    view = discord.ui.View(timeout=None)
+    for a in absences[:5]:
+        view.add_item(AbsenceButton("clear", reg.key, m.discord_id, a.start, label=f"Clear {reg.span_label(a.start, a.end)}"))
+    if len(absences) > 5:
+        view.add_item(AbsenceButton("back", reg.key, label="I'm back… (pick one)"))
     return view
 
 
 def absences_card(reg: Registry) -> discord.Embed:
+    """The public card (D28): names + days in words, no reasons; test puppets never appear (a rehearsal stays private)."""
     today = reg.now_local().date().isoformat()
-    rows = sorted(((m, a) for m in reg.members.values() for a in m.absences if a.end >= today), key=lambda x: x[1].start)
+    rows = sorted(((m, a) for m in reg.members.values() if not m.test for a in m.absences if a.end >= today), key=lambda x: x[1].start)
     e = discord.Embed(title=f"{reg.config.name} · away", colour=TEAL,
-                      description="Going to miss some days? Press **I'll be away**. Sheets on those days have you as *No thanks* automatically, and if you were already rostered the seat is handed back. Reasons stay with the officers.")
+                      description="Going to miss some days? Press **I'll be away**. Sheets on those days have you as *No thanks* automatically, and if you were already rostered the seat is handed back. "
+                                  "Back early? **I'm back** re-opens those sheets for you. Reasons stay with the officers.")
     if rows:
-        e.add_field(name="Upcoming", value="\n".join(f"**{m.display_name}** · {reg.span_label(a.start, a.end)}" for m, a in rows[:25])[:1000], inline=False)  # D28: names + days in words
+        lines = [f"**{m.display_name}** · {reg.span_label(a.start, a.end)}" for m, a in rows]
+        text = ""
+        for i, line in enumerate(lines):
+            more = f"\n…and {len(lines) - i} more" if i < len(lines) else ""
+            if len(text) + len(line) + len(more) + 1 > 1000:
+                text += more
+                break
+            text += ("\n" if text else "") + line
+        e.add_field(name="Upcoming", value=text, inline=False)  # D28: names + days in words
     e.set_footer(text="Also: /me absent add · the Me page on the website")
     return e
 
@@ -266,11 +291,15 @@ def absences_card(reg: Registry) -> discord.Embed:
 def absences_view(reg: Registry) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
     v.add_item(AbsenceButton("new", reg.key))
+    v.add_item(AbsenceButton("back", reg.key))
     v.add_item(AbsenceButton("mine", reg.key))
     return v
 
 
-class AbsencesMixin:
+class AbsencesMixin(PeopleMixin):
+    """The absences channel (card, public lines) — and, through PeopleMixin, the people verbs (save_characters, im_back,
+    record_absence, transfer_owner), so the client's class list stays as it is."""
+
     async def post_absences_card(self, reg: Registry, ch: discord.TextChannel, by: str) -> None:
         if reg.config.absences_channel_id and reg.config.absences_message_id:
             old = self.get_channel(reg.config.absences_channel_id)
@@ -303,13 +332,14 @@ class AbsencesMixin:
         live sheets it touched (answered No thanks, or a rostered seat freed) so every caller can say which."""
         span = reg.span_label(a.start, a.end)  # people read it: "Sat 1 Nov → Mon 3 Nov", never ISO
         touched = await self.after_absence(reg, m, a.start, a.end, by)
-        ch = self.get_channel(reg.config.absences_channel_id) if reg.config.absences_channel_id else None
-        if ch:
+        ch = self.get_channel(reg.config.absences_channel_id) if reg.config.absences_channel_id and not m.test else None
+        if ch:  # a test puppet's absence stays in the rehearsal: no public line, no card change (the ops line below remains)
             try:
                 await ch.send(f"🛫 **{m.display_name}** is away {span}" + (f" · off {len(touched)} sheet(s)" if touched else ""), allowed_mentions=discord.AllowedMentions.none())
             except Exception:  # noqa: BLE001
                 pass
-        await self.refresh_absences_card(reg)
+        if not m.test:
+            await self.refresh_absences_card(reg)
         await self.ops.emit(reg.config, "info", f"{m.display_name} absent {span}" + (f" — {a.reason}" if a.reason else "") + (f" (by {by})" if by != m.display_name else "") + (f" · sheets: {', '.join(touched)}" if touched else ""))
         return touched
 
@@ -318,7 +348,8 @@ class AbsencesMixin:
         card is refreshed, one ops line. Returns the member-facing lines (which sheets they can answer again)."""
         span = reg.span_label(a.start, a.end)  # people read it: "Sat 1 Nov → Mon 3 Nov", never ISO
         lines = await self.after_absence_cleared(reg, m, a)
-        await self.refresh_absences_card(reg)
+        if not m.test:
+            await self.refresh_absences_card(reg)
         await self.ops.emit(reg.config, "info", f"{m.display_name} cleared absence {span}" + (f" (by {by})" if by != m.display_name else "") + (f" · {len(lines)} sheet(s) touched" if lines else ""))
         return lines
 

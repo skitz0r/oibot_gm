@@ -30,6 +30,8 @@ RANKS = ("trial", "raider", "core", "alt", "social")
 NAME_RE = re.compile(r"^[A-Za-zÀ-ÿ]{2,12}$")
 PLACEMENT_ASK_HISTORY = 12  # placement asks kept per member
 MAX_ABSENCE_DAYS = 120
+ABSENCE_REASON_MAX = 200  # an absence's reason (officer-only prose), capped at the verb so every surface refuses alike
+PLAYER_RANKS = ("trial", "raider", "core")
 DEFAULT_RAID_SIZE = 20  # when neither the roster nor the raid says
 
 
@@ -131,6 +133,29 @@ class Member(BaseModel):
 
     def planned(self) -> list[RegisteredCharacter]:
         return [c for c in self.characters if c.status == "planned"]
+
+    @property
+    def rank(self) -> Optional[str]:
+        """The member's rank (D25: rank is per MEMBER, stored on the main; every other character reads 'alt')."""
+        return self.main.rank if self.main else None
+
+
+def settle_ranks(m: Member, rank: str | None = None) -> None:
+    """Rank lives on the member (owner decision D25): the main carries it, every other character — alts, retired ones —
+    reads 'alt'. `rank` = the member's rank to put on the main (None keeps what the main has). Called by every verb that
+    moves the main (set_main, retire, delete, add/plan a main) so the standing follows the player, never the character."""
+    main = m.main
+    for c in m.characters:
+        if c is main:
+            if rank:
+                c.rank = rank
+        elif c.rank != "alt":
+            c.rank = "alt"
+
+
+def member_rank(m: Member | None) -> str:
+    """The rank a new main inherits: the current main's, else 'trial' (a first character)."""
+    return m.main.rank if m is not None and m.main is not None else "trial"
 
 
 class Question(BaseModel):
@@ -329,6 +354,15 @@ class ConfigChanged(RegistryError):
     def __init__(self, section: str, msg: str | None = None):
         self.section = section
         super().__init__(msg or f"The {section_words(section)} changed since you looked — check them and try again.")
+
+
+class CharactersChanged(RegistryError):
+    """A character table save carried a `characters_rev` that isn't the member's any more: someone else (an officer,
+    the member on another device, a wizard) changed their characters since the editor loaded them. Nothing was written."""
+
+    def __init__(self, m: "Member"):
+        self.member = m
+        super().__init__(f"{m.display_name}'s characters changed since you loaded them — reload, then make your change again.")
 
 
 class WishlistChanged(RegistryError):
@@ -922,6 +956,42 @@ class Registry:
         """Owner rights here: the guild's owner, or a host superuser (OIBOT_SUPERUSERS)."""
         return uid is not None and ((self.config.owner_discord_id is not None and uid == self.config.owner_discord_id) or is_superuser(uid))
 
+    # ---- owner transfer (design §3.5 O-03, owner decision D50): one verb for /gm config owner and the Config page
+    def owner_refusal(self, uid: int, *, by_id: int | None = None, bot: bool = False, membership: str = "yes", name: str | None = None) -> str | None:
+        """Why `uid` can't become the owner now (None = they can): a bot, the current owner, yourself, someone outside the
+        guild's Discord server — or 'unknown' (Discord couldn't say): a write that moves owner rights needs certainty."""
+        who, guild = name or "They", self.config.name
+        if bot:
+            return "A bot can't own a guild — pick a person."
+        if self.config.owner_discord_id is not None and int(uid) == int(self.config.owner_discord_id):
+            return f"{who} already own{'s' if name else ''} {guild}."
+        if by_id is not None and int(uid) == int(by_id):
+            return "That's you — pick the person who takes over."
+        if membership == "no":
+            return f"{who} {'is' if name else 'are'} not in {guild}'s Discord server — the owner must be a member of it."
+        if membership != "yes":
+            return "Couldn't check Discord just now, so nothing was changed — try again in a minute."
+        return None
+
+    def owner_consequence(self, name: str, by_id: int | None = None) -> str:
+        """THE confirm sentence of an owner transfer (the Discord decide screen and the Config page print it)."""
+        host = by_id is not None and is_superuser(by_id) and by_id != self.config.owner_discord_id
+        lead = (f"**{name}** becomes the owner of **{self.config.name}** (you act as the host here)." if host else
+                f"**{name}** becomes the owner of **{self.config.name}**. You lose owner rights here (you keep officer rights only if your Discord roles grant them).")
+        return lead + (" The site, MCP, plain text and the error alerts treat them as the owner from now on; nobody is DMed."
+                       " A host superuser can reassign it.")
+
+    @_config_verb("settings")
+    def set_owner(self, uid: int, by: str, *, by_id: int | None = None, bot: bool = False, membership: str = "yes", name: str | None = None) -> str:
+        """Hand the guild to `uid` (the caller resolved `bot` and `membership` from Discord). Refused per owner_refusal;
+        one settings commit. Callers check the presser is the owner (Registry.is_owner_id: the owner or a superuser)."""
+        why = self.owner_refusal(uid, by_id=by_id, bot=bot, membership=membership, name=name)
+        if why:
+            raise RegistryError(why)
+        self.config.owner_discord_id = int(uid)
+        self.save_config(f"owner → {name or uid} (by {by})")
+        return f"{name or uid} owns {self.config.name} now"
+
     def __init__(self, store: GitStore, guild_key: str, profile: GameProfile):
         self.store = store
         self.key = guild_key
@@ -1208,7 +1278,7 @@ class Registry:
         if not self.config.recruitment.open:
             raise RegistryError(f"{self.config.name} isn't taking applications right now.")
         if discord_id in self.members and self.members[discord_id].active():
-            raise RegistryError("You're already a member; use /register or /me char add for more characters.")
+            raise RegistryError("You're already a member; use /register or /me char → Add an alt for more characters.")
         name = self.normalise_name(name)
         surname = self.normalise_name(surname) if surname else None
         if cls not in self.profile.classes:
@@ -1393,14 +1463,16 @@ class Registry:
         m = self.member(discord_id, display_name, create=True)
         is_main = slot == "main"
         prev = next((c for c in m.characters if c.status == "planned" and c.is_main == is_main), None)
+        rank = prev.rank if prev and is_main else member_rank(m)  # D25: the member's standing moves to the new main
         m.characters = [c for c in m.characters if c is not prev]
         if is_main:
             for c in m.characters:
                 c.is_main = False
-        c = RegisteredCharacter(cls=cls, spec=spec, offspec=offspec, is_main=is_main, status="planned", rank="trial" if is_main else "alt")
-        if prev:  # a re-plan keeps roster placement, rank and identity (the change log shows it as a spec change)
-            c.rosters, c.rank, c.created_at, c.note = list(prev.rosters), prev.rank, prev.created_at, prev.note
+        c = RegisteredCharacter(cls=cls, spec=spec, offspec=offspec, is_main=is_main, status="planned", rank=rank if is_main else "alt")
+        if prev:  # a re-plan keeps roster placement and identity (the change log shows it as a spec change)
+            c.rosters, c.created_at, c.note = list(prev.rosters), prev.created_at, prev.note
         m.characters.append(c)
+        settle_ranks(m)
         self.save(m, f"{display_name} plans {slot}: {cls} {spec}{'/' + offspec if offspec else ''}")
         return m, c
 
@@ -1421,7 +1493,8 @@ class Registry:
         return c
 
     def set_roles(self, discord_id: int, display_name: str, primary: str, flex: list[str]) -> Member:
-        """Legacy /me plan roles: the primary is ignored (it follows the spec); flex goes on the main."""
+        """The registration wizard's role step: the primary is ignored (it follows the spec); flex goes on the main.
+        (/me plan roles is gone — /me char → Flex sets a character's extra roles.)"""
         m = self.member(discord_id, display_name, create=True)
         if not m.main:
             raise RegistryError("Plan or register a main first.")
@@ -1966,10 +2039,18 @@ class Registry:
         after = next((s for s in self.schedules(instance) if s["id"] == sid), None) or {"id": sid}
         return [f"{rd.get('name', instance)} · {after.get('name') or sid}: " + ("new schedule, " if before is None else "") + self.schedule_label(instance, after)]
 
+    def schedule_regulars(self, instance: str, sid: str) -> list[tuple[Member, RegisteredCharacter]]:
+        """Everyone holding the series "<raid>:<schedule>" on any character (retired ones too) — what removing the
+        schedule takes off (D30), by display name."""
+        key = series_key(instance, str(sid or "").strip().lower())
+        out = [(m, c) for m in self.members.values() for c in m.characters if key in c.rosters]
+        return sorted(out, key=lambda mc: mc[0].display_name.lower())
+
     @_config_verb(_raid_section)
     def remove_schedule(self, instance: str, sid: str, by: str) -> str:
         """Drop one schedule. `default` is the raid's own run times: removing it clears the raid's slots. Runs already
-        opened from it keep their times."""
+        opened from it keep their times. Its REGULARS come off with it (owner decision D30 — no orphans, and no DM to
+        them: the DM rule); the line names them. One commit for the schedule and the members."""
         import copy
 
         if instance not in self.profile.raids:
@@ -1983,8 +2064,19 @@ class Registry:
         want: dict = {"schedules": stored}
         if sid == DEFAULT_SCHEDULE:
             want["slots"] = []
-        self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} removed (by {by})")
-        return f"{rd.get('name', instance)}: schedule {have.get('name') or sid} removed"
+        key = series_key(instance, sid)
+        held = self.schedule_regulars(instance, sid) if not getattr(self, "_shadow", False) else []
+        with self.store.batch(f"{self.key}: raid {instance}: schedule {sid} removed (by {by})"):
+            self.set_raid_overrides(instance, want, by, message=f"raid {instance}: schedule {sid} removed (by {by})")
+            gone: list[str] = []
+            for m in {mm.discord_id: mm for mm, _c in held}.values():
+                for c in m.characters:
+                    if key in c.rosters:
+                        c.rosters.remove(key)
+                self.save(m, f"{by}: {m.display_name} off the regulars of {key} (schedule removed)")
+                gone.append(m.display_name)
+        return (f"{rd.get('name', instance)}: schedule {have.get('name') or sid} removed"
+                + (f" — {len(gone)} regular{'s' if len(gone) != 1 else ''} off it ({join_words(gone)})" if gone else ""))
 
     @_config_verb(_raid_section)
     def set_raid_override(self, instance: str, field: str, value, by: str) -> str:
@@ -2623,13 +2715,15 @@ class Registry:
         m = self.member(discord_id, display_name, create=True)
         c = RegisteredCharacter(name=name, surname=surname, cls=cls, spec=spec, offspec=offspec)
         if make_main or m.main is None:
+            rank = member_rank(m)  # D25: the member's rank moves to the new main (a first character starts as trial)
             for other in m.characters:
                 other.is_main = False
             c.is_main = True
-            c.rank = "trial" if m.main is None else c.rank
+            m.characters.append(c)
+            settle_ranks(m, rank)
         else:
             c.rank = "alt"
-        m.characters.append(c)
+            m.characters.append(c)
         self.save(m, f"{display_name} registered {c.label} ({cls} {spec}{', main' if c.is_main else ', alt'})")
         return m, c
 
@@ -2641,11 +2735,11 @@ class Registry:
         old = m.main
         if old is c:
             raise RegistryError(f"{c.label} is already your main.")
+        rank = member_rank(m)
         for other in m.characters:
             other.is_main = False
         c.is_main = True
-        if old and old.rank in ("trial", "raider", "core"):
-            c.rank, old.rank = old.rank, "alt"  # rank follows the player
+        settle_ranks(m, rank)  # D25: rank is the player's — it moves to the new main, every other character reads alt
         c.updated_at = now()
         self.save(m, f"{m.display_name} main {old.label if old else '-'} → {c.label}")
         return m, c, old
@@ -2667,13 +2761,13 @@ class Registry:
         c = next((c for c in m.active() if c.matches(label)), None)
         if not c:
             raise RegistryError(f"You have no active character named {label}.")
+        rank = member_rank(m)
         m.characters = [x for x in m.characters if x is not c]
         if c.is_main:
             nxt = next((x for x in m.characters if x.status in ("active", "planned")), None)
             if nxt:
                 nxt.is_main = True
-                if nxt.rank == "alt" and c.rank in ("trial", "raider", "core"):
-                    nxt.rank = c.rank
+        settle_ranks(m, rank)  # the player's standing follows them to the next main
         self.save(m, f"{m.display_name} deleted {c.label}")
         return c
 
@@ -2682,6 +2776,7 @@ class Registry:
         c = next((c for c in m.active() if c.matches(name)), None)
         if not c:
             raise RegistryError(f"You have no active character named {name}.")
+        rank = member_rank(m)
         c.status = "retired"
         c.updated_at = now()
         if c.is_main:
@@ -2689,37 +2784,118 @@ class Registry:
             nxt = next((x for x in m.active()), None)
             if nxt:
                 nxt.is_main = True
-                if nxt.rank == "alt" and c.rank in ("trial", "raider", "core"):
-                    nxt.rank = c.rank  # the player's standing follows them to the new main
+        settle_ranks(m, rank)  # the player's standing follows them to the new main; the retired one reads alt
         self.save(m, f"{m.display_name} retired {c.label}")
         return c
 
-    # ---- officer actions
-    def confirm(self, name: str, by: str) -> tuple[Member, RegisteredCharacter]:
-        hit = self.find(name)
-        if not hit:
-            raise RegistryError(f"No character named {name}.")
-        m, c = hit
+    # ---- officer actions: by (discord id, label), never a guild-wide name lookup (two members may share a first name)
+    def testers(self) -> set[int]:
+        """Who runs a rehearsal right now: the `test_by` of every live test run's roster."""
+        return {int(r["test_by"]) for r in (self.config.rosters or []) if r.get("test") and str(r.get("test_by") or "").isdigit()}
+
+    def puppet_refusal(self, m: Member, by_id: int | None) -> str | None:
+        """A test puppet belongs to the rehearsal: while a test run is live only its tester (or the owner) changes a
+        puppet's record; with none live, any officer may (the bench is idle). None = allowed."""
+        if not m.test or by_id is None or self.is_owner_id(by_id):
+            return None
+        testers = self.testers()
+        if not testers or int(by_id) in testers:
+            return None
+        return f"{m.display_name} is a test puppet of another officer's rehearsal — only they (or the owner) change it."
+
+    def _own_character(self, discord_id: int, label: str) -> tuple[Member, RegisteredCharacter]:
+        m = self.members.get(discord_id)
+        if m is None:
+            raise RegistryError("They have no registered characters yet.")
+        ref = str(label or "").strip()
+        c = next((c for c in m.active() if c.label == ref), None) or next((c for c in m.active() if c.matches(ref)), None)
+        if c is None:
+            raise RegistryError(f"{m.display_name} has no active character named {ref or '?'} (theirs: {', '.join(x.label for x in m.active()) or 'none'}).")
+        return m, c
+
+    def confirm(self, discord_id: int, label: str, by: str, *, by_id: int | None = None) -> tuple[Member, RegisteredCharacter]:
+        """An officer verifies one of THIS member's characters. Refused for your own character (self-confirm defeats the
+        badge; the owner excepted), for a planned (unnamed) one, and when someone already confirmed it."""
+        m, c = self._own_character(discord_id, label)
+        why = self.puppet_refusal(m, by_id)
+        if why:
+            raise RegistryError(why)
+        if by_id is not None and int(by_id) == m.discord_id and not self.is_owner_id(by_id):
+            raise RegistryError("You can't confirm your own character — another officer does that.")
+        if c.status != "active" or not c.name:
+            raise RegistryError(f"{c.label} has no name yet — a planned character is confirmed once it is named.")
         if c.confirmed_by:  # re-confirming used to overwrite who confirmed it, silently
             raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
         c.confirmed_by, c.confirmed_at, c.updated_at = by, now(), now()
         self.save(m, f"{by} confirmed {c.label}")
         return m, c
 
-    def set_rank(self, name: str, rank: str, by: str) -> tuple[Member, RegisteredCharacter]:
+    def set_rank(self, discord_id: int, rank: str, by: str, *, by_id: int | None = None) -> tuple[Member, RegisteredCharacter]:
+        """The member's rank (D25: per MEMBER, stored on the main; alts always read 'alt'). Refused for a member with no
+        main, for your own rank (the owner excepted) and for another officer's test puppet. Returns (member, main)."""
+        rank = str(rank or "").strip().lower()
         if rank not in RANKS:
             raise RegistryError(f"Rank must be one of {', '.join(RANKS)}.")
-        hit = self.find(name)
-        if not hit:
-            raise RegistryError(f"No character named {name}.")
-        m, c = hit
-        c.rank, c.updated_at = rank, now()
-        self.save(m, f"{by} set {c.label} rank {rank}")
-        return m, c
+        m = self.members.get(discord_id)
+        if m is None:
+            raise RegistryError("They have no registered characters yet.")
+        why = self.puppet_refusal(m, by_id)
+        if why:
+            raise RegistryError(why)
+        if by_id is not None and int(by_id) == m.discord_id and not self.is_owner_id(by_id):
+            raise RegistryError("You can't set your own rank — another officer does that.")
+        main = m.main
+        if main is None:
+            raise RegistryError(f"{m.display_name} has no main yet — rank lives on the main (they register or plan one first).")
+        if main.rank == rank and all(c.rank == "alt" for c in m.characters if c is not main):
+            return m, main
+        settle_ranks(m, rank)
+        main.updated_at = now()
+        self.save(m, f"{by} set {m.display_name}'s rank {rank}")
+        return m, main
+
+    def migrate_ranks(self, by: str = "migrate", dry_run: bool = False) -> list[str]:
+        """D25 (rank per member): every member's non-main characters read 'alt', the main keeps the member's rank (an alt
+        that out-ranked a main reading 'alt' gives the main its rank). Idempotent; one data commit for the lot. Run it
+        with scripts/migrate_ranks.py while the bot is stopped."""
+        lines: list[str] = []
+        with self.store.batch(f"{self.key}: migrate: rank per member ({by})"):
+            for m in sorted(self.members.values(), key=lambda x: x.display_name.lower()):
+                main = m.main
+                if main is None:
+                    stray = [c for c in m.characters if c.rank != "alt"]
+                    if stray:
+                        lines.append(f"{m.display_name}: no main — {', '.join(c.label for c in stray)} → alt")
+                        if not dry_run:
+                            for c in stray:
+                                c.rank = "alt"
+                            self.save(m, f"migrate: {m.display_name} rank per member")
+                    continue
+                best = main.rank
+                if best == "alt":  # the standing sat on an alt: it belongs to the player, so to the main
+                    ranked = [c.rank for c in m.characters if c is not main and c.rank in PLAYER_RANKS]
+                    best = max(ranked, key=PLAYER_RANKS.index) if ranked else best
+                stray = [c for c in m.characters if c is not main and c.rank != "alt"]
+                if best == main.rank and not stray:
+                    continue
+                lines.append(f"{m.display_name}: rank {best} on {main.label}" + (f"; {', '.join(c.label for c in stray)} → alt" if stray else ""))
+                if not dry_run:
+                    settle_ranks(m, best)
+                    self.save(m, f"migrate: {m.display_name} rank per member")
+        return lines
 
     def officer_set_main(self, discord_id: int, name: str, by: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m, c, old = self.set_main(discord_id, name)
         return m, c, old
+
+    def set_dm(self, discord_id: int, on: bool, by: str) -> str:
+        """DMs from the bot on/off for one member (the Me page, the Members page, plain text, MCP). Returns the line."""
+        m = self.member(discord_id)
+        if m.dm_opt_out == (not on):
+            return f"{m.display_name}: DMs already {'on' if on else 'off'}"
+        m.dm_opt_out = not on
+        self.save(m, f"{m.display_name} DMs {'on' if on else 'off'}" + (f" (by {by})" if by != m.display_name else ""))
+        return f"{m.display_name}: DMs {'on' if on else 'off'}"
 
     # ---- regulars (roster redesign Phase 1): officer-curated, per recurring SERIES "<raid>:<schedule>", one character per
     # member per series, stored on the character (RegisteredCharacter.rosters). Regulars are expected on every sheet of the
@@ -2976,11 +3152,42 @@ class Registry:
             raise RegistryError(f"Absences longer than {MAX_ABSENCE_DAYS} days: ask an officer to take you off the roster instead.")
         return s.isoformat(), e.isoformat()
 
-    def add_absence(self, discord_id: int, start: str, end: str | None, reason: str | None, by: str, display_name: str | None = None) -> tuple[Member, Absence]:
+    @staticmethod
+    def absence_reason(reason: str | None) -> str | None:
+        """An absence's reason as stored: stripped, None when empty; refused past ABSENCE_REASON_MAX characters (the
+        cap lives here, so the Discord modal, the web and plain text all refuse it the same way)."""
+        text = (reason or "").strip()
+        if len(text) > ABSENCE_REASON_MAX:
+            raise RegistryError(f"A reason is at most {ABSENCE_REASON_MAX} characters (this one has {len(text)}) — shorten it; only officers read it.")
+        return text or None
+
+    def absence_overlap(self, m: Member | None, start: str, end: str) -> Absence | None:
+        """The absence `m` already has on any of those days (ISO, inclusive), or None."""
+        return next((a for a in sorted(m.absences, key=lambda x: x.start) if a.start <= end and a.end >= start), None) if m else None
+
+    def check_absence(self, m: Member | None, start: str, end: str | None, reason: str | None = None) -> tuple[str, str]:
+        """Everything add_absence refuses, without writing (the previews call it): the span, the reason cap, an overlap
+        with an absence already on file ("already away Tue 9 – Thu 11 Dec, recorded by Kessa")."""
         s, e = self.absence_span(start, end)
+        self.absence_reason(reason)
+        clash = self.absence_overlap(m, s, e)
+        if clash is not None:
+            who = m.display_name
+            raise RegistryError(f"{who} is already away {self.span_label(clash.start, clash.end)}" + (f" (recorded by {clash.by})" if clash.by != who else "")
+                                + " — clear that one first (I'm back), or pick days outside it.")
+        return s, e
+
+    def add_absence(self, discord_id: int, start: str, end: str | None, reason: str | None, by: str, display_name: str | None = None, *,
+                    by_id: int | None = None) -> tuple[Member, Absence]:
+        """Record an absence. Refused: a bad span, a reason over the cap, days that overlap an absence on file (one
+        record per day — clearing one never leaves another half-covering it), another officer's test puppet."""
         m = self.member(discord_id, display_name, create=display_name is not None)
-        a = Absence(start=s, end=e, reason=(reason or "").strip() or None, by=by)
-        m.absences = [x for x in m.absences if not (x.start == a.start and x.end == a.end)] + [a]
+        why = self.puppet_refusal(m, by_id)
+        if why:
+            raise RegistryError(why)
+        s, e = self.check_absence(m, start, end, reason)
+        a = Absence(start=s, end=e, reason=self.absence_reason(reason), by=by)
+        m.absences = [*m.absences, a]
         self.save(m, f"{m.display_name} absent {a.start}" + (f"→{a.end}" if a.end != a.start else "") + (f" (by {by})" if by != m.display_name else ""))
         return m, a
 
@@ -3006,69 +3213,151 @@ class Registry:
         return a
 
     # ---- the character table (Me page and the Members page save the same shape)
-    def save_character_table(self, discord_id: int, rows: list[dict], by: str) -> list[str]:
+    def save_character_table(self, discord_id: int, rows: list[dict], by: str, *, officer: bool = False, by_id: int | None = None,
+                             rev: str | None = None) -> list[str]:
         """One save for a member's table. Each row: {label?, cls, spec, offspec?, name?, surname?, main?: bool (or slot: "main"),
-        rank?, flex?: [role, …] (extra roles; [] clears, absent keeps), delete?: bool, retire?: bool}. A row whose label matches an active character updates it (spec/offspec,
-        a name for a planned one, rank when given); an unknown row adds a character (named) or a plan (unnamed);
-        `main` on a row makes it the main. One commit; returns the change lines."""
+        rank?, confirm?: bool, flex?: [role, …] (extra roles; [] clears, absent keeps), delete?: bool, retire?: bool}. A row whose
+        label matches an active character updates it (spec/offspec, a name for a planned one); an unknown row adds a
+        character (named) or a plan (unnamed); `main` on a row makes it the main — applied BEFORE rank, so one save that
+        makes Jonny main and raider is not refused as "rank on an alt". `rank` (D25: per member) is accepted on the row
+        that is the main after the save; on an alt only 'alt'. `rank` and `confirm` need `officer` (a member's own POST
+        with a rank is refused — no self-promotion). `rev` = the characters_rev the editor loaded (stale → CharactersChanged).
+        The whole table is applied to a COPY first, so a refusal on row N leaves nothing applied; then for real, one commit.
+        Returns the change lines."""
+        with self.config_lock:  # web saves run in worker threads while Discord writes on the loop (design §2.4)
+            rows = self.check_character_table(discord_id, rows, by, officer=officer, by_id=by_id, rev=rev)
+            m = self.members.get(discord_id)
+            who = m.display_name if m else by
+            with self.store.batch(f"{self.key}: {by} saved {who}'s characters"):
+                return self._apply_table(discord_id, rows, by, by_id)
+
+    def check_character_table(self, discord_id: int, rows: list[dict], by: str, *, officer: bool = False, by_id: int | None = None,
+                              rev: str | None = None) -> list[dict]:
+        """Everything save_character_table refuses, without writing: the rev, a puppet, a member's rank or confirm, and
+        the whole table applied to a copy (the previews call it, so a {preview: true} that answers is a save that works).
+        Returns the rows as they will be applied."""
+        with self.config_lock:
+            m = self.members.get(discord_id)
+            if rev and m is not None and rev != self.characters_rev(m):
+                raise CharactersChanged(m)
+            if m is not None:
+                why = self.puppet_refusal(m, by_id)
+                if why:
+                    raise RegistryError(why)
+            rows = self._table_rows(m, rows, officer)
+            self._table_shadow(discord_id)._apply_table(discord_id, rows, by, by_id)  # a refusal raises here, nothing written
+            return rows
+
+    @staticmethod
+    def _table_rows(m: Member | None, rows, officer: bool) -> list[dict]:
+        out = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                raise RegistryError("rows must be objects")
+            label = str(row.get("label") or "").strip()
+            cur = next((x for x in (m.active() if m else []) if x.label == label), None) if label else None
+            rank = str(row.get("rank") or "").strip().lower()
+            if not officer and rank and (cur is None or rank != cur.rank):
+                raise RegistryError("Only an officer sets a rank.")
+            if not officer and row.get("confirm") and not (cur and cur.confirmed_by):
+                raise RegistryError("Only an officer confirms a character.")
+            out.append(row)
+        return out
+
+    def _table_shadow(self, discord_id: int) -> "Registry":
+        """A throw-away copy whose `save` keeps the member in memory only: the table's verbs run on it unchanged, so a
+        refusal is found before anything is committed (Registry.shadow copies the config; this copies one member)."""
+        import copy
+
+        sh = copy.copy(self)
+        sh.members = dict(self.members)
+        if discord_id in sh.members:
+            sh.members[discord_id] = self.members[discord_id].model_copy(deep=True)
+        sh.listeners, sh._snap, sh._shadow = [], {}, True
+
+        def save(m: Member, message: str) -> None:
+            sh.members[m.discord_id] = m
+
+        sh.save = save  # type: ignore[method-assign]
+        return sh
+
+    def _apply_table(self, discord_id: int, rows: list[dict], by: str, by_id: int | None) -> list[str]:
         m = self.members.get(discord_id)
         who = m.display_name if m else by
         done: list[str] = []
         want_main = None
-        with self.store.batch(f"{self.key}: {by} saved {who}'s characters"):
-            for row in rows or []:
-                if not isinstance(row, dict):
-                    raise RegistryError("rows must be objects")
-                label = str(row.get("label") or "").strip()
-                cur = next((x for x in (m.active() if m else []) if x.label == label), None) if label else None
-                if row.get("delete") or row.get("retire"):
-                    if cur is None:
-                        continue
-                    if row.get("delete"):
-                        self.delete_character(discord_id, cur.label)
-                        done.append(f"deleted {cur.label}")
-                    else:
-                        self.retire(discord_id, cur.label)
-                        done.append(f"retired {cur.label}")
-                    m = self.members.get(discord_id)
-                    continue
-                cls, spec, off = (row.get("cls") or "").strip(), (row.get("spec") or "").strip(), (row.get("offspec") or "").strip() or None
-                name, surname = (row.get("name") or "").strip(), (row.get("surname") or "").strip() or None
-                is_main = bool(row.get("main")) or row.get("slot") == "main"
+        ranks: list[tuple[str, str]] = []  # (final label, rank) — applied after the main moved
+        confirms: list[str] = []
+        for row in rows:
+            label = str(row.get("label") or "").strip()
+            cur = next((x for x in (m.active() if m else []) if x.label == label), None) if label else None
+            if row.get("delete") or row.get("retire"):
                 if cur is None:
-                    if not cls or not spec:
-                        continue
-                    if name:
-                        m, cur = self.add_character(discord_id, who, name, cls, spec, off, is_main, surname=surname)
-                        done.append(f"added {cur.label}")
-                    else:
-                        m, cur = self.set_plan(discord_id, who, cls, spec, off, "main" if is_main else "alt")
-                        done.append(f"planned {cur.cls} {cur.spec}")
+                    continue
+                if row.get("delete"):
+                    self.delete_character(discord_id, cur.label)
+                    done.append(f"deleted {cur.label}")
                 else:
-                    if spec and (spec, off) != (cur.spec, cur.offspec):
-                        cur = self.set_spec(discord_id, cur.label, spec, off)
-                        done.append(f"{cur.label}: {spec}" + (f"/{off}" if off else ""))
-                    if not cur.name and name:
-                        m, cur = self.name_character(discord_id, name, "main" if cur.is_main else "alt", surname=surname, label=cur.label)
-                        done.append(f"named {cur.label}")
-                rank = str(row.get("rank") or "").strip()
-                if rank and rank != cur.rank:
-                    self.set_rank(cur.label, rank, by)
-                    done.append(f"{cur.label}: rank {rank}")
-                if row.get("flex") is not None:  # extra roles (set_flex drops the ones the spec/offspec already give)
-                    fl = row["flex"]
-                    if not isinstance(fl, list):
-                        raise RegistryError("flex is a list of roles")
-                    before = list(cur.flex)
-                    cur = self.set_flex(discord_id, cur.label, [str(r).strip().lower() for r in fl if str(r).strip()])
-                    if cur.flex != before:
-                        done.append(f"{cur.label}: flex {', '.join(cur.flex) or 'none'}")
-                if is_main:
-                    want_main = cur.label
-            m = self.members.get(discord_id) or m
-            if m and want_main and not (m.main and m.main.label == want_main):
-                self.set_main(discord_id, want_main)
-                done.append(f"main is {want_main}")
+                    self.retire(discord_id, cur.label)
+                    done.append(f"retired {cur.label}")
+                m = self.members.get(discord_id)
+                continue
+            cls, spec, off = (row.get("cls") or "").strip(), (row.get("spec") or "").strip(), (row.get("offspec") or "").strip() or None
+            name, surname = (row.get("name") or "").strip(), (row.get("surname") or "").strip() or None
+            is_main = bool(row.get("main")) or row.get("slot") == "main"
+            if cur is None and label and (any(c.label == label for c in (m.characters if m else [])) or not (cls and spec)):
+                # a row naming a character that is gone (retired or deleted meanwhile) is refused, never silently dropped
+                raise RegistryError(f"{label} is no longer one of {'your' if not m or by == m.display_name else m.display_name + chr(39) + 's'} active characters.")
+            if cur is None:
+                if not cls or not spec:
+                    continue
+                if name:
+                    m, cur = self.add_character(discord_id, who, name, cls, spec, off, is_main, surname=surname)
+                    done.append(f"added {cur.label}")
+                else:
+                    m, cur = self.set_plan(discord_id, who, cls, spec, off, "main" if is_main else "alt")
+                    done.append(f"planned {cur.cls} {cur.spec}")
+            else:
+                if spec and (spec, off) != (cur.spec, cur.offspec):
+                    cur = self.set_spec(discord_id, cur.label, spec, off)
+                    done.append(f"{cur.label}: {spec}" + (f"/{off}" if off else ""))
+                if not cur.name and name:
+                    m, cur = self.name_character(discord_id, name, "main" if cur.is_main else "alt", surname=surname, label=cur.label)
+                    done.append(f"named {cur.label}")
+            rank = str(row.get("rank") or "").strip().lower()
+            if rank:
+                ranks.append((cur.label, rank))
+            if row.get("confirm") and not cur.confirmed_by:
+                confirms.append(cur.label)
+            if row.get("flex") is not None:  # extra roles (set_flex drops the ones the spec/offspec already give)
+                fl = row["flex"]
+                if not isinstance(fl, list):
+                    raise RegistryError("flex is a list of roles")
+                before = list(cur.flex)
+                cur = self.set_flex(discord_id, cur.label, [str(r).strip().lower() for r in fl if str(r).strip()])
+                if cur.flex != before:
+                    done.append(f"{cur.label}: flex {', '.join(cur.flex) or 'none'}")
+            if is_main:
+                want_main = cur.label
+        m = self.members.get(discord_id) or m
+        if m and want_main and not (m.main and m.main.label == want_main):
+            self.set_main(discord_id, want_main)
+            done.append(f"main is {want_main}")
+        m = self.members.get(discord_id) or m
+        for label, rank in ranks:  # main first, then rank (D25): rank is accepted on the main only
+            c = next((x for x in (m.active() if m else []) if x.label == label), None)
+            if c is None:
+                continue
+            if c is not m.main:
+                if rank != "alt":
+                    raise RegistryError(f"{label} is an alt — rank lives on the main ({m.main.label if m.main else 'none yet'}).")
+                continue
+            if rank != c.rank:
+                self.set_rank(discord_id, rank, by, by_id=by_id)
+                done.append(f"{m.display_name}: rank {rank}")
+        for label in confirms:
+            self.confirm(discord_id, label, by, by_id=by_id)
+            done.append(f"confirmed {label}")
         return done
 
     def absences_between(self, start: str, end: str) -> list[tuple[Member, Absence]]:

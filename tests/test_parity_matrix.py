@@ -31,8 +31,8 @@ SURFACES: dict[str, dict[str, str]] = {
     "absence": {"discord": "flow:absence", "web": "POST /api/me/absence", "mcp": "add_absence"},
     "absence_clear": {"discord": "slash:me absent clear", "web": "POST /api/me/absence/clear", "mcp": "clear_absence"},
     "dm": {"web": "POST /api/me/dm", "mcp": "set_dm"},
-    "character": {"discord": "flow:register", "web": "POST /api/me/characters", "mcp": "save_characters"},
-    "set_main": {"discord": "flow:char_main", "web": "POST /api/me/main", "mcp": "set_member"},
+    "character": {"discord": "flow:member_char", "web": "POST /api/me/characters", "mcp": "save_characters"},  # /me char, /roster char
+    "set_main": {"discord": "flow:member_char", "web": "POST /api/me/main", "mcp": "set_member"},
     "rank": {"discord": "flow:roster_rank", "web": "POST /api/members/set", "mcp": "set_member"},
     "confirm": {"discord": "flow:roster_confirm", "web": "POST /api/admin/confirm", "mcp": "set_member"},
     "run_open": {"discord": "flow:raid_open", "web": "POST /api/raid/{rid}/open", "mcp": "open_run"},
@@ -179,11 +179,12 @@ def test_pending_rows_are_few_and_dated_to_a_phase():
 
 
 def test_single_surface_features_are_written_down_with_a_living_path(web_routes, slash_paths):
-    """§2.1's by-design lists (Discord-only: claim, owner transfer, the application wizard, the cards, the guide, the DM
+    """§2.1's by-design lists (Discord-only: claim, the application wizard, the cards, the guide, the DM
     picker; web-only: the board, the comp sandbox, test-bench compose, applications review, the policy editor, history,
     the plain-permissions grid) are configops.BY_DESIGN_ONLY: features, not ops, each with its surface, its entry point
     (which must exist) and the reason."""
-    expected = {"guild_claim", "owner_transfer", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
+    # owner transfer left this list in phase 2 (C): /gm config owner AND the Config page (POST /api/owner) — tests/test_people.py
+    expected = {"guild_claim", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
                 "board", "comp_sandbox", "test_bench_compose", "applications_review", "policy_editor", "history", "plain_permissions_grid"}
     assert expected <= set(configops.BY_DESIGN_ONLY)
     assert not set(configops.BY_DESIGN_ONLY) & set(configops.OP_GROUP), "an op belongs in BY_DESIGN_EXEMPT, not here"

@@ -188,7 +188,7 @@ class RegisterWizard(Wizard):
             return
         what = f"{'Registered' if name else 'Planned'} {'main' if self.slot == 'main' else 'alt'}: **{c.label}** · {_specline(c.spec, c.offspec)}"
         roles = (f" · roles: {self.roles[0]}" + (f" (+{', '.join(self.roles[1:])})" if len(self.roles) > 1 else "")) if self.roles else ""
-        tail = " An officer will confirm the character." if name else " Add the name at launch with `/me char name`."
+        tail = " An officer will confirm the character." if name else " Add the name at launch with `/me char` → Name."
         await self.finish(interaction, f"✅ {what}{roles}.{tail} `/me view` shows everything.")
         await _emit(interaction, reg, f"**{m.display_name}** {'registered' if name else 'planned'} {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ', alt'})"
                     + (f" · roles {self.roles}" if self.roles else "") + ("" if not name else " — pending confirmation"))
@@ -217,7 +217,7 @@ class RegisterWizard(Wizard):
             await self.refuse(interaction, str(e), self.back_to_picks, "Change")
             return
         if self.slot == "main":
-            await self.finish(interaction, f"✅ Planned main: {_char_line(interaction, c)}. Your role follows the spec; extra roles you'd play: `/me plan roles`.")
+            await self.finish(interaction, f"✅ Planned main: {_char_line(interaction, c)}. Your role follows the spec; extra roles you'd play: `/me char` → Flex.")
             await _emit(interaction, reg, f"{m.display_name} plans to main {c.cls} {c.spec}")
         else:
             await self.finish(interaction, f"✅ Planned alt: {_char_line(interaction, c)}")
@@ -427,7 +427,7 @@ async def open_register(interaction: discord.Interaction, reg: Registry, *, slot
     if mode == "apply":
         m = reg.members.get(interaction.user.id)
         if m and m.active():
-            await interaction.response.send_message("You're already a member — add characters with `/register` or `/me char add`.", ephemeral=True)
+            await interaction.response.send_message("You're already a member — add characters with `/register` or `/me char` → Add an alt.", ephemeral=True)
             return
         if not reg.config.recruitment.open:
             await interaction.response.send_message((f"{lead}\n" if lead else "") + f"{reg.config.name} isn't taking applications right now — check back later, or ask an officer.",
@@ -471,7 +471,7 @@ class CharNameWizard(Wizard):
     async def picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         c = next((c for c in self.planned(interaction.user.id) if ("main" if c.is_main else "alt") == values[0]), None)
         if not c:
-            await self.refuse(interaction, "That planned character is gone. Run `/me char name` again.")
+            await self.refuse(interaction, "That planned character is gone. Run `/me char` → Name again.")
             return
         self.choose(c)
         await self.open_form(interaction, self.form())
@@ -492,7 +492,7 @@ class CharNameWizard(Wizard):
         await self.working(interaction, "Saving…")
         now = next((c for c in self.planned(uid) if c.is_main == (d["slot"] == "main")), None)
         if not now or now.cls != d["cls"]:  # re-planned meanwhile: don't name a different character than the one shown
-            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Run `/me char name` again.")
+            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Run `/me char` → Name again.")
             return
         try:
             m, c = self.reg.name_character(uid, d["first"], d["slot"], surname=d["last"] or None)
@@ -615,7 +615,7 @@ class CharSpecWizard(OwnCharWizard):
 
 class CharMainWizard(OwnCharWizard):
     prompt = "Which character becomes your main? Your rank moves with you."
-    empty = "You have no other character to make your main — `/me char add` registers an alt."
+    empty = "You have no other character to make your main — `/me char` → Add an alt registers one."
 
     def __init__(self, reg: Registry, owner_id: int):
         super().__init__(reg, owner_id, title="Change your main")

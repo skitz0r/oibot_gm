@@ -24,6 +24,8 @@ from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from ..consequences import consequence as consequence_lines, consequences_json
+from ..presets import DURATIONS
+from ..registry import ABSENCE_REASON_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
@@ -298,20 +300,98 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         return sheets_words(reg, bot, keys)
 
-    async def clear_absence(v, uid: int, start: str):
-        """Registry clears it, the bot re-opens the sheets it had answered for them; the lines say what changed."""
+    async def refused(v, request: Request, e: Exception):
+        """A people verb's refusal as JSON: CharactersChanged → 409 with the member's current table (the editor marks the
+        rows whose base moved); a RegistryError → 400 with its words; anything else → 500 GENERIC_ERROR + the owner's ops
+        line (configops.report_error — never a type name in a reply)."""
+        from ..configops import GENERIC_ERROR, report_error
+
+        if isinstance(e, CharactersChanged):
+            m = e.member
+            rs = bot.raids.store(v.reg)
+            return JSONResponse({"error": str(e), "uid": str(m.discord_id), "characters_rev": v.reg.characters_rev(m),
+                                 "characters": [char_json(v.reg, c, seat_runs(v.reg, rs, m)) for c in m.active()]}, status_code=409)
+        text = await report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} {request.url.path}")
+        return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)
+
+    def absence_end(d: dict) -> str | None:
+        """The end day of an absence body: `end` (ISO), or `days` (From + For how long — presets.DURATIONS, the
+        Discord wizard's list) counted from `start`, inclusive."""
+        if d.get("days") not in (None, ""):
+            from datetime import date as _date
+
+            try:
+                days = int(d["days"])
+                start = _date.fromisoformat(str(d.get("start") or "").strip())
+            except (TypeError, ValueError):
+                raise RegistryError("Dates are YYYY-MM-DD and days a whole number.")
+            if days < 1:
+                raise RegistryError("An absence is at least one day.")
+            return (start + timedelta(days=days - 1)).isoformat()
+        return d.get("end") or None
+
+    async def absence_route(request: Request, v, d: dict, m):
+        """POST an absence for `m` (the Me page for yourself, the Members page for someone): {start, end | days, reason,
+        preview}. Preview = everything the verb refuses (overlap, reason cap, span) + what it does to each live sheet —
+        the words the Discord wizard's confirm screen prints; nothing written."""
+        from .. import discord_people
+
+        reg = v.reg
+        try:
+            end = absence_end(d)
+            if d.get("preview"):
+                s, e = await asyncio.to_thread(reg.check_absence, m, d.get("start") or "", end, d.get("reason") or None)
+                rs0 = bot.raids.store(reg)
+                lines = discord_people.absence_lines(reg, rs0, m, s, e)
+                return {"preview": True, "span": reg.span_label(s, e), "start": s, "end": e, "lines": lines,
+                        "sheets": [{"key": ev.key, "effect": what} for ev, what in rc.absence_effects(reg, rs0, m, s, e)],
+                        "message": f"preview — nothing saved: {m.display_name if m else v.name} away {reg.span_label(s, e)}" + ("".join(f"\n{ln}" for ln in lines) or " · no live sheet on those days")}
+            mm, a, touched = await discord_people.record_absence(bot, reg, m.discord_id if m else v.uid, d.get("start") or "", end, d.get("reason") or None, v.name,
+                                                                 by_id=v.uid, display_name=m.display_name if m else v.name, via=v.via)
+        except Exception as e:  # noqa: BLE001 — refusals read as written
+            return await refused(v, request, e)
+        who = "" if mm.discord_id == v.uid else f"{mm.display_name} "
+        return {"message": f"{who}away {reg.span_label(a.start, a.end)}" + sheets_touched(reg, touched), "sheets": list(touched or []), "span": reg.span_label(a.start, a.end)}
+
+    async def clear_absence(request: Request, v, uid: int, start: str, preview: bool = False):
+        """I'm back (discord_people.im_back): the absence goes, the sheets it had answered for them re-open; the lines
+        say what changed. `preview`: those lines, nothing written."""
+        from .. import discord_people
+
         reg = v.reg
         m = reg.members.get(uid)
         if not m:
             raise HTTPException(400, "unknown member")
+        if preview:
+            a = next((x for x in m.absences if x.start == str(start).strip()), None)
+            if a is None:
+                return JSONResponse({"error": f"No absence starting {reg.day_label(str(start).strip())}."}, status_code=400)
+            lines = discord_people.absence_clear_lines(reg, bot.raids.store(reg), m, a)
+            return {"preview": True, "lines": lines, "span": reg.span_label(a.start, a.end),
+                    "message": f"preview — nothing saved: {m.display_name} back, {reg.span_label(a.start, a.end)} cleared" + "".join(f"\n{ln}" for ln in lines)}
         try:
-            a = await asyncio.to_thread(reg.clear_absence, uid, start, v.name)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        lines = list(await maybe_await(bot.absence_cleared(reg, m, a, v.name)) or [])
+            a, lines = await discord_people.im_back(bot, reg, uid, start, v.name, by_id=v.uid, via=v.via)
+        except Exception as e:  # noqa: BLE001
+            return await refused(v, request, e)
         head = f"{m.display_name} back: cleared {reg.span_label(a.start, a.end)}"
         await ops_mod.audited(bot.ops, reg, v.name, head + (" — " + "; ".join(lines) if lines else ""), via=v.via, by_id=v.uid)
         return {"message": "\n".join([head, *lines]), "lines": lines}
+
+    async def save_table(request: Request, v, uid: int, rows: list[dict], *, officer: bool, rev: str | None, preview: bool):
+        """THE character verb over HTTP (discord_people.save_characters): {message, lines, ripple} or the refusal."""
+        from .. import discord_people
+
+        try:
+            res = await discord_people.save_characters(bot, v.reg, uid, rows, v.name, by_id=v.uid, officer=officer, rev=rev or None, via=v.via, preview=preview)
+        except Exception as e:  # noqa: BLE001
+            return await refused(v, request, e)
+        m = v.reg.members.get(uid)
+        return {**res, "preview": preview, "characters_rev": v.reg.characters_rev(m) if m else None}
+
+    def visible(v, m) -> bool:
+        """A test puppet shows only to the officers who may change it (Registry.puppet_refusal: the live rehearsal's tester
+        or the owner; any officer while no test run is live) — real members always."""
+        return not m.test or v.reg.puppet_refusal(m, v.uid) is None
 
     @app.exception_handler(HTTPException)
     async def _json_errors(request: Request, exc: HTTPException):
@@ -343,6 +423,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "group_caps": {"tank": int(grouping.get("tank_max_per_group", 2)), "healer": int(grouping.get("healer_max_per_group", 3))},
             "class_colours": dict(render.CLASS),
             "started_at": float(getattr(bot, "started_at", STARTED)),
+            # absences: the Discord wizard's For how long list (presets.DURATIONS) and the verb's caps, so the web modals can't drift
+            "durations": [{"days": d, "label": label} for d, label in DURATIONS], "max_absence_days": MAX_ABSENCE_DAYS, "absence_reason_max": ABSENCE_REASON_MAX,
+            "ranks": list(RANKS),
         }
 
     @app.get("/api/meta")
@@ -448,6 +531,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         today = reg.now_local().date().isoformat()
         return {
             "display_name": m.display_name if m else v.name, "registered": m is not None,
+            "characters_rev": reg.characters_rev(m) if m else None, "rank": m.rank if m else None,  # the table's base (a stale save is refused, 409)
             "must_apply": must_apply(v),  # a newcomer: the page points to the Discord application instead of the character table
             "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in (m.active() if m else [])],
             "roles": {"primary": primary, "flex": list(flex)},
@@ -473,37 +557,45 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/me/characters")
     async def me_characters(request: Request):
-        """One save for the table (spec/offspec per existing row, names for planned rows, new rows added or planned):
-        the same registry verb the Members page and the Discord commands use. A newcomer applies in Discord first."""
-        def go(v, d):
-            if must_apply(v):
-                raise RegistryError(APPLY_FIRST_WEB)
-            return "; ".join(v.reg.save_character_table(v.uid, table_rows(d.get("rows")), v.name)) or "no changes"
-        return await run(request, go)
+        """One save for your table {rows, rev, preview}: the same verb as the Members page, /me char, plain text and MCP
+        (discord_people.save_characters — validated on a copy, rank and confirm refused for a member, the ripple into
+        sheets and seats). `preview` writes nothing and answers the ripple sentences. A newcomer applies in Discord first."""
+        v, d = await body(request)
+        if must_apply(v):
+            return JSONResponse({"error": APPLY_FIRST_WEB}, status_code=400)
+        try:
+            rows = table_rows(d.get("rows"))
+        except HTTPException as e:
+            return JSONResponse({"error": e.detail}, status_code=400)
+        return await save_table(request, v, v.uid, rows, officer=False, rev=d.get("rev"), preview=bool(d.get("preview")))
 
     @app.post("/api/me/main")
     async def me_main(request: Request):
-        return await run(request, lambda v, d: f"main is now {v.reg.set_main(v.uid, parse(d, LabelBody).label)[1].label}")
+        """Make one of your characters the main (the rank moves with it): a one-row table save."""
+        v, d = await body(request)
+        label = parse(d, LabelBody).label
+        return await save_table(request, v, v.uid, [{"label": label, "main": True}], officer=False, rev=d.get("rev"), preview=bool(d.get("preview")))
 
     @app.post("/api/me/character/delete")
     async def me_delete(request: Request):
-        return await run(request, lambda v, d: f"deleted {v.reg.delete_character(v.uid, parse(d, LabelBody).label).label}")
+        """Delete (or with retire: true, retire) one of your characters — a one-row table save, so a seat it holds is
+        handed back and the bench asked; `preview` says so first."""
+        v, d = await body(request)
+        label = parse(d, LabelBody).label
+        row = {"label": label, "retire": True} if d.get("retire") else {"label": label, "delete": True}
+        return await save_table(request, v, v.uid, [row], officer=False, rev=d.get("rev"), preview=bool(d.get("preview")))
 
     @app.post("/api/me/absence")
     async def me_absence(request: Request):
+        """Your absence: {start, days | end, reason, preview} — From + For how long like the Discord wizard."""
         v, d = await body(request)
-        try:
-            m, a = await asyncio.to_thread(v.reg.add_absence, v.uid, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, v.name)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        touched = await bot.announce_absence(v.reg, m, a, v.name)
-        return {"message": f"away {v.reg.span_label(a.start, a.end)}" + sheets_touched(v.reg, touched), "sheets": list(touched or [])}
+        return await absence_route(request, v, d, v.reg.members.get(v.uid))
 
     @app.post("/api/me/absence/clear")
     async def me_absence_clear(request: Request):
-        """Back early: the absence goes, and the sheets it had answered No thanks on re-open for them (the lines say which)."""
+        """I'm back: the absence goes, and the sheets it had answered No thanks on re-open for you (the lines say which)."""
         v, d = await body(request)
-        return await clear_absence(v, v.uid, parse(d, StartBody).start)
+        return await clear_absence(request, v, v.uid, parse(d, StartBody).start, bool(d.get("preview")))
 
     @app.post("/api/me/placement")
     async def me_placement(request: Request):
@@ -552,12 +644,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/me/dm")
     async def me_dm(request: Request):
-        def go(v, d):
-            m = v.reg.member(v.uid)
-            m.dm_opt_out = not bool(d.get("on"))
-            v.reg.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'}")
-            return f"DMs {'off' if m.dm_opt_out else 'on'}"
-        return await run(request, go)
+        return await run(request, lambda v, d: v.reg.set_dm(v.uid, bool(d.get("on")), v.name))
 
     # ---- runs: the officer panel (sheets per raid, the board, lock, confirmations)
     def t12(reg, value) -> str:
@@ -1298,7 +1385,19 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/admin/confirm")
     async def admin_confirm(request: Request):
-        return await run(request, lambda v, d: f"confirmed {v.reg.confirm(parse(d, LabelBody).label, v.name)[1].label}", officer=True)
+        """Confirm one character: {label, uid | member} (the member names whose — two members may share a first name; a
+        bare label still resolves guild-wide). Your own character is refused (the owner aside)."""
+        def go(v, d):
+            label = parse(d, LabelBody).label
+            if member_ref(d) not in (None, ""):
+                m = resolve_member(v.reg, member_ref(d))
+            else:
+                hit = v.reg.find(label)
+                if not hit:
+                    raise RegistryError(f"No character named {label}.")
+                m = hit[0]
+            return f"confirmed {v.reg.confirm(m.discord_id, label, v.name, by_id=v.uid)[1].label}"
+        return await run(request, go, officer=True)
 
     @app.post("/api/admin/placement")
     async def admin_placement(request: Request):
@@ -1589,43 +1688,56 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     # ---- members: every member's characters and absences; officers edit them like their own Me page
     @app.get("/api/members")
     async def members(request: Request):
+        """Every member (characterless ones too — an officer may still record an absence, switch DMs or see a pending
+        ask), their characters, rank (D25: the member's, on the main), DM setting, upcoming absences and the table's base
+        rev. Test puppets only for the officers who may change them (the live rehearsal's tester, the owner)."""
         v = await who(request, officer=True)
         reg = v.reg
-        ms = sorted(reg.members.values(), key=lambda m: m.display_name.lower())
+        ms = sorted((m for m in reg.members.values() if visible(v, m)), key=lambda m: m.display_name.lower())
         privs = await asyncio.gather(*(privilege(reg, m.discord_id) if not m.test else asyncio.sleep(0, "test") for m in ms))
         today = reg.now_local().date().isoformat()
         rs = bot.raids.store(reg)
         rows = []
         for m, p in zip(ms, privs):
             chars = sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))
-            if not chars:
-                continue
             rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else p,
+                         "rank": m.rank, "dm": not m.dm_opt_out, "characters_rev": reg.characters_rev(m),
                          "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in chars], "absences": [absence_json(reg, a) for a in m.upcoming_absences(today)],
                          "asks": [{"roster": a["roster"], "answer": a.get("answer"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-3:] if a.get("answer") is None]})
         return {"rows": rows, "members": len(reg.members), "tz": reg.config.timezone}
 
     @app.post("/api/members/save")
     async def members_save(request: Request):
-        """One save for the whole table: per member — deletes, then the same table verb the Me page uses
-        (spec/offspec, names, new characters, main)."""
-        def go(v, d):
-            reg, done = v.reg, []
-            for row in d.get("rows") or []:
-                if not isinstance(row, dict):
-                    raise HTTPException(400, "rows must be objects")
-                if row.get("member"):  # the MCP server names people; the site sends ids
-                    m = resolve_member(reg, row["member"])
-                else:
-                    m = reg.members.get(as_int(row.get("uid"), "uid"))
-                if not m:
-                    continue
-                uid = m.discord_id
+        """One save for the whole table: per member {uid | member, characters, deletes, rev} through THE character verb
+        (officer: rank on the main and confirm allowed; your own rank refused). Members whose `rev` moved are refused and
+        listed in `refused` (their rows stay drafted on the page); the others apply. `preview`: the ripple per member."""
+        v, d = await body(request, officer=True)
+        reg, done, ripple, refused_rows = v.reg, [], [], []
+        preview = bool(d.get("preview"))
+        for row in d.get("rows") or []:
+            if not isinstance(row, dict):
+                return JSONResponse({"error": "rows must be objects"}, status_code=400)
+            try:
+                m = resolve_member(reg, row["member"]) if row.get("member") else reg.members.get(as_int(row.get("uid"), "uid"))
                 rows = [{"label": str(label), "delete": True} for label in row.get("deletes") or []] + table_rows(row.get("characters"))
-                if rows:
-                    done.extend(f"{line} ({m.display_name})" for line in reg.save_character_table(uid, rows, v.name))
-            return "; ".join(done) or "no changes"
-        return await run(request, go, officer=True)
+            except HTTPException as e:
+                return JSONResponse({"error": e.detail}, status_code=e.status_code)
+            if not m or not rows:
+                continue
+            out = await save_table(request, v, m.discord_id, rows, officer=True, rev=row.get("rev"), preview=preview)
+            if isinstance(out, JSONResponse):
+                import json as _json
+
+                err = _json.loads(out.body)
+                refused_rows.append({"uid": str(m.discord_id), "display_name": m.display_name, "error": err.get("error"), "stale": out.status_code == 409})
+                continue
+            done.extend(f"{line} ({m.display_name})" for line in out["lines"])
+            ripple.extend(f"{m.display_name}: {r}" for r in out["ripple"])
+        head = ("preview — nothing saved" if preview else "; ".join(done) or "no changes")
+        if refused_rows and not done and not ripple and not preview:
+            return JSONResponse({"error": "; ".join(f"{r['display_name']}: {r['error']}" for r in refused_rows), "refused": refused_rows}, status_code=409 if all(r["stale"] for r in refused_rows) else 400)
+        return {"message": head + "".join(f"\n{r}" for r in ripple) + "".join(f"\n⛔ {r['display_name']}: {r['error']}" for r in refused_rows),
+                "lines": done, "ripple": ripple, "refused": refused_rows, "preview": preview}
 
     @app.get("/api/member")
     async def member_get(request: Request, name: str = ""):
@@ -1636,7 +1748,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rs = bot.raids.store(reg)
         primary, flex = reg.roles_of(m)
         return {"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else await privilege(reg, m.discord_id),
-                "test": bool(m.test), "dm": not m.dm_opt_out, "roles": {"primary": primary, "flex": list(flex)},
+                "test": bool(m.test), "dm": not m.dm_opt_out, "roles": {"primary": primary, "flex": list(flex)}, "rank": m.rank, "characters_rev": reg.characters_rev(m),
                 "characters": [char_json(reg, c, seat_runs(reg, rs, m)) for c in sorted(m.active(), key=lambda c: (not c.is_main, c.created_at))],
                 "absences": [absence_json(reg, a) for a in sorted(m.absences, key=lambda a: a.start)],
                 "asks": [{"roster": a["roster"], "answer": a.get("answer"), "asked_at": a.get("asked_at"), **run_label(reg, rs, a["roster"])} for a in m.placement_asks[-5:]],
@@ -1644,83 +1756,137 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.get("/api/absences")
     async def absences(request: Request, all: bool = False):
-        """Every upcoming absence (`?all=true` = past ones too), newest start first, with the member it belongs to."""
+        """Every upcoming absence (`?all=true` = past ones too), by start, with the member, the span in words, the reason
+        and who recorded it (officers only). Test puppets only for the officers who may change them."""
         v = await who(request, officer=True)
         reg = v.reg
         today = reg.now_local().date().isoformat()
-        rows = [{"uid": str(m.discord_id), "display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "by": a.by, "current": a.start <= today <= a.end}
-                for m in reg.members.values() for a in (m.absences if all else m.upcoming_absences(today))]
+        rows = [{"uid": str(m.discord_id), "display_name": m.display_name, "start": a.start, "end": a.end, "span": reg.span_label(a.start, a.end), "reason": a.reason,
+                 "by": a.by, "current": a.start <= today <= a.end, "test": bool(m.test)}
+                for m in reg.members.values() if visible(v, m) for a in (m.absences if all else m.upcoming_absences(today))]
         return {"rows": sorted(rows, key=lambda r: (r["start"], r["display_name"])), "today": today, "tz": reg.config.timezone}
 
     @app.post("/api/members/set")
     async def members_set(request: Request):
-        """Officer edits one member's record the way the Discord commands do: `rank` (on `character`, default the main),
-        `confirm` (true: the character is verified), `main` (a character name becomes the main). Any subset of the three."""
-        def go(v, d):
-            reg, done = v.reg, []
+        """Officer edits of one member the way the Discord commands do: `rank` (D25: the member's, on the main — a
+        `character` that is an alt is refused), `confirm` (true: `character`, default the main, is verified), `main` (a
+        character becomes the main — a one-row table save, the rank moves with it). Any subset; your own rank and your
+        own characters' confirm are refused (the owner aside)."""
+        v, d = await body(request, officer=True)
+        reg, done = v.reg, []
+        try:
             m = resolve_member(reg, member_ref(d))
-            char = str(d.get("character") or "").strip() or (m.main.label if m.main else "")
+        except HTTPException as e:
+            return JSONResponse({"error": e.detail}, status_code=e.status_code)
+        char = str(d.get("character") or "").strip() or (m.main.label if m.main else "")
+        try:
             if d.get("main"):
                 name = str(d["main"]).strip() if isinstance(d["main"], str) else char
-                mm, c, old = reg.officer_set_main(m.discord_id, name, v.name)
+                c = next((x for x in m.active() if x.label == name), None) or next((x for x in m.active() if x.matches(name)), None)
+                if c is None:
+                    raise RegistryError(f"{m.display_name} has no active character named {name or '?'}")
+                if not c.is_main:
+                    out = await save_table(request, v, m.discord_id, [{"label": c.label, "main": True}], officer=True, rev=None, preview=False)
+                    if isinstance(out, JSONResponse):
+                        return out
                 done.append(f"{m.display_name}: main is now {c.label}")
                 char = str(d.get("character") or "").strip() or c.label
             if d.get("rank"):
                 if not char:
-                    raise HTTPException(400, "character required (no main to default to)")
-                mm, c = reg.set_rank(char, str(d["rank"]), v.name)
-                done.append(f"{c.label}: rank {c.rank}")
+                    raise RegistryError("they have no main yet — rank lives on the main")
+                c = next((x for x in m.active() if x.label == char), None) or next((x for x in m.active() if x.matches(char)), None)
+                if c is not None and not c.is_main:
+                    raise RegistryError(f"{c.label} is an alt — rank lives on the main ({m.main.label if m.main else 'none yet'}).")
+                mm, main = await asyncio.to_thread(reg.set_rank, m.discord_id, str(d["rank"]), v.name, by_id=v.uid)
+                done.append(f"{m.display_name}: rank {main.rank}")
             if d.get("confirm"):
                 if not char:
-                    raise HTTPException(400, "character required (no main to default to)")
-                hit = reg.find(char)
-                if hit and hit[1].confirmed_by:  # a "set" is declarative: already confirmed is already done
-                    done.append(f"{hit[1].label} already confirmed by {hit[1].confirmed_by}")
+                    raise RegistryError("character required (no main to default to)")
+                c = next((x for x in m.active() if x.label == char), None) or next((x for x in m.active() if x.matches(char)), None)
+                if c is not None and c.confirmed_by:  # a "set" is declarative: already confirmed is already done
+                    done.append(f"{c.label} already confirmed by {c.confirmed_by}")
                 else:
-                    mm, c = reg.confirm(char, v.name)
+                    mm, c = await asyncio.to_thread(reg.confirm, m.discord_id, char, v.name, by_id=v.uid)
                     done.append(f"confirmed {c.label}")
-            return "; ".join(done) or f"{m.display_name}: no changes"
-        return await run(request, go, officer=True)
+        except Exception as e:  # noqa: BLE001
+            return await refused(v, request, e)
+        msg = "; ".join(done) or f"{m.display_name}: no changes"
+        audit = [x for x in done if not x.startswith(f"{m.display_name}: main is now")]  # the table verb wrote the main's own line
+        if audit:
+            await ops_mod.audited(bot.ops, reg, v.name, "; ".join(audit), via=v.via, by_id=v.uid)
+        return {"message": msg}
 
     @app.post("/api/members/dm")
     async def members_dm(request: Request):
-        """Officer switches someone's DMs on/off (the Me page's toggle, for them)."""
+        """Officer switches someone's DMs on/off (the Me page's toggle, for them): Registry.set_dm."""
         def go(v, d):
             m = resolve_member(v.reg, member_ref(d))
-            m.dm_opt_out = not bool(d.get("on"))
-            v.reg.save(m, f"{m.display_name} DMs {'off' if m.dm_opt_out else 'on'} (by {v.name})")
-            return f"{m.display_name}: DMs {'off' if m.dm_opt_out else 'on'}"
+            return v.reg.set_dm(m.discord_id, bool(d.get("on")), v.name)
         return await run(request, go, officer=True)
 
     @app.post("/api/members/absence")
     async def members_absence(request: Request):
-        """Officer records an absence for someone (same ripple as the member doing it)."""
+        """Officer records an absence for someone (same verb and ripple as the member doing it): {member | uid, start,
+        days | end, reason, preview}. MCP add_absence(preview=true) reads the same preview."""
         v, d = await body(request, officer=True)
-        m0 = resolve_member(v.reg, member_ref(d))
-        if d.get("preview"):  # what it would touch, nothing written (MCP add_absence preview=true): the diff's words
-            from .. import configops
-
-            try:
-                s0, e0 = v.reg.absence_span(d.get("start") or "", d.get("end") or None)
-                words = configops.absence_preview(v.reg, m0, s0, e0, raids=bot.raids.store(v.reg))
-            except (RegistryError, ValueError) as e:
-                return JSONResponse({"error": str(e)}, status_code=400)
-            rs0 = bot.raids.store(v.reg)
-            return {"message": f"preview — nothing saved: {m0.display_name} away {v.reg.span_label(s0, e0)}{words}", "preview": True,
-                    "sheets": [{"key": ev.key, "effect": what} for ev, what in rc.absence_effects(v.reg, rs0, m0, s0, e0)]}
-        try:
-            m, a = await asyncio.to_thread(v.reg.add_absence, m0.discord_id, d.get("start") or "", d.get("end") or None, d.get("reason") or None, v.name, m0.display_name)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        touched = await bot.announce_absence(v.reg, m, a, v.name)
-        return {"message": f"{m.display_name} away {v.reg.span_label(a.start, a.end)}" + sheets_touched(v.reg, touched), "sheets": list(touched or [])}
+        return await absence_route(request, v, d, resolve_member(v.reg, member_ref(d)))
 
     @app.post("/api/members/absence/clear")
     async def members_absence_clear(request: Request):
-        """Officer clears someone's absence: same ripple as the member doing it (sheets re-opened for them; the lines say which)."""
+        """Officer: someone is back (same verb as the member's I'm back: the sheets re-open for them; the lines say which)."""
         v, d = await body(request, officer=True)
         m = resolve_member(v.reg, member_ref(d))
-        return await clear_absence(v, m.discord_id, parse(d, StartBody).start)
+        return await clear_absence(request, v, m.discord_id, parse(d, StartBody).start, bool(d.get("preview")))
+
+    # ---- the owner (design §3.5 O-03, D50): the Config page's transfer; /gm config owner is the Discord one
+    @app.get("/api/owner")
+    async def owner_get(request: Request):
+        """Who owns the guild and, for the owner (or a host superuser), who could take over: the registered real members."""
+        v = await who(request)
+        if not (v.officer or v.owner):
+            raise HTTPException(403, "Officers only.")
+        reg = v.reg
+        oid = reg.config.owner_discord_id
+        from .app import member_name
+
+        out = {"owner": {"uid": str(oid), "name": member_name(bot, reg, int(oid))} if oid else None, "may_transfer": bool(v.owner and v.via == "web")}
+        if out["may_transfer"]:
+            out["candidates"] = [{"uid": str(m.discord_id), "name": m.display_name} for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower())
+                                 if not m.test and m.discord_id != oid and m.discord_id != v.uid]
+        return out
+
+    @app.post("/api/owner")
+    async def owner_set(request: Request):
+        """Hand the guild over: {member | uid, preview}. The owner (or a host superuser) only, from the site; never MCP —
+        the token IS the owner and can't hand itself over. Preview = THE confirm sentence (Registry.owner_consequence) and
+        the refusals (a bot, the owner, yourself, someone outside the server); then discord_people.transfer_owner."""
+        from .. import discord_people
+        from .app import member_name
+
+        v, d = await body(request)
+        if v.via != "web":
+            return JSONResponse({"error": "Ownership is handed over by the owner in person (the Config page or /gm config owner) — MCP acts as the owner and can't hand itself over."}, status_code=403)
+        if not v.owner:
+            return JSONResponse({"error": "Only the owner can hand the guild over."}, status_code=403)
+        reg = v.reg
+        try:
+            m = resolve_member(reg, member_ref(d))
+        except HTTPException as e:
+            return JSONResponse({"error": e.detail}, status_code=e.status_code)
+        name = m.display_name or member_name(bot, reg, m.discord_id)
+        if d.get("preview"):
+            from .. import guild_routing
+
+            answer, member = await guild_routing.member_of(bot, reg, m.discord_id, timeout=None)
+            why = reg.owner_refusal(m.discord_id, by_id=v.uid, bot=bool(getattr(member, "bot", False)), membership=answer, name=name)
+            if why:
+                return JSONResponse({"error": why}, status_code=400)
+            return {"preview": True, "message": reg.owner_consequence(name, v.uid).replace("**", "")}
+        try:
+            line = await discord_people.transfer_owner(bot, reg, m.discord_id, v.name, by_id=v.uid, name=name, via=v.via)
+        except Exception as e:  # noqa: BLE001
+            return await refused(v, request, e)
+        return {"message": line}
 
     # ---- ops, config (read-only)
     @app.get("/api/ops")

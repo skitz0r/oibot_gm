@@ -93,7 +93,7 @@ def test_blank_first_name_plans_the_main(reg):
         await pick_class_specs(h, cls, specs[2])
         await h.press("Continue")
         await h.submit(first="", last="")
-        assert "✅ Planned main" in h.text and "/me char name" in h.text
+        assert "✅ Planned main" in h.text and "`/me char` → Name" in h.text
     run(go())
     c = reg.members[NEW_ID].main
     assert c.status == "planned" and c.name is None and (c.cls, c.spec, c.offspec) == (cls, specs[2], None)

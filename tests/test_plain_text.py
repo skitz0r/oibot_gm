@@ -304,8 +304,10 @@ def test_character_ops(reg):
     assert c.offspec is None
     with pytest.raises(RegistryError, match="not a Mage spec"):
         configops.apply(reg, ConfigOp(op="character", member=m.display_name, character="Jonny", field="spec", value="Arms"), "Officer", is_owner=False)
-    assert configops.apply(reg, ConfigOp(op="character", member=m.display_name, character="Jonny", field="rank", value="raider"), "Officer", is_owner=False) == f"{m.display_name}: Jonny: rank raider"
+    with pytest.raises(RegistryError, match="rank lives on the main"):  # D25: rank is the member's, on the main
+        configops.apply(reg, ConfigOp(op="character", member=m.display_name, character="Jonny", field="rank", value="raider"), "Officer", is_owner=False)
     assert configops.apply(reg, ConfigOp(op="character", member=m.display_name, character="Jonny", field="main"), "Officer", is_owner=False) == f"{m.display_name}: main is Jonny"
+    assert configops.apply(reg, ConfigOp(op="character", member=m.display_name, character="Jonny", field="rank", value="raider"), "Officer", is_owner=False) == f"{m.display_name}: {m.display_name}: rank raider"
     assert m.main.label == "Jonny"
     assert configops.apply(reg, ConfigOp(op="character", member=m.display_name, character="Jonny", field="retire"), "Officer", is_owner=False) == f"{m.display_name}: retired Jonny"
     assert c.status == "retired" and m.main.label == main, "the old main comes back"

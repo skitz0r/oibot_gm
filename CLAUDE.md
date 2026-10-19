@@ -37,7 +37,8 @@ fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg,
 src/oibot_gm/
   constants.py         ROLES / MARK / LEVEL_COLOUR / TEAL shared by Discord, web and render (no per-module copies); CLOCK12 + fmt12 = the one 12-hour formatter behind every clock that is not Registry.local12
   consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release: the ONE confirm sentence from code (design §5.33); ev_json.consequences carries it to the site, wizard.decide shows it in Discord
-  presets.py           shared presets: raid cadence PRESETS (standard/short/same_week), test-run TEMPOS; used by the wizards, plain text and the web
+  presets.py           shared presets: raid cadence PRESETS (standard/short/same_week), test-run TEMPOS, absence DURATIONS (the wizard's For how long
+                       and /api/meta.durations); used by the wizards, plain text and the web
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
@@ -81,10 +82,17 @@ src/oibot_gm/
                        Dual interfaces phase 0 (design §5.33): `config_lock` (RLock) held by save_config and every config verb (`_config_verb`);
                        `config_rev(section)` for settings | raids:<id> | buffs | recruitment | plain (computed, excludes rosters[] / *_message_id),
                        `characters_rev(member)`, verbs take `rev=` and raise `ConfigChanged`; `preview(fn)` runs on shadow(); `member(uid, name)`
-                       never renames — `rename(uid, name, by)` is the explicit step
+                       never renames — `rename(uid, name, by)` is the explicit step.
+                       People (design §5.40): save_character_table(officer=, by_id=, rev=) validates the whole table on a copy (check_character_table)
+                       then one commit; CharactersChanged on a stale rev; rank per MEMBER on the main (Member.rank, settle_ranks — alts always "alt"),
+                       set_rank(uid, rank, by, by_id) / confirm(uid, label, by, by_id) refuse your own (owner aside) and another officer's live puppet
+                       (puppet_refusal); add_absence refuses overlaps + a reason past ABSENCE_REASON_MAX (check_absence = no write); set_dm;
+                       remove_schedule takes its regulars off (D30, no DM); owner_refusal / owner_consequence / set_owner (D50)
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
-                       /me view|wishlist|plan main|alt|roles|char …|absent … (members; /me wishlist = flows_wishlist, the Me page builds long lists);
-                       /roster overview|add|remove|members|list|confirm|rank|set-main|absences|absent|applicants|applicant (officers; `poll` retired, PlanButton is a stub);
+                       /me view|wishlist|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
+                       /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
+                       /roster overview (always ephemeral, per-schedule fields, officers' Post button)|add|remove|members|list|confirm|rank|set-main|char|
+                       absences|absent|back|applicants|applicant (officers; `poll` retired, PlanButton is a stub);
                        Rosters (design §5.30, out of the roster redesign): a run's roster is ephemeral in config `rosters[]` (key/size/cutoffs per run) and WHO
                        holds a seat lives only in the run file (rc.rostered_runs reads it); RegisteredCharacter.rosters holds only REGULARS, as series keys
                        "<raid>:<schedule>" (Registry.regulars / set_regular; officers edit, members may step down). Schedules are RECURRING (weekly, lockout)
@@ -118,6 +126,8 @@ src/oibot_gm/
                        coverage + 4-week forecast: Registry.series_coverage / rc.series_outlook (officer-only).
                        split_reason / split_reason_text: why the joiners make fewer runs than the headcount (what the next run is short, in code);
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run.
+                       People (§5.40): character_changes / character_effects / character_preview / after_character_change (a respec rewrites the
+                       sheet answers; a retired / deleted / respecced seat is freed — a role flip on a locked RECURRING run keeps it); join_while_away.
                        Raid night (design §5.39): expire_confirmations expires only a held ask; unasked_seats (the lock's recovery); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
@@ -144,13 +154,19 @@ src/oibot_gm/
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json, confirmed by an officer
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with one native
                        card per raid (pool_layout: readiness + comp shortfalls, edited in place, no images) + change log (Registry.listeners, debounced);
-                       absences channel (AbsencesMixin: card + "I'll be away" modal → announce_absence → sheets updated);
+                       absences channel (AbsencesMixin: card with I'll be away · I'm back · My absences → AbsenceButton `abs.<gk>:new|back|mine` and a Clear
+                       `abs.<gk>:clear:<uid>:<start>`; announce_absence → sheets updated; puppets never on the card or the channel; AbsencesMixin inherits
+                       discord_people.PeopleMixin);
                        SetupMixin: set_channel (web Config page + plain-text `set …_channel` via configops.apply_async), guild_channels/roles, test_bench_clear.
                        LootLogMixin: the public loot log (LEDGER_LISTENERS → one line per award in the loot channel, else the run's updates thread; never
                        the signup channel; loot_log off = nothing) with LootWishButton (`lootwish.<gk>:<item key>` → /me wishlist on that item)
                        Test bench: Member.test puppets, /gm test seed|run|answer|clear; RaidMixin.send_member_dm routes puppet DMs to the TESTER's own DMs
                        (never the roster channel), may_answer_for lets the tester press their buttons, a test run's pool is puppets + tester only and its
                        sheet refuses presses from real members
+  discord_people.py    THE people verbs (design §5.40), module functions taking the client (bare test clients work) + PeopleMixin:
+                       save_characters (the character table + its ripple: rc.character_changes/effects/preview/after_character_change → drop_seated
+                       for a freed seat, a run-update + warn line for a kept role flip; preview=), record_absence, im_back (THE "I'm back"),
+                       transfer_owner (D50), absence_lines / absence_clear_lines (the preview words). No DMs anywhere
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
@@ -160,8 +176,8 @@ src/oibot_gm/
                        every press, FLOWS registry (@flow), no-typing dates/times (day/hour/minute selects, 12-hour,
                        resolve_local = DST-safe), lint() = what the Discord API would refuse, checked offline
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
-  wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow) · flows_raid ·
-                       flows_config · flows_roster · flows_register (incl. the Discord application: picks → names → schedules → the guild's
+  wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid ·
+                       flows_config (+ OwnerTransferWizard) · flows_roster (MemberWizard/CharWizard: /me char, /roster char|rank|set-main) · flows_register (incl. the Discord application: picks → names → schedules → the guild's
                        questions five per modal → review) · flows_recruit (/gm config recruitment) · flows_wishlist (/me wishlist) · flows_misc. Commands and card buttons call FLOWS[name].
                        tests/wizard_harness.py drives a flow end to end with fake interactions and lints every screen
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id; schedule_set field = <schedule id>.<setting>), describe() diff,
@@ -215,6 +231,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
                        sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`
 frontend/              React + Mantine app (Vite). components/board/* (SheetCard, BoardView, SplitModal, BoardPreview, FillModal), components/Cells.tsx (icon-only cells),
+                       components/CharacterTable.tsx (the Me page's characters), AbsencesModal/AbsencesCard/AbsencesTable.tsx (From + For how long, I'm back), OwnerCard.tsx,
                        components/ConfirmModal.tsx (useConfirm), components/PlainPermissions.tsx (Ops page: who may do what, where), components/ScheduleCard.tsx (Raids page schedules + editor), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
                        `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist) · Loot log (members) · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = puppets of any mix + the comp sandbox) · Loot (components/loot/*: Tonight · History · Precedents · Items · Wishlists) · Agents (the news review's monitor) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)

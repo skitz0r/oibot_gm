@@ -1805,6 +1805,103 @@ too.
 Tests: `tests/test_raid_night.py` (each race, recovery, expiry ask-only, DM failure, remind, withdraw, pause, reopen,
 open preview across DST, cancel without DMs, every new route) and `tests/test_raid_night_flows.py` (the wizard screens).
 
+### 5.40 Dual interfaces, phase 2 — people: characters, rank, absences, owner (built 2026-10-19)
+
+Out of `out/dual_interface_design.md` §3.3 and §6 Phase 2 rows 8–10, with the owner's decisions D24 (a retired, deleted
+or respecced SEATED character ripples: seat freed + backfill; a role-flip respec on a locked recurring run keeps the seat
+and tells the officers), D25 (rank per MEMBER on the main, alts always "alt"), D27 (no "ask to be a regular" button), D28
+(public absences card = names + days in words), D29 (no self-service "delete my record"), D30 (removing a schedule removes
+its regulars, no DM), D50 (owner transfer: one confirm screen; refuse bots, outsiders, self; no DMs) and the DM rule.
+
+**THE character verb.** `discord_people.save_characters(bot, reg, uid, rows, by, *, by_id, officer, rev, via, preview)`
+(also `bot.save_characters`, through `PeopleMixin`, which `AbsencesMixin` inherits so the client's class list is
+unchanged): `Registry.save_character_table(…, officer=, by_id=, rev=)` in a worker thread, then the ripple on the loop,
+then one audit line. Callers: `POST /api/me/characters` (+ `/api/me/main` and `/api/me/character/delete`, one-row tables),
+`/api/members/save`, `/api/members/set`'s main, the `character` op with the bot (`configops._apply_with_bot`; offline
+`apply` keeps the table verb alone), MCP `save_characters`, and every Discord character wizard (one-row tables).
+- `save_character_table` validates the WHOLE table on a copy first (`_table_shadow`: the same verbs on a deep copy of the
+  member whose `save` only keeps it in memory; `check_character_table` is that step alone, the previews call it), then
+  applies it in one commit — a refusal on row N used to leave rows < N committed. A row naming a character that is gone
+  is refused, never dropped. Main is applied before rank. `officer=False` refuses `rank` and `confirm` (no self-promotion
+  over the Me page's POST). `rev` = `characters_rev` the editor loaded; stale → `CharactersChanged` (a `RegistryError`;
+  the web answers 409 with the member's current table). The whole save holds `config_lock` (web threads vs the loop).
+- The ripple is data in `raidcycle` and Discord in `discord_people`: `rc.character_changes(reg, m, rows)` (what a save
+  changes, read BEFORE it) → `rc.character_effects(reg, rs, m, change)` (per live run: free | keep | rewrite | clear |
+  repoint, with the sentence every surface prints) → `rc.character_preview` (the sentences: Discord's decide screens,
+  `{preview: true}`, plain text's diff) → `rc.after_character_change` (AFTER the save: sheet answers rewritten —
+  `set_signup` with the same status, source `respec`, a Join keeping its `joined_at` — or cleared / moved to another
+  character; seats re-labelled with `_reseat`) → `discord_people.after_character_change` (asks of the member close via
+  `release_asks_of`; seats go back through `RaidMixin.drop_seated` — free_seat, the ask card EDITED, the fill engine; a
+  role flip kept on a locked recurring run is a run-update line + a warn ops line; touched sheets and cards redrawn).
+  An ad hoc locked run hands a role-flipped seat back (first come: Join again). A planned character's naming re-labels
+  answers and seats. Nothing DMs anyone.
+- `/me plan roles` and its Choice arguments are gone; `Registry.set_roles` stays only as the registration wizard's role
+  step. `/me char [action:]` is ONE command (a Group with subcommands can't itself be invoked) on
+  `flows_roster.CharWizard` — `MemberWizard`'s self mode (member = the presser, no guard) — with Spec · Main · Flex ·
+  Retire · Delete · Name (hands over to the registration's `char_name`) · Add (the registration wizard). `/roster char
+  member: [action:]` is the same class as an officer (+ Rank, − Name/Add); `/roster rank` and `/roster set-main` are its
+  entry points (`RankWizard`, `SetMainWizard`). Every action ends on `Wizard.decide` with the ripple. The old
+  `/me char name|add|main|spec|retire|list` subcommands are retired (`flows_register`'s CharSpec/Main/Retire wizards
+  stay registered under their FLOWS names but no command opens them).
+
+**Rank per member (D25).** `Member.rank` = the main's rank; `registry.settle_ranks(m, rank)` puts the member's rank on the
+main and "alt" on every other character — called by `set_main`, `retire`, `delete_character`, `add_character` /
+`set_plan` of a main (rank follows the player, always; the three old conditional carries are gone). `Registry.set_rank(uid,
+rank, by, *, by_id)` refuses a member with no main, your own rank (the owner aside) and another officer's live test
+puppet (`puppet_refusal`: while a test run is live only its `test_by` or the owner changes a puppet). The `rank` op and
+`/api/members/set` refuse naming an alt. `Registry.confirm(uid, label, by, *, by_id)` looks up by (member, label) —
+never guild-wide by first name — and refuses your own character and a planned one. `/roster confirm`'s walk no longer
+lists your own and no longer DMs ("They see it on their Me page"). Migration: `scripts/migrate_ranks.py`
+(`Registry.migrate_ranks`: non-main characters → alt; a main reading "alt" takes the best rank an alt held; idempotent,
+one commit per guild).
+
+**Absences.** `Registry.add_absence(…, by_id=)` refuses an overlap with an absence on file ("X is already away Tue 9 Dec
+→ Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"), a reason over
+`ABSENCE_REASON_MAX` (200) and another officer's puppet; `check_absence` is the same without the write (previews).
+`presets.DURATIONS` is the one For-how-long list (the wizard's select and `/api/meta.durations`). `discord_people`:
+`record_absence` (the verb + `announce_absence`), `im_back` (THE "I'm back": `clear_absence` + `absence_cleared`),
+`absence_lines` / `absence_clear_lines` (the preview sentences). "I'm back" is on every surface: the absences card's
+third button and the *My absences* reply's Clear (`AbsenceButton` `abs.<gk>:back` and `abs.<gk>:clear:<uid>:<start>` —
+DynamicItems, no held state), `/me absent clear` and `/roster back member:` (`flows_absence.AbsenceClearWizard`: pick →
+the decide screen with what re-opens → `im_back`), the web (`{preview: true}` then the clear on `/api/me/absence/clear`
+and `/api/members/absence/clear`), plain text's `absence_clear` and MCP `clear_absence` (both through `im_back`). Join on
+a day you're away stays pure (§3.2 B1): `rc.join_while_away` appends "joined for this run; your absence … still stands"
+to `set_answer`'s line on every surface, and the sheet's ephemeral receipt carries an *I'm back* Clear button. Test
+puppets: the absences card and `/roster absences` leave them out, `announce_absence` posts no public line and no card
+refresh for one, `/api/absences` and `/api/members` show them only to who may change them.
+
+**Schedules (D30).** `Registry.remove_schedule` clears the series key from every character in the same commit and names
+them ("— 2 regulars off it (Ana, Bo)"); `schedule_regulars(rid, sid)` feeds `describe(schedule_remove)` ("… come off it —
+nobody is DMed"). `orphan_regulars` remains for data from before.
+
+**Owner (D50).** `Registry.owner_refusal(uid, *, by_id, bot, membership, name)` (a bot · the current owner · yourself ·
+membership "no" · "unknown": a write that moves owner rights needs certainty), `owner_consequence(name, by_id)` (THE
+sentence), `set_owner(uid, by, …)` (a settings `_config_verb`). `discord_people.transfer_owner` resolves Discord's answer
+(`guild_routing.member_of`) and writes a warn audit line; nobody is DMed. Surfaces: `/gm config owner [user]` in a set-up
+server → `flows_config.OwnerTransferWizard` (member picker → refusals → `decide`, danger) and the Config page's owner line
+(`GET/POST /api/owner`, `{preview}`; the owner or a host superuser; MCP refused with 403 — the token IS the owner).
+`owner_transfer` left `BY_DESIGN_ONLY` (it is on Discord and the web; `tests/test_people.py` checks there is no MCP tool).
+
+**Web.** `GET /api/members` returns characterless members, `rank`, `dm`, `characters_rev` per row; `/api/members/save` refuses
+only the members whose rev moved (`refused[]`, the rest apply); `/api/members/set` (rank per member, confirm by member,
+main through the verb); `/api/members/dm` and `/api/me/dm` → `Registry.set_dm`; `/api/me` carries `characters_rev` and
+`rank`; the absence routes take `{start, days | end, reason, preview}`; `/api/absences` carries `span` and `test`.
+Frontend: `components/CharacterTable.tsx` (the Me page's card: row ⋮ menu, Flex, preview-then-confirm, rev),
+`components/AbsencesModal.tsx` (From + For how long + live preview, both pages), `AbsencesCard.tsx` (Me; `useImBack`),
+`AbsencesTable.tsx` (Members), `OwnerCard.tsx` (Config); Members.tsx gains the sticky member cell, the rank select on the
+main, the DM switch, the ⋮ menu, Flex, the *No characters* section and the Absences table.
+`/roster overview` replies ephemerally always, one embed field per recurring schedule, and officers get *Post to the
+roster channel* (`discord_registry.overview_embed` / `overview_post_view`).
+
+**Not built (by decision or left for later):** "ask to be a regular" (D27), self-service delete of a member record (D29),
+member notices (the inbox build), `/roster comp` and the Readiness page (phase 3), a characterless member's *Remove record*
+and `on_member_remove` (left-the-server), `MemberWizard`'s Name for officers.
+
+Tests: `tests/test_people.py` (the ripple on open / locked recurring / locked ad hoc runs, seated delete → freed + bench
+asked, rank per member, confirm by member, validate-on-copy, the rev, puppets, overlap, reason cap, I'm back, Join while
+away, set_owner refusals, schedule removal without a DM), `tests/test_people_flows.py` (every wizard through the harness)
+and `tests/test_people_web.py` (every route).
+
 ## 6. Architecture
 
 ```mermaid

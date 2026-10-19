@@ -60,7 +60,7 @@ def test_plain_text_delete_names_the_seat_from_the_run_file(reg, rs):
     char = _held_char(reg, rs, m)
     assert ev.team not in (reg.members[m.discord_id].main.rosters or [])  # nothing on the member file
     line = configops.describe(reg, ConfigOp(op="character", member=m.display_name, character=char, field="delete"))
-    assert "holds a seat on" in line and _person_words(reg, ev) in line, line
+    assert "seat is handed back" in line and _person_words(reg, ev) in line, line  # phase 2 C: the delete frees it (D24)
     assert ev.key not in line and ev.team not in line, line  # never the run key (24-hour tail)
     assert "placement" not in line
 

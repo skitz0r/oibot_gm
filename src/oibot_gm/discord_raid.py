@@ -173,6 +173,14 @@ class RaidMixin:
             line = await self.set_answer(reg, rs, ev, m, status, character, by=m.display_name, by_id=m.discord_id)
         except ValueError as e:
             line = f"❌ {e}"
+        away = status == "in" and not line.startswith("❌") and m.absent_on(rc.run_day(reg, ev)) is not None
+        if away:  # Join while away (design §3.2 B1): the receipt carries I'm back — the normal clear flow, whole span
+            from .discord_pool import AbsenceButton
+
+            view = discord.ui.View(timeout=None)
+            view.add_item(AbsenceButton("clear", reg.key, m.discord_id, m.absent_on(rc.run_day(reg, ev)).start, label="I'm back"))
+            await interaction.followup.send(line, view=view, ephemeral=True)
+            return
         await interaction.followup.send(line, ephemeral=True)
 
     async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str, by_id: int | None = None) -> str:
@@ -235,6 +243,10 @@ class RaidMixin:
             s = rc.set_signup(reg, rs, ev, m, character, "sub", source=source)
             await self.refresh_sheet(reg, ev)
             line = f"✅ {who}{s.character} Bench for {label}" + (" — still rostered; set No thanks to free the seat" if ev.seat_of(m) else "")
+        if status == "in":  # Join while away: Join stays pure, the absence stands for the other sheets — the receipt says so
+            note = rc.join_while_away(reg, ev, m, mine=mine)
+            if note:
+                line += f"\n{note}"
         if not mine:
             await self.ops.emit(reg.config, "info", f"{by} set {m.display_name} {status} on {ev.key}")
         return line

@@ -665,8 +665,9 @@ def clear_absence(member: str, start: str, guild: Guild = None) -> str:
 def save_characters(member: str, rows: list[dict], guild: Guild = None) -> str:
     """Edit someone's character table the way the Members page saves it. Each row: {label, name?, surname?, cls, spec,
     offspec?, main: bool, flex?: [tank|healer|melee|ranged] (extra roles beyond the spec/offspec; [] clears)} for an
-    existing character (label from get_member) or a new one (cls + spec, name optional = planned), or {label, delete: true}.
-    Only the rows you pass change."""
+    existing character (label from get_member) or a new one (cls + spec, name optional = planned), or {label, delete: true}
+    / {label, retire: true}. Only the rows you pass change. Same verb as the Members page: a seat a deleted or retired
+    character holds is handed back and the bench asked; a respec rewrites the sheet answers."""
     deletes = [str(r.get("label")) for r in rows if isinstance(r, dict) and r.get("delete")]
     chars = [r for r in rows if isinstance(r, dict) and not r.get("delete")]
     return msg(api(guild).post("/api/members/save", {"rows": [{"member": member, "deletes": deletes, "characters": chars}]}))
@@ -674,8 +675,9 @@ def save_characters(member: str, rows: list[dict], guild: Guild = None) -> str:
 
 @mcp.tool()
 def set_member(member: str, character: str | None = None, rank: str | None = None, confirm: bool | None = None, main: str | None = None, guild: Guild = None) -> str:
-    """Officer edits of one member's record: `rank` (trial|raider|core|alt|social, on `character` or their main),
-    `confirm=true` (verify the character), `main` (character name that becomes their main). Any subset."""
+    """Officer edits of one member's record: `rank` (trial|raider|core|alt|social — the MEMBER's rank, stored on their main;
+    naming an alt as `character` is refused), `confirm=true` (verify `character`, default the main), `main` (character
+    name that becomes their main — the rank moves with it). Any subset."""
     body = {"member": member, "character": character, "rank": rank, "confirm": bool(confirm) if confirm else None, "main": main}
     return msg(api(guild).post("/api/members/set", {k: v for k, v in body.items() if v is not None}))
 
