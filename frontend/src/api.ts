@@ -68,12 +68,29 @@ export interface Meta {
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null }
 export interface Absence { start: string; end: string; reason: string | null; span?: string }  // `span` = the days in words (the clock rule); start/end stay ISO for the clear call
-export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean }
+/** One live sheet on the Me page (web/api_me.py sheet_row_extras): `may_answer` = Join / Bench / No thanks apply now (open);
+ *  `may_cant` = Can't make it… (with a note) applies (locked, rostered or joined); `queue_note` = ad hoc and joined — a change
+ *  away from Join asks this once; `receipt` = the state in words (rc.answer_receipt). The row renders from these only. */
+export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean; may_answer?: boolean; may_cant?: boolean; queue_note?: string | null; receipt?: string | null }
 /** One recurring schedule the viewer is a regular of (the Me page's My regular raids). */
 export interface MyRegular { series: string; label: string; character: string; cls: string; spec: string; role: string }
-/** `roster` is the run's key (what the answer is posted with); `raid` + `when` are what people see.
- *  `channel` is where the ask went: "dm", or "web" when DMs are off (the Me page is then the only place to answer). */
-export interface PlacementAsk { roster: string; character: string; asked_at: string; channel?: string | null; raid: string; when: string; key: string | null }
+/** One seat of the group an ask would put you in (spec icon alone on the card; `me` = you). */
+export interface AskSeat { character: string; cls: string; spec: string; role: string; me: boolean }
+/** One open ask wherever it waits (inbox.asks_of): `kind` confirm (answered with POST /api/me/ask/{id}) | fill | swap | prelock
+ *  (POST /api/me/fill/{run}); `channel` dm | web (DMs off, or the DM failed: the Me page is where it waits); `held` = you said yes and
+ *  `waiting_for` is the other half of a tied pair. Every label (`title`, `when`, `deadline`) is words from the server. */
+export interface MyAsk {
+  id: string; kind: "confirm" | "fill" | "swap" | "prelock"; title: string; run: string; roster: string; raid: string; when: string; starts_at: string;
+  character: string; cls: string | null; spec: string | null; role: string | null; as_label: string;
+  group: { roster: number; rosters: number; group: number; members: AskSeat[] } | null; deadline: string | null; channel: "dm" | "web";
+  held: boolean; waiting_for: string | null; reason: string | null;
+}
+/** An outcome to know (D26 — never a DM): not rostered, seat released, answered for you, run cancelled, schedule removed, … */
+export interface Notice { id: string; kind: string; text: string; run: string | null; when: string; read: boolean }
+/** What an officer may record for a member on a run (GET /api/admin/actions — rc.member_actions, the SetWizard's list), each with the
+ *  consequence sentence from the server; `rev` = the member's state the list was drawn from (a stale one is a 409 naming the change). */
+export interface MemberAction { key: string; label: string; needs: "character" | "note" | null; characters?: string[]; consequence: string; by_character?: Record<string, string> }
+export interface MemberActions { uid: string; display_name: string; run: string; actions: MemberAction[]; rev: string; now: string }
 export interface Aura { abbr: string; colour: string; art: string | null; name: string; who?: string; in_run?: boolean; covered?: boolean }
 export interface GroupSummary {
   roles: Record<string, number>; synergy: number | null; unmet: string[]; assumptions: string[];
@@ -194,7 +211,9 @@ export interface Proposal {
 }
 export interface Me {
   display_name: string; registered: boolean; must_apply?: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
-  absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: PlacementAsk[]; regulars?: MyRegular[];
+  absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: MyAsk[]; notices?: Notice[]; regulars?: MyRegular[];
+  /** the one DM sentence (inbox.DM_ON/OFF_SENTENCE): the same words on /me view, /me dms and the manual */
+  dm_sentence?: string;
 }
 
 // ---- the loot council (mirror src/oibot_gm/web/api_loot.py). Every label a person reads arrives as words from the server

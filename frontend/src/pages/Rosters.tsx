@@ -333,11 +333,11 @@ function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: Raid
         </Tabs.List>
         <Tabs.Panel value="open" pt="md">
           {r.open.length === 0 && <Text size="sm" c="dimmed">No sheet open. The next slot opens on its own {r.upcoming[0] ? `${r.upcoming[0].opens}` : "once a schedule is set on Raids"}, or open one now.</Text>}
-          <Stack gap="md">{r.open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
+          <Stack gap="md">{r.open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}</Stack>
         </Tabs.Panel>
         <Tabs.Panel value="locked" pt="md">
           {r.locked.length === 0 && <Text size="sm" c="dimmed">Nothing locked.</Text>}
-          <Stack gap="md">{r.locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
+          <Stack gap="md">{r.locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}</Stack>
         </Tabs.Panel>
         <Tabs.Panel value="upcoming" pt="md">
           {r.upcoming.length === 0 && <Text size="sm" c="dimmed">No upcoming runs{scheds.length ? " before the raid opens" : " — add a schedule on Raids"}.</Text>}
