@@ -101,6 +101,53 @@ def test_me_char_add_opens_the_registration(reg, rs):
     assert "alt" in h.text.lower()
 
 
+def test_me_char_name_relabels_the_open_sheet_through_the_verb(reg, rs):
+    """/me char → Name hands over to the naming wizard, which writes a one-row table through THE character verb: an
+    open sheet's Join on the planned label ('Priest (Holy)') takes the new name (Registry.name_character alone left it,
+    and a later retire / respec ripple, matching by label, then missed it)."""
+    m = reg.set_plan(9_200_000_000_000_001, "Launcher", "Priest", "Holy", None, "main")[0]
+    planned = m.main.label
+    ev = real_run(reg, rs)
+    rc.set_signup(reg, rs, ev, m, planned, "in", source="member")
+    h = as_member(Harness(reg, rs), m)
+
+    async def go():
+        await FLOWS["member_char"](h.command(), reg)
+        assert "Name" in h.buttons()
+        await h.press("Name")
+        await h.submit(first="Brightwing", last="")
+        assert "now names Brightwing" in h.text and "Name it Brightwing" in h.buttons()  # the ripple, from code, before the write
+        assert ev.signups[str(m.discord_id)].character == planned
+        await h.press("Name it Brightwing")
+        assert "✅" in h.text and "now names Brightwing" in h.text
+    run(go())
+    assert reg.members[m.discord_id].main.label == "Brightwing"
+    assert ev.signups[str(m.discord_id)].character == "Brightwing" and ev.signups[str(m.discord_id)].status == "in"
+
+
+def test_roster_confirm_is_a_one_row_table_save(reg, rs, officer, monkeypatch):
+    from oibot_gm import discord_people
+
+    calls = []
+    verb = discord_people.save_characters
+
+    async def spy(*a, **kw):
+        calls.append((a[2], a[3], kw.get("officer")))
+        return await verb(*a, **kw)
+    monkeypatch.setattr(discord_people, "save_characters", spy)
+    m = real(reg, 0)
+    h = Harness(reg, rs)
+
+    async def go():
+        await FLOWS["roster_confirm"](h.command(), reg)
+        await h.pick(h.selects()[0], next(o.value for o in h._items()[0].options if o.value.endswith("|" + m.main.label)))
+        await h.press("Confirm")
+        assert f"Confirmed **{m.main.label}**" in h.text
+    run(go())
+    assert calls == [(m.discord_id, [{"label": m.main.label, "confirm": True}], True)]
+    assert reg.members[m.discord_id].main.confirmed_by
+
+
 # ---------------------------------------------------------------- /roster char (an officer)
 
 def test_roster_char_is_officer_only_and_offers_rank(reg, rs, officer):

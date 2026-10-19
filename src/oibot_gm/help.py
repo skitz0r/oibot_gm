@@ -29,7 +29,7 @@ MANUAL = ROOT / "docs" / "manual.md"
 
 class HelpAnswer(BaseModel):
     answer: str = Field(description="Plain Discord markdown, ≤1200 characters, specific to this guild's settings and the asker; say 'not built yet' when that is the truth")
-    commands: list[str] = Field(default_factory=list, description="Up to 4 exact commands or buttons the asker should use next, e.g. '/me char spec'")
+    commands: list[str] = Field(default_factory=list, description="Up to 4 exact commands or buttons the asker should use next, e.g. '/me char action:Spec'")
     for_officer: bool = Field(default=False, description="True when the action needs an officer and the asker is not one")
     acts: bool = Field(default=False, description="True when the message asks the bot to DO something now (record an absence, change a character or main, answer or confirm a run, change a setting) rather than asking how or what")
 

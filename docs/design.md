@@ -687,7 +687,7 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **The wizard** (`flows_register`, `register` flow `mode="apply"`; `/apply`, the card's `reg:apply` button): picks (with the note) → first + last name + logs (plus the old *Anything else?* box only when the guild has no questions) → a multi-select of active non-pickup schedules (skipped when none) → the questions five per modal, a *Next questions (2 of 3)* button between modals (a modal submit can't open another) → a review embed with every answer, *Change a step* back to any step and straight back → Submit = `reg.apply(source="discord")` + `client.post_application`. Nothing is written before Submit; a refusal keeps the draft and **Fix this** reopens the step it names (the question's page, the names, the picks). Closed recruitment and an open application are refused at entry.
 
-**Gating.** `open_register` checks `must_apply` for every first-character path (the card's Register / Add an alt, `/register`, `/me plan main|alt`, `/me char add`) and turns the flow into the application with "New here? Apply first — the officers take it from there." Plain-text self-service `character add` is refused in `configops.authorize` (it has the author's role ids) with a pointer to `/apply`. The website's own add-character path is not gated here.
+**Gating.** `open_register` checks `must_apply` for every first-character path (the card's Register / Add an alt, `/register`, `/me plan main|alt`, `/me char action:Add an alt`) and turns the flow into the application with "New here? Apply first — the officers take it from there." Plain-text self-service `character add` is refused in `configops.authorize` (it has the author's role ids) with a pointer to `/apply`. The website's own add-character path is not gated here.
 
 **Review and decision.** `application_embed`: full name, class/spec icons, logs, schedules in words (`wizard_opts.schedule_names`), every answer a field; kept within 25 fields / 1024 per value / 6000 total by sharing the space left among long answers (shortest stay whole), each cut with "…", plus a link to the site's full answers only when `OIBOT_WEB_URL` is https. The card's Accept / Decline… are persistent `ApplicationButton`s (`app:accept|decline:<uid>`). One decide path: `OibotGM.decide_application(reg, discord_id, accept, by, note) -> str` (→ `discord_registry.settle_application`): registry decide, DM, card edited in place, ops line, returns the verdict line (raises RegistryError when nothing is open) — the buttons (through `application_decide`, the one `decide` screen — `DeclineModal` is retired, §5.33), `/roster applicant`, the web and MCP all call it. Nothing in it touches server membership.
 
@@ -1817,8 +1817,11 @@ its regulars, no DM), D50 (owner transfer: one confirm screen; refuse bots, outs
 (also `bot.save_characters`, through `PeopleMixin`, which `AbsencesMixin` inherits so the client's class list is
 unchanged): `Registry.save_character_table(…, officer=, by_id=, rev=)` in a worker thread, then the ripple on the loop,
 then one audit line. Callers: `POST /api/me/characters` (+ `/api/me/main` and `/api/me/character/delete`, one-row tables),
-`/api/members/save`, `/api/members/set`'s main, the `character` op with the bot (`configops._apply_with_bot`; offline
-`apply` keeps the table verb alone), MCP `save_characters`, and every Discord character wizard (one-row tables).
+`/api/members/save`, `/api/members/set` (main · rank · confirm as ONE table), `/api/admin/confirm`, the `character`,
+`rank` and one-character `confirm` ops with the bot (`configops._people_verb` → `_apply_with_bot`; offline `apply` keeps
+the table verb alone, and confirm-all is a batch of table saves), MCP `save_characters` / `set_member`, and every Discord
+character wizard (one-row tables): the `/me char` hub, `/roster char|rank|set-main`, `/roster confirm` and the naming
+wizard (`char_name`: names → THE decide screen with the ripple → a `{label, name, surname}` row).
 - `save_character_table` validates the WHOLE table on a copy first (`_table_shadow`: the same verbs on a deep copy of the
   member whose `save` only keeps it in memory; `check_character_table` is that step alone, the previews call it), then
   applies it in one commit — a refusal on row N used to leave rows < N committed. A row naming a character that is gone
@@ -1834,15 +1837,17 @@ then one audit line. Callers: `POST /api/me/characters` (+ `/api/me/main` and `/
   `release_asks_of`; seats go back through `RaidMixin.drop_seated` — free_seat, the ask card EDITED, the fill engine; a
   role flip kept on a locked recurring run is a run-update line + a warn ops line; touched sheets and cards redrawn).
   An ad hoc locked run hands a role-flipped seat back (first come: Join again). A planned character's naming re-labels
-  answers and seats. Nothing DMs anyone.
+  answers and seats. Nothing DMs anyone. The run-file rewrite holds `RaidMixin.board_lock` of every live run the member
+  has an answer or an ask on (sorted keys; `discord_people._board_locks`), so it never interleaves with a `lock_run` or a
+  board write that holds that lock across an await.
 - `/me plan roles` and its Choice arguments are gone; `Registry.set_roles` stays only as the registration wizard's role
   step. `/me char [action:]` is ONE command (a Group with subcommands can't itself be invoked) on
   `flows_roster.CharWizard` — `MemberWizard`'s self mode (member = the presser, no guard) — with Spec · Main · Flex ·
   Retire · Delete · Name (hands over to the registration's `char_name`) · Add (the registration wizard). `/roster char
   member: [action:]` is the same class as an officer (+ Rank, − Name/Add); `/roster rank` and `/roster set-main` are its
   entry points (`RankWizard`, `SetMainWizard`). Every action ends on `Wizard.decide` with the ripple. The old
-  `/me char name|add|main|spec|retire|list` subcommands are retired (`flows_register`'s CharSpec/Main/Retire wizards
-  stay registered under their FLOWS names but no command opens them).
+  `/me char name|add|main|spec|retire|list` subcommands are retired, and so are `flows_register`'s `char_spec`,
+  `char_main`, `char_retire` flows (they called `set_spec` / `set_main` / `retire` directly — a second path).
 
 **Rank per member (D25).** `Member.rank` = the main's rank; `registry.settle_ranks(m, rank)` puts the member's rank on the
 main and "alt" on every other character — called by `set_main`, `retire`, `delete_character`, `add_character` /
@@ -1850,7 +1855,10 @@ main and "alt" on every other character — called by `set_main`, `retire`, `del
 rank, by, *, by_id)` refuses a member with no main, your own rank (the owner aside) and another officer's live test
 puppet (`puppet_refusal`: while a test run is live only its `test_by` or the owner changes a puppet). The `rank` op and
 `/api/members/set` refuse naming an alt. `Registry.confirm(uid, label, by, *, by_id)` looks up by (member, label) —
-never guild-wide by first name — and refuses your own character and a planned one. `/roster confirm`'s walk no longer
+never guild-wide by first name — and refuses your own character and a planned one. A write that names a character
+without its member (plain text's `rank` / `confirm`, `/api/admin/confirm` with a bare label) resolves through
+`Registry.find_unique`: a planned label several members share ("Priest (Holy)") is refused with each named, never the
+first one `find` meets. `/roster confirm`'s walk no longer
 lists your own and no longer DMs ("They see it on their Me page"). Migration: `scripts/migrate_ranks.py`
 (`Registry.migrate_ranks`: non-main characters → alt; a main reading "alt" takes the best rank an alt held; idempotent,
 one commit per guild).
@@ -1858,6 +1866,8 @@ one commit per guild).
 **Absences.** `Registry.add_absence(…, by_id=)` refuses an overlap with an absence on file ("X is already away Tue 9 Dec
 → Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"), a reason over
 `ABSENCE_REASON_MAX` (200) and another officer's puppet; `check_absence` is the same without the write (previews).
+`add_absence`, `clear_absence`, `set_dm`, `set_rank` and `confirm` hold `config_lock` (design §2.4), so the overlap check
+and the write are one step against a web worker thread and the loop.
 `presets.DURATIONS` is the one For-how-long list (the wizard's select and `/api/meta.durations`). `discord_people`:
 `record_absence` (the verb + `announce_absence`), `im_back` (THE "I'm back": `clear_absence` + `absence_cleared`),
 `absence_lines` / `absence_clear_lines` (the preview sentences). "I'm back" is on every surface: the absences card's
@@ -1884,18 +1894,22 @@ server → `flows_config.OwnerTransferWizard` (member picker → refusals → `d
 
 **Web.** `GET /api/members` returns characterless members, `rank`, `dm`, `characters_rev` per row; `/api/members/save` refuses
 only the members whose rev moved (`refused[]`, the rest apply); `/api/members/set` (rank per member, confirm by member,
-main through the verb); `/api/members/dm` and `/api/me/dm` → `Registry.set_dm`; `/api/me` carries `characters_rev` and
+main through the verb; a `character` that isn't theirs is refused, never read as the main); `/api/members/dm` and `/api/me/dm` → `Registry.set_dm`; `/api/me` carries `characters_rev` and
 `rank`; the absence routes take `{start, days | end, reason, preview}`; `/api/absences` carries `span` and `test`.
 Frontend: `components/CharacterTable.tsx` (the Me page's card: row ⋮ menu, Flex, preview-then-confirm, rev),
 `components/AbsencesModal.tsx` (From + For how long + live preview, both pages), `AbsencesCard.tsx` (Me; `useImBack`),
-`AbsencesTable.tsx` (Members), `OwnerCard.tsx` (Config); Members.tsx gains the sticky member cell, the rank select on the
+`AbsencesTable.tsx` (Members; *I'm back* shows by the guild's local `today` from the server, not the browser's UTC date), `OwnerCard.tsx` (Config); Members.tsx gains the sticky member cell, the rank select on the
 main, the DM switch, the ⋮ menu, Flex, the *No characters* section and the Absences table.
 `/roster overview` replies ephemerally always, one embed field per recurring schedule, and officers get *Post to the
 roster channel* (`discord_registry.overview_embed` / `overview_post_view`).
 
+Plain text's diff (`configops.describe` of a `character` op) appends the ripple sentences for every field (spec,
+offspec, name, main, flex, retire, delete) — the words of the decide screen and the web preview.
+
 **Not built (by decision or left for later):** "ask to be a regular" (D27), self-service delete of a member record (D29),
 member notices (the inbox build), `/roster comp` and the Readiness page (phase 3), a characterless member's *Remove record*
-and `on_member_remove` (left-the-server), `MemberWizard`'s Name for officers.
+and `on_member_remove` (left-the-server), `MemberWizard`'s Name for officers, the MCP actor header for rank / confirm (D8 /
+D43, its own build), the phone stacked-card layout of the Me / Members tables (they scroll sideways).
 
 Tests: `tests/test_people.py` (the ripple on open / locked recurring / locked ad hoc runs, seated delete → freed + bench
 asked, rank per member, confirm by member, validate-on-copy, the rev, puppets, overlap, reason cap, I'm back, Join while

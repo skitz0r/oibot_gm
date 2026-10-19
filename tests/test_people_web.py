@@ -242,3 +242,53 @@ def test_owner_route_refuses_an_outsider_and_a_bot(w):
     w.bot.admit(m, bot=True)
     r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
     assert r.status_code == 400 and "bot" in r.json()["error"] and w.reg.config.owner_discord_id == OWNER
+
+
+# ---------------------------------------------------------------- rank / confirm through THE character verb (review fixes)
+
+def test_members_set_refuses_a_character_that_isnt_theirs(w):
+    """A `character` that doesn't exist used to fall back to the main and set its rank without saying so."""
+    m = member(w)
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "character": "Nobodyhere", "rank": "core"}, headers=h)
+    assert r.status_code == 400 and "no active character named Nobodyhere" in r.json()["error"]
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "character": "Nobodyhere", "confirm": True}, headers=h)
+    assert r.status_code == 400 and "no active character named Nobodyhere" in r.json()["error"]
+    mm = w.reg.members[m.discord_id]
+    assert mm.rank == "trial" and not mm.main.confirmed_by
+
+
+def test_members_set_and_admin_confirm_are_one_table_save(w, monkeypatch):
+    from oibot_gm import discord_people
+
+    calls = []
+    verb = discord_people.save_characters
+
+    async def spy(*a, **kw):
+        calls.append(a[3])
+        return await verb(*a, **kw)
+    monkeypatch.setattr(discord_people, "save_characters", spy)
+    m = member(w)
+    w.reg.add_character(m.discord_id, m.display_name, "Newmainy", "Mage", "Fire", None, False)
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "main": "Newmainy", "rank": "core", "confirm": True}, headers=h)
+    assert r.status_code == 200, r.text
+    assert calls == [[{"label": "Newmainy", "main": True}, {"label": "Newmainy", "rank": "core"}, {"label": "Newmainy", "confirm": True}]]
+    mm = w.reg.members[m.discord_id]
+    assert mm.main.label == "Newmainy" and mm.rank == "core" and mm.main.confirmed_by
+    other = mm.characters[0] if mm.characters[0].label != "Newmainy" else mm.characters[1]
+    r = w.c.post("/api/admin/confirm", json={"uid": str(m.discord_id), "label": other.label}, headers=h)
+    assert r.status_code == 200 and r.json()["message"] == f"confirmed {other.label}"
+    assert calls[-1] == [{"label": other.label, "confirm": True}]
+    r = w.c.post("/api/admin/confirm", json={"uid": str(m.discord_id), "label": other.label}, headers=h)
+    assert r.status_code == 400 and "already confirmed" in r.json()["error"]
+    audits = [t for _lvl, t in w.bot.ops.lines if "Newmainy" in t]
+    assert len(audits) == 1, f"one audit line for the one save: {w.bot.ops.lines}"
+
+
+def test_admin_confirm_refuses_a_shared_planned_label(w):
+    w.reg.set_plan(9_100_000_000_000_001, "Plannerone", "Priest", "Holy", None, "main")
+    w.reg.set_plan(9_100_000_000_000_002, "Plannertwo", "Priest", "Holy", None, "main")
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/admin/confirm", json={"label": "Priest (Holy)"}, headers=h)
+    assert r.status_code == 400 and "2 members plan" in r.json()["error"]

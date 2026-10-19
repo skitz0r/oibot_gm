@@ -90,7 +90,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
 
 - **New here? Apply first.** Anyone can join the Discord server with the public invite; joining the guild is an
   application, made in Discord (§3a). Someone with nothing registered who presses *Register / plan my main* or
-  *Add an alt*, or runs `/register`, `/me plan main|alt` or `/me char add`, is sent to the application with one line:
+  *Add an alt*, or runs `/register`, `/me plan main|alt` or `/me char action:Add an alt`, is sent to the application with one line:
   *"New here? Apply first — the officers take it from there."* Plain text ("add my alt …", "plan my main as …") says
   the same, with the **Apply to join** button on the reply while applications are open. Officers, and anyone holding one of the guild's **member roles** (set by the owner, §8), register
   directly; anyone already registered is never affected and keeps adding alts as below.
@@ -117,7 +117,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
     and the bench asked, an open sheet's Join or Bench with it is cleared (a No thanks moves to your other character),
     and it comes off the regulars of any schedule; if it was your main, your next character becomes main.
   - **Name a planned character at launch**: `/me char action:Name a planned character` — pick it (skipped when
-    there is only one), then type first and last name; answers and seats it holds take the new name.
+    there is only one), type first and last name, and the confirm screen says what follows (*"Answered Join on … — the
+    answer now names Stormcall"*); answers and seats it holds take the new name.
   - There is no "delete my record": a member who leaves keeps their history with the officers.
 - **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
   it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page's rank select) — never
@@ -612,7 +613,9 @@ returns to the game defaults.
   `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete), with the
   same ripple on the confirm screen; `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
   member's (on the main): no character to pick. `/roster confirm` alone walks the unconfirmed characters — never your
-  own (self-confirm defeats the badge; the owner aside); the member sees it on their Me page, no DM.
+  own (self-confirm defeats the badge; the owner aside); the member sees it on their Me page, no DM. Rank, confirm
+  and every character change go through the one character save, whichever surface you use (Discord, the Members page,
+  plain text, MCP), so two officers at once never half-apply each other's change.
   `/roster absences` lists the guild's upcoming absences
   (days in words, with reasons) for the next 30 days; a select switches the horizon (a week … three months) — no
   number is typed; a long list ends "and N more — the Members page lists them all". `/roster back member:` is their
@@ -873,10 +876,13 @@ of their characters. The bot reads each live run's board as it stands and each r
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
   rank and roster placement), "delete Jon's alt Jonny" (gone outright; the diff names what it does beyond the record —
-  a seat it holds is handed back and the bench asked, an open sheet's answer cleared; retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
+  a seat it holds is handed back and the bench asked, an open sheet's answer cleared; retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire"
+  (every character change's diff says what it does beyond the record, as the confirm screen does: an answer that now
+  reads Fire, a seat kept for the officers, a rank moving with a new main),
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
-  raider" (the member's rank — name their main; an alt is refused), "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
+  raider" (the member's rank — name their main; an alt is refused; a planned "Priest (Holy)" several members share
+  needs the member named: "rank Jon's Priest (Holy) raider"), "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
   unconfirmed character at once — the diff lists them; officers' requests are read against that list; a character
 really called All or Pending is confirmed alone); "Mira is away
   Nov 1–3" (the diff lists the live sheets those days touch — No thanks, or a rostered seat freed — before anything is

@@ -1,5 +1,5 @@
-"""People verbs on the client (dual interfaces phase 2, design §3.3 / §5.42): the ONE character verb with its ripple into
-runs, "I'm back" (an absence cleared, its sheets re-opened), recording an absence, and the owner transfer.
+"""People verbs on the client (dual interfaces phase 2: dual interface design §3.3, docs/design.md §5.40): the ONE
+character verb with its ripple into runs, "I'm back" (an absence cleared, its sheets re-opened), recording an absence, and the owner transfer.
 
 Every surface is a caller: the Me and Members pages (web/api.py), the Discord wizards (/me char, /roster char, /roster
 back, the absences card, /gm config owner), plain text (configops' `character` / `absence_clear` ops) and MCP (through
@@ -13,6 +13,7 @@ run is told to the officers on the run's card and the ops line."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from . import ops as ops_mod
@@ -49,6 +50,26 @@ async def _call(bot, name: str, *args, **kwargs):
 
 
 # ---------------------------------------------------------------- characters
+
+def _runs_of(rs, m: Member) -> list[str]:
+    """The live runs a member's character change can rewrite: those with their answer, seat or an ask on them."""
+    uid = str(m.discord_id)
+    return sorted(ev.key for ev in rs.live() if uid in ev.signups or any(a.discord_id == m.discord_id for a in ev.fill_asks))
+
+
+@contextlib.asynccontextmanager
+async def _board_locks(bot, reg: Registry, keys: list[str]):
+    """Hold RaidMixin.board_lock of every run in `keys` (sorted: one order everywhere, no lock cycle) — the lock a run's
+    lock_run, board writes, cancel and reopen hold across their awaits — so the ripple's rewrite of a run file waits for
+    a lock in flight instead of being overwritten by it (or landing in the middle of it). A client without boards (the
+    wizard harness) holds nothing."""
+    lock_of = getattr(bot, "board_lock", None)
+    async with contextlib.AsyncExitStack() as stack:
+        if lock_of is not None:
+            for key in sorted(keys):
+                await stack.enter_async_context(lock_of(reg, key))
+        yield
+
 
 def character_preview(bot, reg: Registry, uid: int, rows: list[dict]) -> list[str]:
     """The ripple sentences of a table save, nothing written (rc.character_preview over the live runs)."""
@@ -90,7 +111,8 @@ async def after_character_change(bot, reg: Registry, rs, m: Member, changes: lis
     """The Discord side of a saved table's ripple (rc.after_character_change does the run files): asks close
     (release_asks_of), seats go back through drop_seated (free_seat + the ask card edited + the fill engine), a kept seat
     is told to the officers on the run's updates and the ops line — no DM — and every touched sheet and card is redrawn."""
-    res = rc.after_character_change(reg, rs, m, changes)
+    async with _board_locks(bot, reg, _runs_of(rs, m)):  # the run-file rewrite never interleaves with a lock or a board write
+        res = rc.after_character_change(reg, rs, m, changes)
     freed = {ev.key for ev, _why in res["free"]}
     for ev in res["release"]:
         released = await _call(bot, "release_asks_of", reg, rs, ev, m, "their character changed")

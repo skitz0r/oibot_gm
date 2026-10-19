@@ -1453,6 +1453,20 @@ class Registry:
                     return m, c
         return None
 
+    def find_unique(self, name: str) -> tuple[Member, RegisteredCharacter] | None:
+        """`find` for a WRITE that names a character without its member (plain text's rank / confirm, the site's bare
+        confirm): a planned label ('Priest (Holy)') is shared by everyone who plans that spec, so when more than one
+        member plans it the write is refused with each named instead of landing on whoever `find` meets first."""
+        hit = self.find(name)
+        if hit is None or hit[1].name:
+            return hit
+        n = name.strip().lower()
+        owners = [m for m in self.members.values() if any(not c.name and c.status == "planned" and c.label.lower() == n for c in m.characters)]
+        if len(owners) > 1:
+            raise RegistryError(f"{len(owners)} members plan {hit[1].label}: " + ", ".join(sorted(m.display_name for m in owners))
+                                + ". Name the member too.")
+        return hit
+
     # ---- pre-launch plans (no character names yet)
     def set_plan(self, discord_id: int, display_name: str, cls: str, spec: str, offspec: str | None, slot: str) -> tuple[Member, RegisteredCharacter]:
         """slot: main | alt. Replaces any existing *planned* character in that slot."""
@@ -2816,43 +2830,45 @@ class Registry:
     def confirm(self, discord_id: int, label: str, by: str, *, by_id: int | None = None) -> tuple[Member, RegisteredCharacter]:
         """An officer verifies one of THIS member's characters. Refused for your own character (self-confirm defeats the
         badge; the owner excepted), for a planned (unnamed) one, and when someone already confirmed it."""
-        m, c = self._own_character(discord_id, label)
-        why = self.puppet_refusal(m, by_id)
-        if why:
-            raise RegistryError(why)
-        if by_id is not None and int(by_id) == m.discord_id and not self.is_owner_id(by_id):
-            raise RegistryError("You can't confirm your own character — another officer does that.")
-        if c.status != "active" or not c.name:
-            raise RegistryError(f"{c.label} has no name yet — a planned character is confirmed once it is named.")
-        if c.confirmed_by:  # re-confirming used to overwrite who confirmed it, silently
-            raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
-        c.confirmed_by, c.confirmed_at, c.updated_at = by, now(), now()
-        self.save(m, f"{by} confirmed {c.label}")
-        return m, c
+        with self.config_lock:  # people writes run in web worker threads and on the loop (design §2.4)
+            m, c = self._own_character(discord_id, label)
+            why = self.puppet_refusal(m, by_id)
+            if why:
+                raise RegistryError(why)
+            if by_id is not None and int(by_id) == m.discord_id and not self.is_owner_id(by_id):
+                raise RegistryError("You can't confirm your own character — another officer does that.")
+            if c.status != "active" or not c.name:
+                raise RegistryError(f"{c.label} has no name yet — a planned character is confirmed once it is named.")
+            if c.confirmed_by:  # re-confirming used to overwrite who confirmed it, silently
+                raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
+            c.confirmed_by, c.confirmed_at, c.updated_at = by, now(), now()
+            self.save(m, f"{by} confirmed {c.label}")
+            return m, c
 
     def set_rank(self, discord_id: int, rank: str, by: str, *, by_id: int | None = None) -> tuple[Member, RegisteredCharacter]:
         """The member's rank (D25: per MEMBER, stored on the main; alts always read 'alt'). Refused for a member with no
         main, for your own rank (the owner excepted) and for another officer's test puppet. Returns (member, main)."""
-        rank = str(rank or "").strip().lower()
-        if rank not in RANKS:
-            raise RegistryError(f"Rank must be one of {', '.join(RANKS)}.")
-        m = self.members.get(discord_id)
-        if m is None:
-            raise RegistryError("They have no registered characters yet.")
-        why = self.puppet_refusal(m, by_id)
-        if why:
-            raise RegistryError(why)
-        if by_id is not None and int(by_id) == m.discord_id and not self.is_owner_id(by_id):
-            raise RegistryError("You can't set your own rank — another officer does that.")
-        main = m.main
-        if main is None:
-            raise RegistryError(f"{m.display_name} has no main yet — rank lives on the main (they register or plan one first).")
-        if main.rank == rank and all(c.rank == "alt" for c in m.characters if c is not main):
+        with self.config_lock:  # people writes run in web worker threads and on the loop (design §2.4)
+            rank = str(rank or "").strip().lower()
+            if rank not in RANKS:
+                raise RegistryError(f"Rank must be one of {', '.join(RANKS)}.")
+            m = self.members.get(discord_id)
+            if m is None:
+                raise RegistryError("They have no registered characters yet.")
+            why = self.puppet_refusal(m, by_id)
+            if why:
+                raise RegistryError(why)
+            if by_id is not None and int(by_id) == m.discord_id and not self.is_owner_id(by_id):
+                raise RegistryError("You can't set your own rank — another officer does that.")
+            main = m.main
+            if main is None:
+                raise RegistryError(f"{m.display_name} has no main yet — rank lives on the main (they register or plan one first).")
+            if main.rank == rank and all(c.rank == "alt" for c in m.characters if c is not main):
+                return m, main
+            settle_ranks(m, rank)
+            main.updated_at = now()
+            self.save(m, f"{by} set {m.display_name}'s rank {rank}")
             return m, main
-        settle_ranks(m, rank)
-        main.updated_at = now()
-        self.save(m, f"{by} set {m.display_name}'s rank {rank}")
-        return m, main
 
     def migrate_ranks(self, by: str = "migrate", dry_run: bool = False) -> list[str]:
         """D25 (rank per member): every member's non-main characters read 'alt', the main keeps the member's rank (an alt
@@ -2890,12 +2906,13 @@ class Registry:
 
     def set_dm(self, discord_id: int, on: bool, by: str) -> str:
         """DMs from the bot on/off for one member (the Me page, the Members page, plain text, MCP). Returns the line."""
-        m = self.member(discord_id)
-        if m.dm_opt_out == (not on):
-            return f"{m.display_name}: DMs already {'on' if on else 'off'}"
-        m.dm_opt_out = not on
-        self.save(m, f"{m.display_name} DMs {'on' if on else 'off'}" + (f" (by {by})" if by != m.display_name else ""))
-        return f"{m.display_name}: DMs {'on' if on else 'off'}"
+        with self.config_lock:  # people writes run in web worker threads and on the loop (design §2.4)
+            m = self.member(discord_id)
+            if m.dm_opt_out == (not on):
+                return f"{m.display_name}: DMs already {'on' if on else 'off'}"
+            m.dm_opt_out = not on
+            self.save(m, f"{m.display_name} DMs {'on' if on else 'off'}" + (f" (by {by})" if by != m.display_name else ""))
+            return f"{m.display_name}: DMs {'on' if on else 'off'}"
 
     # ---- regulars (roster redesign Phase 1): officer-curated, per recurring SERIES "<raid>:<schedule>", one character per
     # member per series, stored on the character (RegisteredCharacter.rosters). Regulars are expected on every sheet of the
@@ -3181,36 +3198,38 @@ class Registry:
                     by_id: int | None = None) -> tuple[Member, Absence]:
         """Record an absence. Refused: a bad span, a reason over the cap, days that overlap an absence on file (one
         record per day — clearing one never leaves another half-covering it), another officer's test puppet."""
-        m = self.member(discord_id, display_name, create=display_name is not None)
-        why = self.puppet_refusal(m, by_id)
-        if why:
-            raise RegistryError(why)
-        s, e = self.check_absence(m, start, end, reason)
-        a = Absence(start=s, end=e, reason=self.absence_reason(reason), by=by)
-        m.absences = [*m.absences, a]
-        self.save(m, f"{m.display_name} absent {a.start}" + (f"→{a.end}" if a.end != a.start else "") + (f" (by {by})" if by != m.display_name else ""))
-        return m, a
+        with self.config_lock:  # people writes run in web worker threads and on the loop (design §2.4)
+            m = self.member(discord_id, display_name, create=display_name is not None)
+            why = self.puppet_refusal(m, by_id)
+            if why:
+                raise RegistryError(why)
+            s, e = self.check_absence(m, start, end, reason)
+            a = Absence(start=s, end=e, reason=self.absence_reason(reason), by=by)
+            m.absences = [*m.absences, a]
+            self.save(m, f"{m.display_name} absent {a.start}" + (f"→{a.end}" if a.end != a.start else "") + (f" (by {by})" if by != m.display_name else ""))
+            return m, a
 
     def clear_absence(self, discord_id: int, start: str, by: str | None = None) -> Absence:
         """Remove the absence starting `start`; returns it so the caller can ripple the cleared span into the sheets
         (RaidMixin.after_absence_cleared). `by` defaults to the member (officers pass their own name)."""
         from datetime import date as _d
 
-        m = self.member(discord_id)
-        try:
-            start = _d.fromisoformat(str(start).strip()).isoformat()
-        except ValueError:
-            parts = str(start).strip().split("-")
+        with self.config_lock:  # people writes run in web worker threads and on the loop (design §2.4)
+            m = self.member(discord_id)
             try:
-                start = _d(*(int(x) for x in parts)).isoformat() if len(parts) == 3 else start
-            except (TypeError, ValueError):
-                pass
-        a = next((a for a in m.absences if a.start == start), None)
-        if a is None:
-            raise RegistryError(f"No absence starting {self.day_label(start)}.")
-        m.absences = [x for x in m.absences if x.start != start]
-        self.save(m, f"{m.display_name} cleared absence {start}" + (f" (by {by})" if by and by != m.display_name else ""))
-        return a
+                start = _d.fromisoformat(str(start).strip()).isoformat()
+            except ValueError:
+                parts = str(start).strip().split("-")
+                try:
+                    start = _d(*(int(x) for x in parts)).isoformat() if len(parts) == 3 else start
+                except (TypeError, ValueError):
+                    pass
+            a = next((a for a in m.absences if a.start == start), None)
+            if a is None:
+                raise RegistryError(f"No absence starting {self.day_label(start)}.")
+            m.absences = [x for x in m.absences if x.start != start]
+            self.save(m, f"{m.display_name} cleared absence {start}" + (f" (by {by})" if by and by != m.display_name else ""))
+            return a
 
     # ---- the character table (Me page and the Members page save the same shape)
     def save_character_table(self, discord_id: int, rows: list[dict], by: str, *, officer: bool = False, by_id: int | None = None,

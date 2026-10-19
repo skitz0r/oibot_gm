@@ -1,4 +1,4 @@
-"""Dual interfaces phase 2, part C — people (design §3.3, owner decisions D24 D25 D28 D29 D30 D50; docs/design.md §5.42):
+"""Dual interfaces phase 2, part C — people (design §3.3, owner decisions D24 D25 D28 D29 D30 D50; docs/design.md §5.40):
 the character verb's ripple into sheets and seats (discord_people.save_characters over the REAL RaidMixin verbs), rank per
 member, confirm by (member, label), validate-on-copy and the table rev, absences (overlap, reason cap, I'm back), the
 owner transfer's refusals, a removed schedule's regulars — all over a scratch GitStore (conftest)."""
@@ -398,3 +398,140 @@ def test_a_puppets_absence_posts_no_public_line(reg, rs, bot):
     assert not ch.sent, "a rehearsal stays private"
     run(bot.record_absence(reg, m.discord_id, day, None, "private", m.display_name, by_id=m.discord_id))
     assert len(ch.sent) == 1 and m.display_name in ch.sent[0]["content"] and "private" not in ch.sent[0]["content"]
+
+
+# ---------------------------------------------------------------- one verb, one lock (review fixes)
+
+def _blocks_on_the_config_lock(reg, fn) -> None:
+    """`fn` (a registry people write) waits while another thread holds Registry.config_lock — the web's worker threads
+    and the Discord loop never interleave a check with someone else's write (design §2.4)."""
+    import threading
+
+    reg.config_lock.acquire()
+    t = threading.Thread(target=fn, daemon=True)
+    try:
+        t.start()
+        t.join(0.4)
+        assert t.is_alive(), "the write went ahead while another writer held the lock"
+    finally:
+        reg.config_lock.release()
+    t.join(10)
+    assert not t.is_alive()
+
+
+def test_people_writes_hold_the_config_lock(reg):
+    m = real(reg, 0)
+    reg.add_character(m.discord_id, m.display_name, "Lockalt", "Mage", "Fire", None, False)
+    _blocks_on_the_config_lock(reg, lambda: reg.add_absence(m.discord_id, "2099-05-01", None, None, "t"))
+    assert reg.members[m.discord_id].absences
+    _blocks_on_the_config_lock(reg, lambda: reg.clear_absence(m.discord_id, "2099-05-01", "t"))
+    assert not reg.members[m.discord_id].absences
+    _blocks_on_the_config_lock(reg, lambda: reg.set_dm(m.discord_id, False, "t"))
+    _blocks_on_the_config_lock(reg, lambda: reg.set_rank(m.discord_id, "core", "Officer", by_id=OWNER))
+    _blocks_on_the_config_lock(reg, lambda: reg.confirm(m.discord_id, "Lockalt", "Officer", by_id=OWNER))
+    mm = reg.members[m.discord_id]
+    assert mm.dm_opt_out and mm.rank == "core" and next(c for c in mm.characters if c.label == "Lockalt").confirmed_by == "Officer"
+
+
+def test_two_overlapping_absences_at_once_one_wins(reg):
+    """The overlap check and the write are one step under the lock: two writers racing for the same days (a web thread
+    and the loop) can't both pass the check."""
+    import threading
+
+    m = real(reg, 0)
+    errors: list[Exception] = []
+    gate = threading.Barrier(2)
+
+    def add(by):
+        gate.wait()
+        try:
+            reg.add_absence(m.discord_id, "2099-06-01", "2099-06-03", None, by)
+        except RegistryError as e:
+            errors.append(e)
+    ts = [threading.Thread(target=add, args=(b,)) for b in ("web", "discord")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(10)
+    assert len(reg.members[m.discord_id].absences) == 1 and len(errors) == 1 and "already away" in str(errors[0])
+
+
+def test_the_ripple_waits_for_a_board_writer(reg, rs, bot):
+    """rc.after_character_change rewrites run files on the loop; a lock_run / board write holding board_lock across an
+    await (the solver in a worker thread) would otherwise overwrite it, or see it land half-way. The ripple waits."""
+    m = real(reg, 0, "Priest", "Holy")
+    ev = real_run(reg, rs)
+    join(reg, rs, ev, [m])
+
+    async def go():
+        lock = bot.board_lock(reg, ev.key)
+        await lock.acquire()
+        task = asyncio.create_task(bot.save_characters(reg, m.discord_id, [{"label": m.main.label, "cls": "Priest", "spec": "Shadow"}], m.display_name, by_id=m.discord_id))
+        for _ in range(200):  # the registry write (a worker thread) lands; the run-file rewrite must not
+            await asyncio.sleep(0.02)
+            if reg.members[m.discord_id].main.spec == "Shadow":
+                break
+        await asyncio.sleep(0.1)
+        assert reg.members[m.discord_id].main.spec == "Shadow"
+        assert ev.signups[str(m.discord_id)].spec == "Holy", "the ripple wrote the run while a board writer held it"
+        lock.release()
+        await asyncio.wait_for(task, 10)
+    run(go())
+    assert ev.signups[str(m.discord_id)].spec == "Shadow"
+
+
+def test_plain_text_rank_and_confirm_go_through_the_character_verb(reg, rs, bot, monkeypatch):
+    calls = []
+    real_verb = discord_people.save_characters
+
+    async def spy(*a, **kw):
+        calls.append((a[3], kw.get("officer")))
+        return await real_verb(*a, **kw)
+    monkeypatch.setattr(discord_people, "save_characters", spy)
+    m = real(reg, 0)
+    reg.add_character(m.discord_id, m.display_name, "Confirmee", "Mage", "Fire", None, False)
+    run(configops.apply_async(reg, ConfigOp(op="rank", member=m.display_name, value="core"), "Officer", True, bot=bot, by_id=OWNER, via="chat"))
+    run(configops.apply_async(reg, ConfigOp(op="confirm", member=m.display_name, character="Confirmee"), "Officer", True, bot=bot, by_id=OWNER, via="chat"))
+    assert calls == [([{"label": m.main.label, "rank": "core"}], True), ([{"label": "Confirmee", "confirm": True}], True)]
+    mm = reg.members[m.discord_id]
+    assert mm.rank == "core" and next(c for c in mm.characters if c.label == "Confirmee").confirmed_by == "Officer"
+    audit = [t for _lvl, t in bot.ops.lines if "rank core" in t or "confirmed Confirmee" in t]
+    assert len(audit) == 2, f"one audit line per change (the verb's), not two: {bot.ops.lines}"
+
+
+def test_a_shared_planned_label_never_ranks_the_wrong_member(reg):
+    """Planned labels ('Priest (Holy)') are shared: without a member, a rank / confirm naming one is refused when more
+    than one member plans it (Registry.find returned whoever it met first)."""
+    a = reg.set_plan(REAL + 1, "Plannera", "Priest", "Holy", None, "main")[0]
+    b = reg.set_plan(REAL + 2, "Plannerb", "Priest", "Holy", None, "main")[0]
+    label = a.main.label
+    assert label == b.main.label
+    with pytest.raises(RegistryError, match="2 members plan") as e:
+        configops.apply(reg, ConfigOp(op="rank", character=label, value="core"), "Officer", is_owner=True, by_id=OWNER)
+    assert "Plannera" in str(e.value) and "Plannerb" in str(e.value)
+    assert "2 members plan" in configops.describe(reg, ConfigOp(op="confirm", character=label))
+    assert reg.members[a.discord_id].rank != "core" and reg.members[b.discord_id].rank != "core"
+    configops.apply(reg, ConfigOp(op="rank", member="Plannerb", character=label, value="core"), "Officer", is_owner=True, by_id=OWNER)
+    assert reg.members[b.discord_id].rank == "core" and reg.members[a.discord_id].rank != "core"
+    assert reg.find_unique("Anyone (Nothing)") is None
+
+
+def test_plain_text_diff_prints_the_ripple_for_every_character_field(reg, rs):
+    """The words of the Discord decide screen and the web preview, in the plain-text diff too: spec, offspec, name and
+    main (not only retire / delete)."""
+    m = real(reg, 0, "Priest", "Holy")
+    reg.add_character(m.discord_id, m.display_name, "Ripplealt", "Mage", "Fire", None, False)
+    ev = real_run(reg, rs)
+    join(reg, rs, ev, [m])
+    spec = configops.describe(reg, ConfigOp(op="character", member=m.display_name, character=m.main.label, field="spec", value="Shadow"))
+    assert "now reads Shadow" in spec
+    off = configops.describe(reg, ConfigOp(op="character", member=m.display_name, character=m.main.label, field="offspec", value="Shadow"))
+    assert "offspec" in off
+    main = configops.describe(reg, ConfigOp(op="character", member=m.display_name, character="Ripplealt", field="main"))
+    assert "moves to Ripplealt" in main
+    p = reg.set_plan(REAL + 5, "Planname", "Priest", "Holy", None, "main")[0]
+    rc.set_signup(reg, rs, ev, p, p.main.label, "in", source="member")
+    name = configops.describe(reg, ConfigOp(op="character", member="Planname", character=p.main.label, field="name", value="Newname"))
+    assert "now names Newname" in name
+    retire = configops.describe(reg, ConfigOp(op="character", member=m.display_name, character=m.main.label, field="retire"))
+    assert "answer is cleared" in retire or "stays No thanks" in retire

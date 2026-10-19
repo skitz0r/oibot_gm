@@ -1387,17 +1387,27 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def admin_confirm(request: Request):
         """Confirm one character: {label, uid | member} (the member names whose — two members may share a first name; a
         bare label still resolves guild-wide). Your own character is refused (the owner aside)."""
-        def go(v, d):
+        v, d = await body(request, officer=True)
+        try:
             label = parse(d, LabelBody).label
             if member_ref(d) not in (None, ""):
                 m = resolve_member(v.reg, member_ref(d))
             else:
-                hit = v.reg.find(label)
+                hit = v.reg.find_unique(label)  # a planned label several members share is refused, never guessed
                 if not hit:
                     raise RegistryError(f"No character named {label}.")
                 m = hit[0]
-            return f"confirmed {v.reg.confirm(m.discord_id, label, v.name, by_id=v.uid)[1].label}"
-        return await run(request, go, officer=True)
+            c = next((x for x in m.active() if x.label == label), None) or next((x for x in m.active() if x.matches(label)), None)
+            if c is None:
+                raise RegistryError(f"{m.display_name} has no active character named {label}.")
+            if c.confirmed_by:
+                raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            return await refused(v, request, e)
+        out = await save_table(request, v, m.discord_id, [{"label": c.label, "confirm": True}], officer=True, rev=None, preview=False)  # THE character verb
+        return out if isinstance(out, JSONResponse) else {**out, "message": f"confirmed {c.label}"}
 
     @app.post("/api/admin/placement")
     async def admin_placement(request: Request):
@@ -1770,51 +1780,59 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def members_set(request: Request):
         """Officer edits of one member the way the Discord commands do: `rank` (D25: the member's, on the main — a
         `character` that is an alt is refused), `confirm` (true: `character`, default the main, is verified), `main` (a
-        character becomes the main — a one-row table save, the rank moves with it). Any subset; your own rank and your
-        own characters' confirm are refused (the owner aside)."""
+        character becomes the main; the rank moves with it). Any subset, as ONE character-table save through THE character
+        verb (discord_people.save_characters: under the registry's lock, validated on a copy, one audit line) — main first,
+        then rank, then confirm. A `character` that isn't one of theirs is refused, never read as the main; your own rank
+        and your own characters' confirm are refused (the owner aside)."""
         v, d = await body(request, officer=True)
-        reg, done = v.reg, []
+        reg = v.reg
         try:
             m = resolve_member(reg, member_ref(d))
         except HTTPException as e:
             return JSONResponse({"error": e.detail}, status_code=e.status_code)
-        char = str(d.get("character") or "").strip() or (m.main.label if m.main else "")
+
+        def own(ref: str):
+            c = next((x for x in m.active() if x.label == ref), None) or next((x for x in m.active() if x.matches(ref)), None)
+            if c is None:
+                raise RegistryError(f"{m.display_name} has no active character named {ref or '?'} (theirs: {', '.join(x.label for x in m.active()) or 'none'}).")
+            return c
+
+        rows: list[dict] = []
+        notes: list[str] = []
         try:
+            ref = str(d.get("character") or "").strip()
+            named = own(ref) if ref else None
+            main = m.main
             if d.get("main"):
-                name = str(d["main"]).strip() if isinstance(d["main"], str) else char
-                c = next((x for x in m.active() if x.label == name), None) or next((x for x in m.active() if x.matches(name)), None)
+                c = own(str(d["main"]).strip()) if isinstance(d["main"], str) else (named or main)
                 if c is None:
-                    raise RegistryError(f"{m.display_name} has no active character named {name or '?'}")
+                    raise RegistryError(f"{m.display_name} has no main yet — name the character that becomes it.")
                 if not c.is_main:
-                    out = await save_table(request, v, m.discord_id, [{"label": c.label, "main": True}], officer=True, rev=None, preview=False)
-                    if isinstance(out, JSONResponse):
-                        return out
-                done.append(f"{m.display_name}: main is now {c.label}")
-                char = str(d.get("character") or "").strip() or c.label
+                    rows.append({"label": c.label, "main": True})
+                main, named = c, named or c
             if d.get("rank"):
-                if not char:
-                    raise RegistryError("they have no main yet — rank lives on the main")
-                c = next((x for x in m.active() if x.label == char), None) or next((x for x in m.active() if x.matches(char)), None)
-                if c is not None and not c.is_main:
-                    raise RegistryError(f"{c.label} is an alt — rank lives on the main ({m.main.label if m.main else 'none yet'}).")
-                mm, main = await asyncio.to_thread(reg.set_rank, m.discord_id, str(d["rank"]), v.name, by_id=v.uid)
-                done.append(f"{m.display_name}: rank {main.rank}")
+                c = named or main
+                if c is None:
+                    raise RegistryError(f"{m.display_name} has no main yet — rank lives on the main.")
+                if c is not main:
+                    raise RegistryError(f"{c.label} is an alt — rank lives on the main ({main.label if main else 'none yet'}).")
+                rows.append({"label": c.label, "rank": str(d["rank"]).strip().lower()})
             if d.get("confirm"):
-                if not char:
-                    raise RegistryError("character required (no main to default to)")
-                c = next((x for x in m.active() if x.label == char), None) or next((x for x in m.active() if x.matches(char)), None)
-                if c is not None and c.confirmed_by:  # a "set" is declarative: already confirmed is already done
-                    done.append(f"{c.label} already confirmed by {c.confirmed_by}")
+                c = named or main
+                if c is None:
+                    raise RegistryError(f"{m.display_name} has no main yet — name the character to confirm.")
+                if c.confirmed_by:  # a "set" is declarative: already confirmed is already done
+                    notes.append(f"{c.label} already confirmed by {c.confirmed_by}")
                 else:
-                    mm, c = await asyncio.to_thread(reg.confirm, m.discord_id, char, v.name, by_id=v.uid)
-                    done.append(f"confirmed {c.label}")
+                    rows.append({"label": c.label, "confirm": True})
         except Exception as e:  # noqa: BLE001
             return await refused(v, request, e)
-        msg = "; ".join(done) or f"{m.display_name}: no changes"
-        audit = [x for x in done if not x.startswith(f"{m.display_name}: main is now")]  # the table verb wrote the main's own line
-        if audit:
-            await ops_mod.audited(bot.ops, reg, v.name, "; ".join(audit), via=v.via, by_id=v.uid)
-        return {"message": msg}
+        if not rows:
+            return {"message": "; ".join(notes) or f"{m.display_name}: no changes"}
+        out = await save_table(request, v, m.discord_id, rows, officer=True, rev=None, preview=False)
+        if isinstance(out, JSONResponse):
+            return out
+        return {**out, "message": "; ".join([out["message"], *notes])}
 
     @app.post("/api/members/dm")
     async def members_dm(request: Request):

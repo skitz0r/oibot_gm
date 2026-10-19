@@ -1,5 +1,7 @@
-"""The registration wizards driven end to end: class → spec → offspec → names (register / card / /me char add),
-plan only, apply, and the character flows (name · spec · main · retire). Classes come from the profile."""
+"""The registration wizards driven end to end: class → spec → offspec → names (register / card / /me char action:Add an
+alt), plan only, apply, and naming a planned character (through THE character verb). Classes come from the profile.
+Spec · Main · Retire are the /me char hub's (tests/test_people_flows.py) — the old char_spec / char_main / char_retire
+flows are retired."""
 import asyncio
 from types import SimpleNamespace
 
@@ -126,7 +128,7 @@ def test_add_an_alt_with_a_surname(reg):
     cls, specs = cls_specs(reg)
 
     async def go():
-        await FLOWS["register"](h.command(), reg, slot="alt")  # /me char add
+        await FLOWS["register"](h.command(), reg, slot="alt")  # /me char action:Add an alt
         assert "Add an alt" in h.text
         await pick_class_specs(h, cls, specs[1])
         await h.press("Continue")
@@ -242,6 +244,7 @@ def test_char_name_names_the_planned_main(reg):
     h = harness(reg)
     cls, specs = cls_specs(reg)
     reg.set_plan(NEW_ID, "Newbie", cls, specs[0], None, "main")
+    planned = reg.members[NEW_ID].main.label
 
     async def go():
         await FLOWS["char_name"](h.command(), reg)
@@ -251,10 +254,27 @@ def test_char_name_names_the_planned_main(reg):
         await h.press("Fix this")
         assert h.modal._items["first"].default == "bad1"
         await h.submit(h.modal, first="Launchday", last="Hero")
+        assert planned in h.text and "Launchday Hero" in h.text and "Name it Launchday Hero" in h.buttons()  # THE decide screen
+        assert reg.members[NEW_ID].main.status == "planned", "nothing is written before the decide screen's press"
+        await h.press("Name it Launchday Hero")
         assert "✅" in h.text and "Launchday Hero" in h.text
     run(go())
     c = reg.members[NEW_ID].main
     assert c.status == "active" and c.label == "Launchday Hero"
+
+
+def test_char_name_refuses_a_taken_name_before_the_decide_screen(reg):
+    h = harness(reg)
+    cls, specs = cls_specs(reg)
+    reg.set_plan(NEW_ID, "Newbie", cls, specs[0], None, "main")
+    taken = next(c for m in reg.members.values() for c in m.active() if c.name and not c.surname)
+
+    async def go():
+        await FLOWS["char_name"](h.command(), reg)
+        await h.submit(first=taken.name, last="")
+        assert "❌" in h.text and "already registered" in h.text and "Fix this" in h.buttons()
+    run(go())
+    assert reg.members[NEW_ID].main.status == "planned"
 
 
 def test_char_name_with_nothing_planned(reg):
@@ -264,110 +284,9 @@ def test_char_name_with_nothing_planned(reg):
     assert "no planned character" in h.text
 
 
-# ---- /me char spec
-
-def test_char_spec_offers_only_that_class(reg):
-    m = reg.test_members()[0]
-    h = harness(reg, uid=m.discord_id, name=m.display_name)
-    cls, specs = cls_specs(reg)
-    other = next(c for c in reg.profile.classes if c != cls)
-    reg.add_character(m.discord_id, m.display_name, "Speccy", other, list(reg.profile.classes[other])[0], None, False)
-
-    async def go():
-        await FLOWS["char_spec"](h.command(), reg)
-        assert h.selects() == ["Character"]
-        await h.pick("Character", "Speccy")
-        spec_sel = next(s for s in h._items() if isinstance(s, discord.ui.Select) and s.placeholder == "Main spec")
-        assert [o.value for o in spec_sel.options] == list(reg.profile.classes[other])
-        new = list(reg.profile.classes[other])[-1]
-        await h.pick("Main spec", new)
-        await h.press("Confirm")
-        assert "✅" in h.text
-    run(go())
-    c = next(c for c in reg.members[m.discord_id].active() if c.label == "Speccy")
-    assert c.spec == list(reg.profile.classes[other])[-1] and c.cls == other
-
-
-def test_char_spec_cancel_writes_nothing(reg):
-    m = reg.test_members()[1]
-    h = harness(reg, uid=m.discord_id, name=m.display_name)
-    before = [(c.label, c.spec, c.offspec) for c in m.active()]
-
-    async def go():
-        await FLOWS["char_spec"](h.command(), reg)
-        if h.selects() == ["Character"]:
-            await h.pick("Character", m.main.label)
-        await h.press("Cancel")
-    run(go())
-    assert [(c.label, c.spec, c.offspec) for c in reg.members[m.discord_id].active()] == before
-
-
-# ---- /me char main and retire
-
-def test_char_main_swaps_the_main(reg):
-    m = reg.test_members()[2]
-    h = harness(reg, uid=m.discord_id, name=m.display_name)
-    cls, specs = cls_specs(reg)
-    old = m.main.label
-    reg.add_character(m.discord_id, m.display_name, "Newmain", cls, specs[0], None, False)
-
-    async def go():
-        await FLOWS["char_main"](h.command(), reg)
-        if h.selects() == ["Character"]:
-            assert old not in [o.value for o in h._items()[0].options]  # the main is not a candidate
-            await h.pick("Character", "Newmain")
-        assert h.buttons() == ["Confirm", "Cancel"]
-        await h.press("Confirm")
-        assert "✅ Main is now" in h.text and f"was {old}" in h.text
-    run(go())
-    assert reg.members[m.discord_id].main.label == "Newmain"
-
-
-def test_char_main_refuses_when_the_pick_went_away(reg):
-    m = reg.test_members()[3]
-    h = harness(reg, uid=m.discord_id, name=m.display_name)
-    cls, specs = cls_specs(reg)
-    reg.add_character(m.discord_id, m.display_name, "Fleeting", cls, specs[0], None, False)
-    main_before = m.main.label
-
-    async def go():
-        await FLOWS["char_main"](h.command(), reg)
-        if h.selects() == ["Character"]:
-            await h.pick("Character", "Fleeting")
-        reg.retire(m.discord_id, "Fleeting")  # meanwhile, on the website
-        await h.press("Confirm")
-        assert "❌" in h.text and "no longer" in h.text
-    run(go())
-    assert reg.members[m.discord_id].main.label == main_before
-
-
-def test_char_retire(reg):
-    m = reg.test_members()[4]
-    h = harness(reg, uid=m.discord_id, name=m.display_name)
-    cls, specs = cls_specs(reg)
-    reg.add_character(m.discord_id, m.display_name, "Oldtimer", cls, specs[0], None, False)
-
-    async def go():
-        await FLOWS["char_retire"](h.command(), reg)
-        await h.pick("Character", "Oldtimer")
-        btn = next(b for b in h._items() if isinstance(b, discord.ui.Button) and b.label == "Retire Oldtimer")
-        assert btn.style == discord.ButtonStyle.danger
-        await h.press("Retire Oldtimer")
-        assert "✅ Retired Oldtimer" in h.text
-    run(go())
-    assert next(c for c in reg.members[m.discord_id].characters if c.label == "Oldtimer").status == "retired"
-
-
-def test_char_retire_cancel_writes_nothing(reg):
-    m = reg.test_members()[5]
-    h = harness(reg, uid=m.discord_id, name=m.display_name)
-    before = [c.status for c in m.characters]
-
-    async def go():
-        await FLOWS["char_retire"](h.command(), reg)
-        if h.selects() == ["Character"]:
-            await h.pick("Character", m.main.label)
-        await h.press("Cancel")
-        assert "nothing was changed" in h.text
-    run(go())
-    assert [c.status for c in reg.members[m.discord_id].characters] == before
+def test_the_old_one_character_flows_are_retired():
+    """Spec · Main · Retire live on the /me char hub only (flows_roster.CharWizard → discord_people.save_characters):
+    the old flows called set_spec / set_main / retire directly, a second path without the ripple."""
+    for name in ("char_spec", "char_main", "char_retire"):
+        assert name not in FLOWS
+    assert not hasattr(flows_register, "CharSpecWizard") and not hasattr(flows_register, "OwnCharWizard")

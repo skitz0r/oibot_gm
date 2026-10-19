@@ -459,16 +459,17 @@ class ConfirmWizard(OfficerWizard):
             await self.refuse(interaction, f"{label} was already confirmed by {c.confirmed_by}.", self.back, "Back to the list")
             return
         await self.working(interaction, f"Confirming {label}…")
-        by = interaction.user.display_name
-        try:
-            m, c = self.reg.confirm(member_id, label, by, by_id=interaction.user.id)
+        from . import discord_people
+
+        try:  # THE character verb (a one-row table: the registry's lock, validated on a copy, its own audit line)
+            await discord_people.save_characters(interaction.client, self.reg, member_id, [{"label": label, "confirm": True}], interaction.user.display_name,
+                                                 by_id=interaction.user.id, officer=True, via="discord")
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.back, "Back to the list")
             return
-        self.done.append(c.label)
-        await _emit(interaction, self.reg, f"{by} confirmed {c.label} ({m.display_name})")
+        self.done.append(label)
         self.page = 0
-        await self.listing(interaction, f"✅ Confirmed **{c.label}** ({m.display_name}).")
+        await self.listing(interaction, f"✅ Confirmed **{label}** ({m.display_name}).")
 
 
 @flow("roster_confirm")

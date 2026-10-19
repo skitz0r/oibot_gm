@@ -10,7 +10,10 @@ import { useImBack } from "./AbsencesCard";
 export function AbsencesTable({ reloadKey }: { reloadKey?: number }) {
   const [rows, setRows] = useState<AbsenceRow[] | null>(null);
   const [past, setPast] = useState(false);
-  const load = () => api.get<{ rows: AbsenceRow[] }>(`/api/absences${past ? "?all=true" : ""}`).then((d) => setRows(d.rows)).catch(fail);
+  // "today" is the GUILD's local date from the server: a browser's UTC date runs a day ahead on a US evening and would
+  // hide I'm back on an absence that ends today
+  const [today, setToday] = useState<string>("");
+  const load = () => api.get<{ rows: AbsenceRow[]; today: string }>(`/api/absences${past ? "?all=true" : ""}`).then((d) => { setRows(d.rows); setToday(d.today); }).catch(fail);
   useEffect(() => { load(); }, [past, reloadKey]);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["member"]);
   const [back, dialog, busy] = useImBack(load);
@@ -29,7 +32,7 @@ export function AbsencesTable({ reloadKey }: { reloadKey?: number }) {
                 <Table.Td><Text size="sm">{r.span}</Text>{r.current && <Badge size="xs" variant="light" color="yellow">away now</Badge>}</Table.Td>
                 <Table.Td><Text size="sm" c={r.reason ? undefined : "dimmed"}>{r.reason || "—"}</Text></Table.Td>
                 <Table.Td><Text size="sm" c="dimmed">{r.by === r.display_name ? "themselves" : r.by}</Text></Table.Td>
-                <Table.Td>{!r.end || r.end >= new Date().toISOString().slice(0, 10)
+                <Table.Td>{!r.end || !today || r.end >= today
                   ? <Button size="compact-xs" variant="subtle" loading={busy === `${r.uid}${r.start}`} onClick={() => back({ start: r.start, end: r.end, reason: r.reason, span: r.span }, { uid: r.uid, display_name: r.display_name })}>I'm back</Button>
                   : null}</Table.Td>
               </Table.Tr>
