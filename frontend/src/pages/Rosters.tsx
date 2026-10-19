@@ -349,7 +349,7 @@ function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: Raid
           <Tabs.Panel value="test" pt="md">
             <Stack gap="md">
               {tests.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} badge={testBadge} />)}
-              <Card withBorder p="sm"><TestFeed run={tests.length === 1 ? tests[0].key : undefined} height={260} /></Card>
+              {meta.viewer.officer && <Card withBorder p="sm"><TestFeed run={tests.length === 1 ? tests[0].key : undefined} height={260} /></Card>}
             </Stack>
           </Tabs.Panel>
         )}

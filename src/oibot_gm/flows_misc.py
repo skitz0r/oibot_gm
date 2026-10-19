@@ -42,12 +42,6 @@ async def _refuse_non_officer(interaction: discord.Interaction, reg: Registry) -
     return True
 
 
-async def _ops(interaction: discord.Interaction, reg: Registry, level: str, line: str) -> None:
-    ops = getattr(interaction.client, "ops", None)
-    if ops is not None:
-        await ops.emit(reg.config, level, line)
-
-
 def tempo_note(key: str) -> str:
     _, start, nudge, lock, confirm = TEMPOS[key]
     return f"starts in {start} min · nudge {nudge} · lock {lock} · confirm by {confirm} min before"
@@ -330,7 +324,7 @@ class TestSeedWizard(Wizard):
         count = int(values[0])
         await self.working(interaction, "Seeding…")
         reg = self.reg
-        line = await interaction.client.test_seed(reg, count, interaction.user.display_name)  # SetupMixin.test_seed: the site's Seed too (its ops line)
+        line = await interaction.client.test_seed(reg, count, interaction.user.display_name, by_id=interaction.user.id)  # SetupMixin.test_seed: the site's Seed too (its ops line)
         await self.finish(interaction, f"🧪 {line}\n" + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30]))
 
 
@@ -449,8 +443,7 @@ async def open_test_clear(interaction: discord.Interaction, reg: Registry, **_se
     wiz = Wizard(reg, interaction.user.id, title="Clear the test bench", guard=_officer_guard(reg))
 
     async def do(i: discord.Interaction, _note: str | None) -> None:
-        line = await i.client.test_bench_clear(reg, i.user.display_name)
+        line = await i.client.test_bench_clear(reg, i.user.display_name, by_id=i.user.id)  # the verb writes its own audit line
         await wiz.finish(i, f"🧪 {line}")
-        await _ops(i, reg, "warn", f"test bench: {line} (by {i.user.display_name})")
 
     await wiz.decide(interaction, "\n".join(lines), do=do, do_label="Clear the test bench", danger=True)

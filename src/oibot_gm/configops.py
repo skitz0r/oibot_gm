@@ -842,7 +842,7 @@ def _test_op(value: str | None) -> tuple[str, str]:
     words = (value or "").strip().split()
     kind = words[0].lower() if words else ""
     if kind not in ("seed", "run", "clear", "add", "remove", "comp", "answer"):
-        raise RegistryError("test is 'seed N' | 'seed all', 'run <raid id> [quick|standard|slow] [dm]', 'answer [<run>] join N bench N out N', "
+        raise RegistryError("test is 'seed N' | 'seed all', 'run <raid id> [quick|standard|slow] [dm]', 'answer [<run>] join N bench N out N yes N no N', "
                             "'add N Class Spec, …', 'remove N Class Spec, …', 'comp <raid id>' or 'clear'")
     return kind, " ".join(words[1:])
 
@@ -872,13 +872,16 @@ def _test_run_args(reg: Registry, arg: str) -> tuple[str, str, bool]:
     return raid, tempo, any(w in ("dm", "dms") for w in words)
 
 
-ANSWER_WORDS = {"join": "join", "joins": "join", "in": "join", "bench": "bench", "sub": "bench", "out": "out", "no": "out", "nothanks": "out"}
+ANSWER_WORDS = {"join": "join", "joins": "join", "in": "join", "bench": "bench", "sub": "bench", "out": "out", "nothanks": "out",
+                "yes": "yes", "confirm": "yes", "no": "no", "cant": "no", "can't": "no"}
 
 
 def _test_answer_args(arg: str) -> tuple[str | None, dict[str, int]]:
-    """'bd-1209-1930 join 8 bench 2 out 3' → (run or None, {join, bench, out}); 'join 8' alone = the only live run."""
-    words = arg.replace(",", " ").replace("no thanks", "nothanks").split()
-    counts, run, i = {"join": 0, "bench": 0, "out": 0}, None, 0
+    """'bd-1209-1930 join 8 bench 2 out 3' → (run or None, {join, bench, out, yes, no}); 'join 8' alone = the only live
+    test run. 'yes 3 no 1' answers puppets' open asks (a Confirm / Can't make it after lock, a fill ask): yes = Confirm,
+    no = Can't make it — what /gm test answer and the site's Answer as puppets do (SetupMixin.test_answer)."""
+    words = arg.replace(",", " ").replace("no thanks", "nothanks").replace("can't make it", "cant").split()
+    counts, run, i = {"join": 0, "bench": 0, "out": 0, "yes": 0, "no": 0}, None, 0
     while i < len(words):
         w = words[i].lower()
         if w in ANSWER_WORDS and i + 1 < len(words) and words[i + 1].isdigit():
@@ -893,9 +896,9 @@ def _test_answer_args(arg: str) -> tuple[str | None, dict[str, int]]:
             run = words[i]
             i += 1
             continue
-        raise RegistryError("test answer is 'answer [<run>] join N bench N out N'")
+        raise RegistryError("test answer is 'answer [<run>] join N bench N out N yes N no N'")
     if not any(counts.values()):
-        raise RegistryError("say how many: 'answer join 8 bench 2 out 3'")
+        raise RegistryError("say how many: 'answer join 8 bench 2 out 3' (or 'answer yes 3 no 1' for the puppets' open asks)")
     return run, counts
 
 
@@ -1906,8 +1909,16 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             run, counts = _test_answer_args(arg)
             ev = _test_answer_run(reg, rc.RaidStore(reg.store, reg.key), run)
             left = len([m for m in reg.test_members() if str(m.discord_id) not in ev.signups])
-            return (f"test bench: on {ev.key}, {counts['join']} Join, {counts['bench']} Bench, {counts['out']} No thanks from the {left} puppet(s) "
-                    "who haven't answered (picked at random; fewer if they run out)")
+            parts = []
+            if counts["join"] or counts["bench"] or counts["out"]:
+                parts.append(f"{counts['join']} Join, {counts['bench']} Bench, {counts['out']} No thanks from the {left} puppet(s) "
+                             "who haven't answered (picked at random; fewer if they run out)")
+            if counts["yes"] or counts["no"]:
+                from .discord_pool import SetupMixin
+
+                held = len(SetupMixin.puppet_asks(reg, ev))
+                parts.append(f"{counts['yes']} Confirm, {counts['no']} Can't make it from the {held} puppet(s) holding an open ask")
+            return f"test bench: on {ev.key}, " + "; ".join(parts)
         if kind in ("add", "remove"):
             rows = _test_specs(reg, arg)
             if kind == "remove":
@@ -2357,7 +2368,8 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
     ops = getattr(bot, "ops", None) if bot is not None else None
     channel_op = op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None
     verb_audits = ((op.op == "loot" and bot is not None and hasattr(bot, "open_council"))  # LootMixin's verbs write their own line
-                   or (op.op in RUN_VERBS_AUDITED and bot is not None and hasattr(bot, "remind")))  # so do these RaidMixin verbs (via, by_id passed)
+                   or (op.op in RUN_VERBS_AUDITED and bot is not None and hasattr(bot, "remind"))  # so do these RaidMixin verbs (via, by_id passed)
+                   or (op.op == "test" and bot is not None))  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
     if via is not None and ops is not None and not channel_op and not verb_audits:
         from . import ops as ops_mod
 
@@ -2575,36 +2587,34 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         a = await asyncio.to_thread(reg.clear_absence, m.discord_id, start, by)
         lines = list(await bot.absence_cleared(reg, m, a, by) or [])
         return f"{m.display_name}: cleared absence {reg.span_label(a.start, a.end)}" + (" — " + "; ".join(lines) if lines else "")
-    if op.op == "test":
+    if op.op == "test":  # SetupMixin's bench verbs, the same /gm test …, the site's Test bench and MCP call; each writes its audit line
         kind, arg = _test_op(op.value)
         if kind == "seed":
-            made = await asyncio.to_thread(reg.seed_test_members, _seed_count(reg, arg), by)
-            return f"test bench: {len(made)} puppet(s) created, {len(reg.test_members())} in total"
+            return "test bench: " + await bot.test_seed(reg, _seed_count(reg, arg), by, via=via, by_id=by_id)
         if kind == "clear":
-            return "test bench: " + await bot.test_bench_clear(reg, by)
-        if kind == "answer":  # the site's test bench and /gm test answer: one helper, then the sheet
+            return "test bench: " + await bot.test_bench_clear(reg, by, via=via, by_id=by_id)
+        if kind == "answer":  # a sheet mix (join / bench / out) and the puppets' open asks (yes / no): SetupMixin.test_answer
             run, counts = _test_answer_args(arg)
             ev = _test_answer_run(reg, rs, run)
-            done = await asyncio.to_thread(rc.test_answer_mix, reg, rs, ev, counts["join"], counts["bench"], counts["out"])
-            await bot.refresh_sheet(reg, ev)
+            done = await bot.test_answer(reg, rs, ev, join=counts["join"], bench=counts["bench"], out=counts["out"], yes=counts["yes"], no=counts["no"],
+                                         by=by, by_id=by_id, via=via)
             return f"test bench on {ev.key}: " + ("; ".join(done) if done else "nobody left to answer (seed more, or they've all answered)")
-        if kind == "add":
-            made = await asyncio.to_thread(reg.add_test_members, _test_specs(reg, arg), by)
-            return f"test bench: {len(made)} added, {len(reg.test_members())} test members"
-        if kind == "remove":
-            uids = _test_removals(reg, _test_specs(reg, arg))
-            for ev in await asyncio.to_thread(rc.forget_test_members, reg, rs, uids, by):
-                await bot.refresh_sheet(reg, ev)
-            return f"test bench: {len(uids)} removed, {len(reg.test_members())} test members"
+        if kind in ("add", "remove"):
+            rows = _test_specs(reg, arg)
+            add, remove = (rows, []) if kind == "add" else ([], _test_removals(reg, rows))
+            return await bot.test_compose(reg, rs, add, remove, by, via=via, by_id=by_id)
         if kind == "comp":
-            ev = await asyncio.to_thread(rc.open_comp_sandbox, reg, rs, arg, by, by_id)
+            if arg not in reg.profile.raids:
+                raise RegistryError(f"unknown raid {arg or '?'} (one of {', '.join(reg.profile.raids)})")
+            ev = await bot.test_comp(reg, rs, arg, by, by_id, via=via)
             return f"comp sandbox {ev.key}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp"
         from .presets import TEMPOS
 
         raid, tempo, dm = _test_run_args(reg, arg)  # the /gm test run recipe: a real sheet with minute-level cadence, the pool = puppets + the tester
         _, start_in, nudge_in, lock_in, confirm_in = TEMPOS[tempo]
         here = bot.get_channel(int(channel_id)) if channel_id not in (None, PLAIN_WEB) else None  # no signup channel: the sheet lands where it was asked for
-        ev, posted = await bot.open_test_run(reg, rs, raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in, dm=dm, by=by, by_id=by_id, channel=here)
+        ev, posted = await bot.open_test_run(reg, rs, raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in, dm=dm, by=by, by_id=by_id, channel=here,
+                                             via=via)
         return (f"test run {ev.key} open ({tempo}): starts {reg.local12(ev.start, '%I:%M %p')}, nudge {nudge_in}, lock {lock_in} min before, confirm by {confirm_in} min before"
                 + (", every puppet DMed (to you)" if dm else "") + (f" — sheet in <#{posted.id}>" if posted is not None and getattr(posted, "id", None) else "")
                 + ("" if ev.message_id else " (no signup channel set — sheet not posted)"))

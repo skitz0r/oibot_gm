@@ -1,11 +1,13 @@
 """The Members page's test bench: puppets by composition (class/spec × count), removing chosen ones, and a comp
 sandbox — every puppet joined to a far-off test run that is never posted."""
+import functools
 from collections import Counter
 
 import pytest
 from conftest import join, lock_with_board, open_test_run
 from test_mcp import bearer, client  # noqa: F401  (the web app on a fake bot, as the owner)
 
+from oibot_gm.discord_pool import SetupMixin
 from oibot_gm.registry import RegistryError
 
 
@@ -90,8 +92,15 @@ def test_plain_text_add_remove_and_comp(reg, rs):
     async def refresh(reg, ev):
         pass
 
-    bot = SimpleNamespace(raids=SimpleNamespace(store=lambda r: rs), refresh_sheet=refresh)
+    async def emit(cfg, level, text, exc=None):
+        lines.append(text)
+
+    lines: list[str] = []
+    bot = SimpleNamespace(raids=SimpleNamespace(store=lambda r: rs), refresh_sheet=refresh, ops=SimpleNamespace(emit=emit))
+    for name in ("_test_ops", "test_compose", "test_comp"):  # plain text reaches SetupMixin's verbs (one code path)
+        setattr(bot, name, functools.partial(getattr(SetupMixin, name), bot))
     line = asyncio.run(co._apply_with_bot(reg, op("remove 2 Warrior Protection"), "t", bot, 1))
     assert "2 removed" in line and mains(reg)[("Warrior", "Protection")] == before + 1
-    line = asyncio.run(co._apply_with_bot(reg, op(f"comp {next(iter(reg.profile.raids))}"), "t", bot, 1))
+    line = asyncio.run(co._apply_with_bot(reg, op(f"comp {next(iter(reg.profile.raids))}"), "t", bot, 1, via="chat"))
     assert line.startswith("comp sandbox ")
+    assert lines[0].startswith("t: test bench: 0 added, 2 removed") and lines[1].startswith("[chat] t: test bench: opened a comp sandbox"), lines

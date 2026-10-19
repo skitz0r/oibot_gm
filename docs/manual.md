@@ -874,7 +874,9 @@ really called All or Pending is confirmed alone); "Mira is away
   `/gm test run`: Quick starts in 20 min, nudge 16, lock 12, confirm 8 min before; Standard 40/32/25/15, the default;
   Slow 90/70/55/35 — add "and DM them" to DM every puppet when it opens, which reaches you), "test answer join 8 bench
   2 out 1" (a random mix of puppets who haven't answered; name the run when several test runs are live — a real run is
-  refused), "clear the test bench". Opening a test run by plain text needs the signup channel, or a server channel to
+  refused), "test answer yes 3 no 1" once it is locked (that many Confirm and Can't make it among the puppets holding an
+  open ask, as `/gm test answer` and the site do; *out* is No thanks on the sheet, *no* is Can't make it), "clear the
+  test bench". Opening a test run by plain text needs the signup channel, or a server channel to
   ask in (§8a).
 - *Loot council (officers, §9):* "open the loot council", "the Gatekeeper dropped the Robe of Tests", "distribute",
   "give the Syphon to Eltam instead — tanks progression" (a reason is required), "confirm the rest", "hold the Shard for
@@ -997,16 +999,22 @@ its board and the site takes you there, where **Propose roster** builds the best
 **Clearing.** `/gm test clear` shows what it does — "Cancels 1 test run, deletes 12 puppets, analytics cards
 resume." — then *Clear the test bench* / *Back*; the site's **Clear the test bench** asks with the same words.
 
+Every bench step writes one line to the ops feed, saying who did it and where: `[web]` from the site, `[mcp]` from MCP,
+`[chat]` from plain text, no prefix from Discord. A restart sends a puppet digest that was still waiting before the bot
+goes down. Only officers' pages follow the feed live.
+
 Plain text does the same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 Warrior Protection",
 "comp sandbox for Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps run and DM them", "test answer
-join 8 bench 2 out 1"), and so does MCP (`test_bench`, §8b; its tempo is a name — quick, standard, slow — or minutes to
+join 8 bench 2 out 1", "test answer yes 3 no 1"), through the very same steps as `/gm test` and the site — and so does MCP (`test_bench`, §8b; its tempo is a name — quick, standard, slow — or minutes to
 the start).
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,
 rostered or asked to fill it, and the test sheet refuses presses from real members. The other way round too: a real
 run (ad hoc, or a schedule with no regulars yet, where every main is expected) never expects, suggests, asks or marks
 away a puppet; setting a real member's answer on a test run is refused on every path too (the site, plain text, MCP),
-and a test run refuses `/raid set`. What real members do see: the test sheet in the signup channel (marked as a
+and a test run refuses `/raid set`. A rehearsal opened before test runs had their own keys (`-test`) can still sit at a
+real run's key: that real run doesn't open, and the ops feed says so once, naming the run and the fix — clear the test
+bench (`/gm test clear`) and it opens on the next minute. What real members do see: the test sheet in the signup channel (marked as a
 test), the ops lines, and the analytics cards pausing until the bench is cleared.
 
 ## 8b. MCP server (owner, from Claude Code)

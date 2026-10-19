@@ -50,7 +50,7 @@ class FakeBot:
     test_compose = SetupMixin.test_compose
     test_comp = SetupMixin.test_comp
     test_answer = SetupMixin.test_answer
-    puppet_asks = SetupMixin.puppet_asks
+    puppet_asks = staticmethod(SetupMixin.puppet_asks)
     puppet_answer_ask = SetupMixin.puppet_answer_ask
 
     def __init__(self, reg, rs):

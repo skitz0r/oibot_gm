@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Badge, Box, Group, ScrollArea, Stack, Text } from "@mantine/core";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { useLive } from "../hooks/useLive";
 import { Eyebrow } from "./Page";
 
@@ -18,15 +18,20 @@ const KIND: Record<FeedEvent["kind"], { label: string; color: string }> = {
  *  digest. Live: the server publishes `test:<run>` on every new event. Nothing is stored; a restart empties it. */
 export function TestFeed({ run, height = 320 }: { run?: string; height?: number }) {
   const [events, setEvents] = useState<FeedEvent[] | null>(null);
-  const load = () => api.get<{ events: FeedEvent[] }>(`/api/test/feed${run ? `?run=${encodeURIComponent(run)}` : ""}`).then((r) => setEvents(r.events)).catch(() => setEvents([]));
+  const [error, setError] = useState<string | null>(null);
+  const [hidden, setHidden] = useState(false);  // the feed is officers' only (403): hide it, never pretend it is empty
+  const load = () => api.get<{ events: FeedEvent[] }>(`/api/test/feed${run ? `?run=${encodeURIComponent(run)}` : ""}`)
+    .then((r) => { setEvents(r.events); setError(null); })
+    .catch((e) => { if (e instanceof ApiError && (e.status === 403 || e.status === 401)) setHidden(true); else setError(e instanceof Error ? e.message : String(e)); });
   useEffect(() => { load(); }, [run]);  // eslint-disable-line react-hooks/exhaustive-deps
   useLive(load, ["test:"]);
   const rows = [...(events || [])].reverse();
   const many = new Set(rows.map((e) => e.run)).size > 1;
+  if (hidden) return null;
   return (
     <Box>
       <Eyebrow>Test feed</Eyebrow>
-      {events === null ? <Text size="sm" c="dimmed">Loading…</Text> : rows.length === 0 ? (
+      {error && events === null ? <Text size="sm" c="red">Couldn't load the feed: {error}</Text> : events === null ? <Text size="sm" c="dimmed">Loading…</Text> : rows.length === 0 ? (
         <Text size="sm" c="dimmed">Nothing yet. Open a test run: its cards, the puppets' DMs and every step show up here as they happen.</Text>
       ) : (
         <ScrollArea.Autosize mah={height} type="auto" mt={4}>

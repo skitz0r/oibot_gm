@@ -312,31 +312,32 @@ def test_live_updates_reach_only_their_guild_even_with_one_run_key(bot, duo):
 
     async def scenario():
         bot.loop = asyncio.get_running_loop()
-        got = {GUILD: [], GUILD2: []}
-        gone = {GUILD: asyncio.Event(), GUILD2: asyncio.Event()}
+        got = {GUILD: [], GUILD2: [], "duo officer": []}
+        gone = {GUILD: asyncio.Event(), GUILD2: asyncio.Event(), "duo officer": asyncio.Event()}
 
-        async def stream(key):
+        async def stream(label):
             sent = False
-            cookie = f"{web.COOKIE}={session_cookie(BOTH)}".encode()
+            key, uid = (GUILD2, OWNER2) if label == "duo officer" else (label, BOTH)  # BOTH is a plain member of each; OWNER2 duo's officer
+            cookie = f"{web.COOKIE}={session_cookie(uid)}".encode()
 
             async def receive():
                 nonlocal sent
                 if not sent:
                     sent = True
                     return {"type": "http.request", "body": b"", "more_body": False}
-                await gone[key].wait()
+                await gone[label].wait()
                 return {"type": "http.disconnect"}
 
             async def send(msg):
                 if msg["type"] == "http.response.body" and msg.get("body", b"").startswith(b"data: "):
-                    got[key].append(msg["body"].decode().split("data: ", 1)[1].strip())
+                    got[label].append(msg["body"].decode().split("data: ", 1)[1].strip())
 
             scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"}, "http_version": "1.1", "method": "GET", "scheme": "http",
                      "path": "/api/events", "raw_path": b"/api/events", "query_string": f"g={key}".encode(), "root_path": "",
                      "headers": [(b"host", b"testserver"), (b"cookie", cookie)], "client": ("127.0.0.1", 5000), "server": ("testserver", 80)}
             await app(scope, receive, send)
 
-        tasks = [asyncio.create_task(stream(k)) for k in (GUILD, GUILD2)]
+        tasks = [asyncio.create_task(stream(k)) for k in (GUILD, GUILD2, "duo officer")]
         await asyncio.sleep(0.3)
         await asyncio.to_thread(duo.rs_b.save, ev_b, "touch duo's run")
         await bot.ops.emit(duo.b.config, "info", "x")  # FakeOps doesn't fan out; call the listeners as Ops.emit does
@@ -354,7 +355,9 @@ def test_live_updates_reach_only_their_guild_even_with_one_run_key(bot, duo):
         return got
 
     got = asyncio.run(scenario())
-    assert got[GUILD2] == [f"run:{ev_b.key}", f"test:{ev_b.key}", "ops", "agents"], got  # a test run's save also feeds the test feed (B9)
+    # a test run's save also feeds the test feed (B9) — whose topic reaches officers' pages only, never a member's stream
+    assert got["duo officer"] == [f"run:{ev_b.key}", f"test:{ev_b.key}", "ops", "agents"], got
+    assert got[GUILD2] == [f"run:{ev_b.key}", "ops", "agents"], got
     assert got[GUILD] == ["member", "agents"], got
 
 

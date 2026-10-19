@@ -1147,14 +1147,14 @@ class RaidMixin:
         return ev
 
     async def open_test_run(self, reg, rs, raid: str, *, start_in: int, nudge_in: int, lock_in: int, confirm_in: int, dm: bool, by: str, by_id: int | None,
-                            channel=None) -> tuple[rc.RaidEvent, object]:
+                            channel=None, via: str = "discord") -> tuple[rc.RaidEvent, object]:
         """The one test-run opener (/gm test run, plain text's `test run …`, the site's test bench and so MCP): a real
         sheet with minute-level cadence (`*_in` = minutes; start > nudge > lock > confirm), the pool = puppets + the
         tester (`by_id`), `dm` = DM every puppet when it opens (the puppets' DMs reach the tester as one digest). The
         sheet goes to the signup channel, else to `channel` (where it was asked for); with neither (the site, MCP, a DM
         without a signup channel) it is refused before anything is written, naming the setting (NO_TEST_CHANNEL). Its
         officer cards post in `channel` when it is a server channel (D20; officer_channel), and its key is in the
-        '-test' key space (rc.TEST_SCHEDULE), so it never shares a real run's roster. The ops feed gets the warn line. Returns (the run, the channel it was posted in or None). rc.open_run runs on the event loop, as in
+        '-test' key space (rc.TEST_SCHEDULE), so it never shares a real run's roster. The audit line (ops.audited, `via` = the surface) is the verb's own. Returns (the run, the channel it was posted in or None). rc.open_run runs on the event loop, as in
         open_run_and_post: it adds to the live events the loop's handlers iterate, so never from a worker thread (L3);
         its one git commit is the same short block every on-demand open has."""
         start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
@@ -1169,7 +1169,7 @@ class RaidMixin:
         ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs=cut)
         if target is not None and not ev.message_id:
             await self.post_sheet(reg, rs, ev, target)
-        await self.ops.emit(reg.config, "warn", f"test bench: {by} opened test run {ev.key} (lock in {start_in - lock_in} min)")
+        await ops_mod.audited(self.ops, reg, by, f"test bench: opened test run {ev.key} (lock in {start_in - lock_in} min)", via=via, level="warn", by_id=by_id)
         return ev, target
 
     async def cancel_run(self, reg, rs, ev, by: str, reason: str | None, *, notify: bool = True, by_id: int | None = None, via: str = "discord") -> str:

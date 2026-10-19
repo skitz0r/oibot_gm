@@ -18,6 +18,7 @@ from test_parity_verbs import Bot
 from oibot_gm import configops, discord_policy, presets
 from oibot_gm import mcp_server as ms
 from oibot_gm.configops import ConfigOp, ConfigRequest
+from oibot_gm.discord_pool import SetupMixin
 from oibot_gm.registry import PLAIN_WEB, RegistryError
 from oibot_gm.web import app as web
 
@@ -29,8 +30,9 @@ def run(coro):
     return asyncio.run(coro)
 
 
-class SetupBot(Bot):
-    """Bot plus the SetupMixin verbs the setup ops reach (recorded, no Discord)."""
+class SetupBot(SetupMixin, Bot):
+    """Bot plus the SetupMixin verbs the setup ops reach: the test bench's real verbs, set_channel / create_invite
+    recorded (no Discord)."""
 
     def __init__(self, reg, rs):
         super().__init__(reg, rs)

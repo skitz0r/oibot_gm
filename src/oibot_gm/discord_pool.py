@@ -404,43 +404,50 @@ class SetupMixin:
         return [r.name for r in sorted(g.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if g else []
 
     # ---- the test bench (dual interfaces phase 2, B9): the verbs every surface calls — /gm test seed|run|answer|compose|
-    # comp|clear (flows_misc, flows_test), the site's Test bench (/api/test/*), MCP test_bench through those routes. Each
-    # writes its own ops line, so no caller composes one. Puppets only ever touch TEST runs (rc.is_test_run).
+    # comp|clear (flows_misc, flows_test), plain text's `test …` (configops.apply_async), the site's Test bench
+    # (/api/test/*), MCP test_bench through those routes. Each writes its own audit line (ops.audited: `by` the person,
+    # `via` the surface → the web / mcp / chat prefix, `by_id` marks a host superuser), so no caller composes one.
+    # Puppets only ever touch TEST runs (rc.is_test_run). Sheet writes (forget_test_members, open_comp_sandbox,
+    # test_answer_mix) run ON THE LOOP, never in a worker thread: they change the live events the loop's handlers
+    # iterate (L3), like every on-demand open (open_test_run, open_run_and_post).
 
-    async def _test_ops(self, reg: Registry, level: str, line: str) -> None:
+    async def _test_ops(self, reg: Registry, level: str, line: str, *, by: str, via: str = "discord", by_id: int | None = None) -> None:
         ops = getattr(self, "ops", None)
         if ops is not None:
-            await ops.emit(reg.config, level, line)
+            await ops_mod.audited(ops, reg, by, line, via=via, level=level, by_id=by_id)
 
-    async def test_seed(self, reg: Registry, count: int, by: str) -> str:
+    async def test_seed(self, reg: Registry, count: int, by: str, *, via: str = "discord", by_id: int | None = None) -> str:
         """Seed `count` puppets from the bench's roster (0 = all of it; existing ones are kept; capped to the roster)."""
         n = len(reg.test_roster())
-        made = await asyncio.to_thread(reg.seed_test_members, count if count > 0 else n, by)
+        made = await asyncio.to_thread(reg.seed_test_members, count if count > 0 else n, by)  # member files only: no sheet
         total = len(reg.test_members())
-        await self._test_ops(reg, "warn", f"test bench: {len(made)} test members seeded by {by} ({total} total)")
+        await self._test_ops(reg, "warn", f"test bench: {len(made)} test members seeded ({total} total)", by=by, via=via, by_id=by_id)
         return f"{len(made)} test member(s) created, {total} in total. Analytics cards pause until the bench is cleared."
 
-    async def test_compose(self, reg: Registry, rs, add: list[dict], remove: list[int], by: str) -> str:
+    async def test_compose(self, reg: Registry, rs, add: list[dict], remove: list[int], by: str, *, via: str = "discord", by_id: int | None = None) -> str:
         """The bench by composition: remove the chosen puppets (taken off every open sheet; refused while one is rostered
-        on a locked run), then add rows of {cls, spec, offspec?, count}. The site's spec grid and /gm test compose."""
+        on a locked run), then add rows of {cls, spec, offspec?, count}. The site's spec grid, /gm test compose and plain
+        text's `test add …` / `test remove …`."""
         from . import raidcycle as rc
 
         remove = [int(u) for u in remove or []]
-        changed = await asyncio.to_thread(rc.forget_test_members, reg, rs, remove, by) if remove else []
+        changed = rc.forget_test_members(reg, rs, remove, by) if remove else []  # on the loop: it writes open sheets (L3)
         made = await asyncio.to_thread(reg.add_test_members, list(add or []), by) if add else []
         for ev in changed:
             await self.refresh_sheet(reg, ev)
         line = f"test bench: {len(made)} added, {len(remove)} removed · {len(reg.test_members())} test members"
-        await self._test_ops(reg, "warn", f"{line} (by {by})")
+        await self._test_ops(reg, "warn", line, by=by, via=via, by_id=by_id)
         return line
 
-    async def test_comp(self, reg: Registry, rs, raid: str, by: str, by_id: int | None):
+    async def test_comp(self, reg: Registry, rs, raid: str, by: str, by_id: int | None, *, via: str = "discord"):
         """The comp sandbox: a test run two weeks out with every puppet joined, never posted (rc.open_comp_sandbox);
-        the board's Propose roster then builds the best comp. Returns the run."""
+        the board's Propose roster then builds the best comp. Returns the run. rc.open_comp_sandbox opens a run and
+        joins every puppet: on the loop, never a worker thread (L3)."""
         from . import raidcycle as rc
 
-        ev = await asyncio.to_thread(rc.open_comp_sandbox, reg, rs, raid, by, by_id)
-        await self._test_ops(reg, "warn", f"test bench: {by} opened a comp sandbox {ev.key} with {len(reg.test_members())} test members joined (not posted)")
+        ev = rc.open_comp_sandbox(reg, rs, raid, by, by_id)
+        await self._test_ops(reg, "warn", f"test bench: opened a comp sandbox {ev.key} with {len(reg.test_members())} test members joined (not posted)",
+                             by=by, via=via, by_id=by_id)
         return ev
 
     @staticmethod
@@ -470,7 +477,7 @@ class SetupMixin:
         raise RegistryError(f"{m.display_name} has no open ask on {views.run_title(reg, ev)}")
 
     async def test_answer(self, reg: Registry, rs, ev, *, member=None, status: str | None = None, join: int = 0, bench: int = 0, out: int = 0,
-                          yes: int = 0, no: int = 0, by: str, by_id: int | None = None, rng=None) -> list[str]:
+                          yes: int = 0, no: int = 0, by: str, by_id: int | None = None, via: str = "discord", rng=None) -> list[str]:
         """Puppets answer a TEST run: one `member` with `status` (in | sub | out on the sheet — out on a locked run where
         they hold a seat is a callout —; yes | no answers their open ask), or a random mix — `join`/`bench`/`out` of
         the puppets who haven't answered the sheet, `yes`/`no` of the puppets holding an open ask. Returns one line per
@@ -518,23 +525,24 @@ class SetupMixin:
                             done.append(str(e))
         if done:
             await self.refresh_sheet(reg, ev)
-            await self._test_ops(reg, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {by}")
+            await self._test_ops(reg, "info", f"test bench: {len(done)} answer(s) on {ev.key}", by=by, via=via, by_id=by_id)
         return done
 
-    async def test_bench_clear(self, reg: Registry, by: str) -> str:
-        """Cancel test runs, remove test members and their run rosters."""
-        from . import raidcycle as rc  # noqa: F401
-
+    async def test_bench_clear(self, reg: Registry, by: str, *, via: str = "discord", by_id: int | None = None) -> str:
+        """Cancel test runs, remove test members and their run rosters; writes its own audit line (every surface: the
+        /gm test clear decide screen, the site's Delete all, plain text's `test clear`, MCP)."""
         rs = self.raids.store(reg)
         cancelled = []
         for ev in rs.live():
             t = reg.config.roster(ev.team) or {}
             if t.get("test"):
-                await self.cancel_run(reg, rs, ev, by=by, reason="test bench cleared", notify=False)  # never a line where real members read
+                await self.cancel_run(reg, rs, ev, by=by, reason="test bench cleared", notify=False, by_id=by_id, via=via)  # never a line where real members read
                 cancelled.append(ev.key)
         gone = await asyncio.to_thread(reg.clear_test_members, by)
         await self.cleanup_ephemeral(reg, rs)
-        return f"{gone} test member(s) removed, {len(cancelled)} test run(s) cancelled" + (f" ({', '.join(cancelled)})" if cancelled else "")
+        line = f"{gone} test member(s) removed, {len(cancelled)} test run(s) cancelled" + (f" ({', '.join(cancelled)})" if cancelled else "")
+        await self._test_ops(reg, "warn", f"test bench: {line}", by=by, via=via, by_id=by_id)
+        return line
 
 
 # ---------------------------------------------------------------- the public loot log (design §3.1 "Members", D2)

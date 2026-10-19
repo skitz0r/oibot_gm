@@ -295,6 +295,12 @@ def abbr(instance: str) -> str:
 TEST_SCHEDULE = "test"
 
 
+class RunKeyClash(RegistryError):
+    """A run's key is held by a run of the other kind (a rehearsal's roster or sheet from before the '-test' key space
+    at a real run's key, or the reverse): nothing was opened. The scheduler reports it ONCE per key as an ops warn
+    naming the fix (clear the test bench), never as a minute-by-minute error alert."""
+
+
 def run_key(instance: str, start: datetime, schedule: str | None = None, *, test: bool = False) -> str:
     """The run's roster key: 'bd-1209-1930'. A run from a schedule other than the raid's own run times carries the
     schedule id ('bd-1209-1930-alt'), so two schedules starting the same minute never share a run; a test run ends in
@@ -485,7 +491,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     t = reg.config.roster(key)
     if t:
         if bool(t.get("test")) != test:
-            raise RegistryError(f"{t.get('name') or key} is {'a test run' if t.get('test') else 'a real run'}: "
+            raise RunKeyClash(f"{t.get('name') or key} is {'a test run' if t.get('test') else 'a real run'}: "
                                 f"{'a real run' if not test else 'a test run'} can't share it — nothing was opened")
         return t
     rd = reg.schedule_def(instance, schedule)
@@ -719,7 +725,7 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
     if key in rs.events:
         ev = rs.events[key]
         if ev.test and not team.get("test"):  # a rehearsal's sheet from before the '-test' key space: never a real run's
-            raise RegistryError(f"{key} is a test run's sheet: a real run can't reuse it — nothing was opened")
+            raise RunKeyClash(f"{key} is a test run's sheet: a real run can't reuse it — nothing was opened")
         return ev
     sid = team.get("schedule_id")
     ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=None if sid in (None, DEFAULT_SCHEDULE) else sid,

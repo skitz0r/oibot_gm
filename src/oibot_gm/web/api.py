@@ -930,14 +930,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     # ---- live updates: one event stream per open page, tagged with the page's guild; a run save anywhere (site,
     # Discord, scheduler) wakes that guild's pages only — two guilds with the same run key never wake each other
-    subscribers: dict[asyncio.Queue, str] = {}
+    subscribers: dict[asyncio.Queue, tuple[str, bool]] = {}  # queue -> (guild key, the page's viewer is an officer)
 
-    def publish(topic: str, guild: str | None = None) -> None:
-        """topic: `run:<key>` | `loot:<run key>` | `member` | `config` | `ops` | `agents`. `guild` None = every page (process-wide news:
-        the agents' job status); otherwise only that guild's pages. Safe from worker threads."""
+    def publish(topic: str, guild: str | None = None, *, officers: bool = False) -> None:
+        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents`. `guild` None = every
+        page (process-wide news: the agents' job status); otherwise only that guild's pages. `officers`: only pages an
+        officer opened (the test feed: what it names is officers' business). Safe from worker threads."""
         def fan_out():
-            for q, g in list(subscribers.items()):
-                if (guild is None or g == guild) and q.qsize() < 50:
+            for q, (g, officer) in list(subscribers.items()):
+                if (guild is None or g == guild) and (officer or not officers) and q.qsize() < 50:
                     q.put_nowait(topic)
         try:
             bot.loop.call_soon_threadsafe(fan_out)
@@ -961,7 +962,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from ..loot import session as loot_session_mod
 
     def test_event(guild_key: str, run_key: str) -> None:
-        publish(f"test:{run_key}", guild_key)  # the test feed (testfeed.FEED): the Test bench card and the Rosters Test tab reload
+        publish(f"test:{run_key}", guild_key, officers=True)  # the test feed (testfeed.FEED): the Test bench card and the Rosters Test tab reload
 
     from .. import testfeed
 
@@ -988,7 +989,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         v = await who(request)  # honours ?g= (EventSource can't send headers): the stream is that guild's
         q: asyncio.Queue = asyncio.Queue()
-        subscribers[q] = v.reg.key
+        subscribers[q] = (v.reg.key, bool(v.officer))
 
         async def stream():
             try:
@@ -1409,7 +1410,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     async def test_seed_do(v, d) -> dict:
         count = as_int(d.get("count", 20), "count")  # 0 = the whole built-in roster; above it is capped to it
-        line = await bot.test_seed(v.reg, count, v.name)
+        line = await bot.test_seed(v.reg, count, v.name, via=v.via, by_id=v.uid)
         return {"message": line, "members": len(v.reg.test_members())}
 
     async def test_run_do(v, d) -> dict:
@@ -1426,7 +1427,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": str(e)}, status_code=400)
         try:  # RaidMixin.open_test_run: the wizard's and plain text's opener; from the site it needs the signup channel (no channel of its own)
             ev, _posted = await bot.open_test_run(reg, rs, rid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in,
-                                                  dm=bool(d.get("dm_open") or d.get("dm")), by=v.name, by_id=v.uid)
+                                                  dm=bool(d.get("dm_open") or d.get("dm")), by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before"
@@ -1439,7 +1440,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:
             done = await bot.test_answer(reg, rs, ev, member=m, status=str(d.get("status") or "in") if m else None,
                                          join=as_int(d.get("join", 0), "join"), bench=as_int(d.get("bench", 0), "bench"), out=as_int(d.get("out", 0), "out"),
-                                         yes=as_int(d.get("yes", 0), "yes"), no=as_int(d.get("no", 0), "no"), by=v.name, by_id=v.uid)
+                                         yes=as_int(d.get("yes", 0), "yes"), no=as_int(d.get("no", 0), "no"), by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": ("; ".join(done)) if done else "nobody left to answer (seed more, or they've all answered)", "key": ev.key, "answered": len(done)}
@@ -1450,14 +1451,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         lines = test_clear_consequence(v.reg, bot.raids.store(v.reg))  # the decide screen's words: the browser never composes them
         if d.get("preview"):
             return {"consequence": lines, "empty": lines[0].startswith("Nothing to clear")}
-        line = await bot.test_bench_clear(v.reg, v.name)
-        await bot.ops.emit(v.reg.config, "warn", f"test bench: {line} (by {v.name})")
+        line = await bot.test_bench_clear(v.reg, v.name, via=v.via, by_id=v.uid)  # the verb writes its own audit line
         return {"message": line, "consequence": lines}
 
     async def test_compose_do(v, d) -> dict:
         reg, rs = v.reg, bot.raids.store(v.reg)
         try:
-            line = await bot.test_compose(reg, rs, d.get("add") or [], [int(u) for u in d.get("remove") or []], v.name)
+            line = await bot.test_compose(reg, rs, d.get("add") or [], [int(u) for u in d.get("remove") or []], v.name, via=v.via, by_id=v.uid)
         except (RegistryError, ValueError, TypeError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line}
@@ -1465,7 +1465,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def test_comp_do(v, d) -> dict:
         reg, rs = v.reg, bot.raids.store(v.reg)
         try:
-            ev = await bot.test_comp(reg, rs, str(d.get("raid") or ""), v.name, v.uid)
+            ev = await bot.test_comp(reg, rs, str(d.get("raid") or ""), v.name, v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": f"comp sandbox {ev.key}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp", "key": ev.key}

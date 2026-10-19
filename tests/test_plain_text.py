@@ -12,6 +12,7 @@ from conftest import join, lock_with_board, open_test_run
 
 from oibot_gm import configops, help as help_mod, raidcycle as rc
 from oibot_gm.configops import ConfigOp
+from oibot_gm.discord_pool import SetupMixin
 from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.registry import RegistryError
 
@@ -25,6 +26,10 @@ class FakeBot:
     board_move = RaidMixin.board_move
     _write_board = RaidMixin._write_board
     open_test_run = RaidMixin.open_test_run  # the one test-run opener (the wizard and the site call it too)
+    # the bench's verbs: plain text's `test seed|answer|add|remove|comp` call SetupMixin's, like /gm test and the site
+    _test_ops, test_seed, test_answer, test_compose, test_comp = (SetupMixin._test_ops, SetupMixin.test_seed, SetupMixin.test_answer,
+                                                                  SetupMixin.test_compose, SetupMixin.test_comp)
+    puppet_asks, puppet_answer_ask = staticmethod(SetupMixin.puppet_asks), SetupMixin.puppet_answer_ask
 
     def __init__(self, rs):
         self.calls: list[tuple] = []
@@ -81,7 +86,10 @@ class FakeBot:
         self.calls.append(("open_run_and_post", instance, start.isoformat(), by) + ((schedule,) if schedule else ()))
         return rc.open_run(reg, rs, instance, start, by=by, schedule=schedule)
 
-    async def test_bench_clear(self, reg, by):
+    async def refresh_sheet(self, reg, ev):
+        self.calls.append(("refresh_sheet", ev.key))
+
+    async def test_bench_clear(self, reg, by, *, via="discord", by_id=None):
         self.calls.append(("test_bench_clear", by))
         gone = reg.clear_test_members(by)
         return f"{gone} test member(s) removed, 0 test run(s) cancelled"

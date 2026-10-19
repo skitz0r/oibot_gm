@@ -366,8 +366,9 @@ def test_test_clear_is_the_decide_screen(reg, rs, monkeypatch):
     ev = open_test_run(reg, rs)
     calls = []
 
-    async def test_bench_clear(reg_, by):
-        calls.append(by)
+    async def test_bench_clear(reg_, by, *, via="discord", by_id=None):  # the verb writes its own audit line (the flow adds none)
+        calls.append((by, by_id))
+        await bot.ops.emit(reg_.config, "warn", f"{by}: test bench: 16 test member(s) removed, 1 test run(s) cancelled")
         return "16 test member(s) removed, 1 test run(s) cancelled"
 
     bot = card_bot(reg, rs, test_bench_clear=test_bench_clear)
@@ -378,7 +379,8 @@ def test_test_clear_is_the_decide_screen(reg, rs, monkeypatch):
         assert "Cancels 1 test run, deletes 16 puppets, analytics cards resume." in h.text and h.buttons() == ["Clear the test bench", "Back"]
         assert calls == []
         await h.press("Clear the test bench")
-        assert calls == ["Officer"] and "16 test member(s) removed" in h.text and bot.ops.lines[-1][0] == "warn"
+        assert calls == [("Officer", h.user.id)] and "16 test member(s) removed" in h.text and bot.ops.lines[-1][0] == "warn"
+        assert sum("test member(s) removed" in ln for _lvl, ln in bot.ops.lines) == 1, "one line: the verb's"
         reg.clear_test_members("t")
         ev.state = "cancelled"
         rs.save(ev, "x")

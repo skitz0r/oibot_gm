@@ -145,7 +145,7 @@ class TestComposeWizard(Wizard):
             return
         await self.working(interaction, "Saving the test bench…")
         try:
-            line = await interaction.client.test_compose(self.reg, self.rs, add, remove, interaction.user.display_name)
+            line = await interaction.client.test_compose(self.reg, self.rs, add, remove, interaction.user.display_name, by_id=interaction.user.id)
         except (RegistryError, ValueError) as e:
             await self.refuse(interaction, str(e), self.start, "Back to the bench")
             return

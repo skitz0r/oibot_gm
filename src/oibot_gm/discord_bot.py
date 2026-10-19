@@ -135,8 +135,13 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         return await refresh_registration_card(self, reg)
 
     async def close(self) -> None:
-        """Shutdown: push any unpushed data-repo commits, stop the feed listener, then disconnect. Every step is
-        bounded, so a stopping bot always lets go of its ports (launchd waits ExitTimeOut, then kills it)."""
+        """Shutdown: send the puppet digests still waiting in their quiet window (the tester's one DM per batch — lost
+        at a restart otherwise), push any unpushed data-repo commits, stop the feed listener, then disconnect. Every
+        step is bounded, so a stopping bot always lets go of its ports (launchd waits ExitTimeOut, then kills it)."""
+        try:
+            await asyncio.wait_for(self.flush_puppet_digests(), timeout=5)
+        except Exception as e:  # noqa: BLE001 — the test feed still has each DM until the process ends
+            log.warning("shutdown: puppet digests not sent: %s", type(e).__name__)
         try:
             if STORE is not None:
                 await asyncio.wait_for(asyncio.to_thread(STORE.flush), timeout=20)

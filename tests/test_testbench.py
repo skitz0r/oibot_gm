@@ -110,19 +110,32 @@ def test_the_schedule_id_test_is_kept_for_test_runs(reg):
         reg.set_schedule("barrow_deeps", "test", {"kind": "weekly", "slots": "Sat 20:00"}, "t")
 
 
-def test_the_guards_hold_in_the_new_key_space(reg, rs):
-    """A test run's pool is puppets + its tester; its sheet refuses a real member; /raid set refuses it (rc.is_test_run)."""
+def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
+    """A test run's pool is puppets + its tester (rc._test_pool, the virtual regulars); its sheet refuses a real member
+    (the sheet's own buttons, set_answer); /raid set — its own wizard, end to end — refuses it and writes nothing."""
+    monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
     bot = TBot(reg, rs)
     ev = open_test_run(reg, rs, test_by=TESTER)
     assert ev.team.endswith("-test")
-    pool = {m.discord_id for m, _c in rc.test_pool(reg, ev)} if hasattr(rc, "test_pool") else None
     real = reg.add_character(4242, "Realperson", "Realperson", "Warrior", next(iter(reg.profile.classes["Warrior"])), None, True)[0]
-    assert not rc.on_bench_side(reg, ev, reg.members[real.discord_id] if hasattr(real, "discord_id") else reg.members[4242])
+    tester = reg.add_character(TESTER, "Tester", "Testerchar", "Mage", next(iter(reg.profile.classes["Mage"])), None, True)[0]
+    pool = {m.discord_id for m, _c in rc._test_pool(reg, ev)}
+    assert pool == {m.discord_id for m in reg.test_members()} | {TESTER}, "puppets + the run's own tester, nobody else"
+    assert 4242 not in pool and {m.discord_id for m, _c in rc.run_regulars(reg, ev)} == pool
+    assert real.discord_id == 4242 and tester.discord_id == TESTER
     with pytest.raises(RegistryError, match="test run"):
-        run(bot.set_answer(reg, rs, ev, reg.members[4242], "in", None, by="Officer"))
-    with pytest.raises(RegistryError, match="test run"):  # /raid set's verb is the same set_answer
         run(bot.set_answer(reg, rs, ev, reg.members[4242], "in", None, by="Officer", by_id=OWNER))
-    assert pool is None or 4242 not in pool
+    # /raid set: the command's own path (SetWizard → Confirm → set_answer), on the only live run — a test run
+    h = Harness(reg, rs, client=bot)
+
+    async def go():
+        await FLOWS["raid_set"](h.command(), reg, member=SimpleNamespace(id=4242, display_name="Realperson"), status="in")
+        assert h.buttons() == ["Confirm", "Cancel"], h.text
+        await h.press("Confirm")
+    run(go())
+    assert "❌" in h.text and "is a test run" in h.text, h.text
+    assert "4242" not in ev.signups, "nothing written on the rehearsal's sheet"
+    assert rc.open_run(reg, rs, "barrow_deeps", ev.start, by="scheduler").team == ev.team.removesuffix("-test"), "the real run at that minute is its own"
 
 
 # ---------------------------------------------------------------- the puppet DM digest
@@ -591,3 +604,169 @@ def test_every_new_wizard_screen_passes_the_lint(reg, rs, officer):
             await h.pick("How many", h._items()[0].options[-1].value)
     run(go())
     assert discord.ButtonStyle.success  # (screens linted by the harness as they rendered)
+
+
+# ---------------------------------------------------------------- one code path, one audit line per surface (fixer)
+
+BENCH_VERBS = ("test_seed", "test_answer", "test_compose", "test_comp", "test_bench_clear", "open_test_run")
+
+
+@pytest.fixture
+def spied(monkeypatch):
+    """Record every call into the bench's verbs on TBot, with the via / by_id it was given."""
+    calls: list[tuple] = []
+    for name in BENCH_VERBS:
+        orig = getattr(TBot, name)
+
+        async def spy(self, *a, _orig=orig, _name=name, **kw):
+            by_id = a[4] if _name == "test_comp" and len(a) > 4 else kw.get("by_id")  # test_comp(reg, rs, raid, by, by_id)
+            calls.append((_name, kw.get("via"), by_id))
+            return await _orig(self, *a, **kw)
+        monkeypatch.setattr(TBot, name, spy)
+    return calls
+
+
+def test_plain_text_test_ops_are_the_bench_verbs_with_one_audit_line_each(reg, rs, spied):
+    """The bug: plain text's `test seed|add|remove|comp|answer` called the registry / raidcycle helpers directly — a
+    second code path, with no ops line of the verbs' own. Now every kind is SetupMixin's verb, given via + by_id, and
+    each op writes ONE line, prefixed with the surface (apply_async writes none of its own for them)."""
+    bot = TBot(reg, rs)
+    ev = open_test_run(reg, rs, test_by=OWNER)
+
+    def plain(value):
+        before = len(bot.ops.lines)
+        out = run(configops.apply_async(reg, ConfigOp(op="test", value=value), "Officer", False, bot=bot, by_id=OWNER, via="chat"))
+        return out, bot.ops.lines[before:]
+
+    out, lines = plain("seed 18")
+    assert "created" in out and [ln for _lvl, ln in lines] == [f"[chat] Officer: test bench: 2 test members seeded ({len(reg.test_members())} total)"]
+    out, lines = plain("add 2 Mage Frost")
+    assert "2 added" in out and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: 2 added, 0 removed")
+    out, lines = plain("remove 1 Mage Frost")
+    assert "1 removed" in out and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: 0 added, 1 removed")
+    out, lines = plain(f"answer {ev.key} join 3 bench 1")
+    assert out.startswith(f"test bench on {ev.key}: ") and len(lines) == 1 and lines[0][1] == f"[chat] Officer: test bench: 4 answer(s) on {ev.key}"
+    out, lines = plain("comp barrow_deeps")
+    assert out.startswith("comp sandbox ") and len(lines) == 1 and lines[0][1].startswith("[chat] Officer: test bench: opened a comp sandbox")
+    out, lines = plain("clear")
+    assert "test run(s) cancelled" in out and all(ln.startswith("[chat] Officer: ") for _lvl, ln in lines)
+    assert sum("test member(s) removed" in ln for _lvl, ln in lines) == 1, "clear's own line, once"
+    assert [c[0] for c in spied] == ["test_seed", "test_compose", "test_compose", "test_answer", "test_comp", "test_bench_clear"]
+    assert all(c[1] == "chat" and c[2] == OWNER for c in spied), spied
+
+
+def test_plain_text_test_answer_yes_no_answers_the_puppets_open_asks(reg, rs):
+    """/gm test answer, /api/test/answer and MCP answer a puppet's Confirm / Can't make it; plain text now can too."""
+    bot = TBot(reg, rs)
+    ev = open_test_run(reg, rs, test_by=OWNER)
+    ms = reg.test_members()[:10]
+    join(reg, rs, ev, ms)
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms])
+    run(bot.send_confirmations(reg, rs, ev, rc.run_team(reg, ev), "t"))
+    run(bot.flush_puppet_digests())
+    d = configops.describe(reg, ConfigOp(op="test", value=f"answer {ev.key} yes 3 no 1"))
+    assert d == f"test bench: on {ev.key}, 3 Confirm, 1 Can't make it from the 10 puppet(s) holding an open ask", d
+    out = run(configops.apply_async(reg, ConfigOp(op="test", value=f"answer {ev.key} yes 3 no 1"), "Officer", False, bot=bot, by_id=OWNER, via="chat"))
+    assert out.startswith(f"test bench on {ev.key}: ") and out.count(";") == 3
+    answers = [a["answer"] for m in ms for a in reg.members[m.discord_id].placement_asks if a["roster"] == ev.team]
+    assert answers.count("yes") == 3 and answers.count("no") == 1
+    assert [k for _m, k in SetupMixin.puppet_asks(reg, ev)].count("confirm") == 6  # (the Can't may start a fill ask for the freed seat)
+    assert configops._test_answer_args("join 2 out 1 yes 1 no 2") == (None, {"join": 2, "bench": 0, "out": 1, "yes": 1, "no": 2})
+
+
+def test_route_audit_lines_carry_the_surface_and_clear_writes_its_own_once(reg, rs, site, spied):
+    """/api/test/* pass via + by_id to the verbs: the MCP bearer's lines read '[mcp] …'; clear's line is the verb's, once."""
+    client, bot = site
+    reg.config.signup_channel_id, bot.channels[55] = 55, Chan(55, "signups")
+    before = len(bot.ops.lines)
+    assert client.post("/api/test/seed", json={"count": 18}, headers=bearer()).status_code == 200
+    assert client.post("/api/test/compose", json={"add": [{"cls": "Mage", "spec": "Frost", "count": 1}]}, headers=bearer()).status_code == 200
+    key = client.post("/api/test/run", json={"raid": "barrow_deeps", "tempo": "quick"}, headers=bearer()).json()["key"]
+    assert client.post("/api/test/answer", json={"run": key, "join": 2}, headers=bearer()).status_code == 200
+    assert client.post("/api/test/comp", json={"raid": "barrow_deeps"}, headers=bearer()).status_code == 200
+    assert client.post("/api/test/clear", json={}, headers=bearer()).status_code == 200
+    lines = [ln for _lvl, ln in bot.ops.lines[before:]]
+    bench = [ln for ln in lines if "test bench:" in ln or "cancelled" in ln]
+    assert len(bench) >= 6 and all(ln.startswith("[mcp] ") for ln in bench), lines
+    assert sum("test member(s) removed" in ln for ln in lines) == 1, lines
+    assert [c[0] for c in spied] == ["test_seed", "test_compose", "open_test_run", "test_answer", "test_comp", "test_bench_clear"]
+    assert all(c[1] == "mcp" and c[2] == OWNER for c in spied), spied
+
+
+def test_the_clear_wizard_writes_one_line_the_verbs(reg, rs, officer):
+    bot = TBot(reg, rs)
+    open_test_run(reg, rs, test_by=OWNER)
+    h = Harness(reg, rs, client=bot)
+
+    async def go():
+        await FLOWS["test_clear"](h.command(), reg)
+        await h.press("Clear the test bench")
+    run(go())
+    assert not reg.test_members()
+    assert sum("test member(s) removed" in ln for _lvl, ln in bot.ops.lines) == 1, bot.ops.lines
+
+
+def test_sandbox_and_compose_write_sheets_on_the_loop_never_a_worker_thread(reg, rs, monkeypatch):
+    """L3: rc.open_comp_sandbox (opens a run, joins every puppet) and rc.forget_test_members (writes open sheets) change
+    the live events the loop iterates — on the loop's own thread, as open_test_run does."""
+    import threading
+
+    seen: list[str] = []
+    for name in ("open_comp_sandbox", "forget_test_members"):
+        orig = getattr(rc, name)
+
+        def wrapped(*a, _orig=orig, _name=name, **kw):
+            seen.append((_name, threading.current_thread() is threading.main_thread()))
+            return _orig(*a, **kw)
+        monkeypatch.setattr(rc, name, wrapped)
+    bot = TBot(reg, rs)
+    open_test_run(reg, rs, test_by=OWNER)
+    run(bot.test_comp(reg, rs, "barrow_deeps", "Officer", OWNER))
+    gone = reg.test_members()[0].discord_id
+    run(bot.test_compose(reg, rs, [], [gone], "Officer"))
+    assert seen == [("open_comp_sandbox", True), ("forget_test_members", True)], seen
+
+
+def test_shutdown_sends_the_waiting_puppet_digests_before_disconnecting(monkeypatch):
+    """A digest still in its quiet window was lost at a restart: OibotGM.close flushes it first, while the connection
+    still stands."""
+    from oibot_gm import discord_bot
+
+    order: list[str] = []
+    bot = object.__new__(discord_bot.OibotGM)
+    bot.feed = None
+
+    async def flush():
+        order.append("flush")
+        return 1
+
+    async def disconnect(self):
+        order.append("disconnect")
+    bot.flush_puppet_digests = flush
+    monkeypatch.setattr(discord_bot, "STORE", None)
+    monkeypatch.setattr(discord.Client, "close", disconnect)
+    run(bot.close())
+    assert order == ["flush", "disconnect"]
+
+
+def test_a_real_run_whose_key_a_rehearsal_holds_warns_once_never_an_error_every_minute(reg, rs):
+    """Migration: a rehearsal opened before the '-test' key space at a real slot's very minute holds the real run's
+    key. The scheduler opens the other runs, says ONCE which one waits and how to free it, and never raises (an error
+    alert to the owner every minute)."""
+    from test_raid_night import NightBot
+
+    bot = NightBot(reg, rs)
+    reg.config.signup_channel_id = bot.signup.id
+    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00", "signup_lead_hours": 24 * 14}, "t")
+    (sched, start), *rest = rc.upcoming(reg, "barrow_deeps", reg.now_local(), lead=True)
+    key = rc.run_key("barrow_deeps", start, sched["id"])
+    reg.config.rosters.append({"key": key, "name": "old rehearsal", "test": True, "test_by": OWNER, "instance": "barrow_deeps", "size": 20, "ephemeral": True})
+    run(bot.scheduler_tick_guild(reg))
+    run(bot.scheduler_tick_guild(reg))
+    warns = [t for lvl, t in bot.ops.lines if "a test run holds its key" in t]
+    assert len(warns) == 1 and key in warns[0] and "/gm test clear" in warns[0] and ("AM" in warns[0] or "PM" in warns[0])
+    assert not any(lvl == "error" for lvl, _t in bot.ops.lines)
+    assert rc.event_key("barrow_deeps", start, sched["id"]) not in rs.events
+    assert all(rc.event_key("barrow_deeps", s, sc["id"]) in rs.events for sc, s in rest), "the other runs open as ever"
+    with pytest.raises(rc.RunKeyClash):  # what the scheduler catches when a clash reaches the opener another way
+        rc.ensure_run(reg, "barrow_deeps", start)

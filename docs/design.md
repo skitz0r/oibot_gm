@@ -1879,6 +1879,24 @@ refusals, the reserved schedule id, the digest instead of N DMs and its quiet-sp
 button, cards in the asking channel, the refusal without a channel, feed events for every step, plain feed text, tempo
 names, every `/api/test/*` route, MCP, the compose / comp / clear wizards).
 
+**Review fixes (same day).** *One code path for plain text:* `configops._apply_with_bot`'s `test` op calls the
+SetupMixin verbs for every kind (seed → `test_seed`, add / remove → `test_compose`, comp → `test_comp`, answer →
+`test_answer`, clear → `test_bench_clear`, run → `open_test_run`); `test answer` takes `yes N no N` (the puppets' open
+asks; `_test_answer_args` returns `{join, bench, out, yes, no}` — `no` is now Can't make it, `out` stays No thanks).
+*Audit:* every bench verb takes `via` (default "discord") and `by_id` and writes through `ops.audited`
+(`SetupMixin._test_ops(reg, level, line, *, by, via, by_id)`), so the site's and MCP's lines carry `[web]` / `[mcp]`
+and a host superuser is marked; `test_bench_clear` writes its own line (the clear flow and `/api/test/clear` add none)
+and passes `via` / `by_id` to `cancel_run`; `apply_async` writes no line of its own for `test` ops. *L3:*
+`test_comp` (`rc.open_comp_sandbox`) and `test_compose`'s `rc.forget_test_members` run on the loop, never in
+`asyncio.to_thread` — they change live events. *Shutdown:* `OibotGM.close` awaits `flush_puppet_digests` (bounded
+5 s) before the store push and the disconnect. *Migration:* `ensure_run` / `open_event` raise `rc.RunKeyClash`
+(a RegistryError); the scheduler's open step checks the run key's roster first and, when a pre-'-test' rehearsal holds
+it, writes ONE ops warn per (guild, key) naming `/gm test clear` (`RaidSchedulerMixin._warn_key_clash`) instead of
+raising every minute (an owner error alert each distinct time). *SSE:* `publish(topic, guild, *, officers=False)`;
+subscribers carry `(guild key, officer)`; `test:<run>` is published `officers=True`, so a member's stream never sees a
+test run key. *Frontend:* `TestFeed` hides on 401 / 403 (never "Nothing yet") and shows a load error otherwise; the
+Rosters Test tab renders the feed only for officers.
+
 ## 6. Architecture
 
 ```mermaid
