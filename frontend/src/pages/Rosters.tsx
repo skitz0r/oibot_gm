@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DateTimePicker } from "@mantine/dates";
-import { ActionIcon, Badge, Box, Button, Card, Group, Select, Stack, Tabs, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Box, Button, Card, Drawer, Group, Select, Stack, Tabs, Text, Tooltip } from "@mantine/core";
 import { IconSparkles, IconUserPlus, IconX } from "@tabler/icons-react";
 import { api, type Board, type Meta, type Person, type RaidRuns, type Rosters, type Series, type Sheet } from "../api";
 import { GameIcon } from "../components/Icons";
@@ -8,7 +8,9 @@ import { useConfirm } from "../components/ConfirmModal";
 import { classColour } from "../theme";
 import { RaidHeader } from "../components/RaidHeader";
 import { Eyebrow, PageTitle, fail, ok } from "../components/Page";
-import { SheetCard } from "../components/board/SheetCard";
+import { BoardPreview } from "../components/board/BoardPreview";
+import { Detail, SheetCard } from "../components/board/SheetCard";
+import type { NightSheet, OpenPreview, RunsPage, UpcomingRow } from "../components/board/types";
 import { RoleCounts, runName, type Act, type OnBoard } from "../components/board/shared";
 import { usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
@@ -48,12 +50,6 @@ export function RostersPage({ meta }: { meta: Meta }) {
   );
 }
 
-/** The picker hands back "YYYY-MM-DD HH:mm:ss"; show it the way every other time on the site is shown. */
-function fmt12(v: string): string {
-  const d = new Date(v.replace(" ", "T"));
-  return isNaN(d.getTime()) ? v : d.toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
-}
-
 /** Open the next run of a recurring schedule: one press (a schedule select when the raid has several). */
 function OpenNext({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct: Act }) {
   const [sched, setSched] = useState<string>("");  // "" = the next run of any recurring schedule
@@ -74,12 +70,35 @@ function OpenNext({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct:
 }
 
 /** Start an ad hoc run: a pickup template (its own settings) or a one-off, at a date and time picked — nobody types a
- *  timestamp. Ad hoc: first come, no regulars, no reminder, no confirmations by default. */
+ *  timestamp. Every change asks the server what Open would do (POST /api/raid/{rid}/open/preview, rc.open_preview): a
+ *  time that IS an upcoming recurring run relabels the button "Open the … run — scheduled, with confirmations", and
+ *  the confirm shows both clocks (guild time and yours), the run's rules, the DST note and where the sheet posts. Open
+ *  carries the preview's exact instant and key back, so a stale match is refused rather than opening another run. */
 function StartAdhoc({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct: Act }) {
   const [tpl, setTpl] = useState<string>("adhoc");  // "adhoc" = a one-off
   const [when, setWhen] = useState<string | null>(null);
+  const [p, setP] = useState<OpenPreview | null>(null);
+  const [ask, dialog] = useConfirm();
   const templates = (r.schedules || []).filter((s) => s.active && (s.class === "adhoc" || s.kind === "pickup"));
   const picked = (when || "").trim();
+  useEffect(() => {
+    if (!picked) { setP(null); return; }
+    let live = true;
+    // a one-off sends no schedule: the server matches an upcoming recurring run at that minute (which_run)
+    api.post<OpenPreview>(`/api/raid/${r.id}/open/preview`, { when: picked.slice(0, 16), schedule: tpl === "adhoc" ? "" : tpl })
+      .then((x) => { if (live) setP(x); }).catch(() => { if (live) setP(null); });
+    return () => { live = false; };
+  }, [picked, tpl, r.id]);
+  const label = p && p.kind === "scheduled" ? `Open the ${p.schedule_name} run — scheduled, with confirmations` : "Start ad hoc run";
+  async function start() {
+    if (!p) return;
+    const yours = new Date(p.start).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+    const message = [`${p.label} guild time · ${yours} your time`, p.rules, p.when_note, p.exists ? `A run for that time already exists (${p.exists}); Open points you at it instead of making a second.` : "",
+      p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].filter(Boolean).join("\n");
+    if (!(await ask({ title: p.kind === "scheduled" ? `Open the ${p.schedule_name} run?` : `Start an ad hoc ${r.name}?`, message, confirmLabel: p.kind === "scheduled" ? "Open" : "Start" }))) return;
+    await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: p.schedule || (tpl === "adhoc" ? "adhoc" : tpl), key: p.key });
+    setWhen(null);
+  }
   return (
     <Group gap="xs" align="center" wrap="wrap">
       {templates.length > 0 && (
@@ -92,11 +111,98 @@ function StartAdhoc({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAc
         valueFormat="ddd DD MMM h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }}
         popoverProps={{ withinPortal: true }} aria-label="when the ad hoc run starts"
       />
-      <Tooltip label={picked ? `Starts ${fmt12(picked)} — first come, first rostered` : "Pick when it starts"} withinPortal>
-        <Button size="sm" variant="default" loading={busy === `adhoc${r.id}`} disabled={!picked}
-          onClick={() => onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { when: picked, schedule: tpl }).then(() => setWhen(null))}>Start ad hoc run</Button>
+      <Tooltip label={p ? `${p.label} — ${p.rules}` : picked ? "Checking that time…" : "Pick when it starts"} withinPortal multiline w={320}>
+        <Button size="sm" variant="default" loading={busy === `adhoc${r.id}`} disabled={!p || p.past} onClick={start}>{label}</Button>
       </Tooltip>
+      {dialog}
     </Group>
+  );
+}
+
+/** The Upcoming tab: each run of a recurring schedule with its own Open (design B4) — one press, then the confirm with the
+ *  server's preview; a row the scheduler can't open (no signup channel set) says so in red. */
+function UpcomingRows({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct: Act }) {
+  const [ask, dialog] = useConfirm();
+  const rows = r.upcoming as UpcomingRow[];
+  async function open(u: UpcomingRow) {
+    let p: OpenPreview;
+    try { p = await api.post<OpenPreview>(`/api/raid/${r.id}/open/preview`, { start: u.start_iso, schedule: u.schedule }); } catch (err) { fail(err); return; }
+    const yours = new Date(p.start).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+    const message = [`${p.label} guild time · ${yours} your time`, p.rules, p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].join("\n");
+    if (!(await ask({ title: `Open ${r.name} · ${u.slot}?`, message, confirmLabel: "Open" }))) return;
+    await onAct(`up${u.key || u.start}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, key: p.key });
+  }
+  return (
+    <Stack gap={4}>
+      {rows.map((u) => (
+        <Group key={u.key || u.start} gap="sm" wrap="wrap">
+          <Text size="sm"><b>{u.start}</b> <Text span c="dimmed">· {u.slot} · sheet opens {u.opens}</Text></Text>
+          {u.needs_channel && <Text size="xs" c="red">needs a signup channel</Text>}
+          {u.start_iso && <Button size="compact-xs" variant="light" loading={busy === `up${u.key || u.start}`} onClick={() => open(u)}>Open</Button>}
+        </Group>
+      ))}
+      {dialog}
+    </Stack>
+  );
+}
+
+/** History: the newest runs first, paged (GET /api/runs beyond the first 8), each row opening a read-only drawer with
+ *  the run in full (GET /api/run/{key}); `#run-<key>` deep links open it. */
+function History({ r, meta }: { r: RaidRuns; meta: Meta }) {
+  const [more, setMore] = useState<Sheet[]>([]);
+  const [total, setTotal] = useState<number>((r as RaidRuns & { past_total?: number }).past_total ?? r.past.length);
+  const [busy, setBusy] = useState(false);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const rows = [...r.past, ...more.filter((m) => !r.past.some((p) => p.key === m.key))];
+  useEffect(() => {  // a #run-<key> deep link to a past run opens its drawer
+    const h = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
+    if (h && rows.some((e) => e.key === h)) setOpenKey(h);
+  }, [r.past]);  // eslint-disable-line react-hooks/exhaustive-deps
+  async function loadMore() {
+    setBusy(true);
+    try { const pg = await api.get<RunsPage>(`/api/runs?raid=${encodeURIComponent(r.id)}&offset=${rows.length}&limit=20`); setMore((m) => [...m, ...pg.runs]); setTotal(pg.total); } catch (err) { fail(err); } finally { setBusy(false); }
+  }
+  return (
+    <Stack gap={4}>
+      {rows.length === 0 && <Text size="sm" c="dimmed">No past runs.</Text>}
+      {rows.map((e) => (
+        <Text key={e.key} size="sm" style={{ cursor: "pointer" }} onClick={() => { setOpenKey(e.key); window.history.replaceState(null, "", `#run-${e.key}`); }}>
+          <Badge size="xs" variant="outline" color={e.state === "done" ? "teal" : "gray"} mr={6}>{e.state}</Badge>{e.when} · {e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}
+        </Text>
+      ))}
+      {rows.length < total && <Button size="compact-xs" variant="subtle" loading={busy} onClick={loadMore} w="fit-content">Show older runs ({total - rows.length} more)</Button>}
+      <RunDrawer runKey={openKey} meta={meta} onClose={() => { setOpenKey(null); if (window.location.hash.startsWith("#run-")) window.history.replaceState(null, "", window.location.pathname + window.location.search); }} />
+    </Stack>
+  );
+}
+
+/** A past run, read-only: its summary, the roster as it was, and the detail (fill asks, callouts, the log in words). An
+ *  end by mistake can be reopened from here within the hour (never a cancelled run). */
+function RunDrawer({ runKey, meta, onClose }: { runKey: string | null; meta: Meta; onClose: () => void }) {
+  const [e, setE] = useState<NightSheet | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!runKey) { setE(null); return; }
+    api.get<NightSheet>(`/api/run/${runKey}`).then(setE).catch((err) => { fail(err); onClose(); });
+  }, [runKey]);  // eslint-disable-line react-hooks/exhaustive-deps
+  async function reopen() {
+    if (!e) return;
+    setBusy(true);
+    try { const x = await api.post<{ message: string }>(`/api/run/${e.key}/reopen`, {}); ok(x.message); onClose(); } catch (err) { fail(err); } finally { setBusy(false); }
+  }
+  return (
+    <Drawer opened={!!runKey} onClose={onClose} position="right" size="xl" title={e ? `${e.raid} · ${e.when}` : "Loading…"}>
+      {e && (
+        <Stack gap="sm">
+          <Group gap="sm"><Badge variant="outline" color={e.state === "done" ? "teal" : "gray"}>{e.state}</Badge>{e.closed_at && <Text size="xs" c="dimmed">closed {e.closed_at}</Text>}</Group>
+          <Text size="sm">{e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}</Text>
+          {e.board && e.rostered > 0 && <BoardPreview meta={meta} board={e.board} />}
+          {e.may_reopen && <Button size="xs" variant="light" loading={busy} onClick={reopen} w="fit-content">Reopen — ended by mistake</Button>}
+          {!e.may_reopen && e.reopen_note && e.state === "done" && <Text size="xs" c="dimmed">{e.reopen_note}</Text>}
+          <Detail e={e} readOnly />
+        </Stack>
+      )}
+    </Drawer>
   );
 }
 
@@ -213,7 +319,7 @@ function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: Raid
   const scheds = (r.schedules || []).filter((s) => s.active && s.kind !== "pickup");
   const metaLine = [scheds.length ? scheds.map((s) => (scheds.length > 1 ? `${s.name}: ${s.label}` : s.label)).join(" · ") : "no schedule set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
-  const first = r.locked.some((e) => e.key === target) ? "locked" : r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
+  const first = r.locked.some((e) => e.key === target) ? "locked" : r.past.some((e) => e.key === target) ? "history" : r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
   return (
     <Card>
       <RaidHeader id={r.id} name={r.name} meta={metaLine} right={<Stack gap={6} align="flex-end"><OpenNext r={r} busy={busy} onAct={onAct} /><StartAdhoc r={r} busy={busy} onAct={onAct} /></Stack>} />
@@ -235,14 +341,13 @@ function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: Raid
         </Tabs.Panel>
         <Tabs.Panel value="upcoming" pt="md">
           {r.upcoming.length === 0 && <Text size="sm" c="dimmed">No upcoming runs{scheds.length ? " before the raid opens" : " — add a schedule on Raids"}.</Text>}
-          <Stack gap={4}>{r.upcoming.map((u) => <Text key={u.start} size="sm"><b>{u.start}</b> <Text span c="dimmed">· {u.slot} · sheet opens {u.opens}</Text></Text>)}</Stack>
+          <UpcomingRows r={r} busy={busy} onAct={onAct} />
         </Tabs.Panel>
         <Tabs.Panel value="regulars" pt="md">
           <Regulars r={r} meta={meta} people={people} onAct={onAct} busy={busy} />
         </Tabs.Panel>
         <Tabs.Panel value="history" pt="md">
-          {r.past.length === 0 && <Text size="sm" c="dimmed">No past runs.</Text>}
-          <Stack gap={4}>{r.past.map((e) => <Text key={e.key} size="sm"><Badge size="xs" variant="outline" color={e.state === "done" ? "teal" : "gray"} mr={6}>{e.state}</Badge>{e.when} · {e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}</Text>)}</Stack>
+          <History r={r} meta={meta} />
         </Tabs.Panel>
       </Tabs>
     </Card>

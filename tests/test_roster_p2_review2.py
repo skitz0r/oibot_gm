@@ -96,11 +96,17 @@ def test_fit_suggestions_turns_send_off_when_the_batch_cannot_show():
     assert not whole and len(text) <= flows_raid.SUGGEST_TEXT_MAX and "Send stays off" in text
 
 
-def test_suggest_screen_disables_send_when_the_batch_cannot_show(reg, rs, monkeypatch, officer):  # noqa: F811
+def test_suggest_screen_sends_what_fits_when_the_batch_cannot_show(reg, rs, monkeypatch, officer):  # noqa: F811
+    """Phase 2 (design B7): a batch too long for one screen no longer disables Send — the screen lists the asks of the
+    first seats that fit and Send DMs exactly those ("Send these N (the rest on the site)"); with room for none, off."""
     ev, p, plan = _four_seats(reg, rs, monkeypatch)
     monkeypatch.setattr(flows_raid, "fit_suggestions", lambda lines, seats, batch: ("cut", False))
     bot = CardBot(reg, rs)
     h = Harness(reg, rs, client=bot)
+    run(views.RunButton(reg.key, ev.key, "suggest").callback(h.card_press()))
+    send = next(b for b in h.screen["view"].children if getattr(b, "label", "").startswith("Send"))
+    assert not send.disabled and send.label.startswith("Send these ") and send.label.endswith("(the rest on the site)")
+    monkeypatch.setattr(flows_raid, "fit_partial", lambda lines, plan, picks: (None, "too long"))
     run(views.RunButton(reg.key, ev.key, "suggest").callback(h.card_press()))
     send = next(b for b in h.screen["view"].children if getattr(b, "label", "").startswith("Send"))
     assert send.disabled and send.label == "Send 0 asks"

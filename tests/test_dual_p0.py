@@ -227,8 +227,8 @@ class SeatBot:
     async def post_run_update(self, reg, ev, text):
         self.calls.append(("update", text))
 
-    async def dm_seat_released(self, reg, ev, m, why):
-        self.calls.append(("dm_released", m.discord_id, why))
+    async def seat_released(self, reg, ev, m, why):
+        self.calls.append(("released", m.discord_id, why))
         return True
 
     async def run_fill(self, reg, rs, ev, team, by=None, **kw):
@@ -265,7 +265,7 @@ def test_a_nick_change_mid_run_keeps_the_seat_and_the_callout(reg, rs):
     co = [c for c in ev.callouts if c.discord_id == m.discord_id]
     assert len(co) == 1 and co[0].display_name == "Freshnick", "the callout is theirs, keyed by id"
     assert ev.signups[str(m.discord_id)].status == "out"
-    assert ("dm_released", m.discord_id, "callout") in bot.calls
+    assert ("released", m.discord_id, "callout") in bot.calls
 
 
 def test_member_never_renames_inside_a_verb(reg):

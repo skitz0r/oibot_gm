@@ -74,14 +74,20 @@ def _lock(reg: Registry, ev: rc.RaidEvent) -> list[str]:
 
 
 def _cancel(reg: Registry, ev: rc.RaidEvent) -> list[str]:
+    """Who the cancel touches, from rc.cancel_effects. Nobody is DMed (the DM rule): the sheet is edited to its final
+    state, every open ask card says Cancelled, and the officer may post one fixed line in the signup channel."""
     if ev.state in ("done", "cancelled"):
         return [f"This run is already {ev.state}."]
-    tail = "Rostered members are not told automatically — say so in the channel."
-    if ev.state == "open" or not ev.all_rosters:
-        answered = len([s for s in ev.signups.values() if s.status in rc.STATUSES])
-        return [f"The sheet closes for the {_n(answered, 'person', 'people')} who answered." if answered else "The sheet closes; nobody had answered.", "Nobody is told automatically — say so in the channel."]
-    open_asks = sum(1 for row in rc.confirmations(reg, ev) if row["answer"] is None)
-    return [f"The sheet closes; {_n(len(ev.seated()), 'rostered seat')}" + (f" and {_n(open_asks, 'open confirmation ask')}" if open_asks else "") + " are withdrawn.", tail]
+    fx = rc.cancel_effects(reg, ev)
+    tail = "Nobody is DMed: the sheet and every open ask card say Cancelled, and a fixed line goes to the signup channel unless you choose no line."
+    fills = len(fx["fill_asks"])
+    if not fx["locked"]:
+        n = fx["answered"]
+        head = f"The sheet closes for the {_n(n, 'person', 'people')} who answered" if n else "The sheet closes; nobody had answered"
+        return [head + (f"; {_n(fills, 'ask')} still out close" if fills else "") + ".", tail]
+    asks = len(fx["open_asks"])
+    return [f"The sheet closes; {_n(len(fx['rostered']), 'rostered seat')} are released" + (f", {_n(asks, 'open confirmation ask')}" if asks else "")
+            + (f" and {_n(fills, 'fill ask')}" if fills else "") + (" close" if asks or fills else "") + ".", tail]
 
 
 def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:
@@ -93,16 +99,16 @@ def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     rostered = len(ev.seated())
     if not rostered:
         return ["The roster is empty — nothing to clear."]
-    return [f"Every seat is released: {rostered} rostered are told their seat was released (by DM, or on the site with DMs off) and the bench is asked to fill them."]
+    return [f"Every seat is released: {rostered} rostered see it on their confirmation card and the site (no DM), and the bench is asked to fill them."]
 
 
 def _release(reg: Registry, ev: rc.RaidEvent, name: str | None) -> list[str]:
     if ev.state == "open":
         return ["Nothing is sent before lock — the seat only comes off the board."]
-    told = "by DM, or on the site with DMs off"
+    told = "on their confirmation card and the site, no DM"
     if name:
-        return [f"{name} is told the seat was released — {told} — and the bench is asked to fill it."]
-    return [f"The seat is released: they are told — {told} — and the bench is asked to fill it."]
+        return [f"{name} sees the seat was released — {told} — and the bench is asked to fill it."]
+    return [f"The seat is released: they see it — {told} — and the bench is asked to fill it."]
 
 
 __all__ = ["NAME_TOKEN", "VERBS", "consequence", "consequences_json"]

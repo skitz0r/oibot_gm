@@ -640,39 +640,12 @@ def _regular_args(reg: Registry, op: ConfigOp):
 
 def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None = None):
     """run_open: the raid's next run (of `schedule` when named), or a one-off 'YYYY-MM-DD HH:MM' in guild time (what
-    /raid open and the web take). Returns (start, schedule id or None)."""
-    from datetime import datetime
-
+    /raid open and the web take). Returns (start, schedule id or None). One implementation: raidcycle.open_when (the
+    site's open + preview routes share it; a DST night resolves through wizard.resolve_local, never replace(tzinfo=))."""
     from . import raidcycle as rc
 
-    if rid not in reg.profile.raids:
-        raise RegistryError(f"unknown raid {rid or '?'} (one of {', '.join(reg.profile.raids)})")
-    sid = (schedule or "").strip().lower() or None
-    sched = next((s for s in reg.schedules(rid) if s["id"] == sid), None) if sid else None
-    if sid and sched is None:
-        raise RegistryError(f"{rid} has no schedule {sid} (it has {', '.join(s['id'] for s in reg.schedules(rid)) or 'none'})")
-    when = (value or "").strip()
-    nxt = [(s, t) for s, t in rc.upcoming(reg, rid, reg.now_local(), 24 * rc.OPEN_HORIZON_DAYS) if sid is None or s["id"] == sid]
-    if when:
-        import re
-
-        if re.fullmatch(r"\d{1,2}:\d{2}", when):  # a bare time: the next upcoming run at that clock time
-            hit = next(((s, t) for s, t in nxt if t.astimezone(reg.tz).strftime("%H:%M") == when.zfill(5)), None)
-            if hit is None:
-                raise RegistryError(f"{rid} has no upcoming run at {reg.time_label(when.zfill(5))} — give the date too")
-            return hit[1], hit[0]["id"]
-        try:
-            start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=reg.tz)
-        except ValueError:
-            raise RegistryError("I couldn't tell which time you meant — name the day and the time, e.g. Thu 10 Dec 7:30 PM (guild time)")
-        if sid is None:  # one of the raid's own upcoming runs: open it as that schedule's run; any other time is a one-off (ad hoc)
-            sid = rc.open_schedule(reg, rid, start, None)
-        return start, sid
-    if sched is not None and sched["kind"] == "pickup":
-        raise RegistryError(f"{sched['name']} is a pickup template — give the date and time it starts")
-    if not nxt:
-        raise RegistryError(f"{rid} has no slots yet (or none before it opens) — give a date and time")
-    return nxt[0][1], nxt[0][0]["id"]
+    start, sid, _note = rc.open_when(reg, rid, value, schedule)
+    return start, sid
 
 
 def _schedule_ref(op: ConfigOp) -> tuple[str, str]:

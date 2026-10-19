@@ -119,8 +119,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   page. Nothing is typed: pick the **first day** (Today, Tomorrow, then the days after — *Later than this…* picks a
   week further out) and **how long** (1 day up to 4 months), with an optional reason only you and the officers see. A confirm
   screen shows the days in words and which live sheets it touches before anything is saved. Sheets on those days
-  get *No thanks* for you, and if you were already rostered the seat is released (you get a DM saying so) and the
-  bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
+  get *No thanks* for you, and if you were already rostered the seat is released (your confirmation card in your DMs is
+  edited to say so — no new DM) and the bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
   someone else with `/roster absent` and a member picker, same screens.
 - **See everything the bot has on you**: `/me view` (characters, rosters, absences, your last ten awards and how many
   items are on your wishlist) or the *My status* button.
@@ -284,7 +284,8 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
   switches by people coming go first — a new healer would only push a DPS to the bench at lock. A switch that would
   drop the role someone leaves under its minimum is offered only tied to someone covering it, and both must say yes:
   the first yes changes nothing until the other answers; the second yes makes both changes; a no (or silence, or the
-  lock arriving first) from either closes the other with a "never mind" DM. Nobody is suggested for two seats (the
+  lock arriving first) from either closes the other: its DM card is edited to "never mind" (a DM only when the
+  card is unknown). Nobody is suggested for two seats (the
   *Suggest…* screen refuses picking one person for two), and the bot never takes the one person a later seat can't do
   without. Test puppets are never suggested or asked on a real run.
 - **Two alternates** per short seat, so you can ask someone else without typing a name, and a **Still short if all say
@@ -295,8 +296,9 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
   *Send*). The block, the regulars who haven't answered and the buttons are for
   officers: a member who runs `/raid health` sees the counts, what is short and the missing buffs only. On a recurring schedule with
   regulars the health card is posted **as soon as the sheet opens** when the regulars (minus anyone away) can't cover a
-  minimum — an early warning — and posted again, rebuilt, at reminder time. On the site, **Suggest** beside the sheet's
-  *short* badge opens the same list (pick the suggestion or an alternate per seat, then *Send*). `/raid fill` on an open
+  minimum — an early warning — and posted again, rebuilt, at reminder time. On the site, the sheet's one **Fill**
+  button opens the same list (pick the suggestion or an alternate per seat, then *Send*); its tooltip says how many
+  seats are short and how many suggestions there are. `/raid fill` on an open
   run, plain text ("suggest fixes for Tuesday's run", then "send them") and MCP `fill_seats` give the same list.
 - **A stale list is refused.** If the suggestions changed since you looked (someone joined, someone answered), *Ask*
   sends nothing and the list is redrawn as it is now — check it and press again.
@@ -335,8 +337,19 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    template, picked beside it) at the date and time you pick. `/raid open` does the same in Discord: pick the raid,
    then **Next run — <time>**, **Another upcoming run…** (each labelled with its schedule's name when there are several)
    or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes from lists; nothing
-   typed; ad hoc defaults). The confirm screen shows
-   the time in guild time and in your own. A raid with no run times offers *Set this raid's run times →*. A run opened closer
+   typed; ad hoc defaults; more than three pickup templates come as one *Pick a template* select). **Another upcoming
+   run…** pages by week (*← Earlier week* / *Later week →*) when the raid has more upcoming runs than one list holds.
+   A one-off picked at exactly the minute of an upcoming recurring run **is** that run: it opens as scheduled, with its
+   regulars and confirmations, and the confirm screen says so. The confirm screen shows
+   the time in guild time and in your own, and on a daylight-saving night says which time it used (2:30 AM on the
+   spring-forward night becomes 3:30 AM; on the fall-back night the first 1:30 AM is taken). On the site the
+   **Upcoming** tab has an **Open** on every row (one press, then the same confirm), and *Start ad hoc run* asks the bot
+   what the picked time would open as you pick: when it is a scheduled run the button reads *Open the … run —
+   scheduled, with confirmations*; its confirm shows both clocks, the run's rules, the daylight-saving note and the
+   channel the sheet posts in, and opens exactly the run it showed (if the time now means another run, nothing opens
+   and the preview is shown again). With **no signup channel set** the scheduler opens nothing: each run that was due
+   gets one warning on the ops feed ("Barrow Deeps Tue 7:30 PM did not open: no signup channel is set") and its
+   Upcoming row says *needs a signup channel* in red. A raid with no run times offers *Set this raid's run times →*. A run opened closer
    than its cadence assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
    hours instead of inheriting a lock time that has already passed. A start more than five minutes in the past is
    refused however the run is opened (the site, `/raid open`, plain text, MCP), with the time named in words.
@@ -388,12 +401,16 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    answers plus the roster's pool (people who haven't answered and aren't away) could make another run, one more
    line says so, and says when that needs offspecs or alts. Nothing is sent for it: open another run, or ask people,
    yourself. After lock the leftovers are simply the bench — the first people Fill asks when a seat frees up.
-   **Cancel run** withdraws every open confirmation ask (nothing lingers on anyone's Me page) and warns you that
-   rostered members are not told automatically — say so in the signup channel yourself. On every surface the cancel
-   first shows the same sentence — what closes, how many seats and asks are withdrawn, who is and isn't told — and
-   takes an optional reason (shown in the channel and the run's thread): the card's button opens *Cancel the run* /
-   *Cancel the run with a note…* / *Back*, the site's dialog has the same sentence and a reason box, `/raid cancel`,
-   plain text and MCP carry the reason as before.
+   **Cancel run** is one screen everywhere: first the sentence from the run as it stands — how many seats are
+   released, how many confirmation and fill asks close — then an optional **reason** (officers only: it goes to the
+   run's updates thread and the ops feed, never to the signup channel) and **Tell the channel?** (a fixed line in the
+   signup channel — "🛑 Barrow Deeps … is cancelled. Rostered seats are released — nothing to do." — on by default, or
+   no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
+   the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel run** and `/raid cancel` show
+   the sentence with *Cancel the run…* (the box with the reason and the channel choice) and *Back*; the site's dialog
+   has the same three parts; plain text and MCP take the reason. A cancel waits for a lock that is being built and
+   then cancels the locked run — the lock stops asking people the moment the run is cancelled. A cancelled run is
+   final: it can't be reopened (open a new run).
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. A roster that came out under its tank/healer minimum
@@ -401,13 +418,27 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    card also lists who the solver moved to an offspec (*Playing an offspec*, one per line) and, on a recurring schedule,
    the **regulars not rostered** (who joined but sat out — they get priority next time). Pre-lock asks nobody answered
    close now. Every rostered member gets a DM: **Confirm** / **Can't make it** — showing the spec they're rostered as
-   ("You're rostered as **Protection**, your offspec"). The Me page shows the same ask. With confirmations off (the ad hoc default) nobody is asked and
+   ("You're rostered as **Protection**, your offspec"). The Me page shows the same ask; with DMs off, or when the DM
+   can't be delivered, the ask waits there instead (same deadline — a failed DM never counts as an answer) and the lock
+   card marks them *(site)*. **Preview lock**: the lock's confirm screen (the card's *Lock now* and `/raid lock`) has a
+   *Preview lock* button that draws the roster(s) the lock would build right now — every group, one member per line
+   with the spec icon, then the leftovers (the first 15) — without saving anything; *Lock now* or *Back* from there.
+   The site's lock dialog has the same *Preview*. If the bot stops half way through the confirmation DMs (a restart, a
+   Discord outage), the lock card says *confirmations not yet sent* and within a minute the bot asks exactly the
+   rostered who weren't asked — nobody twice. If a lock fails (the solver finds no roster), the sheet's footer says
+   *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the ad hoc default) nobody is asked and
    no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable: moving people
    between groups changes nothing else; dragging someone in from the bank is a substitution (they get the
-   confirmation DM); dragging someone out releases the seat (they get a DM) and the bench is asked — the confirm names
-   them and says exactly what the bot will do, in the same words as the Discord card.
+   confirmation DM); dragging someone out releases the seat (their confirmation card says so — no new DM) and the bench
+   is asked — the confirm names them and says exactly what the bot will do, in the same words as the Discord card. A
+   drag started on the open board and dropped after the run locked is refused ("The run locked while you were
+   dragging") and the board shows the roster — it is never applied as a change to the locked roster.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
-   counts as out; their seat is released and they are DMed that it was.
+   counts as out; their seat is released and their confirmation card is edited to say so (no new DM). Only someone who
+   was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
+   "no answer". **Remind the unconfirmed** (the lock card's second row, the site's run menu) sends the Confirm / Can't
+   DM again to everyone still unanswered — the same ask, the same deadline — at most once an hour per run; the ones
+   waiting on the site aren't DMed.
 6. **Fill** — the fill engine DMs people on its own only after lock (before lock an officer sends suggestions, see
    *Suggestions* above). Whenever a seat frees (decline, callout, absence, missed
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people, in the suggestions' cost
@@ -418,9 +449,12 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    seats); the updates thread says so once. On an ad hoc run swaps go out by themselves. A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
    for a bench or pool member of that role and sends both asks tied together — the swap and its backfill — and
    nothing changes until both say yes (the first yes waits; the second makes both changes and tells the first);
-   a no (or silence) from either withdraws the other with a "never mind" DM. It asks the shortfall + 1 at a
-   time, never more than 3 outstanding, and never asks someone who is rostered on another raid within 4 hours,
-   absent, or has DMs off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
+   a no (or silence) from either withdraws the other — its card is edited to "never mind". It asks the shortfall + 1 at a
+   time, never more than 3 outstanding, and never asks someone who is rostered on another raid within 4 hours or
+   absent. A fill DM that can't be delivered leaves the ask on the person's Me page (same deadline; the lock card counts
+   "N wait on the site") — never a no. **Pause autofill** (the lock card's second row, the site's run menu) stops the
+   engine asking anyone on its own for that run; an officer's own *Fill* / *Ask* still sends, and *Resume autofill*
+   picks up where it left off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
    it was sent, never later than the run start; the updates thread logs the timeout and the next person is
    asked. A yes goes straight into the freed seat (a swap changes the seat in place). A roster that is full but
    short a tank or healer has no seat for a newcomer, so only swaps are asked for it; a yes that finds every seat
@@ -430,14 +464,35 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    and **exactly the asks Send DMs**, one per line: who, as which character and spec, for which short role, a role
    swap marked **SWAP** (with the role it leaves) and its tied backfill named; what waits under the 3-at-a-time cap;
    what stays short — then *Send N asks* or *Cancel*. Send sends only what was shown: if the board or the answers
-   changed the plan meanwhile, nothing is sent and the batch is shown again as it is now. An officer's Send includes
-   the role swaps it lists. On a very long list the reasons go first, then the last seat lines ("+N more seats"); the
-   batch itself always shows in full — if even it can't fit, *Send* stays off and the site's Suggest sends it.
+   changed the plan meanwhile, nothing is sent and the batch is shown again as it is now; when another officer pressed
+   first the screen says so ("Already sent by Jon at 8:12 PM — the plan is redrawn"). An officer's Send includes
+   the role swaps it lists. On a very long list the reasons go first, then the last seat lines ("+N more seats"); when
+   even the batch can't fit one screen, the screen lists the asks of the first seats that fit and the button reads
+   **Send these N (the rest on the site)** — it DMs exactly those; the site's Fill sends the rest. **Withdraw an ask…**
+   on the same screen (and *Withdraw* on an ask in the site's run detail) closes an ask already out before its
+   deadline: its card says "never mind", its tied half is released.
    `/raid fill preview:true` shows the same batch without a Send button. With `autofill` off
-   nothing is asked until an officer presses Fill seats.
+   nothing is asked until an officer presses Fill seats. On the site one **Fill** button opens the right screen before
+   and after lock; when a role swap waits for you (recurring runs), a yellow banner above the roster says *Waiting on
+   you: …* with the Fill button, and the fill state is in words ("asking — waiting for answers (1 on the site)").
 7. **Raid** — `/raid loot` (or the lock card's **Loot**, or Loot › Tonight on the site) opens the loot council;
-   `/raid end` ends the run and its council (§9).
+   `/raid end` ends the run and its council (§9) — so does **End the run now** on the lock card's second row and the
+   site's run menu, both after the scheduled start and both through one confirm screen. Ended by mistake? The closed
+   officer card keeps a **Reopen** button (and the run's page in History a *Reopen*) for an hour: the run goes back to
+   locked with its roster and asks as they were (the loot council stays archived — open it again with /raid loot).
+   Never a cancelled run, and not after its scheduled close.
 8. **Close** — 3 h after its scheduled end (start + the raid's length) the run is **done** and the sheet says so.
+
+**Reading a run.** `/raid health` works at any time: on an open sheet the health card, on a locked run a brief with
+rostered against the seats, what is short (role icon + number), the confirmations tally and the fill state in words —
+officers also see who is waiting and the lock card's buttons; members see the counts only. On the site a sheet shows,
+under its role counts, who could cover a short role (officers) and the party buffs nobody brings (icons only, names in
+the tooltips); links to the sheet, the officer card and the updates thread in Discord; and, once locked, *Playing an
+offspec* and *Regulars not rostered* (one member per line, the spec icon alone). The run's **detail** lists its fill
+asks (who answered for whom, which wait on the site), callouts with their notes, and the **log** — every line with its
+time in words, lines only officers would read marked *officers*, the raw lines behind *machine form*. **History**
+lists the newest eight past runs per raid and *Show older runs* pages the rest; a row opens the run read-only in a
+side panel (a `#run-<key>` link opens it too).
 
 Seat selection at lock is deterministic: role bounds from the raid's comp, buff synergy, the comp policy's
 standing instructions, officer pins, and the schedule's **weights** (the raid's unless the schedule sets its own) —
@@ -461,10 +516,11 @@ the answer, no callout. When an officer drags someone onto a locked board, the r
 confirm only when the run asks for confirmations (an ad hoc run with confirmations off just says *in*).
 
 **Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
-run* far left, then *Fill seats* and *Lock now* on the right; what does not apply yet is greyed with the reason
-(Fill before lock, Lock after it); before lock **Suggest** sits beside the sheet's *short* badge. The board's own tools sit above the groups: *Auto-fill empty seats*, *Propose
+run* far left, then *Fill* and *Lock now* on the right; what does not apply yet is greyed with the reason. The run's
+**⋮ menu** (top right) holds *Remind the unconfirmed*, *Pause / Resume autofill* and *End the run now*. The board's own tools sit above the groups: *Auto-fill empty seats*, *Propose
 roster/splits*, and *Clear* set apart. Officer cards in Discord use the same fixed order — Open the board · Lock now ·
-Fill seats · Cancel run (the *Suggested* block has its own row: **Ask** · **Suggest…**). **One confirm screen, the same
+Fill seats · Loot · Cancel run (the *Suggested* block has its own row: **Ask** · **Suggest…**), and the lock card adds
+a second row: **Remind the unconfirmed** · **Pause autofill** · **End the run now**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
 a news proposal, the bot shows one sentence computed from the run as it stands — for a lock: *"The board becomes the
 roster. 18 rostered get a confirmation DM (2 with DMs off see it on the site). Confirm by Tue 6:30 PM."*; on an ad hoc
@@ -959,7 +1015,7 @@ news post says can make the review read or write another server.
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
-| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (rostered members are not told automatically: say so in the channel) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
+| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
@@ -1249,8 +1305,8 @@ officer role, a member of the server, or outside it; a Discord nick change never
 locked roster, your callouts and your pending asks are tied to your Discord account, not to the name, and the name
 on your record follows your server nick the next time the bot sees you in the server (a command, a button press) —
 a sheet keeps the name you answered under until you answer again. An absence reason is seen by you and
-the officers, nobody else. The bot DMs only for sheets, nudges, confirmations,
-released seats and fill asks; switch DMs off on the **Me** page if you'd rather not get them — with DMs off
+the officers, nobody else. The bot DMs only when you must act — sheets, nudges, confirmations and fill
+asks (a released seat or a cancelled run edits the card you already have instead); switch DMs off on the **Me** page if you'd rather not get them — with DMs off
 you are never asked to fill, and a confirmation ask is shown on the Me page instead and counts as pending
 until you answer it there. **My absences** on the absences card lists yours with a **Clear** button each; clearing
 an absence puts you back to unanswered on any open sheet it had pre-filled (a seat freed on a locked run is

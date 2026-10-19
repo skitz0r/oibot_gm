@@ -11,6 +11,7 @@ as before (guild_routing.resolve_button), with each button's own matcher decidin
 Import cycle: see `raid_views` — the helpers this module formats replies with are imported at the bottom."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -23,13 +24,17 @@ from .registry import RegistryError
 log = logging.getLogger(__name__)
 
 
-class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot)(?::(?P<rev>[0-9a-f]{6,16}))?"):
+class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot|remind|pause|end|reopen)(?::(?P<rev>[0-9a-f]{6,16}))?"):
     """Officer buttons on the health and lock cards: Fill seats (the suggestions screen: the batch, then Send), Lock now, Cancel run, and
     the Suggested block's Ask (sends what the card shows; the plan fingerprint it was drawn with rides in the id, so a
-    stale card is refused and redrawn) and Suggest… (every seat with its alternates: pick, then send)."""
+    stale card is refused and redrawn) and Suggest… (every seat with its alternates: pick, then send). The lock card's
+    raid-night row (dual interfaces phase 2): Remind the unconfirmed (once an hour), Pause / Resume autofill, End the
+    run now (after the start; the decide screen); the closed card's Reopen (an end by mistake, within the hour)."""
     LABELS = {"fill": ("Fill seats", discord.ButtonStyle.secondary), "lock": ("Lock now", discord.ButtonStyle.secondary), "cancel": ("Cancel run", discord.ButtonStyle.danger),
               "loot": ("Loot", discord.ButtonStyle.secondary),
-              "ask": ("Ask", discord.ButtonStyle.success), "suggest": ("Suggest…", discord.ButtonStyle.secondary)}
+              "ask": ("Ask", discord.ButtonStyle.success), "suggest": ("Suggest…", discord.ButtonStyle.secondary),
+              "remind": ("Remind the unconfirmed", discord.ButtonStyle.secondary), "pause": ("Pause autofill", discord.ButtonStyle.secondary),
+              "end": ("End the run now", discord.ButtonStyle.danger), "reopen": ("Reopen", discord.ButtonStyle.secondary)}
 
     def __init__(self, gk: str | None, key: str, action: str, disabled: bool = False, label: str | None = None, rev: str | None = None):
         """`gk`: the guild key the id carries (None = the old format, from a match only). `disabled`/`label` are
@@ -55,6 +60,9 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
             return
         rs = bot.raids.store(reg)
         ev = rs.events.get(self.key)
+        if self.action == "reopen":  # the one press a closed run's card keeps
+            await reopen_press(interaction, bot, reg, rs, ev)
+            return
         if not ev or ev.state in ("done", "cancelled"):
             await interaction.response.send_message("That run is closed.", ephemeral=True)
             return
@@ -76,7 +84,7 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
             except RegistryError as e:
                 await interaction.followup.send(str(e), ephemeral=True)
                 return
-            await interaction.followup.send((("Asked " + ", ".join(a.display_name for a in sent) + " — their answers post in the run's thread.") if sent else "Nobody could be asked (DMs off or nobody left).") + rc.held_back_words(plan), ephemeral=True)
+            await interaction.followup.send(sent_words(sent) + rc.held_back_words(plan), ephemeral=True)
             return
         if self.action == "suggest":
             from .wizard import FLOWS
@@ -113,9 +121,39 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
             return
         if self.action == "cancel":
             await cancel_decide(interaction, bot, reg, rs, ev)
+            return
+        if self.action == "remind":  # reversible, low ceremony: the press is the send (once an hour per run)
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                line = await bot.remind(reg, rs, ev, by=by, by_id=interaction.user.id)
+            except RegistryError as e:
+                line = str(e)
+            await interaction.followup.send(line, ephemeral=True)
+            return
+        if self.action == "pause":
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                line = await bot.set_autofill_paused(reg, rs, ev, not ev.autofill_paused, by=by, by_id=interaction.user.id)
+            except RegistryError as e:
+                line = str(e)
+            await interaction.followup.send(line, ephemeral=True)
+            return
+        if self.action == "end":
+            await end_decide(interaction, bot, reg, rs, ev)
 
 
-# ---------------------------------------------------------------- the ONE confirm screen for lock and cancel (§2.3)
+def sent_words(sent: list) -> str:
+    """What an officer's Ask did, from the asks themselves: by DM, or waiting on the site (DMs off / the DM failed)."""
+    if not sent:
+        return "Nobody could be asked (nobody left)."
+    dm = [a.display_name for a in sent if getattr(a, "channel", "dm") != "web"]
+    site = [a.display_name for a in sent if getattr(a, "channel", "dm") == "web"]
+    return (("Asked " + ", ".join(dm) + " by DM" if dm else "")
+            + ("; " if dm and site else "") + (", ".join(site) + " wait on the site (DMs off or the DM failed)" if site else "")
+            + " — their answers post in the run's thread.")
+
+
+# ---------------------------------------------------------------- the ONE confirm screen for lock, cancel and end (§2.3)
 
 def officer_wizard(bot, reg, interaction: discord.Interaction, title: str):
     """A Wizard for an officer's card press: the guard re-checks officer standing (is_officer_anywhere) at every press."""
@@ -127,13 +165,16 @@ def officer_wizard(bot, reg, interaction: discord.Interaction, title: str):
     return Wizard(reg, interaction.user.id, title=title, guard=guard)
 
 
-async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
-    """Lock from a card: the consequence sentence (consequences.consequence — the same words the site's confirm shows),
-    then Lock now / Back. The lock itself is RaidMixin.lock_run, after the screen has acknowledged the press."""
+async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
+    """Lock — the card's Lock now and /raid lock alike: the consequence sentence (consequences.consequence — the same
+    words the site's confirm shows), then Lock now · Preview lock · Back. Preview lock draws the roster the lock would
+    build now (rc.split_preview under the run's solver single flight; nothing saved but `ev.last_proposal`), one member
+    per line with the spec icon, and offers Lock now / Back from there. The lock itself is RaidMixin.lock_run, after the
+    screen has acknowledged the press."""
     from .configops import report_error
     from .consequences import consequence
 
-    wiz = officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
+    wiz = wiz or officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
     key = ev.key
 
     async def do(i: discord.Interaction, _note: str | None) -> None:
@@ -157,29 +198,126 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> Non
         if not cur.lock_error:
             await bot.ops.emit(reg.config, "info", line)
 
-    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("lock", reg, ev)), do=do, do_label="Lock now")
+    async def lock_now(i: discord.Interaction) -> None:
+        await wiz.working(i, "Locking…")
+        await do(i, None)
+
+    async def preview(i: discord.Interaction) -> None:
+        cur = rs.events.get(key)
+        if not cur or cur.state != "open":
+            await wiz.finish(i, "That run is no longer open — nothing to preview.")
+            return
+        await wiz.working(i, "Building the preview — up to 8 s…")
+        try:
+            rosters = await bot.lock_preview(reg, rs, cur, by=i.user.display_name)
+        except RegistryError as e:  # the solver is busy on this run, or no roster satisfies the rules
+            await wiz.refuse(i, str(e), retry=lambda ri: lock_decide(ri, bot, reg, rs, rs.events.get(key) or cur, wiz=wiz), retry_label="Back")
+            return
+        await wiz.show(i, f"{run_label(reg, cur)}\n" + "\n".join(consequence("lock", reg, cur)), wiz.button("Lock now", lock_now, discord.ButtonStyle.success),
+                       wiz.button("Back", lambda bi: lock_decide(bi, bot, reg, rs, rs.events.get(key) or cur, wiz=wiz)),
+                       embed=lock_preview_embed(reg, cur, rosters, bot.ico))
+
+    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("lock", reg, ev)), do=do, do_label="Lock now",
+                     extra=[wiz.button("Preview lock", preview)])
 
 
-async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
-    """Cancel from a card: the consequence, then Cancel the run / Cancel the run with a note… / Back. The note is the
-    reason every other surface records (the command's modal, plain text, MCP, the site)."""
+async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
+    """Cancel — ONE screen on every Discord path (the card's Cancel run, /raid cancel): the consequence (who is rostered,
+    which asks close — rc.cancel_effects through consequences.consequence), then Cancel the run… · Back. The button opens
+    one Form: the optional reason (officers only: the run's thread and the ops feed — never the public channel) and
+    "Tell the channel?" (post a fixed line in the signup channel — the default — or not). Nobody is DMed (the DM rule).
+    Submit cancels (RaidMixin.cancel_run)."""
     from .consequences import consequence
+    from .wizard import Field, Form, Opt
 
-    wiz = officer_wizard(bot, reg, interaction, f"Cancel {raid_name(reg, ev)}")
+    wiz = wiz or officer_wizard(bot, reg, interaction, f"Cancel {raid_name(reg, ev)}")
     key = ev.key
 
-    async def do(i: discord.Interaction, note: str | None) -> None:
+    async def submitted(si: discord.Interaction, v: dict[str, str]) -> None:
+        if si.user.id != wiz.owner_id:
+            await si.response.send_message("This belongs to someone else's wizard.", ephemeral=True)
+            return
+        why = await wiz.guard(si) if wiz.guard else None
+        if why:
+            await wiz.finish(si, why)
+            return
+        cur = rs.events.get(key)  # re-read: it may have closed while the box was open
+        if not cur or cur.state in ("done", "cancelled"):
+            await wiz.finish(si, "That run already closed — nothing was changed.")
+            return
+        await wiz.working(si, "Cancelling…")
+        try:
+            line = await bot.cancel_run(reg, rs, cur, by=si.user.display_name, reason=(v.get("reason") or "").strip() or None,
+                                        notify=v.get("notify", "post") != "quiet", by_id=si.user.id)
+        except RegistryError as e:
+            line = str(e)
+        await wiz.finish(si, line)
+
+    def form() -> Form:
+        return Form(f"Cancel {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
+            Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
+                  description="Officers only: the run's thread and the ops feed.", placeholder="never posted in the signup channel"),
+            Field("notify", "Tell the channel?", [Opt("post", "Post a line in the signup channel", "fixed text, no reason", default=True),
+                                                  Opt("quiet", "No line — the sheet and the thread show it")]),
+        ], submitted)
+
+    async def open_box(i: discord.Interaction) -> None:
         cur = rs.events.get(key)
         if not cur or cur.state in ("done", "cancelled"):
             await wiz.finish(i, "That run already closed — nothing was changed.")
             return
-        line = await bot.cancel_run(reg, rs, cur, by=i.user.display_name, reason=note)
-        await wiz.finish(i, line)
+        await wiz.open_form(i, form())
 
-    await wiz.decide(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("cancel", reg, ev)), do=do,
-                     note={"label": "Why? (optional)", "max_length": 300, "placeholder": "shown in the channel and the run's thread"},
-                     do_label="Cancel the run", danger=True)
+    async def back(i: discord.Interaction) -> None:
+        await wiz.finish(i, "Nothing was changed.")
 
+    await wiz.show(interaction, f"{run_label(reg, ev)}\n" + "\n".join(consequence("cancel", reg, ev)),
+                   wiz.button("Cancel the run…", open_box, discord.ButtonStyle.danger), wiz.button("Back", back))
+
+
+async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
+    """End the run now (the lock card, after the scheduled start): the decide screen, then LootMixin.end_run — the verb
+    /raid end, the site, MCP and the scheduler share (its loot council is archived with its summary). Reopen stays
+    possible for an hour (an end by mistake)."""
+    why = rc.end_refusal(ev)
+    if why:
+        await interaction.response.send_message(why, ephemeral=True)
+        return
+    wiz = officer_wizard(bot, reg, interaction, f"End {raid_name(reg, ev)}")
+    key = ev.key
+
+    async def do(i: discord.Interaction, _note: str | None) -> None:
+        cur = rs.events.get(key)
+        if not cur or cur.state in ("done", "cancelled"):
+            await wiz.finish(i, "That run already closed — nothing was changed.")
+            return
+        try:
+            await bot.end_run(reg, rs, cur, by=i.user.display_name, by_id=i.user.id, via="discord")
+        except RegistryError as e:
+            await wiz.finish(i, str(e))
+            return
+        await wiz.finish(i, f"Ended {run_title(reg, cur)}. Pressed by mistake? The closed card's Reopen works for an hour.")
+
+    told = bot.end_consequence(reg, rs, ev) if hasattr(bot, "end_consequence") else f"End {run_title(reg, ev)}."
+    text = (f"{run_label(reg, ev)}\n{told}\nThe sheet and the lock card close; no more fill asks go out. Reopen works for an hour after.")
+    await wiz.decide(interaction, text, do=do, do_label="End the run now", danger=True)
+
+
+async def reopen_press(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
+    """The closed card's Reopen (a run ended by mistake, within the hour; never a cancelled run — D19)."""
+    if ev is None:
+        await interaction.response.send_message("That run is gone.", ephemeral=True)
+        return
+    why = rc.reopen_refusal(reg, ev)
+    if why:
+        await interaction.response.send_message(why, ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        line = await bot.reopen_run(reg, rs, ev, by=interaction.user.display_name, by_id=interaction.user.id)
+    except RegistryError as e:
+        line = str(e)
+    await interaction.followup.send(line, ephemeral=True)
 
 # ---------------------------------------------------------------- persistent buttons
 
@@ -335,12 +473,13 @@ class PlaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"place(?:
         if not await bot.may_answer_for(interaction, reg, self.uid):
             await interaction.response.send_message("That question was for someone else.", ephemeral=True)
             return
-        try:
-            line = reg.answer_placement(self.uid, self.roster, self.answer == "yes", interaction.user.display_name)
+        try:  # the check-and-set runs on the loop (claim), only the git commit in a thread — never two "first" answers
+            m, _ask, line = reg.claim_placement(self.uid, self.roster, self.answer == "yes", interaction.user.display_name)
         except RegistryError as e:
             await interaction.response.send_message(f"{e}", ephemeral=True)
             return
         await show_answer(card, interaction, line)
+        await asyncio.to_thread(reg.save, m, line)
         await bot.after_placement_answer(reg, self.uid, self.roster, self.answer == "yes", line)
 
 
@@ -492,4 +631,4 @@ def loot_custom_id(prefix: str, gk: str | None, sid: str, part: str, action: str
 
 # text helpers the callbacks format with; imported last so `raid_views` (which places these buttons and imports them at
 # its own bottom) always finds the classes above bound, whichever module is imported first
-from .raid_views import SUGGEST_LINES, raid_name, run_label, sheet_state  # noqa: E402
+from .raid_views import SUGGEST_LINES, lock_preview_embed, raid_name, run_label, run_title, sheet_state  # noqa: E402

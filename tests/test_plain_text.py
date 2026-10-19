@@ -229,7 +229,7 @@ def test_run_open(reg, rs):
     assert bot.calls[0][:2] == ("open_run_and_post", "barrow_deeps") and bot.calls[0][2].startswith("2030-01-08T19:30") and bot.calls[0][4] == "adhoc"
     ev = rs.for_team("bd-0108-1930-adhoc")
     assert ev.state == "open" and ev.kind == "adhoc" and ev.series is None
-    with pytest.raises(RegistryError, match="no slots yet"):
+    with pytest.raises(RegistryError, match="no recurring slots yet"):
         run(configops.apply_async(reg, ConfigOp(op="run_open", target="barrow_deeps"), "Officer", False, bot=bot))
 
 

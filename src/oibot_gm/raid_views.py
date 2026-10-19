@@ -172,7 +172,9 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
             e.add_field(name="\u200b", value="-# Nobody has joined yet.", inline=False)
         rows_field()
         adhoc = rc.run_kind(reg, ev) == "adhoc"  # first come, first rostered; Join is the commitment when confirmations are off
-        e.set_footer(text=("test run · " if test else "") + ("First come, first rostered · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me")
+        failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying · " if ev.lock_error and ev.lock_tried_at
+                  else "Lock failed — the sheet stays open, retrying · " if ev.lock_error else "")
+        e.set_footer(text=failed + ("test run · " if test else "") + ("First come, first rostered · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me")
         return e, sheet_view(reg, ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
     rosters = ev.all_rosters
@@ -419,6 +421,49 @@ def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
     return ui.ActionRow(*items)
 
 
+def night_actions_row(reg: Registry, ev: rc.RaidEvent):
+    """The lock card's second row — the raid-night levers (design B2/B4/B7): Remind the unconfirmed (greyed when
+    rc.remind_refusal says it can't go now, e.g. within the hour), Pause / Resume autofill (D18), End the run now
+    (after the scheduled start; LootMixin.end_run). One order always; what does not apply is disabled in place."""
+    ui = discord.ui
+    started = datetime.now(ev.start.tzinfo) >= ev.start
+    remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else "no confirmations"
+    return ui.ActionRow(RunButton(reg.key, ev.key, "remind", disabled=bool(remind_no)),
+                        RunButton(reg.key, ev.key, "pause", label="Resume autofill" if ev.autofill_paused else None),
+                        RunButton(reg.key, ev.key, "end", disabled=not started))
+
+
+def ask_closed_layout(text: str) -> discord.ui.LayoutView:
+    """An ask's DM card in its final state (answered elsewhere, expired, withdrawn, the run cancelled, the seat released):
+    the line and no buttons — RaidMixin.edit_ask_card puts it in place of the card (the DM rule's "card edited")."""
+    ui = discord.ui
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(ui.TextDisplay(text), accent_colour=0x98A3B5))
+    return view
+
+
+def lock_preview_embed(reg: Registry, ev: rc.RaidEvent, rosters: list, ico) -> discord.Embed:
+    """/raid lock's (and the card's) Preview lock: the roster(s) the lock would build NOW (rc.split_preview), group by
+    group as the board shows them — the FULL roster, one member per line, spec icon alone (the iconography rule) — then
+    the leftovers, the only row capped (15). An embed because a 25-man roster one per line outgrows a 2000-character
+    message; nothing here is saved."""
+    e = discord.Embed(colour=TEAL, title=f"Preview · {raid_name(reg, ev)}")
+    for i, r in enumerate(rosters):
+        summaries = _group_summaries(reg, r)
+        if len(rosters) > 1:
+            e.add_field(name=f"Roster {i + 1}", value=_role_counts(ico, r.selected) or "​", inline=False)
+        for gi in range(len(r.groups)):
+            if r.groups[gi]:
+                block = _group_block(reg, ico, r, gi, None, summaries).split("\n")
+                e.add_field(name=block[0].strip("*"), value=_column(block[1:]), inline=True)
+    left = rc.leftovers(reg, ev, rosters)
+    if left:
+        names = [f"{ico('spec', f'{p.cls}:{p.spec}')} {p.character or p.signup_name}" for p in left[:LEFTOVER_LINES]]
+        e.add_field(name=f"Leftovers ({len(left)})", value=_column(names + ([f"+{len(left) - LEFTOVER_LINES} more on the board"] if len(left) > LEFTOVER_LINES else [])), inline=False)
+    e.set_footer(text="Nothing is saved — Lock now builds the roster again from the sheet as it is then.")
+    return e
+
+
 def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer: bool = True) -> discord.ui.LayoutView:
     """The health check as a card: joined vs size, role have/need with the short role marked, who could cover,
     nobody-brings icons, no-answer count, double-booked; officer buttons. `officer=False` is the card a member sees
@@ -571,15 +616,23 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
         tail.append("**Waiting on** " + ", ".join(pending[:15]))
     _soft, _hard, confirm = run_times(reg, ev, team)
     if confirms:
-        tail.append(f"-# ✓ confirm by <t:{int(confirm.timestamp())}:f> · unanswered then counts as out")
+        tail.append(f"-# ✓ confirm by <t:{int(confirm.timestamp())}:f> · unanswered then counts as out"
+                    + (" · confirmations not yet sent" if ev.state == "locked" and not ev.confirmations_sent_at else ""))
+    if i == 0 and ev.state == "locked":
+        site = rc.asks_on_site(reg, ev)
+        tail.append(f"-# fill: {rc.fill_state_text(reg, ev)}" + (f" · {site} ask{'s' if site != 1 else ''} wait on the site" if site else "")
+                    + (f" · reminded {reg.local12(ev.reminded_at, '%I:%M %p')}" if ev.reminded_at else ""))
     parts += [ui.Separator(), ui.TextDisplay("\n".join(tail)), run_actions_row(reg, ev, locked=True)]
+    if i == 0 and ev.state == "locked":
+        parts.append(night_actions_row(reg, ev))
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=TEAL))
     return view
 
 
-def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int, gi: int, uid: int) -> discord.ui.LayoutView:
-    """Confirmation DM: your seat, the group you'd be in (the board's layout), the deadline, Confirm / Can't make it."""
+def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int, gi: int, uid: int, reminder: bool = False) -> discord.ui.LayoutView:
+    """Confirmation DM: your seat, the group you'd be in (the board's layout), the deadline, Confirm / Can't make it.
+    `reminder`: the officers' Remind re-sends it ("Reminder: …" in the title) — the same buttons answer the same ask."""
     ui = discord.ui
     r = ev.all_rosters[i]
     rd = reg.raid_def(ev.instance)
@@ -591,7 +644,7 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     if own is not None and spec != own.spec:  # an offspec the solver switched them to, or one they agreed to before lock
         lines.append(f"You're rostered as **{spec}**" + (", your offspec" if spec == own.offspec else "")
                      + (" — as you agreed" if sg.spec == spec else f" — you signed up as {sg.spec}") + ".")
-    head = _header(reg, ev, f"You're rostered · {rd.get('name', ev.instance)}", lines)
+    head = _header(reg, ev, ("Reminder: confirm your seat" if reminder else "You're rostered") + f" · {rd.get('name', ev.instance)}", lines)
     _s, _h, confirm = run_times(reg, ev, team)
     summaries = _group_summaries(reg, r)
     parts = [head, ui.Separator()]
@@ -676,11 +729,40 @@ def prelock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask, cls: s
 
 
 def closed_layout(reg: Registry, ev: rc.RaidEvent, ico) -> discord.ui.LayoutView:
-    """What a run's officer cards become once it is cancelled or finished: the header and the last log line, no buttons."""
+    """What a run's officer cards become once it is cancelled or finished: the header and the last log line. A run
+    ENDED less than an hour ago keeps one button, Reopen (design B6 — an end by mistake; never a cancelled run, D19)."""
     ui = discord.ui
     title = ("Cancelled" if ev.state == "cancelled" else "Finished") + f" · {raid_name(reg, ev)}"
     view = ui.LayoutView(timeout=None)
-    view.add_item(ui.Container(_header(reg, ev, title, [f"-# {ev.log[-1]}"] if ev.log else []), accent_colour=0x98A3B5))
+    parts = [_header(reg, ev, title, [f"-# {ev.log[-1]}"] if ev.log else [])]
+    if ev.state == "done" and rc.reopen_refusal(reg, ev) is None:
+        parts.append(ui.ActionRow(RunButton(reg.key, ev.key, "reopen")))
+    view.add_item(ui.Container(*parts, accent_colour=0x98A3B5))
+    return view
+
+
+def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> discord.ui.LayoutView:
+    """/raid health on a LOCKED run ("where are we", any time — design B4): rostered against the seats, what is short
+    (role icon + number), the confirmations tally and the fill state in words; officers also get who is waiting and
+    the lock card's buttons. Members see the counts only (never names of who hasn't confirmed)."""
+    ui = discord.ui
+    nd = rc.needs(reg, ev)
+    rows = rc.confirmations(reg, ev) if rc.run_confirms(reg, ev) else []
+    tally = (f"✅ {sum(1 for c in rows if c['answer'] == 'yes')} · ⏳ {sum(1 for c in rows if c['answer'] is None)} · ❌ {sum(1 for c in rows if c['answer'] in ('no', 'expired'))}"
+             if rows else "first come — no confirmations")
+    lines = [f"**{len(ev.seated())}** rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + "   " + _role_counts(ico, ev.seated()), tally]
+    short = gaps_text(ico, nd)
+    lines.append(f"**Short** {short}" if short != "nothing" else "**Full**")
+    if officer:
+        waiting = [c["display_name"] + (" (site)" if c["channel"] == "web" else "") for c in rows if c["answer"] is None]
+        if waiting:
+            lines.append("**Waiting on** " + ", ".join(waiting[:15]) + (f" +{len(waiting) - 15}" if len(waiting) > 15 else ""))
+        lines.append(f"-# fill: {rc.fill_state_text(reg, ev)}")
+    parts = [_header(reg, ev, f"🔒 Roster health · {raid_name(reg, ev)}", lines)]
+    if officer:
+        parts += [run_actions_row(reg, ev, locked=True), night_actions_row(reg, ev)]
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(*parts, accent_colour=0xC0392B if short != "nothing" else TEAL))
     return view
 
 

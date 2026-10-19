@@ -1684,6 +1684,103 @@ The three loot builds (§5.35 core, §5.36 Discord surface, §5.37 web / plain t
   channel), `tests/test_loot_verbs.py` (override by id, companion duplicates, via), `tests/test_loot_web.py` (one retire
   verb, previews without an actor write nothing) and `tests/test_help.py` (a member's own loot).
 
+### 5.39 Dual interfaces, phase 2 — raid-night correctness (built 2026-10-19)
+
+Out of `out/dual_interface_design.md` §3.2 (B2 atomic check-and-set / expiry / levers, B4, B6, B7, B8) and §6 Phase 2
+rows 1, 4, 5, 6, with the owner's decisions (D15 Remind + Withdraw, no Extend; D17 no leftovers-to-ad-hoc button; D18
+pause autofill per run; D19 no reopen of a cancelled run; D22 ad hoc runs wait for an officer before a role swap — the
+D3 rule already covers every run kind) and the DM rule (no courtesy / FYI DMs: outcomes are the card edited and the Me
+page's notices).
+
+**Races, each closed under one lock or on one thread.**
+- `rc.expire_confirmations` expires only a seat whose member HOLDS an open ask; a seated member nobody asked keeps the
+  seat (an interrupted fan-out is not "no answer").
+- `lock_run` flips to `locked` and commits before posting anything; the fan-out runs with `(guild, run)` in
+  `RaidMixin._confirming()`, re-checks `ev.state == "locked"` before every `confirm_one` and before the signup-channel
+  line, and stamps `RaidEvent.confirmations_sent_at` when every seat was reached. `confirm_one` refuses a run that is
+  not locked and skips a member who already holds an open ask (their card still answers). The scheduler's **recovery
+  step** `recover_lock` (before expiry, every minute): a locked run with confirmations on, no `confirmations_sent_at`
+  and no fan-out running here → `send_confirmations(resume=True)` asks exactly `rc.unasked_seats` (while the deadline
+  is ahead) and re-posts missing lock cards (`post_lock_cards(only_missing=True)`).
+- `cancel_run` enters `board_lock(reg, key)` (it waits for a lock's flip) and refuses done / cancelled.
+- `run_fill` holds `plan_lock` like `send_plan`; the batch is derived INSIDE it (and the state re-checked after the
+  solve), so an officer's Ask during the engine's solve is counted, never doubled. `_send_asks` is the one sender.
+- `Registry.claim_placement` is the in-memory check-and-set (stamps `answered_by`); `RaidMixin.record_placement` runs
+  it on the loop and only the commit in a thread; PlaceButton does the same. A second answer gets
+  `Registry.already_answered`: "Already answered (yes, by Kestrel at 5:12 PM)."
+- `POST /api/run/{key}/move` carries `state` (as rendered); `board_move(expect_state=)` raises `BoardChanged` → 409 +
+  the current board ("The run locked while you were dragging…").
+- **A failed DM is a channel change.** `FillAsk.channel: dm | web` (mirrors placement asks), `FillAsk.dm_channel_id /
+  dm_message_id` (the card), `FillAsk.answered_by`; `_send_asks` skips the DM for `channel == "web"` or DMs-off and on
+  a failed DM sets `channel = "web"` (same deadline, still pending, partner not released, `role_plan` keeps counting
+  it), one log + ops line "DM failed — waits on the site". `confirm_one` does the same for a placement ask
+  (`channel: web`; the card is stored as `ask["dm"] = [channel id, message id]`). `rc.asks_on_site(reg, ev)` counts them.
+
+**Cards, not DMs.** `RaidMixin.send_member_card` returns the message; `edit_ask_card(reg, channel_id, message_id,
+text)` edits it to `raid_views.ask_closed_layout(text)`. The "seat released" DM is gone: `seat_released(reg, ev, m,
+why)` edits the confirmation card (drop_seated, expiry). `withdraw_ask` edits the partner's card ("never mind"), with
+the old DM only when no card is known. `answer_placement_for` edits the card to the outcome ("answered for you by Jon").
+
+**Lock.** `raid_buttons.lock_decide` is the one Discord lock screen (the card's Lock now and `/raid lock`): the
+consequence, **Lock now · Preview lock · Back** (`Wizard.decide(extra=)`); Preview = `RaidMixin.lock_preview` (=
+`rc.split_preview` with the run's strategy under `solving`, stores `ev.last_proposal = {layout, strategy, rev, by, at,
+kind}`) drawn by `raid_views.lock_preview_embed` (full roster, one member per line, spec icon alone, leftovers capped at
+15). Web: `POST /api/run/{key}/lock/preview` → `{board, consequence, leftovers, strategy, rev}`; the split route also
+stores `last_proposal`. A failed lock refreshes the sheet: its footer reads "Lock failed <time> — the sheet stays open,
+retrying"; `ev_json.lock_error` carries the same with the reason. `save_board(strategy=)` + `POST /layout {groups, rev,
+strategy}` write a split's layout and strategy in one step (the separate `/strategy` call is no longer used by the page).
+
+**Cancel.** One screen: `raid_buttons.cancel_decide` (consequence → *Cancel the run…* → one Form: optional reason,
+"Tell the channel?" post | quiet) for the card and `/raid cancel`; the site's `CancelModal` has the same parts;
+`cancel_run(..., notify=True, by_id=, via=)` DMs nobody, closes every open placement ask (`cancelled`) and fill ask
+(`cancelled`), edits their cards to "Cancelled", posts one fixed signup-channel line when `notify` (never the reason),
+the reason to the thread and the audit line. `rc.cancel_effects(reg, ev)` → `{state, locked, rostered, open_asks,
+fill_asks, answered}` feeds `consequence("cancel")`.
+
+**Reopen** (an end by mistake): `RaidEvent.closed_at` / `prev_state` (set by `rc.end_run` and `cancel_run`),
+`rc.REOPEN_GRACE_HOURS = 1`, `rc.reopen_refusal` (cancelled → never, D19; past the hour; past the scheduled close; roster
+entry gone), `rc.reopen_run` / `RaidMixin.reopen_run`; `closed_layout` keeps a `runact …:reopen` button while it may.
+`cleanup_ephemeral` keeps a DONE run's `rosters[]` entry for the grace hour; a cancelled run's goes at once.
+
+**Levers.** `RaidMixin.remind` (re-sends `confirm_layout(reminder=True)` against the existing ask, stamps
+`ask["reminded_at"]`, `ev.reminded_at/by`; `rc.remind_refusal`: locked, confirmations on, someone DM-reachable
+unanswered, once per `rc.REMIND_EVERY` = 1 h). `RaidMixin.withdraw_sent_ask` (answer `withdrawn`, partner released, both
+cards edited). `RaidMixin.set_autofill_paused` (`ev.autofill_paused/_by`; gated inside `run_fill` when `approved_by` is
+None). `RunButton` actions `remind · pause · end · reopen` (`raid_views.night_actions_row` is the lock card's second
+row: Remind · Pause/Resume autofill · End the run now); End = `raid_buttons.end_decide` → `LootMixin.end_run`
+(`rc.end_refusal`: locked and started). `send_plan` refuses a stale rev with "Already sent by X at <time> — the plan is
+redrawn" when another officer sent in the last 10 minutes. The suggestions screen: **Withdraw an ask…** select
+(`flows_raid.withdraw_select`) and, when the batch can't fit, `fit_partial` → **Send these N (the rest on the site)**
+(`send_plan(limit=k)` sends exactly what is listed).
+
+**Open.** `rc.open_when(reg, rid, value, schedule) -> (start, sid, note)` (one implementation: `configops._open_time`
+delegates; a wall time resolves through `wizard.resolve_local`, an aware ISO instant is taken as is),
+`rc.which_run(reg, rid, start, sid) -> {kind: scheduled|adhoc, schedule, schedule_name, key}`, `rc.open_preview(reg,
+rs, rid, value, schedule)` → `{…which_run, start, label, when_note (rc.dst_words), exists, channel, rules, past}`.
+`POST /api/raid/{rid}/open/preview` returns it (+ `channel_name`); `POST /api/raid/{rid}/open` takes `start` (the
+preview's instant) or `when`, and `key` — a time that now resolves to another run is 409 + the fresh preview. The
+wizard: a one-off at a recurring run's minute opens as that run; >3 templates become one select; *Another upcoming
+run…* pages by week past `OTHER_STARTS`. The Rosters page: Upcoming rows carry `start_iso`, `key`, `needs_channel`
+and an **Open**; *Start ad hoc run* previews on every change and relabels itself. The scheduler with no signup channel
+warns once per due run (`_warn_unopened`, ops only — no DM).
+
+**Reading.** `/raid health` at any time (`raid_views.health_locked_brief` for a locked run; members get counts only).
+`ev_json` adds (`night_json`): `lock_error`, `fill_state_text` (`rc.fill_state_text`), `early_warning`,
+`spec_switches[]` (`rc.spec_switches`), `regulars_not_rostered[]` (`rc.regulars_not_rostered`), `confirm_by`,
+`confirmations_sent_at`, `confirmations_pending`, `asks_on_site`, `autofill_paused(_by)`, `reminded_at/by`,
+`may_remind/remind_note`, `may_end/end_note`, `may_reopen/reopen_note`, `closed_at`, `log_rows` (`rc.log_rows`: stamp in
+words, `officer` mark; `RaidEvent.log_at` stamped by `RaidStore.save` via `rc.stamp_log`, "" for lines from before);
+`links.card` and `links.thread`; `fill_asks[].uid/channel/answered_by/pending/deadline`; `health.no_provider_buffs`
+(icon chips). `GET /api/runs?raid=&offset=&limit=` pages history (`HISTORY_PAGE = 8` on the Rosters page, `past_total`);
+the page's History opens a read-only drawer (`#run-<key>`). `Registry.local12` formats through `constants.fmt12`.
+
+**Not built (by decision):** a leftovers-to-ad-hoc button (D17), reopening a cancelled run (D19), Extend one deadline
+(D15). Members' notices and the Me page asks (row 2) are the inbox build's; the web side that reads `FillAsk.channel`
+too.
+
+Tests: `tests/test_raid_night.py` (each race, recovery, expiry ask-only, DM failure, remind, withdraw, pause, reopen,
+open preview across DST, cancel without DMs, every new route) and `tests/test_raid_night_flows.py` (the wizard screens).
+
 ## 6. Architecture
 
 ```mermaid

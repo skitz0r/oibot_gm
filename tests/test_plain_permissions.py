@@ -222,6 +222,7 @@ class PlacementBot:
     """RaidMixin.answer_placement_for itself (the shared verb), with the Discord ripple recorded."""
 
     answer_placement_for = RaidMixin.answer_placement_for
+    record_placement = RaidMixin.record_placement  # the check-and-set on the loop (phase 2)
 
     def __init__(self, rs):
         self.calls = []
@@ -372,6 +373,7 @@ def test_web_placement_routes_share_the_verb(web_client, g, rs):
         seen.append((uid, yes))
 
     w.bot.answer_placement_for = types.MethodType(RaidMixin.answer_placement_for, w.bot)
+    w.bot.record_placement = types.MethodType(RaidMixin.record_placement, w.bot)
     w.bot.after_placement_answer = after
     r = w.c.post("/api/admin/placement", json={"member": ms[0].display_name, "run": ev.key, "answer": "yes"}, headers={"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"})
     assert r.status_code == 200, r.text

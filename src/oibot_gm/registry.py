@@ -1080,7 +1080,12 @@ class Registry:
     def local12(self, value, fmt: str = CLOCK12) -> str:
         """Guild-local time the way every surface a PERSON reads shows it: 12-hour, no leading zero. ISO and 24-hour
         stay for machines only (datetime-local inputs, comparisons, the data repo). See CLAUDE.md: no military time."""
-        return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", self.local(value, fmt))
+        from .constants import fmt12
+
+        t = datetime.fromisoformat(str(value)) if not isinstance(value, datetime) else value
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=self.tz)
+        return fmt12(t.astimezone(self.tz), fmt)  # THE 12-hour formatter (constants.fmt12) in the guild's zone
 
     def load_config(self) -> GuildConfig:
         p = self.store.root / self.key / "guild.yaml"
@@ -2924,18 +2929,36 @@ class Registry:
         m = self.members.get(discord_id)
         return [a for a in (m.placement_asks if m else []) if a.get("answer") is None]
 
-    def answer_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> str:
-        """Yes: keep the seat. No: note it (RaidMixin.after_placement_answer frees the seat in the run file)."""
+    ANSWER_WORDS = {"yes": "yes", "no": "can't make it", "expired": "no answer in time", "cancelled": "the run was cancelled",
+                    "withdrawn": "withdrawn by an officer"}
+
+    def already_answered(self, ask: dict) -> str:
+        """'Already answered (yes, by Kestrel at 5:12 PM).' — the one refusal every surface shows for a second answer."""
+        what = self.ANSWER_WORDS.get(ask.get("answer"), str(ask.get("answer")))
+        who = ask.get("answered_by")
+        at = self.local12(ask["answered_at"], "%I:%M %p") if ask.get("answered_at") else None
+        return f"Already answered ({what}" + (f", by {who}" if who else "") + (f" at {at}" if at else "") + ")."
+
+    def claim_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> tuple[Member, dict, str]:
+        """The check-and-set half of answer_placement, IN MEMORY only (design B2): the caller runs it on the event loop —
+        where the DM button and the scheduler's expiry run too — then saves (RaidMixin.record_placement pushes only the
+        commit to a thread). A second answer is refused with what the first was (already_answered). Returns (member,
+        ask, line)."""
         m = self.member(discord_id)
         ask = next((a for a in m.placement_asks if a["roster"] == roster and a.get("answer") is None), None)
         if not ask:
-            raise RegistryError("Nothing to answer for that roster.")
-        ask["answer"], ask["answered_at"] = ("yes" if yes else "no"), now()
-        if yes:
-            self.save(m, f"{m.display_name} confirmed {ask['character']} on {roster}")
-            return f"{m.display_name} confirmed {ask['character']} on {roster}"
-        self.save(m, f"{m.display_name} declined {roster}")
-        return f"{m.display_name} can't make {roster} — seat re-opened"
+            last = next((a for a in reversed(m.placement_asks) if a["roster"] == roster), None)
+            raise RegistryError(self.already_answered(last) if last and last.get("answer") else "Nothing to answer for that roster.")
+        ask["answer"], ask["answered_at"], ask["answered_by"] = ("yes" if yes else "no"), now(), by
+        line = f"{m.display_name} confirmed {ask['character']} on {roster}" if yes else f"{m.display_name} can't make {roster} — seat re-opened"
+        return m, ask, line
+
+    def answer_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> str:
+        """Yes: keep the seat. No: note it (RaidMixin.after_placement_answer frees the seat in the run file).
+        claim_placement + save, in the caller's thread (the Discord paths use RaidMixin.record_placement instead)."""
+        m, _ask, line = self.claim_placement(discord_id, roster, yes, by)
+        self.save(m, line)
+        return line
 
     @staticmethod
     def absence_span(start: str, end: str | None) -> tuple[str, str]:

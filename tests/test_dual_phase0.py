@@ -67,7 +67,8 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     ev = open_test_run(reg, rs)
     names = [m.display_name for m in reg.test_members()[:5]]
     join(reg, rs, ev, reg.test_members()[:5])
-    assert consequences.consequence("cancel", reg, ev) == ["The sheet closes for the 5 people who answered.", "Nobody is told automatically — say so in the channel."]
+    assert consequences.consequence("cancel", reg, ev)[0] == "The sheet closes for the 5 people who answered."
+    assert consequences.consequence("cancel", reg, ev)[1].startswith("Nobody is DMed")  # the DM rule (phase 2)
     assert consequences.consequence("clear", reg, ev) == ["The board is empty — nothing to clear."]
     ev.layout = [names[:3], names[3:]]
     assert consequences.consequence("clear", reg, ev)[0] == "5 placements go back to the bank."
@@ -76,10 +77,10 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
     for m in reg.test_members()[:5]:
         reg.add_placement_ask(m.discord_id, ev.team, m.display_name, "t")
     cancel = consequences.consequence("cancel", reg, ev)
-    assert cancel[0] == "The sheet closes; 5 rostered seats and 5 open confirmation asks are withdrawn." and cancel[1].startswith("Rostered members are not told automatically")
-    assert consequences.consequence("clear", reg, ev)[0].startswith("Every seat is released: 5 rostered are told")
-    assert consequences.consequence("release", reg, ev, name="Jonny")[0].startswith("Jonny is told the seat was released")
-    assert consequences.consequence("release", reg, ev)[0].startswith("The seat is released: they are told")
+    assert cancel[0] == "The sheet closes; 5 rostered seats are released, 5 open confirmation asks close." and cancel[1].startswith("Nobody is DMed")
+    assert consequences.consequence("clear", reg, ev)[0].startswith("Every seat is released: 5 rostered see it on their confirmation card")
+    assert consequences.consequence("release", reg, ev, name="Jonny")[0].startswith("Jonny sees the seat was released")
+    assert consequences.consequence("release", reg, ev)[0].startswith("The seat is released: they see it")
     assert consequences.consequence("lock", reg, ev) == ["Already locked."]
     assert consequences.consequence("nonsense", reg, ev) == []
     assert set(consequences.consequences_json(reg, ev)) == {"lock", "cancel", "clear", "release", "release_named"}
@@ -295,13 +296,13 @@ def card_bot(reg, rs, **verbs):
                            ops=ops, ico=lambda k, v: "", **verbs)
 
 
-def test_cancel_card_button_is_the_decide_screen_with_the_reason_as_the_note(reg, rs):
+def test_cancel_card_button_is_the_one_cancel_screen_with_reason_and_notify(reg, rs):
     ev = open_test_run(reg, rs)
     join(reg, rs, ev, reg.test_members()[:3])
     calls = []
 
-    async def cancel_run(reg_, rs_, ev_, by, reason):
-        calls.append((ev_.key, by, reason))
+    async def cancel_run(reg_, rs_, ev_, by, reason, notify=True, by_id=None, via="discord"):
+        calls.append((ev_.key, by, reason, notify))
         return f"Cancelled {ev_.key}"
 
     bot = card_bot(reg, rs, cancel_run=cancel_run)
@@ -309,14 +310,14 @@ def test_cancel_card_button_is_the_decide_screen_with_the_reason_as_the_note(reg
 
     async def go():
         await RunButton(reg.key, ev.key, "cancel").callback(h.card_press())
-        assert "The sheet closes for the 3 people who answered." in h.text and h.buttons() == ["Cancel the run", "Cancel the run with a note…", "Back"]
+        assert "The sheet closes for the 3 people who answered." in h.text and h.buttons() == ["Cancel the run…", "Back"]
         assert h.screen["view"].children[0].style == discord.ButtonStyle.danger
         await h.press("Back")
         assert calls == [] and "Nothing was changed." in h.text
         await RunButton(reg.key, ev.key, "cancel").callback(h.card_press())
-        await h.press("Cancel the run with a note…")
-        await h.submit(note="server down")
-        assert calls == [(ev.key, "Officer", "server down")] and h.text.endswith(f"Cancelled {ev.key}")
+        await h.press("Cancel the run…")
+        await h.submit(reason="server down", notify="quiet")  # one Form: the optional reason + "Tell the channel?"
+        assert calls == [(ev.key, "Officer", "server down", False)] and h.text.endswith(f"Cancelled {ev.key}")
         # the old 60-second plain View is gone: nothing else answers a cancel press
         from oibot_gm import raid_buttons
 

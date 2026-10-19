@@ -15,7 +15,7 @@ import discord
 from . import configops
 from . import raidcycle as rc
 from . import wizard_opts as wo
-from .raid_views import health_layout, raid_name, run_label, run_title, sheet_state
+from .raid_views import health_layout, health_locked_brief, raid_name, run_label, run_title, sheet_state
 from .registry import ADHOC_SCHEDULE, ADHOC_SCHEDULE_NAME, Registry, RegistryError, schedule_class
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, both_clocks, combine_when, flow, week_opts, when_fields, when_note
 
@@ -127,7 +127,14 @@ class OpenWizard(Wizard):
         return (s or {}).get("name") or ""
 
     def template_buttons(self) -> list[discord.ui.Item]:
-        return [self.button(f"{s['name']} — pick a time", self._template(s["id"])) for s in self.templates()[:3]]
+        """Up to three pickup templates as buttons; more than three become ONE select (design B4: a screen holds five
+        rows, and a button per template would push One-off / Back off it)."""
+        tpls = self.templates()
+        if len(tpls) > 3:
+            async def picked(interaction: discord.Interaction, values: list[str]) -> None:
+                await self._template(values[0])(interaction)
+            return [self.select("Pick a template", [Opt(s["id"], s["name"], "pick a day and time next") for s in tpls], picked)]
+        return [self.button(f"{s['name']} — pick a time", self._template(s["id"])) for s in tpls]
 
     def is_adhoc(self, sid: str | None) -> bool:
         if sid == ADHOC_SCHEDULE:
@@ -157,7 +164,7 @@ class OpenWizard(Wizard):
     async def shortlist(self, interaction: discord.Interaction) -> None:
         ups = self.upcoming()
         self.draft["day0"] = self.reg.now_local().date()
-        self.draft["schedule"] = None
+        self.draft["schedule"], self.draft["matched"] = None, None
         many = self.many()
         if not ups:
             await self.show(interaction, f"**{self.name()}** has no upcoming run to open: {self.no_slot_reason()}\n"
@@ -174,16 +181,38 @@ class OpenWizard(Wizard):
         await self.show(interaction, f"**{self.name()}** — which run?\n-# Ad hoc = a pickup or a one-off at a time you pick: first come, no regulars, no reminder.", *items)
 
     async def another(self, interaction: discord.Interaction) -> None:
-        """The other upcoming runs of every recurring schedule (the value names the schedule unless it is the raid's own)."""
+        """The other upcoming runs of every recurring schedule (the value names the schedule unless it is the raid's own).
+        More than OTHER_STARTS of them page BY WEEK (design B4): one week per screen with ← Earlier week / Later week →,
+        so a busy raid's runs past the first 22 are reachable without typing a date."""
         ups = self.upcoming()
-        others = ups[1:1 + OTHER_STARTS]
+        others = ups[1:]
         if not others:
             await self.shortlist(interaction)
             return
         many = self.many()
+        page_btns: list[discord.ui.Item] = []
+        head = f"**{self.name()}** — which upcoming run?"
+        if len(others) > OTHER_STARTS:
+            tz = self.reg.tz
+            weeks = sorted({(t.astimezone(tz).date() - timedelta(days=t.astimezone(tz).weekday())) for _s, t in others})
+            page = max(0, min(int(self.draft.get("week_page") or 0), len(weeks) - 1))
+            self.draft["week_page"] = page
+            monday = weeks[page]
+            others = [(s, t) for s, t in others if monday <= t.astimezone(tz).date() < monday + timedelta(days=7)][:OTHER_STARTS]
+            head += f"\n-# Week of {monday.strftime('%a %d %b')} ({page + 1} of {len(weeks)})"
+            page_btns = [self.button("← Earlier week", self._week_page(page - 1), disabled=page == 0),
+                         self.button("Later week →", self._week_page(page + 1), disabled=page >= len(weeks) - 1)]
+        else:
+            others = others[:OTHER_STARTS]
         opts = [Opt(t.isoformat() + ("" if s["id"] == "default" else f"|{s['id']}"), self.reg.local12(t), (f"{s['name']} · " if many else "") + when_relative(self.reg, t)) for s, t in others]
-        await self.show(interaction, f"**{self.name()}** — which upcoming run?", self.select("Pick the run", opts, self.start_picked),
+        await self.show(interaction, head, self.select("Pick the run", opts, self.start_picked), *page_btns,
                         self.button("Back", self.shortlist), self.button("Cancel", self.cancel))
+
+    def _week_page(self, page: int):
+        async def go(interaction: discord.Interaction) -> None:
+            self.draft["week_page"] = page
+            await self.another(interaction)
+        return go
 
     async def adhoc(self, interaction: discord.Interaction) -> None:
         """An ad hoc run: one of the raid's pickup templates (its own settings) or a one-off; both then pick a day and time."""
@@ -252,7 +281,13 @@ class OpenWizard(Wizard):
         if start <= self.reg.now_local():
             await self.refuse(interaction, f"{self.reg.local12(start)} has already passed — pick a later time.", self.open_when, "Pick again")
             return
-        self.draft["start"], self.draft["note"] = start, note
+        self.draft["start"], self.draft["note"], self.draft["matched"] = start, note, None
+        if self.draft.get("schedule") == ADHOC_SCHEDULE:
+            # a one-off at exactly an upcoming recurring run's minute IS that run (rc.which_run — the site's preview says
+            # the same): opened as scheduled, with its regulars and confirmations, never a second "ad hoc" run beside it
+            w = rc.which_run(self.reg, self.rid, start, None)
+            if w["kind"] == "scheduled":
+                self.draft["schedule"], self.draft["matched"] = w["schedule"] or "default", w["schedule_name"]
         await self.confirm(interaction)
 
     async def week_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -270,9 +305,12 @@ class OpenWizard(Wizard):
         sid = self.draft.get("schedule")
         label = f"**{self.name()}**" + (f" · {self.sched_name(sid)}" if sid and (sid != "default" or self.many()) else "")
         lines = [f"Open {label} at {both_clocks(self.reg, start)}?"]
+        if self.draft.get("matched"):
+            lines.append(f"-# That time is the {self.draft['matched']} run — it opens as scheduled: its regulars are expected"
+                         + (" and the rostered are asked to confirm." if self.reg.schedule_def(self.rid, sid).get("confirm", True) else "."))
         if self.is_adhoc(sid):
             sd = self.reg.schedule_def(self.rid, sid)
-            lines.append(f"-# Ad hoc: first come, first rostered; no regulars, no reminder" + ("" if sd.get("confirm") else ", no confirmations (Join is the commitment)")
+            lines.append("-# Ad hoc: first come, first rostered; no regulars, no reminder" + ("" if sd.get("confirm") else ", no confirmations (Join is the commitment)")
                          + f"; locks {sd['lock_hours_before']:g} h before.")
         if sid:
             sd = self.reg.schedule_def(self.rid, sid)
@@ -442,25 +480,28 @@ async def open_raid_health(interaction: discord.Interaction, reg: Registry, **_s
         if not ev:
             await wiz.finish(i, "No live sheet.")
             return
-        if sheet_state(ev) != "open":
-            await wiz.finish(i, f"{run_label(reg, ev)} is {sheet_state(ev)} — the health check is for an open sheet; see its lock cards in the roster channel.")
-            return
-        # an officer gets the full card (Suggested block, who hasn't answered, the buttons), shown to everyone only in
-        # the run's officer channel; a member gets the redacted card, always just to them
+        # any time (design B4: the officer's "where are we"): an open sheet's health card, or a locked run's brief —
+        # an officer gets the full card (Suggested block / who hasn't answered or confirmed, the buttons), shown to
+        # everyone only in the run's officer channel; a member gets the redacted card, always just to them
         officer = is_officer(i, reg)
         oc = i.client.officer_channel(reg, ev) if officer else None
         eph = not (officer and oc is not None and i.channel is not None and i.channel.id == oc.id)
-        layout = health_layout(reg, rs, ev, run_team(reg, ev), i.client.ico, officer=officer)
+        if sheet_state(ev) == "open":
+            layout = health_layout(reg, rs, ev, run_team(reg, ev), i.client.ico, officer=officer)
+        else:
+            layout = health_locked_brief(reg, ev, i.client.ico, officer=officer)
         if is_command(i):
             await i.response.send_message(view=layout, ephemeral=eph)
             return
         await wiz.finish(i, f"Health check for {run_label(reg, ev)} below.")
         await i.followup.send(view=layout, ephemeral=eph)
-    await with_run(interaction, reg, title="Roster health", then=body, states=("open",))
+    await with_run(interaction, reg, title="Roster health", then=body)
 
 
 @flow("raid_lock")
 async def open_raid_lock(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """/raid lock — the run picker when several are open, then THE lock confirm screen (raid_buttons.lock_decide: the
+    consequence from code, Lock now · Preview lock · Back) — the card's Lock now shows the same screen."""
     if not await officer_only(interaction, reg):
         return
 
@@ -468,15 +509,10 @@ async def open_raid_lock(interaction: discord.Interaction, reg: Registry, **_see
         if not ev or ev.state != "open":
             await wiz.finish(i, "No open sheet to lock.")
             return
-        await wiz.working(i, "Locking…")
-        bot = i.client
-        try:
-            line = await bot.lock_run(reg, rs, ev, by=i.user.display_name)
-        except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open
-            await wiz.finish(i, str(e))
-            return
-        await wiz.finish(i, line)
-        await bot.ops.emit(reg.config, "info", line)
+        from .raid_buttons import lock_decide
+
+        wiz.title = f"Lock {raid_name(reg, ev)}"
+        await lock_decide(i, i.client, reg, rs, ev, wiz=wiz)
     await with_run(interaction, reg, title="Lock a sheet", then=body, states=("open",), officer=True)
 
 
@@ -525,6 +561,9 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, *, key
 
 @flow("raid_cancel")
 async def open_raid_cancel(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """/raid cancel — the run picker when several are live, then THE cancel screen (raid_buttons.cancel_decide: the
+    consequence, then one Form with the optional reason and "Tell the channel?"; nobody is DMed). The card's Cancel run
+    shows the same screen."""
     if not await officer_only(interaction, reg):
         return
 
@@ -532,28 +571,10 @@ async def open_raid_cancel(interaction: discord.Interaction, reg: Registry, **_s
         if not ev:
             await wiz.finish(i, "No live sheet.")
             return
-        key = ev.key
+        from .raid_buttons import cancel_decide
 
-        async def submitted(si: discord.Interaction, v: dict[str, str]) -> None:
-            why = await wiz.guard(si) if wiz.guard else None
-            if why:
-                await wiz.finish(si, why)
-                return
-            cur = rs.events.get(key)  # re-read: it may have closed while the box was open
-            if not cur or cur.state in ("done", "cancelled"):
-                await wiz.finish(si, "That run already closed — nothing was changed.")
-                return
-            await wiz.working(si, "Cancelling…")
-            line = await si.client.cancel_run(reg, rs, cur, by=si.user.display_name, reason=v.get("reason") or None)
-            if si.channel is not None:  # the old command said it in the channel, for everyone
-                await si.channel.send(line)
-            await wiz.finish(si, line)
-
-        form = Form(f"Cancel {raid_name(reg, ev)} {reg.local12(ev.start, '%a %d %b')}", [
-            Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
-                  description="Submitting cancels the run. Close this box to keep it.", placeholder="shown in the channel and the run's thread"),
-        ], submitted)
-        await wiz.open_form(i, form)
+        wiz.title = f"Cancel {raid_name(reg, ev)}"
+        await cancel_decide(i, i.client, reg, rs, ev, wiz=wiz)
     await with_run(interaction, reg, title="Cancel a run", then=body, officer=True)
 
 
@@ -626,10 +647,14 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
     picks = wiz.draft.setdefault("picks", {})
     when = "before lock — a yes changes their signup, nobody is seated until the lock" if plan.phase == "prelock" else "after lock — a yes takes the seat (role swaps need your Ask)"
     lines = ([note] if note else []) + [f"{run_title(reg, ev)} · {when}"]
+    withdraw = withdraw_select(wiz, rs, key, ev)  # an ask already out can be closed early from here (D15)
     if not plan.seats:
         tail = (" — the minimums are covered by who joined and the regulars yet to answer." if plan.phase == "prelock"
                 else f" beyond the asks still out (waiting on {', '.join(plan.waiting)})." if plan.waiting else ".")
-        await wiz.finish(i, "\n".join(lines + ["Nothing is short" + tail]))
+        if withdraw is None or show_only:
+            await wiz.finish(i, "\n".join(lines + ["Nothing is short" + tail]))
+            return
+        await wiz.show(i, "\n".join(lines + ["Nothing is short" + tail]), withdraw, wiz.button("Close", wiz.cancel))
         return
     if plan.phase == "prelock":
         lines.append("Expected: " + " · ".join(f"{r} {plan.have.get(r, 0)}/{plan.need[r]}" for r in ("tank", "healer") if plan.need.get(r))
@@ -652,17 +677,25 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
         seats.append((f"{n + 1}. {what}: " + " + ".join(rc._ask_words(a) for a in opt) + (" (alternate)" if k else ""), opt[0].why or ""))
     batch = ["", "**A Send would DM:**" if show_only else "**Send DMs exactly these:**"] + (rc.batch_preview(plan, picks) if chosen else [f"Still short if everyone says yes: {rc.still_short_words(plan)}"])
     text, whole = fit_suggestions(lines, seats, batch)
+    limit = None  # Send's seat limit: None = the whole batch shown
+    if not whole and chosen:
+        # the whole batch doesn't fit a screen: send what fits — the first seats whose asks the screen lists — and say the
+        # rest are on the site (design B7: "Send these N (the rest on the site)" instead of a disabled Send)
+        limit, text = fit_partial(lines, plan, picks)
     if show_only:
         await wiz.finish(i, text)
         return
     items = []
+    selects = MAX_PICK_SELECTS - (1 if withdraw is not None else 0)
     for n, st in enumerate(plan.seats):
-        if len(st.options) > 1 and len(items) < MAX_PICK_SELECTS:
+        if len(st.options) > 1 and len(items) < selects:
             async def picked(si: discord.Interaction, values: list[str], n=n) -> None:
                 wiz.draft["picks"][n] = int(values[0])
                 await show_suggestions(si, wiz, rs, key)
             opts = [Opt(str(k), _opt_label(opt), "the suggestion" if k == 0 else f"alternate {k}", default=int(picks.get(n, 0)) == k) for k, opt in enumerate(st.options)]
             items.append(wiz.select(f"Seat {n + 1} ({st.role or 'seat'}): who to ask", opts, picked))
+    if withdraw is not None:
+        items.append(withdraw)
 
     async def send(si: discord.Interaction) -> None:
         cur = rs.events.get(key)
@@ -671,25 +704,74 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
             return
         await wiz.working(si, "Sending…")
         try:
-            sent, sent_plan = await si.client.send_plan(reg, rs, cur, rev=wiz.draft["rev"], by=si.user.display_name, picks=dict(wiz.draft["picks"]))
+            extra = {"limit": limit} if limit else {}
+            sent, sent_plan = await si.client.send_plan(reg, rs, cur, rev=wiz.draft["rev"], by=si.user.display_name, picks=dict(wiz.draft["picks"]), **extra)
         except rc.PlanChanged as e:
             await show_suggestions(si, wiz, rs, key, note=f"⚠️ {e}")
             return
         except RegistryError as e:
             await wiz.refuse(si, str(e), retry=lambda ri: show_suggestions(ri, wiz, rs, key))
             return
-        await wiz.finish(si, ("Asked " + ", ".join(a.display_name for a in sent) + " by DM — answers post in the run's thread." if sent else "Nobody could be asked (DMs off).")
-                         + (" A yes changes their signup; the lock still builds the roster." if plan.phase == "prelock" else "") + rc.held_back_words(sent_plan))
+        from .raid_buttons import sent_words
+
+        await wiz.finish(si, sent_words(sent) + (" A yes changes their signup; the lock still builds the roster." if plan.phase == "prelock" and sent else "")
+                         + rc.held_back_words(sent_plan) + (" The rest of the plan is on the site's Rosters page (Fill)." if limit else ""))
 
     try:
-        n_send = len(rc.send_batch(plan, picks)[0]) if chosen else 0
+        n_send = len(rc.send_batch(plan, picks, limit)[0]) if chosen else 0
     except RegistryError:  # the cap is full: Send stays off (the batch block says why)
         n_send = 0
-    if not whole:  # the batch didn't fit on the screen: Send never DMs anyone the screen didn't show
+    if not whole and not limit:  # not even one seat's asks fit on the screen: Send never DMs anyone the screen didn't show
         n_send = 0
-    items.append(wiz.button(f"Send {n_send} ask{'s' if n_send != 1 else ''}", send, discord.ButtonStyle.success, disabled=not n_send))
+    label = f"Send these {n_send} (the rest on the site)" if limit else f"Send {n_send} ask{'s' if n_send != 1 else ''}"
+    items.append(wiz.button(label, send, discord.ButtonStyle.success, disabled=not n_send))
     items.append(wiz.button("Cancel", wiz.cancel))
     await wiz.show(i, text, *items)
+
+
+def withdraw_select(wiz: Wizard, rs, key: str, ev: rc.RaidEvent):
+    """'Withdraw an ask…' — one option per ask still out on the run (who, before or after lock, as what): the pick calls
+    RaidMixin.withdraw_sent_ask (their DM card is edited to "Never mind", the tied half released) and redraws the
+    screen. None when nothing is out."""
+    out = [a for a in ev.fill_asks if a.pending]
+    if not out:
+        return None
+    opts = [Opt(str(a.discord_id), rc._ask_words(a)[:100], ("before lock" if a.phase == "prelock" else "after lock") + (" · waits on the site" if a.channel == "web" else ""))
+            for a in out][:MAX_OPTIONS]
+
+    async def picked(si: discord.Interaction, values: list[str]) -> None:
+        cur = rs.events.get(key)
+        if not cur or cur.state not in LIVE:
+            await wiz.finish(si, "That run closed — nothing was changed.")
+            return
+        try:
+            line = await si.client.withdraw_sent_ask(wiz.reg, rs, cur, int(values[0]), by=si.user.display_name, by_id=si.user.id)
+        except RegistryError as e:
+            line = f"⚠️ {e}"
+        await show_suggestions(si, wiz, rs, key, note=line)
+    return wiz.select("Withdraw an ask…", opts, picked)
+
+
+def fit_partial(lines: list[str], plan: rc.Plan, picks: dict, limit: int | None = None) -> tuple[int | None, str]:
+    """The most seats whose asks fit on one screen, and that screen's text: the batch of the first k seats
+    (rc.send_batch with limit=k — exactly what Send then DMs) one ask per line, then "the rest on the site"."""
+    limit = limit or SUGGEST_TEXT_MAX
+    n_seats = sum(1 for st in plan.seats if st.options)
+    for k in range(n_seats, 0, -1):
+        try:
+            asks, held = rc.send_batch(plan, picks, k)
+        except RegistryError:
+            continue
+        if not asks:
+            continue
+        body = [f"{n + 1}. {ln}" for n, ln in enumerate(rc.batch_lines(asks))]
+        rest = n_seats - k
+        text = "\n".join(lines + ["", f"**Send DMs exactly these {len(asks)}:**"] + body
+                         + ([f"-# {rest} more seat{'s' if rest != 1 else ''} wait — the site's Rosters page (Fill) lists them all"] if rest else [])
+                         + ([f"-# {held} more wait — at most {rc.FILL_MAX_OPEN} asks out at once"] if held else []))
+        if len(text) <= limit:
+            return k, text
+    return None, "\n".join(lines) + "\n⚠️ Too many asks to show here, so Send stays off — send them from the site's Rosters page (Fill)."
 
 
 SUGGEST_TEXT_MAX = 1900  # what a wizard screen holds (Discord's 2000 less room for the wizard's own lines)

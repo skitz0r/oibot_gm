@@ -90,14 +90,20 @@ class FillAsk(BaseModel):
     reason: str  # "short 1 healer", "short 2" — the member's DM shows it
     why: Optional[str] = None  # the code-written reason officers see (role_plan): "short 1 healer · Ana's declared flex Holy · DPS stays 6 of 5 minimum"
     asked_at: str = Field(default_factory=now)
-    answer: Optional[str] = None  # yes | no | expired | released (the paired ask fell through)
+    answer: Optional[str] = None  # yes | no | expired | released (the paired ask fell through) | withdrawn (an officer closed it) | cancelled (the run was)
     answered_at: Optional[str] = None
+    answered_by: Optional[str] = None  # who answered when it wasn't the member (an officer on the site / MCP / plain text)
     expires_at: Optional[str] = None  # ISO: no answer by then counts as no
     pair: Optional[int] = None  # discord_id of the ask this one is tied to (a swap and the backfill covering the vacated seat)
     vacates: Optional[str] = None  # swaps: the role the person leaves
     phase: Literal["prelock", "fill"] = "fill"  # a suggestion an officer sent before the lock (a yes changes the signup, seats nobody) or a fill ask after it
     approved_by: Optional[str] = None  # the officer whose Ask / Send sent it (every pre-lock ask; D3: a recurring run's role swaps after lock); None = the fill engine on its own
     held: bool = False  # answered yes, but its tied partner hasn't answered yet: nothing changed (a pair needs both yeses)
+    # where the ask waits (mirrors placement asks): "dm" = a DM card with the two buttons; "web" = on the member's Me page
+    # (DMs off, or the DM failed — a failed DM is a CHANNEL change, never an answer: same deadline, still in play)
+    channel: Literal["dm", "web"] = "dm"
+    dm_channel_id: Optional[int] = None  # the DM card, so it can be edited to its final state when the ask closes
+    dm_message_id: Optional[int] = None
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -153,7 +159,17 @@ class RaidEvent(BaseModel):
     fill_state: str = "idle"  # idle | asking | filled | exhausted
     lock_error: Optional[str] = None  # the last failed lock attempt (sheet stays open); cleared on success
     lock_tried_at: Optional[str] = None
+    # dual interfaces phase 2 (design §5.39): raid-night state
+    confirmations_sent_at: Optional[str] = None  # the lock's Confirm / Can't fan-out finished (None on a locked run = not yet sent / interrupted)
+    autofill_paused: bool = False  # the fill engine sends nothing on its own for this run (an officer's explicit send still works, D18)
+    autofill_paused_by: Optional[str] = None
+    reminded_at: Optional[str] = None  # the last "Remind the unconfirmed" (once per hour per run)
+    reminded_by: Optional[str] = None
+    closed_at: Optional[str] = None  # when it became done / cancelled (cleanup_ephemeral's grace, reopen's window)
+    prev_state: Optional[str] = None  # the state before done / cancelled (reopen_run restores it)
+    last_proposal: Optional[dict] = None  # the last lock preview / split shown: {layout, strategy, rev, by, at} (plain text's "use it", the Discord preview)
     log: list[str] = Field(default_factory=list)
+    log_at: Optional[list[str]] = None  # ISO stamp per log line (RaidStore.save stamps new lines; "" = from before stamps were kept)
     created_at: str = Field(default_factory=now)
 
     @model_validator(mode="before")
@@ -642,9 +658,12 @@ class RaidStore:
         if d.exists():
             for f in d.glob("*.json"):
                 ev = RaidEvent.model_validate_json(f.read_text())  # legacy states / roster / tentative normalised by the model
+                if ev.log_at is None:  # a file from before stamps: its lines have none (never stamped "now" on the next save)
+                    ev.log_at = [""] * len(ev.log)
                 self.events[ev.key] = ev
 
     def save(self, ev: RaidEvent, message: str) -> None:
+        stamp_log(ev)
         self.store.write_text(ev.rel_path(self.key), ev.model_dump_json(indent=1))
         self.events[ev.key] = ev
         self.store.commit(f"{self.key}: raid {ev.key}: {message}")
@@ -662,6 +681,17 @@ class RaidStore:
 
     def by_message(self, message_id: int) -> Optional[RaidEvent]:
         return next((e for e in self.events.values() if e.message_id == message_id), None)
+
+
+def stamp_log(ev: RaidEvent) -> None:
+    """Every log line gets a stamp the first time the run is saved after it was written (lines are appended right
+    before a save, so the save time is the line's time). `ev.log_at` follows `ev.log` index for index; a line removed
+    (lock_run's ev.log.pop()) trims it."""
+    n = len(ev.log)
+    stamps = list(ev.log_at or [])
+    if len(stamps) < n:
+        stamps += [now()] * (n - len(stamps))
+    ev.log_at = stamps[:n]
 
 
 # ---------------------------------------------------------------- building an event
@@ -1364,14 +1394,14 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     return plan
 
 
-def early_warning(reg: Registry, rs: "RaidStore | None", ev: RaidEvent) -> bool:
+def early_warning(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, plan: "Plan | None" = None) -> bool:
     """Post the officer health card as soon as a recurring sheet opens? Yes when the series has regulars and, counting
     the ones who haven't answered (minus anyone away) as coming, a tank or healer minimum is still short — officers
     see the hole (and the Suggested block) days before the reminder. Never for ad hoc or test runs, or a series
-    nobody curated (nothing to base it on)."""
+    nobody curated (nothing to base it on). `plan`: role_plan already computed for this run (ev_json passes its own)."""
     if ev.state != "open" or run_kind(reg, ev) != "recurring" or is_test_run(reg, ev) or expected_from(reg, ev) != "regulars":
         return False
-    return bool(role_plan(reg, rs, ev).short["roles"])
+    return bool((plan or role_plan(reg, rs, ev)).short["roles"])
 
 
 def withheld_swaps(reg: Registry, rs: "RaidStore | None", ev: RaidEvent) -> bool:
@@ -2398,10 +2428,53 @@ def end_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> bool:
     cancelled. Returns True when it changed."""
     if ev.state in ("done", "cancelled"):
         return False
-    ev.state = "done"
+    ev.prev_state, ev.state, ev.closed_at = ev.state, "done", now()
     ev.log.append(f"done ({by})")
     rs.save(ev, f"done ({by})")
     return True
+
+
+REOPEN_GRACE_HOURS = 1.0  # a run ended / closed by mistake can be reopened this long after (never a cancelled one, D19)
+
+
+def closed_recently(ev: RaidEvent, hours: float = REOPEN_GRACE_HOURS, at: datetime | None = None) -> bool:
+    """Done / cancelled less than `hours` ago (by `closed_at`; a file from before the stamp counts as long closed)."""
+    if ev.state not in ("done", "cancelled") or not ev.closed_at:
+        return False
+    t = at or datetime.now(ev.start.tzinfo)
+    return t - datetime.fromisoformat(ev.closed_at) < timedelta(hours=hours)
+
+
+def reopen_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> str | None:
+    """Why `ev` can't be reopened now, or None (design B6, owner decision D19): only a run ENDED (done) by mistake,
+    within REOPEN_GRACE_HOURS of the end, before its scheduled close, and only back to the state it ended from. A
+    cancelled run is never reopened — open a new one."""
+    if ev.state == "cancelled":
+        return "A cancelled run can't be reopened — open a new run instead."
+    if ev.state != "done":
+        return f"{ev.key} is {ev.state}, not ended — nothing to reopen."
+    t = at or datetime.now(ev.start.tzinfo)
+    if not closed_recently(ev, at=t):
+        return f"It ended more than {REOPEN_GRACE_HOURS:g} hour ago — reopening is for a run ended by mistake, within the hour."
+    if t >= run_close_at(reg, ev):
+        return "Its scheduled close has passed — the run is over."
+    if not reg.config.team(ev.team):
+        return "Its roster settings were already cleaned up — open a new run instead."
+    return None
+
+
+def reopen_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> str:
+    """Undo an end by mistake (RaidMixin.reopen_run is the surfaces' verb): the run goes back to the state it ended
+    from (locked; open for a run ended before lock) with its rosters, asks and loot archive untouched. RegistryError
+    with the reason (reopen_refusal) otherwise. Returns the state it is back in."""
+    why = reopen_refusal(reg, ev)
+    if why:
+        raise RegistryError(why)
+    back = ev.prev_state if ev.prev_state in ("open", "locked") else ("locked" if ev.all_rosters else "open")
+    ev.state, ev.closed_at, ev.prev_state = back, None, None
+    ev.log.append(f"reopened by {by} ({back})")
+    rs.save(ev, f"reopened by {by}")
+    return back
 
 
 def rostered_runs(reg: Registry, rs: RaidStore, m: Member) -> list[tuple[RaidEvent, str]]:
@@ -2421,7 +2494,10 @@ def rostered_runs(reg: Registry, rs: RaidStore, m: Member) -> list[tuple[RaidEve
 
 
 def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[str]:
-    """Past confirm_by: unanswered confirmations count as out and their seats open. One commit for the lot."""
+    """Past confirm_by: unanswered confirmations count as out and their seats open. One commit for the lot.
+    Only a seat whose member HOLDS an open ask expires (design B2 "expiry correctness"): a seated member nobody asked
+    — a lock whose Confirm / Can't fan-out was interrupted, the scheduler's recovery step still to come — keeps the
+    seat; "no answer" needs a question first."""
     if not ev.confirm_by or datetime.fromisoformat(ev.confirm_by) > datetime.now(ev.start.tzinfo):
         return []
     gone = []
@@ -2430,9 +2506,263 @@ def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[st
             if row["answer"] is None and row["uid"]:
                 m = reg.members.get(int(row["uid"]))
                 ask = next((a for a in reversed(m.placement_asks) if a["roster"] == ev.team and a.get("answer") is None), None) if m else None
-                if ask:
-                    ask["answer"], ask["answered_at"] = "expired", now()
-                    reg.save(m, f"{m.display_name} didn't confirm {ev.team} in time")
+                if ask is None:
+                    continue  # never asked: not an unanswered ask
+                ask["answer"], ask["answered_at"] = "expired", now()
+                reg.save(m, f"{m.display_name} didn't confirm {ev.team} in time")
                 free_seat(reg, rs, ev, int(row["uid"]), "no-confirm")
                 gone.append(row["display_name"])
     return gone
+
+
+def unasked_seats(reg: Registry, ev: RaidEvent) -> list[tuple[int, int, Signup]]:
+    """(roster index, group index, signup) of every seated member with NO placement ask on this run since it locked —
+    the Confirm / Can't fan-out never reached them (a crash or a Discord error after the lock flipped). The scheduler's
+    recovery step asks exactly these (RaidMixin.send_confirmations(resume=True)). Empty when confirmations are off."""
+    if ev.state != "locked" or not ev.all_rosters or not run_confirms(reg, ev):
+        return []
+    since = ev.locked_at or ""
+    out = []
+    for i, r in enumerate(ev.all_rosters):
+        for gi, g in enumerate(r.groups):
+            for n in g:
+                uid = uid_of_name(ev, n)
+                sg = ev.signups.get(str(uid)) if uid is not None else None
+                m = reg.members.get(uid) if uid is not None else None
+                if not sg or not m:
+                    continue
+                if any(a["roster"] == ev.team and (a.get("asked_at") or "") >= since for a in m.placement_asks):
+                    continue
+                out.append((i, gi, sg))
+    return out
+
+
+def open_placement_rows(reg: Registry, ev: RaidEvent) -> list[tuple[Member, dict]]:
+    """(member, ask) for every UNANSWERED placement ask on this run's roster key — Remind's targets, cancel's cards."""
+    return [(m, a) for m in reg.members.values() for a in m.placement_asks if a["roster"] == ev.team and a.get("answer") is None]
+
+
+REMIND_EVERY = timedelta(hours=1)  # "Remind the unconfirmed": at most once per hour per run (D15)
+
+
+def remind_refusal(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> str | None:
+    """Why Remind can't go now, or None: a locked run with confirmations, someone still unconfirmed whom a DM can reach,
+    and not within the hour of the last reminder."""
+    if ev.state != "locked" or not ev.all_rosters:
+        return "Remind is for a locked roster — the sheet is still open." if ev.state == "open" else f"That run is {ev.state}."
+    if not run_confirms(reg, ev):
+        return "Nobody is asked to confirm on this run (Join is the commitment) — nothing to remind."
+    t = at or datetime.now(ev.start.tzinfo)
+    if ev.reminded_at and t - datetime.fromisoformat(ev.reminded_at) < REMIND_EVERY:
+        nxt = datetime.fromisoformat(ev.reminded_at) + REMIND_EVERY
+        return (f"Reminded at {reg.local12(ev.reminded_at, '%I:%M %p')}" + (f" by {ev.reminded_by}" if ev.reminded_by else "")
+                + f" — once an hour; again after {reg.local12(nxt, '%I:%M %p')}.")
+    rows = open_placement_rows(reg, ev)
+    if not rows:
+        return "Everyone rostered has answered — nobody to remind."
+    if not any(a.get("channel", "dm") == "dm" and not m.dm_opt_out for m, a in rows):
+        return "The unconfirmed all wait on the site (DMs off) — a reminder can't reach them."
+    return None
+
+
+def cancel_effects(reg: Registry, ev: RaidEvent) -> dict:
+    """Who a cancel touches, from the run as it stands (consequences.consequence("cancel"), the plain diff, MCP):
+    `rostered` names of the seated (after lock), `open_asks` names with an unanswered Confirm / Can't, `fill_asks` names
+    with a fill or pre-lock ask in play, `answered` how many answered the sheet. Nobody is DMed by a cancel (the DM
+    rule): the sheet, the open ask cards, the signup channel line and the run's thread carry it."""
+    locked = ev.state != "open" and bool(ev.all_rosters)
+    return {"state": ev.state, "locked": locked,
+            "rostered": [p.signup_name for p in ev.seated()] if locked else [],
+            "open_asks": [m.display_name for m, _a in open_placement_rows(reg, ev)] if locked else [],
+            "fill_asks": [a.display_name for a in ev.fill_asks if a.pending],
+            "answered": len([s for s in ev.signups.values() if s.status in STATUSES])}
+
+
+# ---------------------------------------------------------------- opening: which run a picked time is (design B4)
+
+def which_run(reg: Registry, instance: str, start: datetime, sid: str | None = None) -> dict:
+    """What an open at `start` would be — the one answer the /raid open wizard, the site's preview route and plain text
+    share: {kind: scheduled | adhoc, schedule (id; None = the raid's own run times; ADHOC_SCHEDULE = a one-off),
+    schedule_name, key}. `sid` named → that schedule's run (a pickup template is ad hoc); none → one of the raid's
+    upcoming runs at exactly `start` (scheduled), else a one-off (ad hoc)."""
+    if instance not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {instance or '?'} (one of {', '.join(reg.profile.raids)})")
+    if sid and sid not in (DEFAULT_SCHEDULE, ADHOC_SCHEDULE) and not any(s["id"] == sid for s in reg.schedules(instance)):
+        raise RegistryError(f"{reg.raid_def(instance).get('name', instance)} has no schedule {sid}")
+    resolved = open_schedule(reg, instance, start, sid)
+    if resolved == ADHOC_SCHEDULE:
+        kind, name = "adhoc", "One-off"
+    else:
+        s = next((x for x in reg.schedules(instance) if x["id"] == (resolved or DEFAULT_SCHEDULE)), None) or {}
+        kind = "adhoc" if schedule_class(s.get("kind") or "weekly") == "adhoc" else "scheduled"
+        name = s.get("name") or (resolved or DEFAULT_SCHEDULE)
+    return {"kind": kind, "schedule": resolved, "schedule_name": name, "key": event_key(instance, start, resolved)}
+
+
+def open_when(reg: Registry, instance: str, value: str | None, schedule: str | None = None) -> tuple[datetime, str | None, str]:
+    """A picked open time → (start, schedule id or None, DST note): the raid's next run (of `schedule` when named) when
+    `value` is empty; a bare 'HH:MM' = the next upcoming run at that clock time; 'YYYY-MM-DD HH:MM' (guild wall time,
+    from a picker — never typed by a person) resolved DST-safely by wizard.resolve_local (on the spring-forward night
+    2:30 AM becomes 3:30 — note "gap"; on the fall-back night the first 1:30 is taken — note "ambiguous"). An aware ISO
+    instant (the preview's `start`, carried back by Open) is taken as is. configops._open_time and the site's open and
+    preview routes share it, so a DST night opens the same instant everywhere."""
+    import re
+
+    from .wizard import resolve_local
+
+    if instance not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {instance or '?'} (one of {', '.join(reg.profile.raids)})")
+    sid = (schedule or "").strip().lower() or None
+    sched = next((s for s in reg.schedules(instance) if s["id"] == sid), None) if sid and sid != ADHOC_SCHEDULE else None
+    if sid and sid != ADHOC_SCHEDULE and sched is None:
+        raise RegistryError(f"{instance} has no schedule {sid} (it has {', '.join(s['id'] for s in reg.schedules(instance)) or 'none'})")
+    when = (value or "").strip()
+    nxt = [(s, t) for s, t in upcoming(reg, instance, reg.now_local(), 24 * OPEN_HORIZON_DAYS) if sid in (None, ADHOC_SCHEDULE) or s["id"] == sid]
+    if when:
+        if re.fullmatch(r"\d{1,2}:\d{2}", when):  # a bare time: the next upcoming run at that clock time
+            hit = next(((s, t) for s, t in nxt if t.astimezone(reg.tz).strftime("%H:%M") == when.zfill(5)), None)
+            if hit is None:
+                raise RegistryError(f"{instance} has no upcoming run at {reg.time_label(when.zfill(5))} — give the date too")
+            return hit[1], hit[0]["id"], ""
+        try:
+            parsed = datetime.fromisoformat(when.replace(" ", "T", 1))
+        except ValueError:
+            raise RegistryError("I couldn't tell which time you meant — pick a day and time with the picker, or name them, e.g. Thu 10 Dec 7:30 PM (guild time)")
+        if parsed.tzinfo is not None:
+            start, note = parsed.astimezone(reg.tz), ""
+        else:
+            start, note = resolve_local(parsed, reg.tz)
+        if sid is None:  # one of the raid's own upcoming runs: open it as that schedule's run; any other time is a one-off (ad hoc)
+            sid = open_schedule(reg, instance, start, None)
+        return start, sid, note
+    if sid == ADHOC_SCHEDULE:
+        raise RegistryError("an ad hoc run starts at the day and time you pick — pick one")
+    if sched is not None and sched["kind"] == "pickup":
+        raise RegistryError(f"{sched['name']} is a pickup template — pick the date and time it starts")
+    if not nxt:
+        fo = reg.first_open(instance)
+        has = [s for s in reg.schedules(instance) if s["kind"] != "pickup" and (sched is None or s["id"] == sid)]
+        why = (f"its slots all fall before it opens on {reg.local12(fo)}" if has and fo and fo > reg.now_local() else "it has no recurring slots yet")
+        raise RegistryError(f"No next slot for this raid: {why}. Pick a date and time instead, or set it up on the Raids page.")
+    return nxt[0][1], nxt[0][0]["id"], ""
+
+
+def dst_words(reg: Registry, note: str, start: datetime) -> str:
+    """The DST note in words for a person (the wizard's when_note, the site's preview): "" on an ordinary night."""
+    if note == "gap":
+        return f"That time doesn't exist that night (the clocks go forward) — using {reg.local12(start, '%I:%M %p')}."
+    if note == "ambiguous":
+        return f"{reg.local12(start, '%I:%M %p')} happens twice that night (the clocks go back) — using the first."
+    return ""
+
+
+def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | None = None, schedule: str | None = None) -> dict:
+    """What Open would do, before anything is written (POST /api/raid/{rid}/open/preview; the wizard's confirm shows
+    the same facts): {kind, schedule, schedule_name, key, start (ISO — the exact instant Open must carry back), label
+    (12-hour guild time), when_note (the DST line or ""), exists (the live run's state at that key, or None), channel
+    (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in one line), past}."""
+    start, sid, note = open_when(reg, instance, value, schedule)
+    w = which_run(reg, instance, start, sid if sid is not None else DEFAULT_SCHEDULE)
+    ev = rs.events.get(w["key"])
+    live = ev if ev is not None and ev.state not in ("done", "cancelled") else None
+    sd = reg.schedule_def(instance, w["schedule"])
+    lock_h = float(sd["lock_hours_before"])
+    if w["kind"] == "adhoc":
+        rules = ("Ad hoc: first come, first rostered; no regulars, no reminder" + ("" if sd.get("confirm") else ", no confirmations (Join is the commitment)")
+                 + f"; locks {lock_h:g} h before; a role swap waits for an officer.")
+    else:
+        rules = ("Scheduled: its regulars are expected" + ("; the rostered are asked to confirm" if sd.get("confirm", True) else "")
+                 + f"; locks {lock_h:g} h before.")
+    return {**w, "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
+            "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
+
+
+# ---------------------------------------------------------------- what the lock decided, as data (the site's locked SheetCard)
+
+def spec_switches(reg: Registry, ev: RaidEvent) -> list[dict]:
+    """'Playing an offspec': every seat the lock put on a spec other than the one they signed up with, one row each
+    {roster, uid, display_name, character, cls, spec, signed_spec} — the lock card's lines as data."""
+    out = []
+    for i, r in enumerate(ev.all_rosters):
+        by = {p.signup_name: p for p in r.selected}
+        for n in r.spec_switches or []:
+            p = by.get(n)
+            if p is None:
+                continue
+            uid = player_uid(ev, p)
+            sg = ev.signups.get(str(uid)) if uid is not None else None
+            out.append({"roster": i + 1, "uid": str(uid) if uid is not None else None, "display_name": p.signup_name, "character": p.character or p.signup_name,
+                        "cls": p.cls, "spec": p.spec, "signed_spec": sg.spec if sg else None})
+    return out
+
+
+def regulars_not_rostered(reg: Registry, ev: RaidEvent) -> list[dict]:
+    """A recurring run's regulars who answered Join / Bench but hold no seat (who gets priority next time) — the lock
+    card's 'Regulars not rostered' as data. Empty for ad hoc and test runs and before lock."""
+    if ev.state == "open" or not ev.all_rosters or run_kind(reg, ev) != "recurring" or is_test_run(reg, ev):
+        return []
+    seated = {player_uid(ev, p) for p in ev.seated()}
+    out = []
+    for m, c in run_regulars(reg, ev):
+        sg = ev.signups.get(str(m.discord_id))
+        if sg and sg.status in ("in", "sub") and m.discord_id not in seated:
+            out.append({"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec, "status": sg.status})
+    return out
+
+
+FILL_STATE_WORDS = {"idle": "nothing to fill yet", "asking": "asking — waiting for answers", "filled": "every seat filled",
+                    "exhausted": "nobody left to ask — recruit, or move someone in on the board",
+                    "suggested": "waiting for an officer: a role swap would cover it"}
+
+
+def fill_state_text(reg: Registry, ev: RaidEvent) -> str:
+    """The fill engine's state in words (the lock card, the SheetCard, MCP get_run) — never the bare code:
+    'waiting for an officer: a role swap would cover it', 'asking — waiting for answers (2 on the site)',
+    'autofill paused by Jon · …'."""
+    if ev.state == "open":
+        return "the fill engine starts after lock"
+    if ev.state in ("done", "cancelled"):
+        return f"the run is {'over' if ev.state == 'done' else 'cancelled'}"
+    words = FILL_STATE_WORDS.get(ev.fill_state, ev.fill_state)
+    site = sum(1 for a in ev.fill_asks if a.pending and a.channel == "web")
+    if site:
+        words += f" ({site} on the site)"
+    if ev.autofill_paused:
+        words = "autofill paused" + (f" by {ev.autofill_paused_by}" if ev.autofill_paused_by else "") + " · " + words
+    return words
+
+
+def asks_on_site(reg: Registry, ev: RaidEvent) -> int:
+    """How many asks in play wait on the members' Me pages (DMs off, or the DM failed): fill / pre-lock asks with
+    channel "web" plus unanswered Confirm / Can't asks with channel "web" — the "N wait on the site" count."""
+    fills = sum(1 for a in ev.fill_asks if a.pending and a.channel == "web")
+    places = sum(1 for _m, a in open_placement_rows(reg, ev) if a.get("channel") == "web") if ev.state == "locked" else 0
+    return fills + places
+
+
+# a log line's officer-only marks: free text people wrote (a reason, a note) and planning a member never reads
+_OFFICER_LOG = ("cancelled by", "lock (", "fill", "suggestion", "pre-lock", "pin ", "pinned", "board", "proposed", "reminded",
+                "autofill", "callout", "early warning", "confirmation dms")
+
+
+def log_rows(reg: Registry, ev: RaidEvent) -> list[dict]:
+    """ev.log for people (the site's Detail › log): {at (ISO or ""), when (12-hour guild time; "" for a line from before
+    stamps were kept), text, officer (planning or free text a member never sees)}. The raw lines stay `ev.log` (the
+    site's "machine form")."""
+    stamps = list(ev.log_at or [])
+    out = []
+    for i, line in enumerate(ev.log):
+        at = stamps[i] if i < len(stamps) else ""
+        low = line.lower()
+        out.append({"at": at, "when": reg.local12(at) if at else "", "text": line, "officer": any(k in low for k in _OFFICER_LOG)})
+    return out
+
+
+def end_refusal(ev: RaidEvent, at: datetime | None = None) -> str | None:
+    """Why "End the run now" can't go (the lock card, the SheetCard): only a locked run, and only after its scheduled
+    start — before then, Cancel is the verb. None = it may."""
+    if ev.state != "locked":
+        return f"That run is {ev.state} — End is for a locked run." if ev.state in ("done", "cancelled") else "End is for a locked run — the sheet is still open."
+    if (at or datetime.now(ev.start.tzinfo)) < ev.start:
+        return "The run hasn't started yet — End is for after the start; before then, Cancel it."
+    return None

@@ -7,10 +7,10 @@ from oibot_gm.raid_buttons import FillButton, PlaceButton, SignupButton
 ico = lambda kind, key: ""  # noqa: E731
 
 
-def row_of(view):
-    """(label, disabled) for the buttons of the last action row in a layout."""
+def row_of(view, i: int = -1):
+    """(label, disabled) for the buttons of an action row in a layout (default the last)."""
     rows = [c for c in view.walk_children() if c.__class__.__name__ == "ActionRow"]
-    return [(getattr(b, "label", None) or b.item.label, getattr(b, "disabled", None) if hasattr(b, "disabled") else b.item.disabled) for b in rows[-1].children]
+    return [(getattr(b, "label", None) or b.item.label, getattr(b, "disabled", None) if hasattr(b, "disabled") else b.item.disabled) for b in rows[i].children]
 
 
 def test_officer_card_buttons_never_move(reg, rs):
@@ -21,7 +21,10 @@ def test_officer_card_buttons_never_move(reg, rs):
     team = rc.run_team(reg, ev)
     open_row = row_of(views.health_layout(reg, rs, ev, team, ico))
     lock_with_board(reg, rs, ev, [m.display_name for m in members])
-    locked_row = row_of(views.lock_layout(reg, ev, team, ico, 0))
+    card = views.lock_layout(reg, ev, team, ico, 0)
+    locked_row = row_of(card, -2)
+    # the lock card's raid-night row under it (phase 2): Remind (greyed: nobody asked yet), Pause autofill, End (before the start: greyed)
+    assert row_of(card) == [("Remind the unconfirmed", True), ("Pause autofill", False), ("End the run now", True)]
     strip = lambda row: [(l, d) for l, d in row if l != "Open the board"]  # the link needs OIBOT_WEB_URL  # noqa: E731
     assert [l for l, _ in strip(open_row)] == ["Lock now", "Fill seats", "Loot", "Cancel run"]
     assert [l for l, _ in strip(locked_row)] == ["Locked", "Fill seats", "Loot", "Cancel run"]

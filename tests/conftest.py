@@ -133,6 +133,7 @@ def lock_with_board(reg: Registry, rs: rc.RaidStore, ev: rc.RaidEvent, names: li
     layout = [names[i:i + g] for i in range(0, len(names), g)]
     ev.rosters = rc.board_rosters(reg, ev, layout, size)
     ev.state, ev.locked_at = "locked", rc.now()
+    ev.confirmations_sent_at = ev.locked_at  # a lock whose Confirm / Can't fan-out finished (the recovery step leaves it alone)
     ev.confirm_by = (ev.start - timedelta(hours=hours_to_confirm)).isoformat()
     rs.save(ev, "locked (test board)")
     return ev

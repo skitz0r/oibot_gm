@@ -86,8 +86,8 @@ class FakeBot(LootMixin):
         self.calls.append(("lock_run", ev.key, by))
         return f"{ev.key}: locked"
 
-    async def cancel_run(self, reg, rs, ev, by, reason):
-        self.calls.append(("cancel_run", ev.key, by, reason))
+    async def cancel_run(self, reg, rs, ev, by, reason, notify=True, by_id=None, via="discord"):
+        self.calls.append(("cancel_run", ev.key, by, reason) + (() if notify else ("quiet",)))
         return f"Cancelled {ev.key}" + (f": {reason}" if reason else "")
 
     async def run_fill(self, reg, rs, ev, team, by, approved_by=None):
@@ -373,9 +373,15 @@ def test_set_unregistered_member(reg, rs, officer, channel):
 def test_lock_with_one_run_needs_no_picker(reg, rs, officer, channel):
     ev = open_test_run(reg, rs)
     h, bot = harness(reg, rs)
-    asyncio.run(FLOWS["raid_lock"](h.command(), reg))
-    assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
-    assert h.text.endswith(f"{ev.key}: locked") and len([s for s in h.screens if s["view"] is not None]) == 0
+
+    async def go():
+        # THE lock confirm screen (phase 2): the consequence from code, Lock now · Preview lock · Back — nothing before the press
+        await FLOWS["raid_lock"](h.command(), reg)
+        assert h.buttons() == ["Lock now", "Preview lock", "Back"] and "The board becomes the roster." in h.text and not bot.calls
+        await h.press("Lock now")
+        assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
+        assert h.text.endswith(f"{ev.key}: locked")
+    asyncio.run(go())
 
 
 def test_lock_with_two_runs_shows_the_picker_and_cancel_does_nothing(reg, rs, officer, channel):
@@ -391,6 +397,8 @@ def test_lock_with_two_runs_shows_the_picker_and_cancel_does_nothing(reg, rs, of
         h2, bot2 = harness(reg, rs)
         await FLOWS["raid_lock"](h2.command(), reg)
         await h2.pick("Pick the run", b.team)
+        assert not bot2.calls and "Lock now" in h2.buttons()
+        await h2.press("Lock now")
         assert bot2.calls[0] == ("lock_run", b.key, "Tester")
     asyncio.run(go())
 
@@ -509,17 +517,21 @@ def test_loot_needs_a_locked_roster(reg, rs, officer, channel):
     assert "Lock the roster first" in h.text and not channel.sent and not bot.calls
 
 
-def test_cancel_takes_a_reason_in_a_modal(reg, rs, officer, channel):
+def test_cancel_shows_the_consequence_then_one_form_with_reason_and_notify(reg, rs, officer, channel):
     ev = open_test_run(reg, rs)
     h, bot = harness(reg, rs)
 
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
-        assert h.modal is not None and not bot.calls  # one run: the box opens straight away
-        await h.submit(reason="tank flu")
+        # THE cancel screen (phase 2): the consequence from code, then one Form — nothing written before Submit
+        assert h.buttons() == ["Cancel the run…", "Back"] and "Nobody is DMed" in h.text and not bot.calls
+        await h.press("Cancel the run…")
+        assert h.modal is not None and set(h.modal._items) == {"reason", "notify"}
+        await h.submit(reason="tank flu", notify="post")
     asyncio.run(go())
     assert bot.calls == [("cancel_run", ev.key, "Tester", "tank flu")]
-    assert channel.sent[-1]["content"] == f"Cancelled {ev.key}: tank flu" and "tank flu" in h.text
+    assert not channel.sent, "the reason is never echoed in the channel the command ran in"
+    assert h.text.endswith(f"Cancelled {ev.key}: tank flu")
 
 
 def test_cancel_dismissed_box_writes_nothing_and_a_closed_run_is_refused(reg, rs, officer, channel):
@@ -527,7 +539,8 @@ def test_cancel_dismissed_box_writes_nothing_and_a_closed_run_is_refused(reg, rs
     h, bot = harness(reg, rs)
 
     async def go():
-        await FLOWS["raid_cancel"](h.command(), reg)  # the box opens; closing it sends nothing back
+        await FLOWS["raid_cancel"](h.command(), reg)
+        await h.press("Cancel the run…")  # the box opens; closing it sends nothing back
         assert h.modal is not None and not bot.calls
         form = h.modal
         ev.state = "done"
@@ -546,10 +559,11 @@ def test_cancel_with_two_runs_picks_then_opens_the_box(reg, rs, officer, channel
     async def go():
         await FLOWS["raid_cancel"](h.command(), reg)
         await h.pick("Pick the run", b.team)
+        await h.press("Cancel the run…")
         assert h.modal is not None
-        await h.submit(reason="")
+        await h.submit(reason="", notify="quiet")
     asyncio.run(go())
-    assert bot.calls == [("cancel_run", b.key, "Tester", None)]
+    assert bot.calls == [("cancel_run", b.key, "Tester", None, "quiet")]
 
 
 def test_out_is_one_step_with_one_run(reg, rs, channel):

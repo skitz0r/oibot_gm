@@ -23,8 +23,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, ops as ops_mod, raid_views as dr, raidcycle as rc, render
-from ..consequences import consequences_json
-from ..registry import ADHOC_SCHEDULE, CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
+from ..consequences import consequence as consequence_lines, consequences_json
+from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
 
@@ -138,6 +138,7 @@ def application_json(reg, a) -> dict:
             "decided_by": a.decided_by, "note": a.decision_note}
 
 
+HISTORY_PAGE = 8  # past runs per raid on the Rosters page; GET /api/runs pages the rest
 PREVIEW_TTL = 600  # seconds a plain_change preview token stays good (Discord's Apply view waits as long)
 
 
@@ -675,6 +676,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         absences = [{"display_name": m.display_name, "start": a.start, "end": a.end, "reason": a.reason, "signed": str(m.discord_id) in ev.signups}
                     for m in reg.members.values() for a in m.absences if a.start <= day <= a.end]
         busy = rc.conflicts(rs, ev) if live else {}
+        plan = rc.role_plan(reg, rs, ev) if live else None  # the planner's suggestions (computed on view, never stored), once per run
         return {**base,
                 "timeline": {"nudge": t12(reg, soft) if rc.team_setting(t, "reminders") != "none" else None, "lock": t12(reg, hard),
                              "confirm": (clock12(reg, confirm) if confirm.date() == ev.start.astimezone(reg.tz).date() else t12(reg, confirm)) if rc.run_confirms(reg, ev) else None,
@@ -691,16 +693,47 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "board": board_json(reg, ev, board_rosters, conf_rows), "has_layout": bool(ev.layout), "rev": rc.board_rev(reg, ev),
                 "split": split_json(reg, ev) if live else {"strategy": ev.split_strategy or rd.get("split_policy", "balanced"), "policy": rd.get("split_policy", "balanced"), "runs": 1, "reason": None, "reason_text": None},
                 "confirmations": conf_rows,
-                "fill_asks": [{"display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "why": a.why, "answer": a.answer,
-                               "expires_at": a.expires_at, "pair": a.pair, "phase": a.phase, "approved_by": a.approved_by} for a in ev.fill_asks],
+                "fill_asks": [{"uid": str(a.discord_id), "display_name": a.display_name, "kind": a.kind, "character": a.character, "spec": a.spec, "role": a.role, "reason": a.reason, "why": a.why, "answer": a.answer,
+                               "expires_at": a.expires_at, "deadline": t12(reg, a.expires_at) if a.expires_at else None, "pair": a.pair, "phase": a.phase, "approved_by": a.approved_by,
+                               "answered_by": a.answered_by, "channel": a.channel, "pending": a.pending} for a in ev.fill_asks],
                 # the planner's suggestions (computed on view, never stored): what an officer's Ask / Suggest would send
-                "plan": plan_json(reg, rc.role_plan(reg, rs, ev)) if live else None,
-                "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late, "note": c.note} for c in ev.callouts], "log": list(ev.log),
+                "plan": plan_json(reg, plan) if plan is not None else None,
+                "callouts": [{"display_name": c.display_name, "hours_before": c.hours_before, "late": c.late, "note": c.note} for c in ev.callouts],
+                "log": list(ev.log),  # the machine form; `log_rows` = the same lines with stamps in words, officer-only marked
+                "log_rows": rc.log_rows(reg, ev),
                 "health": health_json(reg, ev, t) if ev.state == "open" else None,
                 # the confirm sentences for lock / cancel / clear / release, from code (consequences.py): the browser prints, never composes
                 "consequences": consequences_json(reg, ev),
                 # where the run lives in Discord (sheet, updates thread, loot thread) and its loot council in one line (design §2.5)
-                "links": links_json(reg, ev), "loot": loot_json(reg, ev)}
+                "links": links_json(reg, ev), "loot": loot_json(reg, ev),
+                **night_json(reg, rs, ev, t, plan)}
+
+    def night_json(reg, rs, ev, t, plan=None) -> dict:
+        """The raid-night state the SheetCard renders (dual interfaces phase 2, design §2.5 / B4–B8): every one computed
+        from the run, words already written (no clock or sentence composed in the browser)."""
+        live = ev.state not in ("done", "cancelled")
+        locked = ev.state == "locked" and bool(ev.all_rosters)
+        failed = None
+        if ev.lock_error and ev.state == "open":
+            failed = f"Lock failed {t12(reg, ev.lock_tried_at)} — the sheet stays open, retrying: {ev.lock_error}" if ev.lock_tried_at else f"Lock failed — {ev.lock_error}"
+        remind_no = rc.remind_refusal(reg, ev) if locked else None
+        end_no = rc.end_refusal(ev)
+        reopen_no = rc.reopen_refusal(reg, ev) if ev.state in ("done", "cancelled") else None
+        return {"lock_error": failed,
+                "fill_state_text": rc.fill_state_text(reg, ev),
+                "early_warning": rc.early_warning(reg, rs, ev, plan) if ev.state == "open" else False,
+                "spec_switches": rc.spec_switches(reg, ev) if locked else [],
+                "regulars_not_rostered": rc.regulars_not_rostered(reg, ev) if locked else [],
+                "confirm_by": t12(reg, ev.confirm_by) if ev.confirm_by else None,
+                "confirmations_sent_at": t12(reg, ev.confirmations_sent_at) if ev.confirmations_sent_at else None,
+                "confirmations_pending": locked and rc.run_confirms(reg, ev) and not ev.confirmations_sent_at,
+                "asks_on_site": rc.asks_on_site(reg, ev) if live else 0,
+                "autofill_paused": bool(ev.autofill_paused), "autofill_paused_by": ev.autofill_paused_by,
+                "reminded_at": t12(reg, ev.reminded_at) if ev.reminded_at else None, "reminded_by": ev.reminded_by,
+                "may_remind": locked and remind_no is None, "remind_note": remind_no,
+                "may_end": end_no is None, "end_note": end_no,
+                "may_reopen": ev.state == "done" and reopen_no is None, "reopen_note": reopen_no,
+                "closed_at": t12(reg, ev.closed_at) if ev.closed_at else None}
 
     def discord_url(reg, channel_id, message_id=None) -> str | None:
         if not channel_id:
@@ -713,7 +746,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def links_json(reg, ev) -> dict:
         sessions = run_sessions(reg, ev)
         thread = next((s.raid_thread_id for s in sessions if s.raid_thread_id), None)
+        card = ev.cards.get("lock:0") or ev.cards.get("health")
         return {"sheet": discord_url(reg, ev.channel_id, ev.message_id) if ev.message_id else None,
+                "card": discord_url(reg, ev.cards_channel_id, card) if card and ev.cards_channel_id else None,  # the lock card (the raid-night hub), else the health card
+                "thread": discord_url(reg, ev.updates_thread_id),  # the run's updates thread (design §2.5 links{sheet,card,thread})
                 "updates": discord_url(reg, ev.updates_thread_id), "loot": discord_url(reg, thread)}
 
     def loot_json(reg, ev) -> dict:
@@ -730,10 +766,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """The open sheet's health card as data (MCP get_run, the help context): headcount against the seats the run
         expects, per role have/need/level with who could cover a shortfall, and the party buffs nobody on it provides."""
         h = rc.health_data(reg, ev, t)
+        arts = {b.id: getattr(b, "art", None) for b in reg.profile.party_buffs()}
         n, size, _legacy, subs = h["headcount"]
         return {"headcount": {"in": n, "seats": size, "bench": subs, "level": h["headcount_level"]},
                 "roles": [{k: r[k] for k in ("role", "have", "need", "level", "hint")} for r in h["roles"]],
-                "no_provider": [b["name"] for b in h["buffs"] if not b["providers"]], "unanswered": len(h["unresponsive"]), "not_answered": list(h["unresponsive"]),
+                "no_provider": [b["name"] for b in h["buffs"] if not b["providers"]],
+                # the page draws these as icon-only chips (the iconography rule: the name is the tooltip, never a label)
+                "no_provider_buffs": [{"id": b["id"], "abbr": b["abbr"], "colour": b["colour"], "name": b["name"], "art": arts.get(b["id"])} for b in h["buffs"] if not b["providers"]],
+                "unanswered": len(h["unresponsive"]), "not_answered": list(h["unresponsive"]),
                 "expected_from": h.get("expected_from"), "rosters": h["rosters"]}
 
     def rosters_data(reg) -> dict:
@@ -745,12 +785,20 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             rd = reg.raid_def(rid)
             evs = [e for e in events if e.instance == rid]
             live = [ev_json(reg, rs, e) for e in evs if e.state not in ("done", "cancelled")]
-            past = [ev_json(reg, rs, e, full=False) for e in reversed(evs) if e.state in ("done", "cancelled")][:8]
+            closed = [e for e in reversed(evs) if e.state in ("done", "cancelled")]
+            past = [ev_json(reg, rs, e, full=False) for e in closed[:HISTORY_PAGE]]  # the rest: GET /api/runs (paged)
             fo = reg.first_open(rid)
             scheds = reg.schedules(rid)
             many = len([s for s in scheds if s["kind"] != "pickup"]) > 1
+            no_channel = not reg.config.signup_channel_id
+
+            def opens_at(s, start):
+                return start - timedelta(hours=float(reg.schedule_def(rid, s["id"])["signup_lead_hours"]))
+            # each upcoming run: its exact instant (`start_iso`, what the row's Open carries back to the open route) and,
+            # with no signup channel set, `needs_channel` once its sheet is due — the scheduler opens nothing then
             upcoming = [{"slot": (s["name"] if many else reg.slot_label(start.astimezone(reg.tz).strftime("%a %H:%M"))), "schedule": s["id"], "schedule_name": s["name"], "start": t12(reg, start),
-                         "opens": t12(reg, start - timedelta(hours=float(reg.schedule_def(rid, s["id"])["signup_lead_hours"])))}
+                         "start_iso": start.isoformat(), "key": rc.event_key(rid, start, s["id"]), "opens": t12(reg, opens_at(s, start)),
+                         "needs_channel": no_channel and opens_at(s, start) <= now}
                         for s, start in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if rc.event_key(rid, start, s["id"]) not in rs.events][:6]
             series = rc.series_outlook(reg, rid)  # one card per recurring series: its regulars (one member per line on the page) against the minimums, level, forecast
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
@@ -759,7 +807,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "orphan_regulars": [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec}
                                             for k, m, c in reg.orphan_regulars() if k.partition(":")[0] == rid],
                         "opened": bool(fo and fo <= now), "first_open": reg.local12(fo, "%a %d %b %Y %I:%M %p") if fo else None,
-                        "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "upcoming": upcoming})
+                        "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "past_total": len(closed),
+                        "upcoming": upcoming, "signup_channel": bool(reg.config.signup_channel_id)})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
         # who can be made a regular (the Rosters page's member and character pickers): real members with active characters
         people = [{"uid": str(m.discord_id), "display_name": m.display_name,
@@ -772,6 +821,22 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def rosters(request: Request):
         v = await who(request, officer=True)
         return await asyncio.to_thread(rosters_data, v.reg)
+
+    @app.get("/api/runs")
+    async def runs_history(request: Request, raid: str | None = None, offset: int = 0, limit: int = 20):
+        """Past runs (done / cancelled), newest first, paged beyond the Rosters page's first HISTORY_PAGE (officers):
+        `raid` = one raid id (default every raid), `offset` / `limit` (≤ 50). Rows are ev_json's short form; a row opens
+        the read-only run drawer through GET /api/run/{key}."""
+        v = await who(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        if raid and raid not in v.reg.profile.raids:
+            return JSONResponse({"error": f"unknown raid {raid}"}, status_code=404)
+        closed = sorted([e for e in rs.events.values() if e.state in ("done", "cancelled") and (not raid or e.instance == raid)],
+                        key=lambda e: e.starts_at, reverse=True)
+        offset, limit = max(0, int(offset)), max(1, min(50, int(limit)))
+        page = closed[offset:offset + limit]
+        return {"runs": [ev_json(v.reg, rs, e, full=False) for e in page], "total": len(closed), "offset": offset, "limit": limit,
+                "more": offset + limit < len(closed)}
 
     @app.get("/api/readiness")
     async def readiness(request: Request, raid: str | None = None):
@@ -829,26 +894,36 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         groups = [[str(n) for n in g] for g in (d.get("groups") or [])]
+        strategy = (d.get("strategy") or "").strip() or None  # Use this split: the layout and its strategy in ONE write (design B6)
+        if strategy and strategy not in SPLIT_POLICIES:
+            return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
         was_open = ev.state == "open"
         try:  # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
-            line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name, via=v.via)
+            line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name, via=v.via, strategy=strategy)
         except rc.BoardChanged:
             return stale(v, ev)
         return board_written(v, ev, was_open, line)
 
     @app.post("/api/run/{key}/move")
     async def run_move(request: Request, key: str):
-        """One drag, applied to the board as it is NOW: {member, to: {r, g, i} | null (= bank)}. Two officers dragging
-        at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat freed).
-        The write is RaidMixin.board_move."""
+        """One drag, applied to the board as it is NOW: {member, to: {r, g, i} | null (= bank), state}. Two officers
+        dragging at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat
+        freed). `state` = the state the board was rendered in (open | locked): when the run's state differs (the
+        scheduler locked it mid-drag) the move is refused with 409 + the current board, never applied as a post-lock
+        roster edit (design B6). The write is RaidMixin.board_move."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         name, to = str(d.get("member") or ""), d.get("to")
+        seen = (d.get("state") or "").strip() or None
+        if seen and seen not in ("open", "locked"):
+            return JSONResponse({"error": "state is open or locked (the state the board was drawn in)"}, status_code=400)
         n = rc.groups_per_roster(v.reg, rc.run_size(v.reg, ev))
         target = None if not to else (as_int(to.get("r"), "to.r") * n + as_int(to.get("g"), "to.g"), as_int(to.get("i", 99), "to.i"))
         was_open = ev.state == "open"
         try:
-            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via)
+            line = await bot.board_move(v.reg, rs, ev, name, target, by=v.name, via=v.via, expect_state=seen)
+        except rc.BoardChanged as e:
+            return JSONResponse({"error": str(e), "state": ev.state, **board_reply(v.reg, ev)}, status_code=409)
         except ValueError as e:
             return JSONResponse({"error": str(e)[:1].upper() + str(e)[1:], **board_reply(v.reg, ev)}, status_code=409)
         return board_written(v, ev, was_open, line)
@@ -931,6 +1006,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             except Exception as e:  # noqa: BLE001
                 return JSONResponse({"error": f"solver: {e}"}, status_code=400)
         syn = [r.synergy_value for r in rosters]
+        ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(v.reg, ev), "by": v.name, "at": rc.now(), "kind": "split"}
+        await asyncio.to_thread(rs.save, ev, f"split preview ({strategy}) by {v.name}")  # plain text's "use it" finds it after a restart
         sp = split_json(v.reg, ev)  # why there aren't more rosters, when the roles are what holds it back
         return {"strategy": strategy, "layout": layout, "board": board_json(v.reg, ev, rosters, []), "synergy": syn, "total": sum(syn), "gap": (max(syn) - min(syn)) if syn else 0,
                 "reason": sp["reason"], "reason_text": sp["reason_text"]}
@@ -1029,6 +1106,24 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line}
 
+    @app.post("/api/run/{key}/lock/preview")
+    async def run_lock_preview(request: Request, key: str):
+        """The lock modal's Preview (design B6): the roster(s) the lock would build NOW (RaidMixin.lock_preview —
+        rc.split_preview with the run's strategy, the board and the pins; nothing saved but ev.last_proposal), as the
+        board shows it, plus the consequence sentence the confirm prints and the leftovers. 409 when the solver is busy
+        on this run or no roster satisfies the rules (the sentence says which)."""
+        v, _ = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        if ev.state != "open":
+            return JSONResponse({"error": "already locked"}, status_code=400)
+        try:
+            rosters = await bot.lock_preview(v.reg, rs, ev, by=v.name)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        left = rc.leftovers(v.reg, ev, rosters)
+        return {"board": board_json(v.reg, ev, rosters, []), "consequence": " ".join(consequence_lines("lock", v.reg, ev)),
+                "leftovers": [p.signup_name for p in left], "strategy": (ev.last_proposal or {}).get("strategy"), "rev": rc.board_rev(v.reg, ev)}
+
     def send_batch_json(reg, plan) -> list[dict]:
         try:
             return [ask_json(reg, a) for a in rc.send_batch(plan)[0]]
@@ -1081,62 +1176,125 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/cancel")
     async def run_cancel(request: Request, key: str):
-        """Cancel the run the way /raid cancel does: the sheet and officer cards show it cancelled, open confirmations are
-        withdrawn, a line goes to the run's thread and the ops feed. Rostered members are NOT told automatically; the
-        returned line says what was done."""
+        """Cancel the run — the one verb every surface calls (RaidMixin.cancel_run): {reason?, notify?}. Nobody is DMed
+        (the DM rule): the sheet is edited to its final state, every open ask card says Cancelled, `notify` (default true)
+        posts one fixed line in the signup channel (never the reason, which stays in the run's thread and the ops feed).
+        A done / cancelled run is refused. The returned line says what was done."""
         v, d = await body(request, officer=True)
-        rs, ev, t = live_event(v.reg, key)
-        try:  # cancel_run re-renders the sheet and cards, withdraws open confirmations and writes the ops line itself
-            line = await maybe_await(bot.cancel_run(v.reg, rs, ev, v.name, (d.get("reason") or "").strip() or None))
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key) or find_live(v.reg, rs, key)
+        notify = d.get("notify", True) not in (False, "false", "no", 0, "0")
+        try:  # cancel_run re-renders the sheet and cards, closes every open ask and writes the audit line itself
+            line = await maybe_await(bot.cancel_run(v.reg, rs, ev, v.name, (d.get("reason") or "").strip()[:300] or None, notify=notify, by_id=v.uid, via=v.via))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line}
 
+    @app.post("/api/run/{key}/reopen")
+    async def run_reopen(request: Request, key: str):
+        """Reopen a run ENDED by mistake, within the hour (design B6; RaidMixin.reopen_run). A cancelled run is refused
+        (owner decision D19 — open a new one), as is one past the hour or its scheduled close."""
+        v, _ = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None:
+            return JSONResponse({"error": f"no run {key}"}, status_code=404)
+        try:
+            line = await bot.reopen_run(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": line}
+
+    @app.post("/api/run/{key}/remind")
+    async def run_remind(request: Request, key: str):
+        """Remind the unconfirmed (D15; RaidMixin.remind): the Confirm / Can't DM again for every unanswered ask, against
+        the EXISTING ask; once per hour per run (409 with the time it may go again)."""
+        v, _ = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        try:
+            line = await bot.remind(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        return {"message": line}
+
+    @app.post("/api/run/{key}/pause")
+    async def run_pause(request: Request, key: str):
+        """Pause / resume the fill engine for this run: {paused: bool} (D18; RaidMixin.set_autofill_paused). Paused, the
+        scheduler / a freed seat / an answer send nothing on their own; an officer's Fill still sends."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        if "paused" not in d:
+            return JSONResponse({"error": "paused: true (pause) or false (resume)"}, status_code=400)
+        try:
+            line = await bot.set_autofill_paused(v.reg, rs, ev, d.get("paused") in (True, "true", 1, "1", "yes"), by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": line}
+
+    @app.post("/api/run/{key}/withdraw")
+    async def run_withdraw(request: Request, key: str):
+        """Withdraw a sent ask (D15; RaidMixin.withdraw_sent_ask): {member} — their ask still out closes, the tied half
+        is released, both DM cards say "Never mind". 400 when nothing is out for them."""
+        v, d = await body(request, officer=True)
+        rs, ev, t = live_event(v.reg, key)
+        m = resolve_member(v.reg, member_ref(d))
+        try:
+            line = await bot.withdraw_sent_ask(v.reg, rs, ev, m.discord_id, by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": line}
+
+    def open_args(reg, rid: str, d: dict) -> tuple[str | None, str | None]:
+        """The open / preview body → (when, schedule) for rc.open_when: `start` (the preview's exact ISO instant, aware) wins
+        over `when` ('YYYY-MM-DD HH:MM' guild wall time from the picker, resolved DST-safely); neither = the next run."""
+        return ((d.get("start") or d.get("when") or "").strip() or None), ((d.get("schedule") or "").strip() or None)
+
+    @app.post("/api/raid/{rid}/open/preview")
+    async def raid_open_preview(request: Request, rid: str):
+        """What Open would do, nothing written (design B4; rc.open_preview — the /raid open wizard says the same):
+        {kind: scheduled | adhoc, schedule, schedule_name, key, start (ISO: carry it back to Open), label (12-hour guild
+        time), when_note (the DST line), exists, channel, rules, past}. Body as Open's: {when? | start?, schedule?}."""
+        v, d = await body(request, officer=True)
+        if rid not in v.reg.profile.raids:
+            return JSONResponse({"error": "unknown raid"}, status_code=400)
+        when, sid = open_args(v.reg, rid, d)
+        try:
+            p = rc.open_preview(v.reg, bot.raids.store(v.reg), rid, when, sid)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        ch = bot.get_channel(int(p["channel"])) if p.get("channel") else None
+        p["channel_name"] = getattr(ch, "name", None)
+        return p
+
     @app.post("/api/raid/{rid}/open")
     async def raid_open(request: Request, rid: str):
-        """Open a sheet now: the raid's next run (of `schedule` when given, else of any schedule), or a picked
-        'YYYY-MM-DD HH:MM' in guild time (with `schedule`: that schedule's settings, e.g. a pickup template; without one:
-        the upcoming run at exactly that time if there is one, else a one-off — ad hoc, rc.open_schedule)."""
+        """Open a sheet now: the raid's next run (of `schedule` when given, else of any schedule), or a picked time —
+        `start` (the preview's exact instant) or `when` ('YYYY-MM-DD HH:MM' guild time from the picker; DST-safe through
+        rc.open_when / wizard.resolve_local, never replace(tzinfo=)). With `schedule`: that schedule's settings (a pickup
+        template); without: the upcoming run at exactly that time if there is one, else a one-off (ad hoc). `key` (from
+        the preview): the run Open is expected to make — refused (409) when the time now resolves to another run."""
         v, d = await body(request, officer=True)
         reg = v.reg
         if rid not in reg.profile.raids:
             return JSONResponse({"error": "unknown raid"}, status_code=400)
-        now, rd = reg.now_local(), reg.raid_def(rid)
-        when = (d.get("when") or "").strip()
-        sid = (d.get("schedule") or "").strip() or None
-        sched = next((s for s in reg.schedules(rid) if s["id"] == sid), None) if sid and sid != ADHOC_SCHEDULE else None
-        if sid and sid != ADHOC_SCHEDULE and sched is None:
-            return JSONResponse({"error": f"{rd.get('name', rid)} has no schedule {sid}"}, status_code=400)
-        if sid == ADHOC_SCHEDULE and not (d.get("when") or "").strip():
-            return JSONResponse({"error": "an ad hoc run starts at the day and time you pick — pick one"}, status_code=400)
+        when, sid = open_args(reg, rid, d)
         try:
-            if when:
-                start = datetime.fromisoformat(when.replace(" ", "T", 1)).replace(tzinfo=ZoneInfo(reg.config.timezone))
-                sid = rc.open_schedule(reg, rid, start, sid)
-            elif sched is not None and sched["kind"] == "pickup":
-                return JSONResponse({"error": f"{sched['name']} is a pickup template: pick the date and time it starts"}, status_code=400)
-            else:
-                nxt = [(s, t) for s, t in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if sched is None or s["id"] == sid]
-                if not nxt:
-                    fo = reg.first_open(rid)
-                    has = [s for s in reg.schedules(rid) if s["kind"] != "pickup" and (sched is None or s["id"] == sid)]
-                    why = (f"its slots all fall before it opens on {reg.local12(fo)}" if has and fo and fo > now
-                           else "it has no recurring slots yet")
-                    return JSONResponse({"error": f"No next slot for this raid: {why}. Pick a date and time instead, or set it up on the Raids page."}, status_code=400)
-                sched, start = nxt[0]
-                sid = sched["id"]
-        except ValueError:
-            return JSONResponse({"error": "that date and time didn't parse — pick one with the picker"}, status_code=400)
-        try:  # a mistyped year would open a run the scheduler may close at once (open_run_and_post checks it too)
-            rc.refuse_past_start(reg, start, now)
+            start, sid, _note = rc.open_when(reg, rid, when, sid)
+            rc.refuse_past_start(reg, start, reg.now_local())  # a mistyped year would open a run the scheduler may close at once
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
+        expect = (d.get("key") or "").strip()
+        if expect:
+            got = rc.which_run(reg, rid, start, sid if sid is not None else "default")["key"]
+            if got != expect:
+                return JSONResponse({"error": "That time now opens a different run than the preview showed — check it and open again.",
+                                     "preview": rc.open_preview(reg, bot.raids.store(reg), rid, start.isoformat(), sid)}, status_code=409)
         rs = bot.raids.store(reg)
         try:  # what /raid open does: open (or find) the run, post the sheet, write the ops line
             ev = await maybe_await(bot.open_run_and_post(reg, rs, rid, start, v.name, **rc.schedule_kw(sid)))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)")}
+        return {"message": f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted)"), "key": ev.key}
 
     @app.post("/api/admin/confirm")
     async def admin_confirm(request: Request):

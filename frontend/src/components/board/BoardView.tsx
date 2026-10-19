@@ -49,9 +49,10 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
     } finally { setSaving(false); }
   }
   /** Whole-board writes (Clear, Use this split) are tied to the board this officer was looking at. */
-  const commit = (groups: string[][][]) => send("layout", { groups: groups.flat(), rev: e.rev });
-  /** A drag is sent as one move and applied server-side to the board as it is now, so two officers merge. */
-  const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to });
+  const commit = (groups: string[][][], strategy?: string) => send("layout", { groups: groups.flat(), rev: e.rev, ...(strategy ? { strategy } : {}) });
+  /** A drag is sent as one move and applied server-side to the board as it is now, so two officers merge. `state` = the
+   *  state this board was drawn in: a drag dropped after the scheduler locked the run is refused (409 + the board). */
+  const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to, state: e.state === "open" ? "open" : "locked" });
 
   async function clear() {
     if (placed > 0 && !(await ask({ title: "Clear the board?", message: e.consequences?.clear || `${placed} placement${placed === 1 ? "" : "s"} go back to the bank.`, confirmLabel: "Clear", color: "red" }))) return;  // the sentence comes from the server (consequences.py)
@@ -168,7 +169,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
           ))}
         </Stack>
       </Box>
-      {canSplit && <SplitModal e={e} meta={meta} multi={multi} opened={splitOpen} onClose={() => setSplitOpen(false)} onUse={async (layout, strategy) => { await api.post(`/api/run/${e.key}/strategy`, { strategy }).catch(fail); await commit(layout.map(() => []).length ? chunk(layout, board.n_groups) : []); }} />}
+      {canSplit && <SplitModal e={e} meta={meta} multi={multi} opened={splitOpen} onClose={() => setSplitOpen(false)} onUse={async (layout, strategy) => { await commit(layout.map(() => []).length ? chunk(layout, board.n_groups) : [], strategy); }} />}
       {confirmDialog}
       <Text size="xs" c="dimmed" mt={6}>Coloured = present in that group · greyed with a red edge = wanted here and the provider sits in another group · plain grey = nobody in the run brings it · teal edge = covered by a raid-wide buff of the same family · totems one per element.</Text>
     </Box>

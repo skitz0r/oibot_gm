@@ -88,6 +88,19 @@ class RaidSchedulerMixin:
             elif c.silent_for <= 300:
                 c.warned = False
 
+    async def _warn_unopened(self, reg, now) -> None:
+        """No signup channel: the scheduler opens nothing (design B4 "scheduler visibility"). Each run that is due to open
+        gets ONE ops warn ("Barrow Deeps Tue 7:30 PM did not open: no signup channel") — never repeated every minute, and
+        no DM beyond the ops feed's own error path; the Rosters page's Upcoming row says "needs a signup channel"."""
+        warned: set = self.__dict__.setdefault("_unopened_warned", set())
+        for inst in reg.profile.raids:
+            for sched, start in rc.upcoming(reg, inst, now, lead=True):
+                key = (reg.key, rc.event_key(inst, start, sched["id"]))
+                if key in warned or key[1] in self.raids.store(reg).events:
+                    continue
+                warned.add(key)
+                await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: no signup channel is set (/gm config signup-channel)")
+
     async def _close_run(self, reg, rs, ev, now, exhausted_posted: set) -> None:
         """A locked run past its close: a loot council on it decides (LootMixin.loot_may_close — ended only idle 30 min
         with no pick or drop waiting, after one "closing in 15 min" notice; never with a pick pending), else done."""
@@ -116,6 +129,8 @@ class RaidSchedulerMixin:
                     if rc.event_key(inst, start, sched["id"]) in rs.events:
                         continue
                     await self.open_run_and_post(reg, rs, inst, start, by="scheduler", **rc.schedule_kw(sched["id"]))
+        else:
+            await self._warn_unopened(reg, now)
         # every live run is processed even when its sheet channel can't be resolved: the steps that post to a
         # channel (refresh_sheet, post_run_update, cards) fail soft on their own
         for ev in rs.live():
@@ -150,15 +165,18 @@ class RaidSchedulerMixin:
                 # still waiting must never send fill DMs after the raid) — only the close below
                 await self._close_run(reg, rs, ev, now, exhausted_posted)
                 continue
+            # a lock interrupted after its flip (a crash, a Discord error mid fan-out): ask the rostered nobody asked and
+            # re-post missing lock cards — BEFORE expiry, which only ever expires an ask that exists (design B6)
+            await self.recover_lock(reg, rs, ev)
             gone = rc.expire_confirmations(reg, rs, ev)
             if gone:
                 if ev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again
                     ev.fill_state = "idle"
                     rs.save(ev, "fill: seats freed")
-                for name in gone:
+                for name in gone:  # their Confirm / Can't card says the seat was released (an edit — never a DM)
                     m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
                     if m:
-                        await self.dm_seat_released(reg, ev, m, "no-confirm")
+                        await self.seat_released(reg, ev, m, "no-confirm")
                 await self.post_run_update(reg, ev, f"⌛ no confirmation from {', '.join(gone)} — seats freed")
                 await self.refresh_sheet(reg, ev)
                 await self.refresh_cards(reg, ev)

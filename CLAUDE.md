@@ -117,17 +117,26 @@ src/oibot_gm/
                        recurring run same-role asks are automatic and ROLE SWAPS wait for an officer (owner decision D3, out/roster_decisions.md). Series
                        coverage + 4-week forecast: Registry.series_coverage / rc.series_outlook (officer-only).
                        split_reason / split_reason_text: why the joiners make fewer runs than the headcount (what the next run is short, in code);
-                       leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run
+                       leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run.
+                       Raid night (design §5.39): expire_confirmations expires only a held ask; unasked_seats (the lock's recovery); cancel_effects;
+                       reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
+                       open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
+                       asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; FillAsk.channel dm|web (a failed DM = web)
   discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer / call_out (the one path for an answer; `by` = a
                        display name to read, `by_id` = the actor's Discord id decides "their own" — never a name compare; seats found by id, ev.seat_of(member)), lock_run → roster
-                       cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below
+                       cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below.
+                       Phase 2 (§5.39): send_member_card + edit_ask_card (an outcome edits the ask's DM card — never an FYI DM; seat_released),
+                       record_placement (check-and-set on the loop), lock_run resumable (confirmations_sent_at; recover_lock in the scheduler),
+                       lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind, set_autofill_paused, withdraw_sent_ask;
+                       every writer of ev.fill_asks holds plan_lock (_send_asks is the one sender)
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
                        run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client;
                        the loot council: loot_layout (session card) / batch_layout + loot_chunks (proposal cards) / item_layout (the ephemeral item card) /
                        loot_closed_layout / loot_stub_layout, loot_status_text + presence_line (the companion chip), why_not_text
   raid_buttons.py      persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
-                       RunButton (officer Lock/Fill/Loot/Cancel on the cards), LootButton `loot.<gk>:<session>:<drop|->:<action>[:<arg>]`,
+                       RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/End; the closed card's
+                       Reopen; lock_decide = THE lock screen with Preview lock, cancel_decide = THE cancel screen, end_decide), LootButton `loot.<gk>:<session>:<drop|->:<action>[:<arg>]`,
                        LootPick `lootpick.<gk>:…`, LootStartButton `lootstart.<gk>:open`; constructors take the guild key first (`raid.<gk>:…` ids; old ids still match,
                        g=None → guild_routing.resolve_button + each button's legacy matcher); raid_views ⇄ raid_buttons import each other at the bottom
   raid_scheduler.py    RaidSchedulerMixin: the minute loop (open on cadence → health → lock → expire → fill → close), calls RaidMixin
