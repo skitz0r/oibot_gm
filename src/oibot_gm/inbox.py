@@ -128,16 +128,19 @@ def _has_card(reg: Registry, ev, m: Member, key: str) -> bool:
     return False
 
 
-def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | None = None) -> str:
+def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | None = None, *, by_id: int | None = None) -> str:
     """What one on-behalf action does, from code (design §2.3) — the SetWizard's decide screen and the site's confirm print
-    exactly this. Says who is told and how (a notice; their open DM card edited) — never more than happens."""
+    exactly this. Says who is told and how (a notice; their open DM card edited) — never more than happens. `by_id` = the
+    officer recording it: on their OWN record the verbs treat it as their own answer and write no notice, so the
+    sentence promises none."""
     run = rc.run_words(reg, ev)
     locked = ev.state == "locked"
     seated = bool(ev.seat_of(m)) if locked else False
     s = ev.signups.get(str(m.discord_id))
     char = character or (s.character if s else (m.main.label if m.main else "their main"))
     fill = rc.team_setting(rc.run_team(reg, ev), "autofill")
-    tail = " " + _told(reg, ev, m, _has_card(reg, ev, m, key))
+    own = by_id is not None and int(by_id) == m.discord_id
+    tail = " Your own record: no notice is written." if own else " " + _told(reg, ev, m, _has_card(reg, ev, m, key))
     if key == "callout":
         if locked and seated:
             return f"{m.display_name} is recorded as a callout on {run} (hours before counted) and their seat is freed" + ("; the bench is asked." if fill else ".") + tail
@@ -178,8 +181,8 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
                            by: str, by_id: int | None, via: str = "discord") -> str:
     """Record one on-behalf action — the SetWizard's Confirm and POST /api/admin/action — through the SAME verbs every
     surface uses: set_answer (Join / Bench / No thanks: an answer change), call_out (Record a callout: the record + an
-    optional note, before and after lock), answer_placement_for, answer_fill_for, rc.set_pin. Refuses an action that no
-    longer applies (rc.member_actions re-read). The verbs write the notice and edit cards; pins are audited here."""
+    optional note, before and after lock), answer_placement_for, answer_fill_for, pin_member. Refuses an action that no
+    longer applies (rc.member_actions re-read). The verbs write the notice, edit cards and write the audit line."""
     if not rc.on_bench_side(reg, ev, m):  # a puppet on a real run, a real member on a test run: never
         raise RegistryError(f"{m.display_name} isn't on this run's side of the test bench — a test run takes its puppets and its tester only.")
     allowed = {a["key"] for a in rc.member_actions(reg, ev, m)}
@@ -195,14 +198,37 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
     elif key in ("fill_yes", "fill_no"):
         line = await bot.answer_fill_for(reg, rs, ev, m, key == "fill_yes", by, by_id=by_id)
     else:
-        pin = {"pin_in": "in", "pin_out": "out", "unpin": None}[key]
-        s = ev.signups.get(str(m.discord_id))
-        if s is None:
-            raise RegistryError(f"{m.display_name} hasn't answered this sheet")
-        rc.set_pin(ev, s.display_name, pin)
-        rs.save(ev, f"pin {s.display_name} {pin} by {by}")
-        line = f"{s.display_name}: {'pinned ' + pin if pin else 'unpinned'}"
-        await ops_mod.audited(bot.ops, reg, by, f"{ev.key} {line}", via=via, by_id=by_id)
-        if hasattr(bot, "refresh_sheet"):
-            await bot.refresh_sheet(reg, ev)  # the footer's pin counts
+        line = await pin_member(bot, reg, rs, ev, m, {"pin_in": "in", "pin_out": "out", "unpin": None}[key], by=by, by_id=by_id, via=via)
     return str(line).replace("**", "").removeprefix("✅ ")
+
+
+# ---------------------------------------------------------------- pins (D16): ONE write for every surface
+
+def pin_write(reg: Registry, rs, ev, m: Member, pin: str | None, by: str) -> str:
+    """THE pin write: rc.set_pin (the log line) + one save. `pin` = "in" | "out" | None (clear). Refuses someone who
+    isn't on the sheet. Offline callers (plain text's `apply` with no bot) stop here; everyone else calls `pin_member`,
+    which also re-renders the sheet (its footer counts pins). Returns '<name>: pinned in' / '<name>: unpinned'."""
+    s = ev.signups.get(str(m.discord_id))
+    if s is None:
+        raise RegistryError(f"{m.display_name} isn't on this sheet")
+    try:
+        rc.set_pin(ev, s.display_name, pin)
+    except ValueError as e:
+        raise RegistryError(str(e))
+    rs.save(ev, f"pin {s.display_name} {pin or 'clear'} by {by}")
+    return f"{s.display_name}: {'pinned ' + pin if pin else 'unpinned'}"
+
+
+async def pin_member(bot, reg: Registry, rs, ev, m: Member, pin: str | None, *, by: str, by_id: int | None = None, via: str = "discord",
+                     audit: bool = True) -> str:
+    """Pin someone to the roster / keep them on the bench for the lock / clear it — the one path behind the SetWizard,
+    the site's row menu (POST /api/admin/action), POST /api/run/{key}/pin (MCP `pin`) and plain text's `pin` op:
+    pin_write, the audit line (`audit=False` when the caller writes it: configops.apply_async audits what it returns),
+    then the Discord sheet re-rendered so its footer's 'Pinned: N · Bench-pinned: N' is current. Nobody is told."""
+    line = pin_write(reg, rs, ev, m, pin, by)
+    if audit and getattr(bot, "ops", None) is not None:
+        await ops_mod.audited(bot.ops, reg, by, f"{ev.key} {line.replace(': ', ' ', 1)}", via=via, by_id=by_id)  # 'bd-… Kestrel pinned in'
+    refresh = getattr(bot, "refresh_sheet", None)
+    if refresh is not None:
+        await refresh(reg, ev)
+    return line

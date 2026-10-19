@@ -35,7 +35,7 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   14/20 so far. The roster is decided at lock."* — on a run with two rosters it says *"Join counts for 1 of 2 rosters —
   which one is decided at lock"*, on an ad hoc run your place in the queue (*"14th of 20 seats — in if nothing
   changes"*). Answering is code only, no model. The sheet's footer counts officers' pins (*Pinned: 2 · Bench-pinned:
-  1* — numbers only). A **locked** sheet shows the roster(s) group by group,
+  1* — numbers only), current whichever way the pin was set (`/raid set`, the site, plain text or MCP). A **locked** sheet shows the roster(s) group by group,
   a **Not rostered** row (joiners the solver left off), the Bench and No thanks rows, and a single **Can't make
   it** button. A **cancelled** or **finished** sheet says so and has no buttons.
   The sheet lists who joined in columns, a class per column with one character per line (spec icon + name);
@@ -532,13 +532,14 @@ when an officer presses Apply on your request for you.
 
 **Officers record anything a member can do, for them, from one place per surface.** In Discord: `/raid set
 member:<someone>` (optionally `what:` to go straight to one thing) picks the run first — only runs where something
-applies to that person — then offers **only what applies to them on that run**, in the members' own words, raid-night
+applies to that person, never a test run (answer for puppets with `/gm test answer` or the Test bench) — then offers **only what applies to them on that run**, in the members' own words, raid-night
 first: *Confirm for them* / *Can't make it for them* (their open Confirm ask) · *Confirm their fill* / *No to their fill*
 (their open seat or swap question) · *Record a callout…* (with an optional note; before lock it is No thanks + the
 callout) · *Join* (as which character, "as <alt>") · *Bench* · *No thanks* · *Pin to roster* / *Keep on bench* /
 *Unpin* (open sheet). The confirm screen says what happens and who is told — *"Kestrel goes to No thanks on Barrow
 Deeps Tue 7:30 PM; no callout is recorded. Kestrel sees a notice on their Me page — no new DM."* — and if the member
-pressed something meanwhile it says so first (*"Kestrel is now Bench as Kestrel (since 5:12 PM) — keep going?"*). On
+pressed something meanwhile it says so first (*"Kestrel is now Bench as Kestrel (since 5:12 PM) — keep going?"*).
+On your own record it is your own answer, and the screen says so: *"Your own record: no notice is written."* On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
 list, and the sheet's header has **Someone else…** for anyone not on it. Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
@@ -549,14 +550,16 @@ someone onto a locked board, the run's thread says they were asked to confirm on
 confirmations (an ad hoc run with confirmations off just says *in*).
 
 **Your inbox (Me page, `/me view`).** Asks — what you must act on — come first, one card each: what it is (*Confirm
-your seat*, *A seat is open*, *Could you switch?*, *Could you come?*), the run, *as Holy*, the group it puts you in
+your seat*, *A seat is open*, *Could you switch?*, *Could you come?*), the run, the spec icon you'd play (its tooltip
+says *as Holy*), the group it puts you in
 (spec icons, one member per line), *answer by Tue 6:30 PM*, and the two buttons. Pressing one is the same as pressing
 the DM's button — the card shows the reply, and a second answer (from another device, or the DM) is refused with what
 the first was (*"Already answered (yes, by Kestrel at 5:12 PM)."*). A tied pair you said yes to shows *waiting for
 Kestrel's answer*. Under the asks, your **Notices**: outcomes the bot used to DM, or never told you, now land here
 instead — *not rostered* at lock (how many seats, how many joined, and that a freed seat would reach you), a seat
 released (by the board, an absence, a missed confirmation), something an officer answered for you, a run cancelled,
-a schedule you were a regular of removed, your application's decision, a character confirmed, a loot award. Notices
+a schedule you were a regular of removed, your application's decision, a character confirmed, a loot award (a
+correction reaches both — the one who gets the item and the one who held it). Notices
 are kept 30 days (the newest 20); *Mark read* clears the bold. **DMs off** changes where asks wait, never whether you
 are asked: before lock and for confirmations you are asked in the same order as everyone else, on the Me page, with
 the same deadline (the lock card and the updates thread mark it *(site)*). After lock, in the last hours before the
@@ -649,7 +652,8 @@ returns to the game defaults.
   (and optionally `what`), then offers only what applies to them (§4 *Officers record anything…*). `/raid sheet`
   (anyone): an officer **moves** the live sheet here, or to `channel:` — its buttons and updates follow it and the old
   message says *Re-posted in #raids*; anyone else posts a **read-only copy** labelled *copy — the live sheet is in
-  #signups* that follows the sheet but never moves it. Channels where the bot keeps quiet (plain-text mode *ignore*)
+  #signups* that follows the sheet but never moves it (a member's `channel:` is not followed — the copy lands in the
+  channel they ran it in, and the reply says so). Channels where the bot keeps quiet (plain-text mode *ignore*)
   are refused. The site's sheet menu has **Re-post sheet…** with a channel list. `/raid cancel` asks for an optional
   reason in a box.
 - Precedents: `/gm precedents` — read the council's precedents and retire one with a reason (§9).

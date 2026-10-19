@@ -793,12 +793,14 @@ class SetWizard(OfficerWizard):
     def run(self):
         return self.rs.events.get(self.draft["key"]) if self.draft["key"] else None
 
-    def runs(self, m: Member) -> list:
+    def runs(self, m: Member, *, test: bool = False) -> list:
+        """The live runs where something applies to `m` — never a test run (design B5: `/raid set` refuses them; the
+        tester answers for puppets with `/gm test answer`). `test=True` lists the test runs instead (for the refusal)."""
         from . import raidcycle as rc
 
         out = []
         for ev in self.rs.live():
-            if ev.state not in ("open", "locked") or not rc.on_bench_side(self.reg, ev, m):
+            if ev.state not in ("open", "locked") or rc.is_test_run(self.reg, ev) != test or not rc.on_bench_side(self.reg, ev, m):
                 continue
             keys = {a["key"] for a in rc.member_actions(self.reg, ev, m)}
             if keys and (not self.draft["what"] or self.draft["what"] in keys):
@@ -814,6 +816,10 @@ class SetWizard(OfficerWizard):
             return
         self.title = f"Set for {m.display_name}"
         runs = self.runs(m)
+        if not runs and self.runs(m, test=True):
+            await self.finish(interaction, f"{m.display_name} is only on a test run, and `/raid set` leaves test runs alone — answer for "
+                                           "puppets with `/gm test answer` (or the Test bench on the Members page).")
+            return
         if not runs:
             what = SET_WHAT.get(self.draft["what"] or "", "")
             await self.finish(interaction, f"Nothing to set for {m.display_name}" + (f" ({what})" if what else "") + " on a live run right now.")
@@ -877,7 +883,7 @@ class SetWizard(OfficerWizard):
         if ev is None or m is None:
             await self.finish(interaction, "That run closed, or the member isn't registered any more — nothing was changed.")
             return
-        text = inbox.action_consequence(self.reg, ev, m, key, self.draft["character"])
+        text = inbox.action_consequence(self.reg, ev, m, key, self.draft["character"], by_id=interaction.user.id)
         note = {"label": "Note for the officers (optional)", "max_length": 300, "description": "Never shown on the public sheet"} if key == "callout" else None
         label = {"callout": "Record the callout"}.get(key) or SET_WHAT.get(key, "Do it")
         await self.decide(interaction, text, do=self.save, note=note, do_label=label[:40], danger=key in ("callout", "confirm_no", "fill_no", "no_thanks"))

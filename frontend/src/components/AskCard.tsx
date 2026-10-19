@@ -5,7 +5,7 @@ import { classColour } from "../theme";
 import { GameIcon } from "./Icons";
 import { CardHeader, fail, ok } from "./Page";
 
-/** One open ask on the Me page (design B2): what it is, the run, "as Holy", the group it would put you in (spec icon alone, one
+/** One open ask on the Me page (design B2): what it is, the run, "as Holy" (the spec icon alone, its tooltip says it), the group it would put you in (spec icon alone, one
  *  member per line), the deadline in words, and the member's own two buttons. Rendered from the server's state only: both buttons
  *  are disabled while a press is in flight and nothing flips before the answer comes back (no optimistic state) — a refusal
  *  ("Already answered (yes, by Kestrel at 5:12 PM).", "the seat was released") is shown as the server wrote it and the page reloads. */
@@ -29,8 +29,10 @@ export function AskCard({ a, meta, onDone }: { a: MyAsk; meta: Meta; onDone: () 
         <Box style={{ minWidth: 0, flex: "1 1 320px" }}>
           <Text fw={700}>{a.title}</Text>
           <Group gap={6} mt={2} wrap="nowrap">
-            {a.cls && a.spec && <GameIcon meta={meta} kind="spec" id={`${a.cls}:${a.spec}`} size={20} title={`${a.spec}${a.role ? ` · ${a.role}` : ""}`} />}
-            <Text size="sm"><b>{a.raid}</b> · {a.when} · <Text span c={a.cls ? classColour(meta, a.cls) : undefined} fw={600}>{a.character}</Text> {a.as_label}</Text>
+            {a.cls && a.spec && <GameIcon meta={meta} kind="spec" id={`${a.cls}:${a.spec}`} size={20} title={`${a.as_label || a.spec}${a.role ? ` · ${a.role}` : ""}`} />}
+            {/* the spec icon alone says "as Holy" (iconography rule: no text label beside it; the tooltip carries the words);
+                the words show only when there is no icon to carry them */}
+            <Text size="sm"><b>{a.raid}</b> · {a.when} · <Text span c={a.cls ? classColour(meta, a.cls) : undefined} fw={600}>{a.character}</Text>{!(a.cls && a.spec) && a.as_label ? ` ${a.as_label}` : ""}</Text>
           </Group>
           {a.reason && !confirm && <Text size="xs" c="dimmed" mt={4}>{a.reason}</Text>}
           {a.group && a.group.members.length > 0 && (

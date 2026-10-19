@@ -186,7 +186,7 @@ export function MePage({ meta }: { meta: Meta }) {
           </Card>
           <Card>
             <CardHeader title="Direct messages" action={<Switch checked={me.dm} onChange={(e) => setDm(e.currentTarget.checked)} />} />
-            <Text p="md" size="sm" c="dimmed">{me.dm_sentence || "With DMs off, Confirm and fill asks wait on your Me page and the sheet; nothing is sent anywhere else."}</Text>
+            <Text p="md" size="sm" c="dimmed">{(meta.dm_sentences ? (me.dm ? meta.dm_sentences.on : meta.dm_sentences.off) : me.dm_sentence) || ""}</Text>
           </Card>
         </Stack>
       </div>

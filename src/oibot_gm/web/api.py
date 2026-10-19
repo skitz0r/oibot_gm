@@ -344,6 +344,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "group_caps": {"tank": int(grouping.get("tank_max_per_group", 2)), "healer": int(grouping.get("healer_max_per_group", 3))},
             "class_colours": dict(render.CLASS),
             "started_at": float(getattr(bot, "started_at", STARTED)),
+            # the DM toggle's one sentence each way (design B2; inbox.DM_ON/OFF_SENTENCE — /me view and /me dms say the same)
+            "dm_sentences": {"on": inbox.DM_ON_SENTENCE, "off": inbox.DM_OFF_SENTENCE},
         }
 
     @app.get("/api/meta")
@@ -1049,23 +1051,21 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/pin")
     async def run_pin(request: Request, key: str):
+        """Pin someone to the roster / keep them on the bench for the lock — inbox.pin_member, the one pin write (the
+        board's row menu, the SetWizard and plain text's pin): saved, audited, the Discord sheet's pin footer re-rendered."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        """Pin someone to the roster / keep them on the bench for the lock — the same verb the board's menu uses."""
         pin = d.get("pin")
-        uid = str(resolve_member(v.reg, member_ref(d)).discord_id)
+        m = resolve_member(v.reg, member_ref(d))
         if pin not in ("in", "out", None):
             return JSONResponse({"error": "pin must be in, out or null"}, status_code=400)
-        if uid not in ev.signups:
+        if str(m.discord_id) not in ev.signups:
             return JSONResponse({"error": "they haven't answered this sheet"}, status_code=400)
-        name = ev.signups[uid].display_name
         try:
-            rc.set_pin(ev, name, pin)  # writes the log line; the caller saves
+            line = await inbox.pin_member(bot, v.reg, rs, ev, m, pin, by=v.name, by_id=v.uid, via=v.via)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        rs.save(ev, f"pin {name} {pin} by {v.name}")
-        await ops_mod.audited(bot.ops, v.reg, v.name, f"{ev.key} {name} {'pinned ' + pin if pin else 'unpinned'}", via=v.via, by_id=v.uid)
-        return {"message": f"{name}: {'pinned ' + pin if pin else 'unpinned'}"}
+        return {"message": line}
 
     @app.post("/api/run/{key}/set")
     async def run_set(request: Request, key: str):

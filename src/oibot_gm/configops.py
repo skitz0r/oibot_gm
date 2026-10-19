@@ -2152,18 +2152,14 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         _, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
         return f"{m.display_name} absent {reg.span_label(a.start, a.end)}"
     if op.op == "pin":
-        from . import raidcycle as rc
+        from . import inbox
 
         m = _member(reg, op.member)
         if not m:
             raise RegistryError(f"unknown member {op.member}")
         want = _pin_value(op.value)
         rs, ev = _live_event(reg, op.target, raids)
-        try:
-            rc.set_pin(ev, m.display_name, want)
-        except ValueError as e:  # not on the sheet
-            raise RegistryError(str(e))
-        rs.save(ev, f"{PIN_TEXT[want].format(name=m.display_name)} (by {by})")
+        inbox.pin_write(reg, rs, ev, m, want, by)  # THE pin write (with the bot: inbox.pin_member, from _apply_async)
         return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op == "raid_set":
         if (op.field or "").strip() == "cadence":  # a preset: four fields, one write
@@ -2419,6 +2415,16 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
             await refresh(reg)  # open/closed, the note and the invite show on the card
         return line
     raids = bot.raids.store(reg) if bot is not None and getattr(bot, "raids", None) is not None else None  # the live events, not a fresh read
+    if bot is not None and op.op == "pin" and hasattr(bot, "refresh_sheet"):  # the one pin verb: the sheet's pin footer re-rendered
+        from . import inbox
+
+        m = _member(reg, op.member)
+        if not m:
+            raise RegistryError(f"unknown member {op.member}")
+        want = _pin_value(op.value)
+        rs, ev = _live_event(reg, op.target, raids)
+        await inbox.pin_member(bot, reg, rs, ev, m, want, by=by, by_id=by_id, via=via or "discord", audit=False)  # apply_async audits the line
+        return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op in ("run_autofill", "run_fill"):  # the solver / candidate search: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store, raids)
     return apply(reg, op, by, is_owner, policy_store, raids=raids, rev=rev)

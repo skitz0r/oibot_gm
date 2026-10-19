@@ -2988,7 +2988,10 @@ class Registry:
         if last and last.get("text") == text and last.get("run") == run and not last.get("read_at"):
             return last
         stamp = datetime.now(timezone.utc)
-        n = {"id": f"n{int(stamp.timestamp() * 1000):x}{len(m.notices) % 100:02d}", "kind": kind, "text": text, "run": run,
+        base, taken, i = f"n{int(stamp.timestamp() * 1000):x}", {x.get("id") for x in m.notices}, 0
+        while f"{base}{i:02d}" in taken:  # unique on the member file: two notices in one millisecond (at the cap too) differ
+            i += 1
+        n = {"id": f"{base}{i:02d}", "kind": kind, "text": text, "run": run,
              "at": stamp.isoformat(timespec="seconds"), "read_at": None}
         m.notices = (self._fresh_notices(m) + [n])[-NOTICE_CAP:]
         if save:

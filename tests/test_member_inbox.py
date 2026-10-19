@@ -60,6 +60,28 @@ def test_notify_caps_expires_dedupes_and_marks_read(reg):
     assert '"read_at"' in stored and f"notice {NOTICE_CAP + 4}" in stored, "the inbox lives on the member file"
 
 
+def test_notice_ids_stay_unique_at_the_cap_in_one_millisecond(reg, monkeypatch):
+    """Regression: the id was '<ms>' + len(notices) % 100 — at the cap len stays 20, so two notices in one millisecond
+    shared an id and mark_read([id]) marked both."""
+    import oibot_gm.registry as registry_mod
+
+    m = reg.test_members()[0]
+    for i in range(NOTICE_CAP):
+        reg.notify(m.discord_id, "released", f"filler {i}", save=False)
+    fixed = datetime(2026, 10, 19, 18, 0, 0, 123000, tzinfo=timezone.utc)
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed if tz else fixed.replace(tzinfo=None)
+    monkeypatch.setattr(registry_mod, "datetime", Frozen)
+    a = reg.notify(m.discord_id, "released", "first", save=False)
+    b = reg.notify(m.discord_id, "cancelled", "second", save=False)
+    assert a["id"] != b["id"]
+    assert reg.mark_read(m.discord_id, [a["id"]]) == 1
+    assert [n["text"] for n in reg.notices(m.discord_id, unread=True)][:1] == ["second"]
+
+
 def test_notify_refuses_unknown_kinds_and_ignores_unknown_members(reg):
     with pytest.raises(ValueError):
         reg.notify(reg.test_members()[0].discord_id, "fyi", "hello")
@@ -249,6 +271,25 @@ def test_loot_award_line_is_copied_to_the_recipient(reg):
     assert got and got[0].startswith("Loot:")
 
 
+def test_loot_correction_is_copied_to_who_lost_the_item_too(reg):
+    """Regression: a correction wrote a notice only for the new recipient; the member who held the item heard nothing."""
+    from oibot_gm.discord_pool import award_notice
+
+    old, new = reg.test_members()[:2]
+    award = SimpleNamespace(raider=new.main.label, discord_id=new.discord_id, item_name="Wand of Tests", item_id=1, boss="Gatekeeper", offspec=False,
+                            run_key="r", tier="", weight=1.0, by="Jon", source="correct", disenchant=False)
+    award_notice(reg, award, old.main.label)
+    (t_new,) = texts(reg, new)
+    (t_old,) = texts(reg, old)
+    assert t_new == t_old and t_old.startswith("Loot correction:") and f"was {old.main.label}" in t_old
+    from oibot_gm.loot.session import DISENCHANT
+
+    gone = reg.test_members()[2]
+    award_notice(reg, SimpleNamespace(**{**vars(award), "raider": DISENCHANT, "discord_id": None}), gone.main.label)
+    (t_gone,) = texts(reg, gone)
+    assert "now disenchanted" in t_gone, "disenchanted after all: the one who held it still hears"
+
+
 # ---------------------------------------------------------------- the receipt renders state (§2.7)
 
 def test_receipt_says_state_queue_position_and_rosters(reg, rs):
@@ -299,6 +340,21 @@ def test_action_consequences_say_who_is_told_and_never_promise_a_dm(reg, rs):
     assert "no callout is recorded" in inbox.action_consequence(reg, ev, m, "no_thanks")
 
 
+def test_consequence_on_the_officers_own_record_promises_no_notice(reg, rs):
+    """Regression: an officer recording on their OWN record (by_id == member) is their own answer — the verbs write no
+    notice, so the sentence must not promise one."""
+    ev = open_test_run(reg, rs)
+    m = reg.test_members()[0]
+    join(reg, rs, ev, [m])
+    for key in ("bench", "no_thanks", "callout"):
+        mine = inbox.action_consequence(reg, ev, m, key, by_id=m.discord_id)
+        assert "notice on their Me page" not in mine and "no notice is written" in mine, mine
+        assert "notice on their Me page" in inbox.action_consequence(reg, ev, m, key, by_id=m.discord_id + 1)
+    bot = NightBot(reg, rs)
+    run(inbox.do_member_action(bot, reg, rs, ev, m, "bench", by=m.display_name, by_id=m.discord_id))
+    assert not texts(reg, m), "and indeed none is written"
+
+
 def test_do_member_action_refuses_what_no_longer_applies(reg, rs):
     ev = open_test_run(reg, rs)
     m = reg.test_members()[0]
@@ -330,6 +386,37 @@ def test_pin_op_is_in_the_runs_group_and_the_copy_says_so(reg, rs):
     rc.set_pin(ev, ms[1].display_name, "in")
     rc.set_pin(ev, ms[2].display_name, "out")
     assert rc.pin_counts(ev) == "Pinned: 2 · Bench-pinned: 1"
+
+
+def _sheet_refreshes(bot, monkeypatch) -> list:
+    got: list = []
+
+    async def refresh_sheet(reg, ev):
+        got.append((ev.key, rc.pin_counts(ev)))
+    monkeypatch.setattr(bot, "refresh_sheet", refresh_sheet)
+    return got
+
+
+def test_every_pin_path_is_one_write_and_refreshes_the_sheet_footer(reg, rs, monkeypatch):
+    """Regression: only the row menu's pin re-rendered the sheet; plain text's pin op (and the web / MCP route, see
+    test_member_inbox_web) saved without it, so the public 'Pinned: N' footer went stale. All of them are now
+    inbox.pin_member."""
+    ev = open_test_run(reg, rs)
+    ms = reg.test_members()[:3]
+    join(reg, rs, ev, ms)
+    bot = NightBot(reg, rs)
+    got = _sheet_refreshes(bot, monkeypatch)
+    run(inbox.do_member_action(bot, reg, rs, ev, ms[0], "pin_in", by="Jon", by_id=1))
+    assert got[-1] == (ev.key, "Pinned: 1")
+    op = configops.ConfigOp(op="pin", target=ev.key, member=ms[1].display_name, value="out")
+    line = run(configops.apply_async(reg, op, "Jon", False, bot=bot, by_id=1, via="chat"))
+    assert line == f"{ev.team}: keep {ms[1].display_name} on bench"
+    assert got[-1] == (ev.key, "Pinned: 1 · Bench-pinned: 1"), "plain text's pin re-renders the sheet too"
+    assert ev.pins.get(str(ms[1].discord_id)) == "out"
+    with pytest.raises(RegistryError, match="isn't on this sheet"):
+        run(inbox.pin_member(bot, reg, rs, ev, reg.test_members()[5], "in", by="Jon"))
+    src = (SRC / "configops.py").read_text() + (SRC / "web" / "api.py").read_text() + (SRC / "inbox.py").read_text()
+    assert src.count("rc.set_pin(") == 1, "one pin write (inbox.pin_write)"
 
 
 # ---------------------------------------------------------------- D21: a member's /raid sheet is a copy

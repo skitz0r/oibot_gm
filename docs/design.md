@@ -1859,7 +1859,7 @@ characters}` for confirm_yes/no (their open placement ask), fill_yes/no (their o
 <alt>; a rostered member's character swap), bench, no_thanks, pin_in/pin_out/unpin (open sheet). `inbox.action_consequence`
 says what each does and who is told (a notice; their open DM card edited — `inbox._has_card`; pins: nobody), and
 `inbox.do_member_action` writes through `set_answer` / `call_out` / `answer_placement_for` / `answer_fill_for` /
-`rc.set_pin` after re-reading the union (and `rc.on_bench_side`). `rc.member_state_rev` / `member_change_words` = the
+`inbox.pin_member` after re-reading the union (and `rc.on_bench_side`). `rc.member_state_rev` / `member_change_words` = the
 re-read at Confirm. Surfaces: `/raid set member:<User> [what:<Choice>]` → `flows_roster.SetWizard` (run first, then
 the verbs as buttons, a character select, `Wizard.decide` with the consequence and, for a callout, *with a note…*);
 `GET /api/admin/actions?run=&member=` (each action's consequence, `by_character` for "as <alt>", `rev`), `POST
@@ -1883,6 +1883,19 @@ with `PLAIN_GROUPS` example text, manual §8c and the PlainPermissions copy; the
 `rc.pin_counts` ("Pinned: 2 · Bench-pinned: 1"). `/me dms on|off` → `Registry.set_dm` (the verb the Me page, the
 Members page, plain text `dm` and MCP `set_dm` share); `/me view` leads with the inbox (`inbox.inbox_lines`) and a
 **Mark notices read** button.
+
+**Review fixes.** Pins have ONE write: `inbox.pin_write(reg, rs, ev, m, pin, by)` (rc.set_pin + save; plain text's
+offline `apply`) and `inbox.pin_member(bot, …, by, by_id, via, audit=True)` (+ the audit line + `refresh_sheet`, so the
+footer's pin counts never go stale) behind the SetWizard, the row menu, `POST /api/run/{key}/pin` (MCP `pin`) and
+plain text's `pin` op with the bot (`_apply_async`, `audit=False`: apply_async audits its line). `Registry.notify` ids
+are unique per member file (`n<ms hex><nn>`, the first free `nn` — at the cap two notices in one millisecond no longer
+collide). `action_consequence(…, by_id=)`: on the officer's own record the sentence promises no notice (the verbs
+write none). `award_notice` copies a correction to the member who held the item too (`reg.find(was)`; never a guess
+between two same-named characters). The SetWizard leaves test runs to `/gm test answer` (design B5; the site's board on
+a test run is the tester's own surface and keeps the row menu). A member's `/raid sheet channel:` is not followed and
+the reply names the channel. `/api/meta.dm_sentences {on, off}` carries the DM sentence (Me.tsx reads it; `GET
+/api/me.dm_sentence` stays for MCP). AskCard's "as Holy" is the spec icon's tooltip (iconography rule), the words
+only when no icon can carry them.
 
 Tests: `tests/test_member_inbox.py` (notices, D14 ordering and the parallel twin, confirmations on the site, every
 notice writer, the receipt, the union and its sentences, D16, D21, the picker, the DM-call-site lint),

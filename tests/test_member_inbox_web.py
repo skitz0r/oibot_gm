@@ -100,6 +100,15 @@ def test_me_lists_my_asks_and_notices_and_marks_them_read(w):
 
 # ---------------------------------------------------------------- my own answers, through the sheet's verbs
 
+def test_meta_carries_the_one_dm_sentence_each_way(w):
+    """Design B2: the DM toggle's sentence comes from /api/meta (the same constants /me view and /me dms print)."""
+    from oibot_gm import inbox
+
+    m = w.reg.test_members()[0]
+    d = w.c.get("/api/meta", headers=as_user(w.c, m.discord_id)).json()
+    assert d["dm_sentences"] == {"on": inbox.DM_ON_SENTENCE, "off": inbox.DM_OFF_SENTENCE}
+
+
 def test_member_answers_their_own_sheet_and_gets_the_receipt(w):
     ev = open_test_run(w.reg, w.rs)
     m = w.reg.test_members()[0]
@@ -206,6 +215,35 @@ def test_officer_actions_list_and_record_with_rev(w):
     assert any("recorded that you can't make it" in n["text"] for n in w.reg.notices(m.discord_id))
     inbox_d = w.c.get(f"/api/admin/inbox?member={m.discord_id}", headers=h).json()
     assert inbox_d["notices"] and inbox_d["asks"] == []
+
+
+def test_pin_route_refreshes_the_sheet_footer(w, monkeypatch):
+    """Regression: POST /api/run/{key}/pin (also MCP `pin`) saved the pin without re-rendering the Discord sheet, so its
+    'Pinned: N' footer went stale; it is inbox.pin_member now."""
+    ev = open_test_run(w.reg, w.rs)
+    m = w.reg.test_members()[0]
+    join(w.reg, w.rs, ev, [m])
+    got = []
+
+    async def refresh_sheet(reg, e):
+        got.append(rc.pin_counts(e))
+    monkeypatch.setattr(w.bot, "refresh_sheet", refresh_sheet)
+    h = as_user(w.c, OFFICER)
+    r = w.c.post(f"/api/run/{ev.key}/pin", json={"member": m.display_name, "pin": "in"}, headers=h)
+    assert r.status_code == 200 and r.json()["message"] == f"{m.display_name}: pinned in", r.text
+    assert got == ["Pinned: 1"]
+    r = w.c.post(f"/api/run/{ev.key}/pin", json={"member": m.display_name, "pin": None}, headers=h)
+    assert r.status_code == 200 and got[-1] == "" and str(m.discord_id) not in ev.pins
+
+
+def test_officer_actions_on_their_own_record_promise_no_notice(w):
+    """The consequence sentence the site prints is truthful when the officer is the member (their own answer)."""
+    ev = open_test_run(w.reg, w.rs)
+    h = as_user(w.c, OFFICER)
+    w.reg.add_character(OFFICER, "Officer", "Offichar", "Priest", "Holy", None, True)
+    w.reg.config.rosters[-1]["test_by"] = OFFICER  # the officer is this test run's tester: on its side of the bench
+    d = w.c.get(f"/api/admin/actions?run={ev.key}&member={OFFICER}", headers=h).json()
+    assert d["actions"] and all("notice on their Me page" not in a["consequence"] for a in d["actions"]), d
 
 
 def test_officer_confirms_for_a_member_and_their_dm_card_is_edited(w):

@@ -363,7 +363,8 @@ async def open_raid_open(interaction: discord.Interaction, reg: Registry, **_see
 @flow("raid_sheet")
 async def open_raid_sheet(interaction: discord.Interaction, reg: Registry, *, channel=None, **_seed) -> None:
     """/raid sheet [channel] (D21): an officer MOVES the live sheet (here, or to `channel`); anyone else posts a labelled
-    read-only copy here — "copy — the live sheet is in #signups" — that never moves the live one."""
+    read-only copy here — "copy — the live sheet is in #signups" — that never moves the live one. A member's `channel:`
+    is not followed (only officers pick where a sheet goes), and the reply says so instead of ignoring it silently."""
     from .discord_registry import is_officer
 
     async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
@@ -379,6 +380,8 @@ async def open_raid_sheet(interaction: discord.Interaction, reg: Registry, *, ch
             line = await i.client.repost_sheet(reg, rs, ev, target, copy=not officer)  # the verb the site, MCP and plain text use
         except RegistryError as e:  # a channel of another server
             line = str(e)
+        if channel is not None and not officer and getattr(channel, "id", None) != getattr(i.channel, "id", None):
+            line += f"\n-# Only officers choose where a sheet goes — your copy is here, not in #{getattr(channel, 'name', 'that channel')}."
         await wiz.finish(i, line)
     await with_run(interaction, reg, title="Re-post a sheet", then=body)
 

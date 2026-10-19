@@ -147,9 +147,10 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
         v = await who(request, officer=True)
         m = resolve_member(v.reg, member)
         rs, ev = run_of(v, run)
-        acts = [{**a, "consequence": inbox.action_consequence(v.reg, ev, m, a["key"]),
+        acts = [{**a, "consequence": inbox.action_consequence(v.reg, ev, m, a["key"], by_id=v.uid),
                  # "Join as <alt>": the sentence for each character, so the site never edits one (design §2.3)
-                 **({"by_character": {c: inbox.action_consequence(v.reg, ev, m, a["key"], c) for c in a["characters"]}} if a.get("needs") == "character" else {})}
+                 **({"by_character": {c: inbox.action_consequence(v.reg, ev, m, a["key"], c, by_id=v.uid) for c in a["characters"]}}
+                    if a.get("needs") == "character" else {})}
                 for a in rc.member_actions(v.reg, ev, m)] if rc.on_bench_side(v.reg, ev, m) else []
         s = ev.signups.get(str(m.discord_id))
         return {"uid": str(m.discord_id), "display_name": m.display_name, "run": ev.key, "actions": acts, "rev": rc.member_state_rev(ev, m),
