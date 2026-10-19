@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { DateTimePicker } from "@mantine/dates";
 import { ActionIcon, Badge, Box, Button, Card, Drawer, Group, Select, Stack, Tabs, Text, Tooltip } from "@mantine/core";
-import { IconSparkles, IconUserPlus, IconX } from "@tabler/icons-react";
+import { IconFlask, IconSparkles, IconUserPlus, IconX } from "@tabler/icons-react";
 import { api, type Board, type Meta, type Person, type RaidRuns, type Rosters, type Series, type Sheet } from "../api";
 import { GameIcon } from "../components/Icons";
 import { useConfirm } from "../components/ConfirmModal";
@@ -10,6 +10,7 @@ import { RaidHeader } from "../components/RaidHeader";
 import { Eyebrow, PageTitle, fail, ok } from "../components/Page";
 import { BoardPreview } from "../components/board/BoardPreview";
 import { Detail, SheetCard } from "../components/board/SheetCard";
+import { TestFeed } from "../components/TestFeed";
 import type { NightSheet, OpenPreview, RunsPage, UpcomingRow } from "../components/board/types";
 import { RoleCounts, runName, type Act, type OnBoard } from "../components/board/shared";
 import { usePoll } from "../hooks/usePoll";
@@ -21,7 +22,7 @@ export function RostersPage({ meta }: { meta: Meta }) {
   const load = (): Promise<void> => api.get<Rosters>("/api/rosters").then(setData).catch((e) => { fail(e); });
   useEffect(() => { load(); }, []);
   usePoll(load);
-  useLive(load, ["run:", "member", "loot:"]);  // a save anywhere (another officer, Discord, the scheduler) refreshes this page within a second
+  useLive(load, ["run:", "member", "loot:"]);  // (the Test tab's feed listens to "test:" itself)  // a save anywhere (another officer, Discord, the scheduler) refreshes this page within a second
   // deep link from Discord cards: /app/rosters#run-<key> scrolls to that run once it has rendered
   useEffect(() => {
     if (!data || !window.location.hash.startsWith("#run-")) return;
@@ -317,28 +318,41 @@ function Regulars({ r, meta, people, onAct, busy }: { r: RaidRuns; meta: Meta; p
 
 function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: RaidRuns; meta: Meta; people: Person[]; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
   const scheds = (r.schedules || []).filter((s) => s.active && s.kind !== "pickup");
-  const metaLine = [scheds.length ? scheds.map((s) => (scheds.length > 1 ? `${s.name}: ${s.label}` : s.label)).join(" · ") : "no schedule set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${r.open.length} open · ${r.locked.length} locked`].filter(Boolean).join(" · ");
+  // test runs (the test bench's rehearsals and comp sandboxes) live on their own Test tab, never among the real sheets (B9)
+  const open = r.open.filter((e) => !e.test), locked = r.locked.filter((e) => !e.test);
+  const tests = [...r.open, ...r.locked].filter((e) => e.test);
+  const metaLine = [scheds.length ? scheds.map((s) => (scheds.length > 1 ? `${s.name}: ${s.label}` : s.label)).join(" · ") : "no schedule set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${open.length} open · ${locked.length} locked`].filter(Boolean).join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
-  const first = r.locked.some((e) => e.key === target) ? "locked" : r.past.some((e) => e.key === target) ? "history" : r.open.length ? "open" : r.locked.length ? "locked" : "upcoming";
+  const first = tests.some((e) => e.key === target) ? "test" : locked.some((e) => e.key === target) ? "locked" : r.past.some((e) => e.key === target) ? "history" : open.length ? "open" : locked.length ? "locked" : "upcoming";
+  const testBadge = <Tooltip label="a test run: puppets and its tester only — its cards post where it was opened"><Badge variant="light" color="grape" leftSection={<IconFlask size={12} />}>test</Badge></Tooltip>;
   return (
     <Card>
       <RaidHeader id={r.id} name={r.name} meta={metaLine} right={<Stack gap={6} align="flex-end"><OpenNext r={r} busy={busy} onAct={onAct} /><StartAdhoc r={r} busy={busy} onAct={onAct} /></Stack>} />
       <Tabs defaultValue={first} px="md" pb="md">
         <Tabs.List>
-          <Tabs.Tab value="open" rightSection={r.open.length ? <Badge size="xs" color="teal" variant="light">{r.open.length}</Badge> : null}>Open for signup</Tabs.Tab>
-          <Tabs.Tab value="locked" rightSection={r.locked.length ? <Badge size="xs" color="yellow" variant="light">{r.locked.length}</Badge> : null}>Locked</Tabs.Tab>
+          <Tabs.Tab value="open" rightSection={open.length ? <Badge size="xs" color="teal" variant="light">{open.length}</Badge> : null}>Open for signup</Tabs.Tab>
+          <Tabs.Tab value="locked" rightSection={locked.length ? <Badge size="xs" color="yellow" variant="light">{locked.length}</Badge> : null}>Locked</Tabs.Tab>
           <Tabs.Tab value="upcoming">Upcoming</Tabs.Tab>
           <Tabs.Tab value="regulars" rightSection={(r.series || []).length ? <Badge size="xs" color="gray" variant="light">{(r.series || []).reduce((n, s) => n + s.regulars.length, 0)}</Badge> : null}>Regulars</Tabs.Tab>
           <Tabs.Tab value="history">History</Tabs.Tab>
+          {tests.length > 0 && <Tabs.Tab value="test" rightSection={<Badge size="xs" color="grape" variant="light">{tests.length}</Badge>}>Test</Tabs.Tab>}
         </Tabs.List>
         <Tabs.Panel value="open" pt="md">
-          {r.open.length === 0 && <Text size="sm" c="dimmed">No sheet open. The next slot opens on its own {r.upcoming[0] ? `${r.upcoming[0].opens}` : "once a schedule is set on Raids"}, or open one now.</Text>}
-          <Stack gap="md">{r.open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
+          {open.length === 0 && <Text size="sm" c="dimmed">No sheet open. The next slot opens on its own {r.upcoming[0] ? `${r.upcoming[0].opens}` : "once a schedule is set on Raids"}, or open one now.</Text>}
+          <Stack gap="md">{open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
         </Tabs.Panel>
         <Tabs.Panel value="locked" pt="md">
-          {r.locked.length === 0 && <Text size="sm" c="dimmed">Nothing locked.</Text>}
-          <Stack gap="md">{r.locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
+          {locked.length === 0 && <Text size="sm" c="dimmed">Nothing locked.</Text>}
+          <Stack gap="md">{locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
         </Tabs.Panel>
+        {tests.length > 0 && (
+          <Tabs.Panel value="test" pt="md">
+            <Stack gap="md">
+              {tests.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} badge={testBadge} />)}
+              <Card withBorder p="sm"><TestFeed run={tests.length === 1 ? tests[0].key : undefined} height={260} /></Card>
+            </Stack>
+          </Tabs.Panel>
+        )}
         <Tabs.Panel value="upcoming" pt="md">
           {r.upcoming.length === 0 && <Text size="sm" c="dimmed">No upcoming runs{scheds.length ? " before the raid opens" : " — add a schedule on Raids"}.</Text>}
           <UpcomingRows r={r} busy={busy} onAct={onAct} />

@@ -17,6 +17,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from oibot_gm import mcp_server as ms
 from oibot_gm import raidcycle as rc
+from oibot_gm.discord_pool import SetupMixin
 from oibot_gm.discord_raid import RaidMixin
 from oibot_gm.discord_registry import Guilds
 from oibot_gm.web import app as web
@@ -43,6 +44,14 @@ class FakeBot:
     save_board = RaidMixin.save_board
     board_move = RaidMixin.board_move
     _write_board = RaidMixin._write_board
+    # the test bench's verbs (SetupMixin): /api/test/* call them, as /gm test does
+    _test_ops = SetupMixin._test_ops
+    test_seed = SetupMixin.test_seed
+    test_compose = SetupMixin.test_compose
+    test_comp = SetupMixin.test_comp
+    test_answer = SetupMixin.test_answer
+    puppet_asks = SetupMixin.puppet_asks
+    puppet_answer_ask = SetupMixin.puppet_answer_ask
 
     def __init__(self, reg, rs):
         self.registries = Guilds.of(reg.store, reg)  # the real index (by_key, ordered, only, for_guild) over this one guild

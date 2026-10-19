@@ -960,9 +960,26 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .. import ops as ops_mod, registry as registry_mod
     from ..loot import session as loot_session_mod
 
+    def test_event(guild_key: str, run_key: str) -> None:
+        publish(f"test:{run_key}", guild_key)  # the test feed (testfeed.FEED): the Test bench card and the Rosters Test tab reload
+
+    from .. import testfeed
+
     for hooks, fn in ((rc.RUN_LISTENERS, run_saved), (registry_mod.SAVE_LISTENERS, reg_saved), (ops_mod.LISTENERS, ops_line),
-                      (loot_session_mod.LOOT_LISTENERS, loot_saved)):
+                      (loot_session_mod.LOOT_LISTENERS, loot_saved), (testfeed.LISTENERS, test_event)):
         hooks[:] = [f for f in hooks if getattr(f, "__name__", "") != fn.__name__] + [fn]  # one per process, the newest app wins
+
+    def test_lookup(guild_key: str, run_key: str):
+        """(reg, ev) for a saved run, so the test feed can observe a TEST run (testfeed.install)."""
+        reg = bot.registries.by_key.get(guild_key) if getattr(bot, "registries", None) is not None else None
+        ev = bot.raids.store(reg).events.get(run_key) if reg is not None else None
+        return (reg, ev) if ev is not None else None
+
+    def channel_name(cid):
+        ch = bot.get_channel(int(cid)) if cid and hasattr(bot, "get_channel") else None
+        return getattr(ch, "name", None)
+
+    testfeed.install(test_lookup, channel_name)
 
     @app.get("/api/events")
     async def events(request: Request):
@@ -1364,80 +1381,173 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line}
 
+    # ---- the test bench (dual interfaces phase 2, B9): /api/test/* are the same verbs as /gm test … (SetupMixin.test_seed /
+    # test_answer / test_compose / test_comp / test_bench_clear, RaidMixin.open_test_run) and MCP's test_bench; GET
+    # /api/test is the bench's state, GET /api/test/feed the live feed (testfeed.FEED: every card, puppet DM, step and
+    # answer of a test run; SSE topic `test:<run key>`). /api/admin/test stays as the old one-route form.
+    def test_runs(reg, rs) -> list:
+        return [e for e in rs.live() if rc.is_test_run(reg, e)]
+
+    def test_run_row(reg, e) -> dict:
+        return {"key": e.key, "raid": e.instance, "title": f"{reg.raid_def(e.instance).get('name', e.instance)} · {t12(reg, e.starts_at)}",
+                "state": e.state, "when": t12(reg, e.starts_at), "joined": len(e.by_status("in")), "rostered": len(e.seated()) if e.all_rosters else 0,
+                "posted": bool(e.message_id), "asks": len(bot.puppet_asks(reg, e)) if e.state != "open" and hasattr(bot, "puppet_asks") else 0}
+
+    def test_target(reg, rs, ref) -> rc.RaidEvent:
+        """The test run a request names (key, roster key or raid), else the only live test run; a real run is refused."""
+        if ref not in (None, ""):
+            ev = find_live(reg, rs, str(ref))
+            if not rc.is_test_run(reg, ev):
+                raise HTTPException(400, f"{ev.key} is a real run: test members answer test runs only")
+            return ev
+        live = test_runs(reg, rs)
+        if not live:
+            raise HTTPException(400, "no live test run: open one first")
+        if len(live) > 1:
+            raise HTTPException(400, "several live test runs — name one: " + ", ".join(e.key for e in live))
+        return live[0]
+
+    async def test_seed_do(v, d) -> dict:
+        count = as_int(d.get("count", 20), "count")  # 0 = the whole built-in roster; above it is capped to it
+        line = await bot.test_seed(v.reg, count, v.name)
+        return {"message": line, "members": len(v.reg.test_members())}
+
+    async def test_run_do(v, d) -> dict:
+        from .. import testfeed
+
+        reg, rs = v.reg, bot.raids.store(v.reg)
+        rid = str(d.get("raid") or "")
+        if rid not in reg.profile.raids:
+            return JSONResponse({"error": f"unknown raid; options: {', '.join(reg.profile.raids)}"}, status_code=400)
+        try:  # tempo: a presets.TEMPOS name or minutes to the start; without it the four marks (the old form)
+            _label, start_in, nudge_in, lock_in, confirm_in = testfeed.tempo_of(d.get("tempo"), start_in=d.get("start_in"), nudge_in=d.get("nudge_in"),
+                                                                                lock_in=d.get("lock_in"), confirm_in=d.get("confirm_in"))
+        except (ValueError, TypeError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        try:  # RaidMixin.open_test_run: the wizard's and plain text's opener; from the site it needs the signup channel (no channel of its own)
+            ev, _posted = await bot.open_test_run(reg, rs, rid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in,
+                                                  dm=bool(d.get("dm_open") or d.get("dm")), by=v.name, by_id=v.uid)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before"
+                + ("" if ev.message_id else " (sheet not posted)"), "key": ev.key}
+
+    async def test_answer_do(v, d) -> dict:
+        reg, rs = v.reg, bot.raids.store(v.reg)
+        ev = test_target(reg, rs, d.get("run"))
+        m = resolve_member(reg, member_ref(d)) if member_ref(d) not in (None, "") else None
+        try:
+            done = await bot.test_answer(reg, rs, ev, member=m, status=str(d.get("status") or "in") if m else None,
+                                         join=as_int(d.get("join", 0), "join"), bench=as_int(d.get("bench", 0), "bench"), out=as_int(d.get("out", 0), "out"),
+                                         yes=as_int(d.get("yes", 0), "yes"), no=as_int(d.get("no", 0), "no"), by=v.name, by_id=v.uid)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": ("; ".join(done)) if done else "nobody left to answer (seed more, or they've all answered)", "key": ev.key, "answered": len(done)}
+
+    async def test_clear_do(v, d) -> dict:
+        from ..flows_misc import test_clear_consequence
+
+        lines = test_clear_consequence(v.reg, bot.raids.store(v.reg))  # the decide screen's words: the browser never composes them
+        if d.get("preview"):
+            return {"consequence": lines, "empty": lines[0].startswith("Nothing to clear")}
+        line = await bot.test_bench_clear(v.reg, v.name)
+        await bot.ops.emit(v.reg.config, "warn", f"test bench: {line} (by {v.name})")
+        return {"message": line, "consequence": lines}
+
+    async def test_compose_do(v, d) -> dict:
+        reg, rs = v.reg, bot.raids.store(v.reg)
+        try:
+            line = await bot.test_compose(reg, rs, d.get("add") or [], [int(u) for u in d.get("remove") or []], v.name)
+        except (RegistryError, ValueError, TypeError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": line}
+
+    async def test_comp_do(v, d) -> dict:
+        reg, rs = v.reg, bot.raids.store(v.reg)
+        try:
+            ev = await bot.test_comp(reg, rs, str(d.get("raid") or ""), v.name, v.uid)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": f"comp sandbox {ev.key}: {len(reg.test_members())} test members joined — Propose roster on its board builds the comp", "key": ev.key}
+
+    TEST_ACTIONS = {"seed": test_seed_do, "run": test_run_do, "answer": test_answer_do, "clear": test_clear_do, "compose": test_compose_do, "comp": test_comp_do}
+
+    @app.get("/api/test")
+    async def test_state(request: Request):
+        """The bench as the site's Test bench card shows it: puppets, live test runs, whether a test run can open from
+        the site (the signup channel, named), the tempos, the seed presets and the clear consequence (from code)."""
+        from ..flows_misc import SEED_COUNTS, test_clear_consequence
+        from ..presets import DEFAULT_TEMPO, TEMPOS
+
+        v = await who(request, officer=True)
+        reg, rs = v.reg, bot.raids.store(v.reg)
+        sid = reg.config.signup_channel_id
+        ch = bot.get_channel(int(sid)) if sid and hasattr(bot, "get_channel") else None
+        n = len(reg.test_roster())
+        return {"members": len(reg.test_members()), "max": reg.TEST_MAX, "roster": n,
+                "seed": [{"count": c, "label": str(c)} for c in SEED_COUNTS if c < n] + [{"count": 0, "label": f"all {n}"}],
+                "runs": [test_run_row(reg, e) for e in test_runs(reg, rs)],
+                "signup_channel": {"set": bool(sid), "name": getattr(ch, "name", None)},
+                "open_refusal": None if sid else "No signup channel is set: a test run from the site posts its sheet there. Set it on Config › Channels (or /gm config signup-channel).",
+                "tempos": [{"id": k, "label": t[0], "start_in": t[1], "nudge_in": t[2], "lock_in": t[3], "confirm_in": t[4]} for k, t in TEMPOS.items()],
+                "default_tempo": DEFAULT_TEMPO, "clear_consequence": test_clear_consequence(reg, rs)}
+
+    @app.get("/api/test/feed")
+    async def test_feed(request: Request, run: str | None = None, after: int = 0):
+        """The test feed: every card, puppet DM, scheduler step and answer of the guild's test runs, oldest first
+        (`run` = one run's; `after` = only events newer than that seq). In this process only — nothing is stored."""
+        from .. import testfeed
+
+        v = await who(request, officer=True)
+        return {"events": testfeed.FEED.events(v.reg.key, run or None, after=int(after or 0)), "runs": testfeed.FEED.runs(v.reg.key)}
+
+    @app.post("/api/test/seed")
+    async def test_seed(request: Request):
+        """{count}: 5 / 10 / 20 / 0 = the whole bench (existing puppets are kept)."""
+        v, d = await body(request, officer=True)
+        return await test_seed_do(v, d)
+
+    @app.post("/api/test/run")
+    async def test_run(request: Request):
+        """{raid, tempo (quick | standard | slow, or minutes to the start), dm}: open a test run now — refused without a
+        signup channel (the site has no channel of its own), naming the setting."""
+        v, d = await body(request, officer=True)
+        return await test_run_do(v, d)
+
+    @app.post("/api/test/answer")
+    async def test_answer(request: Request):
+        """{run?, member?, status?} one puppet (in | sub | out on the sheet; yes | no answers their open ask), or a random
+        mix {join, bench, out, yes, no}. Test runs only."""
+        v, d = await body(request, officer=True)
+        return await test_answer_do(v, d)
+
+    @app.post("/api/test/clear")
+    async def test_clear(request: Request):
+        """{preview: true} → the consequence lines (the confirm reads them); otherwise cancel every test run and delete
+        every puppet."""
+        v, d = await body(request, officer=True)
+        return await test_clear_do(v, d)
+
+    @app.post("/api/test/compose")
+    async def test_compose(request: Request):
+        """{add: [{cls, spec, offspec?, count}], remove: [puppet uid]}: the bench by composition."""
+        v, d = await body(request, officer=True)
+        return await test_compose_do(v, d)
+
+    @app.post("/api/test/comp")
+    async def test_comp(request: Request):
+        """{raid}: the comp sandbox (every puppet joined to a test run two weeks out, never posted)."""
+        v, d = await body(request, officer=True)
+        return await test_comp_do(v, d)
+
     @app.post("/api/admin/test")
     async def admin_test(request: Request):
-        """The test bench over HTTP — the same steps as /gm test seed|run|answer|clear (discord_registry.py)."""
+        """The test bench in one route: {action: seed | run | answer | clear | compose | comp, …} — the /api/test/* bodies."""
         v, d = await body(request, officer=True)
-        reg, action = v.reg, str(d.get("action") or "")
-        rs = bot.raids.store(reg)
-        if action == "seed":
-            count = as_int(d.get("count", 20), "count")  # 0 = the whole built-in roster; above it is capped to it
-            made = await asyncio.to_thread(reg.seed_test_members, count if count > 0 else len(reg.test_roster()), v.name)
-            total = len(reg.test_members())
-            await bot.ops.emit(reg.config, "warn", f"test bench: {len(made)} test members seeded by {v.name} ({total} total)")
-            return {"message": f"{len(made)} test member(s) created, {total} in total: " + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30])}
-        if action == "run":
-            rid = str(d.get("raid") or "")
-            if rid not in reg.profile.raids:
-                return JSONResponse({"error": f"unknown raid; options: {', '.join(reg.profile.raids)}"}, status_code=400)
-            start_in, lock_in, confirm_in, nudge_in = (as_int(d.get(k, dflt), k) for k, dflt in (("start_in", 40), ("lock_in", 25), ("confirm_in", 15), ("nudge_in", 32)))
-            if not (start_in > lock_in > confirm_in >= 0) or nudge_in <= lock_in:
-                return JSONResponse({"error": "need start_in > nudge_in > lock_in > confirm_in ≥ 0 (all minutes)"}, status_code=400)
-            # RaidMixin.open_test_run: the wizard's and plain text's opener (the site has no channel of its own: signup channel or none)
-            ev, _posted = await bot.open_test_run(reg, rs, rid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in,
-                                                  dm=bool(d.get("dm_open")), by=v.name, by_id=v.uid)
-            return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before" + ("" if ev.message_id else " (no signup channel set — sheet not posted)"), "key": ev.key}
-        if action == "answer":
-            ev = find_live(reg, rs, str(d.get("run") or "")) if d.get("run") else next(iter(rs.live()), None)
-            if not ev:
-                return JSONResponse({"error": "no live run"}, status_code=400)
-            team = reg.config.roster(ev.team) or {"key": ev.team, "size": 20}
-            done = []
-            if d.get("member"):
-                m, status = resolve_member(reg, d.get("member")), str(d.get("status") or "in")
-                if not m.test:
-                    return JSONResponse({"error": "pick a test member"}, status_code=400)
-                if status not in rc.STATUSES:
-                    return JSONResponse({"error": f"status must be one of {', '.join(rc.STATUSES)}"}, status_code=400)
-                if ev.state != "open" and status == "out" and ev.seat_of(m):
-                    await bot.drop_seated(reg, rs, ev, team, m, "callout (test)", None)
-                    done.append(f"{m.display_name} called out")
-                else:
-                    s = rc.set_signup(reg, rs, ev, m, None, status, source="test")
-                    done.append(f"{m.display_name} {rc.LABELS[s.status]}")
-            else:  # a random mix of the puppets who haven't answered (the helper chat and /gm test answer share)
-                try:
-                    done += rc.test_answer_mix(reg, rs, ev, as_int(d.get("join", 0), "join"), as_int(d.get("bench", 0), "bench"), as_int(d.get("out", 0), "out"))
-                except RegistryError as e:
-                    return JSONResponse({"error": str(e)}, status_code=400)
-            await bot.refresh_sheet(reg, ev)
-            await bot.ops.emit(reg.config, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {v.name}")
-            return {"message": ("; ".join(done)) if done else "nobody left to answer (seed more, or they've all answered)", "key": ev.key}
-        if action == "clear":
-            line = await bot.test_bench_clear(reg, v.name)
-            await bot.ops.emit(reg.config, "warn", f"test bench: {line} (by {v.name})")
-            return {"message": line}
-        if action == "compose":  # the Members page's test bench: remove chosen puppets, add by class/spec
-            try:
-                remove = [int(u) for u in d.get("remove") or []]
-                changed = await asyncio.to_thread(rc.forget_test_members, reg, rs, remove, v.name) if remove else []
-                made = await asyncio.to_thread(reg.add_test_members, d.get("add") or [], v.name)
-            except (RegistryError, ValueError, TypeError) as e:
-                return JSONResponse({"error": str(e)}, status_code=400)
-            for ev in changed:
-                await bot.refresh_sheet(reg, ev)
-            line = f"test bench: {len(made)} added, {len(remove)} removed · {len(reg.test_members())} test members"
-            await bot.ops.emit(reg.config, "warn", f"{line} (by {v.name})")
-            return {"message": line}
-        if action == "comp":  # a sandbox run: every puppet joined to a far-off test run, nothing posted; Propose builds the comp
-            try:
-                ev = await asyncio.to_thread(rc.open_comp_sandbox, reg, rs, str(d.get("raid") or ""), v.name, v.uid)
-            except RegistryError as e:
-                return JSONResponse({"error": str(e)}, status_code=400)
-            n = len(reg.test_members())
-            await bot.ops.emit(reg.config, "warn", f"test bench: {v.name} opened a comp sandbox {ev.key} with {n} test members joined (not posted)")
-            return {"message": f"comp sandbox {ev.key}: {n} test members joined — Propose roster on its board builds the comp", "key": ev.key}
-        return JSONResponse({"error": "action must be seed, run, answer, clear, compose or comp"}, status_code=400)
+        fn = TEST_ACTIONS.get(str(d.get("action") or ""))
+        if fn is None:
+            return JSONResponse({"error": "action must be seed, run, answer, clear, compose or comp"}, status_code=400)
+        return await fn(v, d)
 
     # ---- raids: rules per raid (officers read, owner edits)
     @app.get("/api/raids")

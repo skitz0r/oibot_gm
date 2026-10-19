@@ -235,6 +235,12 @@ def test_test_run_tempo_and_dm(reg, rs):
     bot = SetupBot(reg, rs)
     d = configops.describe(reg, ConfigOp(op="test", value="run barrow_deeps quick dm"))
     assert "starts in 20 min, nudge 16, lock 12, confirm 8 min before" in d and "every puppet is DMed" in d
+    with pytest.raises(RegistryError, match="No signup channel"):  # nowhere to post the sheet (B9): refused, nothing written
+        owner_apply(reg, ConfigOp(op="test", value="run barrow_deeps quick dm"), bot)
+    assert not any((reg.config.roster(e.team) or {}).get("test") for e in rs.live())
+    from test_parity_verbs import Chan
+
+    reg.config.signup_channel_id, bot.channels[1111] = 1111, Chan(1111, "signups")
     out = owner_apply(reg, ConfigOp(op="test", value="run barrow_deeps quick dm"), bot)
     assert "(quick)" in out and "every puppet DMed" in out
     ev = next(e for e in rs.live() if (reg.config.roster(e.team) or {}).get("test"))

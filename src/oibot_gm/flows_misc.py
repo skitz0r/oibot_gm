@@ -1,4 +1,4 @@
-"""Small wizards: the /gm test bench (seed · run · answer) and /gm rule loot|comp.
+"""Small wizards: the /gm test bench (seed · run · answer · clear; compose and comp are in flows_test) and /gm rule loot|comp.
 
 The test bench is what officers repeat all session, so every flow here is ONE screen with today's defaults
 preselected: `/gm test run` is a raid (only when there is more than one), a tempo and one button; the tempo is a set
@@ -8,14 +8,13 @@ the current document's tail, then takes exactly the old compile → Confirm/Disc
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 
 import discord
 
 from . import policy as policy_mod, wizard_opts
 from .presets import DEFAULT_TEMPO, TEMPOS  # name → (label, start_in, nudge_in, lock_in, confirm_in), shared with plain text
-from .registry import Registry
+from .registry import Registry, RegistryError
 from .wizard import MAX_OPTIONS, Field, Form, Opt, Wizard, flow
 
 log = logging.getLogger(__name__)
@@ -74,7 +73,7 @@ class TestRunWizard(Wizard):
         items.append(self.button("Cancel", self.cancel))
         name = self.reg.raid_def(d["raid"]).get("name", d["raid"]) if d["raid"] else "no raid in the profile"
         await self.show(interaction, f"**{name}** · {TEMPOS[d['tempo']][0]} — {tempo_note(d['tempo'])}.\n"
-                                     "-# The puppets' DMs arrive in *your* DMs with their name on them.", *items)
+                                     "-# Its cards post here; the puppets' DMs reach *your* DMs as one digest per batch, and the site's Test bench feed shows each.", *items)
 
     async def raid_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         self.draft["raid"] = values[0]
@@ -96,12 +95,17 @@ class TestRunWizard(Wizard):
             return
         await self.working(interaction, "Opening the test run…")
         reg, client = self.reg, interaction.client
-        # RaidMixin.open_test_run: the one opener (plain text and the site too) — signup channel, else this one; the ops line
-        ev, channel = await client.open_test_run(reg, client.raids.store(reg), raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in,
-                                                 dm=dm, by=interaction.user.display_name, by_id=interaction.user.id, channel=interaction.channel)
+        # RaidMixin.open_test_run: the one opener (plain text and the site too) — signup channel, else this one (never a
+        # DM: refused, naming the setting); its cards post here (D20); the ops line
+        try:
+            ev, channel = await client.open_test_run(reg, client.raids.store(reg), raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in,
+                                                     dm=dm, by=interaction.user.display_name, by_id=interaction.user.id, channel=interaction.channel)
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), self.start, "Back")
+            return
         where = f" in {channel.mention}" if channel is not None and getattr(channel, "mention", None) else ""
         await self.finish(interaction, f"🧪 Test run {ev.key} open{where}: starts <t:{int(ev.start.timestamp())}:t>, nudge {nudge_in} min before, lock {lock_in} min before, "
-                                       f"confirm by {confirm_in} min before. Next: `/gm test answer`; the puppets' DMs arrive in *your* DMs with their name on them.")
+                                       f"confirm by {confirm_in} min before. Next: `/gm test answer`; the puppets' DMs reach *your* DMs as one digest per batch.")
 
 
 @flow("test_run")
@@ -114,26 +118,45 @@ async def open_test_run(interaction: discord.Interaction, reg: Registry, **seed)
 # ---------------------------------------------------------------- /gm test answer
 
 class TestAnswerWizard(Wizard):
-    def __init__(self, reg: Registry, rs, owner_id: int):
-        super().__init__(reg, owner_id, title="Test answers", guard=_officer_guard(reg))
+    """Puppets answer a TEST run (never a real one): on an open sheet Join / Bench / No thanks (a random mix, or one
+    puppet); once locked, their open Confirm / Can't make it or fill asks too (Confirm / Can't). Every answer is
+    SetupMixin.test_answer — the site's Test bench and MCP's test_bench go through the same verb. `team` preselects
+    the run (the digest's Answer as puppets…); `guard` replaces the server-only officer check (a DM needs the async one)."""
+
+    def __init__(self, reg: Registry, rs, owner_id: int, *, team: str | None = None, guard=None):
+        super().__init__(reg, owner_id, title="Test answers", guard=guard or _officer_guard(reg))
         self.rs = rs
-        self.draft = {"team": None, "counts": {"in": "0", "sub": "0", "out": "0"}, "member": None, "page": 0}
+        self.draft = {"team": team, "counts": {"in": "0", "sub": "0", "out": "0", "yes": "0", "no": "0"}, "member": None, "page": 0}
 
     def run(self):
         """The run, re-read from the store at every step (it may have locked, been cancelled or ended)."""
         return self.rs.for_team(self.draft["team"]) if self.draft["team"] else None
 
+    def test_runs(self) -> list:
+        from . import raidcycle as rc
+
+        return [ev for ev in self.rs.live() if rc.is_test_run(self.reg, ev)]
+
+    def asks(self, ev) -> list:
+        from .discord_pool import SetupMixin
+
+        return SetupMixin.puppet_asks(self.reg, ev)
+
     async def start(self, interaction: discord.Interaction) -> None:
-        live = self.rs.live()
+        if self.draft["team"] and self.run() is not None:
+            await self.menu(interaction)
+            return
+        live = self.test_runs()
         if not live:
-            await self.finish(interaction, "No live run. Open one with `/gm test run`.")
+            await self.finish(interaction, "No live test run. Open one with `/gm test run`.")
             return
         if len(live) == 1:
             self.draft["team"] = live[0].team
             await self.menu(interaction)
             return
-        await self.show(interaction, "Which run do the test members answer?",
-                        self.select("Pick the run", wizard_opts.live_runs(self.reg, self.rs), self.run_picked),
+        keys = {ev.team for ev in live}
+        await self.show(interaction, "Which test run do the test members answer?",
+                        self.select("Pick the run", [o for o in wizard_opts.live_runs(self.reg, self.rs) if o.value in keys], self.run_picked),
                         self.button("Cancel", self.cancel))
 
     async def run_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
@@ -152,7 +175,9 @@ class TestAnswerWizard(Wizard):
             await self.finish(interaction, (done + "\n" if done else "") + "That run is no longer live.")
             return
         head = (done + "\n") if done else ""
-        await self.show(interaction, head + self._run_line(ev) + "\nA random mix of unanswered test members, or one member?",
+        n_asks = len(self.asks(ev)) if ev.state != "open" else 0
+        tail = f"\n{n_asks} test member(s) hold an open ask (Confirm / Can't make it, or a fill ask)." if n_asks else ""
+        await self.show(interaction, head + self._run_line(ev) + tail + "\nA random mix of test members, or one member?",
                         self.button("Random mix", self.mix_form, discord.ButtonStyle.primary),
                         self.button("One member", self.member_screen, discord.ButtonStyle.primary),
                         self.button("Done", self.done))
@@ -161,11 +186,16 @@ class TestAnswerWizard(Wizard):
         await self.finish(interaction, "🧪 Done.")
 
     # ---- a random mix
-    def mix(self) -> Form:
+    def mix(self, locked: bool = False) -> Form:
         c = self.draft["counts"]
 
         def opts(cur: str) -> list[Opt]:
             return [Opt(str(n), str(n), default=str(n) == cur) for n in ANSWER_COUNTS]
+        if locked:  # the roster is set: the puppets answer their open asks
+            return Form("Random mix", [
+                Field("yes", "How many Confirm", opts(c["yes"]), description="picked at random from test members holding an open ask"),
+                Field("no", "How many Can't make it", opts(c["no"])),
+            ], self.mix_submitted)
         return Form("Random mix", [
             Field("in", "How many Join", opts(c["in"]), description="picked at random from test members who haven't answered"),
             Field("sub", "How many Bench", opts(c["sub"])),
@@ -173,19 +203,23 @@ class TestAnswerWizard(Wizard):
         ], self.mix_submitted)
 
     async def mix_form(self, interaction: discord.Interaction) -> None:
-        await self.open_form(interaction, self.mix())
+        ev = self.run()
+        await self.open_form(interaction, self.mix(locked=ev is not None and ev.state != "open"))
 
     async def mix_submitted(self, interaction: discord.Interaction, v: dict[str, str]) -> None:
-        from . import raidcycle as rc
-
-        self.draft["counts"] = {k: v.get(k) or "0" for k in ("in", "sub", "out")}
+        self.draft["counts"].update({k: v.get(k) or "0" for k in ("in", "sub", "out", "yes", "no") if k in v})
         ev = self.run()
         if ev is None:
             await self.finish(interaction, "That run is no longer live; nothing was answered.")
             return
         await self.working(interaction, "Answering…")
-        c = self.draft["counts"]  # the helper the site, MCP and plain text's `test answer` share
-        done = rc.test_answer_mix(self.reg, self.rs, ev, int(c["in"]), int(c["sub"]), int(c["out"]))
+        c = {k: int(v.get(k) or 0) for k in ("in", "sub", "out", "yes", "no")}  # only this form's fields: the other phase's stay 0
+        try:  # SetupMixin.test_answer: the verb the site and MCP share (refreshes the sheet, writes the ops line)
+            done = await interaction.client.test_answer(self.reg, self.rs, ev, join=c["in"], bench=c["sub"], out=c["out"], yes=c["yes"], no=c["no"],
+                                                        by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), self.menu, "Back")
+            return
         await self.answered(interaction, ev, done)
 
     # ---- one member
@@ -230,8 +264,12 @@ class TestAnswerWizard(Wizard):
             await self.refuse(interaction, "That test member is gone (the bench was cleared?).", self.member_screen, "Pick again")
             return
         self.draft["member"] = m.discord_id
-        await self.show(interaction, f"How does **{m.display_name}** answer?",
-                        *[self.button(label, self._status(st), style) for st, label, style in STATUS_BUTTONS],
+        ev = self.run()
+        holds = ev is not None and ev.state != "open" and any(mm.discord_id == m.discord_id for mm, _k in self.asks(ev))
+        ask_buttons = [self.button("Confirm", self._status("yes"), discord.ButtonStyle.success),
+                       self.button("Can't make it", self._status("no"), discord.ButtonStyle.danger)] if holds else []
+        await self.show(interaction, f"How does **{m.display_name}** answer?" + ("\n-# They hold an open ask: Confirm / Can't make it answers it." if holds else ""),
+                        *ask_buttons, *[self.button(label, self._status(st), style) for st, label, style in STATUS_BUTTONS],
                         self.button("Back", self.member_screen), self.button("Cancel", self.cancel))
 
     def _status(self, status: str):
@@ -240,8 +278,6 @@ class TestAnswerWizard(Wizard):
         return press
 
     async def answer_one(self, interaction: discord.Interaction, status: str) -> None:
-        from . import raidcycle as rc
-
         ev = self.run()
         m = self.reg.members.get(self.draft["member"] or 0)
         if ev is None:
@@ -251,20 +287,15 @@ class TestAnswerWizard(Wizard):
             await self.refuse(interaction, "That test member is gone (the bench was cleared?).", self.member_screen, "Pick again")
             return
         await self.working(interaction, "Answering…")
-        done = []
-        if ev.state != "open" and status == "out" and ev.seat_of(m):
-            team = self.reg.config.roster(ev.team) or {"key": ev.team, "size": 20}
-            await interaction.client.drop_seated(self.reg, self.rs, ev, team, m, "callout (test)", None)
-            done.append(f"{m.display_name} called out")
-        else:
-            rc.set_signup(self.reg, self.rs, ev, m, None, status, source="test")
-            done.append(f"{m.display_name} {rc.LABELS[status]}")
+        try:  # SetupMixin.test_answer: a callout when a seated puppet says No thanks after lock; yes / no answers their ask
+            done = await interaction.client.test_answer(self.reg, self.rs, ev, member=m, status=status, by=interaction.user.display_name, by_id=interaction.user.id)
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), self.member_screen, "Pick again")
+            return
         await self.answered(interaction, ev, done)
 
     async def answered(self, interaction: discord.Interaction, ev, done: list[str]) -> None:
-        await interaction.client.refresh_sheet(self.reg, ev)
-        await _ops(interaction, self.reg, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {interaction.user.display_name}")
-        await self.menu(interaction, ("🧪 " + "; ".join(done)) if done else "Nobody left to answer (seed more, or they've all answered).")
+        await self.menu(interaction, ("🧪 " + "; ".join(done))[:1500] if done else "Nobody left to answer (seed more, or they've all answered).")
 
 
 @flow("test_answer")
@@ -299,12 +330,8 @@ class TestSeedWizard(Wizard):
         count = int(values[0])
         await self.working(interaction, "Seeding…")
         reg = self.reg
-        made = await asyncio.to_thread(reg.seed_test_members, count, interaction.user.display_name)
-        total = len(reg.test_members())
-        await self.finish(interaction, f"🧪 {len(made)} test member(s) created, {total} in total: "
-                          + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30])
-                          + "\nAnalytics cards pause until `/gm test clear`.")
-        await _ops(interaction, reg, "warn", f"test bench: {len(made)} test members seeded by {interaction.user.display_name} ({total} total)")
+        line = await interaction.client.test_seed(reg, count, interaction.user.display_name)  # SetupMixin.test_seed: the site's Seed too (its ops line)
+        await self.finish(interaction, f"🧪 {line}\n" + ", ".join(f"{m.display_name} ({m.main.cls} {m.main.spec})" for m in reg.test_members()[:30]))
 
 
 @flow("test_seed")
@@ -402,8 +429,10 @@ def test_clear_consequence(reg: Registry, rs) -> list[str]:
     if runs:
         parts.append(f"cancels {len(runs)} test run{'s' if len(runs) != 1 else ''}")
     if puppets:
-        parts.append(f"removes {puppets} test member{'s' if puppets != 1 else ''} and their placements")
-    return ["This " + " and ".join(parts) + ".", "Real members and their answers are untouched; the analytics cards go back to the real pool."]
+        parts.append(f"deletes {puppets} puppet{'s' if puppets != 1 else ''}")
+    parts.append("analytics cards resume")
+    line = ", ".join(parts) + "."
+    return [line[:1].upper() + line[1:], "Real members and their answers are untouched; the cancelled test runs post nothing where members read."]
 
 
 @flow("test_clear")

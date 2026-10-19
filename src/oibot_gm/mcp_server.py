@@ -715,34 +715,46 @@ def set_config(field: str, value: Any, guild: Guild = None) -> str:
 
 
 @mcp.tool()
-def test_bench(action: str, count: int = 20, raid: str | None = None, start_in: int = 40, lock_in: int = 25, confirm_in: int = 15, nudge_in: int = 32, dm_open: bool = False,
-               run: str | None = None, join: int = 0, bench: int = 0, out: int = 0, member: str | None = None, status: str | None = None,
-               add: list[dict] | None = None, remove: list[str] | None = None, guild: Guild = None) -> str:
-    """The test bench (/gm test): action = seed (`count` puppet members from the built-in test roster — existing ones
-    are kept, a count above the roster's size is capped to it, count=0 = the whole roster), run (`raid`, minute cadence start_in > nudge_in
-    > lock_in > confirm_in), answer (`run` + a random mix join/bench/out, or one `member` with `status`), clear (cancel
-    test runs, delete every puppet), compose (`add` = [{cls, spec, offspec?, count}] puppets of exactly that mix, `remove`
-    = puppet ids from get_member/list_members), comp (`raid`: every puppet joined to a sandbox run two weeks out, not
-    posted — then propose_split on its key builds the best comp). Puppets' DMs land in the tester's DMs; real members
-    are never touched."""
-    if action not in ("seed", "run", "answer", "clear", "compose", "comp"):
-        raise ToolError("action must be seed, run, answer, clear, compose or comp")
-    body: dict[str, Any] = {"action": action}
+def test_bench(action: str, count: int = 20, raid: str | None = None, tempo: str | None = None, start_in: int | None = None, lock_in: int | None = None,
+               confirm_in: int | None = None, nudge_in: int | None = None, dm_open: bool = False, run: str | None = None, join: int = 0, bench: int = 0,
+               out: int = 0, yes: int = 0, no: int = 0, member: str | None = None, status: str | None = None, add: list[dict] | None = None,
+               remove: list[str] | None = None, guild: Guild = None) -> str | dict:
+    """The test bench (/gm test; the site's Test bench): action = seed (`count` puppet members from the built-in test
+    roster — existing ones are kept, a count above the roster's size is capped to it, count=0 = the whole roster), run
+    (`raid` + `tempo` = quick | standard | slow, or minutes to the start, or the four marks start_in > nudge_in > lock_in
+    > confirm_in; refused without a signup channel — the sheet needs somewhere to go), answer (`run` + a random mix
+    join/bench/out on the sheet, yes/no on the puppets' open Confirm / fill asks, or one `member` with `status` in | sub |
+    out | yes | no), clear (cancel test runs, delete every puppet), compose (`add` = [{cls, spec, offspec?, count}]
+    puppets of exactly that mix, `remove` = puppet ids from get_member/list_members), comp (`raid`: every puppet joined
+    to a sandbox run two weeks out, not posted — then propose_split on its key builds the best comp), feed (the test
+    feed: every card, puppet DM, step and answer of the test runs; `run` narrows it), state (puppets, live test runs,
+    tempos, the clear consequence). Puppets' DMs reach the tester as one digest per batch; real members are never touched."""
+    actions = ("seed", "run", "answer", "clear", "compose", "comp", "feed", "state")
+    if action not in actions:
+        raise ToolError("action must be " + ", ".join(actions[:-1]) + " or " + actions[-1])
+    if action == "feed":
+        return api(guild).get("/api/test/feed" + (f"?run={run}" if run else ""))
+    if action == "state":
+        return api(guild).get("/api/test")
+    body: dict[str, Any] = {}
     if action == "seed":
         body["count"] = max(0, int(count))
     elif action == "run":
         if not raid:
             raise ToolError("run needs a raid")
-        body.update(raid=get_raid(raid, guild)["id"], start_in=start_in, lock_in=lock_in, confirm_in=confirm_in, nudge_in=nudge_in, dm_open=dm_open)
+        body.update(raid=get_raid(raid, guild)["id"], dm_open=dm_open)
+        if tempo not in (None, ""):
+            body["tempo"] = tempo
+        body.update({k: v for k, v in (("start_in", start_in), ("lock_in", lock_in), ("confirm_in", confirm_in), ("nudge_in", nudge_in)) if v is not None})
     elif action == "answer":
-        body.update(run=run, join=join, bench=bench, out=out, member=member, status=status)
+        body.update(run=run, join=join, bench=bench, out=out, yes=yes, no=no, member=member, status=status)
     elif action == "compose":
         body.update(add=add or [], remove=remove or [])
     elif action == "comp":
         if not raid:
             raise ToolError("comp needs a raid")
         body["raid"] = get_raid(raid, guild)["id"]
-    return msg(api(guild).post("/api/admin/test", body))
+    return msg(api(guild).post(f"/api/test/{action}", body))
 
 
 @mcp.tool()

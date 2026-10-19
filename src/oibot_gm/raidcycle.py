@@ -288,11 +288,20 @@ def abbr(instance: str) -> str:
     return "".join(w[0] for w in instance.split("_"))[:4]
 
 
-def run_key(instance: str, start: datetime, schedule: str | None = None) -> str:
+# A test run's key space (dual interfaces phase 2, B9): every test run's key ends '-test' ('bd-1209-1930-test'), so a
+# rehearsal opened the same minute as a real run of the raid's own run times never shares its roster or its sheet
+# (before, both were 'bd-1209-1930' and the puppets' answers landed on the real sheet). Not a schedule: schedule_def_of
+# never sees it — ensure_run reads the raid's own cadence and only the key carries the suffix.
+TEST_SCHEDULE = "test"
+
+
+def run_key(instance: str, start: datetime, schedule: str | None = None, *, test: bool = False) -> str:
     """The run's roster key: 'bd-1209-1930'. A run from a schedule other than the raid's own run times carries the
-    schedule id ('bd-1209-1930-alt'), so two schedules starting the same minute never share a run."""
+    schedule id ('bd-1209-1930-alt'), so two schedules starting the same minute never share a run; a test run ends in
+    TEST_SCHEDULE ('bd-1209-1930-test', 'bd-1209-1930-alt-test'): `test=True`, or `schedule=TEST_SCHEDULE`."""
     base = f"{abbr(instance)}-{start.strftime('%m%d-%H%M')}"
-    return base if schedule in (None, "", DEFAULT_SCHEDULE) else f"{base}-{schedule}"
+    key = base if schedule in (None, "", DEFAULT_SCHEDULE) else f"{base}-{schedule}"
+    return f"{key}-{TEST_SCHEDULE}" if test and schedule != TEST_SCHEDULE else key
 
 
 def event_key(instance: str, start: datetime, schedule: str | None = None) -> str:
@@ -467,10 +476,17 @@ def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: fl
 def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> dict:
     """The ephemeral roster that carries one run's settings (size, cutoffs from its schedule's cadence, how many rosters
     it expects); created once. `schedule` = the schedule id it comes from (None: the raid's own cadence).
-    `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test runs compress it to minutes)."""
-    key = run_key(instance, start, schedule)
+    `cutoffs` = {soft, hard, confirm} in hours to override the cadence (test runs compress it to minutes) — and makes
+    it a TEST run: its key is in the '-test' key space (TEST_SCHEDULE), and an existing roster whose test flag differs
+    from what is asked is refused (a rehearsal never takes over a real run's roster, nor a real run a rehearsal's).
+    `cutoffs["test_channel"]`: where the command was used — the test run's cards post there (D20)."""
+    test = bool(cutoffs)
+    key = run_key(instance, start, schedule, test=test)
     t = reg.config.roster(key)
     if t:
+        if bool(t.get("test")) != test:
+            raise RegistryError(f"{t.get('name') or key} is {'a test run' if t.get('test') else 'a real run'}: "
+                                f"{'a real run' if not test else 'a test run'} can't share it — nothing was opened")
         return t
     rd = reg.schedule_def(instance, schedule)
     sched = rd["schedule"]
@@ -496,6 +512,8 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     if cutoffs:
         t["test"] = True
         t["test_by"] = c.get("test_by")
+        if c.get("test_channel"):
+            t["test_channel"] = int(c["test_channel"])  # the asking channel: the run's officer cards post there (D20)
     reg.config.rosters.append(t)
     reg.save_config(f"run {key} ({t['name']}) created by {by}", notify=False)
     return t
@@ -699,7 +717,10 @@ def stamp_log(ev: RaidEvent) -> None:
 def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) -> RaidEvent:
     key = f"{team['key']}-{starts_at.date().isoformat()}"
     if key in rs.events:
-        return rs.events[key]
+        ev = rs.events[key]
+        if ev.test and not team.get("test"):  # a rehearsal's sheet from before the '-test' key space: never a real run's
+            raise RegistryError(f"{key} is a test run's sheet: a real run can't reuse it — nothing was opened")
+        return ev
     sid = team.get("schedule_id")
     ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=None if sid in (None, DEFAULT_SCHEDULE) else sid,
                    series=team.get("series"), kind=team.get("kind"), test=bool(team.get("test")), starts_at=starts_at.isoformat())

@@ -1,5 +1,5 @@
-"""Discord surface for the signup-driven cycle — the `RaidMixin` on the client: DM routing (test puppets → the
-tester), the sheet and officer cards kept current, set_answer (the one path for a member's or officer's answer),
+"""Discord surface for the signup-driven cycle — the `RaidMixin` on the client: DM routing (test puppets → one
+digest in the tester's DMs + the test feed), the sheet and officer cards kept current, set_answer (the one path for a member's or officer's answer),
 lock_run → roster cards + Confirm/Can't DMs, the fill engine's DMs, drop_seated, opening / cancelling runs, and the
 absence ripple. The rest of the surface lives next door and is re-exported here so older imports keep working:
 `raid_views` (layouts + text helpers), `raid_buttons` (persistent buttons), `raid_scheduler` (RaidSchedulerMixin),
@@ -35,6 +35,10 @@ __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "regist
            "_aura_line", "_group_block", "_group_summaries", "_header", "_raidwide_line", "_role_counts"]
 
 
+NO_TEST_CHANNEL = ("No signup channel is set, so a test run's sheet has nowhere to go: set the signup channel (Config › Channels, "
+                   "or /gm config signup-channel), or use /gm test run in a server channel.")
+
+
 class RaidContext:
     """Per-guild raid store + helpers, attached to the bot."""
 
@@ -59,9 +63,9 @@ class RaidMixin:
         return bool(m and getattr(m, "test", False) and await self.is_officer_anywhere(reg, interaction.user.id))
 
     async def send_member_dm(self, reg, m, text: str | None = None, view=None, ev=None) -> bool:
-        """DM a member — text + buttons, or a layout card (`view` a LayoutView, `text` None). For a test member the same
-        goes to whoever is running the test (`ev`'s own tester when the DM is about a run, so two officers testing at
-        once each get their own puppets' DMs), with the puppet's name in front. Returns True when delivered.
+        """DM a member — text + buttons, or a layout card (`view` a LayoutView, `text` None). A test member's DM is never
+        sent on its own: it goes to the test feed and into ONE digest per batch in the tester's DMs (`ev`'s own tester
+        when the DM is about a run, so two officers testing at once each get their own; puppet_dm). Returns True when delivered.
         While the process serves several guilds a text DM starts with the guild's name (raid_views.guild_prefix; a card
         names it in its header), unless the text already opens with it; with one guild nothing changes."""
         ok, _msg = await self.send_member_card(reg, m, text, view, ev=ev)
@@ -75,11 +79,12 @@ class RaidMixin:
             text = guild_prefix(reg) + text
         target, prefix = m.discord_id, None
         if getattr(m, "test", False):
-            own = (reg.config.team(ev.team) or {}).get("test_by") if ev is not None else None
-            tester = own or next((t.get("test_by") for t in reg.config.rosters if t.get("test") and t.get("test_by")), None) or reg.config.owner_discord_id
+            if self.PUPPET_DIGEST:  # a puppet: never its own DM — one digest per batch in the tester's DMs + the test feed
+                return await self.puppet_dm(reg, m, text, view, ev)
+            tester = self.puppet_tester(reg, ev)  # the per-puppet route (PUPPET_DIGEST off): the card itself, to the tester
             if not tester:
                 return False, None
-            target, prefix = int(tester), f"🧪 **{m.display_name}** would get:"
+            target, prefix = tester, f"🧪 **{m.display_name}** would get:"
         try:
             user = await self.fetch_user(target)
             if isinstance(view, discord.ui.LayoutView):
@@ -91,6 +96,107 @@ class RaidMixin:
             return True, msg
         except Exception:  # noqa: BLE001
             return False, None
+
+    # ---- the test bench's puppet DMs (dual interfaces phase 2, B9 / D20): a digest per batch, the feed per DM
+    PUPPET_DIGEST = True  # off: each puppet DM reaches the tester as its own card (the pre-phase-2 route) — kept for tests that
+    # use puppets as stand-ins for members' DM cards (edits on expiry / cancel / withdraw); the bot always digests
+    DIGEST_QUIET_S = 2.0  # a batch ends when no puppet DM followed for this long (one fan-out: the lock's confirmations, a fill batch)
+    DIGEST_MAX_S = 10.0  # …or this long after its first DM, whichever comes first
+
+    def puppet_tester(self, reg, ev=None) -> int | None:
+        """Who a puppet's DM reaches: the run's own tester (two officers rehearsing at once each get their own), else
+        whoever runs a live test run, else the owner."""
+        own = (reg.config.team(ev.team) or {}).get("test_by") if ev is not None else None
+        tester = own or next((t.get("test_by") for t in reg.config.rosters if t.get("test") and t.get("test_by")), None) or reg.config.owner_discord_id
+        return int(tester) if tester else None
+
+    def _digests(self) -> dict:
+        return self.__dict__.setdefault("_puppet_digests", {})
+
+    async def puppet_dm(self, reg, m, text, view, ev=None) -> tuple[bool, None]:
+        """A puppet's DM: what it would have got goes to the test feed (testfeed.note, kind dm) and is COUNTED into the
+        tester's digest for this run — one DM per batch ("12 Confirm asks sent to puppets · 3 fill asks" + Answer as
+        puppets…), never twelve. Delivered = counted (an ask to a puppet waits like any DM ask; it has no card to edit:
+        the tester answers through the digest's button, /gm test answer or the site's Test bench). False only when
+        nobody runs the bench (no tester, no owner)."""
+        from . import testfeed
+
+        tester = self.puppet_tester(reg, ev)
+        if not tester:
+            return False, None
+        kind = testfeed.dm_kind(view)
+        body = text if text else testfeed.view_text(view)
+        first = next((ln for ln in testfeed.plain(reg, body, self._channel_name).splitlines() if ln.strip()), "") if body else ""
+        word = testfeed.DM_WORDS[kind][0]
+        testfeed.note(reg, ev, "dm", f"{m.display_name} would get ({word}): {first}" if first else f"{m.display_name} would get a {word}")
+        loop = asyncio.get_running_loop()
+        key = (reg.key, tester, ev.key if ev is not None else "")
+        d = self._digests().get(key)
+        if d is None:
+            d = self._digests()[key] = {"reg": reg, "counts": {}, "names": [], "first": loop.time(), "last": loop.time(), "task": None}
+        d["counts"][kind] = d["counts"].get(kind, 0) + 1
+        d["names"].append(m.display_name)
+        d["last"] = loop.time()
+        if d["task"] is None:
+            d["task"] = asyncio.ensure_future(self._digest_later(key))
+        return True, None
+
+    async def _digest_later(self, key) -> None:
+        d = self._digests().get(key)
+        loop = asyncio.get_running_loop()
+        while d is not None:
+            now = loop.time()
+            if now - d["last"] >= self.DIGEST_QUIET_S or now - d["first"] >= self.DIGEST_MAX_S:
+                break
+            await asyncio.sleep(max(0.05, min(self.DIGEST_QUIET_S - (now - d["last"]), self.DIGEST_MAX_S - (now - d["first"]))))
+        await self.send_digest(key)
+
+    async def flush_puppet_digests(self) -> int:
+        """Send every waiting digest now (shutdown, tests). Returns how many went."""
+        n = 0
+        for key in list(self._digests()):
+            d = self._digests().get(key)
+            task = d.get("task") if d else None
+            if task is not None and task is not asyncio.current_task():
+                task.cancel()
+            if await self.send_digest(key):
+                n += 1
+        return n
+
+    async def send_digest(self, key) -> bool:
+        """One DM to the tester for a batch of puppet DMs: the counts in words, the puppets' names, and the Answer as
+        puppets… button (flows_test.TestAnswerButton) while the run is live."""
+        d = self._digests().pop(key, None)
+        if not d or not d["counts"]:
+            return False
+        from . import testfeed
+
+        reg, (gk, tester, run_key) = d["reg"], key
+        ev = self.raids.store(reg).events.get(run_key) if run_key else None
+        names = d["names"]
+        who = ", ".join(names[:10]) + (f" +{len(names) - 10}" if len(names) > 10 else "")
+        head = f"🧪 {guild_prefix(reg)}**{run_title(reg, ev)}** (test run) · " if ev is not None else f"🧪 {guild_prefix(reg)}"
+        text = head + testfeed.digest_line(d["counts"]) + f"\n-# {who}\n-# Answer as them below, with `/gm test answer`, or on the site's Test bench (its feed shows each DM)."
+        view = None
+        if ev is not None and ev.state in ("open", "locked"):
+            from .flows_test import TestAnswerButton
+
+            view = discord.ui.View(timeout=None)
+            view.add_item(TestAnswerButton(gk, run_key))
+        try:
+            user = await self.fetch_user(tester)
+            await user.send(text[:2000], **({"view": view} if view else {}))
+            return True
+        except Exception as e:  # noqa: BLE001 — the feed has every DM; the digest is the nudge
+            log.warning("puppet digest failed (%s): %s", run_key or "-", e)
+            return False
+
+    def _channel_name(self, cid: int | None) -> str | None:
+        try:
+            ch = self.get_channel(int(cid)) if cid else None
+        except Exception:  # noqa: BLE001
+            ch = None
+        return getattr(ch, "name", None) if ch is not None else None
 
     async def edit_ask_card(self, reg, channel_id: int | None, message_id: int | None, text: str) -> bool:
         """Edit an ask's DM card to its final state — `text` (what happened, nothing to do) and no buttons. The DM rule's
@@ -119,7 +225,11 @@ class RaidMixin:
 
     # ---- officer cards + the run's updates thread
     async def post_run_update(self, reg, ev, text: str) -> None:
-        """One line in the run's thread (under its health or lock card; created on first use); falls back to the officer channel."""
+        """One line in the run's thread (under its health or lock card; created on first use); falls back to the officer channel.
+        A test run's line also goes to the test feed (the site's Test bench follows the rehearsal)."""
+        from . import testfeed
+
+        testfeed.note(reg, ev, "step", text, name_of=self._channel_name)
         ch = self.officer_channel(reg, ev)
         thread = self.get_channel(ev.updates_thread_id) if ev.updates_thread_id else None
         if thread is None and ev.cards and ch:
@@ -611,8 +721,14 @@ class RaidMixin:
 
     # ---- lock → roster(s) → confirmations
     def officer_channel(self, reg, ev=None):
-        """Where officer-facing posts go: the roster channel, else the ops channel, else nowhere (never the public sheet channel)."""
+        """Where officer-facing posts go: the roster channel, else the ops channel, else nowhere (never the public sheet channel).
+        A TEST run's cards go to the channel its /gm test run was used in (D20: the rehearsal stays where it was asked
+        for, with the test badge; a DM can't host the updates thread, so a run opened from a DM or the site uses the
+        officer channel as any run does)."""
         cfg = reg.config
+        own = (cfg.team(ev.team) or {}).get("test_channel") if ev is not None else None
+        if own and (ch := self.get_channel(int(own))) is not None:
+            return ch
         return (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(cfg.ops_channel_id) if cfg.ops_channel_id else None)
 
     @contextlib.asynccontextmanager
@@ -1034,14 +1150,23 @@ class RaidMixin:
                             channel=None) -> tuple[rc.RaidEvent, object]:
         """The one test-run opener (/gm test run, plain text's `test run …`, the site's test bench and so MCP): a real
         sheet with minute-level cadence (`*_in` = minutes; start > nudge > lock > confirm), the pool = puppets + the
-        tester (`by_id`), `dm` = DM every puppet when it opens (the DMs reach the tester). The sheet goes to the signup
-        channel, else to `channel` (where it was asked for; None = nowhere, e.g. the site); the ops feed gets the warn
-        line. Returns (the run, the channel it was posted in or None). rc.open_run runs on the event loop, as in
+        tester (`by_id`), `dm` = DM every puppet when it opens (the puppets' DMs reach the tester as one digest). The
+        sheet goes to the signup channel, else to `channel` (where it was asked for); with neither (the site, MCP, a DM
+        without a signup channel) it is refused before anything is written, naming the setting (NO_TEST_CHANNEL). Its
+        officer cards post in `channel` when it is a server channel (D20; officer_channel), and its key is in the
+        '-test' key space (rc.TEST_SCHEDULE), so it never shares a real run's roster. The ops feed gets the warn line. Returns (the run, the channel it was posted in or None). rc.open_run runs on the event loop, as in
         open_run_and_post: it adds to the live events the loop's handlers iterate, so never from a worker thread (L3);
         its one git commit is the same short block every on-demand open has."""
         start = (reg.now_local() + timedelta(minutes=start_in)).replace(second=0, microsecond=0)
-        ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs={"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(dm), "test_by": by_id})
-        target = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else channel
+        in_guild = (channel is not None and not isinstance(channel, (discord.DMChannel, discord.GroupChannel))
+                    and getattr(channel, "guild", True) is not None)  # a server channel, never a DM
+        target = (self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None) or (channel if in_guild else None)
+        if target is None:  # nowhere to post the sheet: refused before anything is written (the site, MCP, a DM)
+            raise RegistryError(NO_TEST_CHANNEL)
+        cut = {"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(dm), "test_by": by_id}
+        if in_guild:
+            cut["test_channel"] = channel.id  # its health / lock cards post where it was asked for (D20)
+        ev = rc.open_run(reg, rs, raid, start, by=by, cutoffs=cut)
         if target is not None and not ev.message_id:
             await self.post_sheet(reg, rs, ev, target)
         await self.ops.emit(reg.config, "warn", f"test bench: {by} opened test run {ev.key} (lock in {start_in - lock_in} min)")

@@ -354,12 +354,23 @@ def test_test_bench(reg, rs):
     assert len(reg.test_members()) == n + 2
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="test", value="run barrow_deeps"), "Officer", is_owner=False)
-    out = run(configops.apply_async(reg, ConfigOp(op="test", value="run barrow_deeps"), "Officer", False, bot=bot, by_id=42))
-    assert out.startswith("test run bd-") and "lock 25 min before" in out and "no signup channel" in out
+    with pytest.raises(RegistryError, match="No signup channel"):  # no signup channel and no server channel (a DM, the site): refused, nothing written
+        run(configops.apply_async(reg, ConfigOp(op="test", value="run barrow_deeps"), "Officer", False, bot=bot, by_id=42))
+    assert not rs.live() and not any(t.get("test") for t in reg.config.rosters)
+    bot.get_channel = lambda cid: types.SimpleNamespace(id=cid, mention=f"<#{cid}>", guild=object())
+
+    async def post_sheet(reg_, rs_, ev, channel):
+        bot.calls.append(("post_sheet", ev.key, channel.id))
+        ev.message_id, ev.channel_id = 1, channel.id
+    bot.post_sheet = post_sheet
+    out = run(configops.apply_async(reg, ConfigOp(op="test", value="run barrow_deeps"), "Officer", False, bot=bot, by_id=42, channel_id=777))
+    assert out.startswith("test run bd-") and "lock 25 min before" in out and "sheet in <#777>" in out
     ev = rs.live()[0]
     t = reg.config.roster(ev.team)
+    assert ev.team.endswith("-test") and t["test_channel"] == 777, "the -test key space; its cards post where it was asked for (D20)"
     assert t["test"] is True and t["test_by"] == 42 and t["cutoff_hard_hours"] == 25 / 60 and t["confirm_hours"] == 15 / 60
-    assert bot.calls == [], "no signup channel: nothing posted"
+    assert bot.calls == [("post_sheet", ev.key, 777)]
+    bot.calls.clear()
     with pytest.raises(RegistryError, match="unknown raid"):
         run(configops.apply_async(reg, ConfigOp(op="test", value="run nowhere"), "Officer", False, bot=bot))
     assert run(configops.apply_async(reg, ConfigOp(op="test", value="clear"), "Officer", False, bot=bot)) == "test bench: 18 test member(s) removed, 0 test run(s) cancelled"

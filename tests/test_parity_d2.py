@@ -203,7 +203,15 @@ def test_the_sites_test_run_goes_through_the_one_opener(reg, rs, monkeypatch):
     monkeypatch.setattr(RaidMixin, "open_test_run", spy)
     monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
     monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
-    client = TestClient(web.create_app(Bot(reg, rs)))
+    from test_parity_verbs import Chan
+
+    bot = Bot(reg, rs)
+    client = TestClient(web.create_app(bot))
+    r = client.post("/api/admin/test", json={"action": "run", "raid": "barrow_deeps"}, headers=bearer())
+    assert r.status_code == 400 and "signup channel" in r.json()["error"] and not seen[0].get("channel"), "the site has no channel of its own: refused, named"
+    assert not rs.live()
+    reg.config.signup_channel_id, bot.channels[55] = 55, Chan(55, "signups")
+    seen.clear()
     r = client.post("/api/admin/test", json={"action": "run", "raid": "barrow_deeps"}, headers=bearer())
     assert r.status_code == 200, r.text
     assert len(seen) == 1 and seen[0]["lock_in"] == 25 and seen[0]["by_id"] == OWNER
@@ -801,6 +809,8 @@ def test_a_test_run_opens_on_the_event_loop_like_every_open(reg, rs, monkeypatch
         return real(*a, **kw)
 
     monkeypatch.setattr(rc, "open_run", spy)
+    from test_parity_verbs import Chan
+
     bot = Bot(reg, rs)
-    asyncio.run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=30, nudge_in=20, lock_in=10, confirm_in=5, dm=False, by="Owner", by_id=OWNER))
+    asyncio.run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=30, nudge_in=20, lock_in=10, confirm_in=5, dm=False, by="Owner", by_id=OWNER, channel=Chan(5)))
     assert threads == [threading.main_thread()]

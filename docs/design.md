@@ -431,7 +431,7 @@ Members never fill in standing availability. The unit of work is a **run**: one 
 
 ### 5.23 Test bench and web setup (built 2026-09-17)
 
-`Member.test` marks puppet members (`Registry.seed_test_members`, fake ids from 9×10²⁰, names/class mix/ranks from a fixed list, main confirmed; `clear_test_members` deletes their files). `/gm test seed|run|answer|clear` (officers). Test runs are ephemeral rosters with `test: true` and minute-level cutoffs (`ensure_run(cutoffs=…)`), so the unchanged scheduler exercises nudge → lock → confirmation → expiry → close within the hour. `RaidMixin.send_member_dm` is the single DM path: real members get a DM, puppets get the same text and view delivered to the **tester's own DMs** (the officer who opened the run, `test_by` on the run; never the roster channel) with the puppet's name on it; `may_answer_for` lets that officer press a puppet's Fill/Confirm buttons. A test run's pool is only the puppets and the tester — real members are never nudged, rostered or asked to fill it — and the test sheet refuses presses from real members. Analytics refreshes pause while puppets exist. **Web setup:** `SetupMixin.set_channel` mirrors the channel commands (cards posted / re-posted), `/api/config` exposes channels (with live channel and role lists), settings and test-bench status, `/api/admin/config` writes one setting; the Config page has channel pickers, officer roles, timezone, ask audience, about, and the test-bench recipe.
+`Member.test` marks puppet members (`Registry.seed_test_members`, fake ids from 9×10²⁰, names/class mix/ranks from a fixed list, main confirmed; `clear_test_members` deletes their files). `/gm test seed|run|answer|clear` (officers). Test runs are ephemeral rosters with `test: true` and minute-level cutoffs (`ensure_run(cutoffs=…)`), so the unchanged scheduler exercises nudge → lock → confirmation → expiry → close within the hour. `RaidMixin.send_member_dm` is the single DM path: real members get a DM; a puppet's DM goes to the **tester** (the officer who opened the run, `test_by` on the run; never the roster channel) — since phase 2 as one digest per batch plus the test feed (§5.40); `may_answer_for` lets that officer press a puppet's Fill/Confirm buttons. A test run's pool is only the puppets and the tester — real members are never nudged, rostered or asked to fill it — and the test sheet refuses presses from real members. Analytics refreshes pause while puppets exist. **Web setup:** `SetupMixin.set_channel` mirrors the channel commands (cards posted / re-posted), `/api/config` exposes channels (with live channel and role lists), settings and test-bench status, `/api/admin/config` writes one setting; the Config page has channel pickers, officer roles, timezone, ask audience, about, and the test-bench recipe.
 
 ### 5.24 MCP server: Claude Code as an officer's hands (built 2026-09-18)
 
@@ -1804,6 +1804,80 @@ too.
 
 Tests: `tests/test_raid_night.py` (each race, recovery, expiry ask-only, DM failure, remind, withdraw, pause, reopen,
 open preview across DST, cancel without DMs, every new route) and `tests/test_raid_night_flows.py` (the wizard screens).
+
+### 5.40 Dual interfaces, phase 2 — test bench parity and the test feed (built 2026-10-19)
+
+Out of `out/dual_interface_design.md` §3.2 B9 and §6 Phase 2 row 7, with the owner's decision D20 (test-run cards post
+in the channel the command ran in AND the web mirrors them in a live feed; puppet DMs still reach the tester as a
+digest) and the DM rule (a puppet's DM is never one DM per puppet).
+
+**The '-test' key space.** `open_test_run` used to open with `schedule=None`, so a rehearsal's key equalled a real
+default-schedule run's at the same minute and `ensure_run` / `open_event` returned the REAL roster — puppet answers
+landed on the real sheet. Now `rc.ensure_run(cutoffs=…)` (cutoffs = a test run, as before) keys the roster
+`run_key(..., test=True)` (`bd-1209-1930-test`, a named schedule's `bd-1209-1930-fri-test`; the cadence is the
+schedule's own — `schedule_def` never sees `test`), refuses an existing roster whose `test` flag differs from what is asked (both ways: a rehearsal
+never takes a real roster, a real run never takes a rehearsal's), and `rc.open_event` refuses to hand a test run's
+sheet (an old file at a real key) to a real roster. `Registry` keeps the schedule id `test` (refused like `adhoc`).
+The comp sandbox (`rc.open_comp_sandbox`) is in the same key space. The guards stay and are tested in it: a test run's
+pool is puppets + its tester, its sheet refuses real members, `/raid set` refuses it, puppets answer test runs only
+(`SetupMixin.test_answer` and plain text's `_test_answer_run` refuse a real run; the plain-text mix never falls back to
+"the only live run").
+
+**One set of verbs, every surface.** `SetupMixin` (discord_pool) owns the bench: `test_seed`, `test_compose(add,
+remove)`, `test_comp(raid)`, `test_answer(ev, member=, status= | join/bench/out/yes/no)`, `puppet_asks(ev)` (puppets
+holding an open placement or fill ask), `puppet_answer_ask` (through `answer_placement_for` / `answer_fill_for`, the
+member's own verbs), `test_bench_clear`; each writes its own ops line. `RaidMixin.open_test_run` stays THE opener: it
+refuses — before anything is written — when the sheet has nowhere to go (no signup channel and no SERVER channel: the
+site, MCP, a DM, plain text on the site; `NO_TEST_CHANNEL` names the setting), and stamps `test_channel` on the roster
+when asked from a server channel. Callers: `/gm test seed|run|answer|compose|comp|clear` (flows_misc, the new
+flows_test), plain text (`test` op), `/api/test/*`, MCP `test_bench`.
+
+**Where test traffic goes (D20).** `RaidMixin.officer_channel(reg, ev)` returns the roster's `test_channel` for a test
+run, so its health / lock cards and updates thread post where `/gm test run` was used; `raid_views._header` prefixes
+"🧪 Test run ·". `send_member_card` sends nothing to a puppet: `puppet_dm` records the DM in the feed and counts it
+into the tester's digest for that run (key `(guild, tester, run)`; `puppet_tester` = the run's `test_by`, else any live
+test run's, else the owner); a batch ends after `DIGEST_QUIET_S` (2 s) without another puppet DM or `DIGEST_MAX_S` (10
+s) after its first, and `send_digest` sends ONE DM: "12 Confirm asks sent to puppets · 3 fill asks" (`testfeed.dm_kind`
+from the view's buttons: PlaceButton = confirm, FillButton = fill, SignupButton = sheet), the puppets' names, and
+`flows_test.TestAnswerButton` (`testans.<gk>:<run>`, persistent, officers only by `is_officer_anywhere` — it works in
+a DM) that opens the answer wizard on that run. `flush_puppet_digests` sends whatever waits. An ask to a puppet is a
+real ask (it expires, can be withdrawn); it has no DM card to edit.
+
+**The test feed (`testfeed.py`).** `TestFeed`: per (guild key, run key) a ring of events `{seq, at, at_label, kind:
+card | dm | step | answer, text, actor}` (300 per run, 12 runs per guild), in this process only — nothing is written
+to the data repo, a restart empties it. Fed from the hooks the traffic already goes through: `install(lookup)` adds a
+`rc.RUN_LISTENERS` listener (the web app installs it) whose `observe(reg, ev)` diffs every save of a TEST run — new
+`ev.log` lines are steps (whoever wrote them: the scheduler, a press, the site), a new sheet message or officer card is
+a card, a changed answer is ONE answer event (its own `set_signup` log line is not repeated); `note(reg, ev, kind,
+text)` from `post_run_update` (thread lines) and `puppet_dm` (what the puppet would have got). Text is made readable
+once (`plain`: custom emoji dropped, `<t:…>` in `Registry.local12`, mentions by name). Each event calls
+`testfeed.LISTENERS` → the web's `publish("test:<run>", guild)`.
+
+**Web.** `GET /api/test` (puppets, live test runs with puppet asks, the signup channel by name and `open_refusal`, the
+tempos, the seed presets, `clear_consequence`), `GET /api/test/feed?run=&after=`, `POST /api/test/seed|run|answer|
+clear|compose|comp` (`clear {preview:true}` returns the consequence lines; `run.tempo` = a `presets.TEMPOS` name or
+minutes to the start — `testfeed.tempo_of`, which keeps the standard tempo's proportions — or the four marks);
+`/api/admin/test {action}` stays as the one-route form of the same handlers. TestBench.tsx: Seed 5/10/20/all, Open a
+test run (raid, tempo, DM-on-open; the refusal shown before the press), Answer as puppets (a random mix — Join/Bench/No
+thanks open, Confirm/Can't locked — or one puppet → status), Clear with the server's consequence, the live feed
+(`TestFeed.tsx`, `useLive(["test:"])`). Rosters: test runs leave Open/Locked for a per-raid **Test** tab (SheetCard's
+new `badge` prop carries the test badge; the feed below). Config's Test bench card is a link to `/members#test-bench`.
+
+**Discord.** `/gm test compose` (TestComposeWizard: class → spec → count, repeat; the review line "3 to add · 2 to
+remove" from `flows_test.compose_diff` against the live bench at Save; counts are preset selects capped by
+`Registry.TEST_MAX`) and `/gm test comp` (TestCompWizard: raid → Try a comp → `board_url`). `/gm test clear` keeps the
+`decide` screen; its consequence is now "Cancels 1 test run, deletes 12 puppets, analytics cards resume."
+(`flows_misc.test_clear_consequence`, the site reads the same lines). `/gm test answer` lists test runs only and, once
+locked, answers the puppets' open asks.
+
+**Parity.** `comp_sandbox` and `test_bench_compose` left `BY_DESIGN_ONLY`; `tests/test_parity_matrix.py` has a
+`TEST_BENCH` row per action (Discord path, web route, MCP tool; the feed is web + MCP by design — Discord's side of a
+rehearsal is the cards and the digest).
+
+Tests: `tests/test_testbench.py` (key collision with a real run at the same minute, the ensure_run / open_event
+refusals, the reserved schedule id, the digest instead of N DMs and its quiet-spell batching, the Answer as puppets
+button, cards in the asking channel, the refusal without a channel, feed events for every step, plain feed text, tempo
+names, every `/api/test/*` route, MCP, the compose / comp / clear wizards).
 
 ## 6. Architecture
 

@@ -708,6 +708,8 @@ def norm_schedule(row: dict) -> dict:
             out[k] = nv
     if sid == ADHOC_SCHEDULE:
         raise RegistryError(f"schedule id {ADHOC_SCHEDULE!r} is kept for one-off runs; pick another id")
+    if sid == "test":  # raidcycle.TEST_SCHEDULE: the test runs' key space ('bd-1209-1930-test'), never a real schedule's
+        raise RegistryError("schedule id 'test' is kept for test runs; pick another id")
     if sid == DEFAULT_SCHEDULE:
         if out.pop("kind", "weekly") != "weekly":
             raise RegistryError("the default schedule is the raid's own weekly run times; add another schedule for other kinds")

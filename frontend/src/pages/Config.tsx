@@ -1,6 +1,7 @@
 import { useRefresh } from "../hooks/usePoll";
 import { useEffect, useState } from "react";
-import { Alert, Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, Switch, TagsInput, Text, TextInput, Textarea } from "@mantine/core";
+import { Link } from "react-router-dom";
+import { Alert, Anchor, Badge, Box, Card, Code, Group, MultiSelect, Select, Stack, Switch, TagsInput, Text, TextInput, Textarea } from "@mantine/core";
 import { api, type LootLogState, type Meta, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { Recruitment } from "../components/Recruitment";
@@ -89,10 +90,9 @@ export function ConfigPage({ meta }: { meta: Meta }) {
       <Recruitment channels={data.guild_channels} />
 
       <Card>
-        <CardHeader title="Test bench" hint="rehearse the whole cycle in Discord with puppet members" action={data.test_bench.members > 0 ? <Badge color="yellow" variant="light">{data.test_bench.members} test members · {data.test_bench.runs.length} test run{data.test_bench.runs.length === 1 ? "" : "s"}</Badge> : <Badge color="gray" variant="outline">idle</Badge>} />
+        <CardHeader title="Test bench" hint="rehearse the whole cycle with puppet members" action={data.test_bench.members > 0 ? <Badge color="yellow" variant="light">{data.test_bench.members} test members · {data.test_bench.runs.length} test run{data.test_bench.runs.length === 1 ? "" : "s"}</Badge> : <Badge color="gray" variant="outline">idle</Badge>} />
         <Box p="md">
-          <Text size="sm">In Discord: <Code>/gm test seed</Code> (pick how many), then <Code>/gm test run</Code> (pick the raid and a tempo: Quick, Standard or Slow), then <Code>/gm test answer</Code> (a random mix, or one member). Or tell the bot: “seed all test members”, “open a quick test Barrow Deeps run”, “test answer join 8 bench 2 out 1”. Sign up yourself on the sheet too. The puppets' DMs (confirmations, fill asks) arrive in your own DMs with the real buttons, addressed per puppet; officers can also answer for them with <Code>/gm test answer</Code>. Lock, drag the board and propose splits here. <Code>/gm test clear</Code> removes everything.</Text>
-          {data.test_bench.members > 0 && <Text size="xs" c="dimmed" mt="xs">While test members exist the analytics cards don't re-post.</Text>}
+          <Text size="sm">The test bench lives on the Members page: seed or compose puppets, open a test run, answer as them and follow the live feed. <Anchor component={Link} to="/members#test-bench">Open the test bench</Anchor> · in Discord: <Code>/gm test</Code>.</Text>
         </Box>
       </Card>
 

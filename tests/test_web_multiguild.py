@@ -354,7 +354,7 @@ def test_live_updates_reach_only_their_guild_even_with_one_run_key(bot, duo):
         return got
 
     got = asyncio.run(scenario())
-    assert got[GUILD2] == [f"run:{ev_b.key}", "ops", "agents"], got
+    assert got[GUILD2] == [f"run:{ev_b.key}", f"test:{ev_b.key}", "ops", "agents"], got  # a test run's save also feeds the test feed (B9)
     assert got[GUILD] == ["member", "agents"], got
 
 

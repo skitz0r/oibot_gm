@@ -124,16 +124,24 @@ def test_the_comp_sandbox_still_opens(reg, rs):
 # ---------------------------------------------------------------- DMs about a run go to THAT run's tester
 
 def test_puppet_dms_follow_the_runs_own_tester(reg, rs):
+    """A puppet's DM about a run reaches THAT run's tester — as one digest per batch (phase 2, B9), never one DM each."""
+    from oibot_gm.raid_views import run_title
+
     bot = Bot(reg, rs)
     a = open_test_run(reg, rs, days=2, test_by=TESTER_A)
     b = open_test_run(reg, rs, days=4, test_by=TESTER_B)
     puppet = reg.test_members()[0]
-    assert run(bot.send_member_dm(reg, puppet, "about b", ev=b))
-    assert run(bot.send_member_dm(reg, puppet, "about a", ev=a))
-    assert any("about b" in str(x) for x in bot.dms[TESTER_B]) and any("about a" in str(x) for x in bot.dms[TESTER_A])
-    assert all("about b" not in str(x) for x in bot.dms[TESTER_A])
-    assert run(bot.send_member_dm(reg, puppet, "no run"))  # no run: the first test run's tester, as before
-    assert puppet.display_name in str(bot.dms[TESTER_A][-1])
+
+    async def go():
+        assert await bot.send_member_dm(reg, puppet, "about b", ev=b)
+        assert await bot.send_member_dm(reg, puppet, "about a", ev=a)
+        assert await bot.send_member_dm(reg, puppet, "no run")  # no run: the first test run's tester, as before
+        assert not bot.dms, "nothing sent per puppet: the digest waits for the batch to end"
+        assert await bot.flush_puppet_digests() == 3
+    run(go())
+    assert run_title(reg, b) in str(bot.dms[TESTER_B][0]) and len(bot.dms[TESTER_B]) == 1
+    assert run_title(reg, a) in str(bot.dms[TESTER_A][0]) and all(run_title(reg, b) not in str(x) for x in bot.dms[TESTER_A])
+    assert puppet.display_name in str(bot.dms[TESTER_A][-1]) and len(bot.dms[TESTER_A]) == 2
 
 
 # ---------------------------------------------------------------- the board verbs

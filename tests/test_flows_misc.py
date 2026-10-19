@@ -7,6 +7,7 @@ import pytest
 
 from oibot_gm import discord_policy, discord_registry
 from oibot_gm import flows_misc as fm
+from oibot_gm.discord_pool import SetupMixin
 from oibot_gm.discord_raid import RaidMixin
 from oibot_gm import policy as policy_mod
 from oibot_gm.wizard import FLOWS
@@ -38,6 +39,9 @@ def make_client(reg, rs, ps=None):
                              get_channel=lambda _id: None, ops=FakeOps(), policies=SimpleNamespace(store=lambda _r: ps),
                              ctx=SimpleNamespace(provider="llm"), ico=lambda kind, key: "")
     client.open_test_run = functools.partial(RaidMixin.open_test_run, client)  # the real opener on the recording client
+    for name in ("_test_ops", "test_seed", "test_answer", "test_compose", "test_comp", "puppet_answer_ask"):  # the bench's verbs (SetupMixin)
+        setattr(client, name, functools.partial(getattr(SetupMixin, name), client))
+    client.puppet_asks = SetupMixin.puppet_asks
     return client, calls
 
 
@@ -86,6 +90,7 @@ def test_run_default_press_opens_todays_standard_run(reg, rs, officer):
 def test_run_quick_tempo_and_dm_toggle(reg, rs, officer):
     client, _ = make_client(reg, rs)
     h = Harness(reg, rs, client=client)
+    h.channel = SimpleNamespace(id=5, mention="<#5>")  # a server channel: no signup channel set, the sheet goes here
     raids = list(reg.profile.raids)
 
     async def go():
@@ -221,7 +226,7 @@ def test_answer_cancel_writes_nothing_and_no_run_says_so(reg, rs, officer):
 
     async def go():
         await FLOWS["test_answer"](h.command(), reg)
-        assert "No live run" in h.text
+        assert "No live test run" in h.text
     asyncio.run(go())
     ev = open_test_run(reg, rs)
 

@@ -78,7 +78,7 @@ looks exactly as before.
 Log in with Discord. Every member gets **Me** and the **Loot log** (every award the council recorded, §9).
 Everything below can also be done there:
 your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card builds puppet members of any mix and a comp sandbox, see §8a), **Config** (owner edits; officers read), **Loot** (Tonight — the live council; History; Precedents with Retire;
+your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (owner edits; officers read), **Loot** (Tonight — the live council; History; Precedents with Retire;
 Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
 bot's recent actions and the plain-text permissions) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
@@ -873,7 +873,9 @@ really called All or Pending is confirmed alone); "Mira is away
 - *Test bench:* "seed 20 test members" (or "seed all of them"), "open a quick test Barrow Deeps run" (the tempos of
   `/gm test run`: Quick starts in 20 min, nudge 16, lock 12, confirm 8 min before; Standard 40/32/25/15, the default;
   Slow 90/70/55/35 — add "and DM them" to DM every puppet when it opens, which reaches you), "test answer join 8 bench
-  2 out 1" (a random mix of puppets who haven't answered; name the run when several are live), "clear the test bench".
+  2 out 1" (a random mix of puppets who haven't answered; name the run when several test runs are live — a real run is
+  refused), "clear the test bench". Opening a test run by plain text needs the signup channel, or a server channel to
+  ask in (§8a).
 - *Loot council (officers, §9):* "open the loot council", "the Gatekeeper dropped the Robe of Tests", "distribute",
   "give the Syphon to Eltam instead — tanks progression" (a reason is required), "confirm the rest", "hold the Shard for
   later", "Mira got the wand because …" (the reason for an in-game award), "the robe should have gone to Kestrel —
@@ -946,40 +948,66 @@ Only Discord saying they are gone counts: a Discord outage never locks a member 
 
 ## 8a. Rehearsing with the test bench (officers)
 
-`/gm test seed` asks how many puppet members to create (5, 10, 20 or the whole bench; fake Discord ids, a
-realistic class mix and ranks, mains confirmed). `/gm test run` is one screen: the raid (when there is more than
-one), a tempo (Quick, Standard or Slow) and whether to DM everyone when it opens, then **Open the test run**. It
-opens a real sheet for that raid in the signup channel (with no signup channel set: in the channel you asked in —
-the same for plain text's "open a quick test run"; the site's test bench needs the signup channel) with minute-level
-cadence, so the unchanged scheduler goes through nudge →
-lock → confirmations → expiry → fill → close within the hour. `/gm test answer` offers **Random mix** (how many
-Join, Bench and No thanks) or **One member** (pick a puppet, then Join, Bench or No thanks), and stays open so you
-can answer again; after lock a puppet's *No thanks* is a
-callout. `/gm test clear` cancels the test runs and deletes every puppet and their placements — after one screen that
-says how many test runs and puppets go, then *Clear the test bench* / *Back*.
+The test bench is on both surfaces: everything below works in Discord (`/gm test …`) and on the site (the **Test
+bench** card on the Members page), and plain text and MCP reach the same steps.
 
-**Any mix, on the Members page.** Officers get a **Test bench** card under the members table: the bench as spec icons
-with a count each (− / + to change it), the role totals, and a class → spec picker with **Add** for a spec it doesn't
-hold yet. **Save test members** adds or removes the difference (removals take the newest puppets of that spec; one
-rostered on a locked run is refused — cancel that run or clear the bench). **Delete all test members** is `/gm test
-clear`. **Try a comp** (pick the raid, a 20-player one by default) opens a *comp sandbox*: a test run two weeks out
-with every puppet joined, never posted in Discord, and takes you to its board, where **Propose roster** builds the best
-comp from that mix (Leftovers and "what a second run would need" included). Change the mix and try again; the old
-sandbox goes with the next clear. The members table hides test members unless you switch them on. Plain text does the
-same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 Warrior Protection", "comp sandbox for
-Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps run and DM them", "test answer join 8 bench 2
-out 1"), and so does MCP (`test_bench` compose / comp). The bench holds at most 80.
+**Puppets.** `/gm test seed` asks how many puppet members to create (5, 10, 20 or the whole bench; fake Discord ids, a
+realistic class mix and ranks, mains confirmed). `/gm test compose` builds the bench by composition instead: pick a
+class, then a spec, then how many; repeat for as many specs as you like; the screen keeps the review line ("3 to add ·
+2 to remove") and nothing is written before **Save** (removals take the newest puppets of that spec; one rostered on a
+locked run is refused — cancel that run or clear the bench). On the site the card shows the bench as spec icons with a
+count each (− / + to change it), the role totals, **Seed** 5 / 10 / 20 / all, and a class → spec picker with **Add**;
+**Save test members** writes the difference. The bench holds at most 80; the members table hides puppets unless you
+switch them on.
+
+**A test run.** `/gm test run` is one screen: the raid (when there is more than one), a tempo (Quick, Standard or Slow)
+and whether to DM every puppet when it opens, then **Open the test run**. On the site, **Open a test run** has the
+same three choices. It opens a real sheet for that raid with minute-level cadence, so the unchanged scheduler goes
+through nudge → lock → confirmations → expiry → fill → close within the hour. The sheet goes to the signup channel; with
+no signup channel set it goes to the channel you used the command in. With neither — the site, MCP, a DM, plain text
+on the site — the bot refuses before anything is written and says so: set the signup channel (Config › Channels or
+`/gm config signup-channel`), or use `/gm test run` in a server channel. The site's card says this before you press.
+A test run never shares a real run's sheet, even when it starts the same minute as one: its key ends in `-test`
+(`bd-1209-1930-test`), and the schedule id `test` is kept for it.
+
+**Where its traffic goes.** The test run's officer cards (health, lock, the updates thread) post in **the channel you
+opened it from**, marked 🧪 *Test run* — not in the roster channel (a run opened from the site or MCP uses the roster
+channel, as any run does, still marked). The puppets never get DMs of their own: what each would have got (open, nudge,
+Confirm / Can't make it, fill asks) is collected into **one DM per batch** to the officer running *that* test run —
+"12 Confirm asks sent to puppets · 3 fill asks", the puppets' names, and an **Answer as puppets…** button that opens
+the answer screen on that run. Two officers rehearsing at once each get their own.
+
+**The feed.** The site follows a rehearsal live: the Test bench card on Members and the **Test** tab on Rosters (per
+raid, shown while a test run is live; test runs never appear under Open or Locked) list every card posted, every
+puppet DM (with what it said), every scheduler step (opened, nudged, locked, confirmations sent, expired, filled,
+cancelled, thread lines) and every answer, newest first, as they happen. The feed is kept in the bot's memory only:
+nothing of it is stored, and a restart empties it.
+
+**Answering as puppets.** `/gm test answer` (or the digest's button, or **Answer as puppets** on the site) offers a
+**Random mix** — on an open sheet how many Join, Bench and No thanks; once locked how many Confirm and Can't make it
+among the puppets holding an open ask — or **One member** (pick a puppet, then Join, Bench or No thanks, or Confirm /
+Can't make it when they hold an ask). It stays open so you can answer again; after lock a seated puppet's *No thanks*
+is a callout. Puppets answer test runs only — naming a real run is refused on every path.
+
+**Try a comp.** `/gm test comp` (pick the raid, then **Try a comp**) or **Try a comp** on the site opens a *comp
+sandbox*: a test run two weeks out with every puppet joined, never posted in Discord; Discord answers with a link to
+its board and the site takes you there, where **Propose roster** builds the best comp from that mix (Leftovers and
+"what a second run would need" included). Change the mix and try again; the old sandbox goes with the next clear.
+
+**Clearing.** `/gm test clear` shows what it does — "Cancels 1 test run, deletes 12 puppets, analytics cards
+resume." — then *Clear the test bench* / *Back*; the site's **Clear the test bench** asks with the same words.
+
+Plain text does the same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 Warrior Protection",
+"comp sandbox for Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps run and DM them", "test answer
+join 8 bench 2 out 1"), and so does MCP (`test_bench`, §8b; its tempo is a name — quick, standard, slow — or minutes to
+the start).
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,
 rostered or asked to fill it, and the test sheet refuses presses from real members. The other way round too: a real
 run (ad hoc, or a schedule with no regulars yet, where every main is expected) never expects, suggests, asks or marks
-away a puppet; setting a real member's
-answer on a test run is refused on every path too (the site, plain text, MCP). Every DM the bot would
-send a puppet (open, nudge, Confirm / Can't make it, fill asks) arrives in **your own DMs** with the puppet's
-name on it — the DMs of the officer who opened *that* test run, so two officers rehearsing at once each get their
-own — and you can press its buttons on their behalf. What real members do see: the sheet itself in the
-signup channel (marked as a test), the roster-channel cards, the ops lines, and the analytics cards pausing
-until `/gm test clear`.
+away a puppet; setting a real member's answer on a test run is refused on every path too (the site, plain text, MCP),
+and a test run refuses `/raid set`. What real members do see: the test sheet in the signup channel (marked as a
+test), the ops lines, and the analytics cards pausing until the bench is cleared.
 
 ## 8b. MCP server (owner, from Claude Code)
 
@@ -1030,7 +1058,7 @@ news post says can make the review read or write another server.
 | `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles, `loot_log` on/off |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
-| `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run / answer / clear / compose / comp, as `/gm test` |
+| `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
 | `policy_get` · `policy_edit` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full · replace its text (a draft; the persona is live as written) · the bot's reading of it, nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
 | `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview; like Discord's Apply, an op that fails is listed in `refused` with why and the rest still apply (`applied` is what landed, `error` the first failure) (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
 | `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default) |

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Switch, Text, Textarea, Tooltip } from "@mantine/core";
 import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconPin, IconPinnedOff, IconPlayerPause, IconPlayerPlay, IconUserOff, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
@@ -16,7 +16,8 @@ import type { LockPreview, NightSheet } from "./types";
 /** One sheet: header + timeline, who joined by class, bench / no-thanks rows, the board, the detail accordion. Raid-night
  *  state (dual interfaces phase 2) comes as words from the server: the lock failure, the fill state, asks waiting on the
  *  site, the D3 banner, the spec switches and regulars left out — nothing here composes a sentence the bot didn't. */
-export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
+/** `badge`: an extra badge beside the state (the Rosters page's Test tab passes the test badge). */
+export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badge }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void>; badge?: ReactNode }) {
   const e = sheet as unknown as NightSheet;
   const locked = e.state !== "open";
   const n = e.needs;
@@ -88,6 +89,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload }: { 
         <Box>
           <Group gap="sm">
             <Text size="lg" fw={700}>{e.when}</Text>
+            {badge}
             {locked && <Badge variant="light" color="yellow">locked</Badge>}
             {e.kind === "adhoc" && <Tooltip label="first come, first rostered · no regulars · no reminder"><Badge variant="light" color="blue">ad hoc</Badge></Tooltip>}
             {e.kind === "recurring" && e.series_name && <Text size="xs" c="dimmed">{e.series_name}</Text>}

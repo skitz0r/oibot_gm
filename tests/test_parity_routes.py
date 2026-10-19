@@ -297,7 +297,9 @@ def test_changed_tools_send_one_body(mocked):
     ms.set_layout("bd", [["A"]], rev="abc")
     assert mocked[-1][2] == {"groups": [["A"]], "rev": "abc"}
     ms.test_bench("seed", count=0)
-    assert mocked[-1][2] == {"action": "seed", "count": 0}
+    assert mocked[-1][1:] == ("/api/test/seed", {"count": 0})  # one route per action (phase 2, B9)
+    ms.test_bench("run", raid="barrow", tempo="quick")
+    assert mocked[-1][1:] == ("/api/test/run", {"raid": "barrow_deeps", "dm_open": False, "tempo": "quick"})
     ms.ops_log(member="Kessa", precedents_limit=99)
     assert [c[1] for c in mocked[-3:]] == ["/api/ops", "/api/loot/precedents", "/api/loot/log"]
     assert mocked[-2][2] == {"member": "Kessa", "limit": "50"} and mocked[-1][2]["member"] == "Kessa" and mocked[-1][2]["scores"] == "true"

@@ -504,9 +504,9 @@ def test_dm_text_and_cards_name_the_guild_only_when_there_are_several(duo, reg, 
     ev_a, ev_b = same_run(duo.a, duo.rs_a, duo.b, duo.rs_b)
     head = raid_views._header(duo.b, ev_b, "You're rostered", [])
     text = head.content if isinstance(head, discord.ui.TextDisplay) else head.children[0].content
-    assert text.startswith("## Duo Guild · You're rostered")
+    assert text.startswith("## Duo Guild · 🧪 Test run · You're rostered"), "the guild first, then the test badge (a test run's card, B9)"
     single = raid_views._header(reg, ev_a, "You're rostered", [])
-    assert (single.content if isinstance(single, discord.ui.TextDisplay) else single.children[0].content).startswith("## You're rostered")
+    assert (single.content if isinstance(single, discord.ui.TextDisplay) else single.children[0].content).startswith("## 🧪 Test run · You're rostered")
 
 
 # ---------------------------------------------------------------- must_apply in a DM
@@ -537,7 +537,7 @@ def test_every_persistent_custom_id_in_the_source_carries_the_guild():
 
     src = Path(__file__).resolve().parents[1] / "src" / "oibot_gm"
     templates = re.findall(r'DynamicItem\[[^\]]+\], template=r"([^"]+)"', "\n".join(p.read_text() for p in src.glob("*.py")))
-    assert len(templates) == 14 and all(r"(?:\.(?P<g>[a-z0-9_-]{1,16}))?" in t for t in templates), templates  # + cfgapply (the diff Apply/Cancel) + loot, lootpick, lootstart (the council), lootwish (the loot log)
+    assert len(templates) == 15 and all(r"(?:\.(?P<g>[a-z0-9_-]{1,16}))?" in t for t in templates), templates  # + cfgapply (the diff Apply/Cancel) + loot, lootpick, lootstart (the council), lootwish (the loot log), testans (the puppet digest)
 
 
 def test_help_in_a_dm_when_the_picker_runs_out_answers_once(duo, monkeypatch):

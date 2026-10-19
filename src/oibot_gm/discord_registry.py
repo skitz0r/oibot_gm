@@ -1232,6 +1232,18 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["test_answer"](interaction, reg)
 
+    @test.command(name="compose", description="Officer: the bench by composition — class, spec, how many; review, then Save")
+    async def test_compose(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:  # flows_test.TestComposeWizard → SetupMixin.test_compose (the site's spec grid writes through it too)
+            await FLOWS["test_compose"](interaction, reg)
+
+    @test.command(name="comp", description="Officer: try a comp — every test member joins a sandbox run; its board builds the best comp")
+    async def test_comp(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:  # flows_test.TestCompWizard → SetupMixin.test_comp, then a link to the sandbox run's board
+            await FLOWS["test_comp"](interaction, reg)
+
     @test.command(name="clear", description="Officer: end the test — cancel test runs, remove every test member and their placements")
     async def test_clear(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)

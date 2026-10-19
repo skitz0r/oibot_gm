@@ -234,9 +234,11 @@ def guild_prefix(reg: Registry) -> str:
 
 def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
     """Section with the raid emblem: (the guild's name when there are several,) title, run time with countdown, then
-    `lines`."""
+    `lines`. A test run's card carries the test badge (🧪 Test run · …): it posts where /gm test run was used (D20)."""
     ui = discord.ui
     unix = int(ev.start.timestamp())
+    if rc.is_test_run(reg, ev):
+        title = f"🧪 Test run · {title}"
     if getattr(reg, "many_guilds", False):
         title = f"{discord.utils.escape_markdown(str(reg.config.name))} · {title}"
     text = f"## {title}\n<t:{unix}:F> · <t:{unix}:R>" + ("\n" + "\n".join(lines) if lines else "")

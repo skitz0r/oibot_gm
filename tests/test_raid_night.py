@@ -65,6 +65,7 @@ class NightBot(RaidSchedulerMixin, Bot):
     """RaidMixin + RaidSchedulerMixin on test_parity_verbs' recording fake; DMs return cards that can be edited."""
 
     events: dict = {}
+    PUPPET_DIGEST = False  # the puppets stand in for members here: their DM cards must exist to be edited (B9's digest: test_testbench)
 
     def __init__(self, reg, rs):
         super().__init__(reg, rs)

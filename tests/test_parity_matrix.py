@@ -72,7 +72,7 @@ SURFACES: dict[str, dict[str, str]] = {
     "proposal": {"discord": "button:oibot_gm.discord_news.ProposalButton", "web": "POST /api/proposals/{pid}/resolve", "mcp": "resolve_proposal"},
     "policy": {"discord": "slash:gm policy edit", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},
     "regular": {"discord": "flow:roster_add", "web": "POST /api/admin/raid/regulars", "mcp": "set_regular"},
-    "test": {"discord": "slash:gm test seed", "web": "POST /api/admin/test", "mcp": "test_bench"},
+    "test": {"discord": "slash:gm test seed", "web": "POST /api/test/seed", "mcp": "test_bench"},  # every action: TEST_BENCH below
     # the loot council (dual interfaces phase 1): the thread is the Discord surface (/raid loot opens it), Loot › Tonight the
     # web's, the loot_* tools MCP's; a wishlist is the member's own list (Me › Wishlist, /me wishlist); tiers are the grid
     "loot": {"discord": "slash:raid loot", "web": "POST /api/loot/{run}/confirm", "mcp": "loot_confirm"},
@@ -80,6 +80,19 @@ SURFACES: dict[str, dict[str, str]] = {
     "tier": {"web": "POST /api/loot/items/{key}/tiers", "mcp": "tier_item"},
 }
 SURFACE_NAMES = ("discord", "web", "mcp")
+# the `test` op's actions, one row each (dual interfaces phase 2, B9: both halves of the test bench on both surfaces):
+# Discord = /gm test <action>, web = /api/test/<action>, MCP = test_bench(action=…). The feed is the web's mirror of a
+# rehearsal (D20); its Discord side IS the cards and the digest, so it has no command.
+TEST_BENCH: dict[str, dict[str, str]] = {
+    "seed": {"discord": "slash:gm test seed", "web": "POST /api/test/seed", "mcp": "test_bench"},
+    "run": {"discord": "slash:gm test run", "web": "POST /api/test/run", "mcp": "test_bench"},
+    "answer": {"discord": "slash:gm test answer", "web": "POST /api/test/answer", "mcp": "test_bench"},
+    "compose": {"discord": "slash:gm test compose", "web": "POST /api/test/compose", "mcp": "test_bench"},
+    "comp": {"discord": "slash:gm test comp", "web": "POST /api/test/comp", "mcp": "test_bench"},
+    "clear": {"discord": "slash:gm test clear", "web": "POST /api/test/clear", "mcp": "test_bench"},
+    "answer_digest": {"discord": "button:oibot_gm.flows_test.TestAnswerButton", "web": "POST /api/test/answer", "mcp": "test_bench"},
+    "feed": {"web": "GET /api/test/feed", "mcp": "test_bench"},
+}
 
 
 @pytest.fixture(scope="module")
@@ -180,12 +193,14 @@ def test_pending_rows_are_few_and_dated_to_a_phase():
 
 def test_single_surface_features_are_written_down_with_a_living_path(web_routes, slash_paths):
     """§2.1's by-design lists (Discord-only: claim, owner transfer, the application wizard, the cards, the guide, the DM
-    picker; web-only: the board, the comp sandbox, test-bench compose, applications review, the policy editor, history,
+    picker; web-only: the board, applications review, the policy editor, history,
     the plain-permissions grid) are configops.BY_DESIGN_ONLY: features, not ops, each with its surface, its entry point
     (which must exist) and the reason."""
     expected = {"guild_claim", "owner_transfer", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
-                "board", "comp_sandbox", "test_bench_compose", "applications_review", "policy_editor", "history", "plain_permissions_grid"}
+                "board", "applications_review", "policy_editor", "history", "plain_permissions_grid"}
     assert expected <= set(configops.BY_DESIGN_ONLY)
+    # phase 2 B9: the comp sandbox and test-bench compose are on both surfaces now (/gm test comp | compose) — never web-only again
+    assert not {"comp_sandbox", "test_bench_compose"} & set(configops.BY_DESIGN_ONLY)
     assert not set(configops.BY_DESIGN_ONLY) & set(configops.OP_GROUP), "an op belongs in BY_DESIGN_EXEMPT, not here"
     for feature, row in configops.BY_DESIGN_ONLY.items():
         assert set(row) == {"surface", "path", "reason"} and row["surface"] in ("discord", "web"), feature
@@ -194,3 +209,20 @@ def test_single_surface_features_are_written_down_with_a_living_path(web_routes,
             assert discord_path_exists(row["path"], slash_paths), f"{feature}: {row['path']!r} does not exist"
         else:
             assert row["path"] in web_routes, f"{feature}: {row['path']!r} is not a declared route"
+
+
+def test_every_test_bench_action_is_on_every_surface(mcp_tools, web_routes, slash_paths):
+    """Both halves of the test bench on both surfaces (B9): each action of the `test` op has its Discord path, its web
+    route and the MCP tool; the feed is web + MCP by design (Discord's side of a rehearsal is the cards and the digest)."""
+    missing = []
+    for action, row in TEST_BENCH.items():
+        for surface in SURFACE_NAMES:
+            ref = row.get(surface)
+            if ref is None:
+                if not (action == "feed" and surface == "discord"):
+                    missing.append(f"test {action}: no {surface} path")
+                continue
+            ok = discord_path_exists(ref, slash_paths) if surface == "discord" else (ref in web_routes if surface == "web" else ref in mcp_tools)
+            if not ok:
+                missing.append(f"test {action}/{surface}: {ref!r} does not exist")
+    assert not missing, "\n".join(missing)

@@ -462,8 +462,7 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "dm_picker": {"surface": "discord", "path": "fn:oibot_gm.guild_picker.choose_guild", "reason": "a DM has no server: the picker exists only where a message can arrive without one (asked every time, D23)"},
     # Web-only: tables and two-dimensional editing; Discord gets a link plus a read-only mirror, never a second editor
     "board": {"surface": "web", "path": "POST /api/run/{key}/layout", "reason": "the board (drag, auto-fill, propose, clear) is two-dimensional editing; the lock card is Discord's read-only mirror"},
-    "comp_sandbox": {"surface": "web", "path": "POST /api/admin/test", "reason": "the comp sandbox is a spec x count grid on the Members page's test card (TestBench.tsx)"},
-    "test_bench_compose": {"surface": "web", "path": "POST /api/admin/test", "reason": "composing a bench of any mix is a table; /gm test seed offers the presets"},
+    # (the comp sandbox and test-bench compose left this list in phase 2, B9: /gm test comp | compose are their Discord halves)
     "applications_review": {"surface": "web", "path": "GET /api/applications", "reason": "the full answers are long prose: the review page is the web's; the Discord card keeps Accept / Decline (D32)"},
     "policy_editor": {"surface": "web", "path": "PUT /api/policy/{doc}", "reason": "the policy document is long text with a diff; Discord appends a rule (op `policy_append`) and shows the reading"},
     "history": {"surface": "web", "path": "GET /api/rosters", "reason": "history views (past runs, the award log) are tables; Discord has the closed card"},
@@ -901,15 +900,19 @@ def _test_answer_args(arg: str) -> tuple[str | None, dict[str, int]]:
 
 
 def _test_answer_run(reg: Registry, rs, run: str | None):
-    """The run a test answer mix goes to: the one named, else the only live test run (else the only live run)."""
+    """The TEST run a test answer mix goes to: the one named, else the only live test run. A real run is refused —
+    puppets never answer one (phase 2, B9: the same guard as SetupMixin.test_answer)."""
+    from . import raidcycle as rc
+
     if run:
-        return _live_event(reg, run, rs)[1]
-    live = rs.live()
-    tests = [e for e in live if (reg.config.roster(e.team) or {}).get("test")]
-    pick = tests if len(tests) == 1 else live
-    if len(pick) != 1:
-        raise RegistryError(f"{len(live)} live runs — say which ({', '.join(e.key for e in live) or 'none'})")
-    return pick[0]
+        ev = _live_event(reg, run, rs)[1]
+        if not rc.is_test_run(reg, ev):
+            raise RegistryError(f"{ev.key} is a real run: test members answer test runs only")
+        return ev
+    tests = [e for e in rs.live() if rc.is_test_run(reg, e)]
+    if len(tests) != 1:
+        raise RegistryError(f"{len(tests)} live test runs — say which ({', '.join(e.key for e in tests) or 'none: open one first'})")
+    return tests[0]
 
 
 def _test_specs(reg: Registry, text: str) -> list[dict]:

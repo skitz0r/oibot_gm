@@ -17,7 +17,7 @@ from . import comp as comp_mod
 from . import ops as ops_mod
 from . import raid_views as views
 from .discord_registry import registration_card, registration_view
-from .registry import Registry
+from .registry import Registry, RegistryError
 
 from .constants import LEVEL_COLOUR, ROLES, TEAL  # noqa: E402
 DEBOUNCE_S = 5.0  # a burst of registrations re-posts the cards once
@@ -402,6 +402,124 @@ class SetupMixin:
     def guild_roles(self, reg: Registry) -> list[str]:
         g = self.get_guild(reg.config.discord_guild_id)
         return [r.name for r in sorted(g.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if g else []
+
+    # ---- the test bench (dual interfaces phase 2, B9): the verbs every surface calls — /gm test seed|run|answer|compose|
+    # comp|clear (flows_misc, flows_test), the site's Test bench (/api/test/*), MCP test_bench through those routes. Each
+    # writes its own ops line, so no caller composes one. Puppets only ever touch TEST runs (rc.is_test_run).
+
+    async def _test_ops(self, reg: Registry, level: str, line: str) -> None:
+        ops = getattr(self, "ops", None)
+        if ops is not None:
+            await ops.emit(reg.config, level, line)
+
+    async def test_seed(self, reg: Registry, count: int, by: str) -> str:
+        """Seed `count` puppets from the bench's roster (0 = all of it; existing ones are kept; capped to the roster)."""
+        n = len(reg.test_roster())
+        made = await asyncio.to_thread(reg.seed_test_members, count if count > 0 else n, by)
+        total = len(reg.test_members())
+        await self._test_ops(reg, "warn", f"test bench: {len(made)} test members seeded by {by} ({total} total)")
+        return f"{len(made)} test member(s) created, {total} in total. Analytics cards pause until the bench is cleared."
+
+    async def test_compose(self, reg: Registry, rs, add: list[dict], remove: list[int], by: str) -> str:
+        """The bench by composition: remove the chosen puppets (taken off every open sheet; refused while one is rostered
+        on a locked run), then add rows of {cls, spec, offspec?, count}. The site's spec grid and /gm test compose."""
+        from . import raidcycle as rc
+
+        remove = [int(u) for u in remove or []]
+        changed = await asyncio.to_thread(rc.forget_test_members, reg, rs, remove, by) if remove else []
+        made = await asyncio.to_thread(reg.add_test_members, list(add or []), by) if add else []
+        for ev in changed:
+            await self.refresh_sheet(reg, ev)
+        line = f"test bench: {len(made)} added, {len(remove)} removed · {len(reg.test_members())} test members"
+        await self._test_ops(reg, "warn", f"{line} (by {by})")
+        return line
+
+    async def test_comp(self, reg: Registry, rs, raid: str, by: str, by_id: int | None):
+        """The comp sandbox: a test run two weeks out with every puppet joined, never posted (rc.open_comp_sandbox);
+        the board's Propose roster then builds the best comp. Returns the run."""
+        from . import raidcycle as rc
+
+        ev = await asyncio.to_thread(rc.open_comp_sandbox, reg, rs, raid, by, by_id)
+        await self._test_ops(reg, "warn", f"test bench: {by} opened a comp sandbox {ev.key} with {len(reg.test_members())} test members joined (not posted)")
+        return ev
+
+    @staticmethod
+    def puppet_asks(reg: Registry, ev) -> list[tuple]:
+        """(puppet, 'confirm' | 'fill') for every open ask a puppet holds on this run: a Confirm / Can't make it after
+        lock, or a fill / pre-lock ask — what Answer as puppets… answers."""
+        from . import raidcycle as rc
+
+        out = [(m, "confirm") for m, _a in rc.open_placement_rows(reg, ev) if m.test]
+        seen = {m.discord_id for m, _ in out}
+        for a in ev.fill_asks:
+            m = reg.members.get(a.discord_id)
+            if a.open and m is not None and m.test and m.discord_id not in seen:
+                out.append((m, "fill"))
+                seen.add(m.discord_id)
+        return sorted(out, key=lambda mk: mk[0].display_name.lower())
+
+    async def puppet_answer_ask(self, reg: Registry, rs, ev, m, yes: bool, by: str, by_id: int | None = None) -> str:
+        """A puppet's Confirm / Can't make it (or a fill ask's yes / no), through the verbs a member's own answer uses
+        (answer_placement_for / answer_fill_for). RegistryError when the puppet has no open ask on this run."""
+        from . import raidcycle as rc
+
+        if any(mm.discord_id == m.discord_id for mm, _a in rc.open_placement_rows(reg, ev)):
+            return await self.answer_placement_for(reg, m.discord_id, ev.team, yes, by, by_id=by_id)
+        if any(a.discord_id == m.discord_id and a.open for a in ev.fill_asks):
+            return await self.answer_fill_for(reg, rs, ev, m, yes, by, by_id=by_id)
+        raise RegistryError(f"{m.display_name} has no open ask on {views.run_title(reg, ev)}")
+
+    async def test_answer(self, reg: Registry, rs, ev, *, member=None, status: str | None = None, join: int = 0, bench: int = 0, out: int = 0,
+                          yes: int = 0, no: int = 0, by: str, by_id: int | None = None, rng=None) -> list[str]:
+        """Puppets answer a TEST run: one `member` with `status` (in | sub | out on the sheet — out on a locked run where
+        they hold a seat is a callout —; yes | no answers their open ask), or a random mix — `join`/`bench`/`out` of
+        the puppets who haven't answered the sheet, `yes`/`no` of the puppets holding an open ask. Returns one line per
+        answer; the sheet is refreshed and one ops line written. A real run is refused (puppets never answer one)."""
+        import random
+
+        from . import raidcycle as rc
+
+        if ev is None or ev.state in ("done", "cancelled"):
+            raise RegistryError("That run is no longer live.")
+        if not rc.is_test_run(reg, ev):
+            raise RegistryError(f"{views.run_title(reg, ev)} is a real run: test members answer test runs only.")
+        done: list[str] = []
+        if member is not None:
+            m = member
+            if not getattr(m, "test", False):
+                raise RegistryError("pick a test member")
+            st = str(status or "in")
+            if st in ("yes", "no"):
+                done.append(await self.puppet_answer_ask(reg, rs, ev, m, st == "yes", by, by_id))
+            elif st not in rc.STATUSES:
+                raise RegistryError(f"status must be one of {', '.join((*rc.STATUSES, 'yes', 'no'))}")
+            elif ev.state != "open" and st == "out" and ev.seat_of(m):
+                await self.drop_seated(reg, rs, ev, rc.run_team(reg, ev), m, "callout (test)", None)
+                done.append(f"{m.display_name} called out")
+            else:
+                sg = rc.set_signup(reg, rs, ev, m, None, st, source="test")
+                done.append(f"{m.display_name} {rc.LABELS[sg.status]}")
+        else:
+            if any(int(n or 0) < 0 for n in (join, bench, out, yes, no)):
+                raise RegistryError("answer counts can't be negative")
+            if join or bench or out:
+                done += rc.test_answer_mix(reg, rs, ev, join, bench, out, rng)  # on the loop, as every sheet write (L3)
+            if yes or no:
+                asks = self.puppet_asks(reg, ev)
+                (rng or random).shuffle(asks)
+                for want, n in ((True, int(yes or 0)), (False, int(no or 0))):
+                    for _ in range(n):
+                        if not asks:
+                            break
+                        m, _kind = asks.pop()
+                        try:
+                            done.append(await self.puppet_answer_ask(reg, rs, ev, m, want, by, by_id))
+                        except RegistryError as e:  # answered meanwhile (a press, the scheduler): say so, go on
+                            done.append(str(e))
+        if done:
+            await self.refresh_sheet(reg, ev)
+            await self._test_ops(reg, "info", f"test bench: {len(done)} answer(s) on {ev.key} by {by}")
+        return done
 
     async def test_bench_clear(self, reg: Registry, by: str) -> str:
         """Cancel test runs, remove test members and their run rosters."""
