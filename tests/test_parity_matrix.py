@@ -47,6 +47,11 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_propose": {"web": "POST /api/run/{key}/split", "mcp": "propose_split"},
     "run_sheet": {"discord": "flow:raid_sheet", "web": "POST /api/run/{key}/sheet", "mcp": "repost_sheet"},
     "confirm_for": {"web": "POST /api/admin/placement", "mcp": "confirm_for"},
+    # raid-night levers (phase 2 A): the lock / closed card's RunButton, the Suggest… screen, the run routes, the tools
+    "run_remind": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/remind", "mcp": "remind_unconfirmed"},
+    "run_pause": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/pause", "mcp": "pause_autofill"},
+    "run_withdraw": {"discord": "flow:raid_suggest", "web": "POST /api/run/{key}/withdraw", "mcp": "withdraw_ask"},
+    "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
     "comp_target": {}, "comp_target_clear": {}, "comp_groups": {},
     "pin": {"web": "POST /api/run/{key}/pin", "mcp": "pin"},
     "policy_append": {"discord": "flow:rule", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},

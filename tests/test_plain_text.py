@@ -47,8 +47,9 @@ class FakeBot:
         rs.save(ev, "locked (fake)")
         return f"{ev.key}: locked by {by}"
 
-    async def cancel_run(self, reg, rs, ev, by, reason):
+    async def cancel_run(self, reg, rs, ev, by, reason, *, notify=True, by_id=None, via="discord"):
         self.calls.append(("cancel_run", ev.key, by, reason))
+        self.cancel_kw = {"notify": notify, "by_id": by_id, "via": via}
         ev.state = "cancelled"
         rs.save(ev, "cancelled (fake)")
         return f"Cancelled {ev.key}" + (f": {reason}" if reason else "")

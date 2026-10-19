@@ -511,7 +511,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         b = parse(d, PlacementBody)
         yes = b.answer == "yes"
         try:
-            line = await bot.answer_placement_for(v.reg, v.uid, b.roster, yes, v.name)
+            line = await bot.answer_placement_for(v.reg, v.uid, b.roster, yes, v.name, by_id=v.uid)
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
         return {"message": line}
@@ -1006,7 +1006,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             except Exception as e:  # noqa: BLE001
                 return JSONResponse({"error": f"solver: {e}"}, status_code=400)
         syn = [r.synergy_value for r in rosters]
-        ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(v.reg, ev), "by": v.name, "at": rc.now(), "kind": "split"}
+        ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(v.reg, ev), "by": v.name, "by_id": v.uid, "at": rc.now(), "kind": "split"}
         await asyncio.to_thread(rs.save, ev, f"split preview ({strategy}) by {v.name}")  # plain text's "use it" finds it after a restart
         sp = split_json(v.reg, ev)  # why there aren't more rosters, when the roles are what holds it back
         return {"strategy": strategy, "layout": layout, "board": board_json(v.reg, ev, rosters, []), "synergy": syn, "total": sum(syn), "gap": (max(syn) - min(syn)) if syn else 0,
@@ -1117,7 +1117,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if ev.state != "open":
             return JSONResponse({"error": "already locked"}, status_code=400)
         try:
-            rosters = await bot.lock_preview(v.reg, rs, ev, by=v.name)
+            rosters = await bot.lock_preview(v.reg, rs, ev, by=v.name, by_id=v.uid)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=409)
         left = rc.leftovers(v.reg, ev, rosters)
@@ -1309,7 +1309,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rs, ev, t = live_event(v.reg, str(d.get("run") or d.get("roster") or ""))
         yes = d.get("answer") in ("yes", True, "true")
         try:  # the member's Confirm / Can't make it buttons' own verb (plain text's confirm_for uses it too)
-            line = await bot.answer_placement_for(v.reg, m.discord_id, ev.team, yes, v.name)
+            line = await bot.answer_placement_for(v.reg, m.discord_id, ev.team, yes, v.name, by_id=v.uid)
         except (RegistryError, ValueError, KeyError) as e:
             return JSONResponse({"error": str(e) or "bad request"}, status_code=400)
         await ops_mod.audited(bot.ops, v.reg, v.name, f"answered for {m.display_name}: {line}", via=v.via, by_id=v.uid)
@@ -1326,7 +1326,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if "yes" not in d:
             return JSONResponse({"error": "yes: true (they take it) or false (they can't)"}, status_code=400)
         try:
-            line = await bot.answer_fill_for(v.reg, rs, ev, m, d.get("yes") in (True, "true", "yes", 1), v.name)
+            line = await bot.answer_fill_for(v.reg, rs, ev, m, d.get("yes") in (True, "true", "yes", 1), v.name, by_id=v.uid)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         await ops_mod.audited(bot.ops, v.reg, v.name, f"answered a fill ask for {m.display_name}: {line}", via=v.via, by_id=v.uid)

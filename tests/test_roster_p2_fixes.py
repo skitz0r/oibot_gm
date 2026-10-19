@@ -249,25 +249,67 @@ def test_held_yes_counts_as_an_ask_out(reg, rs):
     assert "tank" not in plan.short["roles"], "the held swap still covers its seat while the partner decides"
 
 
+class _Card:
+    """A sent ask card: records RaidMixin.edit_ask_card's edits."""
+
+    def __init__(self):
+        self.edits = []
+
+    async def edit(self, **kw):
+        self.edits.append(kw)
+
+    def texts(self) -> list[str]:
+        return ["\n".join(str(c.content) for c in e["view"].walk_children() if hasattr(c, "content")) for e in self.edits if e.get("view") is not None]
+
+
+class _CardChan:
+    def __init__(self, cid):
+        self.id, self.cards = cid, {}
+
+    async def fetch_message(self, mid):
+        return self.cards[mid]
+
+
+def _give_card(bot, ask, cid=9_100):
+    ch = bot.channels.setdefault(cid, _CardChan(cid))
+    card = ch.cards.setdefault(len(ch.cards) + 1, _Card())
+    ask.dm_channel_id, ask.dm_message_id = cid, len(ch.cards)
+    return card
+
+
 def test_bot_tells_the_held_partner_when_both_said_yes(reg, rs):
+    """The DM rule: the held partner's own ask card is EDITED to the outcome — no courtesy DM."""
     ev, p, quill, swap, back = _prelock_pair(reg, rs)
     bot = Bot(reg, rs)
+    card = _give_card(bot, swap)
     line = rc.apply_fill_answer(reg, rs, ev, swap, True)
     run(bot.after_fill_answer(reg, rs, ev, swap, line))
     assert not bot.dms, "a held yes withdraws nobody and tells nobody yet"
     line = rc.apply_fill_answer(reg, rs, ev, back, True)
     run(bot.after_fill_answer(reg, rs, ev, back, line))
-    dm = bot.dms[p["Kael"].discord_id][-1]
-    assert "Quill said yes too" in dm and "**Kael** (Protection)" in dm
+    assert not bot.dms, "no 'said yes too' DM"
+    assert any("Quill said yes too" in t and "**Kael** (Protection)" in t for t in card.texts())
 
 
 def test_bot_withdraws_a_held_yes_when_the_partner_says_no(reg, rs):
     ev, p, quill, swap, back = _prelock_pair(reg, rs)
     bot = Bot(reg, rs)
+    card = _give_card(bot, swap)
     rc.apply_fill_answer(reg, rs, ev, swap, True)
     line = rc.apply_fill_answer(reg, rs, ev, back, False)
     run(bot.after_fill_answer(reg, rs, ev, back, line))
-    assert swap.answer == "released" and "Never mind the swap question" in bot.dms[p["Kael"].discord_id][-1]
+    assert swap.answer == "released" and any("Never mind the swap question" in t for t in card.texts())
+    assert not bot.dms, "the card says it; no DM"
+
+
+def test_a_withdrawn_half_with_no_known_card_gets_no_dm(reg, rs):
+    """An ask sent before cards were stored: no fallback 'Never mind' DM (the DM rule) — the old card's press is refused as closed."""
+    ev, p, quill, swap, back = _prelock_pair(reg, rs)
+    bot = Bot(reg, rs)
+    rc.apply_fill_answer(reg, rs, ev, swap, True)
+    line = rc.apply_fill_answer(reg, rs, ev, back, False)
+    run(bot.after_fill_answer(reg, rs, ev, back, line))
+    assert swap.answer == "released" and not bot.dms
 
 
 def test_post_lock_pair_needs_both_yeses(reg, rs):

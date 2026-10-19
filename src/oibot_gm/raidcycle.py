@@ -167,7 +167,7 @@ class RaidEvent(BaseModel):
     reminded_by: Optional[str] = None
     closed_at: Optional[str] = None  # when it became done / cancelled (cleanup_ephemeral's grace, reopen's window)
     prev_state: Optional[str] = None  # the state before done / cancelled (reopen_run restores it)
-    last_proposal: Optional[dict] = None  # the last lock preview / split shown: {layout, strategy, rev, by, at} (plain text's "use it", the Discord preview)
+    last_proposal: Optional[dict] = None  # the last lock preview / split shown on any surface: {layout, strategy, rev, by, by_id, at, kind} — the same officer's plain-text "use it" falls back to it (configops._propose)
     log: list[str] = Field(default_factory=list)
     log_at: Optional[list[str]] = None  # ISO stamp per log line (RaidStore.save stamps new lines; "" = from before stamps were kept)
     created_at: str = Field(default_factory=now)

@@ -284,8 +284,8 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
   switches by people coming go first — a new healer would only push a DPS to the bench at lock. A switch that would
   drop the role someone leaves under its minimum is offered only tied to someone covering it, and both must say yes:
   the first yes changes nothing until the other answers; the second yes makes both changes; a no (or silence, or the
-  lock arriving first) from either closes the other: its DM card is edited to "never mind" (a DM only when the
-  card is unknown). Nobody is suggested for two seats (the
+  lock arriving first) from either closes the other: its DM card is edited to "never mind" (never a new DM); when
+  the second yes comes, the first one's card is edited to say it's on. Nobody is suggested for two seats (the
   *Suggest…* screen refuses picking one person for two), and the bot never takes the one person a later seat can't do
   without. Test puppets are never suggested or asked on a real run.
 - **Two alternates** per short seat, so you can ask someone else without typing a name, and a **Still short if all say
@@ -408,9 +408,12 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
    the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel run** and `/raid cancel` show
    the sentence with *Cancel the run…* (the box with the reason and the channel choice) and *Back*; the site's dialog
-   has the same three parts; plain text and MCP take the reason. A cancel waits for a lock that is being built and
-   then cancels the locked run — the lock stops asking people the moment the run is cancelled. A cancelled run is
-   final: it can't be reopened (open a new run).
+   has the same three parts; plain text takes the reason and "…, no announcement" for no channel line, MCP takes
+   `reason` and `notify`. A cancel waits for a lock that is being built and then cancels the locked run — the lock
+   stops asking people the moment the run is cancelled, and so do fill asks, suggestions and a Remind that are going
+   out: nobody after the cancel is DMed, and a card that arrived just as it happened is edited to *Cancelled* at once.
+   Clearing the test bench cancels its test runs without a line in the signup channel. A cancelled run is final: it
+   can't be reopened (open a new run).
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. A roster that came out under its tank/healer minimum
@@ -438,7 +441,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
    "no answer". **Remind the unconfirmed** (the lock card's second row, the site's run menu) sends the Confirm / Can't
    DM again to everyone still unanswered — the same ask, the same deadline — at most once an hour per run; the ones
-   waiting on the site aren't DMed.
+   waiting on the site aren't DMed. Two officers pressing it at once send one round; the second is told who reminded.
 6. **Fill** — the fill engine DMs people on its own only after lock (before lock an officer sends suggestions, see
    *Suggestions* above). Whenever a seat frees (decline, callout, absence, missed
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people, in the suggestions' cost
@@ -822,14 +825,17 @@ of their characters. The bot reads each live run's board as it stands and each r
   role swaps marked SWAP and the backfill named; Apply sends exactly that batch, and nothing if it changed meanwhile);
   before lock "suggest fixes for Tuesday's Barrow Deeps" (the suggestions, nothing sent) and "send them" (the diff
   shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's run
-  first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock).
+  first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock); "remind the
+  unconfirmed for tonight" (once an hour); "pause autofill on tonight's run" / "resume autofill"; "withdraw the ask
+  to Kestrel"; "reopen bd-1209-1930" (an end by mistake, within the hour — never a cancelled run).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from the bank = asked to confirm, out to the bank = seat freed); "groups for
   bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the whole board — the layout the lock will use, or after lock the roster
   itself (names added are asked to confirm, names dropped are freed). "Propose a roster for tonight" (or "a rotation
   split") shows the solver's layout — groups, synergy, who is left out, why there can't be more runs, whether leftovers
-  could make another — and saves nothing; "another one" shows a different one, "use it" puts the last one on the board
-  and remembers its strategy (the bot remembers what it showed you until it restarts). "Post the sheet here" re-posts
+  could make another — and leaves the board as it is; "another one" shows a different one, "use it" puts the last one on the board
+  with its strategy in one step (what it showed you — also after a restart, and a preview you looked at on the site or
+  with the lock's Preview; never one only another officer saw). "Post the sheet here" re-posts
   a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy) — like `/raid
   sheet`, anyone registered may ask, in any channel where plain text acts on their own record. Pins stay as
   before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on a run is someone's answer ("put Ash in for
@@ -1015,7 +1021,8 @@ news post says can make the review read or write another server.
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
-| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
+| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per run) · pause (`paused=true`) or resume the fill engine for one run · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled run) |
+| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |

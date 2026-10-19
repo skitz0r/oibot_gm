@@ -34,7 +34,7 @@ class NightFlowBot(FakeBot):
     async def is_officer_anywhere(self, reg, uid):
         return True
 
-    async def lock_preview(self, reg, rs, ev, *, by):
+    async def lock_preview(self, reg, rs, ev, *, by, by_id=None):
         names = [s.display_name for s in ev.by_status("in")]
         self.calls.append(("lock_preview", ev.key, by))
         rosters = rc.board_rosters(reg, ev, [names[:5], names[5:10]], rc.run_size(reg, ev))
@@ -121,7 +121,7 @@ def test_card_lock_preview_refusal_offers_back(reg, rs):
     ev = open_test_run(reg, rs)
     h, bot = night(reg, rs, user=officer_user())
 
-    async def busy(reg_, rs_, ev_, *, by):
+    async def busy(reg_, rs_, ev_, *, by, by_id=None):
         raise rc.SolverBusy()
     bot.lock_preview = busy
 

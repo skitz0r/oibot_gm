@@ -412,7 +412,7 @@ class SetupMixin:
         for ev in rs.live():
             t = reg.config.roster(ev.team) or {}
             if t.get("test"):
-                await self.cancel_run(reg, rs, ev, by=by, reason="test bench cleared")
+                await self.cancel_run(reg, rs, ev, by=by, reason="test bench cleared", notify=False)  # never a line where real members read
                 cancelled.append(ev.key)
         gone = await asyncio.to_thread(reg.clear_test_members, by)
         await self.cleanup_ephemeral(reg, rs)

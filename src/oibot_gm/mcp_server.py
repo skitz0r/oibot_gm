@@ -475,11 +475,40 @@ def fill_seats(run: str, send: bool = False, rev: str = "", picks: dict | None =
 
 
 @mcp.tool()
-def cancel_run(run: str, reason: str | None = None, guild: Guild = None) -> str:
-    """Cancel a live run the way /raid cancel does: the sheet and officer cards show it cancelled, open confirmations
-    are withdrawn, a line goes to the run's thread and the ops feed. Rostered members are NOT told automatically —
-    say so in the channel (the returned line reminds you)."""
-    return msg(api(guild).post(f"/api/run/{run}/cancel", {"reason": reason or ""}))
+def cancel_run(run: str, reason: str | None = None, notify: bool = True, guild: Guild = None) -> str:
+    """Cancel a live run the way /raid cancel does. Nobody is DMed: the sheet and officer cards show it cancelled, every
+    open ask (confirmation, fill, pre-lock) closes and its DM card is edited to say Cancelled, and with `notify` (default
+    true) one fixed line goes to the signup channel — never the reason, which stays in the run's thread and the ops
+    feed. `notify=false` posts no channel line. A done or cancelled run is refused."""
+    return msg(api(guild).post(f"/api/run/{run}/cancel", {"reason": reason or "", "notify": bool(notify)}))
+
+
+@mcp.tool()
+def remind_unconfirmed(run: str, guild: Guild = None) -> str:
+    """After lock: send the Confirm / Can't make it DM again to everyone rostered who hasn't answered (against their
+    existing ask; members with DMs off wait on the site). At most once an hour per run — the refusal says when."""
+    return msg(api(guild).post(f"/api/run/{run}/remind"))
+
+
+@mcp.tool()
+def pause_autofill(run: str, paused: bool = True, guild: Guild = None) -> str:
+    """Pause (paused=true) or resume (paused=false) the fill engine for one run: paused, nothing goes out on its own
+    (the scheduler, a freed seat, an answer); an officer's own fill send (fill_seats send=true) still goes."""
+    return msg(api(guild).post(f"/api/run/{run}/pause", {"paused": bool(paused)}))
+
+
+@mcp.tool()
+def withdraw_ask(run: str, member: str, guild: Guild = None) -> str:
+    """Close the fill or pre-lock ask already sent to `member` on this run: their DM card is edited to say never mind (no
+    new DM), the tied half of a swap is released, and the seat counts as open again for the planner."""
+    return msg(api(guild).post(f"/api/run/{run}/withdraw", {"member": member}))
+
+
+@mcp.tool()
+def reopen_run(run: str, guild: Guild = None) -> str:
+    """Undo an END by mistake, within the hour: the run goes back to the state it ended from (a locked roster as it was).
+    A cancelled run is never reopened — open a new one."""
+    return msg(api(guild).post(f"/api/run/{run}/reopen"))
 
 
 @mcp.tool()

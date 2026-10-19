@@ -352,11 +352,17 @@ class RaidMixin:
                 return [], nd
             sent = await self._send_asks(reg, rs, ev, team, batch, phase="fill", approved_by=approved_by, deadline=rc.ask_deadline(reg, ev).isoformat())
             if sent:
-                ev.fill_state = "asking"
-                ev.log.append(f"fill ({by}): asked {', '.join(a.display_name + (' (site)' if a.channel == 'web' else '') for a in sent)}")
+                if ev.state == "locked":  # a cancel during the fan-out: the run's fill state stays as the cancel left it
+                    ev.fill_state = "asking"
+                ev.log.append(f"fill ({by}): asked {', '.join(a.display_name + (' (site)' if a.channel == 'web' else '') for a in sent)}"
+                              + ("" if ev.state == "locked" else f" — the run was {ev.state} meanwhile; nobody after that was asked"))
                 rs.save(ev, f"fill asked {len(sent)}")
+            elif batch and ev.state != "locked":
+                rs.save(ev, f"fill stopped: the run is {ev.state}")  # the unsent asks closed by _send_asks
         if sent:
             return sent, nd
+        if ev.state != "locked":
+            return [], nd
         if not [a for a in ev.fill_asks if a.pending]:
             if not swaps and await asyncio.to_thread(rc.withheld_swaps, reg, rs, ev):
                 if ev.fill_state != "suggested":  # said once: the swap needs an officer's Ask on the lock card
@@ -375,13 +381,23 @@ class RaidMixin:
         waiting on the member's Me page (`channel` "web") when their DMs are off or the DM fails: same deadline, still in
         play (design B2: a failed DM is a CHANNEL change, never an answer — role_plan keeps counting it, the partner is
         not released, nobody is "expired"). Each DM card is stored on its ask (dm_channel_id / dm_message_id) so it can
-        be edited when the ask closes. The caller holds plan_lock. Returns the asks now out (by DM or on the site)."""
+        be edited when the ask closes. The caller holds plan_lock. Returns the asks now out (by DM or on the site).
+        The run's state is re-checked before EVERY DM and after it (design §2.4): a cancel (or, for pre-lock asks, the
+        lock) during the fan-out stops it — the asks not yet sent close (`cancelled`, or `released` when the run locked)
+        and a card that went out while the run changed is edited at once, so nothing is left to press on a run that is
+        no longer asking (cancel_run then takes plan_lock and closes the rest)."""
         stamp = rc.now()
+        allowed = "open" if phase == "prelock" else "locked"
         for a in asks:
             a.phase, a.approved_by, a.expires_at, a.asked_at = phase, approved_by, deadline, stamp
             ev.fill_asks.append(a)
         out, failed = [], []
         for a in asks:
+            if not a.pending:  # closed meanwhile (a lock released pre-lock asks while an earlier DM was in flight)
+                continue
+            if ev.state != allowed:  # the run changed during the fan-out: nothing more goes out
+                self._close_unsent(ev, a)
+                continue
             m = reg.members.get(a.discord_id)
             if m is None:  # the member record is gone: nobody to ask
                 a.answer, a.answered_at = "expired", rc.now()
@@ -394,6 +410,10 @@ class RaidMixin:
             ok, msg = await self.send_member_card(reg, m, None, fill_layout(reg, ev, team, self.ico, a), ev=ev)
             if ok:
                 a.dm_channel_id, a.dm_message_id = self.card_ids(msg)
+                if ev.state != allowed or not a.pending:  # the run changed while this DM was in flight: the card says so now
+                    self._close_unsent(ev, a)
+                    await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id, self._ask_closed_text(reg, ev, a))
+                    continue
             else:
                 a.channel = "web"
                 failed.append(a)
@@ -403,6 +423,19 @@ class RaidMixin:
             ev.log.append(f"DM failed — waits on the site: {names}")
             await self.ops.emit(reg.config, "warn", f"{ev.key}: DM failed — waits on the site: {names}")
         return out
+
+    @staticmethod
+    def _close_unsent(ev, a) -> None:
+        """An ask the fan-out did not (or could no longer) leave open: `cancelled` on a cancelled run, else `released`."""
+        if a.pending:
+            a.answer, a.answered_at, a.held = ("cancelled" if ev.state == "cancelled" else "released"), rc.now(), False
+
+    @staticmethod
+    def _ask_closed_text(reg, ev, a) -> str:
+        label = run_label(reg, ev)
+        if ev.state == "cancelled":
+            return f"Cancelled — {label} was cancelled. Nothing to do."
+        return f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — the run is {ev.state} now. Nothing to do."
 
     def plan_lock(self, reg, key: str) -> asyncio.Lock:
         """One officer send per run at a time (two presses of Ask never ask anyone twice). Keyed (guild, run): two
@@ -439,7 +472,7 @@ class RaidMixin:
             prelock = plan.phase == "prelock"
             deadline = (min(hard, ev.start) if prelock else rc.ask_deadline(reg, ev)).isoformat()  # pre-lock asks expire at lock time
             sent = await self._send_asks(reg, rs, ev, team, asks, phase=plan.phase, approved_by=by, deadline=deadline)
-            if sent and not prelock:
+            if sent and not prelock and ev.state == "locked":  # a cancel during the fan-out keeps its own fill state
                 ev.fill_state = "asking"
             ev.log.append(f"{'suggestions' if prelock else 'fill'} sent by {by}: " + (", ".join(a.display_name + (" (site)" if a.channel == "web" else "") for a in sent) or "nobody to ask"))
             rs.save(ev, f"{'suggestions' if prelock else 'fill'} sent by {by}")
@@ -509,12 +542,11 @@ class RaidMixin:
 
     async def withdraw_ask(self, reg, ev, ask, because: str) -> None:
         """Tell the other half of a tied pair the question is off: their ask card is EDITED to say so (the DM rule — an
-        outcome is the card in its final state); only an ask whose card is unknown (sent before cards were stored) gets
-        the one-line DM instead, so a question they could still press is never left looking open."""
-        m = reg.members.get(ask.discord_id)
+        outcome is the card in its final state, never a DM; the ask's own record carries it to the Me page). An ask
+        whose card is unknown (sent before cards were stored) gets no DM either: a press on that old card is refused as
+        closed, which says the same."""
         text = f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}. Nothing to do."
-        if m and not await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, text) and ask.channel != "web":
-            await self.send_member_dm(reg, m, text, ev=ev)
+        await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, text)
         await self.post_run_update(reg, ev, f"↩️ withdrew the ask to {ask.display_name} ({because})")
 
     async def after_fill_answer(self, reg, rs, ev, ask, line: str) -> None:
@@ -532,11 +564,10 @@ class RaidMixin:
             return
         both = rc.tied_ask(ev, ask) if ask.answer == "yes" else None
         both = both if both is not None and both.answer == "yes" else None  # the partner's held yes took effect just now
-        if both is not None:
-            om = reg.members.get(both.discord_id)
-            if om:
-                await self.send_member_dm(reg, om, f"{ask.display_name} said yes too, so it's on for {run_label(reg, ev)}: you're down as **{both.character}** ({both.spec})"
-                                          + (" — the lock builds the roster." if ev.state == "open" else "."), ev=ev)
+        if both is not None:  # the DM rule: the partner's own card is edited to the outcome, never a courtesy DM
+            await self.edit_ask_card(reg, both.dm_channel_id, both.dm_message_id,
+                                     f"{ask.display_name} said yes too, so it's on for {run_label(reg, ev)}: you're down as **{both.character}** ({both.spec})"
+                                     + (" — the lock builds the roster." if ev.state == "open" else ".") + " Nothing more to do.")
         if ask.phase == "prelock" and ev.state == "open":  # before lock: the signup changed, nobody was seated
             plan = rc.role_plan(reg, rs, ev)
             await self.post_run_update(reg, ev, f"🧩 {line}" + (f" · still short {rc.still_short_words(plan)}" if plan.seats else " · **minimums covered**"))
@@ -595,11 +626,12 @@ class RaidMixin:
         async with lock:
             yield
 
-    async def lock_preview(self, reg, rs, ev, *, by: str) -> list:
+    async def lock_preview(self, reg, rs, ev, *, by: str, by_id: int | None = None) -> list:
         """The roster(s) the lock would build NOW (rc.split_preview with the run's strategy, honouring the board and the
         pins), under the run's solver single flight — the Discord Preview lock and the site's lock preview share it.
-        Nothing about the run changes but `ev.last_proposal` (the layout shown, so plain text's "use it" and a redraw
-        after a restart find it). RegistryError (SolverBusy, or the solver's own sentence) when no preview can be made."""
+        Nothing about the run changes but `ev.last_proposal` (the layout shown, with who saw it: the same officer's plain
+        text "use it" puts it on the board, also after a restart — configops._propose). RegistryError (SolverBusy, or the
+        solver's own sentence) when no preview can be made."""
         if ev.state != "open":
             raise RegistryError(f"{run_title(reg, ev)} is {ev.state} — the preview is for an open sheet.")
         strategy = ev.split_strategy or reg.raid_def(ev.instance).get("split_policy") or "balanced"
@@ -608,7 +640,7 @@ class RaidMixin:
                 layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy)
             except RuntimeError as e:
                 raise RegistryError(rc.solver_error_text(e)[:1].upper() + rc.solver_error_text(e)[1:]) from e
-        ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(reg, ev), "by": by, "at": rc.now(), "kind": "lock preview"}
+        ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(reg, ev), "by": by, "by_id": by_id, "at": rc.now(), "kind": "lock preview"}
         await asyncio.to_thread(rs.save, ev, f"lock preview by {by}")
         return rosters
 
@@ -890,15 +922,17 @@ class RaidMixin:
         await self.ops.emit(reg.config, "warn" if co.late else "info", f"callout {m.display_name} {ev.key} {co.hours_before:.0f}h before{' LATE' if co.late else ''}" + (f" — {note}" if note else "") + ("" if mine else f" (by {by})"))
         return line
 
-    async def answer_fill_for(self, reg, rs, ev, m, yes: bool, by: str) -> str:
+    async def answer_fill_for(self, reg, rs, ev, m, yes: bool, by: str, *, by_id: int | None = None) -> str:
         """A fill ask's Confirm / Can't make it from anywhere but the DM button (an officer on the site or MCP, plain
         text's confirm_for): the button's two steps — rc.apply_fill_answer, then after_fill_answer (the tied partner
-        released on a no, the next batch asked, thread line, sheet and cards). RegistryError when nothing is waiting."""
+        released on a no, the next batch asked, thread line, sheet and cards). RegistryError when nothing is waiting.
+        `by_id` (the actor's Discord id) decides whether it was their own answer — never a name compare."""
         ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.open), None)
         if ask is None:
             raise RegistryError(f"no open fill ask for {m.display_name} on {run_title(reg, ev)}")
         line = rc.apply_fill_answer(reg, rs, ev, ask, bool(yes))
-        await self.after_fill_answer(reg, rs, ev, ask, line + ("" if by == m.display_name else f" (answered by {by})"))
+        mine = by_id is not None and int(by_id) == int(m.discord_id)
+        await self.after_fill_answer(reg, rs, ev, ask, line + ("" if mine else f" (answered by {by})"))
         return line
 
     async def repost_sheet(self, reg, rs, ev, channel) -> str:
@@ -924,16 +958,17 @@ class RaidMixin:
         await asyncio.to_thread(reg.save, m, line)
         return line
 
-    async def answer_placement_for(self, reg, uid: int, roster: str, yes: bool, by: str) -> str:
+    async def answer_placement_for(self, reg, uid: int, roster: str, yes: bool, by: str, *, by_id: int | None = None) -> str:
         """A Confirm / Can't make it answer from anywhere but the DM button itself (the Me page, an officer on the
         site or MCP, plain text's confirm_for): the button's two steps — record_placement (check-and-set on the loop),
         then `after_placement_answer` (seat freed on a no, run thread line, sheet and cards). The member's DM card is
-        edited to the outcome (no new DM). Raises RegistryError when there is nothing to answer."""
+        edited to the outcome (no new DM). `by_id` = the actor's Discord id: it alone decides "their own answer" (the
+        card's wording), never a name compare. Raises RegistryError when there is nothing to answer."""
         line = await self.record_placement(reg, uid, roster, yes, by)
         m = reg.members.get(uid)
         ask = next((a for a in reversed(m.placement_asks) if a["roster"] == roster), None) if m else None
         if ask and ask.get("dm"):
-            mine = m is not None and by == m.display_name
+            mine = by_id is not None and int(by_id) == int(uid)
             await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"→ {line}" + ("" if mine else f" (answered for you by {by})"))
         await self.after_placement_answer(reg, uid, roster, yes, line)
         return line
@@ -1018,18 +1053,25 @@ class RaidMixin:
         confirmation); refused when the run is already done / cancelled. Nobody is DMed (the DM rule): every open ask
         (Confirm / Can't, fill, pre-lock) closes as `cancelled` and its DM card is EDITED to say so; the sheet is edited to
         its final state; `notify` posts one fixed line in the signup channel (never the reason — that stays in the run's
-        thread and the ops feed, for officers); the Me page's notices are derived from the record. Returns a plain line."""
+        thread and the ops feed, for officers); the Me page's notices are derived from the record. Returns a plain line.
+        The fill / pre-lock asks close under plan_lock (every writer of ev.fill_asks holds it), taken AFTER the state
+        flip: a fan-out in flight sees the cancel before its next DM (RaidMixin._send_asks), stops, edits a card that
+        went out meanwhile, and releases the lock — so the cancel waits for one DM at most, never a whole batch.
+        Clearing the test bench passes notify=False: its cancels post nothing where real members read."""
         async with self.board_lock(reg, ev.key):
             if ev.state in ("done", "cancelled"):
                 raise RegistryError(f"{run_title(reg, ev)} is already {ev.state} — nothing was changed.")
             fx = rc.cancel_effects(reg, ev)
             cards = [(a["dm"][0], a["dm"][1]) for _m, a in rc.open_placement_rows(reg, ev) if a.get("dm")] if ev.all_rosters else []
-            fills = [a for a in ev.fill_asks if a.pending]
             ev.prev_state, ev.state, ev.closed_at = ev.state, "cancelled", rc.now()
-            for a in fills:
-                a.answer, a.answered_at, a.held = "cancelled", rc.now(), False
             ev.log.append(f"cancelled by {by}" + (f": {reason}" if reason else ""))
             rs.save(ev, "cancelled")
+        async with self.plan_lock(reg, ev.key):
+            fills = [a for a in ev.fill_asks if a.pending]
+            for a in fills:
+                a.answer, a.answered_at, a.held = "cancelled", rc.now(), False
+            if fills:
+                rs.save(ev, f"cancelled: {len(fills)} ask(s) closed")
         waiting = rc.withdraw_confirmations(reg, ev, "cancelled") if ev.all_rosters else []
         label = run_label(reg, ev)
         for cid, mid in cards + [(a.dm_channel_id, a.dm_message_id) for a in fills]:
@@ -1068,13 +1110,23 @@ class RaidMixin:
         """Remind the unconfirmed (design B2 levers, D15): re-send the Confirm / Can't DM to everyone rostered whose ask is
         still unanswered — against their EXISTING ask (never add_placement_ask again: that would reset asked_at and break
         a press on the old card), stamping the ask's `reminded_at` and the run's; at most once per hour per run
-        (rc.remind_refusal). DMs-off asks wait on the site and are not DMed. RegistryError when it can't go now."""
+        (rc.remind_refusal). DMs-off asks wait on the site and are not DMed. RegistryError when it can't go now.
+        Check-and-set on the loop: the refusal check and the run's `reminded_at` stamp happen with no await between
+        them, so two officers pressing Remind at once send ONE round (the second is told who reminded). The run's
+        state and each ask are re-checked before every DM, and a reminder card that went out while the ask closed (an
+        answer elsewhere, the run cancelled) is edited at once — never a live Confirm on a closed ask."""
         why = rc.remind_refusal(reg, ev)
         if why:
             raise RegistryError(why)
+        ev.reminded_at, ev.reminded_by = rc.now(), by  # claimed before the first await (see above)
         team = rc.run_team(reg, ev)
-        sent, site = 0, 0
+        sent, site, stopped = 0, 0, None
         for m, ask in rc.open_placement_rows(reg, ev):
+            if ev.state != "locked":  # cancelled / ended during the round: nobody after that is reminded
+                stopped = ev.state
+                break
+            if ask.get("answer") is not None:  # answered since the round started
+                continue
             if ask.get("channel", "dm") != "dm" or m.dm_opt_out:
                 site += 1
                 continue
@@ -1085,19 +1137,26 @@ class RaidMixin:
             i = seat[0]
             gi = next((k for k, g in enumerate(ev.all_rosters[i].groups) if seat[1].signup_name in g), 0)
             ok, msg = await self.send_member_card(reg, m, None, confirm_layout(reg, ev, team, self.ico, sg, i, gi, m.discord_id, reminder=True), ev=ev)
-            if ok:
-                sent += 1
-                cid, mid = self.card_ids(msg)
-                if mid:
-                    ask["dm"] = [cid, mid]  # the newest card is the one an outcome edits
-                ask["reminded_at"] = rc.now()
-                reg.save(m, f"{m.display_name} reminded to confirm {ev.team}")
-        ev.reminded_at, ev.reminded_by = rc.now(), by
-        ev.log.append(f"reminded the unconfirmed ({sent} by DM) — {by}")
+            if not ok:
+                continue
+            cid, mid = self.card_ids(msg)
+            if ask.get("answer") is not None or ev.state != "locked":  # closed while this DM was in flight
+                await self.edit_ask_card(reg, cid, mid, f"Cancelled — {run_label(reg, ev)} was cancelled. Nothing to do." if ev.state == "cancelled"
+                                         else f"Already answered — nothing to do for {run_label(reg, ev)}.")
+                continue
+            sent += 1
+            if mid:
+                ask["dm"] = [cid, mid]  # the newest card is the one an outcome edits
+            ask["reminded_at"] = rc.now()
+            await asyncio.to_thread(reg.save, m, f"{m.display_name} reminded to confirm {ev.team}")
+        ev.log.append(f"reminded the unconfirmed ({sent} by DM) — {by}" + (f"; stopped, the run is {stopped}" if stopped else ""))
         rs.save(ev, f"reminded {sent} by {by}")
-        await self.post_run_update(reg, ev, f"🔔 {by} reminded the unconfirmed: {sent} by DM" + (f" · {site} wait on the site" if site else ""))
+        await self.post_run_update(reg, ev, f"🔔 {by} reminded the unconfirmed: {sent} by DM" + (f" · {site} wait on the site" if site else "")
+                                   + (f" · stopped: the run is {stopped}" if stopped else ""))
         await self.refresh_cards(reg, ev)
         await ops_mod.audited(self.ops, reg, by, f"reminded {sent} unconfirmed on {ev.key}", via=via, by_id=by_id)
+        if stopped:
+            return f"Reminded {sent} by DM, then stopped: the run is {stopped}."
         return f"Reminded {sent} by DM" + (f"; {site} wait on the site (DMs off)" if site else "") + ". Next reminder possible in an hour."
 
     async def set_autofill_paused(self, reg, rs, ev, paused: bool, *, by: str, by_id: int | None = None, via: str = "discord") -> str:

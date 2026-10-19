@@ -171,7 +171,7 @@ def test_run_propose_previews_remembers_and_uses(reg, rs, monkeypatch):
     ev, names = board_run(reg, rs)
     preview, calls = fake_preview(names)
     monkeypatch.setattr(rc, "split_preview", preview)
-    assert "a balanced proposal from the solver — shown here, nothing saved" in configops.describe(reg, ConfigOp(op="run_propose", target=ev.key))
+    assert "a balanced proposal from the solver — shown here, the board unchanged" in configops.describe(reg, ConfigOp(op="run_propose", target=ev.key))
     with pytest.raises(RegistryError, match="no proposal to use yet"):
         apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, field="use"))
     out = apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, value="first"))

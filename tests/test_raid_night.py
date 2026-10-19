@@ -635,3 +635,286 @@ def test_upcoming_rows_carry_the_instant_and_say_when_no_channel_can_take_the_sh
     bd = next(x for x in web_bot.c.get("/api/rosters", headers=H()).json()["raids"] if x["id"] == "barrow_deeps")
     assert bd["upcoming"] and all(u["start_iso"] and u["key"] for u in bd["upcoming"])
     assert bd["upcoming"][0]["needs_channel"] is True and bd["signup_channel"] is False
+
+
+# ---------------------------------------------------------------- fix pass: cancel vs a fan-out, two Reminds, surfaces
+
+def short_three(reg, rs):
+    """A locked 10-man with three DPS seats freed: the fill engine's batch holds several asks."""
+    ev, seated = locked_ten(reg, rs, confirm_hours=1)
+    for m in seated[-3:]:
+        rc.free_seat(reg, rs, ev, m.discord_id, "no-confirm")
+    return ev, seated
+
+
+async def _until(cond, tries=300):
+    for _ in range(tries):
+        if cond():
+            return True
+        await asyncio.sleep(0.01)
+    return False
+
+
+def _cancel_mid_fanout(bot, reg, rs, ev, start_fanout):
+    """Hold the first DM, start the fan-out, cancel while it hangs, then let the DM through. Returns (fan-out result,
+    the cancel's line, how many asks were on the run when the cancel came)."""
+    async def go():
+        bot.dm_gate = asyncio.Event()
+        fan = asyncio.create_task(start_fanout())
+        assert await _until(lambda: len(ev.fill_asks) > 0), "the fan-out put its asks on the run"
+        on_run = len(ev.fill_asks)
+        cancel = asyncio.create_task(bot.cancel_run(reg, rs, ev, "Kara", "server down"))
+        assert await _until(lambda: ev.state == "cancelled"), "the cancel flips the state at once (board lock, not plan lock)"
+        assert not cancel.done(), "the asks close under plan_lock: the cancel waits for the DM in flight"
+        bot.dm_gate.set()
+        return await fan, await cancel, on_run
+    return run(go())
+
+
+def test_cancel_during_a_fill_fanout_sends_nothing_more_and_edits_the_card_in_flight(reg, rs):
+    bot = NightBot(reg, rs)
+    ev, _seated = short_three(reg, rs)
+    team = rc.run_team(reg, ev)
+    (sent, _nd), line, on_run = _cancel_mid_fanout(bot, reg, rs, ev, lambda: bot.run_fill(reg, rs, ev, team))
+    assert on_run >= 2, "a batch of several asks, so 'nothing after the cancel' means something"
+    carded = [a for a in ev.fill_asks if a.dm_message_id]
+    assert len(carded) == 1, "only the DM already in flight went out"
+    assert any("Cancelled" in t for t in card_texts(bot.cards[carded[0].dm_message_id])), "its card was edited at once"
+    assert all(a.answer == "cancelled" and not a.pending for a in ev.fill_asks), "no ask left open on a cancelled run"
+    assert not sent, "nothing counts as out on a cancelled run"
+    assert ev.fill_state != "asking" and ev.state == "cancelled"
+    assert "Nobody was DMed" in line
+
+
+def test_cancel_during_an_officers_send_stops_the_fanout(reg, rs):
+    bot = NightBot(reg, rs)
+    ev, _seated = short_three(reg, rs)
+    plan = rc.role_plan(reg, rs, ev)
+    (sent, _plan), _line, on_run = _cancel_mid_fanout(bot, reg, rs, ev, lambda: bot.send_plan(reg, rs, ev, rev=plan.rev, by="Jon"))
+    assert on_run >= 2
+    assert len([a for a in ev.fill_asks if a.dm_message_id]) == 1
+    assert all(not a.pending for a in ev.fill_asks) and not sent
+    assert ev.fill_state != "asking"
+
+
+def test_a_prelock_fanout_stops_when_the_run_locks(reg, rs):
+    """The same re-check for pre-lock suggestions: a lock during the fan-out closes the rest as released."""
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    asks = [rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="other", role="tank", character=m.main.name, spec=m.main.spec, reason="short a tank")
+            for m in reg.test_members()[:3]]
+
+    async def go():
+        bot.dm_gate = asyncio.Event()
+        task = asyncio.create_task(bot._send_asks(reg, rs, ev, rc.run_team(reg, ev), asks, phase="prelock", approved_by="Jon", deadline=ev.start.isoformat()))
+        assert await _until(lambda: len(ev.fill_asks) == 3)
+        ev.state = "locked"
+        bot.dm_gate.set()
+        return await task
+    out = run(go())
+    assert out == [] and all(a.answer == "released" for a in asks)
+    assert len([a for a in asks if a.dm_message_id]) == 1 and any("Never mind" in t for t in card_texts(bot.cards[asks[0].dm_message_id]))
+
+
+def _confirm_all(bot, reg, ev):
+    for i, r in enumerate(ev.all_rosters):
+        for gi, g in enumerate(r.groups):
+            for n in g:
+                run(bot.confirm_one(reg, ev, rc.signup_by_name(ev, n), i, gi, "lock"))
+
+
+def test_two_officers_pressing_remind_at_once_send_one_round(reg, rs):
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs)
+    _confirm_all(bot, reg, ev)
+    before = len(bot.cards)
+
+    async def go():
+        bot.dm_gate = asyncio.Event()
+        a = asyncio.create_task(bot.remind(reg, rs, ev, by="Jon"))
+        await asyncio.sleep(0.02)
+        b = asyncio.create_task(bot.remind(reg, rs, ev, by="Kara"))
+        await asyncio.sleep(0.02)
+        bot.dm_gate.set()
+        return await asyncio.gather(a, b, return_exceptions=True)
+    ra, rb = run(go())
+    assert isinstance(ra, str) and "Reminded 10 by DM" in ra
+    assert isinstance(rb, RegistryError) and "by Jon" in str(rb), "the second press is told who reminded"
+    one_round = len(bot.cards) - before
+    assert one_round <= 2 * len(seated), "one card (plus the test bench's prefix) per unconfirmed member — never two rounds"
+    assert ev.reminded_by == "Jon"
+
+
+def test_cancel_during_a_remind_stops_it_and_closes_the_card_in_flight(reg, rs):
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs)
+    _confirm_all(bot, reg, ev)
+    before = set(bot.cards)
+
+    async def go():
+        bot.dm_gate = asyncio.Event()
+        rem = asyncio.create_task(bot.remind(reg, rs, ev, by="Jon"))
+        await asyncio.sleep(0.02)
+        await bot.cancel_run(reg, rs, ev, "Kara", None)
+        bot.dm_gate.set()
+        return await rem
+    line = run(go())
+    new = [bot.cards[k] for k in bot.cards if k not in before]
+    assert len(new) <= 2, "the reminder in flight only (and its test-bench prefix)"
+    assert any("Cancelled" in t for m in new for t in card_texts(m)), "the reminder card that landed after the cancel is closed"
+    assert "stopped" in line and "cancelled" in line
+    assert all(a.get("answer") == "cancelled" for m in seated for a in reg.members[m.discord_id].placement_asks if a["roster"] == ev.team)
+
+
+def test_clearing_the_test_bench_posts_no_cancel_line(reg, rs):
+    from oibot_gm.discord_pool import SetupMixin
+
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    ev.channel_id = bot.signup.id
+    run(SetupMixin.test_bench_clear(bot, reg, "Jon"))
+    assert ev.state == "cancelled"
+    assert not bot.signup.sent, "real members read the signup channel: a bench clear says nothing there"
+
+
+def test_plain_text_cancel_keeps_its_surface_and_can_be_quiet(reg, rs):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    ev.channel_id = bot.signup.id
+    owner = reg.config.owner_discord_id
+    preview = configops.describe(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"))
+    assert "Nobody is DMed" in preview and "no line in the signup channel" in preview
+    line = run(configops.apply_async(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"), "Jon", True, bot=bot, by_id=owner, via="chat"))
+    assert "no line in the signup channel" in line and not bot.signup.sent
+    audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t and ev.key in t]
+    assert len(audits) == 1 and audits[0].startswith("[chat]"), audits
+
+
+def test_answer_placement_for_decides_their_own_by_id_not_by_name(reg, rs):
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs)
+    _confirm_all(bot, reg, ev)
+    m, other = seated[0], seated[1]
+    # an officer whose display name happens to be the member's: still "answered for you"
+    run(bot.answer_placement_for(reg, m.discord_id, ev.team, True, m.display_name, by_id=reg.config.owner_discord_id))
+    card = bot.cards[reg.members[m.discord_id].placement_asks[-1]["dm"][1]]
+    assert any("answered for you by" in t for t in card_texts(card))
+    run(bot.answer_placement_for(reg, other.discord_id, ev.team, True, "Someone Else", by_id=other.discord_id))
+    card = bot.cards[reg.members[other.discord_id].placement_asks[-1]["dm"][1]]
+    assert card_texts(card) and not any("answered for you" in t for t in card_texts(card)), "their own answer, whatever the name"
+
+
+def test_plain_text_use_finds_the_last_proposal_after_a_restart_in_one_write(reg, rs):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    bot = NightBot(reg, rs)  # a fresh process: nothing in split_seen
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:6])
+    names = [s.display_name for s in ev.signups.values() if s.status == "in"]
+    # Jon (id 1) saw this split on the site before the bot restarted
+    ev.last_proposal = {"layout": [names[:3], names[3:6]], "strategy": "rotation", "rev": rc.board_rev(reg, ev), "by": "Jon", "by_id": 1, "at": rc.now(), "kind": "split"}
+    use = ConfigOp(op="run_propose", target=ev.key, field="use")
+    with pytest.raises(RegistryError, match="no proposal to use yet"):  # another officer never applies a preview unseen
+        run(configops._propose(reg, rs, ev, use, "Kara", bot, 2, None))
+    assert not ev.layout
+    seen = {}
+    real = bot.save_board
+
+    async def save_board(*a, **kw):
+        seen.update(kw)
+        return await real(*a, **kw)
+    bot.save_board = save_board
+    line = run(configops._propose(reg, rs, ev, use, "Jon", bot, 1, None))
+    assert seen.get("strategy") == "rotation", "the strategy rides in the same save_board write"
+    assert ev.layout == [names[:3], names[3:6]] and ev.split_strategy == "rotation" and "rotation proposal used" in line
+
+
+def test_plain_text_preview_keeps_the_proposal_on_the_run(reg, rs, monkeypatch):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:6])
+    names = [s.display_name for s in ev.signups.values() if s.status == "in"]
+    monkeypatch.setattr(rc, "split_preview", lambda reg_, rs_, ev_, strategy, avoid=None: ([names[:5], names[5:]], []))
+    monkeypatch.setattr(configops, "propose_text", lambda *a, **k: "shown")
+    assert run(configops._propose(reg, rs, ev, ConfigOp(op="run_propose", target=ev.key), "Jon", bot, 1, None)) == "shown"
+    assert ev.last_proposal["layout"] == [names[:5], names[5:]] and ev.last_proposal["by"] == "Jon" and ev.last_proposal["by_id"] == 1
+
+
+def test_raid_night_levers_from_plain_text_call_the_same_verbs(reg, rs):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    bot = NightBot(reg, rs)
+    owner = reg.config.owner_discord_id
+    ev, seated = locked_ten(reg, rs)
+    _confirm_all(bot, reg, ev)
+
+    def apply(op):
+        return run(configops.apply_async(reg, op, "Jon", True, bot=bot, by_id=owner, via="chat"))
+    assert "remind the unconfirmed" in configops.describe(reg, ConfigOp(op="run_remind", target=ev.key))
+    assert "Reminded 10 by DM" in apply(ConfigOp(op="run_remind", target=ev.key)) and ev.reminded_by == "Jon"
+    assert "pause autofill" in configops.describe(reg, ConfigOp(op="run_pause", target=ev.key, value="pause"))
+    apply(ConfigOp(op="run_pause", target=ev.key, value="pause"))
+    assert ev.autofill_paused
+    apply(ConfigOp(op="run_pause", target=ev.key, value="resume"))
+    assert not ev.autofill_paused
+    with pytest.raises(RegistryError, match="pause \\| resume"):
+        configops._pause_value(ConfigOp(op="run_pause", target=ev.key, value="maybe"))
+    # withdraw: an officer's sent ask, closed from chat
+    rc.free_seat(reg, rs, ev, seated[-1].discord_id, "no-confirm")
+    plan = rc.role_plan(reg, rs, ev)
+    sent, _ = run(bot.send_plan(reg, rs, ev, rev=plan.rev, by="Kara"))
+    who = reg.members[sent[0].discord_id].display_name
+    assert "withdraw the" in configops.describe(reg, ConfigOp(op="run_withdraw", target=ev.key, member=who))
+    assert "Withdrew the ask" in apply(ConfigOp(op="run_withdraw", target=ev.key, member=who)) and sent[0].answer == "withdrawn"
+    audits = [t for _l, t in bot.ops.lines if t.startswith("[chat]")]
+    assert len([t for t in audits if "reminded" in t]) == 1, "the verb writes the one audit line"
+
+
+def test_reopen_from_plain_text_and_a_cancelled_run_is_refused(reg, rs):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    bot = NightBot(reg, rs)
+    ev, _seated = locked_ten(reg, rs)
+    ev.prev_state, ev.state, ev.closed_at = "locked", "done", rc.now()
+    rs.save(ev, "ended by mistake")
+    assert "reopen" in configops.describe(reg, ConfigOp(op="run_reopen", target=ev.key))
+    line = run(configops.apply_async(reg, ConfigOp(op="run_reopen", target=ev.key), "Jon", True, bot=bot, by_id=reg.config.owner_discord_id, via="chat"))
+    assert ev.state == "locked" and "Reopened" in line
+    run(bot.cancel_run(reg, rs, ev, "Kara", None, notify=False))
+    with pytest.raises(RegistryError, match="never reopened"):
+        run(configops.apply_async(reg, ConfigOp(op="run_reopen", target=ev.key), "Jon", True, bot=bot, via="chat"))
+
+
+def test_mcp_tools_for_the_levers_post_to_the_run_routes():
+    import httpx
+
+    from oibot_gm import mcp_server as ms
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json as _json
+
+        calls.append((request.method, request.url.path, _json.loads(request.read() or b"{}")))
+        return httpx.Response(200, json={"message": "ok"})
+    ms.use(ms.Api(url="http://bot", token="t", transport=httpx.MockTransport(handler)))
+    try:
+        ms.remind_unconfirmed("bd-1")
+        ms.pause_autofill("bd-1", paused=False)
+        ms.withdraw_ask("bd-1", "Kessa")
+        ms.reopen_run("bd-1")
+        ms.cancel_run("bd-1", "server down", notify=False)
+    finally:
+        ms.use(None)
+    assert [(m, p) for m, p, _b in calls] == [("POST", "/api/run/bd-1/remind"), ("POST", "/api/run/bd-1/pause"), ("POST", "/api/run/bd-1/withdraw"),
+                                              ("POST", "/api/run/bd-1/reopen"), ("POST", "/api/run/bd-1/cancel")]
+    assert calls[1][2] == {"paused": False} and calls[2][2] == {"member": "Kessa"} and calls[4][2] == {"reason": "server down", "notify": False}

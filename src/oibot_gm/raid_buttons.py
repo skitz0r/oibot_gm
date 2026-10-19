@@ -209,7 +209,7 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
             return
         await wiz.working(i, "Building the preview — up to 8 s…")
         try:
-            rosters = await bot.lock_preview(reg, rs, cur, by=i.user.display_name)
+            rosters = await bot.lock_preview(reg, rs, cur, by=i.user.display_name, by_id=i.user.id)
         except RegistryError as e:  # the solver is busy on this run, or no roster satisfies the rules
             await wiz.refuse(i, str(e), retry=lambda ri: lock_decide(ri, bot, reg, rs, rs.events.get(key) or cur, wiz=wiz), retry_label="Back")
             return
