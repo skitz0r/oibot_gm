@@ -168,13 +168,14 @@ class RaidSchedulerMixin:
             # a lock interrupted after its flip (a crash, a Discord error mid fan-out): ask the rostered nobody asked and
             # re-post missing lock cards — BEFORE expiry, which only ever expires an ask that exists (design B6)
             await self.recover_lock(reg, rs, ev)
-            gone = rc.expire_confirmations(reg, rs, ev)
+            gone_ids = rc.expire_confirmation_asks(reg, rs, ev)
+            gone = [name for _uid, name in gone_ids]
             if gone:
                 if ev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again
                     ev.fill_state = "idle"
                     rs.save(ev, "fill: seats freed")
-                for name in gone:  # their Confirm / Can't card says the seat was released (an edit — never a DM)
-                    m = next((mm for mm in reg.members.values() if mm.display_name == name), None)
+                for uid, _name in gone_ids:  # their Confirm / Can't card says the seat was released (an edit — never a DM)
+                    m = reg.members.get(uid)  # by id: a rename or two members with one name never edit the wrong card
                     if m:
                         await self.seat_released(reg, ev, m, "no-confirm")
                 await self.post_run_update(reg, ev, f"⌛ no confirmation from {', '.join(gone)} — seats freed")
@@ -184,6 +185,8 @@ class RaidSchedulerMixin:
             expired, released = rc.expire_fill_asks(reg, rs, ev)
             if expired:
                 await self.post_run_update(reg, ev, f"⌛ no answer from {', '.join(a.display_name for a in expired)} — counts as no")
+                for a in expired:  # the expired ask's own card: its final state, no live Yes / No (never a new DM)
+                    await self.close_ask_card(reg, ev, a, f"it closed <t:{int(now.timestamp())}:t> without an answer")
                 for a in released:
                     await self.withdraw_ask(reg, ev, a, "the other half of the question timed out")
                 await self.refresh_cards(reg, ev)

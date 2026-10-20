@@ -157,12 +157,17 @@ def test_recurring_after_lock_a_role_swap_waits_for_an_officer(reg, rs):
     assert people["Offy"].discord_id in bot.dms
 
 
-def test_ad_hoc_after_lock_the_engine_sends_role_swaps_itself(reg, rs):
+def test_ad_hoc_after_lock_a_role_swap_waits_for_an_officer_too(reg, rs):
+    """D22: ad hoc runs also wait for an officer before a role swap (the engine used to send it on its own)."""
     ev, people = _locked_short_healer(reg, rs, adhoc=True)
-    assert rc.run_kind(reg, ev) == "adhoc" and rc.auto_swaps(reg, ev)
+    assert rc.run_kind(reg, ev) == "adhoc" and not rc.auto_swaps(reg, ev)
     bot = Bot(reg, rs)
-    sent, _ = run(bot.run_fill(reg, rs, ev, rc.run_team(reg, ev)))
-    assert [(a.display_name, a.kind, a.approved_by) for a in sent] == [("Offy", "offspec", None)]
+    sent, _ = run(bot.run_fill(reg, rs, ev, rc.run_team(reg, ev)))  # the scheduler / a freed seat: nobody pressed
+    assert sent == [] and ev.fill_state == "suggested" and not bot.dms, "no swap DM without an officer"
+    card = text_of(views.lock_layout(reg, ev, rc.run_team(reg, ev), ico, 0, rs))
+    assert "**Suggested**" in card and "**Offy** · offspec" in card, "the ad hoc lock card offers the Ask"
+    sent, _ = run(bot.run_fill(reg, rs, ev, rc.run_team(reg, ev), by="Officer", approved_by="Officer"))
+    assert [(a.display_name, a.kind, a.approved_by) for a in sent] == [("Offy", "offspec", "Officer")]
 
 
 def test_same_role_fill_stays_automatic_on_a_recurring_run(reg, rs):
