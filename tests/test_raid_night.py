@@ -919,3 +919,185 @@ def test_mcp_tools_for_the_levers_post_to_the_run_routes():
     assert [(m, p) for m, p, _b in calls] == [("POST", "/api/run/bd-1/remind"), ("POST", "/api/run/bd-1/pause"), ("POST", "/api/run/bd-1/withdraw"),
                                               ("POST", "/api/run/bd-1/reopen"), ("POST", "/api/run/bd-1/cancel")]
     assert calls[1][2] == {"paused": False} and calls[2][2] == {"member": "Kessa"} and calls[4][2] == {"reason": "server down", "notify": False}
+
+
+# ---------------------------------------------------------------- final fixer: regressions
+
+def test_lock_fanout_never_asks_a_member_moved_off_the_board_meanwhile(reg, rs, monkeypatch):
+    """The lock's Confirm / Can't fan-out lists the seats once and runs outside board_lock: a seat freed while the DMs
+    go out (an officer's drag to the bank) must get no ask — confirm_one re-reads the seat."""
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    pool = reg.test_members()
+    join(reg, rs, ev, pool)
+    roles = by_role(reg)
+    seated = roles["tank"][:2] + roles["healer"][:3] + (roles["melee"] + roles["ranged"])[:5]
+    monkeypatch.setattr(rc, "propose", fast_propose([m.display_name for m in seated]))
+    gone = seated[-1]
+
+    async def go():
+        bot.dm_gate = asyncio.Event()  # the first confirmation DM hangs: the lock is mid fan-out
+        lock = asyncio.create_task(bot.lock_run(reg, rs, ev, by="Jon"))
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if ev.state == "locked" and any(a["roster"] == ev.team for m in seated for a in reg.members[m.discord_id].placement_asks):
+                break
+        assert ev.state == "locked"
+        move = asyncio.create_task(bot.board_move(reg, rs, ev, gone.display_name, None, by="Kara"))
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if not ev.seat_of(gone):
+                break
+        assert not ev.seat_of(gone), "the drag to the bank freed the seat"
+        bot.dm_gate.set()
+        await lock
+        await move
+
+    run(go())
+    open_asks = [a for a in reg.members[gone.discord_id].placement_asks if a["roster"] == ev.team and a.get("answer") is None]
+    assert not ev.seat_of(gone) and not open_asks, "no seat, so no Confirm / Can't ask"
+    assert all(any(a["roster"] == ev.team for a in reg.members[m.discord_id].placement_asks) for m in seated[:-1]), "everyone still seated was asked"
+
+
+def test_opening_at_a_cancelled_runs_time_is_refused_and_the_preview_says_so(reg, rs, web_bot):
+    """open_event used to hand the cancelled run back ('opened <key>') — nothing opened, the run stayed cancelled."""
+    bot, c = web_bot.bot, web_bot.c
+    wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)
+    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
+    p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00"}, headers=H()).json()
+    assert c.post("/api/raid/barrow_deeps/open", json={"start": p["start"], "key": p["key"]}, headers=H()).status_code == 200
+    ev = rs.events[p["key"]]
+    run(bot.cancel_run(reg, rs, ev, "Jon", None, notify=False))
+    run(bot.cleanup_ephemeral(reg, rs))
+    assert not reg.config.team(ev.team)
+    opened_lines = sum("opened" in t for _, t in bot.ops.lines)
+    p2 = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00"}, headers=H()).json()
+    assert p2["closed"] == "cancelled" and "was cancelled" in p2["refusal"] and p2["exists"] is None
+    r = c.post("/api/raid/barrow_deeps/open", json={"start": p2["start"], "key": p2["key"]}, headers=H())
+    assert r.status_code == 400 and "was cancelled" in r.json()["error"], r.text
+    assert ev.state == "cancelled" and not reg.config.team(ev.team), "a refused open re-creates no roster entry"
+    assert sum("opened" in t for _, t in bot.ops.lines) == opened_lines, "no 'opened' audit line for a refused open"
+    with pytest.raises(RegistryError, match="was cancelled"):
+        run(bot.open_run_and_post(reg, rs, "barrow_deeps", ev.start, by="Kara"))
+
+
+def test_a_test_run_opened_after_clearing_one_the_same_minute_is_a_live_run(reg, rs):
+    bot = NightBot(reg, rs)
+    reg.seed_test_members(10, "t")
+    ev, _ = run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=10, nudge_in=8, lock_in=6, confirm_in=3, dm=False, by="Jon", by_id=1, channel=bot.signup))
+    run(bot.cancel_run(reg, rs, ev, "Jon", None, notify=False))  # what clearing the bench does to its runs
+    ev2, _ = run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=10, nudge_in=8, lock_in=6, confirm_in=3, dm=False, by="Jon", by_id=1, channel=bot.signup))
+    assert ev2.key != ev.key and ev2.state == "open" and ev.state == "cancelled", "a fresh rehearsal, never the cleared one handed back"
+    assert ev2.key.endswith(f"-test-{ev2.start.date().isoformat()}"), "still in the '-test' key space"
+
+
+def test_rosters_page_open_of_the_raids_own_scheduled_run_from_the_adhoc_picker(reg, rs, web_bot):
+    """Rosters.tsx StartAdhoc: a one-off time that IS the raid's own (default) run previews as 'scheduled' with schedule
+    null; the page then sends schedule 'default' (it used to send 'adhoc' → 409, the key never matched)."""
+    c = web_bot.c
+    wed = reg.now_local().date() + timedelta(days=(2 - reg.now_local().weekday()) % 7 + 7)
+    reg.set_raid_overrides("barrow_deeps", {"slots": "Wed 20:00", "first_open": "2026-01-01T00:00"}, "t")
+    p = c.post("/api/raid/barrow_deeps/open/preview", json={"when": f"{wed.isoformat()} 20:00", "schedule": ""}, headers=H()).json()
+    assert p["kind"] == "scheduled" and p["schedule"] is None
+    tpl = "adhoc"  # the page's template select: One-off
+    sent = {"start": p["start"], "key": p["key"],
+            "schedule": (p["schedule"] or "default") if p["kind"] == "scheduled" else (p["schedule"] or ("adhoc" if tpl == "adhoc" else tpl))}
+    r = c.post("/api/raid/barrow_deeps/open", json=sent, headers=H())
+    assert r.status_code == 200 and r.json()["key"] == p["key"], r.text
+    from pathlib import Path
+    page = (Path(__file__).resolve().parents[1] / "frontend/src/pages/Rosters.tsx").read_text()
+    assert 'p.kind === "scheduled" ? (p.schedule || "default")' in page, "the page sends what this test sends"
+    old = {**sent, "schedule": "adhoc"}  # what the page sent before the fix
+    assert c.post("/api/raid/barrow_deeps/open", json=old, headers=H()).status_code == 409
+
+
+def test_plain_text_use_refuses_a_proposal_solved_on_an_older_board(reg, rs):
+    """'use it' compares the board rev stored with the proposal: a split shown hours ago never overwrites the moves
+    other officers made since (the restart path through ev.last_proposal and the in-memory path alike)."""
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members()[:6])
+    names = [s.display_name for s in ev.signups.values() if s.status == "in"]
+    ev.last_proposal = {"layout": [names[:3], names[3:6]], "strategy": "rotation", "rev": rc.board_rev(reg, ev), "by": "Jon", "by_id": 1, "at": rc.now(), "kind": "split"}
+    run(bot.board_move(reg, rs, ev, names[0], (0, 0), by="Kara"))  # another officer's move after the proposal
+    moved = rc.board_layout(reg, ev)
+    use = ConfigOp(op="run_propose", target=ev.key, field="use")
+    with pytest.raises(rc.BoardChanged, match="ask for a fresh one"):
+        run(configops._propose(reg, rs, ev, use, "Jon", bot, 1, None))
+    assert rc.board_layout(reg, ev) == moved and ev.split_strategy != "rotation", "nothing written"
+    configops.split_seen(bot)[(reg.key, ev.key, 1)] = {"strategy": "rotation", "layouts": [[names[:3], names[3:6]]], "rev": "stale0000000"}
+    with pytest.raises(rc.BoardChanged):
+        run(configops._propose(reg, rs, ev, use, "Jon", bot, 1, None))
+
+
+def test_a_members_own_fill_card_is_closed_when_their_ask_is_released(reg, rs):
+    """release_asks_of edited only the tied partners' cards: the member's own fill DM kept live Yes / No after their
+    callout / No thanks closed the ask."""
+    bot = NightBot(reg, rs)
+    ev, _seated = short_one(reg, rs)
+    plan = rc.role_plan(reg, rs, ev)
+    sent, _ = run(bot.send_plan(reg, rs, ev, rev=plan.rev, by="Jon"))
+    a = sent[0]
+    m = reg.members[a.discord_id]
+    run(bot.call_out(reg, rs, ev, m, None, by="Jon", by_id=1))
+    assert a.answer == "released"
+    texts = card_texts(bot.cards[a.dm_message_id])
+    assert any("Never mind" in t and "called out" in t for t in texts), texts
+
+
+def test_an_expired_fill_ask_closes_its_own_card(reg, rs):
+    bot = NightBot(reg, rs)
+    ev, _seated = short_one(reg, rs)
+    plan = rc.role_plan(reg, rs, ev)
+    sent, _ = run(bot.send_plan(reg, rs, ev, rev=plan.rev, by="Jon"))
+    a = sent[0]
+    a.expires_at = (datetime.now(ev.start.tzinfo) - timedelta(minutes=1)).isoformat()
+    rs.save(ev, "deadline")
+    run(bot.scheduler_tick_guild(reg))
+    assert a.answer == "expired"
+    assert any("without an answer" in t for t in card_texts(bot.cards[a.dm_message_id])), "the card says it closed — no live Yes / No"
+
+
+def test_prelock_asks_closed_by_the_lock_close_their_cards(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    pool = reg.test_members()
+    join(reg, rs, ev, pool)
+    roles = by_role(reg)
+    seated = roles["tank"][:2] + roles["healer"][:3] + (roles["melee"] + roles["ranged"])[:5]
+    monkeypatch.setattr(rc, "propose", fast_propose([m.display_name for m in seated]))
+    asks = [rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="other", role="tank", character=m.main.name, spec=m.main.spec, reason="short a tank")
+            for m in pool[-2:]]
+    run(bot._send_asks(reg, rs, ev, rc.run_team(reg, ev), asks, phase="prelock", approved_by="Jon", deadline=ev.start.isoformat()))
+    assert all(a.dm_message_id for a in asks)
+    run(bot.lock_run(reg, rs, ev, by="Jon"))
+    assert all(a.answer == "released" for a in asks)
+    for a in asks:
+        assert any("locked before you answered" in t for t in card_texts(bot.cards[a.dm_message_id])), a.display_name
+    # the scheduler's lock-time close (close_prelock_asks) does the same
+    ev2 = open_test_run(reg, rs, days=5)
+    more = [rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="other", role="tank", character=m.main.name, spec=m.main.spec, reason="short a tank")
+            for m in pool[:1]]
+    run(bot._send_asks(reg, rs, ev2, rc.run_team(reg, ev2), more, phase="prelock", approved_by="Jon", deadline=ev2.start.isoformat()))
+    run(bot.close_prelock_asks(reg, rs, ev2))
+    assert any("locked before you answered" in t for t in card_texts(bot.cards[more[0].dm_message_id]))
+
+
+def test_expired_confirmation_card_is_found_by_id_after_a_rename(reg, rs):
+    """The scheduler found the member by display name: a rename since the Join (the signup keeps the old name) left the
+    Confirm card with live buttons."""
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs)
+    m = seated[2]
+    run(bot.confirm_one(reg, ev, ev.signups[str(m.discord_id)], 0, 0, "lock"))
+    reg.rename(m.discord_id, "Renamed Since", "t")
+    past_confirm(ev)
+    rs.save(ev, "deadline")
+    run(bot.scheduler_tick_guild(reg))
+    assert not ev.seat_of(m)
+    card = bot.cards[reg.members[m.discord_id].placement_asks[-1]["dm"][1]]
+    assert any("was released" in t for t in card_texts(card))
+    assert rc.expire_confirmation_asks(reg, rs, ev) == []

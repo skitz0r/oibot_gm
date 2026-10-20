@@ -315,12 +315,12 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 - **The health card follows the sheet**: every answer, and an absence recorded or cleared, redraws it. Once the run
   locks it says *Locked* and points at the lock card — its *Suggested* block and **Ask** go (pressing an old Ask says
   the run has locked).
-- **After lock** the fill engine (step 6 below) uses the same list. On a **recurring** schedule it asks people for the
+- **After lock** the fill engine (step 6 below) uses the same list. On every run — recurring or ad hoc — it asks people for the
   same role on its own, but a **role swap** (a flex role, an offspec or an alt, with or without someone covering)
   waits for an officer: the lock card shows it under *Suggested* with **Ask** — while it waits, a seat freed later
   (a missed confirmation) still gets its same-role asks automatically. An officer's Ask after lock counts the asks
   still out (nobody is asked twice for one seat) and keeps the cap of 3 questions out at a time: what doesn't fit
-  stays on the card ("1 more waits"). On an **ad hoc** run the fill engine sends swaps itself, as before.
+  stays on the card ("1 more waits"). An **ad hoc** run works the same way: no swap goes out without an officer.
 
 Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
 
@@ -413,7 +413,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    stops asking people the moment the run is cancelled, and so do fill asks, suggestions and a Remind that are going
    out: nobody after the cancel is DMed, and a card that arrived just as it happened is edited to *Cancelled* at once.
    Clearing the test bench cancels its test runs without a line in the signup channel. A cancelled run is final: it
-   can't be reopened (open a new run).
+   can't be reopened, and opening a run at the same time is refused ("That time's run was cancelled — pick another
+   time"; the open screen and the site say so before you press anything). A test run opened in the same minute as one
+   you just cleared starts a minute later.
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): the board becomes
    the roster(s); the sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. A roster that came out under its tank/healer minimum
@@ -447,9 +449,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people, in the suggestions' cost
    order: joiners the solver left off and *Bench* answers first → the schedule's regulars who haven't answered (every
    main while it has none; on an ad hoc run, every main) → other members → **swaps** (a rostered player's declared flex
-   role, offspec or alt in the needed role; never the spec the lock already moved them to). On a **recurring** schedule
+   role, offspec or alt in the needed role; never the spec the lock already moved them to). On every run (recurring or ad hoc)
    a swap is not sent on its own: the lock card shows it under *Suggested* and an officer presses **Ask** (or Fill
-   seats); the updates thread says so once. On an ad hoc run swaps go out by themselves. A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
+   seats); the updates thread says so once. A swap goes out only when the role it vacates stays covered; otherwise the bot looks ahead
    for a bench or pool member of that role and sends both asks tied together — the swap and its backfill — and
    nothing changes until both say yes (the first yes waits; the second makes both changes and tells the first);
    a no (or silence) from either withdraws the other — its card is edited to "never mind". It asks the shortfall + 1 at a
@@ -476,7 +478,7 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    deadline: its card says "never mind", its tied half is released.
    `/raid fill preview:true` shows the same batch without a Send button. With `autofill` off
    nothing is asked until an officer presses Fill seats. On the site one **Fill** button opens the right screen before
-   and after lock; when a role swap waits for you (recurring runs), a yellow banner above the roster says *Waiting on
+   and after lock; when a role swap waits for you (any run, ad hoc too), a yellow banner above the roster says *Waiting on
    you: …* with the Fill button, and the fill state is in words ("asking — waiting for answers (1 on the site)").
 7. **Raid** — `/raid loot` (or the lock card's **Loot**, or Loot › Tonight on the site) opens the loot council;
    `/raid end` ends the run and its council (§9) — so does **End the run now** on the lock card's second row and the
@@ -687,8 +689,8 @@ picked from it (it never changes; the site and MCP use it), the game version (Wo
 the owner (you, or pick someone). Nothing is saved until **Confirm**; then the server is a guild of its own — empty:
 its own members, raids, schedules, policy and settings — and you continue with the channels below. Every other
 command used in a server that isn't set up answers "This server isn't set up for oibot_GM yet". The bot can look
-after **several** servers, each its own guild with its own data; when a second one is claimed the owners of the others
-get a DM. Keep **Public Bot** switched off in the Discord Developer Portal, so only you can invite the bot (any server
+after **several** servers, each its own guild with its own data; when another one is claimed the host's superusers
+(`OIBOT_SUPERUSERS`) get a DM — the other guilds' owners don't (the ops log keeps the line). Keep **Public Bot** switched off in the Discord Developer Portal, so only you can invite the bot (any server
 the bot is in could otherwise claim itself, show on the homepage and draw on the shared AI budget). The invite link:
 `uv run python scripts/move_guild.py --invite-link` (`--guild <server id>` preselects the server). Commands are global (every server and DMs); the
 development mode `OIBOT_COMMAND_SCOPE=guild` puts them only in the test server and the configured servers, so a new
@@ -835,7 +837,8 @@ of their characters. The bot reads each live run's board as it stands and each r
   split") shows the solver's layout — groups, synergy, who is left out, why there can't be more runs, whether leftovers
   could make another — and leaves the board as it is; "another one" shows a different one, "use it" puts the last one on the board
   with its strategy in one step (what it showed you — also after a restart, and a preview you looked at on the site or
-  with the lock's Preview; never one only another officer saw). "Post the sheet here" re-posts
+  with the lock's Preview; never one only another officer saw, and never one made before someone moved people on the
+  board since: then it asks you for a fresh one). "Post the sheet here" re-posts
   a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy) — like `/raid
   sheet`, anyone registered may ask, in any channel where plain text acts on their own record. Pins stay as
   before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on a run is someone's answer ("put Ash in for
@@ -1351,7 +1354,8 @@ locked roster, your callouts and your pending asks are tied to your Discord acco
 on your record follows your server nick the next time the bot sees you in the server (a command, a button press) —
 a sheet keeps the name you answered under until you answer again. An absence reason is seen by you and
 the officers, nobody else. The bot DMs only when you must act — sheets, nudges, confirmations and fill
-asks (a released seat or a cancelled run edits the card you already have instead); switch DMs off on the **Me** page if you'd rather not get them — with DMs off
+asks (a released seat, a cancelled run, an ask that expired, closed at the lock or closed by your own No thanks /
+callout / absence edits the card you already have to say so — no buttons left, nothing to do); switch DMs off on the **Me** page if you'd rather not get them — with DMs off
 you are never asked to fill, and a confirmation ask is shown on the Me page instead and counts as pending
 until you answer it there. **My absences** on the absences card lists yours with a **Clear** button each; clearing
 an absence puts you back to unanswered on any open sheet it had pre-filled (a seat freed on a locked run is

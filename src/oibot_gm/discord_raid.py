@@ -444,7 +444,7 @@ class RaidMixin:
         """Send the next batch of fill DMs. Returns (asks sent, needs). The fill engine only runs on a locked roster:
         before lock nothing is sent this way (an officer sends suggestions with send_plan). `approved_by` = the officer
         who pressed Send: their batch may include role swaps. On its own (the scheduler, a freed seat, an answer) the
-        engine sends role swaps on an ad hoc run only — owner decision D3: on a recurring run a swap waits for an
+        engine never sends a role swap — owner decisions D3 / D22, every run kind: a swap waits for an
         officer's Ask (fill_state "suggested", the lock card lists it). `swaps=False` keeps role swaps out whoever
         sends (the site's / MCP's send without a preview may only send same-role asks). An officer's send from a
         screen goes through send_plan instead: the batch they were shown, nothing else.
@@ -639,14 +639,21 @@ class RaidMixin:
             rs.save(ev, "pre-lock asks closed at lock time")
         for a in held:
             await self.withdraw_ask(reg, ev, a, "the roster locks before the other half of the swap was answered")
+        for a in gone:  # every other unanswered "Could you come?" card: its final state, no buttons
+            if a not in held:
+                await self.close_ask_card(reg, ev, a, "the roster locked before you answered")
         return gone
 
     async def release_asks_of(self, reg, rs, ev, m, why: str) -> bool:
         """`m` can't come any more (No thanks, a callout, an absence): close their asks still in play (rc.release_member_asks)
         and tell the tied half of each pair it's off. The fill engine's next batch is the caller's (drop_seated, or
         refill_after_release) — so a seat their ask was holding is asked for again. True when an ask was closed."""
-        had = any(a.discord_id == m.discord_id and a.pending for a in ev.fill_asks)
+        mine = [a for a in ev.fill_asks if a.discord_id == m.discord_id and a.pending]
+        had = bool(mine)
         partners = rc.release_member_asks(reg, rs, ev, m.discord_id, why)
+        for a in mine:  # their own card: edited to its final state too (it used to keep live Yes / No)
+            if a.answer == "released":
+                await self.close_ask_card(reg, ev, a, f"closed ({why})")
         for other in partners:
             await self.withdraw_ask(reg, ev, other, f"{m.display_name} can't come")
         if had:
@@ -668,9 +675,15 @@ class RaidMixin:
         outcome is the card in its final state, never a DM; the ask's own record carries it to the Me page). An ask
         whose card is unknown (sent before cards were stored) gets no DM either: a press on that old card is refused as
         closed, which says the same."""
-        text = f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}. Nothing to do."
-        await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, text)
+        await self.close_ask_card(reg, ev, ask, because)
         await self.post_run_update(reg, ev, f"↩️ withdrew the ask to {ask.display_name} ({because})")
+
+    async def close_ask_card(self, reg, ev, ask, because: str) -> bool:
+        """Edit one fill / pre-lock ask's DM card to its final state ("Never mind … — <because>. Nothing to do.", no
+        buttons): every path that closes an ask without the member's press (their own No thanks / callout / absence,
+        expiry, the lock closing pre-lock asks, a withdrawn partner) ends the card this way — never a new DM."""
+        text = f"Never mind the {'swap' if ask.swap else 'seat'} question for **{reg.raid_def(ev.instance).get('name', ev.instance)}** <t:{int(ev.start.timestamp())}:F> — {because}. Nothing to do."
+        return await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, text)
 
     async def after_fill_answer(self, reg, rs, ev, ask, line: str) -> None:
         await self.refresh_sheet(reg, ev)
@@ -821,7 +834,7 @@ class RaidMixin:
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
             ev.log.append(f"locked by {by}")
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
-            rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time (a yes held for a tied partner too)
+            pre_gone = rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time (a yes held for a tied partner too)
             short = rc.needs(reg, ev, team)["roles"]
             if short:  # the solver caps a minimum at what the sheet can supply: say so instead of locking quietly
                 ev.log.append("locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
@@ -833,6 +846,9 @@ class RaidMixin:
                 await self.ops.emit(reg.config, "warn", f"{ev.key}: locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
             for a in held:  # they said yes, but their partner never answered: nothing changed for them
                 await self.withdraw_ask(reg, ev, a, "the roster locked before the other half of the swap was answered")
+            for a in pre_gone:  # the unanswered pre-lock asks: each card edited to its final state (no live Yes / No)
+                if a not in held:
+                    await self.close_ask_card(reg, ev, a, "the roster locked before you answered")
             await self.refresh_sheet(reg, ev)
             if "health" in ev.cards:  # the open sheet's card: its Suggested block and Ask go; it points at the lock card
                 await self.refresh_cards(reg, ev)
@@ -867,6 +883,12 @@ class RaidMixin:
             return False
         if ev.state != "locked":  # cancelled / ended meanwhile: never an ask for a run that is not locked
             return False
+        seat = ev.seat_of(sg.discord_id)  # re-read NOW: a board move / Can't / absence may have freed it since the
+        if seat is None:                  # caller listed the seats (the lock's fan-out runs outside board_lock)
+            return False
+        roster_i = seat[0]
+        group_i = next((k for k, g in enumerate(ev.all_rosters[roster_i].groups)
+                        if seat[1].signup_name in g or sg.display_name in g), group_i)
         if any(a["roster"] == ev.team and a.get("answer") is None for a in m.placement_asks):
             return False  # already asked and not answered: the card they hold still works (a re-ask would reset it)
         # the seat itself is in the run file (ev.rosters); the member file only gets the confirmation ask
@@ -1176,6 +1198,10 @@ class RaidMixin:
         target = (self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None) or (channel if in_guild else None)
         if target is None:  # nowhere to post the sheet: refused before anything is written (the site, MCP, a DM), naming why
             raise RegistryError(bench_channel_refusal(reg, self.get_channel) or NO_TEST_CHANNEL)
+        for _ in range(60):  # a rehearsal cleared (cancelled) this minute keeps its key: start a minute later instead
+            if not rc.closed_run_refusal(rs, rc.event_key(raid, start, test=True)):
+                break
+            start += timedelta(minutes=1)
         cut = {"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(dm), "test_by": by_id}
         if in_guild:
             cut["test_channel"] = channel.id  # its health / lock cards post where it was asked for (D20)
