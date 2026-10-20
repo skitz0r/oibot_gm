@@ -932,6 +932,13 @@ class RaidMixin:
         if ok and mid:
             ask["dm"] = [cid, mid]
             reg.save(m, f"{m.display_name}'s confirmation card for {ev.team}")
+            if ev.state != "locked" or ask.get("answer") is not None:
+                # closed while this DM was in flight (a cancel collects the cards it edits before this one had an id;
+                # a freed seat closes the ask): the card goes to its final state at once — never a live Confirm
+                await self.edit_ask_card(reg, cid, mid, f"Cancelled — {run_label(reg, ev)} was cancelled. Nothing to do." if ev.state == "cancelled"
+                                         else f"{run_label(reg, ev)} is {ev.state} — nothing to do." if ev.state != "locked"
+                                         else f"Your seat on {run_label(reg, ev)} was released. Nothing to do — if that's wrong, tell an officer."
+                                         if ask.get("answer") == "released" else f"Already answered — nothing to do for {run_label(reg, ev)}.")
         elif not ok:  # a failed DM is a channel change, never an answer: the ask waits on the site, same deadline
             ask["channel"] = "web"
             reg.save(m, f"{m.display_name}'s confirmation for {ev.team} waits on the site (DM failed)")

@@ -276,6 +276,44 @@ def test_cancel_during_the_lock_fanout_leaves_no_orphan_asks(reg, rs, monkeypatc
     assert "Nobody was DMed" in cline
 
 
+def test_a_confirm_card_in_flight_at_a_cancel_is_closed_when_it_lands(reg, rs):
+    """The Confirm DM is still being sent when the run is cancelled: the cancel can't edit a card it has no id for, so
+    confirm_one edits it the moment it lands — no live Confirm on a cancelled run."""
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs)
+    m = seated[1]
+
+    async def go():
+        bot.dm_gate = asyncio.Event()  # the DM hangs: in flight
+        ask = asyncio.create_task(bot.confirm_one(reg, ev, ev.signups[str(m.discord_id)], ev.seat_of(m)[0], 0, "lock"))
+        await asyncio.sleep(0.05)
+        await bot.cancel_run(reg, rs, ev, "Kara", None)
+        bot.dm_gate.set()
+        await ask
+    run(go())
+    a = reg.members[m.discord_id].placement_asks[-1]
+    card = bot.cards[a["dm"][1]]
+    assert ev.state == "cancelled" and a["answer"] == "cancelled"
+    assert _live_buttons(card) == 0 and "Cancelled" in card_texts(card)[-1]
+
+
+def test_the_scheduler_expires_nothing_on_a_run_cancelled_mid_tick(reg, rs, monkeypatch):
+    """A cancel lands during the tick's awaits (the recovery step), before its asks are withdrawn: the expiry step
+    re-checks the state under the run's lock and frees nobody."""
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs, asks=True)
+    past_confirm(ev)
+    rs.save(ev, "deadline passed")
+
+    async def cancelled_meanwhile(reg_, rs_, ev_):
+        ev_.prev_state, ev_.state = ev_.state, "cancelled"  # cancel_run's flip; its withdraw step hasn't run yet
+        return 0
+    monkeypatch.setattr(bot, "recover_lock", cancelled_meanwhile)
+    run(bot.scheduler_tick_guild(reg))
+    assert all(ev.seat_of(m) for m in seated), "nobody freed on a cancelled run"
+    assert all(a.get("answer") != "expired" for m in seated for a in reg.members[m.discord_id].placement_asks)
+
+
 def test_cancel_waits_for_the_board_lock_and_refuses_a_closed_run(reg, rs):
     bot = NightBot(reg, rs)
     ev = open_test_run(reg, rs)

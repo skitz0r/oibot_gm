@@ -2582,8 +2582,8 @@ def expire_confirmation_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> lis
     two members sharing a name, never edits the wrong card).
     Only a seat whose member HOLDS an open ask expires (design B2 "expiry correctness"): a seated member nobody asked
     — a lock whose Confirm / Can't fan-out was interrupted, the scheduler's recovery step still to come — keeps the
-    seat; "no answer" needs a question first."""
-    if not ev.confirm_by or datetime.fromisoformat(ev.confirm_by) > datetime.now(ev.start.tzinfo):
+    seat; "no answer" needs a question first. Only a LOCKED run's asks expire (a run cancelled mid-tick frees nobody)."""
+    if ev.state != "locked" or not ev.confirm_by or datetime.fromisoformat(ev.confirm_by) > datetime.now(ev.start.tzinfo):
         return []
     gone = []
     with rs.store.batch(f"{rs.key}: raid {ev.key}: confirmations expired"):

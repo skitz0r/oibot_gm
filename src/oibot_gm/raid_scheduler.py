@@ -186,7 +186,10 @@ class RaidSchedulerMixin:
             # a lock interrupted after its flip (a crash, a Discord error mid fan-out): ask the rostered nobody asked and
             # re-post missing lock cards — BEFORE expiry, which only ever expires an ask that exists (design B6)
             await self.recover_lock(reg, rs, ev)
-            gone_ids = rc.expire_confirmation_asks(reg, rs, ev)
+            async with self.board_lock(reg, ev.key):  # under the run's lock: a cancel mid-tick (during the awaits above) is seen
+                if ev.state != "locked":
+                    continue
+                gone_ids = rc.expire_confirmation_asks(reg, rs, ev)
             gone = [name for _uid, name in gone_ids]
             if gone:
                 if ev.fill_state == "exhausted":  # a freed seat is a new gap: the engine looks again
@@ -200,6 +203,8 @@ class RaidSchedulerMixin:
                 await self.refresh_sheet(reg, ev)
                 await self.refresh_cards(reg, ev)
                 await self.ops.emit(cfg, "warn", f"{ev.key}: confirmations expired for {len(gone)}")
+            if ev.state != "locked":  # cancelled while the expired seats' cards were being edited: no fill step
+                continue
             expired, released = rc.expire_fill_asks(reg, rs, ev)
             if expired:
                 await self.post_run_update(reg, ev, f"⌛ no answer from {', '.join(a.display_name for a in expired)} — counts as no")

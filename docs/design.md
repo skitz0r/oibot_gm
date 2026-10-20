@@ -1695,7 +1695,10 @@ page's notices).
 
 **Races, each closed under one lock or on one thread.**
 - `rc.expire_confirmations` expires only a seat whose member HOLDS an open ask; a seated member nobody asked keeps the
-  seat (an interrupted fan-out is not "no answer").
+  seat (an interrupted fan-out is not "no answer"). Only a locked run's asks expire: the scheduler re-checks
+  `ev.state == "locked"` under `board_lock` at the top of its expiry step (a cancel during the tick's awaits frees
+  nobody) and again before the fill step. A Confirm DM that lands after the run was cancelled (or its ask closed) is
+  edited by `confirm_one` at once — the cancel had no card id to edit yet.
 - `lock_run` flips to `locked` and commits before posting anything; the fan-out runs with `(guild, run)` in
   `RaidMixin._confirming()`, re-checks `ev.state == "locked"` before every `confirm_one` and before the signup-channel
   line, and stamps `RaidEvent.confirmations_sent_at` when every seat was reached. `confirm_one` refuses a run that is
