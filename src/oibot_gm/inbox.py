@@ -218,7 +218,7 @@ def pin_write(reg: Registry, rs, ev, m: Member, pin: str | None, by: str) -> str
     if s is None:
         raise RegistryError(f"{m.display_name} isn't on this sheet")
     try:
-        rc.set_pin(ev, s.display_name, pin)
+        rc.set_pin(ev, m.discord_id, pin)  # by id: ids decide who is written, names are for reading
     except ValueError as e:
         raise RegistryError(str(e))
     rs.save(ev, f"pin {s.display_name} {pin or 'clear'} by {by}")

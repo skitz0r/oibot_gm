@@ -951,14 +951,16 @@ def signup_by_name(ev: RaidEvent, display_name: str) -> Optional[Signup]:
     return next((s for s in ev.signups.values() if s.display_name.lower() == n), None)
 
 
-def set_pin(ev: RaidEvent, display_name: str, pin: str | None) -> None:
+def set_pin(ev: RaidEvent, who: int | str, pin: str | None) -> None:
     """Officer decision the lock solve must honour: "in" | "out" | None (clear). Pins are keyed by discord id (as
-    the web API keys them); the person must be on the sheet. Appends the log line; the caller saves the event."""
+    the web API keys them); the person must be on the sheet. `who` = the member's discord id — THE write path
+    (inbox.pin_write): an id decides, so two members sharing a name never pin the wrong one; a str is a display name
+    (tests and offline tools only). Appends the log line; the caller saves the event."""
     if pin not in ("in", "out", None):
         raise ValueError("pin must be in, out or nothing (clear)")
-    sg = signup_by_name(ev, display_name)
+    sg = ev.signups.get(str(who)) if isinstance(who, int) else signup_by_name(ev, who)
     if not sg:
-        raise ValueError(f"{display_name} isn't on this sheet")
+        raise ValueError(f"{who} isn't on this sheet")
     uid = str(sg.discord_id)
     if pin:
         ev.pins[uid] = pin

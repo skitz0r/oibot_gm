@@ -419,6 +419,16 @@ def test_every_pin_path_is_one_write_and_refreshes_the_sheet_footer(reg, rs, mon
     assert src.count("rc.set_pin(") == 1, "one pin write (inbox.pin_write)"
 
 
+def test_the_pin_write_decides_by_id_never_by_a_shared_name(reg, rs):
+    """Two members sharing a display name on one sheet: pinning the second pins the second (ids decide, names read)."""
+    ev = open_test_run(reg, rs)
+    a, b = reg.test_members()[:2]
+    join(reg, rs, ev, [a, b])
+    ev.signups[str(b.discord_id)].display_name = ev.signups[str(a.discord_id)].display_name
+    inbox.pin_write(reg, rs, ev, b, "in", "Jon")
+    assert ev.pins == {str(b.discord_id): "in"}, "the pin is the second member's, not the first one by name"
+
+
 # ---------------------------------------------------------------- D21: a member's /raid sheet is a copy
 
 class Sent:
