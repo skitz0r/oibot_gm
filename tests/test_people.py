@@ -651,3 +651,36 @@ def test_member_writes_hold_the_config_lock(reg, monkeypatch, verb):
      "set_main": lambda: reg.set_main(m.discord_id, "Lockalt"),
      "regular_add": lambda: reg.regular_add(m.discord_id, "barrow_deeps:default", "t")}[verb]()
     assert held and all(held)
+
+
+# ---------------------------------------------------------------- final fixer: a PLANNED character respecced
+
+def _planned(reg, n: int, cls="Priest", spec="Holy"):
+    uid = REAL + 40 + n
+    m, c = reg.set_plan(uid, f"Planner{n}", cls, spec, None, "main")
+    assert not c.name and c.label == f"{cls} ({spec})"
+    return reg.members[uid]
+
+
+def test_respec_of_a_planned_main_rewrites_the_open_sheet_answer(reg, rs, bot):
+    """Regression: a planned character's label is 'Class (Spec)', so a respec renames it; the ripple looked the character
+    up by the OLD label after the save and skipped the rewrite while saying 'the answer now reads Shadow'."""
+    m = _planned(reg, 0)
+    ev = real_run(reg, rs)
+    join(reg, rs, ev, [m])
+    res = run(bot.save_characters(reg, m.discord_id, [{"label": "Priest (Holy)", "cls": "Priest", "spec": "Shadow"}], m.display_name, by_id=m.discord_id))
+    assert any("now reads Shadow" in line for line in res["ripple"])
+    sg = ev.signups[str(m.discord_id)]
+    assert (sg.character, sg.spec, sg.role) == ("Priest (Shadow)", "Shadow", "ranged"), "the sheet says what the ripple said"
+
+
+def test_same_role_respec_of_a_planned_main_follows_the_locked_seat(reg, rs, bot):
+    m = _planned(reg, 1)
+    others = [real(reg, i, "Mage", "Fire") for i in range(1, 6)]
+    ev = real_run(reg, rs)
+    join(reg, rs, ev, [m] + others)
+    lock_with_board(reg, rs, ev, [m.display_name] + [o.display_name for o in others])
+    run(bot.save_characters(reg, m.discord_id, [{"label": "Priest (Holy)", "cls": "Priest", "spec": "Discipline"}], m.display_name, by_id=m.discord_id))
+    seat = ev.seat_of(m)
+    assert seat is not None and (seat[1].spec, seat[1].role) == ("Discipline", "healer")
+    assert seat[1].character == "Priest (Discipline)" and ev.signups[str(m.discord_id)].character == "Priest (Discipline)"

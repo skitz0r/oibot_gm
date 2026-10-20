@@ -1935,6 +1935,11 @@ asked, rank per member, confirm by member, validate-on-copy, the rev, puppets, o
 away, set_owner refusals, schedule removal without a DM), `tests/test_people_flows.py` (every wizard through the harness)
 and `tests/test_people_web.py` (every route).
 
+**Final review fix (2026-10-19).** A planned character's label is `Class (Spec)`, so a respec renames it:
+`rc.character_changes` gives such a `spec` change its `new_label`, and `rc.after_character_change` re-finds the
+character by the label it has AFTER the save (a name given in the same save wins) — it used to look it up by the old
+label, skip the sheet rewrite and the same-role seat rewrite without a word, and still say "the answer now reads …".
+
 ## 6. Architecture
 
 ```mermaid

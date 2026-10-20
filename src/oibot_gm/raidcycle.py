@@ -2781,7 +2781,8 @@ def _run_words(reg: Registry, ev: RaidEvent) -> str:
 def character_changes(reg: Registry, m: Member | None, rows) -> list[dict]:
     """What a table save would change for runs, read from its rows against the member AS STORED NOW (call it before the
     save): [{kind: retire|delete|spec|name|main, label, …}]. `spec` carries cls/spec/offspec and the old and new role;
-    `name` the new label. A row the save will refuse is still listed — the save refuses before any ripple runs."""
+    `name` the new label (and so does `spec` on an unnamed, planned character: its label 'Class (Spec)' changes). A row
+    the save will refuse is still listed — the save refuses before any ripple runs."""
     out: list[dict] = []
     if m is None:
         return out
@@ -2803,7 +2804,10 @@ def character_changes(reg: Registry, m: Member | None, rows) -> list[dict]:
                 new = None
             if new is not None and new.spec != cur.spec:
                 out.append({"kind": "spec", "label": cur.label, "cls": cur.cls, "spec": new.spec, "offspec": off,
-                            "role": new.role, "old_role": reg.profile.spec(cur.cls, cur.spec).role, "old_spec": cur.spec})
+                            "role": new.role, "old_role": reg.profile.spec(cur.cls, cur.spec).role, "old_spec": cur.spec,
+                            # a PLANNED character's label is 'Class (Spec)': the respec renames it, so the ripple
+                            # re-finds it under the new label after the save (a named one keeps its label)
+                            **({} if cur.name else {"new_label": f"{cur.cls} ({new.spec})"})})
         name = (row.get("name") or "").strip()
         if not cur.name and name:
             try:
@@ -2897,6 +2901,7 @@ def after_character_change(reg: Registry, rs: RaidStore, m: Member, changes: lis
     "touched": [ev], "lines": [text]} — the seats to hand back, the role flips to tell officers about, the runs whose
     asks by this member close, every run touched (sheet + cards to redraw) and the sentences. Nothing is sent here."""
     renamed = {ch["label"]: ch["new_label"] for ch in changes if ch["kind"] == "name"}
+    respecced = {ch["label"]: ch["new_label"] for ch in changes if ch["kind"] == "spec" and ch.get("new_label")}
     res: dict = {"free": [], "keep": [], "release": [], "touched": [], "lines": []}
 
     def touch(ev):
@@ -2904,7 +2909,9 @@ def after_character_change(reg: Registry, rs: RaidStore, m: Member, changes: lis
             res["touched"].append(ev)
 
     for ch in changes:
-        now_label = renamed.get(ch["label"], ch["label"])
+        # the character's label AFTER the save: a name given wins, else a planned character's respec ('Priest (Holy)' →
+        # 'Priest (Shadow)'), else unchanged — looked up by the old label it would silently skip the rewrite
+        now_label = renamed.get(ch["label"]) or respecced.get(ch["label"]) or ch["label"]
         for e in character_effects(reg, rs, m, ch):
             ev, act = e["ev"], e["action"]
             if e["text"] not in res["lines"]:

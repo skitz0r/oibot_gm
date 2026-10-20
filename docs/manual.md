@@ -108,7 +108,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   reads Shadow"*, *"Regular of Barrow Deeps · Raid nights — comes off it"*. The Me page's characters card and telling
   the bot do exactly the same (one verb behind all three).
   - **Alts**: *Add an alt* button, `/me char action:Add an alt` (first and last name, like the button), `/me plan alt`.
-  - **Spec/offspec**: a sheet you answered shows the new spec at once (sheets keep the spec you answered with). On a
+  - **Spec/offspec**: a sheet you answered shows the new spec at once (sheets keep the spec you answered with) — a
+    planned character without a name too, whose name on the sheet follows ("Priest (Holy)" becomes "Priest (Shadow)"). On a
     locked roster, a change in the same role follows your seat; a change of role (healer → damage) on a **recurring**
     run keeps the seat as the roster was built and tells the officers on the run's card — they decide; on an **ad
     hoc** run it hands the seat back (Join again to queue). Nobody is DMed.
