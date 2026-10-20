@@ -1988,55 +1988,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         m = resolve_member(v.reg, member_ref(d))
         return await clear_absence(request, v, m.discord_id, parse(d, StartBody).start, bool(d.get("preview")))
 
-    # ---- the owner (design §3.5 O-03, D50): the Config page's transfer; /gm config owner is the Discord one
-    @app.get("/api/owner")
-    async def owner_get(request: Request):
-        """Who owns the guild and, for the owner (or a host superuser), who could take over: the registered real members."""
-        v = await who(request)
-        if not (v.officer or v.owner):
-            raise HTTPException(403, "Officers only.")
-        reg = v.reg
-        oid = reg.config.owner_discord_id
-        from .app import member_name
-
-        out = {"owner": {"uid": str(oid), "name": member_name(bot, reg, int(oid))} if oid else None, "may_transfer": bool(v.owner and v.via == "web")}
-        if out["may_transfer"]:
-            out["candidates"] = [{"uid": str(m.discord_id), "name": m.display_name} for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower())
-                                 if not m.test and m.discord_id != oid and m.discord_id != v.uid]
-        return out
-
-    @app.post("/api/owner")
-    async def owner_set(request: Request):
-        """Hand the guild over: {member | uid, preview}. The owner (or a host superuser) only, from the site; never MCP —
-        the token IS the owner and can't hand itself over. Preview = THE confirm sentence (Registry.owner_consequence) and
-        the refusals (a bot, the owner, yourself, someone outside the server); then discord_people.transfer_owner."""
-        from .. import discord_people
-        from .app import member_name
-
-        v, d = await body(request)
-        if v.via != "web":
-            return JSONResponse({"error": "Ownership is handed over by the owner in person (the Config page or /gm config owner) — MCP acts as the owner and can't hand itself over."}, status_code=403)
-        if not v.owner:
-            return JSONResponse({"error": "Only the owner can hand the guild over."}, status_code=403)
-        reg = v.reg
-        try:
-            m = resolve_member(reg, member_ref(d))
-        except HTTPException as e:
-            return JSONResponse({"error": e.detail}, status_code=e.status_code)
-        name = m.display_name or member_name(bot, reg, m.discord_id)
-        if d.get("preview"):
-            from .. import guild_routing
-
-            answer, member = await guild_routing.member_of(bot, reg, m.discord_id, timeout=None)
-            why = reg.owner_refusal(m.discord_id, by_id=v.uid, bot=bool(getattr(member, "bot", False)), membership=answer, name=name)
-            if why:
-                return JSONResponse({"error": why}, status_code=400)
-            return {"preview": True, "message": reg.owner_consequence(name, v.uid).replace("**", "")}
-        try:
-            line = await discord_people.transfer_owner(bot, reg, m.discord_id, v.name, by_id=v.uid, name=name, via=v.via)
-        except Exception as e:  # noqa: BLE001
-            return await refused(v, request, e)
-        return {"message": line}
+    # ---- the owner: claimed and handed over in Discord only (design §2.1, configops.BY_DESIGN_ONLY guild_claim /
+    # owner_transfer: /gm config owner); the Config page shows who owns it (settings.owner_id), never a transfer
 
     # ---- ops, config (read-only)
     @app.get("/api/ops")

@@ -1,7 +1,7 @@
 """The people routes over HTTP (dual interfaces phase 2, part C): the Me and Members pages' character table (THE character
 verb: rank refused for a member, preview, the rev), /api/members (characterless members, puppets only for their tester),
 /api/members/set (rank per member), absences (From + For how long, preview, overlap, reason cap, I'm back), /api/absences,
-/api/meta's durations and /api/owner (owner only, never MCP). A real web session (signed cookie) and the MCP bearer."""
+/api/meta's durations; no owner transfer on the site (design §2.1). A real web session (signed cookie) and the MCP bearer."""
 from __future__ import annotations
 
 import time
@@ -216,32 +216,14 @@ def test_absences_table_carries_the_span(w):
     assert row["span"] == w.reg.span_label(start, start) and row["reason"] == "why" and row["by"] == "Officer"
 
 
-# ---------------------------------------------------------------- the owner (D50)
+# ---------------------------------------------------------------- the owner (design §2.1: Discord only)
 
-def test_owner_route_is_the_owners_and_never_mcp(w):
+def test_the_site_has_no_owner_transfer(w):
+    """Owner transfer is /gm config owner in the server (BY_DESIGN_ONLY): the site has no route for it, for anyone."""
     m = member(w)
-    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=H)
-    assert r.status_code == 403 and "MCP" in r.json()["error"]
-    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=as_user(w, OFFICER))
-    assert r.status_code == 403 and w.reg.config.owner_discord_id == OWNER
-    h = as_user(w, OWNER)
-    info = w.c.get("/api/owner", headers=h).json()
-    assert info["may_transfer"] and any(c["uid"] == str(m.discord_id) for c in info["candidates"])
-    p = w.c.post("/api/owner", json={"uid": str(m.discord_id), "preview": True}, headers=h).json()
-    assert "becomes the owner" in p["message"] and "**" not in p["message"]
-    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
-    assert r.status_code == 200, r.text
-    assert w.reg.config.owner_discord_id == m.discord_id and not w.bot.dms and not w.bot.sent_dms
-
-
-def test_owner_route_refuses_an_outsider_and_a_bot(w):
-    m = real(w.reg, 0)  # not in the server
-    h = as_user(w, OWNER)
-    r = w.c.post("/api/owner", json={"uid": str(m.discord_id), "preview": True}, headers=h)
-    assert r.status_code == 400 and "not in" in r.json()["error"]
-    w.bot.admit(m, bot=True)
-    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
-    assert r.status_code == 400 and "bot" in r.json()["error"] and w.reg.config.owner_discord_id == OWNER
+    for h in (as_user(w, OWNER), H):
+        assert w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h).status_code in (404, 405)
+    assert w.reg.config.owner_discord_id == OWNER
 
 
 # ---------------------------------------------------------------- rank / confirm through THE character verb (review fixes)
@@ -345,21 +327,6 @@ def test_mcp_plain_change_refuses_a_rank_without_the_actor(w, monkeypatch):
     assert "X-Oibot-Actor" in str(d) and "rank" not in " ".join(d.get("describe") or d.get("lines") or []).lower()
     d2 = w.c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=H).json()
     assert w.reg.members[m.discord_id].rank == "trial" and w.reg.members[m.discord_id].dm_opt_out, d2
-
-
-def test_a_host_superuser_hands_over_a_guild_they_host_from_the_site(w, monkeypatch):
-    su = 424_242_424_242_424_242
-    monkeypatch.setenv("OIBOT_SUPERUSERS", str(su))
-    w.bot.directory.members[(1, su)] = person(su)
-    m = member(w)
-    h = as_user(w, su)
-    info = w.c.get("/api/owner", headers=h).json()
-    assert info["may_transfer"] and any(c["uid"] == str(m.discord_id) for c in info["candidates"])
-    p = w.c.post("/api/owner", json={"uid": str(m.discord_id), "preview": True}, headers=h).json()
-    assert "you act as the host here" in p["message"] and "You lose owner rights" not in p["message"]
-    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
-    assert r.status_code == 200, r.text
-    assert w.reg.config.owner_discord_id == m.discord_id and not w.bot.dms and not w.bot.sent_dms
 
 
 def test_mcp_member_tools_send_the_actor_only_for_a_rank_or_a_confirm(monkeypatch):

@@ -2026,11 +2026,12 @@ nobody is DMed"). `orphan_regulars` remains for data from before.
 membership "no" · "unknown": a write that moves owner rights needs certainty), `owner_consequence(name, by_id)` (THE
 sentence), `set_owner(uid, by, …)` (a settings `_config_verb`). `discord_people.transfer_owner` resolves Discord's answer
 (`guild_routing.member_of`) and writes a warn audit line; nobody is DMed. Surfaces: `/gm config owner [user]` in a set-up
-server → `flows_config.OwnerTransferWizard` (member picker → refusals → `decide`, danger) and the Config page's owner line
-(`GET/POST /api/owner`, `{preview}`; the owner or a host superuser; MCP refused with 403 — the token IS the owner).
+server → `flows_config.OwnerTransferWizard` (member picker → refusals → `decide`, danger) — Discord only, like the server
+claim (§2.1): the Config page shows the owner, never a transfer, and there is no MCP tool (the token IS the owner).
 A host superuser (`Registry.is_owner_id`) may hand over a guild they host but don't own; the sentence then reads "(you
 act as the host here)" instead of "You lose owner rights", and the audit line carries " (host)".
-`owner_transfer` left `BY_DESIGN_ONLY` (it is on Discord and the web; `tests/test_people.py` checks there is no MCP tool).
+`owner_transfer` is in `BY_DESIGN_ONLY` (surface discord, path `flow:owner_transfer`; `tests/test_people.py` checks there is
+no web route and no MCP tool).
 
 **Web.** `GET /api/members` returns characterless members, `rank`, `dm`, `characters_rev` per row; `/api/members/save` refuses
 only the members whose rev moved (`refused[]`, the rest apply); `/api/members/set` (rank per member, confirm by member,
@@ -2038,8 +2039,8 @@ main through the verb; a `character` that isn't theirs is refused, never read as
 another officer's live puppet like `/api/members` (`visible`); `/api/members/dm` and `/api/me/dm` → `Registry.set_dm`; `/api/me` carries `characters_rev` and
 `rank`; the absence routes take `{start, days | end, reason, preview}`; `/api/absences` carries `span` and `test`.
 Frontend: `components/CharacterTable.tsx` (the Me page's card: row ⋮ menu, Flex, preview-then-confirm, rev),
-`components/AbsencesModal.tsx` (From + For how long + live preview, both pages), `AbsencesCard.tsx` (Me; `useImBack`),
-`AbsencesTable.tsx` (Members; *I'm back* shows by the guild's local `today` from the server, not the browser's UTC date), `OwnerCard.tsx` (Config); Members.tsx gains the sticky member cell, the rank select on the
+`components/AbsencesModal.tsx` (From picked on a calendar, `DatePickerInput` — never typed — + For how long + live preview, both pages), `AbsencesCard.tsx` (Me; `useImBack`),
+`AbsencesTable.tsx` (Members; *I'm back* shows by the guild's local `today` from the server, not the browser's UTC date); Members.tsx gains the sticky member cell, the rank select on the
 main, the DM switch, the ⋮ menu, Flex, the *No characters* section and the Absences table.
 `/roster overview` replies ephemerally always, one embed field per recurring schedule, and officers get *Post to the
 roster channel* (`discord_registry.overview_embed` / `overview_post_view`).

@@ -190,8 +190,6 @@ export interface TableSaved { message: string; lines: string[]; ripple: string[]
 export interface AbsenceRow { uid: string; display_name: string; start: string; end: string; span: string; reason: string | null; by: string; current: boolean; test?: boolean }
 /** An absence or I'm back preview: the span and what it does to each live sheet, in words; nothing written. */
 export interface AbsencePreview { preview: true; message: string; lines: string[]; span: string; start?: string; end?: string }
-/** GET /api/owner: who owns the guild; for the owner (or a host superuser) the people who could take over. */
-export interface OwnerInfo { owner: { uid: string; name: string } | null; may_transfer: boolean; candidates?: { uid: string; name: string }[] }
 export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }

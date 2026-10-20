@@ -367,18 +367,20 @@ def test_removing_a_schedule_drops_its_regulars_without_a_dm(reg, bot):
     assert not reg.orphan_regulars() and not bot.sent_dms and not bot.dms
 
 
-def test_owner_transfer_is_discord_and_web_never_mcp(reg, rs):
-    """Owner transfer left BY_DESIGN_ONLY (phase 2 C): /gm config owner and POST /api/owner, both owner-only; no MCP tool
-    — the token IS the owner."""
+def test_owner_transfer_is_discord_only_never_web_or_mcp(reg, rs):
+    """Design §2.1: a server claim and an owner transfer are made in the server (/gm config owner, the owner or a host
+    superuser) — BY_DESIGN_ONLY with its path; no web route (the Config page shows who owns it) and no MCP tool (the
+    token IS the owner)."""
     from test_mcp import FakeBot
 
     from oibot_gm import mcp_server as ms
     from oibot_gm.web import app as web
     from oibot_gm.wizard import FLOWS
 
-    assert "owner_transfer" not in configops.BY_DESIGN_ONLY and "owner_transfer" in FLOWS
+    row = configops.BY_DESIGN_ONLY["owner_transfer"]
+    assert row["surface"] == "discord" and row["path"] == "flow:owner_transfer" and "owner_transfer" in FLOWS
     routes = {f"{m} {r.path}" for r in web.create_app(FakeBot(reg, rs)).routes for m in (getattr(r, "methods", None) or ())}
-    assert "POST /api/owner" in routes
+    assert not any("/api/owner" in r for r in routes), "no web transfer"
     assert not any("owner" in t.name for t in asyncio.run(ms.mcp.list_tools()))
 
 

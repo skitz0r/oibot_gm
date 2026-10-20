@@ -455,8 +455,7 @@ PARITY_PENDING: dict[str, dict[str, str]] = {
 BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # Discord-only: the MCP token IS the owner, so claiming and handing over a server is done by a person in the server
     "guild_claim": {"surface": "discord", "path": "flow:guild_claim", "reason": "a server claim is made in the server by the person claiming it; the MCP token is the owner and the web has no viewer yet"},
-    # owner transfer is NOT single-surface any more: /gm config owner (the decide screen) and the Config page (POST /api/owner),
-    # both owner-only; never MCP — the token IS the owner, so it can't hand itself over (tests/test_people.py checks all three)
+    "owner_transfer": {"surface": "discord", "path": "flow:owner_transfer", "reason": "the owner (or a host superuser) hands the guild over in the server with /gm config owner; the web shows who owns it and MCP's token IS the owner, so it can't hand itself over"},
     "application_wizard": {"surface": "discord", "path": "slash:apply", "reason": "a newcomer's first touch is Discord (design §5.29): the questions are asked where they already are; the web reviews (D32)"},
     "registration_card": {"surface": "discord", "path": "button:oibot_gm.discord_registry.RegisterButton", "reason": "the registration card is a Discord message by nature; the Me page is the web's own registration"},
     "absences_card": {"surface": "discord", "path": "button:oibot_gm.discord_pool.AbsenceButton", "reason": "the absences card is a Discord message by nature; the absence verb itself is on every surface (op `absence`)"},

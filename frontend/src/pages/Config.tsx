@@ -5,7 +5,6 @@ import { Alert, Anchor, Badge, Box, Card, Code, Group, MultiSelect, Select, Stac
 import { api, type LootLogState, type Meta, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { Recruitment } from "../components/Recruitment";
-import { OwnerLine } from "../components/OwnerCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -76,7 +75,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
             <Select label={lab("ask_audience", "Who may ask the bot questions")} description="/ask, DMs, @mentions; others get the static guide" data={["officers", "confirmed", "registered", "everyone"]} value={data.settings.ask_audience} onChange={(v) => v && v !== data.settings.ask_audience && set("ask_audience", v)} disabled={ro} w={260} />
           </Group>
           <Textarea label={lab("about", "About the guild")} description="one paragraph on the public homepage and in the static guide to unregistered visitors" defaultValue={data.settings.about} disabled={ro} autosize minRows={2} onBlur={(e) => e.currentTarget.value !== data.settings.about && set("about", e.currentTarget.value)} />
-          <OwnerLine />
+          <Text size="xs" c="dimmed">Owner: {data.settings.owner_id ? `Discord id ${data.settings.owner_id}` : "not claimed — /gm config owner"} · transfer with /gm config owner in the server</Text>
         </Stack>
       </Card>
 

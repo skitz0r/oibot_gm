@@ -192,12 +192,12 @@ def test_pending_rows_are_few_and_dated_to_a_phase():
 
 
 def test_single_surface_features_are_written_down_with_a_living_path(web_routes, slash_paths):
-    """§2.1's by-design lists (Discord-only: claim, the application wizard, the cards, the guide, the DM
+    """§2.1's by-design lists (Discord-only: claim, owner transfer, the application wizard, the cards, the guide, the DM
     picker; web-only: the board, applications review, the policy editor, history,
     the plain-permissions grid) are configops.BY_DESIGN_ONLY: features, not ops, each with its surface, its entry point
     (which must exist) and the reason."""
-    # owner transfer left this list in phase 2 (C): /gm config owner AND the Config page (POST /api/owner) — tests/test_people.py
-    expected = {"guild_claim", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
+    # owner transfer is Discord-only (§2.1): /gm config owner in the server — tests/test_people.py
+    expected = {"guild_claim", "owner_transfer", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
                 "board", "applications_review", "policy_editor", "history", "plain_permissions_grid"}
     assert expected <= set(configops.BY_DESIGN_ONLY)
     # phase 2 B9: the comp sandbox and test-bench compose are on both surfaces now (/gm test comp | compose) — never web-only again

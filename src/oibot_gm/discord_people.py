@@ -204,7 +204,7 @@ async def im_back(bot, reg: Registry, uid: int, start: str, by: str, *, by_id: i
 
 async def transfer_owner(bot, reg: Registry, uid: int, by: str, *, by_id: int | None, name: str | None = None, is_bot: bool | None = None,
                          membership: str | None = None, via: str = "discord") -> str:
-    """Hand the guild to `uid` — the /gm config owner decide screen and POST /api/owner. The caller checked the presser
+    """Hand the guild to `uid` — the /gm config owner decide screen (Discord only, design §2.1). The caller checked the presser
     is the owner (Registry.is_owner_id: the owner or a host superuser). Refused (Registry.owner_refusal): a bot, the
     current owner, yourself, someone outside the server or a Discord lookup that can't say. One warn-level audit line;
     nobody is DMed (D50, the DM rule). `membership`: the Discord answer the caller already has (the wizard's member
