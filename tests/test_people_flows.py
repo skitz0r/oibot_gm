@@ -270,6 +270,24 @@ def test_owner_transfer_refusals(reg, rs, in_server, case):
     assert reg.config.owner_discord_id == OWNER
 
 
+def test_a_host_superuser_transfers_a_guild_they_host(reg, rs, in_server, monkeypatch):
+    """/gm config owner from a host superuser (OIBOT_SUPERUSERS) in a guild they don't own: allowed (is_owner_id), and the
+    decide screen says they act as the host — they have no owner rights of their own to lose."""
+    su = 424_242_424_242_424_242
+    monkeypatch.setenv("OIBOT_SUPERUSERS", str(su))
+    m = real(reg, 0)
+    in_server[m.discord_id] = ("yes", SimpleNamespace(display_name=m.display_name, bot=False))
+    h = Harness(reg, rs, user=SimpleNamespace(id=su, display_name="Host", mention="@Host"))
+
+    async def go():
+        await FLOWS["owner_transfer"](h.command(), reg, user=user(m))
+        assert "you act as the host here" in h.text and "You lose owner rights" not in h.text
+        await h.press("Transfer ownership")
+        assert "✅" in h.text
+    run(go())
+    assert reg.config.owner_discord_id == m.discord_id
+
+
 def test_owner_transfer_is_the_owners(reg, rs, in_server):
     m = real(reg, 0)
     h = as_member(Harness(reg, rs), m)

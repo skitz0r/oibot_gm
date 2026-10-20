@@ -1819,7 +1819,8 @@ unchanged): `Registry.save_character_table(…, officer=, by_id=, rev=)` in a wo
 then one audit line. Callers: `POST /api/me/characters` (+ `/api/me/main` and `/api/me/character/delete`, one-row tables),
 `/api/members/save`, `/api/members/set` (main · rank · confirm as ONE table), `/api/admin/confirm`, the `character`,
 `rank` and one-character `confirm` ops with the bot (`configops._people_verb` → `_apply_with_bot`; offline `apply` keeps
-the table verb alone, and confirm-all is a batch of table saves), MCP `save_characters` / `set_member`, and every Discord
+the table verb alone, and confirm-all is a batch of table saves), the `set_main` op (a `{label, main: true}` row,
+`configops._set_main_rows`; offline too — `Registry.officer_set_main` is gone), MCP `save_characters` / `set_member`, and every Discord
 character wizard (one-row tables): the `/me char` hub, `/roster char|rank|set-main`, `/roster confirm` and the naming
 wizard (`char_name`: names → THE decide screen with the ripple → a `{label, name, surname}` row).
 - `save_character_table` validates the WHOLE table on a copy first (`_table_shadow`: the same verbs on a deep copy of the
@@ -1827,7 +1828,12 @@ wizard (`char_name`: names → THE decide screen with the ripple → a `{label, 
   applies it in one commit — a refusal on row N used to leave rows < N committed. A row naming a character that is gone
   is refused, never dropped. Main is applied before rank. `officer=False` refuses `rank` and `confirm` (no self-promotion
   over the Me page's POST). `rev` = `characters_rev` the editor loaded; stale → `CharactersChanged` (a `RegistryError`;
-  the web answers 409 with the member's current table). The whole save holds `config_lock` (web threads vs the loop).
+  the web answers 409 with the member's current table). The whole save holds `config_lock` (web threads vs the loop),
+  and `save_characters` reads `rc.character_changes` inside that same critical section, so the ripple works from the
+  record the save applied to. Every other member write — `add_character`, `set_plan`, `name_character`, `set_main`,
+  `set_spec`, `set_flex`, `set_roles`, `retire`, `delete_character`, `rename`, `decide`, `regular_add` / `regular_remove`,
+  the placement asks, the test bench seeds — takes it too (`registry._member_write`; re-entrant, so the table's save
+  calls them under it). The table's change lines name no member ("rank core"); callers prefix the name once.
 - The ripple is data in `raidcycle` and Discord in `discord_people`: `rc.character_changes(reg, m, rows)` (what a save
   changes, read BEFORE it) → `rc.character_effects(reg, rs, m, change)` (per live run: free | keep | rewrite | clear |
   repoint, with the sentence every surface prints) → `rc.character_preview` (the sentences: Discord's decide screens,
@@ -1866,7 +1872,8 @@ one commit per guild).
 **Absences.** `Registry.add_absence(…, by_id=)` refuses an overlap with an absence on file ("X is already away Tue 9 Dec
 → Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"), a reason over
 `ABSENCE_REASON_MAX` (200) and another officer's puppet; `check_absence` is the same without the write (previews).
-`add_absence`, `clear_absence`, `set_dm`, `set_rank` and `confirm` hold `config_lock` (design §2.4), so the overlap check
+`clear_absence(…, by_id=)` refuses another officer's puppet the same way (so do plain text's offline `absence` /
+`absence_clear`, which pass `by_id`). `add_absence`, `clear_absence`, `set_dm`, `set_rank` and `confirm` hold `config_lock` (design §2.4), so the overlap check
 and the write are one step against a web worker thread and the loop.
 `presets.DURATIONS` is the one For-how-long list (the wizard's select and `/api/meta.durations`). `discord_people`:
 `record_absence` (the verb + `announce_absence`), `im_back` (THE "I'm back": `clear_absence` + `absence_cleared`),
@@ -1890,11 +1897,14 @@ sentence), `set_owner(uid, by, …)` (a settings `_config_verb`). `discord_peopl
 (`guild_routing.member_of`) and writes a warn audit line; nobody is DMed. Surfaces: `/gm config owner [user]` in a set-up
 server → `flows_config.OwnerTransferWizard` (member picker → refusals → `decide`, danger) and the Config page's owner line
 (`GET/POST /api/owner`, `{preview}`; the owner or a host superuser; MCP refused with 403 — the token IS the owner).
+A host superuser (`Registry.is_owner_id`) may hand over a guild they host but don't own; the sentence then reads "(you
+act as the host here)" instead of "You lose owner rights", and the audit line carries " (host)".
 `owner_transfer` left `BY_DESIGN_ONLY` (it is on Discord and the web; `tests/test_people.py` checks there is no MCP tool).
 
 **Web.** `GET /api/members` returns characterless members, `rank`, `dm`, `characters_rev` per row; `/api/members/save` refuses
 only the members whose rev moved (`refused[]`, the rest apply); `/api/members/set` (rank per member, confirm by member,
-main through the verb; a `character` that isn't theirs is refused, never read as the main); `/api/members/dm` and `/api/me/dm` → `Registry.set_dm`; `/api/me` carries `characters_rev` and
+main through the verb; a `character` that isn't theirs is refused, never read as the main); `GET /api/member` hides
+another officer's live puppet like `/api/members` (`visible`); `/api/members/dm` and `/api/me/dm` → `Registry.set_dm`; `/api/me` carries `characters_rev` and
 `rank`; the absence routes take `{start, days | end, reason, preview}`; `/api/absences` carries `span` and `test`.
 Frontend: `components/CharacterTable.tsx` (the Me page's card: row ⋮ menu, Flex, preview-then-confirm, rev),
 `components/AbsencesModal.tsx` (From + For how long + live preview, both pages), `AbsencesCard.tsx` (Me; `useImBack`),
@@ -1908,8 +1918,17 @@ offspec, name, main, flex, retire, delete) — the words of the decide screen an
 
 **Not built (by decision or left for later):** "ask to be a regular" (D27), self-service delete of a member record (D29),
 member notices (the inbox build), `/roster comp` and the Readiness page (phase 3), a characterless member's *Remove record*
-and `on_member_remove` (left-the-server), `MemberWizard`'s Name for officers, the MCP actor header for rank / confirm (D8 /
-D43, its own build), the phone stacked-card layout of the Me / Members tables (they scroll sideways).
+and `on_member_remove` (left-the-server), `MemberWizard`'s Name for officers, the phone stacked-card layout of the Me / Members
+tables (they scroll sideways). Without the inbox, a confirm's and an owner transfer's outcome is the record itself
+(the Me page's table) and the ops line.
+
+**MCP rank / confirm (D8).** A rank or a character's confirmation is a decision about a person: from MCP it needs
+`X-Oibot-Actor` (validated by `web/app.py mcp_actor`). `web/api.py people_actor` refuses it with a 403 in `save_table`
+(so `/api/members/set`, `/api/admin/confirm`, `/api/me/characters`) and up front in `/api/members/save` (before any member
+saves); previews and the rest of a table (spec, main, flex, retire, delete) need no actor. Plain text over MCP:
+`mcp_actor_rule` drops `configops.people_needs_actor` ops (rank, confirm, `character` field=rank) into `refused`. The
+MCP tools `set_member` and `save_characters` send the header (`actor=True`) only when the call carries a rank or a
+confirm.
 
 Tests: `tests/test_people.py` (the ripple on open / locked recurring / locked ad hoc runs, seated delete → freed + bench
 asked, rank per member, confirm by member, validate-on-copy, the rev, puppets, overlap, reason cap, I'm back, Join while

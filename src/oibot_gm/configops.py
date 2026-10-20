@@ -627,10 +627,32 @@ def _confirm_rows(reg: Registry, op: ConfigOp):
     return m, [{"label": c.label, "confirm": True}]
 
 
+def _set_main_rows(reg: Registry, op: ConfigOp):
+    """(member, rows) of a set_main op as the character table writes it: {label, main: true} on one of the member's
+    active characters (the rank moves with the main, D25). Already the main is refused, as the old verb did."""
+    m = _need_member(reg, op.member)
+    ref = (op.character or "").strip()
+    c = (next((c for c in m.active() if c.label == ref), None) or next((c for c in m.active() if c.matches(ref)), None)) if ref else None
+    if c is None:
+        raise RegistryError(f"{m.display_name} has no active character named {ref or '?'} (theirs: {', '.join(x.label for x in m.active()) or 'none'})")
+    if c.is_main:
+        raise RegistryError(f"{c.label} is already {m.display_name}'s main.")
+    return m, [{"label": c.label, "main": True}]
+
+
+ROWS_OF = {"rank": _rank_rows, "confirm": _confirm_rows, "set_main": _set_main_rows}  # the one-row table each op saves
+
+
 def _people_verb(reg: Registry, op: ConfigOp) -> bool:
-    """The ops that go through THE character verb (PeopleMixin.save_characters) when a bot is there: character, rank and
-    a one-character confirm (the confirm-all walk is one batch of table saves, audited by apply_async)."""
-    return op.op in ("character", "rank") or (op.op == "confirm" and not _all_pending(reg, op))
+    """The ops that go through THE character verb (PeopleMixin.save_characters) when a bot is there: character, rank,
+    set_main and a one-character confirm (the confirm-all walk is one batch of table saves, audited by apply_async)."""
+    return op.op in ("character", "rank", "set_main") or (op.op == "confirm" and not _all_pending(reg, op))
+
+
+def people_needs_actor(op: ConfigOp) -> bool:
+    """D8: a decision about a person — a rank, a character's confirmation — from MCP needs X-Oibot-Actor naming an
+    officer (web/api.py's mcp_actor_rule refuses it without; the owner's token alone may read and preview)."""
+    return op.op in ("rank", "confirm") or (op.op == "character" and (op.field or "").strip().lower() == "rank")
 
 
 def _need_member(reg: Registry, ref: str | None):
@@ -2188,17 +2210,15 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         m, rows = _confirm_rows(reg, op)
         reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)
         return f"confirmed {rows[0]['label']}"
-    if op.op == "set_main":
-        m = _member(reg, op.member)
-        if not m:
-            raise RegistryError(f"unknown member {op.member}")
-        reg.officer_set_main(m.discord_id, op.character or "", by)
-        return f"{m.display_name} main → {op.character}"
+    if op.op == "set_main":  # without the bot (offline, tests): the table verb alone; with it, PeopleMixin.save_characters
+        m, rows = _set_main_rows(reg, op)
+        reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)  # under config_lock, puppets refused
+        return f"{m.display_name} main → {rows[0]['label']}"
     if op.op == "absence":
         m = _member(reg, op.member)
         if not m:
             raise RegistryError(f"unknown member {op.member}")
-        _, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
+        _, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by, by_id=by_id)
         return f"{m.display_name} absent {reg.span_label(a.start, a.end)}"
     if op.op == "pin":
         from . import raidcycle as rc
@@ -2305,7 +2325,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)
         start = _absence_start(reg, m, op.start, reg.now_local().date().isoformat())
-        a = reg.clear_absence(m.discord_id, start, by)
+        a = reg.clear_absence(m.discord_id, start, by, by_id=by_id)
         return f"{m.display_name}: cleared absence {reg.span_label(a.start, a.end)}"
     if op.op == "dm":
         m = _need_member(reg, op.member)
@@ -2617,13 +2637,15 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         if not res["lines"]:
             raise RegistryError(f"{m.display_name if m else by}: nothing changed")
         return res["message"].replace("\n", " — ", 1).replace("\n", "; ")
-    if op.op in ("rank", "confirm"):  # the same verb: a one-row table (rank on the main, D25; one character's confirm)
+    if op.op in ROWS_OF:  # the same verb: a one-row table (rank on the main, D25; set_main; one character's confirm)
         from . import discord_people
 
-        m, rows = (_rank_rows if op.op == "rank" else _confirm_rows)(reg, op)
+        m, rows = ROWS_OF[op.op](reg, op)
         res = await discord_people.save_characters(bot, reg, m.discord_id, rows, by, by_id=by_id, officer=True, via=via)
         if op.op == "rank":
             return f"{m.display_name} → {rows[0]['rank']}" + ("" if res["lines"] else " (already)")
+        if op.op == "set_main":
+            return f"{m.display_name} main → {rows[0]['label']}" + ("".join(f" — {r}" for r in res["ripple"]))
         return f"confirmed {rows[0]['label']}"
     rs = bot.raids.store(reg)
     if op.op == "run_open":

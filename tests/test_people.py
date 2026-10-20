@@ -535,3 +535,119 @@ def test_plain_text_diff_prints_the_ripple_for_every_character_field(reg, rs):
     assert "now names Newname" in name
     retire = configops.describe(reg, ConfigOp(op="character", member=m.display_name, character=m.main.label, field="retire"))
     assert "answer is cleared" in retire or "stays No thanks" in retire
+
+
+# ---------------------------------------------------------------- review fixes (the C fixer)
+
+def test_plain_text_set_main_goes_through_the_character_verb(reg, rs, bot, monkeypatch):
+    """set_main used to call Registry.officer_set_main straight: no config_lock, no puppet refusal, no audit line from the
+    verb. Now it is a {label, main: true} row through discord_people.save_characters, like rank and confirm."""
+    m = real(reg, 0)
+    reg.set_rank(m.discord_id, "core", "Officer", by_id=OWNER)
+    reg.add_character(m.discord_id, m.display_name, "Newmain", "Mage", "Fire", None, False)
+    calls = []
+    verb = discord_people.save_characters
+
+    async def spy(*a, **k):
+        calls.append(a[3])  # (bot, reg, uid, rows, by)
+        return await verb(*a, **k)
+    monkeypatch.setattr(discord_people, "save_characters", spy)
+    op = ConfigOp(op="set_main", member=m.display_name, character="Newmain")
+    line = run(configops.apply_async(reg, op, "Officer", is_owner=False, bot=bot, by_id=OWNER, via="chat"))
+    assert calls == [[{"label": "Newmain", "main": True}]]
+    mm = reg.members[m.discord_id]
+    assert mm.main.label == "Newmain" and mm.rank == "core" and "main → Newmain" in line  # D25: the rank moved with the main
+    assert len([t for _lvl, t in bot.ops.lines if "main is Newmain" in t]) == 1  # one audit line, the verb's
+    with pytest.raises(RegistryError, match="already"):
+        run(configops.apply_async(reg, op, "Officer", is_owner=False, bot=bot, by_id=OWNER, via="chat"))
+
+
+def test_set_main_and_absences_refuse_another_officers_puppet_offline_too(reg, rs):
+    """The offline (no-bot) branches of configops.apply pass by_id: set_main, absence and absence_clear refuse a puppet of
+    a rehearsal someone else runs, as the bot's paths do."""
+    from conftest import open_test_run
+
+    tester, other = 777_000_000_000_001, 777_000_000_000_002
+    p = reg.test_members()[0]
+    reg.add_character(p.discord_id, p.display_name, "Puppetalt", "Mage", "Fire", None, False)
+    day = (reg.now_local().date() + timedelta(days=2)).isoformat()
+    reg.add_absence(p.discord_id, day, None, None, "t")
+    open_test_run(reg, rs, test_by=tester)
+    later = (reg.now_local().date() + timedelta(days=9)).isoformat()
+    for op in (ConfigOp(op="set_main", member=p.display_name, character="Puppetalt"),
+               ConfigOp(op="absence", member=p.display_name, start=later),
+               ConfigOp(op="absence_clear", member=p.display_name, start=day)):
+        with pytest.raises(RegistryError, match="test puppet"):
+            configops.apply(reg, op, "Other", is_owner=False, by_id=other)
+    pp = reg.members[p.discord_id]
+    assert pp.main.label != "Puppetalt" and [a.start for a in pp.absences] == [day]
+    configops.apply(reg, ConfigOp(op="set_main", member=p.display_name, character="Puppetalt"), "Tester", is_owner=False, by_id=tester)
+    configops.apply(reg, ConfigOp(op="absence_clear", member=p.display_name, start=day), "Tester", is_owner=False, by_id=tester)
+    pp = reg.members[p.discord_id]
+    assert pp.main.label == "Puppetalt" and not pp.absences
+
+
+def test_a_host_superuser_transfers_a_guild_they_host_but_do_not_own(reg, rs, bot, monkeypatch):
+    """Registry.is_owner_id: a host superuser (OIBOT_SUPERUSERS) has owner rights in every guild, so they may hand one
+    over; the confirm sentence says they act as the host (they had no owner rights of their own to lose)."""
+    from oibot_gm import guild_routing
+
+    su = 424_242_424_242_424_242
+    monkeypatch.setenv("OIBOT_SUPERUSERS", str(su))
+    m = real(reg, 0)
+    assert reg.config.owner_discord_id == OWNER and reg.is_owner_id(su)
+    words = reg.owner_consequence(m.display_name, su)
+    assert "you act as the host here" in words and "You lose owner rights" not in words
+
+    async def member_of(_bot, _reg, uid, timeout=None, max_age=None):
+        return "yes", type("M", (), {"display_name": m.display_name, "bot": False})()
+    monkeypatch.setattr(guild_routing, "member_of", member_of)
+    line = run(bot.transfer_owner(reg, m.discord_id, "Host", by_id=su))
+    assert m.display_name in line and reg.config.owner_discord_id == m.discord_id
+    assert any(level == "warn" and "owner →" in text and "(host)" in text for level, text in bot.ops.lines)
+    assert not bot.sent_dms and not bot.dms
+
+
+def test_the_rank_line_names_the_member_once(reg):
+    m = real(reg, 0)
+    lines = reg.save_character_table(m.discord_id, [{"label": m.main.label, "rank": "core"}], "Officer", officer=True, by_id=OWNER)
+    assert lines == ["rank core"]
+
+
+def test_save_characters_reads_the_changes_under_the_same_lock_as_the_save(reg, rs, bot, monkeypatch):
+    """The ripple's changes come from the record the save applies to: rc.character_changes runs holding config_lock,
+    in the same critical section as save_character_table (it used to run on the loop before the locked save)."""
+    m = real(reg, 0, "Priest", "Holy")
+    held = []
+    changes = rc.character_changes
+
+    def spy(*a, **k):
+        held.append(reg.config_lock._is_owned())
+        return changes(*a, **k)
+    monkeypatch.setattr(rc, "character_changes", spy)
+    run(bot.save_characters(reg, m.discord_id, [{"label": m.main.label, "cls": "Priest", "spec": "Shadow"}], m.display_name, by_id=m.discord_id))
+    assert held == [True] and reg.members[m.discord_id].main.spec == "Shadow"
+
+
+@pytest.mark.parametrize("verb", ["add_character", "set_plan", "name_character", "set_flex", "set_main", "regular_add"])
+def test_member_writes_hold_the_config_lock(reg, monkeypatch, verb):
+    """Registration, plans and the other member writes take config_lock like the character table (they run on the loop
+    while a web save may hold it in a worker thread)."""
+    reg.set_raid_overrides("barrow_deeps", {"slots": ["Tue 19:30"], "first_open": "2026-01-01T00:00"}, "t")
+    m = real(reg, 0)
+    reg.add_character(m.discord_id, m.display_name, "Lockalt", "Mage", "Fire", None, False)
+    reg.set_plan(REAL + 7, "Planner", "Priest", "Holy", None, "main")
+    held = []
+    save = reg.save
+
+    def spy(member, message):
+        held.append(reg.config_lock._is_owned())
+        return save(member, message)
+    monkeypatch.setattr(reg, "save", spy)
+    {"add_character": lambda: reg.add_character(REAL + 8, "Newbie", "Freshone", "Mage", "Fire", None, True),
+     "set_plan": lambda: reg.set_plan(REAL + 9, "Plantwo", "Priest", "Holy", None, "main"),
+     "name_character": lambda: reg.name_character(REAL + 7, "Namedone"),
+     "set_flex": lambda: reg.set_flex(m.discord_id, "Lockalt", ["tank"]),
+     "set_main": lambda: reg.set_main(m.discord_id, "Lockalt"),
+     "regular_add": lambda: reg.regular_add(m.discord_id, "barrow_deeps:default", "t")}[verb]()
+    assert held and all(held)

@@ -743,7 +743,8 @@ Manage Server): pick the person (Discord's member picker), then **one confirm sc
 You lose owner rights here (you keep officer rights only if your Discord roles grant them). The site, MCP, plain text
 and the error alerts treat them as the owner from now on; nobody is DMed."* — and *Transfer ownership*. Refused: a bot,
 the current owner, yourself, someone not in the server (or a Discord lookup that can't say right now). The owner, or the
-host's superuser, may do it; so may the owner on the site's **Config** page (*Hand it over to…* → the same sentence →
+host's superuser, may do it — a superuser can hand over a guild they host but don't own (the screen then says *"you act
+as the host here"*: they had no owner rights of their own to lose, and the ops line is marked *(host)*); so may the owner on the site's **Config** page (*Hand it over to…* → the same sentence →
 *Transfer*). Never plain text or MCP: an MCP token acts as the owner, so a transfer through it would give the guild
 away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
@@ -1062,7 +1063,7 @@ news post says can make the review read or write another server.
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
-| `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off |
+| `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles, `loot_log` on/off |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
@@ -1079,7 +1080,8 @@ Members can be named by display name, character name or Discord id; runs by key,
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
 
 **Decisions are a named officer's (D8).** A decision about an award — confirming, overriding, a reason, a correction,
-retiring a precedent, tiers, someone's wishlist — is never "the owner's token": those tools send `X-Oibot-Actor` with
+retiring a precedent, tiers, someone's wishlist — or about a person — a member's rank, confirming a character — is never
+"the owner's token": those tools send `X-Oibot-Actor` with
 `OIBOT_MCP_ACTOR` from `.env` (the Discord id of the officer at the keyboard), the bot checks that id is an officer (or
 the owner) of the chosen server right then, and acts as that person: the record and the ops line read *"Mira via MCP"*.
 Without `OIBOT_MCP_ACTOR` those tools are refused with a line saying so; reads, previews, ticks, Distribute, Discard

@@ -377,10 +377,21 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         await ops_mod.audited(bot.ops, reg, v.name, head + (" — " + "; ".join(lines) if lines else ""), via=v.via, by_id=v.uid)
         return {"message": "\n".join([head, *lines]), "lines": lines}
 
+    def people_actor(v, rows: list[dict], preview: bool) -> None:
+        """D8: a rank or a confirmation is a decision about a person — from MCP it needs X-Oibot-Actor naming an officer
+        (web/app.py mcp_actor validated it); the owner's token alone may read, preview and edit the rest of a table."""
+        if preview or v.via != "mcp" or getattr(v, "actor", None):
+            return
+        if any(isinstance(r, dict) and (r.get("rank") or r.get("confirm")) for r in rows or []):
+            raise HTTPException(403, f"A rank or a confirmation is a decision a person makes: from MCP it needs the X-Oibot-Actor header naming "
+                                     f"an officer of {v.reg.config.name} (set OIBOT_MCP_ACTOR to their Discord id) — the owner's token alone can "
+                                     "read, preview and edit the rest of a character table.")
+
     async def save_table(request: Request, v, uid: int, rows: list[dict], *, officer: bool, rev: str | None, preview: bool):
         """THE character verb over HTTP (discord_people.save_characters): {message, lines, ripple} or the refusal."""
         from .. import discord_people
 
+        people_actor(v, rows, preview)
         try:
             res = await discord_people.save_characters(bot, v.reg, uid, rows, v.name, by_id=v.uid, officer=officer, rev=rev or None, via=v.via, preview=preview)
         except Exception as e:  # noqa: BLE001
@@ -1724,6 +1735,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         v, d = await body(request, officer=True)
         reg, done, ripple, refused_rows = v.reg, [], [], []
         preview = bool(d.get("preview"))
+        people_actor(v, [c for row in d.get("rows") or [] if isinstance(row, dict) for c in (row.get("characters") or [])], preview)  # before any member saves
         for row in d.get("rows") or []:
             if not isinstance(row, dict):
                 return JSONResponse({"error": "rows must be objects"}, status_code=400)
@@ -1755,6 +1767,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         v = await who(request, officer=True)
         reg = v.reg
         m = resolve_member(reg, name)
+        if not visible(v, m):  # another officer's rehearsal puppet: hidden like on /api/members and /api/absences
+            raise HTTPException(400, "unknown member")
         rs = bot.raids.store(reg)
         primary, flex = reg.roles_of(m)
         return {"uid": str(m.discord_id), "display_name": m.display_name, "verification": reg.verification(m.discord_id), "privilege": "test" if m.test else await privilege(reg, m.discord_id),
@@ -2221,13 +2235,17 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         precedent, tiers, someone else's wishlist) are refused — the owner's token is not the officer who decided."""
         if v.via != "mcp" or getattr(v, "actor", None):
             return allowed, refused
+        from ..configops import people_needs_actor
         from ..loot_ops import needs_actor
 
         keep = [op for op in allowed if not needs_actor(op, v.uid)]
         if len(keep) != len(allowed):
             refused = [*refused, "Loot decisions (an award, a confirm, a reason, a correction, tiers, someone else's wishlist) from MCP need the "
                                  "X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
-        return keep, refused
+        people = [op for op in keep if not people_needs_actor(op)]
+        if len(people) != len(keep):  # D8: a rank or a character's confirmation is a decision about a person
+            refused = [*refused, "A rank or a confirmation from MCP needs the X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
+        return people, refused
 
     @app.post("/api/ops/change")
     async def ops_change(request: Request):

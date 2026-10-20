@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 
 from . import ops as ops_mod
@@ -91,12 +92,20 @@ async def save_characters(bot, reg: Registry, uid: int, rows: list[dict], by: st
     m = reg.members.get(uid)
     who = m.display_name if m else by
     rs = _rs(bot, reg)
-    changes = rc.character_changes(reg, m, rows)
-    ripple = rc.character_preview(reg, rs, m, changes) if rs is not None and m is not None else []
     if preview:
+        changes = rc.character_changes(reg, m, rows)
+        ripple = rc.character_preview(reg, rs, m, changes) if rs is not None and m is not None else []
         await asyncio.to_thread(reg.check_character_table, uid, rows, by, officer=officer, by_id=by_id, rev=rev)
         return {"lines": [], "ripple": ripple, "message": f"preview — nothing saved: {who}" + (": " + "; ".join(ripple) if ripple else ": nothing else changes")}
-    lines = await asyncio.to_thread(reg.save_character_table, uid, rows, by, officer=officer, by_id=by_id, rev=rev)
+
+    def locked_save():
+        # the changes are read from the record the save applies to — under the same config_lock, so a save that lands
+        # in between (another web worker, a Discord write) can't leave the ripple working from a stale record
+        with reg.config_lock:
+            before = reg.members.get(uid)
+            return rc.character_changes(reg, before, rows), reg.save_character_table(uid, rows, by, officer=officer, by_id=by_id, rev=rev)
+
+    changes, lines = await asyncio.to_thread(locked_save)
     m = reg.members.get(uid)
     done: list[str] = []
     if rs is not None and m is not None and changes:
@@ -184,10 +193,7 @@ async def im_back(bot, reg: Registry, uid: int, start: str, by: str, *, by_id: i
     m = reg.members.get(uid)
     if m is None:
         raise RegistryError("They have nothing on file.")
-    why = reg.puppet_refusal(m, by_id)
-    if why:
-        raise RegistryError(why)
-    a = await asyncio.to_thread(reg.clear_absence, uid, start, by)
+    a = await asyncio.to_thread(functools.partial(reg.clear_absence, uid, start, by, by_id=by_id))  # a puppet only by its tester
     lines = list(await _call(bot, "absence_cleared", reg, m, a, by) or [])
     return a, lines
 

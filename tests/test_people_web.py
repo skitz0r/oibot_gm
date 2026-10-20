@@ -145,7 +145,7 @@ def test_members_set_rank_is_the_members_and_refuses_an_alt(w):
     assert r.status_code == 200 and w.reg.members[m.discord_id].rank == "core"
     r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "character": "Altname", "rank": "raider"}, headers=h)
     assert r.status_code == 400 and "rank lives on the main" in r.json()["error"]
-    r = w.c.post("/api/members/set", json={"member": m.display_name, "rank": "emperor"}, headers=H)  # MCP: the same refusal words
+    r = w.c.post("/api/members/set", json={"member": m.display_name, "rank": "emperor"}, headers=H | {"X-Oibot-Actor": str(OFFICER)})  # MCP: the same refusal
     assert r.status_code == 400
 
 
@@ -292,3 +292,95 @@ def test_admin_confirm_refuses_a_shared_planned_label(w):
     h = as_user(w, OFFICER)
     r = w.c.post("/api/admin/confirm", json={"label": "Priest (Holy)"}, headers=h)
     assert r.status_code == 400 and "2 members plan" in r.json()["error"]
+
+
+# ---------------------------------------------------------------- review fixes (the C fixer)
+
+def test_member_get_hides_another_officers_puppet(w):
+    """GET /api/member applies the same puppet filter as /api/members and /api/absences."""
+    p = w.reg.test_members()[0]
+    h = as_user(w, OFFICER)
+    assert w.c.get(f"/api/member?name={p.discord_id}", headers=h).status_code == 200  # no rehearsal live: any officer
+    open_test_run(w.reg, w.rs, test_by=OWNER)
+    r = w.c.get(f"/api/member?name={p.discord_id}", headers=h)
+    assert r.status_code == 400 and r.json()["error"] == "unknown member"
+    assert w.c.get(f"/api/member?name={p.discord_id}", headers=H).status_code == 200  # the owner's token: the owner may change it
+
+
+def test_mcp_rank_and_confirm_need_the_actor_header(w):
+    """D8: from MCP a rank or a confirmation needs X-Oibot-Actor naming an officer — /api/members/set, /api/members/save
+    (checked before any member saves) and /api/admin/confirm; previews and the rest of a table don't."""
+    m, n = member(w, 0), member(w, 1, cls="Mage", spec="Fire")
+    n_label = n.main.label
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "rank": "core"}, headers=H)
+    assert r.status_code == 403 and "X-Oibot-Actor" in r.json()["error"] and w.reg.members[m.discord_id].rank == "trial"
+    r = w.c.post("/api/admin/confirm", json={"uid": str(m.discord_id), "label": m.main.label}, headers=H)
+    assert r.status_code == 403 and not w.reg.members[m.discord_id].main.confirmed_by
+    r = w.c.post("/api/members/save", json={"rows": [{"uid": str(n.discord_id), "characters": [{"label": n_label, "cls": "Mage", "spec": "Frost"}]},
+                                                     {"uid": str(m.discord_id), "characters": [{"label": m.main.label, "cls": "Priest", "spec": "Holy", "rank": "core"}]}]}, headers=H)
+    assert r.status_code == 403 and w.reg.members[n.discord_id].main.spec == "Fire", "refused before the first member saved"
+    r = w.c.post("/api/members/save", json={"preview": True, "rows": [{"uid": str(m.discord_id), "characters": [{"label": m.main.label, "cls": "Priest", "spec": "Holy", "rank": "core"}]}]}, headers=H)
+    assert r.status_code == 200 and r.json()["preview"]
+    r = w.c.post("/api/members/save", json={"rows": [{"uid": str(n.discord_id), "characters": [{"label": n_label, "cls": "Mage", "spec": "Frost"}]}]}, headers=H)
+    assert r.status_code == 200 and w.reg.members[n.discord_id].main.spec == "Frost"  # a respec isn't a decision about a person
+    actor = H | {"X-Oibot-Actor": str(OFFICER)}
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "rank": "core", "confirm": True}, headers=actor)
+    assert r.status_code == 200, r.text
+    mm = w.reg.members[m.discord_id]
+    assert mm.rank == "core" and mm.main.confirmed_by
+    assert any("[mcp]" in t and "rank core" in t for _lvl, t in w.bot.ops.lines)
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "rank": "raider"}, headers=H | {"X-Oibot-Actor": str(m.discord_id)})
+    assert r.status_code == 403 and "not an officer" in r.json()["error"]  # the header never widens what the token may do
+
+
+def test_mcp_plain_change_refuses_a_rank_without_the_actor(w, monkeypatch):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp, ConfigRequest
+
+    m = member(w)
+    w.bot.ctx = types.SimpleNamespace(provider=object())
+    monkeypatch.setattr(configops, "parse", lambda *a, **k: ConfigRequest(kind="change", reply="", ops=[
+        ConfigOp(op="rank", member=m.display_name, value="core"), ConfigOp(op="dm", member=m.display_name, value="off")]))
+    d = w.c.post("/api/ops/change", json={"text": "make them core and DMs off"}, headers=H).json()
+    assert "X-Oibot-Actor" in str(d) and "rank" not in " ".join(d.get("describe") or d.get("lines") or []).lower()
+    d2 = w.c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=H).json()
+    assert w.reg.members[m.discord_id].rank == "trial" and w.reg.members[m.discord_id].dm_opt_out, d2
+
+
+def test_a_host_superuser_hands_over_a_guild_they_host_from_the_site(w, monkeypatch):
+    su = 424_242_424_242_424_242
+    monkeypatch.setenv("OIBOT_SUPERUSERS", str(su))
+    w.bot.directory.members[(1, su)] = person(su)
+    m = member(w)
+    h = as_user(w, su)
+    info = w.c.get("/api/owner", headers=h).json()
+    assert info["may_transfer"] and any(c["uid"] == str(m.discord_id) for c in info["candidates"])
+    p = w.c.post("/api/owner", json={"uid": str(m.discord_id), "preview": True}, headers=h).json()
+    assert "you act as the host here" in p["message"] and "You lose owner rights" not in p["message"]
+    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
+    assert r.status_code == 200, r.text
+    assert w.reg.config.owner_discord_id == m.discord_id and not w.bot.dms and not w.bot.sent_dms
+
+
+def test_mcp_member_tools_send_the_actor_only_for_a_rank_or_a_confirm(monkeypatch):
+    import httpx
+
+    from oibot_gm import mcp_server as ms
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, request.headers.get("x-oibot-actor")))
+        return httpx.Response(200, json={"message": "ok"})
+
+    ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
+    try:
+        monkeypatch.setenv(ms.ACTOR_ENV, str(OFFICER))
+        ms.set_member("Kessa", main="Kessalt")
+        ms.set_member("Kessa", rank="core")
+        ms.set_member("Kessa", confirm=True)
+        ms.save_characters("Kessa", [{"label": "Kessa", "cls": "Priest", "spec": "Shadow"}])
+        ms.save_characters("Kessa", [{"label": "Kessa", "cls": "Priest", "spec": "Holy", "rank": "core"}])
+    finally:
+        ms.use(None)
+    assert [a for _p, a in calls] == [None, str(OFFICER), str(OFFICER), None, str(OFFICER)]

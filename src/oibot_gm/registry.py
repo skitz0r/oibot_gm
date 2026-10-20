@@ -393,6 +393,20 @@ def _config_verb(section):
     return deco
 
 
+def _member_write(fn):
+    """A member-record write (registration, plans, characters, regulars, placement asks): under the Registry's
+    `config_lock`, like the character table and the config verbs — the web saves in worker threads while Discord writes
+    on the loop (design §2.4), and a read-modify-save that interleaves with another loses one of them. Re-entrant: the
+    table's save calls these under the same lock."""
+
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self.config_lock:
+            return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
 def _raid_section(self, instance, *a, **k) -> str:
     return f"raids:{instance}"
 
@@ -1385,6 +1399,7 @@ class Registry:
     def open_applicants(self) -> list[Applicant]:
         return sorted([a for a in self.applicants.values() if a.status == "open"], key=lambda a: a.created_at)
 
+    @_member_write
     def decide(self, discord_id: int, accept: bool, by: str, note: str | None = None) -> tuple[Applicant, Optional[RegisteredCharacter]]:
         a = self.applicants.get(discord_id)
         if not a or a.status != "open":
@@ -1421,6 +1436,7 @@ class Registry:
             m = Member(discord_id=discord_id, display_name=display_name or str(discord_id))
         return m
 
+    @_member_write
     def rename(self, discord_id: int, display_name: str, by: str) -> Member:
         """The one way a member's display name changes (a nick change an officer or the person records). Seats, callouts
         and asks are keyed by id, so nothing else moves; the change is its own commit."""
@@ -1468,6 +1484,7 @@ class Registry:
         return hit
 
     # ---- pre-launch plans (no character names yet)
+    @_member_write
     def set_plan(self, discord_id: int, display_name: str, cls: str, spec: str, offspec: str | None, slot: str) -> tuple[Member, RegisteredCharacter]:
         """slot: main | alt. Replaces any existing *planned* character in that slot."""
         if cls not in self.profile.classes:
@@ -1490,6 +1507,7 @@ class Registry:
         self.save(m, f"{display_name} plans {slot}: {cls} {spec}{'/' + offspec if offspec else ''}")
         return m, c
 
+    @_member_write
     def set_flex(self, discord_id: int, label: str, roles: list[str]) -> RegisteredCharacter:
         """Extra roles a character can play (besides the roles its spec/offspec already imply)."""
         if any(r not in ROLES for r in roles):
@@ -1506,6 +1524,7 @@ class Registry:
         self.save(m, f"{m.display_name}: {c.label} flex {', '.join(new) or 'none'}")
         return c
 
+    @_member_write
     def set_roles(self, discord_id: int, display_name: str, primary: str, flex: list[str]) -> Member:
         """The registration wizard's role step: the primary is ignored (it follows the spec); flex goes on the main.
         (/me plan roles is gone — /me char → Flex sets a character's extra roles.)"""
@@ -1515,6 +1534,7 @@ class Registry:
         self.set_flex(discord_id, m.main.label, [f for f in flex if f != primary] + ([primary] if primary else []))
         return m
 
+    @_member_write
     def name_character(self, discord_id: int, name: str, slot: str = "main", surname: str | None = None, label: str | None = None) -> tuple[Member, RegisteredCharacter]:
         """At launch: give a planned character its real name; it becomes active (pending confirmation)."""
         name = self.normalise_name(name)
@@ -2291,6 +2311,7 @@ class Registry:
         return [{"name": n, "cls": c, "spec": sp, "rank": rk}
                 for n, (c, sp, rk) in zip(self.TEST_NAMES, [self.TEST_MIX[i % len(self.TEST_MIX)] for i in range(len(self.TEST_NAMES))])]
 
+    @_member_write
     def seed_test_members(self, count: int, by: str) -> list[Member]:
         """Create `count` test members from `test_roster()` (idempotent: existing ones are kept)."""
         roster = self.test_roster()
@@ -2331,6 +2352,7 @@ class Registry:
                 taken.add(n.lower())
                 yield n
 
+    @_member_write
     def add_test_members(self, rows: list[dict], by: str) -> list[Member]:
         """Puppets by composition: rows of {cls, spec, offspec?, count}. Checked in full before anything is written
         (the profile's classes and specs, the TEST_MAX cap); then one commit for the lot. Mains, rank raider, confirmed."""
@@ -2714,6 +2736,7 @@ class Registry:
             raise RegistryError(f"{spec} is not a {cls} spec. Valid: {valid}.")
 
     # ---- member actions
+    @_member_write
     def add_character(self, discord_id: int, display_name: str, name: str, cls: str, spec: str, offspec: str | None, make_main: bool, surname: str | None = None) -> tuple[Member, RegisteredCharacter]:
         name = self.normalise_name(name)
         surname = self.normalise_name(surname) if surname else None
@@ -2741,6 +2764,7 @@ class Registry:
         self.save(m, f"{display_name} registered {c.label} ({cls} {spec}{', main' if c.is_main else ', alt'})")
         return m, c
 
+    @_member_write
     def set_main(self, discord_id: int, name: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m = self.member(discord_id)
         c = next((c for c in m.active() if c.matches(name)), None)
@@ -2758,6 +2782,7 @@ class Registry:
         self.save(m, f"{m.display_name} main {old.label if old else '-'} → {c.label}")
         return m, c, old
 
+    @_member_write
     def set_spec(self, discord_id: int, name: str, spec: str, offspec: str | None) -> RegisteredCharacter:
         m = self.member(discord_id)
         c = next((c for c in m.active() if c.matches(name)), None)
@@ -2769,6 +2794,7 @@ class Registry:
         self.save(m, f"{m.display_name}: {c.label} spec {c.spec}{'/' + c.offspec if c.offspec else ''}")
         return c
 
+    @_member_write
     def delete_character(self, discord_id: int, label: str) -> RegisteredCharacter:
         """Remove a character outright (roster placements go with it); the next character becomes main if needed."""
         m = self.member(discord_id)
@@ -2785,6 +2811,7 @@ class Registry:
         self.save(m, f"{m.display_name} deleted {c.label}")
         return c
 
+    @_member_write
     def retire(self, discord_id: int, name: str) -> RegisteredCharacter:
         m = self.member(discord_id)
         c = next((c for c in m.active() if c.matches(name)), None)
@@ -2900,10 +2927,6 @@ class Registry:
                     self.save(m, f"migrate: {m.display_name} rank per member")
         return lines
 
-    def officer_set_main(self, discord_id: int, name: str, by: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
-        m, c, old = self.set_main(discord_id, name)
-        return m, c, old
-
     def set_dm(self, discord_id: int, on: bool, by: str) -> str:
         """DMs from the bot on/off for one member (the Me page, the Members page, plain text, MCP). Returns the line."""
         with self.config_lock:  # people writes run in web worker threads and on the loop (design §2.4)
@@ -2956,6 +2979,7 @@ class Registry:
         """(series key, character) for every series `m` is a regular on (orphans of a removed schedule included)."""
         return [(k, c) for c in m.active() for k in c.rosters if ":" in k]
 
+    @_member_write
     def regular_add(self, discord_id: int, key: str, by: str, character: str | None = None) -> tuple[Member, RegisteredCharacter, list[str]]:
         """Make a member a regular of a recurring series with one of their characters (default the main). One character
         per member per series: picking another replaces it. Returns (member, character, warnings) — D15: the same
@@ -2982,6 +3006,7 @@ class Registry:
         self.save(m, f"{by}: {m.display_name} ({c.label}) regular on {key}" + (f" (was {before.label})" if before else ""))
         return m, c, warn
 
+    @_member_write
     def regular_remove(self, discord_id: int, key: str, by: str) -> Member:
         """Take a member off a series' regulars (an officer, or the member stepping down). Works on any series key they
         hold — a removed schedule's leftovers too (the Rosters page lists those as orphaned)."""
@@ -3108,6 +3133,7 @@ class Registry:
         return [(m, c) for m in self.members.values() for c in m.active() if roster in c.rosters]
 
     # ---- placement confirmations (after a roster build is approved)
+    @_member_write
     def add_placement_ask(self, discord_id: int, roster: str, character: str, by: str, channel: str = "dm") -> dict:
         """`channel`: dm (the Confirm / Can't DM) | web (DMs off: the ask waits on the Me page; unanswered still expires)."""
         m = self.member(discord_id)
@@ -3146,6 +3172,7 @@ class Registry:
         line = f"{m.display_name} confirmed {ask['character']} on {roster}" if yes else f"{m.display_name} can't make {roster} — seat re-opened"
         return m, ask, line
 
+    @_member_write
     def answer_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> str:
         """Yes: keep the seat. No: note it (RaidMixin.after_placement_answer frees the seat in the run file).
         claim_placement + save, in the caller's thread (the Discord paths use RaidMixin.record_placement instead)."""
@@ -3209,13 +3236,17 @@ class Registry:
             self.save(m, f"{m.display_name} absent {a.start}" + (f"→{a.end}" if a.end != a.start else "") + (f" (by {by})" if by != m.display_name else ""))
             return m, a
 
-    def clear_absence(self, discord_id: int, start: str, by: str | None = None) -> Absence:
+    def clear_absence(self, discord_id: int, start: str, by: str | None = None, *, by_id: int | None = None) -> Absence:
         """Remove the absence starting `start`; returns it so the caller can ripple the cleared span into the sheets
-        (RaidMixin.after_absence_cleared). `by` defaults to the member (officers pass their own name)."""
+        (RaidMixin.after_absence_cleared). `by` defaults to the member (officers pass their own name). Refused: another
+        officer's test puppet (`by_id`, Registry.puppet_refusal)."""
         from datetime import date as _d
 
         with self.config_lock:  # people writes run in web worker threads and on the loop (design §2.4)
             m = self.member(discord_id)
+            why = self.puppet_refusal(m, by_id)
+            if why:
+                raise RegistryError(why)
             try:
                 start = _d.fromisoformat(str(start).strip()).isoformat()
             except ValueError:
@@ -3373,7 +3404,7 @@ class Registry:
                 continue
             if rank != c.rank:
                 self.set_rank(discord_id, rank, by, by_id=by_id)
-                done.append(f"{m.display_name}: rank {rank}")
+                done.append(f"rank {rank}")  # the callers name the member ("Mira: rank core")
         for label in confirms:
             self.confirm(discord_id, label, by, by_id=by_id)
             done.append(f"confirmed {label}")
