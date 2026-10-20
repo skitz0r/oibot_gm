@@ -860,6 +860,7 @@ class RaidMixin:
             ev.rosters = trial.rosters
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
+            ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
             ev.log.append(f"locked by {by}")
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
             pre_gone = rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time (a yes held for a tied partner too)

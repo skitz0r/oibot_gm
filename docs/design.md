@@ -1702,7 +1702,12 @@ page's notices).
   not locked and skips a member who already holds an open ask (their card still answers). The scheduler's **recovery
   step** `recover_lock` (before expiry, every minute): a locked run with confirmations on, no `confirmations_sent_at`
   and no fan-out running here → `send_confirmations(resume=True)` asks exactly `rc.unasked_seats` (while the deadline
-  is ahead) and re-posts missing lock cards (`post_lock_cards(only_missing=True)`).
+  is ahead) and re-posts missing lock cards (`post_lock_cards(only_missing=True)`). `rc.unasked_seats` = the seats
+  rostered AT THE FLIP (`RaidEvent.lock_seats`, written by `lock_run`) still seated with no placement ask since the
+  lock — never a seat that came later (a fill yes, an officer's add after lock: those carry their own ask or none) nor a
+  fill-seated member (`rc.seated_by_fill`). A legacy locked run (no `lock_seats`, no stamp) whose fan-out evidently ran
+  (`rc.legacy_lock_sent`: a placement / fill ask on it exists, or `confirm_by` passed) is stamped and asks nobody — a
+  deploy never re-asks every locked run.
 - `cancel_run` enters `board_lock(reg, key)` (it waits for a lock's flip) and refuses done / cancelled; it flips the
   state there, then closes the fill / pre-lock asks under `plan_lock` (every writer of `ev.fill_asks` holds it) — taken
   after the flip and not nested, so the cancel waits for one DM in flight at most, never a whole batch.

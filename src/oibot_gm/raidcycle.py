@@ -168,6 +168,9 @@ class RaidEvent(BaseModel):
     lock_tried_at: Optional[str] = None
     # dual interfaces phase 2 (design §5.39): raid-night state
     confirmations_sent_at: Optional[str] = None  # the lock's Confirm / Can't fan-out finished (None on a locked run = not yet sent / interrupted)
+    # the discord ids rostered at the lock flip — the only seats the lock's fan-out (and its recovery step) asks; a seat
+    # that came later (a fill yes, an officer's add) carries its own ask or none. None = locked before it was recorded
+    lock_seats: Optional[list[int]] = None
     autofill_paused: bool = False  # the fill engine sends nothing on its own for this run (an officer's explicit send still works, D18)
     autofill_paused_by: Optional[str] = None
     reminded_at: Optional[str] = None  # the last "Remind the unconfirmed" (once per hour per run)
@@ -2589,13 +2592,38 @@ def expire_confirmation_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> lis
     return gone
 
 
+def seated_by_fill(ev: RaidEvent, uid: int) -> bool:
+    """The member's seat (or their switch on it) came from a fill ask they answered yes after lock: that yes was the
+    commitment — the lock's Confirm / Can't is not theirs to answer."""
+    sg = ev.signups.get(str(uid))
+    return (sg is not None and sg.source == "fill") or any(
+        a.discord_id == uid and a.answer == "yes" and a.phase == "fill" for a in ev.fill_asks)
+
+
+def legacy_lock_sent(reg: Registry, ev: RaidEvent) -> bool:
+    """A run locked before `lock_seats` / `confirmations_sent_at` were recorded whose fan-out evidently ran: a
+    placement or fill ask on it already exists, or its confirmation deadline has passed. The recovery step stamps it and
+    asks nobody (a deploy must never re-ask every locked run)."""
+    if ev.lock_seats is not None or ev.confirmations_sent_at:
+        return False
+    if ev.confirm_by and datetime.fromisoformat(ev.confirm_by) <= datetime.now(ev.start.tzinfo):
+        return True
+    if any(a.phase == "fill" for a in ev.fill_asks):
+        return True
+    return any(a["roster"] == ev.team for m in reg.members.values() for a in m.placement_asks)
+
+
 def unasked_seats(reg: Registry, ev: RaidEvent) -> list[tuple[int, int, Signup]]:
-    """(roster index, group index, signup) of every seated member with NO placement ask on this run since it locked —
-    the Confirm / Can't fan-out never reached them (a crash or a Discord error after the lock flipped). The scheduler's
-    recovery step asks exactly these (RaidMixin.send_confirmations(resume=True)). Empty when confirmations are off."""
-    if ev.state != "locked" or not ev.all_rosters or not run_confirms(reg, ev):
+    """(roster index, group index, signup) of every member rostered AT THE LOCK FLIP (ev.lock_seats) who is still
+    seated and has NO placement ask on this run since it locked — the Confirm / Can't fan-out never reached them (a
+    crash or a Discord error after the lock flipped). Never a seat that came later (a fill yes, an officer's add after
+    lock: they carry their own ask or none) nor a fill-seated member. A legacy run (no lock_seats) whose fan-out
+    evidently ran (legacy_lock_sent) has none. The scheduler's recovery step asks exactly these
+    (RaidMixin.send_confirmations(resume=True)). Empty when confirmations are off."""
+    if ev.state != "locked" or not ev.all_rosters or not run_confirms(reg, ev) or legacy_lock_sent(reg, ev):
         return []
     since = ev.locked_at or ""
+    at_lock = set(ev.lock_seats) if ev.lock_seats is not None else None
     out = []
     for i, r in enumerate(ev.all_rosters):
         for gi, g in enumerate(r.groups):
@@ -2604,6 +2632,8 @@ def unasked_seats(reg: Registry, ev: RaidEvent) -> list[tuple[int, int, Signup]]
                 sg = ev.signups.get(str(uid)) if uid is not None else None
                 m = reg.members.get(uid) if uid is not None else None
                 if not sg or not m:
+                    continue
+                if (at_lock is not None and uid not in at_lock) or seated_by_fill(ev, uid):
                     continue
                 if any(a["roster"] == ev.team and (a.get("asked_at") or "") >= since for a in m.placement_asks):
                     continue

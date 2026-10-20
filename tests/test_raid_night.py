@@ -139,6 +139,7 @@ def test_recover_lock_asks_exactly_the_unasked_and_stamps_the_run(reg, rs):
     ev, seated = locked_ten(reg, rs, confirm_hours=1)
     reg.add_placement_ask(seated[0].discord_id, ev.team, seated[0].main.label, "lock")  # one reached before the "crash"
     ev.confirmations_sent_at = None  # the fan-out never finished
+    ev.lock_seats = [m.discord_id for m in seated]  # recorded at the flip (lock_run)
     ev.locked_at = (datetime.now(ev.start.tzinfo) - timedelta(minutes=5)).astimezone().isoformat()
     assert len(rc.unasked_seats(reg, ev)) == len(seated) - 1 and not ev.confirmations_sent_at
     n = run(bot.recover_lock(reg, rs, ev))
@@ -154,8 +155,66 @@ def test_recover_lock_leaves_a_fanout_in_progress_alone(reg, rs):
     bot = NightBot(reg, rs)
     ev, _seated = locked_ten(reg, rs)
     ev.confirmations_sent_at = None
+    ev.lock_seats = [m.discord_id for m in _seated]
     bot._confirming().add((reg.key, ev.key))
     assert run(bot.recover_lock(reg, rs, ev)) == 0 and rc.unasked_seats(reg, ev)
+
+
+def test_recover_lock_never_reasks_a_seat_that_came_after_the_lock(reg, rs):
+    """A fill yes and an officer's add after the lock are not the lock's seats: the recovery step asks only the seats
+    rostered at the flip that nobody asked — never a fill-seated member, never one an officer seated later."""
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs, confirm_hours=1)
+    at_lock, filler, added = seated[:8], seated[8], seated[9]
+    ev.lock_seats = [m.discord_id for m in at_lock]
+    ev.confirmations_sent_at = None  # the fan-out was interrupted after the flip
+    ev.locked_at = (datetime.now(ev.start.tzinfo) - timedelta(minutes=5)).astimezone().isoformat()
+    reg.add_placement_ask(at_lock[0].discord_id, ev.team, at_lock[0].main.label, "lock")
+    # the filler's seat came through a fill ask answered yes (their signup is the fill's)
+    ev.fill_asks.append(rc.FillAsk(discord_id=filler.discord_id, display_name=filler.display_name, kind="sub", role="melee",
+                                   character=filler.main.label, spec=filler.main.spec, reason="short 1", answer="yes",
+                                   answered_at=rc.now()))
+    ev.signups[str(filler.discord_id)].source = "fill"
+    rs.save(ev, "after-lock seats")
+    missing = {sg.discord_id for _i, _g, sg in rc.unasked_seats(reg, ev)}
+    assert missing == {m.discord_id for m in at_lock[1:]}
+    n = run(bot.recover_lock(reg, rs, ev))
+    assert n == len(at_lock) - 1 and ev.confirmations_sent_at
+    for m in (filler, added):
+        assert m.discord_id not in bot.dms, f"{m.display_name}'s seat came after the lock: no Confirm / Can't"
+        assert not [a for a in reg.members[m.discord_id].placement_asks if a["roster"] == ev.team]
+
+
+def test_recover_lock_stamps_a_legacy_locked_run_and_asks_nobody(reg, rs):
+    """On deploy, a run locked before `lock_seats` / `confirmations_sent_at` existed whose asks went out (or whose
+    deadline passed) is treated as sent: stamped, nobody asked again."""
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs, asks=True, confirm_hours=1)
+    for m in seated[:3]:  # some answered, some still hold the card
+        a = reg.members[m.discord_id].placement_asks[-1]
+        a["answer"], a["answered_at"] = "yes", rc.now()
+    ev.confirmations_sent_at = ev.lock_seats = None
+    assert rc.unasked_seats(reg, ev) == []
+    assert run(bot.recover_lock(reg, rs, ev)) == 0
+    assert ev.confirmations_sent_at and not bot.dms and not bot.updates
+    # a legacy run with no asks at all whose deadline has passed: stamped too, nobody asked
+    ev2, seated2 = locked_ten(reg, rs, confirm_hours=1, days=4)
+    ev2.confirmations_sent_at = ev2.lock_seats = None
+    past_confirm(ev2)
+    assert run(bot.recover_lock(reg, rs, ev2)) == 0
+    assert ev2.confirmations_sent_at and not bot.dms
+    assert all(ev2.seat_of(m) for m in seated2)
+
+
+def test_lock_run_records_the_seats_at_the_flip(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs)
+    join(reg, rs, ev, reg.test_members())
+    roles = by_role(reg)
+    seated = roles["tank"][:2] + roles["healer"][:3] + (roles["melee"] + roles["ranged"])[:5]
+    monkeypatch.setattr(rc, "propose", fast_propose([m.display_name for m in seated]))
+    run(bot.lock_run(reg, rs, ev, by="Jon"))
+    assert sorted(ev.lock_seats) == sorted(m.discord_id for m in seated)
 
 
 def test_the_scheduler_never_frees_unasked_seats_at_the_deadline(reg, rs):
