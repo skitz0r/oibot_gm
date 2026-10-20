@@ -171,7 +171,7 @@ def test_no_thanks_closes_the_pending_ask_and_withdraws_its_tied_half(reg, rs):
 def test_after_lock_an_absence_closes_the_fill_ask_and_a_late_yes_is_refused(reg, rs):
     ev, people = _locked_short_healer(reg, rs, adhoc=True)
     bot = Bot(reg, rs)
-    run(bot.run_fill(reg, rs, ev, rc.run_team(reg, ev)))  # ad hoc: the swap goes out on its own
+    run(bot.run_fill(reg, rs, ev, rc.run_team(reg, ev), by="Officer", approved_by="Officer"))  # a swap needs an officer (D3/D22)
     offy = next(a for a in ev.fill_asks if a.display_name == "Offy")
     assert offy.pending
     day = _away(reg, people["Offy"], ev)

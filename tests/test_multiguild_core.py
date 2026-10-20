@@ -527,13 +527,17 @@ def test_a_claim_in_flight_on_an_empty_deployment_blocks_a_second_server(tmp_pat
     assert g.claim_refusal(6) is None
 
 
-def test_claim_tells_every_other_owner_once(duo, monkeypatch):
+def test_claim_tells_the_host_superusers_never_other_owners(duo, monkeypatch):
+    """The claim DM goes to the host's superusers only (they can act on it); another guild's owner is not DMed about
+    someone else's server (the DM rule), and a superuser who claimed it themselves isn't told either."""
     monkeypatch.setattr(Guilds, "ALLOW_SECOND", True)
-    duo.b.config.owner_discord_id = OWNER  # one person owns both: told once
+    monkeypatch.setenv("OIBOT_SUPERUSERS", "777, 888")
+    duo.b.config.owner_discord_id = OWNER
     bot = ClaimBot(duo.guilds)
-    reg = run(bot.claim_guild(types.SimpleNamespace(id=9, name="Third *Server*"), 4242, "forever", types.SimpleNamespace(display_name="Claimer")))
+    reg = run(bot.claim_guild(types.SimpleNamespace(id=9, name="Third *Server*"), 4242, "forever", types.SimpleNamespace(display_name="Claimer", id=888)))
     assert reg.key == "third-server" and bot.added == [reg.key]
-    assert [uid for uid, _ in bot.dms] == [OWNER] and "Third \\*Server\\*" in bot.dms[0][1], "names are data (escaped)"
+    assert [uid for uid, _ in bot.dms] == [777] and "Third \\*Server\\*" in bot.dms[0][1], "names are data (escaped)"
+    assert OWNER not in [uid for uid, _ in bot.dms]
     with pytest.raises(RegistryError, match="Invite the bot"):
         run(bot.claim_guild(None, 1, "forever", "x"))
 

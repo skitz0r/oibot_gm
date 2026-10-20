@@ -501,7 +501,24 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     return t
 
 
+def closed_run_refusal(rs: "RaidStore", key: str) -> str | None:
+    """Why a run can't be opened at `key` (an event key), or None: that time's run already exists and is CLOSED. A
+    cancelled run is never brought back by an open (D19: open a new run at another time), and an ended one only by
+    Reopen within the hour — open_run refuses rather than hand the closed run back as if it had opened."""
+    ev = rs.events.get(key)
+    if ev is None or ev.state not in ("done", "cancelled"):
+        return None
+    if ev.state == "cancelled":
+        return f"That time's run was cancelled ({ev.key}) — a cancelled run isn't opened again; pick another time."
+    return f"That time's run already ended ({ev.key}) — Reopen it within the hour if that was a mistake, or pick another time."
+
+
 def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None) -> "RaidEvent":
+    """Open (or find the live) run for `instance` at `start`. RegistryError when that time's run is closed
+    (closed_run_refusal) — checked before ensure_run, so a refused open re-creates no roster entry."""
+    why = closed_run_refusal(rs, event_key(instance, start, schedule))
+    if why:
+        raise RegistryError(why)
     return open_event(reg, rs, ensure_run(reg, instance, start, by, cutoffs, schedule), start)
 
 
@@ -699,6 +716,9 @@ def stamp_log(ev: RaidEvent) -> None:
 def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) -> RaidEvent:
     key = f"{team['key']}-{starts_at.date().isoformat()}"
     if key in rs.events:
+        why = closed_run_refusal(rs, key)
+        if why:  # never hand a cancelled / ended run back as the one just opened
+            raise RegistryError(why)
         return rs.events[key]
     sid = team.get("schedule_id")
     ev = RaidEvent(key=key, team=team["key"], instance=team.get("instance"), schedule=None if sid in (None, DEFAULT_SCHEDULE) else sid,
@@ -1405,7 +1425,7 @@ def early_warning(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, plan: "P
 
 
 def withheld_swaps(reg: Registry, rs: "RaidStore | None", ev: RaidEvent) -> bool:
-    """After lock on a recurring run, would a role swap cover a gap the fill engine can't cover on its own? (D3: such
+    """After lock (any run kind), would a role swap cover a gap the fill engine can't cover on its own? (D3 / D22: such
     swaps wait for an officer's Ask.)"""
     if ev.state == "open" or not ev.all_rosters:
         return False
@@ -1414,9 +1434,10 @@ def withheld_swaps(reg: Registry, rs: "RaidStore | None", ev: RaidEvent) -> bool
 
 
 def auto_swaps(reg: Registry, ev: RaidEvent) -> bool:
-    """May the fill engine send role swaps (flex / offspec / alt) on its own? Ad hoc: yes (today's behaviour). A recurring
-    run: no — owner decision D3: same-role fill asks stay automatic, a role swap needs an officer's Ask."""
-    return run_kind(reg, ev) == "adhoc"
+    """May the fill engine send role swaps (flex / offspec / alt) on its own? Never — owner decisions D3 and D22: on
+    EVERY run kind (recurring and ad hoc alike) same-role fill asks stay automatic and a role swap waits for an
+    officer's Ask (fill_state "suggested", the lock card lists it)."""
+    return False
 
 
 def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> list[FillAsk]:
@@ -2494,7 +2515,14 @@ def rostered_runs(reg: Registry, rs: RaidStore, m: Member) -> list[tuple[RaidEve
 
 
 def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[str]:
-    """Past confirm_by: unanswered confirmations count as out and their seats open. One commit for the lot.
+    """expire_confirmation_asks, as the display names on the run (its lines)."""
+    return [name for _uid, name in expire_confirmation_asks(reg, rs, ev)]
+
+
+def expire_confirmation_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[tuple[int, str]]:
+    """Past confirm_by: unanswered confirmations count as out and their seats open. One commit for the lot. Returns
+    (member id, display name on the run) per seat freed — callers find the member BY ID (a rename since the Join, or
+    two members sharing a name, never edits the wrong card).
     Only a seat whose member HOLDS an open ask expires (design B2 "expiry correctness"): a seated member nobody asked
     — a lock whose Confirm / Can't fan-out was interrupted, the scheduler's recovery step still to come — keeps the
     seat; "no answer" needs a question first."""
@@ -2511,7 +2539,7 @@ def expire_confirmations(reg: Registry, rs: RaidStore, ev: RaidEvent) -> list[st
                 ask["answer"], ask["answered_at"] = "expired", now()
                 reg.save(m, f"{m.display_name} didn't confirm {ev.team} in time")
                 free_seat(reg, rs, ev, int(row["uid"]), "no-confirm")
-                gone.append(row["display_name"])
+                gone.append((int(row["uid"]), row["display_name"]))
     return gone
 
 
@@ -2660,11 +2688,13 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     """What Open would do, before anything is written (POST /api/raid/{rid}/open/preview; the wizard's confirm shows
     the same facts): {kind, schedule, schedule_name, key, start (ISO — the exact instant Open must carry back), label
     (12-hour guild time), when_note (the DST line or ""), exists (the live run's state at that key, or None), channel
-    (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in one line), past}."""
+    (the signup channel id the sheet posts in, or None), rules (what kind of run it is, in one line), past, closed
+    (done | cancelled when that time's run is closed — Open is refused) and refusal (the sentence why, or None)}."""
     start, sid, note = open_when(reg, instance, value, schedule)
     w = which_run(reg, instance, start, sid if sid is not None else DEFAULT_SCHEDULE)
     ev = rs.events.get(w["key"])
     live = ev if ev is not None and ev.state not in ("done", "cancelled") else None
+    refusal = closed_run_refusal(rs, w["key"])
     sd = reg.schedule_def(instance, w["schedule"])
     lock_h = float(sd["lock_hours_before"])
     if w["kind"] == "adhoc":
@@ -2674,7 +2704,7 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
         rules = ("Scheduled: its regulars are expected" + ("; the rostered are asked to confirm" if sd.get("confirm", True) else "")
                  + f"; locks {lock_h:g} h before.")
     return {**w, "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
-            "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
+            "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 
 # ---------------------------------------------------------------- what the lock decided, as data (the site's locked SheetCard)

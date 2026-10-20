@@ -322,6 +322,11 @@ class OpenWizard(Wizard):
         ev = self.existing(start)
         if ev:
             lines.append(f"-# A run for that time already exists ({sheet_state(ev)}); Open points you at it instead of making a second.")
+        closed = rc.closed_run_refusal(self.rs, rc.event_key(self.rid, start, self.draft.get("schedule")))
+        if closed:  # open_run refuses it: the screen says so instead of offering an Open that would fail
+            lines.append(f"-# {closed}")
+            await self.show(interaction, "\n".join(lines), self.button("Change", self.shortlist), self.button("Cancel", self.cancel))
+            return
         fo = self.reg.first_open(self.rid)
         if fo is not None and start < fo:
             lines.append(f"-# This is before the raid's first lockout opens ({self.reg.local12(fo)}).")

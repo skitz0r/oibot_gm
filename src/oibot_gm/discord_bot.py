@@ -36,7 +36,7 @@ from .llm.provider import Provider, get_provider
 from .loot import session as loot_session
 from .loot.session import LootSession
 from .profiles import GameProfile
-from .registry import RegistryError
+from .registry import RegistryError, superusers
 from .store import GitStore
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -364,7 +364,9 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
     async def claim_guild(self, guild, owner_id: int, profile: str, by) -> "object":
         """Make an unconfigured Discord server a guild (the claim wizard's Confirm): the folder and its commit in a
         worker thread, then served ON THE LOOP (copy-on-write add), hooked up like boot (guild_added), announced to the
-        owners of every other guild. Raises RegistryError when the server is configured or a claim is in flight."""
+        HOST's superusers (OIBOT_SUPERUSERS — they run the bot and can act on it: the Public Bot switch, the shared LLM
+        budget); another guild's owner is never DMed about someone else's server (the DM rule), the ops line stays.
+        Raises RegistryError when the server is configured or a claim is in flight."""
 
         if guild is None:
             raise RegistryError("Invite the bot to this server first.")
@@ -374,12 +376,10 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         who = getattr(by, "display_name", None) or str(by)
         line = f"guild created for {guild.name} by {who}; owner <@{owner_id}> · profile {reg.profile.label}"
         await self.ops.emit(reg.config, "warn", line)  # no ops channel yet: the log (and the new guild's ring)
-        told: set[int] = set()
-        for other in self.registries.ordered():  # the bot host learns at once that a new server is served (K5)
-            oid = other.config.owner_discord_id
-            if other is reg or not oid or oid in told:
-                continue
-            told.add(oid)
+        claimer = getattr(by, "id", None)
+        for oid in sorted(superusers()):  # the bot host learns at once that a new server is served (K5)
+            if claimer is not None and int(claimer) == oid:
+                continue  # they claimed it themselves: nothing to act on
             try:
                 user = self.get_user(oid) or await self.fetch_user(oid)
                 await user.send(f"🆕 The bot now also serves **{discord.utils.escape_markdown(str(guild.name))}** — claimed by {discord.utils.escape_markdown(who)}, "
