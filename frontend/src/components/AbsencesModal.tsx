@@ -1,19 +1,18 @@
 import { useEffect, useState } from "react";
 import { Alert, Button, Group, Modal, Select, Stack, Text, TextInput } from "@mantine/core";
-import { DateInput } from "@mantine/dates";
+import { DatePickerInput } from "@mantine/dates";
 import { api, type AbsencePreview, type Meta } from "../api";
 import { fail, ok } from "./Page";
 
 const FALLBACK = [1, 2, 3, 4, 5, 6, 7, 10, 14, 21, 30].map((d) => ({ days: d, label: d === 1 ? "1 day" : d === 7 ? "a week" : `${d} days` }));
-const iso = (d: Date | null) => (d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}` : null);
 
-/** An absence, the Discord way (design §3.3 cluster B): **From** (a day) + **For how long** (the wizard's own list, from
+/** An absence, the Discord way (design §3.3 cluster B): **From** (a day picked on a calendar — the clock rule: never typed) + **For how long** (the wizard's own list, from
  *  /api/meta `durations`) + an optional reason — so an end before the start, or past the cap, can't be entered. Under the
  *  pickers the server's preview (`{preview: true}`): the days in words and what it does to each live sheet, or the verb's
  *  refusal (an overlap with an absence on file, the reason cap) before anything is pressed. `who` null = your own (the
  *  Me page); a member = an officer recording it for them (the Members page). */
 export function AbsencesModal({ meta, opened, who, onClose, onSaved }: { meta: Meta; opened: boolean; who: { uid: string; display_name: string } | null; onClose: () => void; onSaved: () => void }) {
-  const [start, setStart] = useState<Date | null>(null);
+  const [start, setStart] = useState<string | null>(null);  // "YYYY-MM-DD" from the calendar (picked, never typed)
   const [days, setDays] = useState("1");
   const [reason, setReason] = useState("");
   const [preview, setPreview] = useState<AbsencePreview | null>(null);
@@ -22,7 +21,7 @@ export function AbsencesModal({ meta, opened, who, onClose, onSaved }: { meta: M
   const path = who ? "/api/members/absence" : "/api/me/absence";
   const durations = meta.durations?.length ? meta.durations : FALLBACK;
   const max = meta.absence_reason_max ?? 200;
-  const body = { ...(who ? { uid: who.uid } : {}), start: iso(start), days: Number(days), reason };
+  const body = { ...(who ? { uid: who.uid } : {}), start, days: Number(days), reason };
 
   useEffect(() => {
     if (!opened || !start) { setPreview(null); setRefusal(null); return; }
@@ -45,7 +44,8 @@ export function AbsencesModal({ meta, opened, who, onClose, onSaved }: { meta: M
     <Modal opened={opened} onClose={() => { reset(); onClose(); }} title={who ? `${who.display_name} is away` : "I'll be away"} centered>
       <Stack>
         <Group grow align="flex-start">
-          <DateInput label="From" value={start} onChange={(v) => setStart(v ? new Date(v) : null)} required valueFormat="ddd D MMM YYYY" />
+          <DatePickerInput label="From" value={start} onChange={(v) => setStart(v ? String(v).slice(0, 10) : null)} required valueFormat="ddd D MMM YYYY"
+            placeholder="pick a day" popoverProps={{ withinPortal: false }} />
           <Select label="For how long" value={days} onChange={(v) => setDays(v || "1")} allowDeselect={false}
             data={durations.map((d) => ({ value: String(d.days), label: d.label }))} description="counted from the first day" />
         </Group>

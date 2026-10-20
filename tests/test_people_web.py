@@ -384,3 +384,16 @@ def test_mcp_member_tools_send_the_actor_only_for_a_rank_or_a_confirm(monkeypatc
     finally:
         ms.use(None)
     assert [a for _p, a in calls] == [None, str(OFFICER), str(OFFICER), None, str(OFFICER)]
+
+
+def test_no_free_typed_date_or_time_field_on_the_site():
+    """The clock rule: a person picks a date or time from a widget, never types one for a parser — Mantine's DateInput
+    and TimeInput are free-typed, so the site uses DatePickerInput / DateTimePicker (12-hour) instead."""
+    import re as _re
+    from pathlib import Path as _P
+    src = _P(__file__).resolve().parents[1] / "frontend" / "src"
+    typed = [f"{p.relative_to(src)}" for p in src.rglob("*.tsx")
+             if _re.search(r"\b(DateInput|TimeInput)\b", p.read_text()) or 'type="date' in p.read_text() or 'type="time' in p.read_text()]
+    assert not typed, f"free-typed date / time fields: {typed}"
+    absences = (src / "components" / "AbsencesModal.tsx").read_text()
+    assert "DatePickerInput" in absences and "withinPortal: false" in absences, "picked in the modal, its popover kept inside it"
