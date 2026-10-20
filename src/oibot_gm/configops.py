@@ -2616,8 +2616,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         ev, posted = await bot.open_test_run(reg, rs, raid, start_in=start_in, nudge_in=nudge_in, lock_in=lock_in, confirm_in=confirm_in, dm=dm, by=by, by_id=by_id, channel=here,
                                              via=via)
         return (f"test run {ev.key} open ({tempo}): starts {reg.local12(ev.start, '%I:%M %p')}, nudge {nudge_in}, lock {lock_in} min before, confirm by {confirm_in} min before"
-                + (", every puppet DMed (to you)" if dm else "") + (f" — sheet in <#{posted.id}>" if posted is not None and getattr(posted, "id", None) else "")
-                + ("" if ev.message_id else " (no signup channel set — sheet not posted)"))
+                + (", every puppet DMed (to you)" if dm else "") + (f" — sheet in <#{posted.id}>" if posted is not None and getattr(posted, "id", None) else ""))
     if op.op == "run_reopen":  # RaidMixin.reopen_run: the closed card's Reopen, the site and MCP share it
         rs, ev = _ended_event(reg, op.target, rs)
         return await bot.reopen_run(reg, rs, ev, by=by, by_id=by_id, via=via)

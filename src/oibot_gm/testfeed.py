@@ -129,10 +129,11 @@ def tempo_of(tempo=None, *, start_in=None, nudge_in=None, lock_in=None, confirm_
         if start < 4:
             raise ValueError("a test run needs at least 4 minutes to its start (nudge, lock and the confirmation deadline come before it)")
         _, s0, n0, l0, c0 = TEMPOS[DEFAULT_TEMPO]
-        confirm = max(0, round(start * c0 / s0))
-        lock = max(confirm + 1, round(start * l0 / s0))
-        nudge = max(lock + 1, round(start * n0 / s0))
-        nudge = min(nudge, start - 1)
+        # each mark clamped below the one before it (start → nudge → lock → confirm), so every start ≥ 4 has a
+        # strictly ordered set: 4 → 3, 2, 1 (clamping upward from confirm made nudge = lock at 4 minutes)
+        nudge = min(start - 1, round(start * n0 / s0))
+        lock = min(nudge - 1, round(start * l0 / s0))
+        confirm = max(0, min(lock - 1, round(start * c0 / s0)))
         if not start > nudge > lock > confirm >= 0:
             raise ValueError("a test run needs at least 4 minutes to its start")
         return (f"{start} min", start, nudge, lock, confirm)

@@ -1828,7 +1828,9 @@ remove)`, `test_comp(raid)`, `test_answer(ev, member=, status= | join/bench/out/
 holding an open placement or fill ask), `puppet_answer_ask` (through `answer_placement_for` / `answer_fill_for`, the
 member's own verbs), `test_bench_clear`; each writes its own ops line. `RaidMixin.open_test_run` stays THE opener: it
 refuses — before anything is written — when the sheet has nowhere to go (no signup channel and no SERVER channel: the
-site, MCP, a DM, plain text on the site; `NO_TEST_CHANNEL` names the setting), and stamps `test_channel` on the roster
+site, MCP, a DM, plain text on the site; `NO_TEST_CHANNEL` names the setting, `UNREACHABLE_TEST_CHANNEL` a signup
+channel set but unresolvable — `discord_raid.bench_channel_refusal`, the same words the site's `open_refusal` shows; so
+the opener's replies carry no 'sheet not posted' tail: it posts or refuses), and stamps `test_channel` on the roster
 when asked from a server channel. Callers: `/gm test seed|run|answer|compose|comp|clear` (flows_misc, the new
 flows_test), plain text (`test` op), `/api/test/*`, MCP `test_bench`.
 
@@ -1856,7 +1858,8 @@ once (`plain`: custom emoji dropped, `<t:…>` in `Registry.local12`, mentions b
 **Web.** `GET /api/test` (puppets, live test runs with puppet asks, the signup channel by name and `open_refusal`, the
 tempos, the seed presets, `clear_consequence`), `GET /api/test/feed?run=&after=`, `POST /api/test/seed|run|answer|
 clear|compose|comp` (`clear {preview:true}` returns the consequence lines; `run.tempo` = a `presets.TEMPOS` name or
-minutes to the start — `testfeed.tempo_of`, which keeps the standard tempo's proportions — or the four marks);
+minutes to the start — `testfeed.tempo_of`, which keeps the standard tempo's proportions, each mark clamped below the
+one before it so every start ≥ 4 is strictly ordered (4 → 3, 2, 1) — or the four marks);
 `/api/admin/test {action}` stays as the one-route form of the same handlers. TestBench.tsx: Seed 5/10/20/all, Open a
 test run (raid, tempo, DM-on-open; the refusal shown before the press), Answer as puppets (a random mix — Join/Bench/No
 thanks open, Confirm/Can't locked — or one puppet → status), Clear with the server's consequence, the live feed

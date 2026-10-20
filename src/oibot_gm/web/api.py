@@ -1430,8 +1430,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                                   dm=bool(d.get("dm_open") or d.get("dm")), by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before"
-                + ("" if ev.message_id else " (sheet not posted)"), "key": ev.key}
+        return {"message": f"test run {ev.key} open: starts {t12(reg, ev.starts_at)}, nudge {nudge_in} min before, lock {lock_in} min before, confirm by {confirm_in} min before",
+                "key": ev.key}
 
     async def test_answer_do(v, d) -> dict:
         reg, rs = v.reg, bot.raids.store(v.reg)
@@ -1481,14 +1481,17 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
         v = await who(request, officer=True)
         reg, rs = v.reg, bot.raids.store(v.reg)
+        from ..discord_raid import bench_channel_refusal
+
         sid = reg.config.signup_channel_id
-        ch = bot.get_channel(int(sid)) if sid and hasattr(bot, "get_channel") else None
+        get_channel = getattr(bot, "get_channel", None) or (lambda _id: None)
+        ch = get_channel(int(sid)) if sid else None
         n = len(reg.test_roster())
         return {"members": len(reg.test_members()), "max": reg.TEST_MAX, "roster": n,
                 "seed": [{"count": c, "label": str(c)} for c in SEED_COUNTS if c < n] + [{"count": 0, "label": f"all {n}"}],
                 "runs": [test_run_row(reg, e) for e in test_runs(reg, rs)],
                 "signup_channel": {"set": bool(sid), "name": getattr(ch, "name", None)},
-                "open_refusal": None if sid else "No signup channel is set: a test run from the site posts its sheet there. Set it on Config › Channels (or /gm config signup-channel).",
+                "open_refusal": bench_channel_refusal(reg, get_channel),  # the same words open_test_run refuses with
                 "tempos": [{"id": k, "label": t[0], "start_in": t[1], "nudge_in": t[2], "lock_in": t[3], "confirm_in": t[4]} for k, t in TEMPOS.items()],
                 "default_tempo": DEFAULT_TEMPO, "clear_consequence": test_clear_consequence(reg, rs)}
 

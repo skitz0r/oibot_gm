@@ -37,6 +37,19 @@ __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "regist
 
 NO_TEST_CHANNEL = ("No signup channel is set, so a test run's sheet has nowhere to go: set the signup channel (Config › Channels, "
                    "or /gm config signup-channel), or use /gm test run in a server channel.")
+UNREACHABLE_TEST_CHANNEL = ("The signup channel is set but the bot can't reach it (deleted, or hidden from the bot), so a test run's sheet "
+                            "has nowhere to go: pick the signup channel again (Config › Channels, or /gm config signup-channel), "
+                            "or use /gm test run in a server channel.")
+
+
+def bench_channel_refusal(reg, get_channel) -> str | None:
+    """Why a test run with no channel of its own (the site, MCP, a DM) can't open, or None: the signup channel unset
+    (NO_TEST_CHANNEL) or set to one the bot can't resolve (UNREACHABLE_TEST_CHANNEL). The site's Test bench card and
+    open_test_run read the same answer."""
+    sid = reg.config.signup_channel_id
+    if not sid:
+        return NO_TEST_CHANNEL
+    return None if get_channel(int(sid)) is not None else UNREACHABLE_TEST_CHANNEL
 
 
 class RaidContext:
@@ -1161,8 +1174,8 @@ class RaidMixin:
         in_guild = (channel is not None and not isinstance(channel, (discord.DMChannel, discord.GroupChannel))
                     and getattr(channel, "guild", True) is not None)  # a server channel, never a DM
         target = (self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None) or (channel if in_guild else None)
-        if target is None:  # nowhere to post the sheet: refused before anything is written (the site, MCP, a DM)
-            raise RegistryError(NO_TEST_CHANNEL)
+        if target is None:  # nowhere to post the sheet: refused before anything is written (the site, MCP, a DM), naming why
+            raise RegistryError(bench_channel_refusal(reg, self.get_channel) or NO_TEST_CHANNEL)
         cut = {"soft": nudge_in / 60, "hard": lock_in / 60, "confirm": confirm_in / 60, "open_dm": bool(dm), "test_by": by_id}
         if in_guild:
             cut["test_channel"] = channel.id  # its health / lock cards post where it was asked for (D20)

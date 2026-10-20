@@ -968,7 +968,9 @@ same three choices. It opens a real sheet for that raid with minute-level cadenc
 through nudge → lock → confirmations → expiry → fill → close within the hour. The sheet goes to the signup channel; with
 no signup channel set it goes to the channel you used the command in. With neither — the site, MCP, a DM, plain text
 on the site — the bot refuses before anything is written and says so: set the signup channel (Config › Channels or
-`/gm config signup-channel`), or use `/gm test run` in a server channel. The site's card says this before you press.
+`/gm config signup-channel`), or use `/gm test run` in a server channel. A signup channel that is set but the bot
+can't reach (deleted, or hidden from the bot) is refused the same way, and the message says that is the problem. The
+site's card says all of this before you press.
 A test run never shares a real run's sheet, even when it starts the same minute as one: its key ends in `-test`
 (`bd-1209-1930-test`), and the schedule id `test` is kept for it.
 
@@ -1006,7 +1008,7 @@ goes down. Only officers' pages follow the feed live.
 Plain text does the same ("add 3 Warrior Protection, 2 Priest Holy to the test bench", "remove 2 Warrior Protection",
 "comp sandbox for Barrow Deeps", "seed all test members", "open a slow test Barrow Deeps run and DM them", "test answer
 join 8 bench 2 out 1", "test answer yes 3 no 1"), through the very same steps as `/gm test` and the site — and so does MCP (`test_bench`, §8b; its tempo is a name — quick, standard, slow — or minutes to
-the start).
+the start, at least 4: nudge, lock and the confirmation deadline each get a minute before it).
 
 What is safe: a test run's pool is only the puppets and you (the tester) — real members are never nudged,
 rostered or asked to fill it, and the test sheet refuses presses from real members. The other way round too: a real

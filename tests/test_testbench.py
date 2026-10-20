@@ -18,6 +18,7 @@ from wizard_harness import Harness
 
 from oibot_gm import configops, discord_registry, raidcycle as rc, testfeed
 from oibot_gm.configops import ConfigOp
+from oibot_gm.discord_raid import NO_TEST_CHANNEL, UNREACHABLE_TEST_CHANNEL, bench_channel_refusal
 from oibot_gm.discord_pool import SetupMixin
 from oibot_gm.flows_test import TestAnswerButton, compose_diff, review_line
 from oibot_gm.presets import TEMPOS
@@ -249,6 +250,22 @@ def test_a_test_run_with_nowhere_to_post_is_refused_naming_the_setting(reg, rs):
     assert posted is bot.channels[55] and "test_channel" not in reg.config.roster(ev.team), "from the site: the officer channel, as any run"
 
 
+def test_a_signup_channel_the_bot_cant_reach_is_named_as_such(reg, rs):
+    """The signup channel set to a channel the bot can't resolve (deleted / hidden): the refusal says so, not 'no signup channel is set'."""
+    bot = TBot(reg, rs)
+    reg.config.signup_channel_id = 66  # not in bot.channels
+    rosters = len(reg.config.rosters)
+    with pytest.raises(RegistryError, match="can't reach it") as e:
+        run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=40, nudge_in=32, lock_in=25, confirm_in=15, dm=False, by="O", by_id=TESTER))
+    assert "No signup channel is set" not in str(e.value)
+    assert not rs.live() and len(reg.config.rosters) == rosters
+    assert bench_channel_refusal(reg, bot.get_channel) == UNREACHABLE_TEST_CHANNEL
+    reg.config.signup_channel_id = None
+    assert bench_channel_refusal(reg, bot.get_channel) == NO_TEST_CHANNEL
+    reg.config.signup_channel_id, bot.channels[66] = 66, Chan(66, "signups")
+    assert bench_channel_refusal(reg, bot.get_channel) is None
+
+
 # ---------------------------------------------------------------- the test feed
 
 @pytest.fixture
@@ -324,9 +341,19 @@ def test_tempo_names_and_minutes():
     assert label == "30 min" and s == 30 and s > n > lk > c >= 0
     assert testfeed.tempo_of(None)[1:] == TEMPOS["standard"][1:]
     assert testfeed.tempo_of(None, start_in=50, nudge_in=40, lock_in=30, confirm_in=20)[1:] == (50, 40, 30, 20)
-    for bad in ("turbo", "2"):
+    for bad in ("turbo", "2", "3"):
         with pytest.raises(ValueError):
             testfeed.tempo_of(bad)
+
+
+def test_tempo_of_four_minutes_is_strictly_ordered():
+    """Regression: '4' raised 'needs at least 4 minutes' (the marks were clamped upward from confirm, so nudge = lock).
+    Every start from the 4-minute minimum up gives start > nudge > lock > confirm ≥ 0."""
+    assert testfeed.tempo_of("4") == ("4 min", 4, 3, 2, 1)
+    assert testfeed.tempo_of(4)[1:] == (4, 3, 2, 1)
+    for start in range(4, 241):
+        _l, s, n, lk, c = testfeed.tempo_of(str(start))
+        assert s == start and s > n > lk > c >= 0, (start, n, lk, c)
     with pytest.raises(ValueError, match="start_in > nudge_in"):
         testfeed.tempo_of(None, start_in=10, nudge_in=20, lock_in=5, confirm_in=1)
 
@@ -356,6 +383,10 @@ def test_state_route_names_the_missing_signup_channel_and_the_tempos(reg, rs, si
     assert [t["id"] for t in d["tempos"]] == list(TEMPOS) and d["default_tempo"] == "standard"
     assert d["seed"][-1]["count"] == 0 and d["seed"][-1]["label"].startswith("all ")
     assert d["clear_consequence"][0].startswith("Deletes ")
+    reg.config.signup_channel_id = 66  # set, but not a channel the bot can resolve: the card says so (the words open_test_run refuses with)
+    d = client.get("/api/test", headers=bearer()).json()
+    assert d["open_refusal"] == UNREACHABLE_TEST_CHANNEL and d["signup_channel"] == {"set": True, "name": None}
+    assert client.post("/api/test/run", json={"raid": "barrow_deeps", "tempo": "quick"}, headers=bearer()).json()["error"] == UNREACHABLE_TEST_CHANNEL
     reg.config.signup_channel_id, bot.channels[55] = 55, Chan(55, "signups")
     d = client.get("/api/test", headers=bearer()).json()
     assert d["open_refusal"] is None and d["signup_channel"] == {"set": True, "name": "signups"}
@@ -383,6 +414,7 @@ def test_run_route_takes_tempo_names_and_refuses_without_a_signup_channel(reg, r
     assert ev.team.endswith("-test") and t["open_dm"] is True and t["test_by"] == OWNER
     assert (round(t["cutoff_soft_hours"] * 60), round(t["cutoff_hard_hours"] * 60), round(t["confirm_hours"] * 60)) == TEMPOS["quick"][2:]
     assert 19 <= (ev.start - before).total_seconds() / 60 <= 20
+    assert "not posted" not in r.json()["message"]  # posted or refused: no dead 'sheet not posted' tail
     r = client.post("/api/test/run", json={"raid": "barrow_deeps", "tempo": 25}, headers=bearer())  # minutes work too
     assert r.status_code == 200 and "starts" in r.json()["message"]
     rows = client.get("/api/test", headers=bearer()).json()["runs"]
@@ -624,6 +656,19 @@ def spied(monkeypatch):
             return await _orig(self, *a, **kw)
         monkeypatch.setattr(TBot, name, spy)
     return calls
+
+
+def test_plain_text_test_run_reply_has_no_dead_tail_and_names_an_unreachable_channel(reg, rs):
+    """open_test_run posts the sheet or refuses, so plain text's reply never carries the old '(no signup channel set —
+    sheet not posted)' tail; with the signup channel unreachable the refusal names that, from a DM as from the site."""
+    bot = TBot(reg, rs)
+    op = ConfigOp(op="test", value="run barrow_deeps quick")
+    reg.config.signup_channel_id = 66
+    with pytest.raises(RegistryError, match="can't reach it"):
+        run(configops.apply_async(reg, op, "Officer", False, bot=bot, by_id=OWNER, via="chat"))
+    reg.config.signup_channel_id, bot.channels[55] = 55, Chan(55, "signups")
+    out = run(configops.apply_async(reg, op, "Officer", False, bot=bot, by_id=OWNER, via="chat"))
+    assert out.startswith("test run ") and "not posted" not in out and "<#55>" in out, out
 
 
 def test_plain_text_test_ops_are_the_bench_verbs_with_one_audit_line_each(reg, rs, spied):
