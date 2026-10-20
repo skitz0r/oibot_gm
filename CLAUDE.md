@@ -132,7 +132,8 @@ src/oibot_gm/
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run.
                        People (§5.41): character_changes / character_effects / character_preview / after_character_change (a respec rewrites the
                        sheet answers; a retired / deleted / respecced seat is freed — a role flip on a locked RECURRING run keeps it); join_while_away.
-                       Raid night (design §5.39): expire_confirmations expires only a held ask; unasked_seats (the lock's recovery); cancel_effects;
+                       Raid night (design §5.39): expire_confirmations expires only a held ask (locked runs only); unasked_seats (the lock's recovery: only
+                       RaidEvent.lock_seats, the seats at the flip — never a fill-seated or later seat; legacy_lock_sent = a pre-field run is stamped); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
                        asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; FillAsk.channel dm|web (a failed DM = web)
@@ -140,8 +141,8 @@ src/oibot_gm/
                        display name to read, `by_id` = the actor's Discord id decides "their own" — never a name compare; seats found by id, ev.seat_of(member)), lock_run → roster
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below.
                        Phase 2 (§5.39): send_member_card + edit_ask_card (an outcome edits the ask's DM card — never an FYI DM; seat_released),
-                       record_placement (check-and-set on the loop), lock_run resumable (confirmations_sent_at; recover_lock in the scheduler),
-                       lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind, set_autofill_paused, withdraw_sent_ask;
+                       record_placement (check-and-set on the loop), lock_run resumable (lock_seats + confirmations_sent_at; recover_lock in the scheduler),
+                       lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;
                        every writer of ev.fill_asks holds plan_lock (_send_asks is the one sender)
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
@@ -166,7 +167,7 @@ src/oibot_gm/
                        the signup channel; loot_log off = nothing) with LootWishButton (`lootwish.<gk>:<item key>` → /me wishlist on that item)
                        Test bench (design §5.42): Member.test puppets; SetupMixin.test_seed/test_compose/test_comp/test_answer/puppet_asks/test_bench_clear =
                        THE verbs of /gm test seed|run|answer|compose|comp|clear, /api/test/*, plain text and MCP test_bench; test run keys end '-test'
-                       (rc.TEST_SCHEDULE; ensure_run refuses a roster whose test flag differs), cards in the asking channel (roster test_channel),
+                       (rc.TEST_SCHEDULE; ensure_run refuses a roster whose test flag differs, and another tester's run — a rehearsal is its test_by's), cards in the asking channel (roster test_channel),
                        puppet DMs → RaidMixin.puppet_dm: the feed + ONE digest per batch to the tester (TestAnswerButton); may_answer_for lets the tester
                        press their buttons, a test run's pool is puppets + tester only and its sheet refuses presses from real members
   testfeed.py          the test feed (D20): TestFeed ring per (guild, run) of card | dm | step | answer events, in memory only (never the data repo);
@@ -175,7 +176,8 @@ src/oibot_gm/
   discord_people.py    THE people verbs (design §5.41), module functions taking the client (bare test clients work) + PeopleMixin:
                        save_characters (the character table + its ripple: rc.character_changes/effects/preview/after_character_change → drop_seated
                        for a freed seat, a run-update + warn line for a kept role flip; preview=), record_absence, im_back (THE "I'm back"),
-                       transfer_owner (D50), absence_lines / absence_clear_lines (the preview words). No DMs anywhere
+                       transfer_owner (D50; Discord only — /gm config owner, BY_DESIGN_ONLY), absence_lines / absence_clear_lines (the preview words);
+                       a member's own retire / delete frees the seat with no self-notice (by_id decides). No DMs anywhere
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:

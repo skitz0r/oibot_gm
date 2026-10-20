@@ -2093,7 +2093,9 @@ landed on the real sheet. Now `rc.ensure_run(cutoffs=…)` (cutoffs = a test run
 schedule's own — `schedule_def` never sees `test`), refuses an existing roster whose `test` flag differs from what is asked (both ways: a rehearsal
 never takes a real roster, a real run never takes a rehearsal's), and `rc.open_event` refuses to hand a test run's
 sheet (an old file at a real key) to a real roster. `Registry` keeps the schedule id `test` (refused like `adhoc`).
-The comp sandbox (`rc.open_comp_sandbox`) is in the same key space. The guards stay and are tested in it: a test run's
+A rehearsal belongs to its tester (`test_by`): a second officer opening a test run in the same minute is refused by
+`ensure_run` ("Tess opened a test run at … — join theirs or clear it"), never handed the first one's run (its pool,
+buttons and DMs follow its tester); the same tester asking again gets their own run back. The comp sandbox (`rc.open_comp_sandbox`) is in the same key space. The guards stay and are tested in it: a test run's
 pool is puppets + its tester, its sheet refuses real members, `/raid set` refuses it, puppets answer test runs only
 (`SetupMixin.test_answer` and plain text's `_test_answer_run` refuse a real run; the plain-text mix never falls back to
 "the only live run").
