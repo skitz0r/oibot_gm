@@ -109,17 +109,19 @@ async def save_characters(bot, reg: Registry, uid: int, rows: list[dict], by: st
     m = reg.members.get(uid)
     done: list[str] = []
     if rs is not None and m is not None and changes:
-        done = await after_character_change(bot, reg, rs, m, changes)
+        done = await after_character_change(bot, reg, rs, m, changes, by_id=by_id)
     message = (f"{who}: " + "; ".join(lines)) if lines else f"{who}: no changes"
     if lines:
         await _audit(bot, reg, by, message + ("" if not done else " — " + "; ".join(done)), via=via, by_id=by_id)
     return {"lines": lines, "ripple": done, "message": message + ("".join(f"\n{d}" for d in done))}
 
 
-async def after_character_change(bot, reg: Registry, rs, m: Member, changes: list[dict]) -> list[str]:
+async def after_character_change(bot, reg: Registry, rs, m: Member, changes: list[dict], *, by_id: int | None = None) -> list[str]:
     """The Discord side of a saved table's ripple (rc.after_character_change does the run files): asks close
     (release_asks_of), seats go back through drop_seated (free_seat + the ask card edited + the fill engine), a kept seat
-    is told to the officers on the run's updates and the ops line — no DM — and every touched sheet and card is redrawn."""
+    is told to the officers on the run's updates and the ops line — no DM — and every touched sheet and card is redrawn.
+    `by_id` = who saved: the member's own save writes them no "seat released" notice about their own act (ids decide)."""
+    notice = not (by_id is not None and int(by_id) == int(m.discord_id))
     async with _board_locks(bot, reg, _runs_of(rs, m)):  # the run-file rewrite never interleaves with a lock or a board write
         res = rc.after_character_change(reg, rs, m, changes)
     freed = {ev.key for ev, _why in res["free"]}
@@ -129,9 +131,9 @@ async def after_character_change(bot, reg: Registry, rs, m: Member, changes: lis
             await _call(bot, "refill_after_release", reg, rs, ev, bool(released))
     for ev, why in res["free"]:
         if getattr(bot, "drop_seated", None) is not None:
-            await _call(bot, "drop_seated", reg, rs, ev, rc.run_team(reg, ev), m, why, None)
+            await _call(bot, "drop_seated", reg, rs, ev, rc.run_team(reg, ev), m, why, None, **({} if notice else {"notice": False}))
         else:
-            rc.free_seat(reg, rs, ev, m, why)
+            rc.free_seat(reg, rs, ev, m, why, notice=notice)
     for ev, text in res["keep"]:
         await _call(bot, "post_run_update", reg, ev, f"⚠️ {m.display_name}: {text}")
         ops = getattr(bot, "ops", None)

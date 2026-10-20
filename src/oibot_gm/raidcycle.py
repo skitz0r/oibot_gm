@@ -2436,7 +2436,7 @@ def withdraw_confirmations(reg: Registry, ev: RaidEvent, why: str) -> list[str]:
     return gone
 
 
-def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str) -> Player | None:
+def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str, *, notice: bool = True) -> Player | None:
     """Take someone off the locked roster (decline, callout, absence, missed confirmation): seat opens, signup → out.
     `who`: a Member, a Discord id or a display name (ev.seat_of) — the seat is found by id, so a nick change mid-run
     can't leave it standing."""
@@ -2460,7 +2460,7 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str) -> Pla
     ev.log.append(f"seat freed: {name} ({why})")
     rs.save(ev, f"seat freed {name}")
     if uid is not None:
-        seat_gone(reg, ev, uid, why)  # their open Confirm ask closes (a later Confirm is refused) and their inbox hears why
+        seat_gone(reg, ev, uid, why, notice=notice)  # their open Confirm ask closes (a later Confirm is refused) and their inbox hears why
     on_roster_change(rs.key, ev, removed=[uid if uid is not None else name], roster_of={uid if uid is not None else name: i})
     return p
 
@@ -3153,13 +3153,14 @@ def close_parallel(reg: Registry, rs: "RaidStore", ev: RaidEvent, ask: FillAsk) 
     return gone
 
 
-def seat_gone(reg: Registry, ev: RaidEvent, uid: int, why: str) -> None:
+def seat_gone(reg: Registry, ev: RaidEvent, uid: int, why: str, *, notice: bool = True) -> None:
     """A seat was freed (free_seat — every path: an officer, the board, an absence, expiry, a Can't make it): the member's
     OPEN Confirm ask on this run closes (`released`; a Confirm pressed later on the Me page or an old card is then
     refused from one place) and — unless it was their own doing, or an officer's on-behalf write that tells them
-    itself — their inbox says why. Never a DM (the card is RaidMixin.seat_released's to edit)."""
+    itself — their inbox says why. `notice=False`: the member's own act by another road (retiring / deleting their own
+    character) — no notice about what they just did. Never a DM (the card is RaidMixin.seat_released's to edit)."""
     reg.close_placement_ask(uid, ev.team, "released")
-    if why in ("declined", "callout", "callout (test)", "officer"):
+    if not notice or why in ("declined", "callout", "callout (test)", "officer"):
         return
     reason = RELEASE_NOTICE.get(why, why)
     reg.notify(uid, "released", f"Your seat on {run_words(reg, ev)} was released ({reason}). Nothing to do — if that's wrong, tell an officer.", run=ev.key)

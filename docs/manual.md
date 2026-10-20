@@ -126,7 +126,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   - **Main**: your rank moves with it (below). **Retire** keeps history; **Delete** removes a character outright
     (prefer Retire if you may come back to it). Either way a seat the character holds on a locked run is handed back
     and the bench asked, an open sheet's Join or Bench with it is cleared (a No thanks moves to your other character),
-    and it comes off the regulars of any schedule; if it was your main, your next character becomes main.
+    and it comes off the regulars of any schedule; if it was your main, your next character becomes main. Your own
+    change writes you no "seat released" notice (you did it); when an officer retires or deletes it for you, your Me
+    page says so.
   - **Name a planned character at launch**: `/me char action:Name a planned character` — pick it (skipped when
     there is only one), type first and last name, and the confirm screen says what follows (*"Answered Join on … — the
     answer now names Stormcall"*); answers and seats it holds take the new name.

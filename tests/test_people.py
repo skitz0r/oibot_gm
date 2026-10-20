@@ -120,6 +120,21 @@ def test_same_role_respec_follows_the_seat(reg, rs, bot):
     assert ev.signups[str(healer.discord_id)].spec == "Discipline" and not bot.fills
 
 
+def test_retiring_your_own_seated_character_writes_you_no_notice_but_an_officer_doing_it_does(reg, rs, bot):
+    """A member's own retire / delete frees the seat with no "seat released" notice about their own act; the same
+    change saved by an officer tells them (by id: who saved decides, never a name)."""
+    ev, ms = seated(reg, rs)
+    me, them = ms[2], ms[3]
+    for m, spare in ((me, "Sparemine"), (them, "Sparetheirs")):
+        reg.add_character(m.discord_id, m.display_name, spare, "Warrior", "Protection", None, False)
+    run(bot.save_characters(reg, me.discord_id, [{"label": me.main.label, "retire": True}], me.display_name, by_id=me.discord_id))
+    assert ev.seat_of(me) is None
+    assert not [n for n in reg.notices(me.discord_id) if n.get("kind") == "released"], "no notice about your own act"
+    run(bot.save_characters(reg, them.discord_id, [{"label": them.main.label, "delete": True}], "Officer", by_id=OWNER, officer=True))
+    assert ev.seat_of(them) is None
+    assert [n for n in reg.notices(them.discord_id) if n.get("kind") == "released"], "an officer's change is told"
+
+
 def test_deleting_a_seated_character_frees_the_seat_and_asks_the_bench(reg, rs, bot):
     ev, ms = seated(reg, rs)
     m = ms[2]

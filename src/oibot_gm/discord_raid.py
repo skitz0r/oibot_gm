@@ -1233,9 +1233,10 @@ class RaidMixin:
         reason = RELEASE_WHY.get(why, why)
         return await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"Your seat on {run_label(reg, ev)} was released ({reason}). Nothing to do — if that's wrong, tell an officer.")
 
-    async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True) -> None:
-        """A rostered member is out after lock: free the seat, edit their ask card, post it, ask the bench to fill."""
-        rc.free_seat(reg, rs, ev, m, why)
+    async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True, *, notice: bool = True) -> None:
+        """A rostered member is out after lock: free the seat, edit their ask card, post it, ask the bench to fill.
+        `notice=False`: their own act (rc.seat_gone writes them no notice about it)."""
+        rc.free_seat(reg, rs, ev, m, why, notice=notice)
         await self.seat_released(reg, ev, m, why)
         if announce:
             await self.post_run_update(reg, ev, f"↩️ {m.display_name} is out ({why}{f': {note}' if note else ''}) — seat freed")
