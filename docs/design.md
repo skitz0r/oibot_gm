@@ -1924,7 +1924,9 @@ writes a notice, no DM). `inbox.action_consequence('join')` on a locked confirmi
 that seating sends (an ask to answer) when the member has DMs on, and the Me page when off — never "no new DM" for a DM
 that goes out. Plain text's `run_sheet` follows D21: `authorize` stamps the op (`ConfigOp._sheet_copy`, a private
 attribute the model never sees) so the preview says "move the live sheet" or "post a read-only copy", and the apply
-decides from the presser's standing now (`_actor_is_officer`, PRIV_LIVE): `repost_sheet(copy=not officer)`.
+decides from the presser's standing now (`_actor_is_officer`, PRIV_LIVE): `repost_sheet(copy=not officer)`. An
+expired fill / pre-lock ask that waited on the site (DMs off) writes an `ask_closed` notice (`rc.expire_fill_asks`); a
+DM ask's card is edited instead (§5.39's `close_ask_card`).
 
 ## 6. Architecture
 

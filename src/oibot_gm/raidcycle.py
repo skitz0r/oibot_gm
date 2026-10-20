@@ -1666,7 +1666,9 @@ def release_member_asks(reg: Registry, rs: RaidStore, ev: RaidEvent, uid: int, w
 
 
 def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[FillAsk], list[FillAsk]]:
-    """Open asks past their deadline count as no. Returns (expired, released partners)."""
+    """Open asks past their deadline count as no. Returns (expired, released partners). An ask that waited on the site
+    (channel "web", DMs off) gets a notice saying it closed (design §2.5 — the outcome reaches them somewhere); a DM
+    ask's card is the scheduler's to edit (RaidMixin.close_ask_card)."""
     t = datetime.now(ev.start.tzinfo)
     expired, released = [], []
     for a in ev.fill_asks:
@@ -1681,6 +1683,9 @@ def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[
             other = release_partner(reg, rs, ev, a)
             if other:
                 released.append(other)
+            if a.channel == "web":
+                reg.notify(a.discord_id, "ask_closed", f"The seat question for {run_words(reg, ev)} closed at {reg.local12(t)} without your answer. "
+                           "Nothing to do.", run=ev.key)
         rs.save(ev, f"fill expired {len(expired)}")
     return expired, released
 

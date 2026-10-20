@@ -608,3 +608,28 @@ def test_a_members_plain_text_sheet_ask_posts_a_copy_and_never_moves_the_live_sh
     officer_op = ConfigOp(op="run_sheet", target=ev.key)
     configops.authorize(reg, [officer_op], reg.config.owner_discord_id, officer=True, channel=here.id)
     assert "move the live sheet" in configops.describe(reg, officer_op, here.id)
+
+
+def test_an_expired_site_ask_writes_a_notice_and_a_dm_asks_card_is_closed(reg, rs):
+    """Expiry reached the member nowhere: the AskCard just vanished from the Me page and a DM card kept live Yes / No.
+    A site ask (DMs off) now gets an ask_closed notice; a DM ask's card is edited (the scheduler)."""
+    ev, tanks = _fill_scene(reg, rs, hours_out=72)
+    team = rc.run_team(reg, ev)
+    first = rc.fill_batch(reg, rs, ev, team)[0]
+    reg.members[first.discord_id].dm_opt_out = True
+    bot = NightBot(reg, rs)
+    run(bot.run_fill(reg, rs, ev, team, by="t"))
+    site = next(a for a in ev.fill_asks if a.discord_id == first.discord_id)
+    dm = next((a for a in ev.fill_asks if a.channel == "dm" and a.dm_message_id), None)
+    past = (datetime.now(ev.start.tzinfo) - timedelta(minutes=1)).isoformat()
+    for a in ev.fill_asks:
+        if a.open:
+            a.expires_at = past
+    rs.save(ev, "deadline")
+    run(bot.scheduler_tick_guild(reg))
+    assert site.answer == "expired"
+    assert any("closed at" in t and "without your answer" in t for t in texts(reg, reg.members[first.discord_id])), "the site ask hears it"
+    if dm is not None:
+        from test_raid_night import card_texts
+        assert dm.answer == "expired" and any("without an answer" in t for t in card_texts(bot.cards[dm.dm_message_id]))
+        assert not any("without your answer" in t for t in texts(reg, reg.members[dm.discord_id])), "a DM ask's card says it — no notice too"
