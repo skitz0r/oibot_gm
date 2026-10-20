@@ -1902,6 +1902,13 @@ notice writer, the receipt, the union and its sentences, D16, D21, the picker, t
 `tests/test_member_inbox_web.py` (every route, member vs officer, a web ask after its seat was freed, two devices, the
 rev 409, MCP shapes, the run_answer re-check) and `tests/test_flows_raid.py` (the SetWizard and `/raid sheet` copy).
 
+**Final review fixes (2026-10-19).** `/roster confirm`'s screen says "They see it on their Me page (no DM)" (the save
+writes a notice, no DM). `inbox.action_consequence('join')` on a locked confirming run names the Confirm / Can't DM
+that seating sends (an ask to answer) when the member has DMs on, and the Me page when off — never "no new DM" for a DM
+that goes out. Plain text's `run_sheet` follows D21: `authorize` stamps the op (`ConfigOp._sheet_copy`, a private
+attribute the model never sees) so the preview says "move the live sheet" or "post a read-only copy", and the apply
+decides from the presser's standing now (`_actor_is_officer`, PRIV_LIVE): `repost_sheet(copy=not officer)`.
+
 ## 6. Architecture
 
 ```mermaid

@@ -202,7 +202,7 @@ class ConfirmWizard(OfficerWizard):
         others = [x.label for x in m.active() if x is not c]
         lines = [f"Confirm **{c.label}** · {c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''} · {'main' if c.is_main else 'alt'}, registered by **{m.display_name}**?",
                  f"-# Their other characters: {', '.join(others)}" if others else "-# Their only character.",
-                 "-# They get a DM saying you confirmed it."]
+                 "-# They see it on their Me page (no DM)."]
         await self.show(interaction, "\n".join(lines),
                         self.button("Confirm", self.save, discord.ButtonStyle.success),
                         self.button("Back", self.back),

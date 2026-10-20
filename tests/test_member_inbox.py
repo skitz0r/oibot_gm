@@ -560,3 +560,51 @@ def test_every_dm_is_an_ask_a_decision_or_the_owner_alert():
 def test_officer_character_confirm_is_a_notice_not_a_dm():
     text = (SRC / "flows_roster.py").read_text()
     assert "Welcome aboard" not in text or "send_member_dm" not in text.split("Welcome aboard")[1][:400]
+
+
+def test_on_behalf_join_after_lock_says_the_confirm_dm_it_sends(reg, rs):
+    """Regression: an on-behalf Join on a locked confirming run with a free seat said '— no new DM', yet set_answer seats
+    them and confirm_one DMs the Confirm / Can't card. The sentence must match what is sent."""
+    ev = open_test_run(reg, rs)  # a test run rehearses the confirmations
+    roles = by_role(reg)
+    seated = roles["tank"][:2] + roles["healer"][:3] + (roles["melee"] + roles["ranged"])[:4]  # 9 of 10: one seat free
+    join(reg, rs, ev, seated)
+    lock_with_board(reg, rs, ev, [m.display_name for m in seated])
+    m = next(x for x in reg.test_members() if x not in seated)
+    assert rc.run_confirms(reg, ev) and not ev.seat_of(m)
+    text = inbox.action_consequence(reg, ev, m, "join", by_id=1)
+    assert "Confirm / Can't DM" in text and "no new DM" not in text, text
+    bot = NightBot(reg, rs)
+    run(inbox.do_member_action(bot, reg, rs, ev, m, "join", by="Jon", by_id=1))
+    assert ev.seat_of(m) and any(a["roster"] == ev.team and a.get("dm") for a in reg.members[m.discord_id].placement_asks), "the Confirm DM card went out"
+    other = next(x for x in reg.test_members() if x not in seated and x is not m)
+    other.dm_opt_out = True  # DMs off: the ask waits on the Me page, and the sentence says so
+    off = inbox.action_consequence(reg, ev, other, "join", by_id=1)
+    assert "Me page (DMs off)" in off and "Confirm / Can't DM" not in off, off
+
+
+def test_a_members_plain_text_sheet_ask_posts_a_copy_and_never_moves_the_live_sheet(reg, rs):
+    """Regression (D21): run_sheet is open to anyone (ANYONE_OPS) and plain text called repost_sheet without copy= — so a
+    member's "post the sheet here" MOVED the live sheet. It posts a read-only copy now; the preview says so."""
+    from oibot_gm.configops import ConfigOp
+
+    reg.config.discord_guild_id = 1
+    ev = open_test_run(reg, rs)
+    bot = NightBot(reg, rs)
+    live, here = PostChan(11, "signups", 1), PostChan(12, "general", 1)
+    for ch in (live, here):
+        bot.channels[ch.id] = ch
+    run(bot.repost_sheet(reg, rs, ev, live))
+    before = (ev.channel_id, ev.message_id)
+    member = reg.test_members()[0]
+    op = ConfigOp(op="run_sheet", target=ev.key)
+    allowed, refused = configops.authorize(reg, [op], member.discord_id, officer=False, channel=here.id)
+    assert allowed and not refused
+    words = configops.describe(reg, op, here.id)
+    assert "read-only copy" in words and "follow the new message" not in words, words
+    line = run(configops.apply_async(reg, op, member.display_name, False, bot=bot, by_id=member.discord_id, channel_id=here.id))
+    assert "read-only copy" in line and (ev.channel_id, ev.message_id) == before, "the live sheet stays in #signups"
+    assert ev.mirror_messages and ev.mirror_messages[-1][0] == here.id
+    officer_op = ConfigOp(op="run_sheet", target=ev.key)
+    configops.authorize(reg, [officer_op], reg.config.owner_discord_id, officer=True, channel=here.id)
+    assert "move the live sheet" in configops.describe(reg, officer_op, here.id)

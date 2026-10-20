@@ -80,6 +80,7 @@ def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
         assert any("Altone · Mage Fire · " + a.display_name == o.label for o in opt)
         await h.pick(h.selects()[0], "Altone")
         assert "Confirm **Altone**" in h.text and a.display_name in h.text
+        assert "Me page (no DM)" in h.text and "get a DM" not in h.text, "the confirm screen says what the save does"
         await h.press("Confirm")
         assert "✅ Confirmed **Altone**" in h.text and "1 character waiting" in h.text
         await h.press("Confirm next")

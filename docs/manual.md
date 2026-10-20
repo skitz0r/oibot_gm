@@ -890,9 +890,10 @@ of their characters. The bot reads each live run's board as it stands and each r
   split") shows the solver's layout — groups, synergy, who is left out, why there can't be more runs, whether leftovers
   could make another — and leaves the board as it is; "another one" shows a different one, "use it" puts the last one on the board
   with its strategy in one step (what it showed you — also after a restart, and a preview you looked at on the site or
-  with the lock's Preview; never one only another officer saw). "Post the sheet here" re-posts
-  a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy) — like `/raid
-  sheet`, anyone registered may ask, in any channel where plain text acts on their own record. Pins stay as
+  with the lock's Preview; never one only another officer saw). "Post the sheet here" works like
+  `/raid sheet` in the channel you ask in (not in DMs): an officer's ask moves the live sheet there (its buttons and
+  updates follow the new message); anyone else registered may ask too, in any channel where plain text acts on their own
+  record, and gets a read-only copy — the live sheet stays where it is. The preview says which it will be. Pins stay as
   before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on a run is someone's answer ("put Ash in for
   tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in

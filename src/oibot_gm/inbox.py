@@ -154,8 +154,14 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
             return f"{m.display_name} joins {run} as {char}; the lock decides the roster." + tail
         if seated:
             return f"{m.display_name} plays {char} on {run} and keeps the seat." + tail
-        conf = " and asked to confirm" if rc.run_confirms(reg, ev) else ""
-        return f"{m.display_name} joins {run} as {char}: rostered if a seat is free{conf}, else a Join the board can move in." + tail
+        if not rc.run_confirms(reg, ev):
+            return f"{m.display_name} joins {run} as {char}: rostered if a seat is free, else a Join the board can move in." + tail
+        if not rc.reachable(m):  # DMs off: the confirmation waits on the Me page (confirm_one's channel "web")
+            return f"{m.display_name} joins {run} as {char}: rostered if a seat is free and asked to confirm on their Me page (DMs off), else a Join the board can move in." + tail
+        # DMs on: a seat taken means confirm_one sends the Confirm / Can't card — an ask they must act on, so say so
+        told = " Your own record: no notice is written." if own else f" {m.display_name} sees a notice on their Me page."
+        return (f"{m.display_name} joins {run} as {char}: rostered if a seat is free and then gets the Confirm / Can't DM (an ask to answer), "
+                f"else a Join the board can move in." + told)
     if key == "bench":
         return f"{m.display_name} goes to Bench on {run}" + (" — still rostered until set to No thanks." if seated else ".") + tail
     if key == "confirm_yes":

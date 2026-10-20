@@ -8,7 +8,7 @@ import re
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from .llm.provider import Provider
 from .constants import ROLES
@@ -181,6 +181,9 @@ SCHEMA_TEXT = SCHEMA_TEXT.replace("Resolving a run:", LOOT_SCHEMA + "Resolving a
 
 
 class ConfigOp(BaseModel):
+    # set by authorize(), never by the model (a private attribute: not in the schema): run_sheet from a non-officer is
+    # a read-only copy (D21) — describe() words it so; the apply decides again from the presser's standing (PRIV_LIVE)
+    _sheet_copy: bool | None = PrivateAttr(default=None)
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier")
@@ -538,6 +541,8 @@ def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bo
             bad = _locked_self_join(reg, op, raids)
         if bad is None and op.op == "run_sheet" and (channel is None or channel == PLAIN_WEB):
             bad = SHEET_HERE if channel is None else "from the site or MCP a sheet is re-posted with repost_sheet (it names the channel)"
+        if op.op == "run_sheet":
+            op._sheet_copy = not officer  # D21: only an officer moves the live sheet; a member gets a read-only copy
         if bad is None:
             own = group == "self"
             key = "rank" if op.op == "character" and (op.field or "").strip().lower() == "rank" else op.op
@@ -2022,7 +2027,11 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         return f"{label}: {'another' if f == 'another' else 'a'} {strategy} proposal from the solver — shown here, the board unchanged"
     if op.op == "run_sheet":
         where = "this channel" if channel not in (_UNSET, None, PLAIN_WEB) else "the channel you ask in (not DMs or the site)"
-        return f"{label}: post a fresh copy of the sheet in {where}; its buttons and later updates follow the new message"
+        if op._sheet_copy is True:  # a member (D21): the live sheet stays where it is
+            return f"{label}: post a read-only copy of the sheet in {where} — the live sheet (and its buttons) stays where it is"
+        if op._sheet_copy is False:
+            return f"{label}: move the live sheet to {where}; its buttons and later updates follow the new message"
+        return f"{label}: post the sheet in {where} — an officer's re-post moves the live sheet there, anyone else's is a read-only copy"
     if op.op == "run_lock":
         if ev.state != "open":
             raise RegistryError(f"{ev.key} is already {ev.state}")
@@ -2673,7 +2682,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         channel = bot.get_channel(int(channel_id))
         if channel is None:
             raise RegistryError("I can't post in this channel")
-        return await bot.repost_sheet(reg, rs, ev, channel)
+        officer = await _actor_is_officer(bot, reg, by_id)  # D21: a member's ask posts a read-only copy, as /raid sheet does
+        return await bot.repost_sheet(reg, rs, ev, channel, copy=not officer)
     if op.op == "run_propose":
         return await _propose(reg, rs, ev, op, by, bot, by_id, rev, via)
     if op.op == "run_lock":
