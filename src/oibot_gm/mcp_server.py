@@ -379,20 +379,34 @@ def open_run(raid: str, when: str | None = None, schedule: str | None = None, gu
 
 
 @mcp.tool()
-def set_answer(run: str, member: str, status: str, character: str | None = None, note: str | None = None, guild: Guild = None) -> str:
+def set_answer(run: str, member: str, status: str, character: str | None = None, note: str | None = None, callout: bool = True,
+               guild: Guild = None) -> str:
     """Answer a sheet for someone: status in (Join) / sub (Bench) / out (No thanks); `character` swaps which character
     they play. After lock, `in` seats them and asks them to confirm, `out` frees the seat and starts filling it.
-    `out` is always a callout, like /raid out (hours before, late after the lock cutoff, the updates-thread line);
-    `note` (with out only) is its reason: officers see it (get_run callouts, the run's updates thread), the public
-    sheet never does."""
+    `out` with `callout` true (the default) is "Can't make it": a callout like /raid out (hours before, late after the
+    lock cutoff, the updates-thread line); `callout=False` is a plain No thanks — an answer change, no callout record
+    (the same split as the site's menu and /raid set). `note` (a callout only) is its reason: officers see it (get_run
+    callouts, the run's updates thread), the public sheet never does. The member gets a notice on their Me page (never
+    a DM); their open DM card is edited."""
     if status not in STATUSES:
         raise ToolError(f"status must be one of {', '.join(STATUSES)} (in = Join, sub = Bench, out = No thanks)")
+    if note and (status != "out" or not callout):
+        raise ToolError("a note goes with a callout only (status out, callout true): it is the reason they can't make it")
     body: dict[str, Any] = {"member": member, "status": status, "character": character}
     if note:
         body["note"] = note
-    if status == "out":
+    if status == "out" and callout:
         body["callout"] = True  # /raid out's verb (RaidMixin.call_out), note or not
     return msg(api(guild).post(f"/api/run/{run}/set", body))
+
+
+@mcp.tool()
+def member_inbox(member: str, guild: Guild = None) -> dict:
+    """A member's inbox as their Me page shows it: `asks` (every open Confirm / Can't, fill, swap or pre-lock ask, with
+    where it waits — channel dm | web — and its deadline in words) and `notices` (outcomes they were told on the site
+    instead of by DM: not rostered, seat released, answered for them, run cancelled, …). Answer an ask for them with
+    confirm_for / fill_answer."""
+    return api(guild).get("/api/admin/inbox", member=member)
 
 
 @mcp.tool()
@@ -665,19 +679,23 @@ def clear_absence(member: str, start: str, guild: Guild = None) -> str:
 def save_characters(member: str, rows: list[dict], guild: Guild = None) -> str:
     """Edit someone's character table the way the Members page saves it. Each row: {label, name?, surname?, cls, spec,
     offspec?, main: bool, flex?: [tank|healer|melee|ranged] (extra roles beyond the spec/offspec; [] clears)} for an
-    existing character (label from get_member) or a new one (cls + spec, name optional = planned), or {label, delete: true}.
-    Only the rows you pass change."""
+    existing character (label from get_member) or a new one (cls + spec, name optional = planned), or {label, delete: true}
+    / {label, retire: true}. Only the rows you pass change. Same verb as the Members page: a seat a deleted or retired
+    character holds is handed back and the bench asked; a respec rewrites the sheet answers."""
     deletes = [str(r.get("label")) for r in rows if isinstance(r, dict) and r.get("delete")]
     chars = [r for r in rows if isinstance(r, dict) and not r.get("delete")]
-    return msg(api(guild).post("/api/members/save", {"rows": [{"member": member, "deletes": deletes, "characters": chars}]}))
+    decides = any(r.get("rank") or r.get("confirm") for r in chars)  # D8: a rank / a confirmation is made as OIBOT_MCP_ACTOR
+    return msg(api(guild).post("/api/members/save", {"rows": [{"member": member, "deletes": deletes, "characters": chars}]}, actor=decides))
 
 
 @mcp.tool()
 def set_member(member: str, character: str | None = None, rank: str | None = None, confirm: bool | None = None, main: str | None = None, guild: Guild = None) -> str:
-    """Officer edits of one member's record: `rank` (trial|raider|core|alt|social, on `character` or their main),
-    `confirm=true` (verify the character), `main` (character name that becomes their main). Any subset."""
+    """Officer edits of one member's record: `rank` (trial|raider|core|alt|social — the MEMBER's rank, stored on their main;
+    naming an alt as `character` is refused), `confirm=true` (verify `character`, default the main), `main` (character
+    name that becomes their main — the rank moves with it). Any subset. A rank or a confirm is a decision about a person
+    (D8): it is sent as OIBOT_MCP_ACTOR (X-Oibot-Actor) and refused without it; `main` alone is the owner's token."""
     body = {"member": member, "character": character, "rank": rank, "confirm": bool(confirm) if confirm else None, "main": main}
-    return msg(api(guild).post("/api/members/set", {k: v for k, v in body.items() if v is not None}))
+    return msg(api(guild).post("/api/members/set", {k: v for k, v in body.items() if v is not None}, actor=bool(rank or confirm)))  # D8
 
 
 @mcp.tool()

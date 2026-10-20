@@ -174,7 +174,9 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         adhoc = rc.run_kind(reg, ev) == "adhoc"  # first come, first rostered; Join is the commitment when confirmations are off
         failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying · " if ev.lock_error and ev.lock_tried_at
                   else "Lock failed — the sheet stays open, retrying · " if ev.lock_error else "")
-        e.set_footer(text=failed + ("test run · " if test else "") + ("First come, first rostered · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me")
+        pins = rc.pin_counts(ev)  # numbers only (who is officer data): 'Pinned: 2 · Bench-pinned: 1'
+        e.set_footer(text=failed + ("test run · " if test else "") + ("First come, first rostered · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me"
+                     + (f" · {pins}" if pins else ""))
         return e, sheet_view(reg, ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
     rosters = ev.all_rosters
@@ -249,10 +251,12 @@ def _header(reg: Registry, ev: rc.RaidEvent, title: str, lines: list[str]):
 
 
 def ask_line(reg: Registry, ico, ask) -> str:
-    """One thread line per fill ask: who, what they'd play (spec icon + character), and what it covers."""
+    """One thread line per fill ask: who, what they'd play (spec icon + character), and what it covers. "(site)" when
+    the ask waits on their Me page (DMs off, or the DM failed — D14); "in parallel" when it is a D14 twin."""
     c = reg.find(ask.character)
     what = (ico("spec", f"{c[1].cls}:{ask.spec}") + " " if c else "") + f"**{ask.character}**"
-    when = " (before lock)" if ask.phase == "prelock" else ""
+    when = (" (before lock)" if ask.phase == "prelock" else "") + (" (site)" if getattr(ask, "channel", "dm") == "web" else "") \
+        + (" (in parallel)" if getattr(ask, "parallel_of", None) is not None else "")
     if ask.kind in ("offspec", "flex"):
         return f"asked {ask.display_name} to swap to {ask.spec} on {what}{when}"
     if ask.kind == "alt":

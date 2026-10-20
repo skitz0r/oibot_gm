@@ -687,7 +687,7 @@ bot down. Plists: `scripts/launchd/gg.earlyandoften.oibot.{news-review,apply,men
 
 **The wizard** (`flows_register`, `register` flow `mode="apply"`; `/apply`, the card's `reg:apply` button): picks (with the note) → first + last name + logs (plus the old *Anything else?* box only when the guild has no questions) → a multi-select of active non-pickup schedules (skipped when none) → the questions five per modal, a *Next questions (2 of 3)* button between modals (a modal submit can't open another) → a review embed with every answer, *Change a step* back to any step and straight back → Submit = `reg.apply(source="discord")` + `client.post_application`. Nothing is written before Submit; a refusal keeps the draft and **Fix this** reopens the step it names (the question's page, the names, the picks). Closed recruitment and an open application are refused at entry.
 
-**Gating.** `open_register` checks `must_apply` for every first-character path (the card's Register / Add an alt, `/register`, `/me plan main|alt`, `/me char add`) and turns the flow into the application with "New here? Apply first — the officers take it from there." Plain-text self-service `character add` is refused in `configops.authorize` (it has the author's role ids) with a pointer to `/apply`. The website's own add-character path is not gated here.
+**Gating.** `open_register` checks `must_apply` for every first-character path (the card's Register / Add an alt, `/register`, `/me plan main|alt`, `/me char action:Add an alt`) and turns the flow into the application with "New here? Apply first — the officers take it from there." Plain-text self-service `character add` is refused in `configops.authorize` (it has the author's role ids) with a pointer to `/apply`. The website's own add-character path is not gated here.
 
 **Review and decision.** `application_embed`: full name, class/spec icons, logs, schedules in words (`wizard_opts.schedule_names`), every answer a field; kept within 25 fields / 1024 per value / 6000 total by sharing the space left among long answers (shortest stay whole), each cut with "…", plus a link to the site's full answers only when `OIBOT_WEB_URL` is https. The card's Accept / Decline… are persistent `ApplicationButton`s (`app:accept|decline:<uid>`). One decide path: `OibotGM.decide_application(reg, discord_id, accept, by, note) -> str` (→ `discord_registry.settle_application`): registry decide, DM, card edited in place, ops line, returns the verdict line (raises RegistryError when nothing is open) — the buttons (through `application_decide`, the one `decide` screen — `DeclineModal` is retired, §5.33), `/roster applicant`, the web and MCP all call it. Nothing in it touches server membership.
 
@@ -1800,7 +1800,7 @@ words, `officer` mark; `RaidEvent.log_at` stamped by `RaidStore.save` via `rc.st
 the page's History opens a read-only drawer (`#run-<key>`). `Registry.local12` formats through `constants.fmt12`.
 
 **Not built (by decision):** a leftovers-to-ad-hoc button (D17), reopening a cancelled run (D19), Extend one deadline
-(D15). Members' notices and the Me page asks (row 2) are the inbox build's; the web side that reads `FillAsk.channel`
+(D15). Members' notices and the Me page asks (row 2) are §5.40; so is the web side that reads `FillAsk.channel`
 too.
 
 Tests: `tests/test_raid_night.py` (each race, recovery, expiry ask-only, DM failure, remind, withdraw, pause, reopen,
@@ -1822,7 +1822,256 @@ other guilds' owners. (7) D22 in code: `rc.auto_swaps` is False for every run ki
 shows on ad hoc runs too. (8) The Rosters page's ad hoc picker sends `schedule: "default"` when the time is the raid's
 own scheduled run (it sent "adhoc" and got a 409).
 
-### 5.40 Dual interfaces, phase 2 — test bench parity and the test feed (built 2026-10-19)
+### 5.40 Dual interfaces, phase 2 — the member inbox, asks and officers on behalf (built 2026-10-19)
+
+Out of `out/dual_interface_design.md` §3.2 B1 (web answers, receipt, re-post), B2 (asks, notices, DMs-off by phase,
+on-behalf), B5 and §6 Phase 2 rows 2 and 3, with the owner's decisions D14 (DMs-off asks split by phase), D16 (pins in
+`runs`), D21 (a member's `/raid sheet` is a copy), D26 (notices) and the DM rule. Builds on §5.39 (`FillAsk.channel`,
+`edit_ask_card`, `record_placement`, the levers).
+
+**Notices (D26) — the outcome half of the DM rule.** `Member.notices` on the member file: `{id, kind, text, run, at,
+read_at}`, `NOTICE_KINDS` (not_rostered, released, answered_for_you, cancelled, schedule_removed, application,
+loot_award, ask_closed, confirmed), at most `NOTICE_CAP = 20`, kept `NOTICE_DAYS = 30`, text capped at 300 and stripped
+of markdown. `Registry.notify(uid, kind, text, run=, save=)` (unknown member → None; the same unread line for the same
+run twice in a row is kept once; `save=False` rides the caller's commit), `notices(uid, unread=)` newest first,
+`mark_read(uid, ids=None)`; `save_quiet` commits a member file without the analytics change-log listeners (the web's
+`SAVE_LISTENERS` still fire, so the Me page reloads live). Writers — every one where a courtesy DM used to be, or the
+design wanted one: `rc.leftover_notices` at lock (not rostered: seats, joined, "a freed seat would reach you"),
+`rc.seat_gone` inside `free_seat` (every path; it also closes the member's open placement ask as `released` so a later
+Confirm is refused by `already_answered`; silent for their own decline/callout and for an officer's on-behalf write,
+which tells them itself), `rc.cancel_notices` in `cancel_run` (never the reason, never the canceller),
+`rc.on_behalf_notice` from `set_answer` / `call_out` / `answer_fill_for` / `answer_placement_for` when `by_id` is not
+the member, `rc.close_parallel` (a site ask whose twin won), `Registry.remove_schedule` (its regulars; D47 no DM),
+`Registry.decide` (the application's copy; the decision DM itself stays — they wait on it), `Registry.confirm` (a
+character confirmed — the ConfirmWizard's "Welcome aboard" DM is gone) and `discord_pool.award_notice` (the public
+loot-log line's member copy, never reason or score). `tests/test_member_inbox.py::test_every_dm_is_an_ask_a_decision_or_the_owner_alert`
+greps every DM call site and fails on one without a written reason.
+
+**Asks wherever they wait (D14).** `role_plan.ok()` no longer skips `dm_opt_out`: pre-lock asks and confirmations go
+to the same people in the same order; `_send_asks` / `confirm_one` put a DMs-off member's ask on the site (`channel
+"web"`, same deadline). After lock, `rc.fill_batch` → `rc.add_parallel_twins`: inside `rc.parallel_window` (an ask can
+no longer run its whole `fill_ask_hours` before the start) a plain seat ask to someone a DM can't reach
+(`rc.reachable`) is followed by that seat's first reachable alternate, marked `FillAsk.parallel_of = <primary uid>`.
+`rc.parallel_shadowed` keeps the twin from counting as a second ask out (`role_plan.waiting/out`, `fill_batch`'s room);
+`apply_fill_answer` → `rc.close_parallel` closes the other side `released` on the first yes (a site ask gets an
+`ask_closed` notice, a DM card is edited by `after_fill_answer`). `raid_views.ask_line` marks "(site)" and "(in
+parallel)". `inbox.asks_of(reg, rs, uid)` is the one shape for every open ask (confirm on a locked run; fill / swap /
+pre-lock on an open or locked one): `{id, kind, title, run, roster, raid, when, character, cls, spec, role, as_label,
+group (inbox.group_preview: the seat's group, one member per line), deadline, channel, held, waiting_for, reason}`.
+
+**Answering on the site (B1/B2), the same verbs.** `web/api_me.py` (installed by `install_api`): `POST
+/api/me/run/{key}/answer {status, character}` → `set_answer(by_id=me)` (a Join / Bench after lock refused with
+`rc.LOCKED_JOIN`, like the sheet); `POST /api/me/run/{key}/out {note}` → `call_out`; `POST /api/me/fill/{key} {answer}`
+→ `answer_fill_for`; `POST /api/me/ask/{id} {answer}` (id = run key, `place:<run>` or roster key) →
+`answer_placement_for` (the check-and-set on the loop — a seat freed meanwhile or a second device's answer is refused
+from one place); `POST /api/me/notices/read {ids?}`. Every reply carries `rc.answer_receipt` — THE receipt: state, not
+action (joined / Bench / No thanks / rostered / in line; the ad hoc queue position; "1 of N rosters, decided at
+lock"); the sheet button's ephemeral reply is the same string. `GET /api/me` adds `asks[]` (inbox.asks_of),
+`notices[]`, `dm_sentence` (`inbox.DM_OFF_SENTENCE` / `DM_ON_SENTENCE`, also `/me view`, `/me dms`, the manual) and per
+sheet `sheet_row_extras` (`may_answer`, `may_cant`, `queue_note`, `receipt`). Me.tsx: `components/AskCard.tsx`
+(`AskCard`, `NoticesCard`) and `SheetRow` — rendered from server state only, disabled in flight, no optimistic flip.
+
+**Officers on behalf (B5).** `rc.member_actions(reg, ev, m)` is THE filtered union — `{key, label, needs character|note,
+characters}` for confirm_yes/no (their open placement ask), fill_yes/no (their open fill ask), callout (note), join (as
+<alt>; a rostered member's character swap), bench, no_thanks, pin_in/pin_out/unpin (open sheet). `inbox.action_consequence`
+says what each does and who is told (a notice; their open DM card edited — `inbox._has_card`; pins: nobody), and
+`inbox.do_member_action` writes through `set_answer` / `call_out` / `answer_placement_for` / `answer_fill_for` /
+`inbox.pin_member` after re-reading the union (and `rc.on_bench_side`). `rc.member_state_rev` / `member_change_words` = the
+re-read at Confirm. Surfaces: `/raid set member:<User> [what:<Choice>]` → `flows_roster.SetWizard` (run first, then
+the verbs as buttons, a character select, `Wizard.decide` with the consequence and, for a callout, *with a note…*);
+`GET /api/admin/actions?run=&member=` (each action's consequence, `by_character` for "as <alt>", `rev`), `POST
+/api/admin/action {run, member, action, character?, note?, rev?}` (stale rev → 409 naming the change), `GET
+/api/admin/inbox?member=` (MCP `member_inbox`); SheetCard's row ⋮ menu (`components/board/MemberMenu.tsx`), also on the
+NotAnswered rows, and the header's **Someone else…**. **No thanks** = an answer change, **Can't make it** = `call_out`
+on every surface: MCP `set_answer(callout=True)` by default, `callout=False` = No thanks; a note goes with a callout
+only. `configops` `run_answer` re-checks the lock at apply (`_actor_is_officer` via `guild_routing.role_of`, PRIV_LIVE):
+a member's own Join / Bench previewed open and Applied after the lock is refused.
+
+**Re-post (D21).** `RaidMixin.repost_sheet(…, copy=False)`: an officer's re-post moves the live sheet and edits the old
+message ("Re-posted in #channel — answer there.", no buttons); `copy=True` (a member's `/raid sheet`) posts a labelled
+read-only copy that never touches `ev.channel_id/message_id`, kept in `RaidEvent.mirror_messages` (last
+`MIRRORS_KEPT = 5`) and refreshed by `refresh_sheet` without buttons. A channel whose plain mode is `ignore` is refused
+(the signup channel never is). `/raid sheet [channel]` (officers may name the channel); the site's run ⋮ menu has
+**Re-post sheet…** with a channel select (channels not in `ignore`).
+
+**Smaller pieces.** `raid_buttons.character_picker`: ≤ `PICKER_BUTTONS = 4` characters → buttons, main first; more →
+one select (main preselected) + "<verb> as <main>"; Join, Bench and No thanks all ask. `OP_GROUP["pin"] = "runs"` (D16)
+with `PLAIN_GROUPS` example text, manual §8c and the PlainPermissions copy; the open sheet's footer adds
+`rc.pin_counts` ("Pinned: 2 · Bench-pinned: 1"). `/me dms on|off` → `Registry.set_dm` (the verb the Me page, the
+Members page, plain text `dm` and MCP `set_dm` share); `/me view` leads with the inbox (`inbox.inbox_lines`) and a
+**Mark notices read** button.
+
+**Review fixes.** Pins have ONE write: `inbox.pin_write(reg, rs, ev, m, pin, by)` (rc.set_pin + save; plain text's
+offline `apply`) and `inbox.pin_member(bot, …, by, by_id, via, audit=True)` (+ the audit line + `refresh_sheet`, so the
+footer's pin counts never go stale) behind the SetWizard, the row menu, `POST /api/run/{key}/pin` (MCP `pin`) and
+plain text's `pin` op with the bot (`_apply_async`, `audit=False`: apply_async audits its line). `Registry.notify` ids
+are unique per member file (`n<ms hex><nn>`, the first free `nn` — at the cap two notices in one millisecond no longer
+collide). `action_consequence(…, by_id=)`: on the officer's own record the sentence promises no notice (the verbs
+write none). `award_notice` copies a correction to the member who held the item too (`reg.find(was)`; never a guess
+between two same-named characters). The SetWizard leaves test runs to `/gm test answer` (design B5; the site's board on
+a test run is the tester's own surface and keeps the row menu). A member's `/raid sheet channel:` is not followed and
+the reply names the channel. `/api/meta.dm_sentences {on, off}` carries the DM sentence (Me.tsx reads it; `GET
+/api/me.dm_sentence` stays for MCP). AskCard's "as Holy" is the spec icon's tooltip (iconography rule), the words
+only when no icon can carry them.
+
+Tests: `tests/test_member_inbox.py` (notices, D14 ordering and the parallel twin, confirmations on the site, every
+notice writer, the receipt, the union and its sentences, D16, D21, the picker, the DM-call-site lint),
+`tests/test_member_inbox_web.py` (every route, member vs officer, a web ask after its seat was freed, two devices, the
+rev 409, MCP shapes, the run_answer re-check) and `tests/test_flows_raid.py` (the SetWizard and `/raid sheet` copy).
+
+**Final review fixes (2026-10-19).** `/roster confirm`'s screen says "They see it on their Me page (no DM)" (the save
+writes a notice, no DM). `inbox.action_consequence('join')` on a locked confirming run names the Confirm / Can't DM
+that seating sends (an ask to answer) when the member has DMs on, and the Me page when off — never "no new DM" for a DM
+that goes out. Plain text's `run_sheet` follows D21: `authorize` stamps the op (`ConfigOp._sheet_copy`, a private
+attribute the model never sees) so the preview says "move the live sheet" or "post a read-only copy", and the apply
+decides from the presser's standing now (`_actor_is_officer`, PRIV_LIVE): `repost_sheet(copy=not officer)`. An
+expired fill / pre-lock ask that waited on the site (DMs off) writes an `ask_closed` notice (`rc.expire_fill_asks`); a
+DM ask's card is edited instead (§5.39's `close_ask_card`).
+
+### 5.41 Dual interfaces, phase 2 — people: characters, rank, absences, owner (built 2026-10-19)
+
+Out of `out/dual_interface_design.md` §3.3 and §6 Phase 2 rows 8–10, with the owner's decisions D24 (a retired, deleted
+or respecced SEATED character ripples: seat freed + backfill; a role-flip respec on a locked recurring run keeps the seat
+and tells the officers), D25 (rank per MEMBER on the main, alts always "alt"), D27 (no "ask to be a regular" button), D28
+(public absences card = names + days in words), D29 (no self-service "delete my record"), D30 (removing a schedule removes
+its regulars, no DM), D50 (owner transfer: one confirm screen; refuse bots, outsiders, self; no DMs) and the DM rule.
+
+**THE character verb.** `discord_people.save_characters(bot, reg, uid, rows, by, *, by_id, officer, rev, via, preview)`
+(also `bot.save_characters`, through `PeopleMixin`, which `AbsencesMixin` inherits so the client's class list is
+unchanged): `Registry.save_character_table(…, officer=, by_id=, rev=)` in a worker thread, then the ripple on the loop,
+then one audit line. Callers: `POST /api/me/characters` (+ `/api/me/main` and `/api/me/character/delete`, one-row tables),
+`/api/members/save`, `/api/members/set` (main · rank · confirm as ONE table), `/api/admin/confirm`, the `character`,
+`rank` and one-character `confirm` ops with the bot (`configops._people_verb` → `_apply_with_bot`; offline `apply` keeps
+the table verb alone, and confirm-all is a batch of table saves), the `set_main` op (a `{label, main: true}` row,
+`configops._set_main_rows`; offline too — `Registry.officer_set_main` is gone), MCP `save_characters` / `set_member`, and every Discord
+character wizard (one-row tables): the `/me char` hub, `/roster char|rank|set-main`, `/roster confirm` and the naming
+wizard (`char_name`: names → THE decide screen with the ripple → a `{label, name, surname}` row).
+- `save_character_table` validates the WHOLE table on a copy first (`_table_shadow`: the same verbs on a deep copy of the
+  member whose `save` only keeps it in memory; `check_character_table` is that step alone, the previews call it), then
+  applies it in one commit — a refusal on row N used to leave rows < N committed. A row naming a character that is gone
+  is refused, never dropped. Main is applied before rank. `officer=False` refuses `rank` and `confirm` (no self-promotion
+  over the Me page's POST). `rev` = `characters_rev` the editor loaded; stale → `CharactersChanged` (a `RegistryError`;
+  the web answers 409 with the member's current table). The whole save holds `config_lock` (web threads vs the loop),
+  and `save_characters` reads `rc.character_changes` inside that same critical section, so the ripple works from the
+  record the save applied to. Every other member write — `add_character`, `set_plan`, `name_character`, `set_main`,
+  `set_spec`, `set_flex`, `set_roles`, `retire`, `delete_character`, `rename`, `decide`, `regular_add` / `regular_remove`,
+  the placement asks, the test bench seeds — takes it too (`registry._member_write`; re-entrant, so the table's save
+  calls them under it). The table's change lines name no member ("rank core"); callers prefix the name once.
+- The ripple is data in `raidcycle` and Discord in `discord_people`: `rc.character_changes(reg, m, rows)` (what a save
+  changes, read BEFORE it) → `rc.character_effects(reg, rs, m, change)` (per live run: free | keep | rewrite | clear |
+  repoint, with the sentence every surface prints) → `rc.character_preview` (the sentences: Discord's decide screens,
+  `{preview: true}`, plain text's diff) → `rc.after_character_change` (AFTER the save: sheet answers rewritten —
+  `set_signup` with the same status, source `respec`, a Join keeping its `joined_at` — or cleared / moved to another
+  character; seats re-labelled with `_reseat`) → `discord_people.after_character_change` (asks of the member close via
+  `release_asks_of`; seats go back through `RaidMixin.drop_seated` — free_seat, the ask card EDITED, the fill engine; a
+  role flip kept on a locked recurring run is a run-update line + a warn ops line; touched sheets and cards redrawn).
+  An ad hoc locked run hands a role-flipped seat back (first come: Join again). A planned character's naming re-labels
+  answers and seats. Nothing DMs anyone. The run-file rewrite holds `RaidMixin.board_lock` of every live run the member
+  has an answer or an ask on (sorted keys; `discord_people._board_locks`), so it never interleaves with a `lock_run` or a
+  board write that holds that lock across an await.
+- `/me plan roles` and its Choice arguments are gone; `Registry.set_roles` stays only as the registration wizard's role
+  step. `/me char [action:]` is ONE command (a Group with subcommands can't itself be invoked) on
+  `flows_roster.CharWizard` — `MemberWizard`'s self mode (member = the presser, no guard) — with Spec · Main · Flex ·
+  Retire · Delete · Name (hands over to the registration's `char_name`) · Add (the registration wizard). `/roster char
+  member: [action:]` is the same class as an officer (+ Rank, − Name/Add); `/roster rank` and `/roster set-main` are its
+  entry points (`RankWizard`, `SetMainWizard`). Every action ends on `Wizard.decide` with the ripple. The old
+  `/me char name|add|main|spec|retire|list` subcommands are retired, and so are `flows_register`'s `char_spec`,
+  `char_main`, `char_retire` flows (they called `set_spec` / `set_main` / `retire` directly — a second path).
+
+**Rank per member (D25).** `Member.rank` = the main's rank; `registry.settle_ranks(m, rank)` puts the member's rank on the
+main and "alt" on every other character — called by `set_main`, `retire`, `delete_character`, `add_character` /
+`set_plan` of a main (rank follows the player, always; the three old conditional carries are gone). `Registry.set_rank(uid,
+rank, by, *, by_id)` refuses a member with no main, your own rank (the owner aside) and another officer's live test
+puppet (`puppet_refusal`: while a test run is live only its `test_by` or the owner changes a puppet). The `rank` op and
+`/api/members/set` refuse naming an alt. `Registry.confirm(uid, label, by, *, by_id)` looks up by (member, label) —
+never guild-wide by first name — and refuses your own character and a planned one. A write that names a character
+without its member (plain text's `rank` / `confirm`, `/api/admin/confirm` with a bare label) resolves through
+`Registry.find_unique`: a planned label several members share ("Priest (Holy)") is refused with each named, never the
+first one `find` meets. `/roster confirm`'s walk no longer
+lists your own and no longer DMs ("They see it on their Me page"). Migration: `scripts/migrate_ranks.py`
+(`Registry.migrate_ranks`: non-main characters → alt; a main reading "alt" takes the best rank an alt held; idempotent,
+one commit per guild).
+
+**Absences.** `Registry.add_absence(…, by_id=)` refuses an overlap with an absence on file ("X is already away Tue 9 Dec
+→ Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"), a reason over
+`ABSENCE_REASON_MAX` (200) and another officer's puppet; `check_absence` is the same without the write (previews).
+`clear_absence(…, by_id=)` refuses another officer's puppet the same way (so do plain text's offline `absence` /
+`absence_clear`, which pass `by_id`). `add_absence`, `clear_absence`, `set_dm`, `set_rank` and `confirm` hold `config_lock` (design §2.4), so the overlap check
+and the write are one step against a web worker thread and the loop.
+`presets.DURATIONS` is the one For-how-long list (the wizard's select and `/api/meta.durations`). `discord_people`:
+`record_absence` (the verb + `announce_absence`), `im_back` (THE "I'm back": `clear_absence` + `absence_cleared`),
+`absence_lines` / `absence_clear_lines` (the preview sentences). "I'm back" is on every surface: the absences card's
+third button and the *My absences* reply's Clear (`AbsenceButton` `abs.<gk>:back` and `abs.<gk>:clear:<uid>:<start>` —
+DynamicItems, no held state), `/me absent clear` and `/roster back member:` (`flows_absence.AbsenceClearWizard`: pick →
+the decide screen with what re-opens → `im_back`), the web (`{preview: true}` then the clear on `/api/me/absence/clear`
+and `/api/members/absence/clear`), plain text's `absence_clear` and MCP `clear_absence` (both through `im_back`). Join on
+a day you're away stays pure (§3.2 B1): `rc.join_while_away` appends "joined for this run; your absence … still stands"
+to `set_answer`'s line on every surface, and the sheet's ephemeral receipt carries an *I'm back* Clear button. Test
+puppets: the absences card and `/roster absences` leave them out, `announce_absence` posts no public line and no card
+refresh for one, `/api/absences` and `/api/members` show them only to who may change them.
+
+**Schedules (D30).** `Registry.remove_schedule` clears the series key from every character in the same commit and names
+them ("— 2 regulars off it (Ana, Bo)"); `schedule_regulars(rid, sid)` feeds `describe(schedule_remove)` ("… come off it —
+nobody is DMed"). `orphan_regulars` remains for data from before.
+
+**Owner (D50).** `Registry.owner_refusal(uid, *, by_id, bot, membership, name)` (a bot · the current owner · yourself ·
+membership "no" · "unknown": a write that moves owner rights needs certainty), `owner_consequence(name, by_id)` (THE
+sentence), `set_owner(uid, by, …)` (a settings `_config_verb`). `discord_people.transfer_owner` resolves Discord's answer
+(`guild_routing.member_of`) and writes a warn audit line; nobody is DMed. Surfaces: `/gm config owner [user]` in a set-up
+server → `flows_config.OwnerTransferWizard` (member picker → refusals → `decide`, danger) and the Config page's owner line
+(`GET/POST /api/owner`, `{preview}`; the owner or a host superuser; MCP refused with 403 — the token IS the owner).
+A host superuser (`Registry.is_owner_id`) may hand over a guild they host but don't own; the sentence then reads "(you
+act as the host here)" instead of "You lose owner rights", and the audit line carries " (host)".
+`owner_transfer` left `BY_DESIGN_ONLY` (it is on Discord and the web; `tests/test_people.py` checks there is no MCP tool).
+
+**Web.** `GET /api/members` returns characterless members, `rank`, `dm`, `characters_rev` per row; `/api/members/save` refuses
+only the members whose rev moved (`refused[]`, the rest apply); `/api/members/set` (rank per member, confirm by member,
+main through the verb; a `character` that isn't theirs is refused, never read as the main); `GET /api/member` hides
+another officer's live puppet like `/api/members` (`visible`); `/api/members/dm` and `/api/me/dm` → `Registry.set_dm`; `/api/me` carries `characters_rev` and
+`rank`; the absence routes take `{start, days | end, reason, preview}`; `/api/absences` carries `span` and `test`.
+Frontend: `components/CharacterTable.tsx` (the Me page's card: row ⋮ menu, Flex, preview-then-confirm, rev),
+`components/AbsencesModal.tsx` (From + For how long + live preview, both pages), `AbsencesCard.tsx` (Me; `useImBack`),
+`AbsencesTable.tsx` (Members; *I'm back* shows by the guild's local `today` from the server, not the browser's UTC date), `OwnerCard.tsx` (Config); Members.tsx gains the sticky member cell, the rank select on the
+main, the DM switch, the ⋮ menu, Flex, the *No characters* section and the Absences table.
+`/roster overview` replies ephemerally always, one embed field per recurring schedule, and officers get *Post to the
+roster channel* (`discord_registry.overview_embed` / `overview_post_view`).
+
+Plain text's diff (`configops.describe` of a `character` op) appends the ripple sentences for every field (spec,
+offspec, name, main, flex, retire, delete) — the words of the decide screen and the web preview.
+
+**Not built (by decision or left for later):** "ask to be a regular" (D27), self-service delete of a member record (D29),
+member notices (the inbox build), `/roster comp` and the Readiness page (phase 3), a characterless member's *Remove record*
+and `on_member_remove` (left-the-server), `MemberWizard`'s Name for officers, the phone stacked-card layout of the Me / Members
+tables (they scroll sideways). Without the inbox, a confirm's and an owner transfer's outcome is the record itself
+(the Me page's table) and the ops line.
+
+**MCP rank / confirm (D8).** A rank or a character's confirmation is a decision about a person: from MCP it needs
+`X-Oibot-Actor` (validated by `web/app.py mcp_actor`). `web/api.py people_actor` refuses it with a 403 in `save_table`
+(so `/api/members/set`, `/api/admin/confirm`, `/api/me/characters`) and up front in `/api/members/save` (before any member
+saves); previews and the rest of a table (spec, main, flex, retire, delete) need no actor. Plain text over MCP:
+`mcp_actor_rule` drops `configops.people_needs_actor` ops (rank, confirm, `character` field=rank) into `refused`. The
+MCP tools `set_member` and `save_characters` send the header (`actor=True`) only when the call carries a rank or a
+confirm.
+
+Tests: `tests/test_people.py` (the ripple on open / locked recurring / locked ad hoc runs, seated delete → freed + bench
+asked, rank per member, confirm by member, validate-on-copy, the rev, puppets, overlap, reason cap, I'm back, Join while
+away, set_owner refusals, schedule removal without a DM), `tests/test_people_flows.py` (every wizard through the harness)
+and `tests/test_people_web.py` (every route).
+
+**Merged with §5.40 (2026-10-19).** `Registry.confirm(discord_id, label, by, by_id=)` writes the `confirmed` notice
+in the same member save (D26 — the confirm is told on the Me page, never by DM); `Registry.remove_schedule` strips the
+series from its regulars AND writes each a `schedule_removed` notice in that one store batch (the label read before the
+override is written); `rc.answer_receipt` carries `join_while_away`'s sentence, so the sheet button's receipt (and its
+I'm back button) and the Me page's toast say why; `/me view` keeps the inbox fields with the `/me char` → Flex hint;
+one `Registry.set_dm` (the config lock; "already on" short-circuit). `tests/test_people_flows.py` lints every
+backticked `/me …` hint in the member-facing modules against the live command tree.
+
+**Final review fix (2026-10-19).** A planned character's label is `Class (Spec)`, so a respec renames it:
+`rc.character_changes` gives such a `spec` change its `new_label`, and `rc.after_character_change` re-finds the
+character by the label it has AFTER the save (a name given in the same save wins) — it used to look it up by the old
+label, skip the sheet rewrite and the same-role seat rewrite without a word, and still say "the answer now reads …".
+
+### 5.42 Dual interfaces, phase 2 — test bench parity and the test feed (built 2026-10-19)
 
 Out of `out/dual_interface_design.md` §3.2 B9 and §6 Phase 2 row 7, with the owner's decision D20 (test-run cards post
 in the channel the command ran in AND the web mirrors them in a live feed; puppet DMs still reach the tester as a

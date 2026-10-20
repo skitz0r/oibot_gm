@@ -30,9 +30,9 @@ from oibot_gm.wizard import FLOWS
 SURFACES: dict[str, dict[str, str]] = {
     "absence": {"discord": "flow:absence", "web": "POST /api/me/absence", "mcp": "add_absence"},
     "absence_clear": {"discord": "slash:me absent clear", "web": "POST /api/me/absence/clear", "mcp": "clear_absence"},
-    "dm": {"web": "POST /api/me/dm", "mcp": "set_dm"},
-    "character": {"discord": "flow:register", "web": "POST /api/me/characters", "mcp": "save_characters"},
-    "set_main": {"discord": "flow:char_main", "web": "POST /api/me/main", "mcp": "set_member"},
+    "dm": {"discord": "slash:me dms", "web": "POST /api/me/dm", "mcp": "set_dm"},
+    "character": {"discord": "flow:member_char", "web": "POST /api/me/characters", "mcp": "save_characters"},  # /me char, /roster char
+    "set_main": {"discord": "flow:member_char", "web": "POST /api/me/main", "mcp": "set_member"},
     "rank": {"discord": "flow:roster_rank", "web": "POST /api/members/set", "mcp": "set_member"},
     "confirm": {"discord": "flow:roster_confirm", "web": "POST /api/admin/confirm", "mcp": "set_member"},
     "run_open": {"discord": "flow:raid_open", "web": "POST /api/raid/{rid}/open", "mcp": "open_run"},
@@ -46,14 +46,14 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_move": {"web": "POST /api/run/{key}/move"},
     "run_propose": {"web": "POST /api/run/{key}/split", "mcp": "propose_split"},
     "run_sheet": {"discord": "flow:raid_sheet", "web": "POST /api/run/{key}/sheet", "mcp": "repost_sheet"},
-    "confirm_for": {"web": "POST /api/admin/placement", "mcp": "confirm_for"},
+    "confirm_for": {"discord": "flow:raid_set", "web": "POST /api/admin/placement", "mcp": "confirm_for"},
     # raid-night levers (phase 2 A): the lock / closed card's RunButton, the Suggest… screen, the run routes, the tools
     "run_remind": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/remind", "mcp": "remind_unconfirmed"},
     "run_pause": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/pause", "mcp": "pause_autofill"},
     "run_withdraw": {"discord": "flow:raid_suggest", "web": "POST /api/run/{key}/withdraw", "mcp": "withdraw_ask"},
     "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
     "comp_target": {}, "comp_target_clear": {}, "comp_groups": {},
-    "pin": {"web": "POST /api/run/{key}/pin", "mcp": "pin"},
+    "pin": {"discord": "flow:raid_set", "web": "POST /api/run/{key}/pin", "mcp": "pin"},
     "policy_append": {"discord": "flow:rule", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},
     "raid_set": {"discord": "flow:raid_config", "web": "POST /api/admin/raid", "mcp": "raid_set"},
     "raid_reset": {"discord": "flow:raid_config", "web": "POST /api/admin/raid/reset", "mcp": "raid_reset"},
@@ -192,11 +192,12 @@ def test_pending_rows_are_few_and_dated_to_a_phase():
 
 
 def test_single_surface_features_are_written_down_with_a_living_path(web_routes, slash_paths):
-    """§2.1's by-design lists (Discord-only: claim, owner transfer, the application wizard, the cards, the guide, the DM
+    """§2.1's by-design lists (Discord-only: claim, the application wizard, the cards, the guide, the DM
     picker; web-only: the board, applications review, the policy editor, history,
     the plain-permissions grid) are configops.BY_DESIGN_ONLY: features, not ops, each with its surface, its entry point
     (which must exist) and the reason."""
-    expected = {"guild_claim", "owner_transfer", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
+    # owner transfer left this list in phase 2 (C): /gm config owner AND the Config page (POST /api/owner) — tests/test_people.py
+    expected = {"guild_claim", "application_wizard", "registration_card", "absences_card", "guide", "dm_picker",
                 "board", "applications_review", "policy_editor", "history", "plain_permissions_grid"}
     assert expected <= set(configops.BY_DESIGN_ONLY)
     # phase 2 B9: the comp sandbox and test-bench compose are on both surfaces now (/gm test comp | compose) — never web-only again

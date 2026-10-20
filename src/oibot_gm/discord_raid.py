@@ -293,9 +293,20 @@ class RaidMixin:
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            open_before = sheet_state(ev) == "open"
             line = await self.set_answer(reg, rs, ev, m, status, character, by=m.display_name, by_id=m.discord_id)
+            if open_before and sheet_state(ev) == "open":  # the receipt renders state (design §2.7): what they are now, as which character
+                line = "✅ " + rc.answer_receipt(reg, ev, m)
         except ValueError as e:
             line = f"❌ {e}"
+        away = status == "in" and not line.startswith("❌") and m.absent_on(rc.run_day(reg, ev)) is not None
+        if away:  # Join while away (design §3.2 B1): the receipt carries I'm back — the normal clear flow, whole span
+            from .discord_pool import AbsenceButton
+
+            view = discord.ui.View(timeout=None)
+            view.add_item(AbsenceButton("clear", reg.key, m.discord_id, m.absent_on(rc.run_day(reg, ev)).start, label="I'm back"))
+            await interaction.followup.send(line, view=view, ephemeral=True)
+            return
         await interaction.followup.send(line, ephemeral=True)
 
     async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str, by_id: int | None = None) -> str:
@@ -358,8 +369,14 @@ class RaidMixin:
             s = rc.set_signup(reg, rs, ev, m, character, "sub", source=source)
             await self.refresh_sheet(reg, ev)
             line = f"✅ {who}{s.character} Bench for {label}" + (" — still rostered; set No thanks to free the seat" if ev.seat_of(m) else "")
+        if status == "in":  # Join while away: Join stays pure, the absence stands for the other sheets — the receipt says so
+            note = rc.join_while_away(reg, ev, m, mine=mine)
+            if note:
+                line += f"\n{note}"
         if not mine:
             await self.ops.emit(reg.config, "info", f"{by} set {m.display_name} {status} on {ev.key}")
+            s = ev.signups.get(str(m.discord_id))  # B5: the member's notice (never a DM)
+            rc.on_behalf_notice(reg, ev, m.discord_id, f"set you to {rc.LABELS[status]}" + (f" as {s.character}" if s and status != "out" else ""), by)
         return line
 
     async def refresh_sheet(self, reg, ev) -> None:
@@ -378,6 +395,13 @@ class RaidMixin:
                     await msg.edit(embed=embed, view=view)
             except Exception as e:  # noqa: BLE001
                 log.warning("sheet refresh failed (%s): %s", ev.key, e)
+        for cid, mid in list(ev.mirror_messages):  # members' read-only copies (D21) follow the sheet, never with buttons
+            try:
+                copy, _v = sheet_message(reg, ev, team, self.ico)
+                copy.set_footer(text=f"copy — the live sheet is in {self._live_sheet_name(ev)}")
+                await (await self.get_channel(cid).fetch_message(mid)).edit(embed=copy, view=None)
+            except Exception as e:  # noqa: BLE001 — a deleted copy just stops following
+                log.debug("sheet copy refresh failed (%s %s): %s", ev.key, mid, e)
 
     async def post_sheet(self, reg, rs, ev, channel) -> None:
         team = rc.run_team(reg, ev)
@@ -693,6 +717,10 @@ class RaidMixin:
             other = rc.release_partner(reg, rs, ev, ask)
             if other:
                 await self.withdraw_ask(reg, ev, other, f"{ask.display_name} said no")
+        else:  # D14: a parallel ask the yes closed (rc.close_parallel) — its DM card says so, buttons gone
+            for tw in rc.parallel_linked(ev, ask):
+                if tw.answer == "released":
+                    await self.edit_ask_card(reg, tw.dm_channel_id, tw.dm_message_id, f"Never mind the seat question for {run_label(reg, ev)} — someone else said yes first. Nothing to do.")
         if ask.held:  # the first yes of a tied pair: nothing changed yet, the partner's answer decides
             await self.post_run_update(reg, ev, f"🧩 {line}")
             await self.refresh_cards(reg, ev)
@@ -860,6 +888,8 @@ class RaidMixin:
             sent = await self.send_confirmations(reg, rs, ev, team, by) if confirms and ev.state == "locked" else 0
         finally:
             confirming.discard((reg.key, ev.key))
+        if ev.state == "locked":  # joiners left off: one notice each (D26), never a DM — a seat offered later is the DM
+            rc.leftover_notices(reg, ev)  # on the loop: member files are mutated where the buttons mutate them
         if ev.state != "locked":  # cancelled during the fan-out: the cancel carried its own lines; no "is locked" line now
             return f"{ev.key}: locked by {by}, then {ev.state} before the confirmations finished ({sent} sent)"
         if confirms and ev.state == "locked":
@@ -982,6 +1012,11 @@ class RaidMixin:
             seat = ev.seat_of(sg.discord_id)
             gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if sg.display_name in g), 0) if seat else 0
             await self.confirm_one(reg, ev, sg, seat[0] if seat else 0, gi, by)
+        for name in removed:  # their Confirm card says the seat went (free_seat closed the ask and wrote the notice)
+            uid = rc.uid_of_name(ev, name)
+            m = reg.members.get(uid) if uid is not None else None
+            if m is not None:
+                await self.seat_released(reg, ev, m, "board")
         if added or removed:
             asks = " (asked to confirm)" if rc.run_confirms(reg, ev) else ""  # confirmations off (ad hoc, D5): nobody is asked
             await self.post_run_update(reg, ev, f"✏️ board by {by}: " + (f"in {', '.join(s.display_name for s in added)}{asks}" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
@@ -1063,6 +1098,8 @@ class RaidMixin:
         mine = by_id is not None and int(by_id) == int(m.discord_id)
         line = (f"Noted: out for {run_label(reg, ev)} ({when}). Thanks for saying so." if mine
                 else f"{m.display_name} is out of {run_title(reg, ev)} ({when})" + (" — noted for the officers" if note else ""))
+        if not mine:  # B5: the member's notice (never a DM); the note stays officers'
+            rc.on_behalf_notice(reg, ev, m.discord_id, "recorded that you can't make it", by)
         if sheet_state(ev) == "locked" and ev.seat_of(m):
             await self.drop_seated(reg, rs, ev, t, m, "callout" if mine else "officer", note)
             return line + " — seat freed"
@@ -1081,24 +1118,58 @@ class RaidMixin:
         ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.open), None)
         if ask is None:
             raise RegistryError(f"no open fill ask for {m.display_name} on {run_title(reg, ev)}")
-        line = rc.apply_fill_answer(reg, rs, ev, ask, bool(yes))
         mine = by_id is not None and int(by_id) == int(m.discord_id)
+        if not mine:
+            ask.answered_by = by  # saved with the answer
+        line = rc.apply_fill_answer(reg, rs, ev, ask, bool(yes))
+        if not mine:
+            rc.on_behalf_notice(reg, ev, m.discord_id, f"said {'yes' if yes else 'no'} to your {'swap' if ask.swap else 'seat'} question for you", by)
+        # the ask's DM card shows the outcome, buttons gone (an answer on the site, an officer's) — never a new DM
+        await self.edit_ask_card(reg, ask.dm_channel_id, ask.dm_message_id, f"→ {line}" + ("" if mine else f" (answered for you by {by})"))
         await self.after_fill_answer(reg, rs, ev, ask, line + ("" if mine else f" (answered by {by})"))
         return line
 
-    async def repost_sheet(self, reg, rs, ev, channel) -> str:
-        """Post a fresh copy of a live sheet in `channel` (/raid sheet, the site, MCP); the sheet's buttons and later
-        refreshes follow the new message. No open DMs (that was the first posting). A channel of another server is
-        refused here, for every caller (the site, MCP, plain text, the wizard): one guild's sheet never lands in another's
-        server — the rule set_channel and create_invite keep."""
+    MIRRORS_KEPT = 5  # read-only copies a run keeps track of (older ones stay as they were posted)
+
+    def _live_sheet_name(self, ev) -> str:
+        ch = self.get_channel(ev.channel_id) if ev.channel_id else None
+        return f"#{getattr(ch, 'name', None) or 'signups'}" if ev.channel_id else "the signup channel"
+
+    async def repost_sheet(self, reg, rs, ev, channel, *, copy: bool = False) -> str:
+        """Re-post a live sheet in `channel` (/raid sheet, the site, MCP, plain text). Two verbs in one (D21):
+        an officer's re-post MOVES the live sheet — the buttons and later refreshes follow the new message and the old
+        one is edited to "Re-posted in #channel" (no buttons); `copy=True` (a member's /raid sheet) posts a labelled
+        READ-ONLY copy ("copy — the live sheet is in #signups", no buttons) that never touches ev.channel_id /
+        message_id; it is kept in ev.mirror_messages and refreshed with the sheet. No open DMs either way. Refused: a
+        channel of another server (one guild's sheet never lands in another's) and a channel whose plain-text mode is
+        `ignore` (the bot keeps quiet there) unless it is the signup channel."""
         g = getattr(channel, "guild", None)
         if g is not None and getattr(g, "id", None) != reg.config.discord_guild_id:
             raise RegistryError("That channel is in another server.")
+        cid = getattr(channel, "id", None)
+        if cid is not None and cid != reg.config.signup_channel_id and reg.plain_mode(cid) == "ignore":
+            raise RegistryError(f"The bot keeps quiet in #{getattr(channel, 'name', cid)} (its plain-text mode is ignore) — pick another channel.")
         embed, view = sheet_message(reg, ev, rc.run_team(reg, ev), self.ico)
+        where = f"#{getattr(channel, 'name', cid)}"
+        if copy:
+            if cid is not None and cid == ev.channel_id:
+                return f"The live sheet for {run_title(reg, ev)} is already in {where}."
+            embed.set_footer(text=f"copy — the live sheet is in {self._live_sheet_name(ev)}")
+            msg = await channel.send(embed=embed)
+            ev.mirror_messages = (ev.mirror_messages + [[msg.channel.id, msg.id]])[-self.MIRRORS_KEPT:]
+            rs.save(ev, "sheet copy posted")
+            return f"Posted a read-only copy of the sheet for {run_title(reg, ev)} in {where} — answers go on the live sheet in {self._live_sheet_name(ev)}."
+        old = (ev.channel_id, ev.message_id)
         msg = await channel.send(embed=embed, **({"view": view} if view else {}))
         ev.channel_id, ev.message_id = msg.channel.id, msg.id
         rs.save(ev, "sheet re-posted")
-        return f"Re-posted the sheet for {run_title(reg, ev)} in #{getattr(channel, 'name', channel.id)}."
+        if old[0] and old[1] and old != (ev.channel_id, ev.message_id):
+            with contextlib.suppress(Exception):  # the old message keeps its look, says where the sheet went, loses its buttons
+                old_msg = await self.get_channel(old[0]).fetch_message(old[1])
+                stale, _v = sheet_message(reg, ev, rc.run_team(reg, ev), self.ico)
+                stale.set_footer(text=f"Re-posted in {where} — answer there.")
+                await old_msg.edit(embed=stale, view=None)
+        return f"Re-posted the sheet for {run_title(reg, ev)} in {where} — the old one now points there."
 
     async def record_placement(self, reg, uid: int, roster: str, yes: bool, by: str) -> str:
         """THE check-and-set for a Confirm / Can't make it answer (design B2 "atomic check-and-set"): Registry.claim_placement
@@ -1118,9 +1189,13 @@ class RaidMixin:
         line = await self.record_placement(reg, uid, roster, yes, by)
         m = reg.members.get(uid)
         ask = next((a for a in reversed(m.placement_asks) if a["roster"] == roster), None) if m else None
+        mine = by_id is not None and int(by_id) == int(uid)
         if ask and ask.get("dm"):
-            mine = by_id is not None and int(by_id) == int(uid)
             await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"→ {line}" + ("" if mine else f" (answered for you by {by})"))
+        if not mine:  # B5: the member's notice (never a DM)
+            ev = next((e for e in self.raids.store(reg).live() if e.team == roster), None)
+            if ev is not None:
+                rc.on_behalf_notice(reg, ev, uid, "confirmed your seat" if yes else "answered Can't make it for you", by)
         await self.after_placement_answer(reg, uid, roster, yes, line)
         return line
 
@@ -1237,6 +1312,7 @@ class RaidMixin:
             if fills:
                 rs.save(ev, f"cancelled: {len(fills)} ask(s) closed")
         waiting = rc.withdraw_confirmations(reg, ev, "cancelled") if ev.all_rosters else []
+        rc.cancel_notices(reg, ev, by, by_id)  # the Me page's notice for everyone on it (D26) — nobody is DMed
         label = run_label(reg, ev)
         for cid, mid in cards + [(a.dm_channel_id, a.dm_message_id) for a in fills]:
             await self.edit_ask_card(reg, cid, mid, f"Cancelled — {label} was cancelled. Nothing to do.")

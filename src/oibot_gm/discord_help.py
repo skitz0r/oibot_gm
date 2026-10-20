@@ -112,7 +112,7 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
         m = reg.members.get(user_id) if user_id else None
         a = reg.applicants.get(user_id) if user_id else None
         if m and m.active():
-            return "**Applying**\nYou're already a member — nothing to apply for. Add characters with **Register / plan my main** or **Add an alt** on the registration card, or `/me char add`."
+            return "**Applying**\nYou're already a member — nothing to apply for. Add characters with **Register / plan my main** or **Add an alt** on the registration card, or `/me char` → Add an alt."
         if a and a.status == "open":
             return (f"**Applying**\nYour application for **{a.label}** ({a.cls} {a.spec}) is waiting for an officer — sent {reg.local12(a.created_at)}. "
                     "You'll get a DM either way; there is nothing else to fill in.")

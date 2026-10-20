@@ -343,16 +343,16 @@ function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: Raid
         </Tabs.List>
         <Tabs.Panel value="open" pt="md">
           {open.length === 0 && <Text size="sm" c="dimmed">No sheet open. The next slot opens on its own {r.upcoming[0] ? `${r.upcoming[0].opens}` : "once a schedule is set on Raids"}, or open one now.</Text>}
-          <Stack gap="md">{open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
+          <Stack gap="md">{open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}</Stack>
         </Tabs.Panel>
         <Tabs.Panel value="locked" pt="md">
           {locked.length === 0 && <Text size="sm" c="dimmed">Nothing locked.</Text>}
-          <Stack gap="md">{locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} />)}</Stack>
+          <Stack gap="md">{locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}</Stack>
         </Tabs.Panel>
         {tests.length > 0 && (
           <Tabs.Panel value="test" pt="md">
             <Stack gap="md">
-              {tests.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} badge={testBadge} />)}
+              {tests.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} badge={testBadge} people={people} />)}
               {meta.viewer.officer && <Card withBorder p="sm"><TestFeed run={tests.length === 1 ? tests[0].key : undefined} height={260} /></Card>}
             </Stack>
           </Tabs.Panel>

@@ -368,21 +368,54 @@ class SignupButton(discord.ui.DynamicItem[discord.ui.Button], template=r"raid(?:
         if sheet_state(ev) != "open":
             await interaction.response.send_message(rc.LOCKED_JOIN, ephemeral=True)
             return
-        chars = m.active()
-        if len(chars) > 1 and self.status == "in":
-            # one press per character: no default to second-guess
-            view = discord.ui.View(timeout=120)
-            for c in chars[:5]:
-                btn = discord.ui.Button(label=f"{c.label} · {c.cls} {c.spec}"[:80], style=discord.ButtonStyle.success if c.is_main else discord.ButtonStyle.secondary, emoji=bot.ico("class", c.cls) or None)
-
-                async def pick(i: discord.Interaction, label=c.label):
-                    await bot.apply_signup(i, reg, rs, ev, m, label, self.status)
-
-                btn.callback = pick
-                view.add_item(btn)
-            await interaction.response.send_message(f"**{rc.LABELS[self.status]}** as which character?", view=view, ephemeral=True)
+        if len(m.active()) > 1:  # Join, Bench and No thanks all take the character (a Bench on an alt is a different fill candidate)
+            await interaction.response.send_message(f"**{rc.LABELS[self.status]}** as which character?", view=character_picker(bot, reg, rs, ev, m, self.status), ephemeral=True)
             return
         await bot.apply_signup(interaction, reg, rs, ev, m, None, self.status)
+
+
+PICKER_BUTTONS = 4  # up to this many characters are one button each; more become one select (design B1)
+
+
+def character_picker(bot, reg, rs, ev, m, status: str) -> discord.ui.View:
+    """The sheet's character picker (design B1): ≤ PICKER_BUTTONS characters → one button each, main first (one press);
+    more → one select of every character with the main preselected, plus "<label> as <main>" so the main is still one
+    press (picking another option in the select answers at once). Nothing is dropped (the old picker cut at five)."""
+    chars = sorted(m.active(), key=lambda c: (not c.is_main, c.label.lower()))
+    label = rc.LABELS[status]
+    view = discord.ui.View(timeout=120)
+
+    async def apply(i: discord.Interaction, character: str) -> None:
+        await bot.apply_signup(i, reg, rs, ev, m, character, status)
+
+    if len(chars) <= PICKER_BUTTONS:
+        for c in chars:
+            btn = discord.ui.Button(label=f"{c.label} · {c.cls} {c.spec}"[:80], style=discord.ButtonStyle.success if c.is_main else discord.ButtonStyle.secondary, emoji=bot.ico("class", c.cls) or None)
+
+            async def pick(i: discord.Interaction, character=c.label):
+                await apply(i, character)
+
+            btn.callback = pick
+            view.add_item(btn)
+        return view
+    main = chars[0]
+    sel = discord.ui.Select(placeholder=f"{label} as…", min_values=1, max_values=1,
+                            options=[discord.SelectOption(label=f"{c.label} · {c.cls} {c.spec}"[:100], value=c.label[:100], default=c.label == main.label,
+                                                          emoji=bot.ico("class", c.cls) or None) for c in chars[:25]])
+
+    async def picked(i: discord.Interaction) -> None:
+        await apply(i, sel.values[0])
+
+    sel.callback = picked
+    view.add_item(sel)
+    btn = discord.ui.Button(label=f"{label} as {main.label}"[:80], style=discord.ButtonStyle.success)
+
+    async def as_main(i: discord.Interaction) -> None:
+        await apply(i, main.label)
+
+    btn.callback = as_main
+    view.add_item(btn)
+    return view
 
 
 async def show_answer(card: discord.Interaction, press: discord.Interaction, line: str) -> None:

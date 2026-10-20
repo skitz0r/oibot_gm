@@ -67,6 +67,11 @@ def run(coro):
 
 # ---- /roster confirm
 
+def pick_value(h, label):
+    """The confirm walk's select values are '<uid>|<label>' (two members may share a name); pick by the label shown."""
+    return next(o.value for o in h._items()[0].options if o.value.endswith("|" + label))
+
+
 def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
     a, b = reg.test_members()[:2]
     reg.add_character(a.discord_id, a.display_name, "Altone", "Mage", "Fire", None, False)
@@ -78,8 +83,9 @@ def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
         assert "2 characters waiting" in h.text
         opt = h._items()[0].options
         assert any("Altone · Mage Fire · " + a.display_name == o.label for o in opt)
-        await h.pick(h.selects()[0], "Altone")
+        await h.pick(h.selects()[0], pick_value(h, "Altone"))
         assert "Confirm **Altone**" in h.text and a.display_name in h.text
+        assert "Me page (no DM)" in h.text and "get a DM" not in h.text, "the confirm screen says what the save does"
         await h.press("Confirm")
         assert "✅ Confirmed **Altone**" in h.text and "1 character waiting" in h.text
         await h.press("Confirm next")
@@ -88,7 +94,9 @@ def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
         assert "Nothing left to confirm" in h.text and h.screen["view"] is None
     run(go())
     assert reg.find("Altone")[1].confirmed_by == "Tester" and reg.find("Alttwo")[1].confirmed_by == "Tester"
-    assert {uid for uid, _ in h.dms} == {a.discord_id, b.discord_id}
+    assert not h.dms, "no 'welcome aboard' DM (the DM rule)"
+    for m, label in ((a, "Altone"), (b, "Alttwo")):  # the member hears it on their Me page instead (D26)
+        assert [n["text"] for n in reg.notices(m.discord_id)] == [f"{label} was confirmed by Tester. Welcome aboard."]
     assert len(h.client.ops.lines) == 2
 
 
@@ -99,14 +107,23 @@ def test_confirm_refuses_one_someone_else_confirmed(reg, rs, officer):
 
     async def go():
         await FLOWS["roster_confirm"](h.command(), reg)
-        await h.pick(h.selects()[0], "Raced")
-        reg.confirm("Raced", "Other Officer")  # meanwhile
+        await h.pick(h.selects()[0], pick_value(h, "Raced"))
+        reg.confirm(a.discord_id, "Raced", "Other Officer")  # meanwhile
         await h.press("Confirm")
         assert "already confirmed by Other Officer" in h.text and "Back to the list" in h.buttons()
         await h.press("Back to the list")
         assert "Nothing left to confirm" in h.text
     run(go())
     assert reg.find("Raced")[1].confirmed_by == "Other Officer" and not h.dms
+
+
+def test_confirm_never_offers_your_own_character(reg, rs, officer):
+    me = reg.test_members()[0]
+    reg.add_character(me.discord_id, me.display_name, "Mineown", "Mage", "Fire", None, False)
+    h = harness(reg, rs)
+    h.user = user(me)
+    run(FLOWS["roster_confirm"](h.command(), reg))
+    assert "Nothing left to confirm" in h.text  # self-confirm defeats the badge (the owner aside)
 
 
 def test_confirm_cancel_writes_nothing_and_list_button_opens_it(reg, rs, officer):
@@ -119,7 +136,7 @@ def test_confirm_cancel_writes_nothing_and_list_button_opens_it(reg, rs, officer
     async def go():
         await view.children[0].callback(h.command())
         assert "Confirm characters" in h.text
-        await h.pick(h.selects()[0], "Waiting")
+        await h.pick(h.selects()[0], pick_value(h, "Waiting"))
         await h.press("Cancel")
         assert "nothing was changed" in h.text
     run(go())
@@ -142,45 +159,58 @@ def test_confirm_pages_past_25(reg, rs, officer):
     run(go())
 
 
-# ---- /roster rank
+# ---- /roster rank: the MEMBER's rank (D25), on the main — no character pick
 
-def test_rank_change_on_the_main(reg, rs, officer):
+def test_rank_is_the_members_on_the_main(reg, rs, officer):
     m = reg.test_members()[3]  # a trial
     reg.add_character(m.discord_id, m.display_name, "Rankalt", "Mage", "Fire", None, False)
-    main = m.main
-    before = main.rank
+    before = m.main.rank
     h = harness(reg, rs)
 
     async def go():
         await FLOWS["roster_rank"](h.command(), reg, member=user(m))
-        assert h.selects() == ["Pick the character"]
-        idx = next(o.value for o in h._items()[0].options if o.label == main.label)
-        await h.pick("Pick the character", idx)
-        assert "follows the main" in h.text
+        assert h.selects() == ["Pick the rank"] and "lives on the main" in h.text  # straight to the rank: it is the member's
         assert [o.value for o in h._items()[0].options if o.default] == [before]
         await h.pick("Pick the rank", "core")
-        assert f"**{before}** → **core**" in h.text
-        await h.press("Confirm")
+        assert f"**{before}** → **core**" in h.text and "Set the rank" in h.buttons()
+        await h.press("Set the rank")
         assert "is now **core**" in h.text
     run(go())
-    assert reg.members[m.discord_id].main.rank == "core"
+    mm = reg.members[m.discord_id]
+    assert mm.main.rank == "core" and mm.rank == "core"
+    assert next(c for c in mm.characters if c.label == "Rankalt").rank == "alt"  # alts always read alt
     assert h.client.ops.lines
 
 
-def test_rank_cancel_writes_nothing(reg, rs, officer):
+def test_rank_back_writes_nothing(reg, rs, officer):
     m = reg.test_members()[3]
     before = m.main.rank
     h = harness(reg, rs)
 
     async def go():
-        await FLOWS["roster_rank"](h.command(), reg, member=user(m))  # one character: straight to the rank
+        await FLOWS["roster_rank"](h.command(), reg, member=user(m))
         await h.pick("Pick the rank", "core")
-        await h.press("Cancel")
+        await h.press("Back")
+        assert "Nothing was changed" in h.text
     run(go())
     assert reg.members[m.discord_id].main.rank == before
 
 
-# ---- /roster set-main
+def test_rank_of_yourself_is_refused(reg, rs, officer):
+    me = reg.test_members()[3]
+    h = harness(reg, rs)
+    h.user = user(me)
+
+    async def go():
+        await FLOWS["roster_rank"](h.command(), reg, member=user(me))
+        await h.pick("Pick the rank", "core")
+        await h.press("Set the rank")
+        assert "your own rank" in h.text
+    run(go())
+    assert reg.members[me.discord_id].main.rank != "core"
+
+
+# ---- /roster set-main: the hub's Main (the rank moves with it)
 
 def test_set_main(reg, rs, officer):
     m = reg.test_members()[0]  # core
@@ -189,10 +219,10 @@ def test_set_main(reg, rs, officer):
     h = harness(reg, rs)
 
     async def go():
-        await FLOWS["roster_set_main"](h.command(), reg, member=user(m))  # one other character: straight to confirm
-        assert "Make **Newmain**" in h.text and "becomes **core**" in h.text
-        await h.press("Confirm")
-        assert "main is now **Newmain**" in h.text
+        await FLOWS["roster_set_main"](h.command(), reg, member=user(m))  # one other character: straight to the decide screen
+        assert "**Newmain** becomes" in h.text and "Rank core moves to Newmain" in h.text
+        await h.press("Make it the main")
+        assert "Newmain is the main now" in h.text
     run(go())
     mm = reg.members[m.discord_id]
     assert mm.main.label == "Newmain" and mm.main.rank == "core"
@@ -207,8 +237,8 @@ def test_set_main_refuses_a_retired_pick(reg, rs, officer):
     async def go():
         await FLOWS["roster_set_main"](h.command(), reg, member=user(m))
         reg.retire(m.discord_id, "Goner")  # meanwhile
-        await h.press("Confirm")
-        assert "retired meanwhile" in h.text
+        await h.press("Make it the main")
+        assert "changed since you loaded them" in h.text and "Start over" in h.buttons()
     run(go())
     assert reg.members[m.discord_id].main.label != "Goner"
 

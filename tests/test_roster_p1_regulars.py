@@ -98,15 +98,15 @@ def test_same_character_on_two_series_of_one_raid_warns(reg):
     assert warn and "lockout" in warn[0]
 
 
-def test_removed_schedule_leaves_orphans_that_can_be_cleared(reg):
+def test_removed_schedule_takes_its_regulars_with_it(reg):
+    """Owner decision D30 (phase 2 C): removing a schedule removes its regulars — named in the line, no DM, no orphans."""
     opened(reg)
     reg.set_schedule(RID, "alt", {"slots": "Sat 20:00", "name": "Alt run"}, "t")
     m = real(reg, 0)
     reg.regular_add(m.discord_id, f"{RID}:alt", "t")
-    reg.remove_schedule(RID, "alt", "t")
-    assert [(k, mm.discord_id) for k, mm, _c in reg.orphan_regulars()] == [(f"{RID}:alt", m.discord_id)], "never stripped silently"
-    reg.regular_remove(m.discord_id, f"{RID}:alt", "t")
-    assert not reg.orphan_regulars()
+    line = reg.remove_schedule(RID, "alt", "t")
+    assert "1 regular off it" in line and m.display_name in line
+    assert not reg.orphan_regulars() and not any(f"{RID}:alt" in c.rosters for c in reg.members[m.discord_id].characters)
 
 
 # ---------------------------------------------------------------- D1: nothing pre-filled; absences mark people away

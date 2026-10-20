@@ -8,7 +8,7 @@ import re
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from .llm.provider import Provider
 from .constants import ROLES
@@ -181,6 +181,9 @@ SCHEMA_TEXT = SCHEMA_TEXT.replace("Resolving a run:", LOOT_SCHEMA + "Resolving a
 
 
 class ConfigOp(BaseModel):
+    # set by authorize(), never by the model (a private attribute: not in the schema): run_sheet from a non-officer is
+    # a read-only copy (D21) — describe() words it so; the apply decides again from the presser's standing (PRIV_LIVE)
+    _sheet_copy: bool | None = PrivateAttr(default=None)
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier")
@@ -402,7 +405,8 @@ OP_GROUP = {
     "run_open": "runs", "run_answer": "runs", "run_lock": "runs", "run_cancel": "runs", "run_fill": "runs", "run_strategy": "runs",
     "run_autofill": "runs", "run_board": "runs", "run_move": "runs", "run_propose": "runs", "run_sheet": "runs", "confirm_for": "runs",
     "run_remind": "runs", "run_pause": "runs", "run_withdraw": "runs", "run_reopen": "runs",  # raid-night levers (phase 2 A, D15/D18/B6)
-    "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "pin": "comp", "policy_append": "comp",
+    "pin": "runs",  # D16: a pin is a run decision (who the lock seats), not comp policy
+    "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "policy_append": "comp",
     "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
     "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup", "job": "setup", "plain": "setup",
     "application": "members", "proposal": "comp", "policy": "comp", "regular": "members",
@@ -433,7 +437,6 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
     "run_propose": {"discord": "the board's Propose / Use this split is web-only (§2.1); the lock does the same solve"},
     "run_strategy": {"discord": "a board setting (web-only, §2.1); the lock card shows the split it produced"},
     "run_autofill": {"discord": "the board's auto-fill is web-only (§2.1); after lock Discord has Fill seats (run_fill)"},
-    "pin": {"discord": "a board control (web-only, §2.1): pins are set from the sheet's member menu on the site"},
     "job": {"discord": "the host's jobs are the web Agents page and MCP (§2.1); the ops channel gets the proposal cards"},
     "plain": {"discord": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
     "tier": {"discord": "the item × spec tier grid is web-only (§2.1, Loot › Items): Discord shows the 'N untiered tonight' line and a link"},
@@ -441,8 +444,6 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
 # ops a surface is still missing from, with the plan that adds it — temporary, unlike BY_DESIGN_EXEMPT; the parity test
 # accepts these too but lists them apart, so the gap is written down rather than silent
 PARITY_PENDING: dict[str, dict[str, str]] = {
-    "confirm_for": {"discord": "phase 2 B5: an officer's Confirm / Can't make it for a member joins the lock card's menu"},
-    "dm": {"discord": "phase 3 (Registry.set_dm): a Discord toggle; today the Me page, plain text and MCP"},
     "comp_target": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page (Registry.set_comp_targets)", "mcp": "phase 3: set_comp_target"},
     "comp_target_clear": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
     "comp_groups": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
@@ -454,7 +455,8 @@ PARITY_PENDING: dict[str, dict[str, str]] = {
 BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # Discord-only: the MCP token IS the owner, so claiming and handing over a server is done by a person in the server
     "guild_claim": {"surface": "discord", "path": "flow:guild_claim", "reason": "a server claim is made in the server by the person claiming it; the MCP token is the owner and the web has no viewer yet"},
-    "owner_transfer": {"surface": "discord", "path": "slash:gm config owner", "reason": "ownership moves the identity MCP acts as: only the owner, in Discord, hands it over (one decide screen, D50)"},
+    # owner transfer is NOT single-surface any more: /gm config owner (the decide screen) and the Config page (POST /api/owner),
+    # both owner-only; never MCP — the token IS the owner, so it can't hand itself over (tests/test_people.py checks all three)
     "application_wizard": {"surface": "discord", "path": "slash:apply", "reason": "a newcomer's first touch is Discord (design §5.29): the questions are asked where they already are; the web reviews (D32)"},
     "registration_card": {"surface": "discord", "path": "button:oibot_gm.discord_registry.RegisterButton", "reason": "the registration card is a Discord message by nature; the Me page is the web's own registration"},
     "absences_card": {"surface": "discord", "path": "button:oibot_gm.discord_pool.AbsenceButton", "reason": "the absences card is a Discord message by nature; the absence verb itself is on every surface (op `absence`)"},
@@ -539,6 +541,8 @@ def authorize(reg: Registry, ops: list[ConfigOp], author_id: int, *, officer: bo
             bad = _locked_self_join(reg, op, raids)
         if bad is None and op.op == "run_sheet" and (channel is None or channel == PLAIN_WEB):
             bad = SHEET_HERE if channel is None else "from the site or MCP a sheet is re-posted with repost_sheet (it names the channel)"
+        if op.op == "run_sheet":
+            op._sheet_copy = not officer  # D21: only an officer moves the live sheet; a member gets a read-only copy
         if bad is None:
             own = group == "self"
             key = "rank" if op.op == "character" and (op.field or "").strip().lower() == "rank" else op.op
@@ -590,6 +594,67 @@ def _all_pending(reg: Registry, op: ConfigOp) -> bool:
         return not (op.character and reg.find(op.character))
     except RegistryError:  # several characters share that name: a name, not "everyone"
         return False
+
+
+def _char_target(reg: Registry, op: ConfigOp):
+    """(member, character) a rank / confirm op names: its member's character when `member` is given, else the character
+    by name across the guild (a first name two members share is refused with both named)."""
+    if (op.member or "").strip():
+        m = _need_member(reg, op.member)
+        ref = (op.character or "").strip()
+        c = (next((c for c in m.active() if c.label == ref), None) or next((c for c in m.active() if c.matches(ref)), None)) if ref else m.main
+        if c is None:
+            raise RegistryError(f"{m.display_name} has no character named {ref or '?'}" if ref else f"{m.display_name} has no main yet")
+        return m, c
+    hit = reg.find_unique(op.character or "")  # a planned label several members share is refused, never the first one met
+    if not hit:
+        raise RegistryError(f"No character named {op.character or '?'}.")
+    return hit
+
+
+def _rank_rows(reg: Registry, op: ConfigOp):
+    """(member, rows) of a rank op as the character table writes it (D25: the member's rank, on the main)."""
+    m, c = _char_target(reg, op)
+    if not c.is_main:
+        raise RegistryError(f"{c.label} is an alt — rank lives on the main ({m.main.label if m.main else 'none yet'}).")
+    return m, [{"label": c.label, "rank": (op.rank or op.value or "").strip().lower()}]
+
+
+def _confirm_rows(reg: Registry, op: ConfigOp):
+    """(member, rows) of a one-character confirm op as the character table writes it; already confirmed is refused
+    with who did it (the table itself treats a confirmed row as done)."""
+    m, c = _char_target(reg, op)
+    if c.confirmed_by:
+        raise RegistryError(f"{c.label} was already confirmed by {c.confirmed_by}.")
+    return m, [{"label": c.label, "confirm": True}]
+
+
+def _set_main_rows(reg: Registry, op: ConfigOp):
+    """(member, rows) of a set_main op as the character table writes it: {label, main: true} on one of the member's
+    active characters (the rank moves with the main, D25). Already the main is refused, as the old verb did."""
+    m = _need_member(reg, op.member)
+    ref = (op.character or "").strip()
+    c = (next((c for c in m.active() if c.label == ref), None) or next((c for c in m.active() if c.matches(ref)), None)) if ref else None
+    if c is None:
+        raise RegistryError(f"{m.display_name} has no active character named {ref or '?'} (theirs: {', '.join(x.label for x in m.active()) or 'none'})")
+    if c.is_main:
+        raise RegistryError(f"{c.label} is already {m.display_name}'s main.")
+    return m, [{"label": c.label, "main": True}]
+
+
+ROWS_OF = {"rank": _rank_rows, "confirm": _confirm_rows, "set_main": _set_main_rows}  # the one-row table each op saves
+
+
+def _people_verb(reg: Registry, op: ConfigOp) -> bool:
+    """The ops that go through THE character verb (PeopleMixin.save_characters) when a bot is there: character, rank,
+    set_main and a one-character confirm (the confirm-all walk is one batch of table saves, audited by apply_async)."""
+    return op.op in ("character", "rank", "set_main") or (op.op == "confirm" and not _all_pending(reg, op))
+
+
+def people_needs_actor(op: ConfigOp) -> bool:
+    """D8: a decision about a person — a rank, a character's confirmation — from MCP needs X-Oibot-Actor naming an
+    officer (web/api.py's mcp_actor_rule refuses it without; the owner's token alone may read and preview)."""
+    return op.op in ("rank", "confirm") or (op.op == "character" and (op.field or "").strip().lower() == "rank")
 
 
 def _need_member(reg: Registry, ref: str | None):
@@ -1011,23 +1076,18 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
             raise RegistryError(f"{cur.label} already has a name — a character isn't renamed; retire it and add the new name")
         name, _, surname = value.partition(" ")
         return [{"label": cur.label, "cls": cur.cls, "spec": cur.spec, "offspec": cur.offspec, "name": name, "surname": surname.strip() or None}], f"{who}: name the planned {cur.label} {value}"
-    if f == "rank":
+    if f == "rank":  # D25: rank is the member's, on the main
         if value not in RANKS:
             raise RegistryError(f"rank is one of {', '.join(RANKS)}")
-        return [{"label": cur.label, "rank": value}], f"{cur.label}: rank {cur.rank} → {value}"
+        if not cur.is_main:
+            raise RegistryError(f"{cur.label} is an alt — rank lives on the main ({m.main.label if m.main else 'none yet'})")
+        return [{"label": cur.label, "rank": value}], f"{who}: rank {cur.rank} → {value}"
     if f == "main":
         return [{"label": cur.label, "main": True}], f"{who}: main {m.main.label if m.main else '—'} → {cur.label}"
-    if f == "retire":
+    if f == "retire":  # describe() adds the ripple (seats live in the run files, named as a person reads them)
         return [{"label": cur.label, "retire": True}], f"{who}: retire {cur.label}" + (" (their main; the next character becomes main)" if cur.is_main else "")
     if f == "delete":
-        # seats live in the run files (roster redesign Phase 0), not in cur.rosters: name each run as a person reads it
-        from . import raidcycle as rc
-        from .raid_views import run_title
-
-        held = [ev for ev, char in rc.rostered_runs(reg, rc.RaidStore(reg.store, reg.key), m) if char == cur.label]
-        placed = f" · it holds a seat on {', '.join(run_title(reg, ev) for ev in held)} (deleting it does not free the seat)" if held else ""
-        return ([{"label": cur.label, "delete": True}],
-                f"{who}: DELETE {cur.label} outright — no history is kept (retire keeps it){placed}"
+        return ([{"label": cur.label, "delete": True}], f"{who}: DELETE {cur.label} outright — no history is kept (retire keeps it)"
                 + (" · it is their main: the next character becomes main" if cur.is_main else ""))
     if f == "flex":
         roles = _flex_roles(value)
@@ -1740,19 +1800,24 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         rid = reg.role_id_for(op.value)
         target = reg.role_names.get(rid, f"role:{rid}") if rid is not None else f"{(op.value or '').strip().lstrip('@')} (by name: takes effect once the bot resolves it to a role id)"
         return f"officer roles {reg.officer_role_names()} {'+' if op.op == 'role_add' else '−'} {target}"
-    if op.op == "rank":
-        hit = reg.find(op.character or "")
-        return f"{op.character}: rank {hit[1].rank if hit else '?'} → {op.rank or op.value}"
+    if op.op == "rank":  # D25: the member's rank, on the main
+        try:
+            m, c = _char_target(reg, op)
+        except RegistryError as e:
+            return f"rank {op.character or op.member}: {e}"
+        if not c.is_main:
+            return f"rank {c.label}: refused — {c.label} is an alt; rank lives on the main ({m.main.label if m.main else 'none yet'})"
+        return f"{m.display_name}: rank {m.rank or '?'} → {op.rank or op.value}"
     if op.op == "confirm":
         if _all_pending(reg, op):
             pend = reg.pending()
             return (f"confirm all {len(pend)} unconfirmed: " + ", ".join(f"{c.label} ({m.display_name})" for m, c in pend[:25])
                     + (f" … +{len(pend) - 25}" if len(pend) > 25 else "")) if pend else "confirm all pending: nothing is waiting"
         try:
-            hit = reg.find(op.character or "")
+            m, c = _char_target(reg, op)
         except RegistryError as e:
-            return f"confirm {op.character}: {e}"
-        return f"confirm {op.character}" + (f" ({hit[0].display_name})" if hit else " — no character by that name")
+            return f"confirm {op.character or op.member}: {e}"
+        return f"confirm {c.label} ({m.display_name})" + (f" — already confirmed by {c.confirmed_by}" if c.confirmed_by else "")
     if op.op == "set_main":
         return f"{op.member}: main → {op.character}"
     if op.op == "absence":
@@ -1868,8 +1933,10 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
         cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
         if cur is None:
             raise RegistryError(f"{name} has no schedule {sid or '?'}")
+        held = sorted({m.display_name for m, _c in reg.schedule_regulars(rid, sid)})
         return (f"{name}: remove schedule {cur['name']} ({reg.schedule_label(rid, cur)})"
-                + (" — the raid's weekly run times are cleared" if sid == "default" else "") + "; runs already open keep their times")
+                + (" — the raid's weekly run times are cleared" if sid == "default" else "") + "; runs already open keep their times"
+                + (f"; its {len(held)} regular{'s' if len(held) != 1 else ''} come off it ({', '.join(held)}) — nobody is DMed" if held else ""))
     sid, setting = _schedule_ref(op)
     fields = _schedule_fields(setting, op.value)
     cur = next((s for s in reg.schedules(rid) if s["id"] == sid), None)
@@ -1940,10 +2007,13 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         rs = rc.RaidStore(reg.store, reg.key)
         runs = [e.key for e in rs.live() if (cfg.roster(e.team) or {}).get("test")]
         return f"test bench: clear — cancel {len(runs)} test run(s){' (' + ', '.join(runs) + ')' if runs else ''} and delete {n} puppet member(s) and their placements"
-    if op.op == "character":
+    if op.op == "character":  # the change, then its ripple into sheets and seats in the words every surface prints
+        from . import raidcycle as rc
+
         _, m = _character_member(reg, op)
-        _, line = _character_rows(reg, m, op)
-        return line
+        rows, line = _character_rows(reg, m, op)
+        ripple = rc.character_preview(reg, rc.RaidStore(reg.store, reg.key), m, rc.character_changes(reg, m, rows)) if m is not None else []
+        return line + "".join(f" · {r}" for r in ripple)
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)
         start = _absence_start(reg, m, op.start, reg.now_local().date().isoformat())
@@ -2038,7 +2108,11 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         return f"{label}: {'another' if f == 'another' else 'a'} {strategy} proposal from the solver — shown here, the board unchanged"
     if op.op == "run_sheet":
         where = "this channel" if channel not in (_UNSET, None, PLAIN_WEB) else "the channel you ask in (not DMs or the site)"
-        return f"{label}: post a fresh copy of the sheet in {where}; its buttons and later updates follow the new message"
+        if op._sheet_copy is True:  # a member (D21): the live sheet stays where it is
+            return f"{label}: post a read-only copy of the sheet in {where} — the live sheet (and its buttons) stays where it is"
+        if op._sheet_copy is False:
+            return f"{label}: move the live sheet to {where}; its buttons and later updates follow the new message"
+        return f"{label}: post the sheet in {where} — an officer's re-post moves the live sheet there, anyone else's is a read-only copy"
     if op.op == "run_lock":
         if ev.state != "open":
             raise RegistryError(f"{ev.key} is already {ev.state}")
@@ -2108,7 +2182,7 @@ def _fill_ask(ev, m):
     return next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.open), None)
 
 
-def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, raids=None, rev: str | None = None) -> str:
+def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, raids=None, rev: str | None = None, by_id: int | None = None) -> str:
     """Apply one op through the same code paths as the slash commands. Raises RegistryError on refusal. `rev`: for a
     config write, the section fingerprint the author saw (board_revs under "config:"); a section changed since raises
     ConfigChanged and nothing is written.
@@ -2141,45 +2215,41 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         # stored by role id: a mention/id applies at once; a name resolves through the registry's role cache (filled by
         # the bot), otherwise it is parked in the legacy list and resolved on the bot's next ready / role event
         return reg.set_officer_role(op.value, op.op == "role_add", by, rev=rev)
-    if op.op == "rank":
-        rank = op.rank or op.value or ""
-        reg.set_rank(op.character or "", rank, by)
-        return f"{op.character} → {rank}"
+    if op.op == "rank":  # D25: the member's rank, stored on the main; naming an alt is refused — through the character table
+        m, rows = _rank_rows(reg, op)
+        reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)
+        return f"{m.display_name} → {rows[0]['rank']}"
     if op.op == "confirm":
-        if _all_pending(reg, op):  # /roster confirm's walk in one go: every unconfirmed character, one commit
-            pend = reg.pending()
+        if _all_pending(reg, op):  # /roster confirm's walk in one go: every unconfirmed character, one commit (not your own)
+            pend = [(m, c) for m, c in reg.pending() if by_id is None or m.discord_id != by_id or reg.is_owner_id(by_id)]
             if not pend:
                 raise RegistryError("nothing is waiting for a confirmation")
-            with reg.store.batch(f"{reg.key}: {by} confirmed {len(pend)} character(s)"):
-                done = [reg.confirm(c.label, by)[1].label for _m, c in pend]
-            return f"confirmed {len(done)}: {', '.join(done)}"
-        reg.confirm(op.character or "", by)
-        return f"confirmed {op.character}"
-    if op.op == "set_main":
-        m = _member(reg, op.member)
-        if not m:
-            raise RegistryError(f"unknown member {op.member}")
-        reg.officer_set_main(m.discord_id, op.character or "", by)
-        return f"{m.display_name} main → {op.character}"
+            with reg.config_lock, reg.store.batch(f"{reg.key}: {by} confirmed {len(pend)} character(s)"):
+                for m, c in pend:
+                    reg.save_character_table(m.discord_id, [{"label": c.label, "confirm": True}], by, officer=True, by_id=by_id)
+            return f"confirmed {len(pend)}: {', '.join(c.label for _m, c in pend)}"
+        m, rows = _confirm_rows(reg, op)
+        reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)
+        return f"confirmed {rows[0]['label']}"
+    if op.op == "set_main":  # without the bot (offline, tests): the table verb alone; with it, PeopleMixin.save_characters
+        m, rows = _set_main_rows(reg, op)
+        reg.save_character_table(m.discord_id, rows, by, officer=True, by_id=by_id)  # under config_lock, puppets refused
+        return f"{m.display_name} main → {rows[0]['label']}"
     if op.op == "absence":
         m = _member(reg, op.member)
         if not m:
             raise RegistryError(f"unknown member {op.member}")
-        _, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
+        _, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by, by_id=by_id)
         return f"{m.display_name} absent {reg.span_label(a.start, a.end)}"
     if op.op == "pin":
-        from . import raidcycle as rc
+        from . import inbox
 
         m = _member(reg, op.member)
         if not m:
             raise RegistryError(f"unknown member {op.member}")
         want = _pin_value(op.value)
         rs, ev = _live_event(reg, op.target, raids)
-        try:
-            rc.set_pin(ev, m.display_name, want)
-        except ValueError as e:  # not on the sheet
-            raise RegistryError(str(e))
-        rs.save(ev, f"{PIN_TEXT[want].format(name=m.display_name)} (by {by})")
+        inbox.pin_write(reg, rs, ev, m, want, by)  # THE pin write (with the bot: inbox.pin_member, from _apply_async)
         return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op == "raid_set":
         if (op.field or "").strip() == "cadence":  # a preset: four fields, one write
@@ -2260,10 +2330,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         return line
     if op.op in ("application", "proposal"):
         raise RegistryError(f"{op.op} {NEEDS_BOT}")
-    if op.op == "character":
+    if op.op == "character":  # without the bot (offline, tests): the table verb alone; with it, PeopleMixin.save_characters (+ ripple)
         uid, m = _character_member(reg, op)
         rows, _ = _character_rows(reg, m, op)
-        lines = reg.save_character_table(uid, rows, by)
+        lines = reg.save_character_table(uid, rows, by, officer=True, by_id=by_id)  # authorize() already decided who may
         m = reg.members.get(uid) or m
         who = m.display_name if m else by
         if not lines:
@@ -2272,15 +2342,14 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op == "absence_clear":
         m = _need_member(reg, op.member)
         start = _absence_start(reg, m, op.start, reg.now_local().date().isoformat())
-        a = reg.clear_absence(m.discord_id, start, by)
+        a = reg.clear_absence(m.discord_id, start, by, by_id=by_id)
         return f"{m.display_name}: cleared absence {reg.span_label(a.start, a.end)}"
     if op.op == "dm":
         m = _need_member(reg, op.member)
         v = (op.value or "").strip().lower()
         if v not in ("on", "off"):
             raise RegistryError("dm is on | off")
-        m.dm_opt_out = v == "off"
-        reg.save(m, f"{m.display_name} DMs {v} (by {by})")
+        reg.set_dm(m.discord_id, v == "on", by)  # the one DM-setting verb (the Me and Members pages, MCP)
         return f"{m.display_name}: DMs {v}"
     if op.op == "regular":  # the same registry verbs as the site's /api/admin/raid/regulars and Discord's /roster add|remove
         m, key, add = _regular_args(reg, op)
@@ -2368,6 +2437,7 @@ async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, poli
     ops = getattr(bot, "ops", None) if bot is not None else None
     channel_op = op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None
     verb_audits = ((op.op == "loot" and bot is not None and hasattr(bot, "open_council"))  # LootMixin's verbs write their own line
+                   or (bot is not None and _people_verb(reg, op))  # so does PeopleMixin.save_characters (discord_people)
                    or (op.op in RUN_VERBS_AUDITED and bot is not None and hasattr(bot, "remind"))  # so do these RaidMixin verbs (via, by_id passed)
                    or (op.op == "test" and bot is not None))  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
     if via is not None and ops is not None and not channel_op and not verb_audits:
@@ -2398,7 +2468,7 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
             return await loot_ops.apply_async(reg, op, by, bot, by_id, via or "discord", rev=rev)
         ctx = loot_ops.guild_ctx(bot, reg) if bot is not None else None
         return await asyncio.to_thread(loot_ops.apply_sync, reg, op, by, ctx)  # a git commit: off the event loop
-    if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test", "application", "proposal")):
+    if bot is not None and (op.op in RUN_OPS or op.op in ("absence_clear", "test", "application", "proposal") or _people_verb(reg, op)):
         return await _apply_with_bot(reg, op, by, bot, by_id, rev=rev, channel_id=channel_id, self_id=self_id, via=via or "discord")
     if op.op == "job":  # launchctl: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)
@@ -2413,11 +2483,12 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
         except ValueError as e:
             raise RegistryError(str(e))
     if bot is not None and op.op == "absence":
+        from . import discord_people
+
         m = _member(reg, op.member)
         if not m:
             raise RegistryError(f"unknown member {op.member}")
-        m, a = reg.add_absence(m.discord_id, op.start or "", op.end, op.reason, by)
-        touched = await bot.announce_absence(reg, m, a, by) or []
+        m, a, touched = await discord_people.record_absence(bot, reg, m.discord_id, op.start or "", op.end, op.reason, by, by_id=by_id, via=via or "discord")
         return f"{m.display_name} absent {reg.span_label(a.start, a.end)}" + sheets_words(reg, bot, touched)
     if bot is not None and (op.op in ("role_add", "role_remove", "plain") or (op.op == "recruit" and (op.field or "").strip().lower().startswith("member_role"))):
         await _warm_roles(reg, bot)  # role names → ids against the live guild before the op
@@ -2436,9 +2507,19 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
             await refresh(reg)  # open/closed, the note and the invite show on the card
         return line
     raids = bot.raids.store(reg) if bot is not None and getattr(bot, "raids", None) is not None else None  # the live events, not a fresh read
+    if bot is not None and op.op == "pin" and hasattr(bot, "refresh_sheet"):  # the one pin verb: the sheet's pin footer re-rendered
+        from . import inbox
+
+        m = _member(reg, op.member)
+        if not m:
+            raise RegistryError(f"unknown member {op.member}")
+        want = _pin_value(op.value)
+        rs, ev = _live_event(reg, op.target, raids)
+        await inbox.pin_member(bot, reg, rs, ev, m, want, by=by, by_id=by_id, via=via or "discord", audit=False)  # apply_async audits the line
+        return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op in ("run_autofill", "run_fill"):  # the solver / candidate search: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store, raids)
-    return apply(reg, op, by, is_owner, policy_store, raids=raids, rev=rev)
+    return apply(reg, op, by, is_owner, policy_store, raids=raids, rev=rev, by_id=by_id)
 
 
 async def _warm_roles(reg: Registry, bot) -> None:
@@ -2552,6 +2633,18 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
             + ", waiting for Confirm or Discard")
 
 
+async def _actor_is_officer(bot, reg: Registry, uid: int | None) -> bool:
+    """Officer or owner rights of the presser NOW (PRIV_LIVE: a write) — guild_routing.role_of, the one predicate."""
+    if uid is None:
+        return False
+    from . import guild_routing
+
+    try:
+        return await guild_routing.role_of(bot, reg, uid, max_age=guild_routing.PRIV_LIVE) in ("owner", "officer")
+    except Exception:  # noqa: BLE001 — unknown standing: treated as a member (the stricter answer)
+        return False
+
+
 async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int | None, rev: str | None = None, channel_id: int | None = None,
                           self_id: int | None = None, via: str = "discord") -> str:
     """The ops whose slash commands and web endpoints do Discord work: one branch per verb on the bot."""
@@ -2575,17 +2668,37 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         if ops is not None:
             await ops.emit(reg.config, "info", f"news proposal {p.id} {state} by {by}: {p.title}")
         return f"news proposal {p.id} {state}: {p.title}"
+    if op.op == "character":  # THE character verb (PeopleMixin.save_characters): the table + its ripple into sheets and seats
+        from . import discord_people
+
+        uid, m = _character_member(reg, op)
+        rows, _ = _character_rows(reg, m, op)
+        res = await discord_people.save_characters(bot, reg, uid, rows, by, by_id=by_id, officer=True, via=via)  # authorize() decided who may
+        if not res["lines"]:
+            raise RegistryError(f"{m.display_name if m else by}: nothing changed")
+        return res["message"].replace("\n", " — ", 1).replace("\n", "; ")
+    if op.op in ROWS_OF:  # the same verb: a one-row table (rank on the main, D25; set_main; one character's confirm)
+        from . import discord_people
+
+        m, rows = ROWS_OF[op.op](reg, op)
+        res = await discord_people.save_characters(bot, reg, m.discord_id, rows, by, by_id=by_id, officer=True, via=via)
+        if op.op == "rank":
+            return f"{m.display_name} → {rows[0]['rank']}" + ("" if res["lines"] else " (already)")
+        if op.op == "set_main":
+            return f"{m.display_name} main → {rows[0]['label']}" + ("".join(f" — {r}" for r in res["ripple"]))
+        return f"confirmed {rows[0]['label']}"
     rs = bot.raids.store(reg)
     if op.op == "run_open":
         rid = op.target or ""
         start, sid = _open_time(reg, rid, op.value, op.field)
         ev = await bot.open_run_and_post(reg, rs, rid, start, by, **rc.schedule_kw(sid))
         return f"opened {ev.key}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
-    if op.op == "absence_clear":
+    if op.op == "absence_clear":  # THE "I'm back" verb (discord_people.im_back): the absence goes, its sheets re-open
+        from . import discord_people
+
         m = _need_member(reg, op.member)
         start = _absence_start(reg, m, op.start, reg.now_local().date().isoformat())
-        a = await asyncio.to_thread(reg.clear_absence, m.discord_id, start, by)
-        lines = list(await bot.absence_cleared(reg, m, a, by) or [])
+        a, lines = await discord_people.im_back(bot, reg, m.discord_id, start, by, by_id=by_id, via=via)
         return f"{m.display_name}: cleared absence {reg.span_label(a.start, a.end)}" + (" — " + "; ".join(lines) if lines else "")
     if op.op == "test":  # SetupMixin's bench verbs, the same /gm test …, the site's Test bench and MCP call; each writes its audit line
         kind, arg = _test_op(op.value)
@@ -2633,6 +2746,10 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         want = _answer_value(op.value)
         note = (op.reason or "").strip()
         own = m.discord_id in {by_id, self_id} - {None}  # the presser's own, or the asker's own when someone else applies their diff
+        if own and m.discord_id == by_id and want in ("in", "sub") and ev.state != "open" and not await _actor_is_officer(bot, reg, by_id):
+            # the stale-diff gap (design B1): the diff was previewed while the sheet was open and Applied after it locked —
+            # a member's own Join / Bench after lock is refused here exactly as authorize and the sheet refuse it
+            raise RegistryError(rc.LOCKED_JOIN)
         if want == "out" and (note or own):  # a callout (/raid out's verb): anyone's with a reason, and every "I can't make it" of one's own
             return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id)
         try:
@@ -2665,7 +2782,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         channel = bot.get_channel(int(channel_id))
         if channel is None:
             raise RegistryError("I can't post in this channel")
-        return await bot.repost_sheet(reg, rs, ev, channel)
+        officer = await _actor_is_officer(bot, reg, by_id)  # D21: a member's ask posts a read-only copy, as /raid sheet does
+        return await bot.repost_sheet(reg, rs, ev, channel, copy=not officer)
     if op.op == "run_propose":
         return await _propose(reg, rs, ev, op, by, bot, by_id, rev, via)
     if op.op == "run_lock":

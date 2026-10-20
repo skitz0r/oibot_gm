@@ -484,7 +484,7 @@ def test_absence_json_carries_the_days_in_words(reg, rs, monkeypatch):
     assert a["start"] == "2099-01-02" and a["span"] == reg.span_label("2099-01-02", "2099-01-04") and not ISO_DAY.search(a["span"])
     from pathlib import Path
 
-    me = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "Me.tsx").read_text()
+    me = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "AbsencesCard.tsx").read_text()  # the Me page's card (phase 2 C)
     assert "a.span" in me and 'ff="monospace">{a.start}' not in me
 
 
@@ -492,7 +492,8 @@ def test_absences_card_and_my_absences_read_in_words(reg):
     from oibot_gm.discord_pool import absences_card
     from oibot_gm.flows_roster import absences_text
 
-    m = reg.test_members()[0]
+    reg.add_character(410_000_000_000_000_777, "Realone", "Realone", "Priest", "Holy", None, True)  # puppets stay off these lists (phase 2 C)
+    m = reg.members[410_000_000_000_000_777]
     reg.add_absence(m.discord_id, "2099-01-02", "2099-01-04", "holiday", "t")
     field = next(f for f in absences_card(reg).fields if f.name == "Upcoming")
     assert reg.span_label("2099-01-02", "2099-01-04") in field.value and not ISO_DAY.search(field.value)
@@ -517,8 +518,9 @@ def test_roster_absences_is_a_horizon_select_not_a_typed_number(reg, monkeypatch
     assert absences.parameters == [], "the wizard rule: no `days:int` argument — the horizon is a select"
     me = next(c for c in tree.get_commands() if c.name == "me")
     plan = next(c for c in me.commands if c.name == "plan")
-    roles = next(c for c in plan.commands if c.name == "roles")
-    assert [p.name for p in roles.parameters] == ["flex1", "flex2", "flex3"], "the discarded `primary` argument is gone"
+    assert "roles" not in [c.name for c in plan.commands], "phase 2 C: /me plan roles is gone — /me char → Flex"
+    char = next(c for c in me.commands if c.name == "char")
+    assert [p.name for p in char.parameters] == ["action"], "/me char: one command, a fixed Choice (the wizard rule)"
     h = Harness(reg, user=officer_user())
 
     async def go():

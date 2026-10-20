@@ -164,13 +164,17 @@ def test_member_get_and_absences(client, reg):
 
 
 def test_members_set_rank_confirm_main(client, reg):
+    """D8: rank and confirm are decisions about a person — the owner's token alone is refused (403, X-Oibot-Actor named);
+    a main change is not one. tests/test_people_web.py covers the same calls WITH the actor header."""
     m = reg.test_members()[1]
+    rank = reg.members[m.discord_id].main.rank
     r = client.post("/api/members/set", json={"member": m.display_name, "rank": "core", "confirm": True}, headers=bearer())
+    assert r.status_code == 403 and "X-Oibot-Actor" in r.json()["error"]
+    assert reg.members[m.discord_id].main.rank == rank
+    reg.add_character(m.discord_id, m.display_name, "Newmain", "Mage", "Fire", None, False)
+    r = client.post("/api/members/set", json={"member": m.display_name, "main": "Newmain"}, headers=bearer())
     assert r.status_code == 200, r.text
-    assert "rank core" in r.json()["message"] and "confirmed" in r.json()["message"]
-    assert reg.members[m.discord_id].main.rank == "core"
-    r = client.post("/api/members/set", json={"member": m.display_name, "rank": "emperor"}, headers=bearer())
-    assert r.status_code == 400
+    assert reg.members[m.discord_id].main.label == "Newmain" and reg.members[m.discord_id].rank == rank  # the rank moved with the main
 
 
 # ---- the tool layer over a mocked bot

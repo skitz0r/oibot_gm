@@ -1483,5 +1483,63 @@ async def open_guild_claim(interaction: discord.Interaction, reg: Registry | Non
     await GuildClaimWizard(interaction.user.id, default or interaction.user, profiles).start(interaction)
 
 
-__all__ = ["MultiForm", "RaidConfigWizard", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "open_raid_config", "open_aura",
-           "open_timezone", "open_about", "open_guild_claim", "claim_refusal", "next_runs", "hours_words", "tz_cities"]
+# ---------------------------------------------------------------- owner transfer (design §3.5 O-03, owner decision D50)
+
+class OwnerTransferWizard(Wizard):
+    """`/gm config owner [user]` in a set-up server: pick the person (Discord's member picker, or the command's `user`),
+    then THE decide screen with Registry.owner_consequence, [Transfer ownership] [Back]. Refused before the screen and
+    again at the press (Registry.owner_refusal): a bot, the current owner, yourself, someone not in the server.
+    Owner-only presses (the owner or a host superuser, re-checked on every press); nobody is DMed (D50, the DM rule)."""
+
+    def __init__(self, reg: Registry, owner_id: int):
+        super().__init__(reg, owner_id, title="Transfer ownership", guard=_owner_guard(reg))
+
+    async def start(self, i: discord.Interaction, target=None) -> None:
+        if target is not None:
+            await self.picked(i, [target])
+            return
+        await self.pick(i)
+
+    async def pick(self, i: discord.Interaction) -> None:
+        cur = self.reg.config.owner_discord_id
+        await self.show(i, (f"<@{cur}> owns **{self.reg.config.name}** now. " if cur else "") + "Who takes over? They must be a member of this server.",
+                        self.members("Pick the new owner", self.picked), self.button("Cancel", self.cancel))
+
+    async def picked(self, i: discord.Interaction, users: list) -> None:
+        from . import guild_routing
+
+        user = users[0]
+        answer, member = await guild_routing.member_of(i.client, self.reg, user.id)
+        if isinstance(user, discord.Member) and answer != "yes":  # the picker handed us a server member: that is a yes
+            answer, member = "yes", user
+        name = getattr(member or user, "display_name", None) or str(user.id)
+        why = self.reg.owner_refusal(user.id, by_id=i.user.id, bot=bool(getattr(user, "bot", False)), membership=answer, name=name)
+        if why:
+            await self.refuse(i, why, self.pick, "Pick someone else")
+            return
+        self.draft.update(uid=user.id, name=name, bot=bool(getattr(user, "bot", False)), membership=answer)
+        await self.decide(i, self.reg.owner_consequence(name, i.user.id), do=self.save, do_label="Transfer ownership", danger=True)
+
+    async def save(self, i: discord.Interaction, _note: str | None) -> None:
+        from . import discord_people
+
+        d = self.draft
+        try:
+            line = await discord_people.transfer_owner(i.client, self.reg, d["uid"], i.user.display_name, by_id=i.user.id, name=d["name"],
+                                                      is_bot=d["bot"], membership=d["membership"], via="discord")
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        await self.finish(i, f"✅ {line}. The Config page and `/gm config show` name them as the owner.")
+
+
+@flow("owner_transfer")
+async def open_owner_transfer(interaction: discord.Interaction, reg: Registry, *, user=None, **_seed) -> None:
+    """`/gm config owner` in a server that is set up: the owner (or a host superuser) hands it over."""
+    if not await _owner_or_refuse(interaction, reg):
+        return
+    await OwnerTransferWizard(reg, interaction.user.id).start(interaction, user)
+
+
+__all__ = ["MultiForm", "RaidConfigWizard", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "OwnerTransferWizard", "open_raid_config", "open_aura",
+           "open_timezone", "open_about", "open_guild_claim", "open_owner_transfer", "claim_refusal", "next_runs", "hours_words", "tz_cities"]

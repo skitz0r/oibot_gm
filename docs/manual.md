@@ -28,8 +28,14 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 - **Signup channel** — one sheet per run. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
   call me if you need me). The sheet is a card: raid emblem, date and countdown, joined count and role counts,
   joiners grouped by class with real class/spec/role icons, Bench and No thanks as member rows, lock and confirm
-  times; it updates in place on every answer. Join asks which character when you have more than one; Bench and
-  No thanks are your answer as a person, so they don't. A **locked** sheet shows the roster(s) group by group,
+  times; it updates in place on every answer. With more than one character, Join, Bench and No thanks each ask which
+  one (a Bench on your alt makes your alt the fill candidate): up to four characters are one button each, your main
+  first; five or more are one list with your main already picked, plus a *Join as <main>* button — nothing is left
+  out. The reply is your state, not the press: *"You're joined as Kestrel (Holy) for Barrow Deeps Tue 9 Dec 7:30 PM ·
+  14/20 so far. The roster is decided at lock."* — on a run with two rosters it says *"Join counts for 1 of 2 rosters —
+  which one is decided at lock"*, on an ad hoc run your place in the queue (*"14th of 20 seats — in if nothing
+  changes"*). Answering is code only, no model. The sheet's footer counts officers' pins (*Pinned: 2 · Bench-pinned:
+  1* — numbers only), current whichever way the pin was set (`/raid set`, the site, plain text or MCP). A **locked** sheet shows the roster(s) group by group,
   a **Not rostered** row (joiners the solver left off), the Bench and No thanks rows, and a single **Can't make
   it** button. A **cancelled** or **finished** sheet says so and has no buttons.
   The sheet lists who joined in columns, a class per column with one character per line (spec icon + name);
@@ -77,8 +83,12 @@ looks exactly as before.
 
 Log in with Discord. Every member gets **Me** and the **Loot log** (every award the council recorded, §9).
 Everything below can also be done there:
-your characters (press **Edit characters**: add a row, first + last name, spec/offspec, main/alt, then one **Save changes**; the crown marks your main, the trash icon deletes), absences,
-your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles, a Confirm button for named characters, and their upcoming absences; **Edit members** lets an officer change any member's characters exactly as on Me, with one save; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (owner edits; officers read), **Loot** (Tonight — the live council; History; Precedents with Retire;
+your characters (press **Edit**: add a row, first + last name, spec/offspec, extra roles (*Flex*), main/alt, then one **Save changes**; the crown marks your main; each row's **⋮** menu has *Make main*, *Retire* and *Delete* — when the change reaches a sheet or a seat, the confirm says so first), absences (*Add*: **From** a day **for how long**, previewed; **I'm back** clears one),
+your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**. **Me is your
+inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make it, a seat or swap question, a pre-lock
+"could you come?" — as a card with its two buttons and its deadline, then your **Notices** (what happened that you
+should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
+Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (owner edits; officers read; the owner hands the guild over there, §8), **Loot** (Tonight — the live council; History; Precedents with Retire;
 Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
 bot's recent actions and the plain-text permissions) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
@@ -90,7 +100,7 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
 
 - **New here? Apply first.** Anyone can join the Discord server with the public invite; joining the guild is an
   application, made in Discord (§3a). Someone with nothing registered who presses *Register / plan my main* or
-  *Add an alt*, or runs `/register`, `/me plan main|alt` or `/me char add`, is sent to the application with one line:
+  *Add an alt*, or runs `/register`, `/me plan main|alt` or `/me char action:Add an alt`, is sent to the application with one line:
   *"New here? Apply first — the officers take it from there."* Plain text ("add my alt …", "plan my main as …") says
   the same, with the **Apply to join** button on the reply while applications are open. Officers, and anyone holding one of the guild's **member roles** (set by the owner, §8), register
   directly; anyone already registered is never affected and keeps adding alts as below.
@@ -100,30 +110,51 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   names). Nothing is typed but the name, and a refused name reopens the form with your picks kept.
   Pressing the button again replaces a planned main (roster placement and rank carry over). A named
   character waits for an officer to confirm it.
-- **Alts**: *Add an alt* button, `/me char add` (first and last name, like the button), `/me plan alt`.
-- **Change spec/offspec**: `/me char spec`. **Switch main**: `/me char main` (or the crown on the website).
-  **Delete**: the bin icon on the website, or telling the bot ("delete my alt Jonny"), removes a character outright
-  (a seat it already holds on a locked run is not freed by the delete — press *Can't make it* for that run); if it was your main, your next character becomes main (`/me char retire` keeps history
-  instead).
-- **Name a planned character at launch**: `/me char name`: pick the planned character (skipped when there is
-  only one), then type first and last name.
-- `/me char spec|main|retire` take no arguments: pick the character from your own list. Spec choices are always
-  that character's class, and retire asks you to confirm. `/apply` is the application (§3a).
-- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me plan roles` (up to three flex roles,
-  picked from a list — the primary is never asked, it follows the main's spec) adds roles your main
-  would play beyond that, and telling the bot sets them on any of your characters ("I can also tank on Xanthe", "no
-  extra roles on Jonny"). The site has no flex toggles yet; officers can also set a character's flex list over MCP
-  (`save_characters`).
-- **Absences**: `/me absent list` shows yours with a **Clear** button on each; `/me absent clear` does the same.
+- **Your characters: `/me char`** — one command. Alone it lists your characters and asks what to change; with
+  `action:` (Spec · Main · Flex · Retire · Delete · Name a planned character · Add an alt) it goes straight there. You
+  pick the character from your own list (spec choices are always that character's class), then one confirm screen
+  says what changes — and what it does beyond your record, worked out by the bot: *"Holds a healer seat on Barrow
+  Deeps Tue 9 Dec 7:30 PM — the seat is handed back and the bench is asked"*, *"Answered Join on … — the answer now
+  reads Shadow"*, *"Regular of Barrow Deeps · Raid nights — comes off it"*. The Me page's characters card and telling
+  the bot do exactly the same (one verb behind all three).
+  - **Alts**: *Add an alt* button, `/me char action:Add an alt` (first and last name, like the button), `/me plan alt`.
+  - **Spec/offspec**: a sheet you answered shows the new spec at once (sheets keep the spec you answered with) — a
+    planned character without a name too, whose name on the sheet follows ("Priest (Holy)" becomes "Priest (Shadow)"). On a
+    locked roster, a change in the same role follows your seat; a change of role (healer → damage) on a **recurring**
+    run keeps the seat as the roster was built and tells the officers on the run's card — they decide; on an **ad
+    hoc** run it hands the seat back (Join again to queue). Nobody is DMed.
+  - **Main**: your rank moves with it (below). **Retire** keeps history; **Delete** removes a character outright
+    (prefer Retire if you may come back to it). Either way a seat the character holds on a locked run is handed back
+    and the bench asked, an open sheet's Join or Bench with it is cleared (a No thanks moves to your other character),
+    and it comes off the regulars of any schedule; if it was your main, your next character becomes main.
+  - **Name a planned character at launch**: `/me char action:Name a planned character` — pick it (skipped when
+    there is only one), type first and last name, and the confirm screen says what follows (*"Answered Join on … — the
+    answer now names Stormcall"*); answers and seats it holds take the new name.
+  - There is no "delete my record": a member who leaves keeps their history with the officers.
+- **Rank** is the member's, not a character's: it lives on your main, every alt reads *alt*, and switching mains moves
+  it to the new main. Only officers set it (`/roster rank`, `/roster char`, the Members page's rank select) — never
+  your own (the owner aside), and never on an alt.
+- **Extra roles**: your role follows your spec and your offspec counts as flex; `/me char action:Flex` (or the Me
+  page's *Flex* column in Edit) picks roles a character could also play — only the roles its spec and offspec don't
+  already give — and telling the bot does too ("I can also tank on Xanthe", "no extra roles on Jonny").
+- **Absences**: `/me absent list` shows yours with a **Clear** button on each (they survive a bot restart); a Clear,
+  `/me absent clear` and **I'm back** on the absences card all open the same screen: pick the absence, see which
+  sheets re-open for you (a seat it handed back stays handed back), press *I'm back*.
 - **Away for a while**: press *I'll be away* on the card in the absences channel, or `/me absent add`, or the Me
   page. Nothing is typed: pick the **first day** (Today, Tomorrow, then the days after — *Later than this…* picks a
-  week further out) and **how long** (1 day up to 4 months), with an optional reason only you and the officers see. A confirm
-  screen shows the days in words and which live sheets it touches before anything is saved. Sheets on those days
+  week further out; on the site, a date picker) and **how long** (1 day up to 4 months — the same list everywhere),
+  with an optional reason (up to 200 characters) only you and the officers see. A confirm
+  screen (on the site: the preview under the pickers) shows the days in words and which live sheets it touches before
+  anything is saved. Days that overlap an absence already on file are refused with that absence named ("already away
+  Tue 9 Dec → Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"). Sheets on those days
   get *No thanks* for you, and if you were already rostered the seat is released (your confirmation card in your DMs is
   edited to say so — no new DM) and the bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
   someone else with `/roster absent` and a member picker, same screens.
-- **See everything the bot has on you**: `/me view` (characters, rosters, absences, your last ten awards and how many
-  items are on your wishlist) or the *My status* button.
+- **See everything the bot has on you**: `/me view` (your inbox first — open asks and unread notices, with **Mark
+  notices read** — then characters, rosters, absences, your last ten awards and how many items are on your wishlist) or
+  the *My status* button.
+- **DMs on or off**: `/me dms on|off`, the switch on the Me page, or "turn my DMs off". The bot says it in one sentence
+  everywhere: *"With DMs off, Confirm and fill asks wait on your Me page and the sheet; nothing is sent anywhere else."*
 - **Wishlist**: `/me wishlist` — per character, up to 10 items in the order you want them, main spec or offspec, a
   note; the Me page's Wishlist card is the place for long lists and re-ordering (§9). **My loot** on the Me page shows
   what your characters received.
@@ -328,7 +359,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
    out after answering). With more than one character you pick which one. Anyone with a registered absence that day
    is listed under **Away** instead (names only, the first 15 then "+N"; reasons stay with officers): they aren't
-   nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. On a recurring schedule with
+   nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. A Join on a day you're away
+   answers that sheet only: the receipt says *"joined for this run; your absence … still stands for the other sheets"*
+   with an **I'm back** button for the whole absence. On a recurring schedule with
    regulars, if the regulars minus anyone away can't cover a tank or healer minimum, the officer channel gets the
    health card with its *Suggested* block right away (an early warning; see *Suggestions* above). With `open_dm` on [off] everyone
    the sheet is for (the schedule's regulars, or every main while it has none) is also DMed when it opens. Officers can
@@ -400,7 +433,9 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    on the lock card, one per line — with what another run is short under them. When the leftovers plus the Bench
    answers plus the roster's pool (people who haven't answered and aren't away) could make another run, one more
    line says so, and says when that needs offspecs or alts. Nothing is sent for it: open another run, or ask people,
-   yourself. After lock the leftovers are simply the bench — the first people Fill asks when a seat frees up.
+   yourself. After lock the leftovers are simply the bench — the first people Fill asks when a seat frees up; each
+   gets one notice on the Me page (*"You weren't rostered (20 seats, 23 joined). You're in line for a freed seat"*),
+   never a DM until a seat is actually offered.
    **Cancel run** is one screen everywhere: first the sentence from the run as it stands — how many seats are
    released, how many confirmation and fill asks close — then an optional **reason** (officers only: it goes to the
    run's updates thread and the ops feed, never to the signup channel) and **Tell the channel?** (a fixed line in the
@@ -511,14 +546,48 @@ Raids & auras to others (§8c).
 If you can't make a run you joined: press *No thanks* on an open sheet, *Can't make it* on a locked one, or
 `/raid out` (a box asks for an optional note; it goes to the run's updates thread for officers, not to the public sheet). After
 lock this releases your seat immediately and the bench is asked; *Can't make it* is recorded as a callout like `/raid
-out` (hours before, late after the lock). An officer who hears it out of band records the
-same callout, note included, with No thanks and a note on the site's answer menu, in plain text ("Kestrel can't
-make it tonight, her baby is sick") or MCP `set_answer` with `note`. Your own "I can't make tonight" in plain text is a
-callout too, note or not (hours before, late after the lock, the line in the updates thread) — also when an officer
-presses Apply on your request for you — and so is MCP
-`set_answer` with status `out`; an officer who only sets someone else's answer to No thanks without a reason changes
-the answer, no callout. When an officer drags someone onto a locked board, the run's thread says they were asked to
-confirm only when the run asks for confirmations (an ad hoc run with confirmations off just says *in*).
+out` (hours before, late after the lock). The same two words mean the same thing on every surface, before and after
+lock: **No thanks** is an answer change (no record), **Can't make it** is a callout with an optional note for the
+officers. On the Me page *My sheets* has Join · Bench · No thanks while the sheet is open and *Can't make it…* (with
+the note box) once it is locked; your own "I can't make tonight" in plain text is a callout too, note or not — also
+when an officer presses Apply on your request for you.
+
+**Officers record anything a member can do, for them, from one place per surface.** In Discord: `/raid set
+member:<someone>` (optionally `what:` to go straight to one thing) picks the run first — only runs where something
+applies to that person, never a test run (answer for puppets with `/gm test answer` or the Test bench) — then offers **only what applies to them on that run**, in the members' own words, raid-night
+first: *Confirm for them* / *Can't make it for them* (their open Confirm ask) · *Confirm their fill* / *No to their fill*
+(their open seat or swap question) · *Record a callout…* (with an optional note; before lock it is No thanks + the
+callout) · *Join* (as which character, "as <alt>") · *Bench* · *No thanks* · *Pin to roster* / *Keep on bench* /
+*Unpin* (open sheet). The confirm screen says what happens and who is told — *"Kestrel goes to No thanks on Barrow
+Deeps Tue 7:30 PM; no callout is recorded. Kestrel sees a notice on their Me page — no new DM."* — and if the member
+pressed something meanwhile it says so first (*"Kestrel is now Bench as Kestrel (since 5:12 PM) — keep going?"*).
+On your own record it is your own answer, and the screen says so: *"Your own record: no notice is written."* On
+the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
+list, and the sheet's header has **Someone else…** for anyone not on it. Plain text ("Kestrel can't make it tonight,
+her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
+`callout=false`) do the same. Whatever an officer records for someone reaches them as a **notice** on their Me page and
+in `/me view` ("Jon set you to No thanks for Barrow Deeps Tue 7:30 PM"), and an open DM card of theirs is edited to
+*answered for you by Jon* — never a new DM. Pins are officers' planning: nobody is told. When an officer drags
+someone onto a locked board, the run's thread says they were asked to confirm only when the run asks for
+confirmations (an ad hoc run with confirmations off just says *in*).
+
+**Your inbox (Me page, `/me view`).** Asks — what you must act on — come first, one card each: what it is (*Confirm
+your seat*, *A seat is open*, *Could you switch?*, *Could you come?*), the run, the spec icon you'd play (its tooltip
+says *as Holy*), the group it puts you in
+(spec icons, one member per line), *answer by Tue 6:30 PM*, and the two buttons. Pressing one is the same as pressing
+the DM's button — the card shows the reply, and a second answer (from another device, or the DM) is refused with what
+the first was (*"Already answered (yes, by Kestrel at 5:12 PM)."*). A tied pair you said yes to shows *waiting for
+Kestrel's answer*. Under the asks, your **Notices**: outcomes the bot used to DM, or never told you, now land here
+instead — *not rostered* at lock (how many seats, how many joined, and that a freed seat would reach you), a seat
+released (by the board, an absence, a missed confirmation), something an officer answered for you, a run cancelled,
+a schedule you were a regular of removed, your application's decision, a character confirmed, a loot award (a
+correction reaches both — the one who gets the item and the one who held it). Notices
+are kept 30 days (the newest 20); *Mark read* clears the bold. **DMs off** changes where asks wait, never whether you
+are asked: before lock and for confirmations you are asked in the same order as everyone else, on the Me page, with
+the same deadline (the lock card and the updates thread mark it *(site)*). After lock, in the last hours before the
+start (when a fill ask can no longer run its whole wait), a seat offered to someone with DMs off is also offered to
+the next person a DM can reach, at the same time: the first yes takes the seat and the other ask closes (*"Never mind
+— someone else took the seat first"*).
 
 **Where the buttons are (site and Discord).** A run's actions sit in one bar under its board and never move: *Cancel
 run* far left, then *Fill* and *Lock now* on the right; what does not apply yet is greyed with the reason. The run's
@@ -583,18 +652,27 @@ returns to the game defaults.
   so the card, `/ask`, the API and MCP never disagree.
 - The **character bank** lives on the Members page and **groups** are built on the Rosters board (Auto-fill /
   Propose); the old bank, optimised-groups and comp images are gone.
-- `/roster overview` (no arguments) shows the plan summary on demand: every planned main by class, the role counts
+- `/roster overview` (no arguments) shows the plan summary on demand, only to you (officers get **Post to the roster
+  channel** under it for the officer version): every planned main by class, the role counts
   against each raid's size with who could flex in, buff coverage (nobody / only one), the alts, and the recruiting ask
-  against the biggest raid, and — for officers only — **Regulars**: each recurring schedule's regulars coverage and its
-  4-week forecast (recruit candidates and who is away are planning data; a member's overview leaves the field out). `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
+  against the biggest raid, and — for officers only — **Regulars**: one field per recurring schedule with its regulars
+  coverage and 4-week forecast (recruit candidates and who is away are planning data; a member's overview leaves them out). `/roster members` lists a recurring schedule's regulars by role (pick the schedule).
 
 ## 7. Officers: day-to-day commands
 
-- Registry: `/roster list|confirm|rank|set-main|add|remove|members|absences|absent`. They take at most a member
-  (Discord's own picker); the character, rank or schedule is picked from a list and confirmed before anything saves.
-  `/roster confirm` alone walks the unconfirmed characters. `/roster absences` lists the guild's upcoming absences
+- Registry: `/roster list|confirm|rank|set-main|char|add|remove|members|absences|absent|back`. They take at most a member
+  (Discord's own picker) and a fixed choice; the character, rank or schedule is picked from a list and confirmed before anything saves.
+  `/roster char member: [action:]` is `/me char` on their behalf (Spec · Main · Flex · Rank · Retire · Delete), with the
+  same ripple on the confirm screen; `/roster rank` and `/roster set-main` are its Rank and Main. **Rank** is the
+  member's (on the main): no character to pick. `/roster confirm` alone walks the unconfirmed characters — never your
+  own (self-confirm defeats the badge; the owner aside); the member sees it on their Me page, no DM. Rank, confirm
+  and every character change go through the one character save, whichever surface you use (Discord, the Members page,
+  plain text, MCP), so two officers at once never half-apply each other's change.
+  `/roster absences` lists the guild's upcoming absences
   (days in words, with reasons) for the next 30 days; a select switches the horizon (a week … three months) — no
-  number is typed. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
+  number is typed; a long list ends "and N more — the Members page lists them all". `/roster back member:` is their
+  *I'm back*: pick the absence, see which sheets re-open, confirm. Test puppets stay out of these lists, the absences
+  card and the absences channel. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
 - Regulars: `/roster add` (pick the recurring schedule, then the member — or name them in the command — then the
   character), `/roster remove`, `/roster members` (a schedule's regulars by role, one per line). Same list as the
   Rosters page's *Regulars* tab, plain text and MCP `set_regular` (§4 *Regulars*).
@@ -602,7 +680,13 @@ returns to the game defaults.
   text ("accept Nyx", "decline nyxie: full on healers") (§3a).
 - Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|distribute|end` (officers) and `/raid out` (anyone).
   They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
-  and answer, then asks which character. `/raid cancel` asks for an optional reason in a box.
+  (and optionally `what`), then offers only what applies to them (§4 *Officers record anything…*). `/raid sheet`
+  (anyone): an officer **moves** the live sheet here, or to `channel:` — its buttons and updates follow it and the old
+  message says *Re-posted in #raids*; anyone else posts a **read-only copy** labelled *copy — the live sheet is in
+  #signups* that follows the sheet but never moves it (a member's `channel:` is not followed — the copy lands in the
+  channel they ran it in, and the reply says so). Channels where the bot keeps quiet (plain-text mode *ignore*)
+  are refused. The site's sheet menu has **Re-post sheet…** with a channel list. `/raid cancel` asks for an optional
+  reason in a box.
 - Precedents: `/gm precedents` — read the council's precedents and retire one with a reason (§9).
 - Policy: `/gm policy show|edit|reload`, `/gm rule loot|comp` (the bot shows the end of the current document; press
   **Write the rule** and write it in a paragraph box) — prose is compiled by Claude into rules and
@@ -712,9 +796,15 @@ roles, the invite and per-channel plain-text settings are cleared to set again i
 several-servers update is live, don't roll the bot's code back to before it: buttons posted since carry their server in
 a form older code doesn't read.
 
-`/gm config owner` in a configured server transfers ownership (first claim needs the Discord server owner or Manage Server). Handing the guild to a new owner
-is only ever this slash command, by design — not the site, plain text or MCP: an MCP token acts as the owner, so a
-transfer there would give the guild away and silently change whose rights the token carries. Then
+`/gm config owner [user]` in a configured server transfers ownership (first claim needs the Discord server owner or
+Manage Server): pick the person (Discord's member picker), then **one confirm screen** — *"X becomes the owner of …
+You lose owner rights here (you keep officer rights only if your Discord roles grant them). The site, MCP, plain text
+and the error alerts treat them as the owner from now on; nobody is DMed."* — and *Transfer ownership*. Refused: a bot,
+the current owner, yourself, someone not in the server (or a Discord lookup that can't say right now). The owner, or the
+host's superuser, may do it — a superuser can hand over a guild they host but don't own (the screen then says *"you act
+as the host here"*: they had no owner rights of their own to lose, and the ops line is marked *(host)*); so may the owner on the site's **Config** page (*Hand it over to…* → the same sentence →
+*Transfer*). Never plain text or MCP: an MCP token acts as the owner, so a transfer through it would give the guild
+away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
 `signup-channel`, `absences-channel`, `applications-channel`, `loot-channel` (the public loot log, §9), `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
 now and the next run become before saving) — or all of these on
@@ -838,23 +928,27 @@ of their characters. The bot reads each live run's board as it stands and each r
   could make another — and leaves the board as it is; "another one" shows a different one, "use it" puts the last one on the board
   with its strategy in one step (what it showed you — also after a restart, and a preview you looked at on the site or
   with the lock's Preview; never one only another officer saw, and never one made before someone moved people on the
-  board since: then it asks you for a fresh one). "Post the sheet here" re-posts
-  a live sheet in the channel you ask in (not in DMs; its buttons and updates follow the new copy) — like `/raid
-  sheet`, anyone registered may ask, in any channel where plain text acts on their own record. Pins stay as
+  board since: then it asks you for a fresh one). "Post the sheet here" works like
+  `/raid sheet` in the channel you ask in (not in DMs): an officer's ask moves the live sheet there (its buttons and
+  updates follow the new message); anyone else registered may ask too, in any channel where plain text acts on their own
+  record, and gets a read-only copy — the live sheet stays where it is. The preview says which it will be. Pins stay as
   before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on a run is someone's answer ("put Ash in for
   tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
-  rank and roster placement), "delete Jon's alt Jonny" (gone outright; the diff names any run it is rostered on, by raid and
-  start time — the delete does not free that seat; retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire",
+  rank and roster placement), "delete Jon's alt Jonny" (gone outright; the diff names what it does beyond the record —
+  a seat it holds is handed back and the bench asked, an open sheet's answer cleared; retire keeps history), "Jonny can also tank" (extra roles; "none" clears them), "change Jonny to Fire"
+  (every character change's diff says what it does beyond the record, as the confirm screen does: an answer that now
+  reads Fire, a seat kept for the officers, a rank moving with a new main),
   "offspec for Jonny: none", "name Jon's planned Shaman Stormcall" (planned characters only — a named
   character is never renamed: retire it and add the new one; its class never changes either), "rank Jonny
-  raider", "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
+  raider" (the member's rank — name their main; an alt is refused; a planned "Priest (Holy)" several members share
+  needs the member named: "rank Jon's Priest (Holy) raider"), "make Jonny Jon's main", "retire Jon's alt Jonny"; "confirm Jonny", or "confirm everyone pending" (every
   unconfirmed character at once — the diff lists them; officers' requests are read against that list; a character
 really called All or Pending is confirmed alone); "Mira is away
   Nov 1–3" (the diff lists the live sheets those days touch — No thanks, or a rostered seat freed — before anything is
   saved); "Marrow is back, clear her absence" (by start
-  date when she has several — the bot lists them as days, e.g. "Fri 01 Mar → Sun 03 Mar, Mon 10 Jun"); "turn DMs off for Marrow" (off: never asked to fill, confirmations wait on the site).
+  date when she has several — the bot lists them as days, e.g. "Fri 01 Mar → Sun 03 Mar, Mon 10 Jun"); "turn DMs off for Marrow" (off: her Confirm and fill asks wait on her Me page; she is still asked, in order).
 - *Raids (owner):* "Barrow Deeps runs Tuesdays and Thursdays at 7:30 PM" (the diff shows the next runs it makes),
   "short-notice cadence for Barrow Deeps" (Standard, Short notice or Same week — the same presets as `/gm config
   raid`: when the sheet opens, the nudge, the lock and the confirmation deadline together), "lock Barrow Deeps 12 hours
@@ -911,8 +1005,8 @@ record*; someone else's is *Other people's records*):
 |---|---|---|
 | Own record — your absences, DMs, characters (add or plan, spec, offspec, name, main, retire, delete, extra roles) and your own answer or confirmation on a run; re-posting a live sheet here (it touches nobody's record, like `/raid sheet`) | registered members | "I'll be away Nov 1–3", "make Xanthe my main", "I can't make tonight", "post tonight's sheet here" |
 | Other people's records — their absences, characters, DMs, ranks (yours too), confirming characters, deciding applications | officers | "rank Jonny raider", "Mira is away next week", "accept Nyx" |
-| Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight" |
-| Comp & policy — comp targets and group layout, pins, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "we want 3–4 healers in Barrow Deeps", "pin Jonny in tonight" |
+| Runs — open, answer for someone, lock, cancel, fill, split, auto-fill, the board, pins (who the lock rosters), `confirm_for` | officers | "lock tonight's Barrow Deeps", "Xanthe confirmed for tonight", "pin Jonny in tonight" |
+| Comp & policy — comp targets and group layout, the loot / comp / persona policy (add or remove a rule, replace, recompile), deciding news proposals | officers | "we want 3–4 healers in Barrow Deeps", "add a loot rule" |
 | Raids & auras — raid schedules and settings, buff and family facts | the owner | "Barrow Deeps runs Tue and Thu 7:30 pm" |
 | Guild setup — channels, officer roles, timezone, who may ask, the about text, recruitment (applications open/closed, note, questions, invite), starting the local jobs | the owner | "post raid sheets in #signups" |
 | Test bench | officers | "seed 20 puppets", "clear the test bench" |
@@ -1060,14 +1154,15 @@ news post says can make the review read or write another server.
 | `get_wishlists` · `set_wishlist` · `import_wishlists` | who wants each item / one member's lists with their `rev` · replace a character's whole list (actor; a list changed since `rev` is refused) · a ThatsMyBIS export (preview first; writing needs the actor) |
 | `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
-| `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; No thanks is always a callout like `/raid out`, a `note` is its reason, for officers only) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them |
+| `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
+| `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more runs and who is left over) · remember the strategy · solver shapes the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
 | `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per run) · pause (`paused=true`) or resume the fill engine for one run · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled run) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, comp bounds, first open…) · back to defaults |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
-| `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off |
+| `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles, `loot_log` on/off |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
@@ -1084,7 +1179,8 @@ Members can be named by display name, character name or Discord id; runs by key,
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
 
 **Decisions are a named officer's (D8).** A decision about an award — confirming, overriding, a reason, a correction,
-retiring a precedent, tiers, someone's wishlist — is never "the owner's token": those tools send `X-Oibot-Actor` with
+retiring a precedent, tiers, someone's wishlist — or about a person — a member's rank, confirming a character — is never
+"the owner's token": those tools send `X-Oibot-Actor` with
 `OIBOT_MCP_ACTOR` from `.env` (the Discord id of the officer at the keyboard), the bot checks that id is an officer (or
 the owner) of the chosen server right then, and acts as that person: the record and the ops line read *"Mira via MCP"*.
 Without `OIBOT_MCP_ACTOR` those tools are refused with a line saying so; reads, previews, ticks, Distribute, Discard
@@ -1100,7 +1196,7 @@ it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (th
 remotely too; leave it on unless you run the MCP server on another machine. Browser logins are unaffected. Ask for a preview first (`propose_split`, `fill_seats` without send,
 `plain_change` without apply) and read the returned line back: it says what actually happened. There is no tool
 for handing the guild to a new owner, by design: the token *is* the owner, so a transfer through it would give the
-guild away and change whose rights the token carries — that stays `/gm config owner` in Discord.
+guild away and change whose rights the token carries — that stays with a person: `/gm config owner` or the Config page.
 
 ## 9. Loot council
 
@@ -1355,9 +1451,10 @@ on your record follows your server nick the next time the bot sees you in the se
 a sheet keeps the name you answered under until you answer again. An absence reason is seen by you and
 the officers, nobody else. The bot DMs only when you must act — sheets, nudges, confirmations and fill
 asks (a released seat, a cancelled run, an ask that expired, closed at the lock or closed by your own No thanks /
-callout / absence edits the card you already have to say so — no buttons left, nothing to do); switch DMs off on the **Me** page if you'd rather not get them — with DMs off
-you are never asked to fill, and a confirmation ask is shown on the Me page instead and counts as pending
-until you answer it there. **My absences** on the absences card lists yours with a **Clear** button each; clearing
+callout / absence edits the card you already have to say so — no buttons left, nothing to do; everything else you
+should know is a notice on the Me page and in `/me view`); switch DMs off on the **Me** page or with `/me dms off` if you'd rather not
+get them — with DMs off, Confirm and fill asks wait on your Me page and the sheet; nothing is sent anywhere else (you
+are still asked, in the same order, with the same deadline). **My absences** on the absences card lists yours with a **Clear** button each; clearing
 an absence puts you back to unanswered on any open sheet it had pre-filled (a seat freed on a locked run is
 not handed back automatically — ask an officer). Claude is used sparingly — never for registry, signup or solver work — and spend is
 capped by a monthly budget the owner sets (`OIBOT_BUDGET_USD`, per calendar month, kept across restarts); questions and

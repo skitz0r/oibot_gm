@@ -1,7 +1,7 @@
 """Registration wizards: one flow for class → spec → offspec → name, and the small character flows around it.
 
 `register` serves the registration card (Apply to join · Register / plan my main · Add an alt), /register, /me char
-add, /me plan main|alt (`plan_only`: no name step) and /apply (`mode="apply"`). A newcomer (Registry.must_apply) who
+action:Add an alt, /me plan main|alt (`plan_only`: no name step) and /apply (`mode="apply"`). A newcomer (Registry.must_apply) who
 tries to register is sent to the application instead. The application is: the class/spec picks (with the guild's
 recruitment note) → first and last name + logs → the raid schedules they can make (a multi-select) → the guild's own
 questions, five per modal with a button between pages → a review with every answer → Submit (reg.apply + the
@@ -10,8 +10,10 @@ The class list and each class's specs come from the game profile (wizard_opts), 
 list always belongs to the class picked. A name is prose with one rule (2–12 letters): a TextInput whose rule is on
 its label; a refusal keeps every pick and reopens the SAME form with the typed names filled in.
 
-`char_name`, `char_spec`, `char_main`, `char_retire` pick one of your own characters (always a handful) instead of
-typing it. Nothing is written before the last Submit / Confirm; the Registry re-checks everything when it saves."""
+`char_name` (the /me char hub's Name) names a planned character: the names, THE decide screen with the ripple from code,
+then a one-row table through the character verb (discord_people.save_characters), so open sheets and locked seats take
+the new name. Spec · Main · Flex · Retire · Delete are the hub's own screens (flows_roster.CharWizard) — there is no
+second path. Nothing is written before the last Submit / Confirm; the Registry re-checks everything when it saves."""
 from __future__ import annotations
 
 import logging
@@ -188,7 +190,7 @@ class RegisterWizard(Wizard):
             return
         what = f"{'Registered' if name else 'Planned'} {'main' if self.slot == 'main' else 'alt'}: **{c.label}** · {_specline(c.spec, c.offspec)}"
         roles = (f" · roles: {self.roles[0]}" + (f" (+{', '.join(self.roles[1:])})" if len(self.roles) > 1 else "")) if self.roles else ""
-        tail = " An officer will confirm the character." if name else " Add the name at launch with `/me char name`."
+        tail = " An officer will confirm the character." if name else " Add the name at launch with `/me char` → Name."
         await self.finish(interaction, f"✅ {what}{roles}.{tail} `/me view` shows everything.")
         await _emit(interaction, reg, f"**{m.display_name}** {'registered' if name else 'planned'} {c.label} ({c.cls} {c.spec}{', main' if c.is_main else ', alt'})"
                     + (f" · roles {self.roles}" if self.roles else "") + ("" if not name else " — pending confirmation"))
@@ -217,7 +219,7 @@ class RegisterWizard(Wizard):
             await self.refuse(interaction, str(e), self.back_to_picks, "Change")
             return
         if self.slot == "main":
-            await self.finish(interaction, f"✅ Planned main: {_char_line(interaction, c)}. Your role follows the spec; extra roles you'd play: `/me plan roles`.")
+            await self.finish(interaction, f"✅ Planned main: {_char_line(interaction, c)}. Your role follows the spec; extra roles you'd play: `/me char` → Flex.")
             await _emit(interaction, reg, f"{m.display_name} plans to main {c.cls} {c.spec}")
         else:
             await self.finish(interaction, f"✅ Planned alt: {_char_line(interaction, c)}")
@@ -417,7 +419,7 @@ async def must_apply(interaction: discord.Interaction, reg: Registry) -> bool:
 @flow("register")
 async def open_register(interaction: discord.Interaction, reg: Registry, *, slot: str = "main", plan_only: bool = False, mode: str = "register",
                         roles: list[str] | None = None) -> None:
-    """The registration card's Register / Add an alt / Apply to join, /register, /me char add (slot="alt"), /me plan
+    """The registration card's Register / Add an alt / Apply to join, /register, /me char action:Add an alt (slot="alt"), /me plan
     main|alt (plan_only) and /apply (mode="apply"). A newcomer's first character goes through the application instead."""
     if slot not in ("main", "alt") or mode not in ("register", "apply"):
         raise ValueError(f"register flow: bad seed slot={slot!r} mode={mode!r}")
@@ -427,7 +429,7 @@ async def open_register(interaction: discord.Interaction, reg: Registry, *, slot
     if mode == "apply":
         m = reg.members.get(interaction.user.id)
         if m and m.active():
-            await interaction.response.send_message("You're already a member — add characters with `/register` or `/me char add`.", ephemeral=True)
+            await interaction.response.send_message("You're already a member — add characters with `/register` or `/me char` → Add an alt.", ephemeral=True)
             return
         if not reg.config.recruitment.open:
             await interaction.response.send_message((f"{lead}\n" if lead else "") + f"{reg.config.name} isn't taking applications right now — check back later, or ask an officer.",
@@ -466,12 +468,12 @@ class CharNameWizard(Wizard):
         await self.show(interaction, "Which planned character are you naming?", self.select("Planned character", choices, self.picked), self.button("Cancel", self.cancel))
 
     def choose(self, c: RegisteredCharacter) -> None:
-        self.draft.update(slot="main" if c.is_main else "alt", cls=c.cls, spec=c.spec)
+        self.draft.update(slot="main" if c.is_main else "alt", cls=c.cls, spec=c.spec, offspec=c.offspec, label=c.label)
 
     async def picked(self, interaction: discord.Interaction, values: list[str]) -> None:
         c = next((c for c in self.planned(interaction.user.id) if ("main" if c.is_main else "alt") == values[0]), None)
         if not c:
-            await self.refuse(interaction, "That planned character is gone. Run `/me char name` again.")
+            await self.refuse(interaction, "That planned character is gone. Run `/me char` → Name again.")
             return
         self.choose(c)
         await self.open_form(interaction, self.form())
@@ -483,24 +485,57 @@ class CharNameWizard(Wizard):
     async def reopen(self, interaction: discord.Interaction) -> None:
         await self.open_form(interaction, self.form())
 
+    def current(self, uid: int) -> RegisteredCharacter | None:
+        """The planned character shown, as the registry holds it NOW (re-planned or named meanwhile → None)."""
+        d = self.draft
+        now = next((c for c in self.planned(uid) if c.is_main == (d["slot"] == "main")), None)
+        return now if now is not None and now.cls == d["cls"] and now.label == d.get("label") else None
+
+    def rows(self) -> list[dict]:
+        d = self.draft
+        return [{"label": d["label"], "cls": d["cls"], "spec": d["spec"], "offspec": d.get("offspec"), "name": d["first"], "surname": d["last"] or None}]
+
     async def submitted(self, interaction: discord.Interaction, v: dict[str, str]) -> None:
+        from . import discord_people
+
         d, uid = self.draft, interaction.user.id
         d["first"], d["last"] = v.get("first", ""), v.get("last", "")
         if not d["first"]:
             await self.refuse(interaction, f"A first name is needed ({NAME_RULE}).", self.reopen)
             return
-        await self.working(interaction, "Saving…")
-        now = next((c for c in self.planned(uid) if c.is_main == (d["slot"] == "main")), None)
-        if not now or now.cls != d["cls"]:  # re-planned meanwhile: don't name a different character than the one shown
-            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Run `/me char name` again.")
+        if self.current(uid) is None:  # re-planned meanwhile: don't name a different character than the one shown
+            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Run `/me char` → Name again.")
             return
-        try:
-            m, c = self.reg.name_character(uid, d["first"], d["slot"], surname=d["last"] or None)
+        try:  # every refusal the save would give (the letters, a name already registered), nothing written
+            await discord_people.save_characters(interaction.client, self.reg, uid, self.rows(), interaction.user.display_name,
+                                                 by_id=uid, preview=True, via="discord")
         except RegistryError as e:
             await self.refuse(interaction, str(e), self.reopen)
             return
-        await self.finish(interaction, f"✅ {_char_line(interaction, c)} — an officer will confirm it.")
-        await _emit(interaction, self.reg, f"**{m.display_name}** named their planned {d['slot']}: {c.label} ({c.cls} {c.spec}) — pending confirmation")
+        full = f"{self.reg.normalise_name(d['first'])}" + (f" {self.reg.normalise_name(d['last'])}" if d["last"] else "")
+        effects = discord_people.character_preview(interaction.client, self.reg, uid, self.rows())
+        what = f"Name your planned {d['slot']} **{d['label']}** → **{full}**. An officer confirms it afterwards."
+        text = "\n".join([what, *[f"• {e}" for e in effects]]) if effects else what + "\n-# Nothing else changes: no sheet or seat holds it."
+        await self.decide(interaction, text, do=self.save, do_label=f"Name it {full}"[:80])
+
+    async def save(self, interaction: discord.Interaction, _note: str | None) -> None:
+        """THE character verb: a one-row table naming the planned character — the ripple re-labels open sheet answers
+        and locked seats that hold it, and the verb writes the one audit line."""
+        from . import discord_people
+
+        d, uid = self.draft, interaction.user.id
+        if self.current(uid) is None:
+            await self.finish(interaction, f"❌ Your planned {d['slot']} changed since you started. Run `/me char` → Name again.")
+            return
+        try:
+            res = await discord_people.save_characters(interaction.client, self.reg, uid, self.rows(), interaction.user.display_name, by_id=uid, via="discord")
+        except RegistryError as e:
+            await self.refuse(interaction, str(e), self.reopen)
+            return
+        m = self.reg.members.get(uid)
+        c = next((x for x in (m.active() if m else []) if x.name and x.label.lower() == f"{d['first']} {d['last']}".strip().lower()), None) if m else None
+        head = f"✅ {_char_line(interaction, c)} — an officer will confirm it." if c else "✅ Named — an officer will confirm it."
+        await self.finish(interaction, head + "".join(f"\n• {line}" for line in res["ripple"]))
 
 
 @flow("char_name")
@@ -508,188 +543,4 @@ async def open_char_name(interaction: discord.Interaction, reg: Registry, **_see
     await CharNameWizard(reg, interaction.user.id).start(interaction)
 
 
-# ---------------------------------------------------------------- pick one of your characters (spec · main · retire)
-
-class OwnCharWizard(Wizard):
-    """Pick one of your own characters (skipped when there is only one candidate), then `picked_one`."""
-
-    empty = "You have no characters yet — `/register` to start."
-    prompt = "Which character?"
-
-    def candidates(self, uid: int) -> list[RegisteredCharacter]:
-        m = self.reg.members.get(uid)
-        return m.active() if m else []
-
-    def current(self, uid: int) -> RegisteredCharacter | None:
-        """Re-read the picked character from the Registry (never trust the screen)."""
-        label = self.draft.get("label")
-        return next((c for c in self.candidates(uid) if c.label == label), None)
-
-    async def start(self, interaction: discord.Interaction) -> None:
-        chars = self.candidates(interaction.user.id)
-        if not chars:
-            await interaction.response.send_message(self.empty, ephemeral=True)
-            return
-        if len(chars) == 1:
-            self.draft["label"] = chars[0].label
-            await self.picked_one(interaction)
-            return
-        await self.show_pick(interaction)
-
-    async def show_pick(self, interaction: discord.Interaction) -> None:
-        chars = self.candidates(interaction.user.id)
-        await self.show(interaction, self.prompt, self.select("Character", char_opts(self.reg, chars, _ico(interaction), current=self.draft.get("label")), self.on_pick),
-                        self.button("Cancel", self.cancel))
-
-    async def on_pick(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["label"] = values[0]
-        await self.picked_one(interaction)
-
-    async def gone(self, interaction: discord.Interaction) -> None:
-        await self.finish(interaction, f"❌ {self.draft.get('label')} is no longer one of your active characters. Nothing was changed.")
-
-    async def picked_one(self, interaction: discord.Interaction) -> None:  # pragma: no cover — each flow overrides
-        raise NotImplementedError
-
-
-class CharSpecWizard(OwnCharWizard):
-    prompt = "Which character's spec are you changing?"
-
-    def __init__(self, reg: Registry, owner_id: int):
-        super().__init__(reg, owner_id, title="Change spec")
-
-    async def picked_one(self, interaction: discord.Interaction) -> None:
-        c = self.current(interaction.user.id)
-        if not c:
-            await self.gone(interaction)
-            return
-        self.draft.setdefault("spec", c.spec)
-        self.draft.setdefault("offspec", c.offspec)
-        self.draft["cls"] = c.cls
-        await self.screen(interaction)
-
-    async def screen(self, interaction: discord.Interaction) -> None:
-        d, ico = self.draft, _ico(interaction)
-        c = self.current(interaction.user.id)
-        now = f"{c.cls} {_specline(c.spec, c.offspec)}" if c else "?"
-        offs = [o for o in opts.specs_of(self.reg, d["cls"], ico, current=d["offspec"], none_label="none") if o.value != d["spec"]]
-        text = f"**{d['label']}** — now {now}.\nNew: **{d['cls']} {_specline(d['spec'], d['offspec'])}**"
-        items = [self.select("Main spec", opts.specs_of(self.reg, d["cls"], ico, current=d["spec"]), self.on_spec),
-                 self.select("Offspec (optional)", offs, self.on_offspec),
-                 self.button("Confirm", self.save, discord.ButtonStyle.success)]
-        if len(self.candidates(interaction.user.id)) > 1:
-            items.append(self.button("Other character", self.other))
-        items.append(self.button("Cancel", self.cancel))
-        await self.show(interaction, text, *items)
-
-    async def other(self, interaction: discord.Interaction) -> None:
-        for k in ("spec", "offspec", "cls"):
-            self.draft.pop(k, None)
-        await self.show_pick(interaction)
-
-    async def on_spec(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["spec"] = values[0]
-        if self.draft.get("offspec") == values[0]:
-            self.draft["offspec"] = None
-        await self.screen(interaction)
-
-    async def on_offspec(self, interaction: discord.Interaction, values: list[str]) -> None:
-        self.draft["offspec"] = None if values[0] == "-" else values[0]
-        await self.screen(interaction)
-
-    async def save(self, interaction: discord.Interaction) -> None:
-        d = self.draft
-        await self.working(interaction, "Saving…")
-        c = self.current(interaction.user.id)
-        if not c or c.cls != d["cls"]:
-            await self.gone(interaction)
-            return
-        try:
-            c = self.reg.set_spec(interaction.user.id, c.label, d["spec"], d["offspec"])
-        except RegistryError as e:
-            await self.refuse(interaction, str(e), self.screen, "Change")
-            return
-        await self.finish(interaction, f"✅ {_char_line(interaction, c)}")
-        await _emit(interaction, self.reg, f"{interaction.user.display_name}: {c.label} now {_specline(c.spec, c.offspec)}")
-
-
-class CharMainWizard(OwnCharWizard):
-    prompt = "Which character becomes your main? Your rank moves with you."
-    empty = "You have no other character to make your main — `/me char add` registers an alt."
-
-    def __init__(self, reg: Registry, owner_id: int):
-        super().__init__(reg, owner_id, title="Change your main")
-
-    def candidates(self, uid: int) -> list[RegisteredCharacter]:
-        return [c for c in super().candidates(uid) if not c.is_main]
-
-    async def picked_one(self, interaction: discord.Interaction) -> None:
-        m = self.reg.members.get(interaction.user.id)
-        old = m.main if m else None
-        text = f"Make **{self.draft['label']}** your main?" + (f"\n-# {old.label} becomes an alt; your rank follows you." if old else "")
-        await self.show(interaction, text, self.button("Confirm", self.save, discord.ButtonStyle.success), self.button("Cancel", self.cancel))
-
-    async def save(self, interaction: discord.Interaction) -> None:
-        await self.working(interaction, "Saving…")
-        c = self.current(interaction.user.id)
-        if not c:
-            await self.gone(interaction)
-            return
-        try:
-            m, c, old = self.reg.set_main(interaction.user.id, c.label)
-        except RegistryError as e:
-            await self.finish(interaction, f"❌ {e}")
-            return
-        await self.finish(interaction, f"✅ Main is now {_char_line(interaction, c)}" + (f" (was {old.label}, now alt)" if old else ""))
-        await _emit(interaction, self.reg, f"**{m.display_name}** changed main {old.label if old else '-'} → {c.label}")
-
-
-class CharRetireWizard(OwnCharWizard):
-    prompt = "Which character are you retiring? Its history is kept."
-
-    def __init__(self, reg: Registry, owner_id: int):
-        super().__init__(reg, owner_id, title="Retire a character")
-
-    async def picked_one(self, interaction: discord.Interaction) -> None:
-        c = self.current(interaction.user.id)
-        if not c:
-            await self.gone(interaction)
-            return
-        lines = [f"Retire **{c.label}** ({c.cls} {_specline(c.spec, c.offspec)})? It leaves sheets and rosters; its history is kept."]
-        if c.is_main:
-            nxt = next((x for x in self.candidates(interaction.user.id) if x is not c), None)
-            lines.append(f"-# It is your main — {nxt.label} becomes your main." if nxt else "-# It is your only character.")
-        await self.show(interaction, "\n".join(lines), self.button(f"Retire {c.label}", self.save, discord.ButtonStyle.danger), self.button("Cancel", self.cancel))
-
-    async def save(self, interaction: discord.Interaction) -> None:
-        await self.working(interaction, "Saving…")
-        c = self.current(interaction.user.id)
-        if not c:
-            await self.gone(interaction)
-            return
-        try:
-            c = self.reg.retire(interaction.user.id, c.label)
-        except RegistryError as e:
-            await self.finish(interaction, f"❌ {e}")
-            return
-        await self.finish(interaction, f"✅ Retired {c.label}.")
-        await _emit(interaction, self.reg, f"{interaction.user.display_name} retired {c.label}")
-
-
-@flow("char_spec")
-async def open_char_spec(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
-    await CharSpecWizard(reg, interaction.user.id).start(interaction)
-
-
-@flow("char_main")
-async def open_char_main(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
-    await CharMainWizard(reg, interaction.user.id).start(interaction)
-
-
-@flow("char_retire")
-async def open_char_retire(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
-    await CharRetireWizard(reg, interaction.user.id).start(interaction)
-
-
-__all__ = ["RegisterWizard", "CharNameWizard", "CharSpecWizard", "CharMainWizard", "CharRetireWizard", "char_opts", "name_fields",
-           "open_register", "open_char_name", "open_char_spec", "open_char_main", "open_char_retire"]
+__all__ = ["RegisterWizard", "CharNameWizard", "char_opts", "name_fields", "open_register", "open_char_name"]

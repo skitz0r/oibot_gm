@@ -1,0 +1,386 @@
+"""The people routes over HTTP (dual interfaces phase 2, part C): the Me and Members pages' character table (THE character
+verb: rank refused for a member, preview, the rev), /api/members (characterless members, puppets only for their tester),
+/api/members/set (rank per member), absences (From + For how long, preview, overlap, reason cap, I'm back), /api/absences,
+/api/meta's durations and /api/owner (owner only, never MCP). A real web session (signed cookie) and the MCP bearer."""
+from __future__ import annotations
+
+import time
+import types
+from datetime import timedelta
+
+import pytest
+from conftest import OFFICER_ROLE, OWNER, MemberDirectory, join, lock_with_board, open_test_run
+from fastapi.testclient import TestClient
+from itsdangerous import URLSafeSerializer
+from test_people import PeopleBot, real, real_run
+
+from oibot_gm import raidcycle as rc
+from oibot_gm.registry import ABSENCE_REASON_MAX
+from oibot_gm.web import app as web
+
+TOKEN = "a" * 64
+SECRET = "s" * 40
+OFFICER = 300_000_000_000_000_015
+H = {"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot"}
+
+
+def person(uid, *roles, bot=False):
+    return types.SimpleNamespace(id=uid, display_name=f"u{str(uid)[-3:]}", roles=[types.SimpleNamespace(id=r) for r in roles], bot=bot)
+
+
+class WebBot(PeopleBot):
+    def __init__(self, reg, rs):
+        super().__init__(reg, rs)
+        self.people = {(1, OFFICER): person(OFFICER, OFFICER_ROLE), (1, OWNER): person(OWNER)}
+        for m in reg.test_members():
+            self.people[(1, m.discord_id)] = person(m.discord_id)
+        self.directory = MemberDirectory(self.people)
+        self.directory.install(self, servers=(1,))
+
+    def admit(self, m, bot=False):
+        self.directory.members[(1, m.discord_id)] = person(m.discord_id, bot=bot)
+
+    def officiates(self, member, guild):
+        return any(r.id == OFFICER_ROLE for r in getattr(member, "roles", []))
+
+
+@pytest.fixture
+def w(reg, rs, monkeypatch):
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.setenv("OIBOT_WEB_SECRET", SECRET)
+    monkeypatch.setenv("OIBOT_WEB_URL", "http://127.0.0.1:8788")
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    monkeypatch.delenv("OIBOT_WEB_SESSION_EPOCH", raising=False)
+    bot = WebBot(reg, rs)
+    return types.SimpleNamespace(bot=bot, c=TestClient(web.create_app(bot)), reg=reg, rs=rs)
+
+
+def as_user(w, uid) -> dict:
+    w.c.cookies.clear()
+    w.c.cookies.set(web.COOKIE, URLSafeSerializer(SECRET, salt="session").dumps({"uid": str(uid), "name": "x", "iat": time.time()}))
+    return {"X-Requested-With": "oibot"}
+
+
+def member(w, n=0, **kw):
+    m = real(w.reg, n, **kw)
+    w.bot.admit(m)
+    return m
+
+
+# ---------------------------------------------------------------- the Me page's table
+
+def test_a_member_posting_a_rank_is_refused(w):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    r = w.c.post("/api/me/characters", json={"rows": [{"label": m.main.label, "cls": "Priest", "spec": "Holy", "rank": "core"}]}, headers=h)
+    assert r.status_code == 400 and "Only an officer sets a rank" in r.json()["error"]
+    assert w.reg.members[m.discord_id].rank == "trial"
+
+
+def test_me_characters_preview_rev_and_save(w):
+    m = member(w)
+    ev = real_run(w.reg, w.rs)
+    join(w.reg, w.rs, ev, [m])
+    h = as_user(w, m.discord_id)
+    me = w.c.get("/api/me", headers=h).json()
+    rev = me["characters_rev"]
+    assert rev and me["rank"] == "trial"
+    row = {"label": m.main.label, "cls": "Priest", "spec": "Shadow"}
+    p = w.c.post("/api/me/characters", json={"rows": [row], "rev": rev, "preview": True}, headers=h).json()
+    assert p["preview"] and any("now reads Shadow" in x for x in p["ripple"]) and w.reg.members[m.discord_id].main.spec == "Holy"
+    r = w.c.post("/api/me/characters", json={"rows": [row], "rev": rev}, headers=h)
+    assert r.status_code == 200, r.text
+    assert ev.signups[str(m.discord_id)].spec == "Shadow"
+    stale = w.c.post("/api/me/characters", json={"rows": [{"label": m.main.label, "cls": "Priest", "spec": "Discipline"}], "rev": rev}, headers=h)
+    assert stale.status_code == 409 and stale.json()["characters"][0]["spec"] == "Shadow" and "changed since" in stale.json()["error"]
+
+
+def test_me_delete_and_main_are_one_row_saves(w):
+    m = member(w)
+    w.reg.add_character(m.discord_id, m.display_name, "Secundus", "Mage", "Fire", None, False)
+    h = as_user(w, m.discord_id)
+    assert w.c.post("/api/me/main", json={"label": "Secundus"}, headers=h).status_code == 200
+    assert w.reg.members[m.discord_id].main.label == "Secundus"
+    r = w.c.post("/api/me/character/delete", json={"label": "Anabelle"}, headers=h)
+    assert r.status_code == 200 and [c.label for c in w.reg.members[m.discord_id].active()] == ["Secundus"]
+
+
+# ---------------------------------------------------------------- the Members page
+
+def test_members_lists_characterless_members_and_hides_others_puppets(w):
+    lone = 420_000_000_000_000_001
+    w.reg.add_absence(lone, (w.reg.now_local().date() + timedelta(days=3)).isoformat(), None, None, "Officer", display_name="Lonely")
+    h = as_user(w, OFFICER)
+    rows = w.c.get("/api/members", headers=h).json()["rows"]
+    lonely = next(r for r in rows if r["display_name"] == "Lonely")
+    assert lonely["characters"] == [] and lonely["absences"] and "dm" in lonely and "characters_rev" in lonely
+    assert any(r["privilege"] == "test" for r in rows)  # no rehearsal live: any officer sees the bench
+    open_test_run(w.reg, w.rs, test_by=OWNER)  # someone else's rehearsal: its puppets are theirs
+    rows = w.c.get("/api/members", headers=h).json()["rows"]
+    assert not any(r["privilege"] == "test" for r in rows)
+    assert not any(r.get("test") for r in w.c.get("/api/absences", headers=h).json()["rows"])
+
+
+def test_members_save_refuses_only_the_stale_member(w):
+    a, b = member(w, 0), member(w, 1, cls="Mage", spec="Fire")
+    h = as_user(w, OFFICER)
+    rows = {r["uid"]: r for r in w.c.get("/api/members", headers=h).json()["rows"]}
+    w.reg.save_character_table(a.discord_id, [{"label": a.main.label, "cls": "Priest", "spec": "Discipline"}], a.display_name)  # a changes meanwhile
+    r = w.c.post("/api/members/save", json={"rows": [
+        {"uid": str(a.discord_id), "rev": rows[str(a.discord_id)]["characters_rev"], "characters": [{"label": a.main.label, "cls": "Priest", "spec": "Shadow"}]},
+        {"uid": str(b.discord_id), "rev": rows[str(b.discord_id)]["characters_rev"], "characters": [{"label": b.main.label, "cls": "Mage", "spec": "Frost", "main": True, "rank": "raider"}]},
+    ]}, headers=h)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert [x["uid"] for x in d["refused"]] == [str(a.discord_id)] and d["refused"][0]["stale"]
+    assert w.reg.members[a.discord_id].main.spec == "Discipline" and w.reg.members[b.discord_id].main.spec == "Frost"
+    assert w.reg.members[b.discord_id].rank == "raider"
+
+
+def test_members_set_rank_is_the_members_and_refuses_an_alt(w):
+    m = member(w)
+    w.reg.add_character(m.discord_id, m.display_name, "Altname", "Mage", "Fire", None, False)
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "rank": "core"}, headers=h)
+    assert r.status_code == 200 and w.reg.members[m.discord_id].rank == "core"
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "character": "Altname", "rank": "raider"}, headers=h)
+    assert r.status_code == 400 and "rank lives on the main" in r.json()["error"]
+    r = w.c.post("/api/members/set", json={"member": m.display_name, "rank": "emperor"}, headers=H | {"X-Oibot-Actor": str(OFFICER)})  # MCP: the same refusal
+    assert r.status_code == 400
+
+
+def test_members_dm_and_me_dm_use_the_one_verb(w):
+    m = member(w)
+    h = as_user(w, OFFICER)
+    assert w.c.post("/api/members/dm", json={"uid": str(m.discord_id), "on": False}, headers=h).json()["message"].endswith("DMs off")
+    assert w.reg.members[m.discord_id].dm_opt_out
+    h = as_user(w, m.discord_id)
+    assert w.c.post("/api/me/dm", json={"on": True}, headers=h).status_code == 200 and not w.reg.members[m.discord_id].dm_opt_out
+
+
+def test_seated_delete_from_the_members_page_frees_the_seat(w):
+    ms = [member(w, i, cls="Mage", spec="Fire") for i in range(5)]
+    ev = real_run(w.reg, w.rs)
+    join(w.reg, w.rs, ev, ms)
+    lock_with_board(w.reg, w.rs, ev, [m.display_name for m in ms])
+    rc.run_team(w.reg, ev)["autofill"] = True
+    m = ms[3]
+    w.reg.add_character(m.discord_id, m.display_name, "Reserva", "Rogue", "Combat", None, False)
+    h = as_user(w, OFFICER)
+    body = {"rows": [{"uid": str(m.discord_id), "deletes": [m.main.label]}]}
+    p = w.c.post("/api/members/save", json={**body, "preview": True}, headers=h).json()
+    assert any("handed back" in x for x in p["ripple"]) and ev.seat_of(m)
+    assert w.c.post("/api/members/save", json=body, headers=h).status_code == 200
+    assert ev.seat_of(m) is None and w.bot.fills
+
+
+# ---------------------------------------------------------------- absences
+
+def test_absence_from_and_for_how_long_with_preview(w):
+    m = member(w)
+    h = as_user(w, m.discord_id)
+    meta = w.c.get("/api/meta", headers=h).json()
+    assert meta["durations"][0] == {"days": 1, "label": "1 day"} and meta["absence_reason_max"] == ABSENCE_REASON_MAX
+    start = (w.reg.now_local().date() + timedelta(days=5)).isoformat()
+    p = w.c.post("/api/me/absence", json={"start": start, "days": 3, "preview": True}, headers=h).json()
+    assert p["preview"] and p["end"] == (w.reg.now_local().date() + timedelta(days=7)).isoformat() and p["span"] and not w.reg.members[m.discord_id].absences
+    assert w.c.post("/api/me/absence", json={"start": start, "days": 3, "reason": "trip"}, headers=h).status_code == 200
+    r = w.c.post("/api/me/absence", json={"start": start, "days": 1, "preview": True}, headers=h)
+    assert r.status_code == 400 and "already away" in r.json()["error"]
+    r = w.c.post("/api/me/absence", json={"start": (w.reg.now_local().date() + timedelta(days=30)).isoformat(), "days": 1, "reason": "x" * 300}, headers=h)
+    assert r.status_code == 400 and f"at most {ABSENCE_REASON_MAX}" in r.json()["error"]
+
+
+def test_im_back_preview_then_clear_on_the_web(w):
+    m = member(w)
+    ev = real_run(w.reg, w.rs)
+    day = rc.run_day(w.reg, ev)
+    h = as_user(w, m.discord_id)
+    assert w.c.post("/api/me/absence", json={"start": day, "days": 1}, headers=h).status_code == 200
+    assert ev.signups[str(m.discord_id)].source == "absence"
+    p = w.c.post("/api/me/absence/clear", json={"start": day, "preview": True}, headers=h).json()
+    assert p["preview"] and "re-opens" in p["lines"][0] and w.reg.members[m.discord_id].absences
+    r = w.c.post("/api/me/absence/clear", json={"start": day}, headers=h)
+    assert r.status_code == 200 and str(m.discord_id) not in ev.signups and not w.reg.members[m.discord_id].absences
+    h = as_user(w, OFFICER)
+    w.reg.add_absence(m.discord_id, day, None, "x", "Officer")
+    r = w.c.post("/api/members/absence/clear", json={"uid": str(m.discord_id), "start": day}, headers=h)
+    assert r.status_code == 200 and not w.reg.members[m.discord_id].absences
+
+
+def test_absences_table_carries_the_span(w):
+    m = member(w)
+    start = (w.reg.now_local().date() + timedelta(days=2)).isoformat()
+    w.reg.add_absence(m.discord_id, start, None, "why", "Officer")
+    row = next(r for r in w.c.get("/api/absences", headers=as_user(w, OFFICER)).json()["rows"] if r["uid"] == str(m.discord_id))
+    assert row["span"] == w.reg.span_label(start, start) and row["reason"] == "why" and row["by"] == "Officer"
+
+
+# ---------------------------------------------------------------- the owner (D50)
+
+def test_owner_route_is_the_owners_and_never_mcp(w):
+    m = member(w)
+    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=H)
+    assert r.status_code == 403 and "MCP" in r.json()["error"]
+    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=as_user(w, OFFICER))
+    assert r.status_code == 403 and w.reg.config.owner_discord_id == OWNER
+    h = as_user(w, OWNER)
+    info = w.c.get("/api/owner", headers=h).json()
+    assert info["may_transfer"] and any(c["uid"] == str(m.discord_id) for c in info["candidates"])
+    p = w.c.post("/api/owner", json={"uid": str(m.discord_id), "preview": True}, headers=h).json()
+    assert "becomes the owner" in p["message"] and "**" not in p["message"]
+    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
+    assert r.status_code == 200, r.text
+    assert w.reg.config.owner_discord_id == m.discord_id and not w.bot.dms and not w.bot.sent_dms
+
+
+def test_owner_route_refuses_an_outsider_and_a_bot(w):
+    m = real(w.reg, 0)  # not in the server
+    h = as_user(w, OWNER)
+    r = w.c.post("/api/owner", json={"uid": str(m.discord_id), "preview": True}, headers=h)
+    assert r.status_code == 400 and "not in" in r.json()["error"]
+    w.bot.admit(m, bot=True)
+    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
+    assert r.status_code == 400 and "bot" in r.json()["error"] and w.reg.config.owner_discord_id == OWNER
+
+
+# ---------------------------------------------------------------- rank / confirm through THE character verb (review fixes)
+
+def test_members_set_refuses_a_character_that_isnt_theirs(w):
+    """A `character` that doesn't exist used to fall back to the main and set its rank without saying so."""
+    m = member(w)
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "character": "Nobodyhere", "rank": "core"}, headers=h)
+    assert r.status_code == 400 and "no active character named Nobodyhere" in r.json()["error"]
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "character": "Nobodyhere", "confirm": True}, headers=h)
+    assert r.status_code == 400 and "no active character named Nobodyhere" in r.json()["error"]
+    mm = w.reg.members[m.discord_id]
+    assert mm.rank == "trial" and not mm.main.confirmed_by
+
+
+def test_members_set_and_admin_confirm_are_one_table_save(w, monkeypatch):
+    from oibot_gm import discord_people
+
+    calls = []
+    verb = discord_people.save_characters
+
+    async def spy(*a, **kw):
+        calls.append(a[3])
+        return await verb(*a, **kw)
+    monkeypatch.setattr(discord_people, "save_characters", spy)
+    m = member(w)
+    w.reg.add_character(m.discord_id, m.display_name, "Newmainy", "Mage", "Fire", None, False)
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "main": "Newmainy", "rank": "core", "confirm": True}, headers=h)
+    assert r.status_code == 200, r.text
+    assert calls == [[{"label": "Newmainy", "main": True}, {"label": "Newmainy", "rank": "core"}, {"label": "Newmainy", "confirm": True}]]
+    mm = w.reg.members[m.discord_id]
+    assert mm.main.label == "Newmainy" and mm.rank == "core" and mm.main.confirmed_by
+    other = mm.characters[0] if mm.characters[0].label != "Newmainy" else mm.characters[1]
+    r = w.c.post("/api/admin/confirm", json={"uid": str(m.discord_id), "label": other.label}, headers=h)
+    assert r.status_code == 200 and r.json()["message"] == f"confirmed {other.label}"
+    assert calls[-1] == [{"label": other.label, "confirm": True}]
+    r = w.c.post("/api/admin/confirm", json={"uid": str(m.discord_id), "label": other.label}, headers=h)
+    assert r.status_code == 400 and "already confirmed" in r.json()["error"]
+    audits = [t for _lvl, t in w.bot.ops.lines if "Newmainy" in t]
+    assert len(audits) == 1, f"one audit line for the one save: {w.bot.ops.lines}"
+
+
+def test_admin_confirm_refuses_a_shared_planned_label(w):
+    w.reg.set_plan(9_100_000_000_000_001, "Plannerone", "Priest", "Holy", None, "main")
+    w.reg.set_plan(9_100_000_000_000_002, "Plannertwo", "Priest", "Holy", None, "main")
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/admin/confirm", json={"label": "Priest (Holy)"}, headers=h)
+    assert r.status_code == 400 and "2 members plan" in r.json()["error"]
+
+
+# ---------------------------------------------------------------- review fixes (the C fixer)
+
+def test_member_get_hides_another_officers_puppet(w):
+    """GET /api/member applies the same puppet filter as /api/members and /api/absences."""
+    p = w.reg.test_members()[0]
+    h = as_user(w, OFFICER)
+    assert w.c.get(f"/api/member?name={p.discord_id}", headers=h).status_code == 200  # no rehearsal live: any officer
+    open_test_run(w.reg, w.rs, test_by=OWNER)
+    r = w.c.get(f"/api/member?name={p.discord_id}", headers=h)
+    assert r.status_code == 400 and r.json()["error"] == "unknown member"
+    assert w.c.get(f"/api/member?name={p.discord_id}", headers=H).status_code == 200  # the owner's token: the owner may change it
+
+
+def test_mcp_rank_and_confirm_need_the_actor_header(w):
+    """D8: from MCP a rank or a confirmation needs X-Oibot-Actor naming an officer — /api/members/set, /api/members/save
+    (checked before any member saves) and /api/admin/confirm; previews and the rest of a table don't."""
+    m, n = member(w, 0), member(w, 1, cls="Mage", spec="Fire")
+    n_label = n.main.label
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "rank": "core"}, headers=H)
+    assert r.status_code == 403 and "X-Oibot-Actor" in r.json()["error"] and w.reg.members[m.discord_id].rank == "trial"
+    r = w.c.post("/api/admin/confirm", json={"uid": str(m.discord_id), "label": m.main.label}, headers=H)
+    assert r.status_code == 403 and not w.reg.members[m.discord_id].main.confirmed_by
+    r = w.c.post("/api/members/save", json={"rows": [{"uid": str(n.discord_id), "characters": [{"label": n_label, "cls": "Mage", "spec": "Frost"}]},
+                                                     {"uid": str(m.discord_id), "characters": [{"label": m.main.label, "cls": "Priest", "spec": "Holy", "rank": "core"}]}]}, headers=H)
+    assert r.status_code == 403 and w.reg.members[n.discord_id].main.spec == "Fire", "refused before the first member saved"
+    r = w.c.post("/api/members/save", json={"preview": True, "rows": [{"uid": str(m.discord_id), "characters": [{"label": m.main.label, "cls": "Priest", "spec": "Holy", "rank": "core"}]}]}, headers=H)
+    assert r.status_code == 200 and r.json()["preview"]
+    r = w.c.post("/api/members/save", json={"rows": [{"uid": str(n.discord_id), "characters": [{"label": n_label, "cls": "Mage", "spec": "Frost"}]}]}, headers=H)
+    assert r.status_code == 200 and w.reg.members[n.discord_id].main.spec == "Frost"  # a respec isn't a decision about a person
+    actor = H | {"X-Oibot-Actor": str(OFFICER)}
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "rank": "core", "confirm": True}, headers=actor)
+    assert r.status_code == 200, r.text
+    mm = w.reg.members[m.discord_id]
+    assert mm.rank == "core" and mm.main.confirmed_by
+    assert any("[mcp]" in t and "rank core" in t for _lvl, t in w.bot.ops.lines)
+    r = w.c.post("/api/members/set", json={"uid": str(m.discord_id), "rank": "raider"}, headers=H | {"X-Oibot-Actor": str(m.discord_id)})
+    assert r.status_code == 403 and "not an officer" in r.json()["error"]  # the header never widens what the token may do
+
+
+def test_mcp_plain_change_refuses_a_rank_without_the_actor(w, monkeypatch):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp, ConfigRequest
+
+    m = member(w)
+    w.bot.ctx = types.SimpleNamespace(provider=object())
+    monkeypatch.setattr(configops, "parse", lambda *a, **k: ConfigRequest(kind="change", reply="", ops=[
+        ConfigOp(op="rank", member=m.display_name, value="core"), ConfigOp(op="dm", member=m.display_name, value="off")]))
+    d = w.c.post("/api/ops/change", json={"text": "make them core and DMs off"}, headers=H).json()
+    assert "X-Oibot-Actor" in str(d) and "rank" not in " ".join(d.get("describe") or d.get("lines") or []).lower()
+    d2 = w.c.post("/api/ops/change", json={"token": d["token"], "apply": True}, headers=H).json()
+    assert w.reg.members[m.discord_id].rank == "trial" and w.reg.members[m.discord_id].dm_opt_out, d2
+
+
+def test_a_host_superuser_hands_over_a_guild_they_host_from_the_site(w, monkeypatch):
+    su = 424_242_424_242_424_242
+    monkeypatch.setenv("OIBOT_SUPERUSERS", str(su))
+    w.bot.directory.members[(1, su)] = person(su)
+    m = member(w)
+    h = as_user(w, su)
+    info = w.c.get("/api/owner", headers=h).json()
+    assert info["may_transfer"] and any(c["uid"] == str(m.discord_id) for c in info["candidates"])
+    p = w.c.post("/api/owner", json={"uid": str(m.discord_id), "preview": True}, headers=h).json()
+    assert "you act as the host here" in p["message"] and "You lose owner rights" not in p["message"]
+    r = w.c.post("/api/owner", json={"uid": str(m.discord_id)}, headers=h)
+    assert r.status_code == 200, r.text
+    assert w.reg.config.owner_discord_id == m.discord_id and not w.bot.dms and not w.bot.sent_dms
+
+
+def test_mcp_member_tools_send_the_actor_only_for_a_rank_or_a_confirm(monkeypatch):
+    import httpx
+
+    from oibot_gm import mcp_server as ms
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.url.path, request.headers.get("x-oibot-actor")))
+        return httpx.Response(200, json={"message": "ok"})
+
+    ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
+    try:
+        monkeypatch.setenv(ms.ACTOR_ENV, str(OFFICER))
+        ms.set_member("Kessa", main="Kessalt")
+        ms.set_member("Kessa", rank="core")
+        ms.set_member("Kessa", confirm=True)
+        ms.save_characters("Kessa", [{"label": "Kessa", "cls": "Priest", "spec": "Shadow"}])
+        ms.save_characters("Kessa", [{"label": "Kessa", "cls": "Priest", "spec": "Holy", "rank": "core"}])
+    finally:
+        ms.use(None)
+    assert [a for _p, a in calls] == [None, str(OFFICER), str(OFFICER), None, str(OFFICER)]

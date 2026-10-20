@@ -13,7 +13,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
-from . import guild_routing, ops as ops_mod
+from . import guild_routing, inbox, ops as ops_mod
 from .profiles import GameProfile
 from .registry import is_superuser, GUILD_KEY_RE, RANKS, Registry, RegistryError
 from .store import GitStore
@@ -243,6 +243,94 @@ def is_owner(interaction: discord.Interaction, reg: Registry) -> bool:
 
 from .constants import ROLES, TEAL  # noqa: E402
 ROLE_CHOICES = [app_commands.Choice(name=r, value=r) for r in ROLES]
+CHAR_ACTION_CHOICES = [app_commands.Choice(name=n, value=v) for v, n in (("spec", "Spec"), ("main", "Main"), ("flex", "Flex (extra roles)"), ("retire", "Retire"),
+                                                                          ("delete", "Delete"), ("name", "Name a planned character"), ("add", "Add an alt"))]
+ROSTER_CHAR_CHOICES = [app_commands.Choice(name=n, value=v) for v, n in (("spec", "Spec"), ("main", "Main"), ("flex", "Flex (extra roles)"), ("rank", "Rank"),
+                                                                          ("retire", "Retire"), ("delete", "Delete"))]
+
+
+def overview_embed(reg: Registry, ico, *, officer: bool) -> discord.Embed | None:
+    """/roster overview: who plans what. Role lines are icon + have/need (the iconography rule); buffs are icon rows
+    (Nobody / Only one, a provider's name after the icon); the regulars get ONE FIELD PER SCHEDULE (no 1000-character
+    truncation of the whole block) — officers only: recruit candidates and who is away are planning data. None = no
+    mains yet."""
+    from . import raidcycle as rc
+
+    s = reg.plan_summary()
+    if not s["mains"]:
+        return None
+    e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=TEAL)
+    for cls, lines in sorted(s["by_class"].items(), key=lambda kv: -len(kv[1])):
+        e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
+    # every raid's size at once (no typed size: the wizard rule); the recruiting ask is against the biggest
+    sized = sorted(((int(reg.raid_def(rid).get("size") or 20), rid) for rid in reg.profile.raids), reverse=True) or [(20, None)]
+    for n, rid in sized:
+        bounds = reg.role_bounds(rid, n)
+        role_lines = []
+        for r in ROLES:
+            have = s["by_role"].get(r, 0)
+            need_min = bounds.get(r, {}).get("min", 0)
+            flex = s["flex"].get(r, [])
+            mark = "🟢" if not need_min or have >= need_min else ("🟡" if have + len(flex) >= need_min else "🔴")
+            role_lines.append(f"{mark} {ico('role', r)} **{have}**" + (f" / {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
+        name = reg.raid_def(rid).get("name", rid) if rid else "a raid"
+        e.add_field(name=f"Roles vs {name} ({n})", value="\n".join(role_lines), inline=True)
+    n, rid = sized[0]
+    bounds = reg.role_bounds(rid, n)
+    ids = {b.short: b.id for b in reg.profile.party_buffs()}
+    missing = [b for b, who in s["providers"].items() if not who]
+    thin = [(b, who[0]) for b, who in s["providers"].items() if len(who) == 1]
+    if missing or thin:
+        val = ""  # icons only (the iconography rule): the buff icon carries the name; a provider's name is a member, not a label
+        if missing:
+            val += "Nobody: " + " ".join(ico('buff', ids.get(b, '')) or b for b in missing) + "\n"  # the name only stands in for a missing emoji
+        if thin:
+            val += "Only one: " + " · ".join(f"{ico('buff', ids.get(b, '')) or b} {who}" for b, who in thin)
+        e.add_field(name="Buff coverage", value=val[:1000], inline=False)
+    if officer:
+        from .raid_views import coverage_line, forecast_lines
+
+        cover = rc.series_outlook(reg)
+        many = len({cv["raid"] for cv in cover}) > 1
+        room = 25 - len(e.fields) - (1 if s["alts"] else 0)  # an embed holds 25 fields; the classes, roles and alts keep theirs
+        shown = cover[:room] if len(cover) <= room else cover[:max(0, room - 1)]
+        for cv in shown:  # one field per schedule
+            body = "\n".join([coverage_line(ico, cv)] + forecast_lines(ico, cv))
+            e.add_field(name=f"Regulars · {cv['raid_name'] + ' · ' if many else ''}{cv['name']}"[:256], value=body[:1000] or "—", inline=False)
+        if len(shown) < len(cover):
+            e.add_field(name="Regulars · more", value=f"{len(cover) - len(shown)} more schedule(s) — the Rosters page's Regulars tab has them all", inline=False)
+    if s["alts"]:
+        e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
+    asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
+    e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
+    return e
+
+
+def overview_post_view(reg: Registry, ico) -> discord.ui.View:
+    """The officer's *Post to #roster* under their ephemeral overview: the officer version, posted in the roster channel
+    (officer standing re-checked at the press)."""
+    view = discord.ui.View(timeout=600)
+    btn = discord.ui.Button(label="Post to the roster channel", style=discord.ButtonStyle.secondary)
+
+    async def press(i: discord.Interaction) -> None:
+        if not is_officer(i, reg):
+            await i.response.send_message("Officers only.", ephemeral=True)
+            return
+        ch = i.client.get_channel(reg.config.roster_channel_id) if reg.config.roster_channel_id else None
+        e = overview_embed(reg, ico, officer=True)
+        if ch is None or e is None:
+            await i.response.send_message("No roster channel the bot can see — the owner sets it with `/gm config roster-channel`.", ephemeral=True)
+            return
+        try:
+            await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            await i.response.send_message(f"Couldn't post in <#{ch.id}> — check the bot's permissions there.", ephemeral=True)
+            return
+        await i.response.edit_message(view=None)
+        await i.followup.send(f"✅ Posted in <#{ch.id}>.", ephemeral=True)
+    btn.callback = press  # type: ignore[method-assign]
+    view.add_item(btn)
+    return view
 
 
 def char_line(ico, c) -> str:
@@ -318,7 +406,7 @@ def registration_card(reg: Registry) -> discord.Embed:
                       description=f"{apply}\n\n"
                                   "**Members:**\n**Register / plan my main** — class, spec, optional offspec, and the name if the character exists (leave it blank before launch; your role follows the spec).\n"
                                   "**Add an alt** — same flow for an alt.\n**My status** — what the bot has for you.\n\n"
-                                  "Keyboard route: `/apply`, `/me plan …`, `/me char …`, `/me view`. Away for a while? `/me absent add` or the card in the absences channel.")
+                                  "Keyboard route: `/apply`, `/me plan …`, `/me char`, `/me view`. Away for a while? `/me absent add` or the card in the absences channel.")
     e.set_footer(text="Your Discord account is your identity. Newcomers apply first; members register and add alts.")
     return e
 
@@ -604,69 +692,17 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["register"](interaction, reg, slot="alt", plan_only=True)
 
-    @plan.command(name="roles", description="Extra roles your main can play besides its spec (flex); or tell the bot, per character")
-    @app_commands.choices(flex1=ROLE_CHOICES, flex2=ROLE_CHOICES, flex3=ROLE_CHOICES)
-    @app_commands.describe(flex1="a role your main can also play", flex2="another", flex3="another")
-    async def plan_roles(interaction: discord.Interaction, flex1: app_commands.Choice[str] | None = None, flex2: app_commands.Choice[str] | None = None, flex3: app_commands.Choice[str] | None = None):
-        # no `primary` argument: the primary role follows the main's spec and was discarded (the wizard rule — never ask
-        # for a value the command won't use); the flex roles are fixed Choices, a widget Discord renders itself
-        reg, interaction = await need(interaction)
-        if not reg:
-            return
-        flex = [f.value for f in (flex1, flex2, flex3) if f]
-        try:
-            m = reg.set_roles(interaction.user.id, interaction.user.display_name, "", flex)
-        except RegistryError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        main_role, flex_now = reg.roles_of(m)  # the primary follows the main's spec; the rest is flex on the main
-        await interaction.response.send_message(f"✅ Roles: **{main_role or '?'}**" + (f", also {', '.join(flex_now)}" if flex_now else " — no flex roles"), ephemeral=True)
-        await ops.emit(reg.config, "info", f"{m.display_name} roles: {main_role or '?'}" + (f" (+{', '.join(flex_now)})" if flex_now else ""))
-
-
-    # ---------------- /char
-    char = app_commands.Group(name="char", description="Manage your characters", parent=me)
-
-    @char.command(name="name", description="At launch: give your planned character its real name")
-    async def char_name(interaction: discord.Interaction):
+    # ---------------- /me char: ONE command (a Group can't itself be invoked); the Choice pre-seeds the hub and skips its
+    # action row (design §3.3 cluster A). Spec · Main · Flex · Retire · Delete · Name · Add — every write is a one-row table
+    # through THE character verb (discord_people.save_characters), so a seated character's retire frees the seat and asks
+    # the bench, a respec rewrites the sheets, exactly as on the Me page.
+    @me.command(name="char", description="Your characters: spec, main, extra roles, retire, delete, name a planned one, add an alt")
+    @app_commands.describe(action="what to change (leave empty to see your characters and pick)")
+    @app_commands.choices(action=CHAR_ACTION_CHOICES)
+    async def me_char(interaction: discord.Interaction, action: app_commands.Choice[str] | None = None):
         reg, interaction = await need(interaction)
         if reg:
-            await FLOWS["char_name"](interaction, reg)
-
-    @char.command(name="add", description="Register another character (alt)")
-    async def char_add(interaction: discord.Interaction):
-        reg, interaction = await need(interaction)
-        if reg:
-            await FLOWS["register"](interaction, reg, slot="alt")
-
-    @char.command(name="main", description="Make one of your characters your main (rank follows you)")
-    async def char_main(interaction: discord.Interaction):
-        reg, interaction = await need(interaction)
-        if reg:
-            await FLOWS["char_main"](interaction, reg)
-
-    @char.command(name="spec", description="Change a character's spec/offspec")
-    async def char_spec(interaction: discord.Interaction):
-        reg, interaction = await need(interaction)
-        if reg:
-            await FLOWS["char_spec"](interaction, reg)
-
-    @char.command(name="retire", description="Retire a character (history is kept)")
-    async def char_retire(interaction: discord.Interaction):
-        reg, interaction = await need(interaction)
-        if reg:
-            await FLOWS["char_retire"](interaction, reg)
-
-    @char.command(name="list", description="Show your registered characters")
-    async def char_list(interaction: discord.Interaction):
-        reg, interaction = await need(interaction)
-        if not reg:
-            return
-        m = reg.members.get(interaction.user.id)
-        if not m or not m.active():
-            await interaction.response.send_message("No characters yet — use /register.", ephemeral=True)
-            return
-        await interaction.response.send_message("\n".join(char_line(ico, c) for c in m.active()), ephemeral=True)
+            await FLOWS["member_char"](interaction, reg, action=action.value if action else None)
 
 
     # ---------------- /me absent, /me
@@ -686,24 +722,23 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         await show_my_absences(interaction, reg)
 
-    @absent.command(name="clear", description="Remove one of your absences (pick it from the list)")
+    @absent.command(name="clear", description="I'm back: clear one of your absences — its sheets re-open for you")
     async def absent_clear(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if not reg:
             return
-        await show_my_absences(interaction, reg)
+        await FLOWS["absence_clear"](interaction, reg)
 
     async def show_my_absences(interaction: discord.Interaction, reg: Registry) -> None:
-        """Your upcoming absences, each with its own Clear button — the same view as the absences card's *My absences*."""
-        from .discord_pool import clear_absences_view
+        """Your upcoming absences, each with its own Clear button — the same reply as the absences card's *My absences*."""
+        from .discord_pool import clear_absences_view, my_absences_text
 
         m = reg.members.get(interaction.user.id)
         ups = m.upcoming_absences(reg.now_local().date().isoformat()) if m else []
         if not ups:
             await interaction.response.send_message("No upcoming absences. Add one with `/me absent add`.", ephemeral=True)
             return
-        lines = [f"• {reg.span_label(a.start, a.end)}" + (f" — {a.reason}" if a.reason else "") for a in ups]
-        await interaction.response.send_message("\n".join(lines)[:1900], view=clear_absences_view(reg, m, ups[:5]), ephemeral=True)
+        await interaction.response.send_message(my_absences_text(reg, ups), view=clear_absences_view(reg, m, ups), ephemeral=True)
 
 
     @me.command(name="wishlist", description="Your wishlist: add or remove items, place and main/offspec (the Me page for long lists)")
@@ -719,7 +754,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await FLOWS["register"](interaction, reg, mode="apply")
 
     @me.command(name="view", description="Your plan, characters and upcoming absences")
-    async def me(interaction: discord.Interaction):
+    async def me_view(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if not reg:
             return
@@ -737,8 +772,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if regular:  # the recurring schedules they're a regular of, as a person reads them (never a series key)
             e.add_field(name="Regular on", value="\n".join(f"{reg.series_label(k)} ({c.label})" for k, c in regular)[:1000], inline=False)
         primary, flex = reg.roles_of(m)
-        e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me plan roles` to add more", inline=True)
-        e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)
+        e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me char` → Flex adds more", inline=True)
+        e.add_field(name="DMs", value=("off — " + inbox.DM_OFF_SENTENCE if m.dm_opt_out else "on") + "\n-# `/me dms` switches them", inline=True)
+        box = inbox.inbox_lines(reg, interaction.client.raids.store(reg), m.discord_id) if hasattr(interaction.client, "raids") else []
+        if box:  # asks to answer, then the unread notices (D26: outcomes are told here and on the Me page — never by DM)
+            e.insert_field_at(0, name="Inbox", value="\n".join(box)[:1000], inline=False)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(reg.span_label(a.start, a.end) for a in ups) or "none", inline=True)
         from .loot_ops import guild_ctx, loot_block, member_awards
@@ -758,7 +796,31 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 await FLOWS["regular_step_down"](i, reg)
             btn.callback = step_down
             view.add_item(btn)
+        if reg.notices(m.discord_id, unread=True):  # the inbox's notices: read here, marked read with one press
+            view = view or discord.ui.View(timeout=600)
+            seen = discord.ui.Button(label="Mark notices read", style=discord.ButtonStyle.secondary)
+
+            async def mark_read(i: discord.Interaction) -> None:
+                n = reg.mark_read(i.user.id)
+                await i.response.send_message(f"✅ {n} notice(s) marked read.", ephemeral=True)
+            seen.callback = mark_read
+            view.add_item(seen)
         await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
+
+    @me.command(name="dms", description="DMs from the bot on or off (off: your asks wait on the Me page)")
+    @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
+    async def me_dms(interaction: discord.Interaction, state: app_commands.Choice[str]):
+        """The one member setting that had no Discord control (design B2): Registry.set_dm, the verb the Me page, plain
+        text and MCP share; the reply is the one DM sentence (inbox.DM_ON/OFF_SENTENCE)."""
+        reg, interaction = await need(interaction)
+        if not reg:
+            return
+        if interaction.user.id not in reg.members:
+            await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
+            return
+        on = state.value == "on"
+        line = reg.set_dm(interaction.user.id, on, reg.members[interaction.user.id].display_name)
+        await interaction.response.send_message(f"✅ {line}. " + (inbox.DM_ON_SENTENCE if on else inbox.DM_OFF_SENTENCE), ephemeral=True)
 
     tree.add_command(me)
 
@@ -822,55 +884,29 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg, interaction = await need(interaction)
         if not reg:
             return
-        s = reg.plan_summary()
-        if not s["mains"]:
+        officer_view = is_officer(interaction, reg)
+        e = overview_embed(reg, ico, officer=officer_view)
+        if e is None:
             await interaction.response.send_message("Nobody has planned a main yet — point people at the registration card (`/gm config registration-channel`) or `/me plan main`.", ephemeral=True)
             return
-        e = discord.Embed(title=f"{reg.config.name} · plan · {s['mains']} mains", colour=TEAL)
-        for cls, lines in sorted(s["by_class"].items(), key=lambda kv: -len(kv[1])):
-            e.add_field(name=f"{ico('class', cls)} {cls} ({len(lines)})", value="\n".join(lines)[:1000], inline=True)
-        # every raid's size at once (no typed size: the wizard rule); the recruiting ask is against the biggest
-        sized = sorted(((int(reg.raid_def(rid).get("size") or 20), rid) for rid in reg.profile.raids), reverse=True) or [(20, None)]
-        for n, rid in sized:
-            bounds = reg.role_bounds(rid, n)
-            role_lines = []
-            for r in ROLES:
-                have = s["by_role"].get(r, 0)
-                need_min = bounds.get(r, {}).get("min", 0)
-                flex = s["flex"].get(r, [])
-                mark = "🟢" if not need_min or have >= need_min else ("🟡" if have + len(flex) >= need_min else "🔴")
-                # the iconography rule: the role icon stands alone — icon + number (have / need), then who could flex into it
-                role_lines.append(f"{mark} {ico('role', r)} **{have}**" + (f" / {need_min}" if need_min else "") + (f" · flex: {', '.join(flex)}" if flex else ""))
-            name = reg.raid_def(rid).get("name", rid) if rid else "a raid"
-            e.add_field(name=f"Roles vs {name} ({n})", value="\n".join(role_lines), inline=True)
-        n, rid = sized[0]
-        bounds = reg.role_bounds(rid, n)
-        ids = {b.short: b.id for b in reg.profile.party_buffs()}
-        missing = [b for b, who in s["providers"].items() if not who]
-        thin = [(b, who[0]) for b, who in s["providers"].items() if len(who) == 1]
-        if missing or thin:
-            val = ""  # icons only (the iconography rule): the buff icon carries the name; a provider's name is a member, not a label
-            if missing:
-                val += "Nobody: " + " ".join(ico('buff', ids.get(b, '')) or b for b in missing) + "\n"  # the name only stands in for a missing emoji
-            if thin:
-                val += "Only one: " + " · ".join(f"{ico('buff', ids.get(b, '')) or b} {who}" for b, who in thin)
-            e.add_field(name="Buff coverage", value=val[:1000], inline=False)
-        from . import raidcycle as rc
+        # always ephemeral (design §2.8): officers get *Post to #roster* for the officer version, never a public reply by accident
+        view = overview_post_view(reg, ico) if officer_view and reg.config.roster_channel_id else None
+        await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
 
-        officer_view = is_officer(interaction, reg)
-        # regulars coverage per recurring series + the 4-week forecast (the Rosters page's numbers): officer-facing — the
-        # recruit candidates and who is away which week are planning data, so a member's overview leaves the field out
-        cover = rc.series_outlook(reg) if officer_view else []
-        if cover:
-            from .raid_views import coverage_line, forecast_lines
+    @roster.command(name="char", description="A member's characters on their behalf: spec, main, extra roles, rank, retire, delete")
+    @app_commands.describe(member="whose characters", action="what to change (leave empty to see their characters and pick)")
+    @app_commands.choices(action=ROSTER_CHAR_CHOICES)
+    async def roster_char(interaction: discord.Interaction, member: discord.User, action: app_commands.Choice[str] | None = None):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await FLOWS["member_char"](interaction, reg, member=member, action=action.value if action else None)
 
-            many = len({cv["raid"] for cv in cover}) > 1
-            e.add_field(name="Regulars", value="\n".join("\n".join([f"**{cv['raid_name'] + ' · ' if many else ''}{cv['name']}** {coverage_line(ico, cv)}"] + forecast_lines(ico, cv)) for cv in cover)[:1000], inline=False)
-        if s["alts"]:
-            e.add_field(name=f"Alts ({len(s['alts'])})", value=", ".join(f"{w} · {c}" for w, c in s["alts"])[:1000], inline=False)
-        asks = [f"{max(0, bounds[r]['min'] - s['by_role'].get(r, 0))} {r}" for r in ("tank", "healer") if bounds.get(r) and s["by_role"].get(r, 0) < bounds[r]["min"]]
-        e.set_footer(text=(("Recruiting ask: " + ", ".join(asks) + " · ") if asks else "") + "counts use each member's primary role preference, else their main spec's role")
-        await interaction.response.send_message(embed=e, ephemeral=not officer_view)
+    @roster.command(name="back", description="Someone is back early: clear one of their absences — its sheets re-open for them")
+    @app_commands.describe(member="who is back")
+    async def roster_back(interaction: discord.Interaction, member: discord.User):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await FLOWS["absence_clear"](interaction, reg, member=member)
 
     @roster.command(name="add", description="Make someone a regular of a recurring schedule: pick the schedule, member and character")
     @app_commands.describe(member="who to add (optional: pick them in the wizard)")
@@ -946,8 +982,11 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg, interaction = await need(interaction)
         if not reg:
             return
-        if reg.config.owner_discord_id and not is_owner(interaction, reg):
-            await interaction.response.send_message("Only the current owner can transfer ownership.", ephemeral=True)
+        if reg.config.owner_discord_id:  # a transfer: the owner (or a host superuser) picks the person, then one decide screen (D50)
+            if not is_owner(interaction, reg):
+                await interaction.response.send_message("Only the current owner can transfer ownership.", ephemeral=True)
+                return
+            await FLOWS["owner_transfer"](interaction, reg, user=user)
             return
         if not reg.config.owner_discord_id:  # first claim: only the server owner or someone with Manage Server
             m = interaction.user if isinstance(interaction.user, discord.Member) else None

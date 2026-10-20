@@ -343,8 +343,8 @@ def test_roster_overview_has_a_regulars_field(reg, monkeypatch):
                                 response=types.SimpleNamespace(send_message=send_message))
     monkeypatch.setattr(dr, "is_officer", lambda i, r: True)
     asyncio.run(overview.callback(itx))
-    field = next(f for f in said[0]["embed"].fields if f.name == "Regulars")
-    assert field.value.startswith("**Raid nights** 🔴 <role:tank> 1/") and "· 4/" in field.value  # Phase 2: the coverage level dot
+    field = next(f for f in said[0]["embed"].fields if f.name.startswith("Regulars"))  # phase 2 C: one field per schedule
+    assert field.name == "Regulars · Raid nights" and field.value.startswith("🔴 <role:tank> 1/") and "· 4/" in field.value  # the coverage level dot
 
 
 def test_help_readiness_names_regulars_coverage(reg, rs):
