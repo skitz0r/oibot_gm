@@ -503,6 +503,12 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         if bool(t.get("test")) != test:
             raise RunKeyClash(f"{t.get('name') or key} is {'a test run' if t.get('test') else 'a real run'}: "
                                 f"{'a real run' if not test else 'a test run'} can't share it — nothing was opened")
+        mine, theirs = (cutoffs or {}).get("test_by"), t.get("test_by")
+        if test and mine is not None and theirs is not None and str(mine) != str(theirs):
+            # a rehearsal belongs to its tester (its pool, its buttons, its DMs): a second tester never inherits it
+            who = reg.members.get(int(theirs)) if str(theirs).isdigit() else None
+            raise RunKeyClash(f"{who.display_name if who else 'Another officer'} opened a test run at {reg.local12(start)} — "
+                                "join theirs or clear it (nothing was opened)")
         return t
     rd = reg.schedule_def(instance, schedule)
     sched = rd["schedule"]

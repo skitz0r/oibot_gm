@@ -1069,7 +1069,9 @@ on the site — the bot refuses before anything is written and says so: set the 
 can't reach (deleted, or hidden from the bot) is refused the same way, and the message says that is the problem. The
 site's card says all of this before you press.
 A test run never shares a real run's sheet, even when it starts the same minute as one: its key ends in `-test`
-(`bd-1209-1930-test`), and the schedule id `test` is kept for it.
+(`bd-1209-1930-test`), and the schedule id `test` is kept for it. A test run belongs to the officer who opened it:
+a second officer opening one in the same minute is refused — "Tess opened a test run at Tue 9 Dec 7:30 PM — join
+theirs or clear it" — and nothing is opened for them.
 
 **Where its traffic goes.** The test run's officer cards (health, lock, the updates thread) post in **the channel you
 opened it from**, marked 🧪 *Test run* — not in the roster channel (a run opened from the site or MCP uses the roster

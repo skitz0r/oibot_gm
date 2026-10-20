@@ -237,6 +237,24 @@ def test_test_run_cards_post_in_the_asking_channel_with_the_test_badge(reg, rs):
     assert "🧪" not in header_text(_header(reg, real, "Locked", []))
 
 
+def test_a_second_tester_in_the_same_minute_is_refused_never_handed_the_first_ones_run(reg, rs):
+    """Two officers opening a test run in the same minute: the run belongs to whoever was first (its pool, buttons,
+    DMs follow its tester); the second is refused naming the first, and nothing of theirs is written."""
+    bot = TBot(reg, rs)
+    reg.config.signup_channel_id, bot.channels[55] = 55, Chan(55, "signups")
+    for uid, name in ((TESTER, "Tess"), (TESTER + 1, "Other")):
+        reg.members[uid] = reg.member(uid, name, create=True)
+    other = reg.members[TESTER + 1]
+    ev, _ = run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=40, nudge_in=32, lock_in=25, confirm_in=15, dm=False, by="Tess", by_id=TESTER))
+    rosters, sheets = len(reg.config.rosters), len(bot.channels[55].sent)
+    with pytest.raises(RegistryError, match=r"Tess opened a test run at .* join theirs or clear it"):
+        run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=40, nudge_in=32, lock_in=25, confirm_in=15, dm=False, by="Other", by_id=other.discord_id))
+    assert len(reg.config.rosters) == rosters and len(bot.channels[55].sent) == sheets
+    assert str(reg.config.roster(ev.team)["test_by"]) == str(TESTER), "the run is still the first tester's"
+    again, _ = run(bot.open_test_run(reg, rs, "barrow_deeps", start_in=40, nudge_in=32, lock_in=25, confirm_in=15, dm=False, by="Tess", by_id=TESTER))
+    assert again.key == ev.key, "the same tester asking again finds their own run"
+
+
 def header_text(item) -> str:
     return item.content if isinstance(item, discord.ui.TextDisplay) else item.children[0].content
 
