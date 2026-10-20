@@ -126,15 +126,19 @@ def test_the_guards_hold_in_the_new_key_space(reg, rs, monkeypatch):
     assert real.discord_id == 4242 and tester.discord_id == TESTER
     with pytest.raises(RegistryError, match="test run"):
         run(bot.set_answer(reg, rs, ev, reg.members[4242], "in", None, by="Officer", by_id=OWNER))
-    # /raid set: the command's own path (SetWizard → Confirm → set_answer), on the only live run — a test run
+    # /raid set: the command's own path, on the only live run — a test run. Since the inbox build (§5.40) the SetWizard
+    # offers only what applies (rc.member_actions → rc.on_bench_side): a real member gets no action on a rehearsal at
+    # all, so it stops before any Confirm (and do_member_action refuses the same if one were forced)
     h = Harness(reg, rs, client=bot)
 
     async def go():
         await FLOWS["raid_set"](h.command(), reg, member=SimpleNamespace(id=4242, display_name="Realperson"), status="in")
-        assert h.buttons() == ["Confirm", "Cancel"], h.text
-        await h.press("Confirm")
+        assert h.screen.get("view") is None or "Confirm" not in h.buttons(), h.text
     run(go())
-    assert "❌" in h.text and "is a test run" in h.text, h.text
+    assert "Nothing to set for Realperson" in h.text, h.text
+    from oibot_gm import inbox
+    with pytest.raises(RegistryError, match="test bench"):
+        run(inbox.do_member_action(bot, reg, rs, ev, reg.members[4242], "join", by="Officer", by_id=OWNER))
     assert "4242" not in ev.signups, "nothing written on the rehearsal's sheet"
     assert rc.open_run(reg, rs, "barrow_deeps", ev.start, by="scheduler").team == ev.team.removesuffix("-test"), "the real run at that minute is its own"
 

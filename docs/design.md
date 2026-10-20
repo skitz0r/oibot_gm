@@ -2166,6 +2166,12 @@ subscribers carry `(guild key, officer)`; `test:<run>` is published `officers=Tr
 test run key. *Frontend:* `TestFeed` hides on 401 / 403 (never "Nothing yet") and shows a load error otherwise; the
 Rosters Test tab renders the feed only for officers.
 
+**Merged with §5.39–§5.41 (2026-10-19).** A test run opened in the minute a cleared rehearsal held starts a minute
+later (`rc.closed_run_refusal` on `rc.event_key(…, test=True)` — the '-test' key space); `open_run` checks the test key
+when cutoffs are given. The puppet digest (`send_digest`) is listed in the DM-rule lint as an ask (the tester answers
+for the puppets). `/raid set` on a test run offers a real member nothing (§5.40's `rc.on_bench_side`), so the refusal
+comes before any Confirm; `do_member_action` refuses the same. The Test tab's sheets carry the on-behalf `people` list.
+
 ## 6. Architecture
 
 ```mermaid

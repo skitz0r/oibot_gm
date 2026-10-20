@@ -533,7 +533,8 @@ DM_CALL_SITES = {
     ("discord_registry.py", "settle_application"): "a decision the applicant waits on",
     ("discord_loot_surface.py", "_loot_after_end_dm"): "officers must act: record in-game awards that arrived after the end",
     ("ops.py", "emit"): "the owner's error alert (one per distinct error per 30 min)",
-    ("discord_bot.py", "claim_guild"): "the host's security alert: a new server claimed this bot",
+    ("discord_bot.py", "claim_guild"): "the host's security alert: a new server claimed this bot (OIBOT_SUPERUSERS only)",
+    ("discord_raid.py", "send_digest"): "an ask: a test run's puppet asks, batched into one DM to the tester who answers for them (D20)",
 }
 
 
