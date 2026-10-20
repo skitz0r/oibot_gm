@@ -39,6 +39,7 @@ export interface LockPreview { board: Board; consequence: string; leftovers: str
 export interface OpenPreview {
   kind: "scheduled" | "adhoc"; schedule: string | null; schedule_name: string; key: string; start: string; label: string; when_note: string;
   exists: string | null; channel: number | null; channel_name?: string | null; rules: string; past: boolean;
+  closed?: "done" | "cancelled" | null; refusal?: string | null;  // that time's run is closed: Open is refused (rc.closed_run_refusal)
 }
 
 /** One upcoming run on the Rosters page (web/api.py rosters_data). */

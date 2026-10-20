@@ -871,7 +871,8 @@ asks (`release_prelock_asks`, `released`); the scheduler does the same at lock t
 `expired`). `FillButton` says "That question closed when the roster locked" for such an ask.
 
 **D3 after lock.** `run_fill(..., approved_by=None)`: on its own (scheduler, a freed seat, an answer) the engine sends
-role swaps only on an ad hoc run (`rc.auto_swaps`); on a recurring run it sends same-role asks and, when only a swap
+role swaps only on an ad hoc run (`rc.auto_swaps`; since D22, 2026-10-19, never — ad hoc runs wait too and their lock
+card carries the same Suggested block); on a recurring run it sends same-role asks and, when only a swap
 could cover a gap (`rc.withheld_swaps`), sets `fill_state="suggested"`, posts one thread line and refreshes the lock
 card, whose **Suggested** block (roster 1, recurring) lists the plan with **Ask** / **Suggest…**. "suggested" doesn't
 stop the engine: the scheduler runs `run_fill` in every `fill_state` but `exhausted` (a seat freed by an expired
@@ -1688,8 +1689,8 @@ The three loot builds (§5.35 core, §5.36 Discord surface, §5.37 web / plain t
 
 Out of `out/dual_interface_design.md` §3.2 (B2 atomic check-and-set / expiry / levers, B4, B6, B7, B8) and §6 Phase 2
 rows 1, 4, 5, 6, with the owner's decisions (D15 Remind + Withdraw, no Extend; D17 no leftovers-to-ad-hoc button; D18
-pause autofill per run; D19 no reopen of a cancelled run; D22 ad hoc runs wait for an officer before a role swap — the
-D3 rule already covers every run kind) and the DM rule (no courtesy / FYI DMs: outcomes are the card edited and the Me
+pause autofill per run; D19 no reopen of a cancelled run; D22 ad hoc runs wait for an officer before a role swap — `rc.auto_swaps`
+is False for every run kind, so the D3 rule covers ad hoc runs too) and the DM rule (no courtesy / FYI DMs: outcomes are the card edited and the Me
 page's notices).
 
 **Races, each closed under one lock or on one thread.**
@@ -1804,6 +1805,22 @@ too.
 
 Tests: `tests/test_raid_night.py` (each race, recovery, expiry ask-only, DM failure, remind, withdraw, pause, reopen,
 open preview across DST, cancel without DMs, every new route) and `tests/test_raid_night_flows.py` (the wizard screens).
+
+**Final review fixes (2026-10-19).** (1) `confirm_one` re-reads the seat (`ev.seat_of`) before every ask: the lock's
+fan-out lists the seats once and runs outside `board_lock`, so a seat freed meanwhile (a drag to the bank, Can't make
+it, an absence) gets no Confirm / Can't ask. (2) `rc.closed_run_refusal`: opening at the time of a cancelled or ended
+run is refused (`open_run`, before `ensure_run`, so no roster entry comes back; `open_event` guards too) instead of
+handing the closed run back as "opened"; `open_preview` carries `closed` + `refusal`, the wizard's confirm and the
+Rosters page show it and offer no Open; a test run opened in the minute a cleared rehearsal held starts a minute later.
+(3) plain text's "use it" compares the board rev stored with the proposal (`ev.last_proposal.rev`, and the in-memory
+one) and refuses a proposal solved on an older board. (4) Every ask closed without the member's press ends with its own
+card edited (`RaidMixin.close_ask_card`): their No thanks / callout / absence (`release_asks_of`), expiry
+(`expire_fill_asks` in the scheduler), and pre-lock asks closed at lock (`lock_run`, `close_prelock_asks`).
+(5) `rc.expire_confirmation_asks` returns (member id, name): the scheduler edits the Confirm card of the member found
+by id, never by display name. (6) The guild-claim DM goes to the host's superusers only (`OIBOT_SUPERUSERS`), never to
+other guilds' owners. (7) D22 in code: `rc.auto_swaps` is False for every run kind, and the lock card's Suggested block
+shows on ad hoc runs too. (8) The Rosters page's ad hoc picker sends `schedule: "default"` when the time is the raid's
+own scheduled run (it sent "adhoc" and got a 409).
 
 ### 5.40 Dual interfaces, phase 2 — the member inbox, asks and officers on behalf (built 2026-10-19)
 

@@ -118,7 +118,7 @@ src/oibot_gm/
                        come from raid_def. No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
                        ONE planner (rc.role_plan; fill engine extended to before lock): ranked moves with alternates and a still-short line; nothing is
                        sent before an officer's Ask (RaidMixin.send_plan with the shown plan rev; rc.send_batch = exactly what a send DMs); after lock on a
-                       recurring run same-role asks are automatic and ROLE SWAPS wait for an officer (owner decision D3, out/roster_decisions.md). Series
+                       run (recurring or ad hoc) same-role asks are automatic and ROLE SWAPS wait for an officer (D3, out/roster_decisions.md; D22). Series
                        coverage + 4-week forecast: Registry.series_coverage / rc.series_outlook (officer-only).
                        split_reason / split_reason_text: why the joiners make fewer runs than the headcount (what the next run is short, in code);
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run.

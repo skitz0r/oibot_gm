@@ -93,10 +93,13 @@ function StartAdhoc({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAc
   async function start() {
     if (!p) return;
     const yours = new Date(p.start).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
-    const message = [`${p.label} guild time · ${yours} your time`, p.rules, p.when_note, p.exists ? `A run for that time already exists (${p.exists}); Open points you at it instead of making a second.` : "",
+    const message = [`${p.label} guild time · ${yours} your time`, p.rules, p.when_note, p.exists ? `A run for that time already exists (${p.exists}); Open points you at it instead of making a second.` : "", p.refusal || "",
       p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].filter(Boolean).join("\n");
     if (!(await ask({ title: p.kind === "scheduled" ? `Open the ${p.schedule_name} run?` : `Start an ad hoc ${r.name}?`, message, confirmLabel: p.kind === "scheduled" ? "Open" : "Start" }))) return;
-    await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: p.schedule || (tpl === "adhoc" ? "adhoc" : tpl), key: p.key });
+    await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, key: p.key,
+      // a time that IS a scheduled run opens as that schedule's run (null = the raid's own run times → "default");
+      // sending "adhoc" there would resolve to a one-off key and the server would refuse the stale preview (409)
+      schedule: p.kind === "scheduled" ? (p.schedule || "default") : (p.schedule || (tpl === "adhoc" ? "adhoc" : tpl)) });
     setWhen(null);
   }
   return (
@@ -111,8 +114,8 @@ function StartAdhoc({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAc
         valueFormat="ddd DD MMM h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }}
         popoverProps={{ withinPortal: true }} aria-label="when the ad hoc run starts"
       />
-      <Tooltip label={p ? `${p.label} — ${p.rules}` : picked ? "Checking that time…" : "Pick when it starts"} withinPortal multiline w={320}>
-        <Button size="sm" variant="default" loading={busy === `adhoc${r.id}`} disabled={!p || p.past} onClick={start}>{label}</Button>
+      <Tooltip label={p ? (p.refusal || `${p.label} — ${p.rules}`) : picked ? "Checking that time…" : "Pick when it starts"} withinPortal multiline w={320}>
+        <Button size="sm" variant="default" loading={busy === `adhoc${r.id}`} disabled={!p || p.past || !!p.closed} onClick={start}>{label}</Button>
       </Tooltip>
       {dialog}
     </Group>
@@ -128,6 +131,7 @@ function UpcomingRows({ r, busy, onAct }: { r: RaidRuns; busy: string | null; on
     let p: OpenPreview;
     try { p = await api.post<OpenPreview>(`/api/raid/${r.id}/open/preview`, { start: u.start_iso, schedule: u.schedule }); } catch (err) { fail(err); return; }
     const yours = new Date(p.start).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+    if (p.refusal) { fail(new Error(p.refusal)); return; }
     const message = [`${p.label} guild time · ${yours} your time`, p.rules, p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].join("\n");
     if (!(await ask({ title: `Open ${r.name} · ${u.slot}?`, message, confirmLabel: "Open" }))) return;
     await onAct(`up${u.key || u.start}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, key: p.key });

@@ -2752,11 +2752,13 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
     last = seen.get(key)
     if f == "use":
         if last and last.get("layouts"):
-            layout, strategy = last["layouts"][-1], last["strategy"]
+            layout, strategy, shown = last["layouts"][-1], last["strategy"], last.get("rev")
         elif (ev.last_proposal or {}).get("layout") and by_id is not None and (ev.last_proposal or {}).get("by_id") == by_id:
-            layout, strategy = ev.last_proposal["layout"], ev.last_proposal.get("strategy")
+            layout, strategy, shown = ev.last_proposal["layout"], ev.last_proposal.get("strategy"), ev.last_proposal.get("rev")
         else:
             raise RegistryError("no proposal to use yet — ask for one first")
+        if shown and shown != rc.board_rev(reg, ev):  # solved against an older board: never overwrite the moves made since
+            raise rc.BoardChanged("The board changed since that proposal (someone moved people) — ask for a fresh one.")
         line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via, strategy=strategy)
         seen.pop(key, None)
         return f"{ev.key}: {strategy or 'the last'} proposal used — {line}"
@@ -2767,7 +2769,7 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
             layout, rosters = await asyncio.to_thread(rc.split_preview, reg, rs, ev, strategy, avoid or None)
     except RuntimeError as e:
         raise RegistryError(rc.solver_error_text(e))
-    seen[key] = {"strategy": strategy, "layouts": avoid + [layout]}
+    seen[key] = {"strategy": strategy, "layouts": avoid + [layout], "rev": rc.board_rev(reg, ev)}
     ev.last_proposal = {"layout": layout, "strategy": strategy, "rev": rc.board_rev(reg, ev), "by": by, "by_id": by_id, "at": rc.now(), "kind": "split"}
     await asyncio.to_thread(rs.save, ev, f"split preview ({strategy}) by {by}")  # 'use it' finds it after a restart
     return propose_text(reg, ev, strategy, layout, rosters, len(avoid) + 1)

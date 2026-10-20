@@ -606,7 +606,7 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
     extra = lock_notes(reg, ev, ico, i)
     if extra:
         parts.append(ui.TextDisplay(extra))
-    if i == 0 and ev.state == "locked" and rc.run_kind(reg, ev) == "recurring":
+    if i == 0 and ev.state == "locked":  # every run kind (D22): an ad hoc run's swap waits for the same Ask
         plan = rc.role_plan(reg, rs, ev)
         if any(a.swap for a in plan.asks):  # D3: after lock a role swap waits for an officer's Ask
             parts += [ui.Separator(), ui.TextDisplay(suggested_block(reg, ico, plan)), suggest_row(reg, ev, plan)]
