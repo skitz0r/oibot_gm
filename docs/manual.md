@@ -478,7 +478,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
    "no answer". **Remind the unconfirmed** (the lock card's second row, the site's run menu) sends the Confirm / Can't
    DM again to everyone still unanswered — the same ask, the same deadline — at most once an hour per run; the ones
-   waiting on the site aren't DMed. Two officers pressing it at once send one round; the second is told who reminded.
+   waiting on the site aren't DMed. The older Confirm card loses its buttons and reads *Reminded — see the newer message
+   below*, so only the newest card answers. Two officers pressing it at once send one round; the second is told who reminded.
 6. **Fill** — the fill engine DMs people on its own only after lock (before lock an officer sends suggestions, see
    *Suggestions* above). Whenever a seat frees (decline, callout, absence, missed
    confirmation, officer removal) and `autofill` is on [on], the bot DMs the next best people, in the suggestions' cost

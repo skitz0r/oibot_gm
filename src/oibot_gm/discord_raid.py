@@ -1386,8 +1386,11 @@ class RaidMixin:
                                          else f"Already answered — nothing to do for {run_label(reg, ev)}.")
                 continue
             sent += 1
+            prev = ask.get("dm")
             if mid:
                 ask["dm"] = [cid, mid]  # the newest card is the one an outcome edits
+                if prev and list(prev) != [cid, mid]:  # the older card goes dead: one live Confirm per ask, never two
+                    await self.edit_ask_card(reg, prev[0], prev[1], f"Reminded — see the newer message below for {run_label(reg, ev)}.")
             ask["reminded_at"] = rc.now()
             await asyncio.to_thread(reg.save, m, f"{m.display_name} reminded to confirm {ev.team}")
         ev.log.append(f"reminded the unconfirmed ({sent} by DM) — {by}" + (f"; stopped, the run is {stopped}" if stopped else ""))

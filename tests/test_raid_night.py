@@ -480,6 +480,31 @@ def test_remind_resends_against_the_existing_ask_once_an_hour(reg, rs):
     assert "Reminded" in run(bot.remind(reg, rs, ev, by="Kara"))
 
 
+def _live_buttons(card: Msg) -> int:
+    """Buttons still pressable on a DM card: the last edit's view, else what was sent."""
+    import discord as _d
+    view = card.edits[-1]["view"] if card.edits else card.payload
+    return sum(1 for c in view.walk_children() if isinstance(c, (_d.ui.Button, _d.ui.DynamicItem))) if hasattr(view, "walk_children") else 0
+
+
+def test_a_yes_after_a_remind_leaves_no_live_button_on_either_card(reg, rs):
+    """Remind sends a newer Confirm card: the older one goes dead at once ('Reminded — see the newer message'), and a
+    yes then closes the newer one — no Confirm stays pressable on either."""
+    bot = NightBot(reg, rs)
+    ev, seated = locked_ten(reg, rs)
+    m = seated[1]
+    seat = ev.seat_of(m)
+    run(bot.confirm_one(reg, ev, ev.signups[str(m.discord_id)], seat[0], 0, "lock"))
+    first = bot.cards[reg.members[m.discord_id].placement_asks[-1]["dm"][1]]
+    assert _live_buttons(first) >= 2
+    run(bot.remind(reg, rs, ev, by="Jon"))
+    second = bot.cards[reg.members[m.discord_id].placement_asks[-1]["dm"][1]]
+    assert second is not first and _live_buttons(second) >= 2
+    assert _live_buttons(first) == 0 and "Reminded" in card_texts(first)[-1]
+    run(bot.answer_placement_for(reg, m.discord_id, ev.team, True, m.display_name, by_id=m.discord_id))
+    assert _live_buttons(first) == 0 and _live_buttons(second) == 0
+
+
 def test_withdraw_closes_a_sent_ask_and_edits_its_card(reg, rs):
     bot = NightBot(reg, rs)
     ev, _seated = short_one(reg, rs)
