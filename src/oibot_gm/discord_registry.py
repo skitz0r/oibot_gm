@@ -13,7 +13,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
-from . import guild_routing, ops as ops_mod
+from . import guild_routing, inbox, ops as ops_mod
 from .profiles import GameProfile
 from .registry import is_superuser, GUILD_KEY_RE, RANKS, Registry, RegistryError
 from .store import GitStore
@@ -754,7 +754,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await FLOWS["register"](interaction, reg, mode="apply")
 
     @me.command(name="view", description="Your plan, characters and upcoming absences")
-    async def me(interaction: discord.Interaction):
+    async def me_view(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if not reg:
             return
@@ -773,7 +773,10 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.add_field(name="Regular on", value="\n".join(f"{reg.series_label(k)} ({c.label})" for k, c in regular)[:1000], inline=False)
         primary, flex = reg.roles_of(m)
         e.add_field(name="Roles", value=f"{primary or '?'}" + (f" (+{', '.join(flex)})" if flex else "") + "\n-# from your spec/offspec · `/me char` → Flex adds more", inline=True)
-        e.add_field(name="DMs", value="off (asks show on the Me page)" if m.dm_opt_out else "on", inline=True)
+        e.add_field(name="DMs", value=("off — " + inbox.DM_OFF_SENTENCE if m.dm_opt_out else "on") + "\n-# `/me dms` switches them", inline=True)
+        box = inbox.inbox_lines(reg, interaction.client.raids.store(reg), m.discord_id) if hasattr(interaction.client, "raids") else []
+        if box:  # asks to answer, then the unread notices (D26: outcomes are told here and on the Me page — never by DM)
+            e.insert_field_at(0, name="Inbox", value="\n".join(box)[:1000], inline=False)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(reg.span_label(a.start, a.end) for a in ups) or "none", inline=True)
         from .loot_ops import guild_ctx, loot_block, member_awards
@@ -793,7 +796,31 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 await FLOWS["regular_step_down"](i, reg)
             btn.callback = step_down
             view.add_item(btn)
+        if reg.notices(m.discord_id, unread=True):  # the inbox's notices: read here, marked read with one press
+            view = view or discord.ui.View(timeout=600)
+            seen = discord.ui.Button(label="Mark notices read", style=discord.ButtonStyle.secondary)
+
+            async def mark_read(i: discord.Interaction) -> None:
+                n = reg.mark_read(i.user.id)
+                await i.response.send_message(f"✅ {n} notice(s) marked read.", ephemeral=True)
+            seen.callback = mark_read
+            view.add_item(seen)
         await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
+
+    @me.command(name="dms", description="DMs from the bot on or off (off: your asks wait on the Me page)")
+    @app_commands.choices(state=[app_commands.Choice(name="on", value="on"), app_commands.Choice(name="off", value="off")])
+    async def me_dms(interaction: discord.Interaction, state: app_commands.Choice[str]):
+        """The one member setting that had no Discord control (design B2): Registry.set_dm, the verb the Me page, plain
+        text and MCP share; the reply is the one DM sentence (inbox.DM_ON/OFF_SENTENCE)."""
+        reg, interaction = await need(interaction)
+        if not reg:
+            return
+        if interaction.user.id not in reg.members:
+            await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
+            return
+        on = state.value == "on"
+        line = reg.set_dm(interaction.user.id, on, reg.members[interaction.user.id].display_name)
+        await interaction.response.send_message(f"✅ {line}. " + (inbox.DM_ON_SENTENCE if on else inbox.DM_OFF_SENTENCE), ephemeral=True)
 
     tree.add_command(me)
 

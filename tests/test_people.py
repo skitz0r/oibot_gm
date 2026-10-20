@@ -1,4 +1,4 @@
-"""Dual interfaces phase 2, part C — people (design §3.3, owner decisions D24 D25 D28 D29 D30 D50; docs/design.md §5.40):
+"""Dual interfaces phase 2, part C — people (design §3.3, owner decisions D24 D25 D28 D29 D30 D50; docs/design.md §5.41):
 the character verb's ripple into sheets and seats (discord_people.save_characters over the REAL RaidMixin verbs), rank per
 member, confirm by (member, label), validate-on-copy and the table rev, absences (overlap, reason cap, I'm back), the
 owner transfer's refusals, a removed schedule's regulars — all over a scratch GitStore (conftest)."""

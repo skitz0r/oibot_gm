@@ -47,6 +47,8 @@ class FakeBot(LootMixin):
 
     call_out = RaidMixin.call_out
     repost_sheet = RaidMixin.repost_sheet
+    _live_sheet_name = RaidMixin._live_sheet_name
+    MIRRORS_KEPT = RaidMixin.MIRRORS_KEPT
     release_asks_of = RaidMixin.release_asks_of  # call_out's own steps: a pending ask closes, the cards follow
     refill_after_release = RaidMixin.refill_after_release
     refresh_cards = RaidMixin.refresh_cards
@@ -307,65 +309,166 @@ def test_open_later_than_the_window_narrows_by_week(reg, rs, officer, channel):
     assert start.date().isoformat() == got["week"] and (start.hour, start.minute) == (19, 30)
 
 
-# ---------------------------------------------------------------- /raid set
+# ---------------------------------------------------------------- /raid set: anything a member can do, for them (B5)
 
-def test_set_picks_run_and_character_then_calls_set_answer(reg, rs, officer, channel):
-    a = open_test_run(reg, rs, days=3)
-    b = open_test_run(reg, rs, "hyjal_summit_forever", days=5)
-    m = reg.test_members()[0]
+def _user(m):
+    return SimpleNamespace(id=m.discord_id, display_name=m.display_name)
+
+
+REAL = 620_000_000_000_000_000  # real (non-puppet) members: `/raid set` leaves test runs to `/gm test answer` (design B5)
+
+
+def open_real_run(reg, rs, instance="barrow_deeps", days=3):
+    """A real run (no test cutoffs): its side of the bench is the real members."""
+    start = (reg.now_local() + timedelta(days=days, hours=3)).replace(second=0, microsecond=0)
+    return rc.open_run(reg, rs, instance, start, by="t")
+
+
+def reals(reg, n, start=0):
+    out = []
+    for k in range(start, start + n):
+        uid = REAL + k
+        if uid not in reg.members:
+            reg.add_character(uid, f"Real{k}", "Real" + "".join(chr(97 + int(d)) for d in f"{k:02d}"), "Priest", "Holy", None, True)
+        out.append(reg.members[uid])
+    return out
+
+def test_set_picks_run_then_only_what_applies_then_the_character(reg, rs, officer, channel):
+    a = open_real_run(reg, rs, days=3)
+    b = open_real_run(reg, rs, "hyjal_summit_forever", days=5)
+    m = reals(reg, 1)[0]
     cls = next(iter(reg.profile.classes))
     spec = next(iter(reg.profile.classes[cls]))
     reg.add_character(m.discord_id, m.display_name, "Altonar", cls, spec, None, False)
     h, bot = harness(reg, rs)
-    user = SimpleNamespace(id=m.discord_id, display_name=m.display_name)
 
     async def go():
-        await FLOWS["raid_set"](h.command(), reg, member=user, status="in")
+        await FLOWS["raid_set"](h.command(), reg, member=_user(m))
         assert h.selects() == ["Pick the run"]
-        await h.pick("Pick the run", b.team)
+        await h.pick("Pick the run", b.key)
+        assert h.buttons() == ["Record a callout…", "Join", "Bench", "No thanks", "Cancel"], "no answer yet: no Confirm, no pins"
+        assert "no answer yet" in h.text
+        await h.press("Join")
         assert h.selects() == ["Pick the character"]
         await h.pick("Pick the character", "Altonar")
-        assert "Altonar" in h.text and "Join" in h.text
+        assert "Altonar" in h.text and "notice on their Me page" in h.text and "no new DM" in h.text
+        assert h.buttons() == ["Join", "Back"]
         assert not bot.calls
-        await h.press("Confirm")
+        await h.press("Join")
     asyncio.run(go())
     assert bot.calls == [("set_answer", b.key, m.display_name, "in", "Altonar", "Tester")]
     assert a.key != b.key
 
 
-def test_set_one_run_one_character_goes_straight_to_confirm_and_cancel_writes_nothing(reg, rs, officer, channel):
-    open_test_run(reg, rs)
-    m = reg.test_members()[1]
+def test_set_with_what_goes_straight_to_the_confirm_screen_and_back_writes_nothing(reg, rs, officer, channel):
+    open_real_run(reg, rs)
+    m = reals(reg, 1, 1)[0]
     h, bot = harness(reg, rs)
 
     async def go():
-        await FLOWS["raid_set"](h.command(), reg, member=SimpleNamespace(id=m.discord_id, display_name=m.display_name), status="out")
-        assert h.buttons() == ["Confirm", "Cancel"] and "No thanks" in h.text
-        await h.press("Cancel")
+        await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="no_thanks")
+        assert h.buttons() == ["No thanks", "Back"] and "No thanks" in h.text and "no callout is recorded" in h.text
+        await h.press("Back")
+        assert "Nothing was changed" in h.text
     asyncio.run(go())
     assert not bot.calls
 
 
 def test_set_refuses_when_the_run_closed(reg, rs, officer, channel):
-    ev = open_test_run(reg, rs)
-    m = reg.test_members()[2]
+    ev = open_real_run(reg, rs)
+    m = reals(reg, 1, 2)[0]
     h, bot = harness(reg, rs)
 
     async def go():
-        await FLOWS["raid_set"](h.command(), reg, member=SimpleNamespace(id=m.discord_id, display_name=m.display_name), status="in")
+        await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join")
         ev.state = "cancelled"
         rs.save(ev, "cancelled")
-        await h.press("Confirm")
+        await h.press("Join")
         assert "closed" in h.text
     asyncio.run(go())
     assert not bot.calls
 
 
 def test_set_unregistered_member(reg, rs, officer, channel):
-    open_test_run(reg, rs)
+    open_real_run(reg, rs)
     h, bot = harness(reg, rs)
-    asyncio.run(FLOWS["raid_set"](h.command(), reg, member=SimpleNamespace(id=1, display_name="Nobody"), status="in"))
-    assert "isn't registered" in h.text and not bot.calls
+    asyncio.run(FLOWS["raid_set"](h.command(), reg, member=SimpleNamespace(id=1, display_name="Nobody")))
+    assert "aren't registered" in h.text and not bot.calls
+
+
+def test_set_rereads_the_member_at_confirm(reg, rs, officer, channel):
+    ev = open_real_run(reg, rs)
+    m = reals(reg, 1, 3)[0]
+    h, bot = harness(reg, rs)
+
+    async def go():
+        await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join")
+        join(reg, rs, ev, [m], "sub")  # the member presses Bench while the officer's wizard is open
+        await h.press("Join")
+        assert "is now Bench" in h.text and "keep going?" in h.text
+        assert not bot.calls
+        await h.press("Keep going")
+    asyncio.run(go())
+    assert bot.calls and bot.calls[0][:4] == ("set_answer", ev.key, m.display_name, "in")
+
+
+def test_set_records_a_callout_with_a_note_before_lock(reg, rs, officer, channel):
+    ev = open_real_run(reg, rs)
+    m = reals(reg, 1, 4)[0]
+    join(reg, rs, ev, [m])
+    h, bot = harness(reg, rs)
+
+    async def go():
+        await FLOWS["raid_set"](h.command(), reg, member=_user(m), what="callout")
+        assert h.buttons() == ["Record the callout", "Record the callout with a note…", "Back"]
+        assert "No thanks" in h.text and "callout is recorded" in h.text
+        await h.press("Record the callout with a note…")
+        await h.submit(note="flight delayed")
+    asyncio.run(go())
+    assert ev.signups[str(m.discord_id)].status == "out"
+    assert ev.callouts and ev.callouts[-1].note == "flight delayed"
+
+
+def test_set_on_a_locked_run_offers_their_confirm_ask_first(reg, rs, officer, channel):
+    ev = open_real_run(reg, rs)
+    pool = reals(reg, 10)
+    join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [m.display_name for m in pool])
+    m = pool[0]
+    reg.add_placement_ask(m.discord_id, ev.team, m.main.label, "lock")
+    h, bot = harness(reg, rs)
+
+    async def go():
+        await FLOWS["raid_set"](h.command(), reg, member=_user(m))
+        assert h.buttons()[:3] == ["Confirm for them", "Can't make it for them", "Record a callout…"]
+        assert "Pin to roster" not in h.buttons(), "pins are for an open sheet"
+    asyncio.run(go())
+
+
+def test_set_with_a_what_that_does_not_apply_says_so(reg, rs, officer, channel):
+    open_real_run(reg, rs)
+    m = reals(reg, 1, 5)[0]
+    h, bot = harness(reg, rs)
+    asyncio.run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="confirm_yes"))
+    assert "Nothing to set" in h.text and "Confirm for them" in h.text and not bot.calls
+
+
+def test_set_leaves_test_runs_to_gm_test_answer(reg, rs, officer, channel):
+    """Design B5: `/raid set` refuses a test run — a puppet on one is answered with `/gm test answer` (the Test bench)."""
+    open_test_run(reg, rs)
+    m = reg.test_members()[0]
+    h, bot = harness(reg, rs)
+    asyncio.run(FLOWS["raid_set"](h.command(), reg, member=_user(m)))
+    assert "test run" in h.text and "/gm test answer" in h.text and not bot.calls
+    real = open_real_run(reg, rs, days=5)
+    r = reals(reg, 1, 7)[0]
+    h2, bot2 = harness(reg, rs)
+
+    async def go():  # a real run alongside: only it is offered (one run → straight to the verbs)
+        await FLOWS["raid_set"](h2.command(), reg, member=_user(r))
+        assert "Pick the run" not in h2.selects() and "Join" in h2.buttons()
+    asyncio.run(go())
+    assert real.key in [e.key for e in rs.live()]
 
 
 # ---------------------------------------------------------------- run-scoped commands
@@ -420,13 +523,43 @@ def test_run_commands_are_officer_only(reg, rs, channel, monkeypatch):
         assert h.text == "Officers only." and not bot.calls, name
 
 
-def test_sheet_reposts_in_the_channel(reg, rs, channel):
+def test_sheet_officer_moves_the_live_sheet_here(reg, rs, officer, channel):
     ev = open_test_run(reg, rs)
     h, bot = harness(reg, rs)
     asyncio.run(FLOWS["raid_sheet"](h.command(), reg))
     assert channel.sent and channel.sent[0]["embed"] is not None
     assert rs.events[ev.key].channel_id == channel.id and rs.events[ev.key].message_id == 7010
     assert "Re-posted" in h.text
+
+
+def test_sheet_member_posts_a_read_only_copy_that_never_moves_the_live_one(reg, rs, channel):
+    """D21: a member's /raid sheet is a labelled copy — no buttons, the live sheet stays where it is."""
+    ev = open_test_run(reg, rs)
+    ev.channel_id, ev.message_id = 4444, 4545
+    rs.save(ev, "t: posted")
+    h, bot = harness(reg, rs)
+    asyncio.run(FLOWS["raid_sheet"](h.command(), reg))
+    (sent,) = channel.sent
+    assert "view" not in sent and "copy — the live sheet is in" in sent["embed"].footer.text
+    assert (rs.events[ev.key].channel_id, rs.events[ev.key].message_id) == (4444, 4545)
+    assert rs.events[ev.key].mirror_messages == [[channel.id, 7010]] and "read-only copy" in h.text
+
+
+def test_sheet_member_channel_choice_is_not_followed_and_the_reply_says_so(reg, rs, channel):
+    """A member's `channel:` is never followed (only officers choose where a sheet goes) — and never silently: the reply
+    names the channel they asked for."""
+    ev = open_test_run(reg, rs)
+    ev.channel_id, ev.message_id = 4444, 4545
+    rs.save(ev, "t: posted")
+    other = FakeChannel()
+    other.id, other.name = 556, "general"
+    h, bot = harness(reg, rs)
+    asyncio.run(FLOWS["raid_sheet"](h.command(), reg, channel=other))
+    assert len(channel.sent) == 1 and not other.sent, "the copy is posted here"
+    assert "Only officers choose where a sheet goes" in h.text and "#general" in h.text
+    h2, _ = harness(reg, rs)
+    asyncio.run(FLOWS["raid_sheet"](h2.command(), reg))
+    assert "Only officers" not in h2.text, "no channel asked for: nothing to explain"
 
 
 def test_sheet_with_no_live_run(reg, rs, channel):

@@ -5,11 +5,12 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 
-from . import guild_routing, raidcycle as rc
+from . import guild_routing
 from .discord_registry import Guilds, is_officer
 from .ops import Ops
 from .raid_views import run_label, sheet_state
 from .registry import Registry
+from .flows_roster import SET_WHAT
 from .wizard_flows import FLOWS
 
 
@@ -32,11 +33,12 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["raid_open"](interaction, reg)
 
-    @raid.command(name="sheet", description="Re-post a live sheet in this channel")
-    async def raid_sheet(interaction: discord.Interaction):
+    @raid.command(name="sheet", description="Officers move the live sheet here (or to a channel); anyone else posts a read-only copy here")
+    @app_commands.describe(channel="officers: move the live sheet to this channel instead of this one")
+    async def raid_sheet(interaction: discord.Interaction, channel: discord.TextChannel | None = None):
         reg, interaction = await need(interaction)
         if reg:
-            await FLOWS["raid_sheet"](interaction, reg)
+            await FLOWS["raid_sheet"](interaction, reg, channel=channel)
 
     @raid.command(name="health", description="Roster health for an open sheet")
     async def raid_health(interaction: discord.Interaction):
@@ -68,12 +70,13 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["loot_end"](interaction, reg)
 
-    @raid.command(name="set", description="Officer: set someone's answer on a sheet (join / bench / out)")
-    @app_commands.choices(status=[app_commands.Choice(name=rc.LABELS[s], value=s) for s in rc.STATUSES])
-    async def raid_set(interaction: discord.Interaction, member: discord.User, status: app_commands.Choice[str]):
+    @raid.command(name="set", description="Officer: record anything a member can do on a run, for them — only what applies is offered")
+    @app_commands.describe(member="who you're recording it for", what="skip the list: the one thing to record (only if it applies)")
+    @app_commands.choices(what=[app_commands.Choice(name=label, value=key) for key, label in SET_WHAT.items()])
+    async def raid_set(interaction: discord.Interaction, member: discord.User, what: app_commands.Choice[str] | None = None):
         reg, interaction = await officer(interaction)
         if reg:
-            await FLOWS["raid_set"](interaction, reg, member=member, status=status.value)
+            await FLOWS["raid_set"](interaction, reg, member=member, what=what.value if what else None)
 
     @raid.command(name="cancel", description="Officer: cancel a run (an optional reason goes in a box)")
     async def raid_cancel(interaction: discord.Interaction):

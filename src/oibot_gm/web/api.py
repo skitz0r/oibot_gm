@@ -22,12 +22,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from .. import comp as comp_mod, ops as ops_mod, raid_views as dr, raidcycle as rc, render
+from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from ..consequences import consequence as consequence_lines, consequences_json
 from ..presets import DURATIONS
 from ..registry import ABSENCE_REASON_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
+from .api_me import sheet_row_extras
 from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
 
 HERE = Path(__file__).parent
@@ -437,6 +438,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # absences: the Discord wizard's For how long list (presets.DURATIONS) and the verb's caps, so the web modals can't drift
             "durations": [{"days": d, "label": label} for d, label in DURATIONS], "max_absence_days": MAX_ABSENCE_DAYS, "absence_reason_max": ABSENCE_REASON_MAX,
             "ranks": list(RANKS),
+            # the DM toggle's one sentence each way (design B2; inbox.DM_ON/OFF_SENTENCE — /me view and /me dms say the same)
+            "dm_sentences": {"on": inbox.DM_ON_SENTENCE, "off": inbox.DM_OFF_SENTENCE},
         }
 
     @app.get("/api/meta")
@@ -537,7 +540,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                            "status": s.status if s else None, "label": rc.LABELS.get(s.status, s.status) if s else None, "character": s.character if s else None, "note": s.note if s else None,
                            "rostered": bool(seat), "roster": (seat[0] + 1) if seat else None, "kind": rc.run_kind(reg, ev),
                            "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
-                           "confirms": rc.run_confirms(reg, ev)})
+                           "confirms": rc.run_confirms(reg, ev), **sheet_row_extras(reg, ev, m)})
         primary, flex = reg.roles_of(m) if m else (None, [])
         today = reg.now_local().date().isoformat()
         return {
@@ -548,10 +551,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "roles": {"primary": primary, "flex": list(flex)},
             "absences": [absence_json(reg, a) for a in (m.upcoming_absences(today) if m else [])],
             "dm": not (m.dm_opt_out if m else False),
+            "dm_sentence": inbox.DM_OFF_SENTENCE if (m and m.dm_opt_out) else inbox.DM_ON_SENTENCE,
             "sheets": sheets,
             "regulars": regulars_json(reg, m),  # the recurring raids they're a regular of (Step down on the Me page)
-            # `channel` says where the ask went: "dm" / "web" (DMs off, so the Me page is the only place to answer)
-            "asks": [{"roster": a["roster"], "character": a["character"], "asked_at": a.get("asked_at"), "channel": a.get("channel"), **run_label(reg, rs, a["roster"])} for a in reg.open_placement_asks(v.uid)],
+            # every open ask wherever it waits (`channel` dm | web): Confirm / Can't, fill, swap, pre-lock (inbox.asks_of), and
+            # the notices (D26: outcomes that are never a DM) — the Me page's AskCards and its inbox
+            "asks": inbox.asks_of(reg, rs, v.uid),
+            "notices": inbox.notices_of(reg, v.uid),
         }
 
     # ---- member self-service
@@ -655,7 +661,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/me/dm")
     async def me_dm(request: Request):
-        return await run(request, lambda v, d: v.reg.set_dm(v.uid, bool(d.get("on")), v.name))
+        """My DMs on / off — Registry.set_dm, the verb /me dms, the Members page, plain text and MCP share."""
+        return await run(request, lambda v, d: v.reg.set_dm(v.uid, bool(d.get("on")), v.reg.members[v.uid].display_name if v.uid in v.reg.members else v.name))
 
     # ---- runs: the officer panel (sheets per raid, the board, lock, confirmations)
     def t12(reg, value) -> str:
@@ -1147,23 +1154,21 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/pin")
     async def run_pin(request: Request, key: str):
+        """Pin someone to the roster / keep them on the bench for the lock — inbox.pin_member, the one pin write (the
+        board's row menu, the SetWizard and plain text's pin): saved, audited, the Discord sheet's pin footer re-rendered."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        """Pin someone to the roster / keep them on the bench for the lock — the same verb the board's menu uses."""
         pin = d.get("pin")
-        uid = str(resolve_member(v.reg, member_ref(d)).discord_id)
+        m = resolve_member(v.reg, member_ref(d))
         if pin not in ("in", "out", None):
             return JSONResponse({"error": "pin must be in, out or null"}, status_code=400)
-        if uid not in ev.signups:
+        if str(m.discord_id) not in ev.signups:
             return JSONResponse({"error": "they haven't answered this sheet"}, status_code=400)
-        name = ev.signups[uid].display_name
         try:
-            rc.set_pin(ev, name, pin)  # writes the log line; the caller saves
+            line = await inbox.pin_member(bot, v.reg, rs, ev, m, pin, by=v.name, by_id=v.uid, via=v.via)
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        rs.save(ev, f"pin {name} {pin} by {v.name}")
-        await ops_mod.audited(bot.ops, v.reg, v.name, f"{ev.key} {name} {'pinned ' + pin if pin else 'unpinned'}", via=v.via, by_id=v.uid)
-        return {"message": f"{name}: {'pinned ' + pin if pin else 'unpinned'}"}
+        return {"message": line}
 
     @app.post("/api/run/{key}/set")
     async def run_set(request: Request, key: str):
@@ -2335,6 +2340,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
 
     install_agents_api(app, bot, who=who, body=body, publish=publish)
+
+    from .api_me import install_me_api  # the member inbox (asks, notices, own answers) and the officers' on-behalf routes (design §5.40)
+
+    install_me_api(app, bot, who=who, body=body, find_live=find_live, resolve_member=resolve_member)
 
     from .api_loot import install_loot_api  # the loot council, history, precedents, the award log, items, wishlists (design §3.1)
 

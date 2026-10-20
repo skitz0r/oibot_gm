@@ -8,6 +8,7 @@ Registry commits drive both through Registry.listeners; refreshes are debounced 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 
@@ -18,7 +19,9 @@ from . import ops as ops_mod
 from . import raid_views as views
 from .discord_people import PeopleMixin
 from .discord_registry import registration_card, registration_view
-from .registry import Registry
+from .registry import Registry, RegistryError
+
+log = logging.getLogger(__name__)
 
 from .constants import LEVEL_COLOUR, ROLES, TEAL  # noqa: E402
 DEBOUNCE_S = 5.0  # a burst of registrations re-posts the cards once
@@ -503,6 +506,32 @@ class LootWishButton(discord.ui.DynamicItem[discord.ui.Button], template=r"lootw
         await FLOWS["me_wishlist"](interaction, reg, item=self.wish_item)
 
 
+def award_notice(reg: Registry, award, was: str | None) -> None:
+    """The public loot-log line's member copy (D26): the recipient's inbox says what they got — never the reason or a
+    score (officer data), never a DM. A correction ('was Kestrel, now Mira') is copied to BOTH: the new recipient and the
+    member who held it (`was` = their character), so the one who lost the item hears of it too. A disenchant (as the new
+    holder) or an award not tied to a member writes nothing for that side."""
+    from .loot.session import DISENCHANT
+
+    line = loot_log_line(reg, award, was).replace("**", "").removeprefix("🎁 ").removeprefix("✎ ")
+    text = ("Loot correction: " if was else "Loot: ") + line
+    to: list[int] = []
+    if award.raider != DISENCHANT and award.discord_id is not None:
+        to.append(int(award.discord_id))
+    if was and was != DISENCHANT:
+        try:
+            hit = reg.find(was)
+        except RegistryError:  # two characters share the name: nobody is guessed
+            hit = None
+        if hit is not None and hit[0].discord_id not in to:
+            to.append(hit[0].discord_id)
+    for uid in to:
+        try:
+            reg.notify(uid, "loot_award", text)
+        except Exception:  # noqa: BLE001 — the award is recorded; the notice is a copy
+            log.exception("loot award notice failed")
+
+
 class LootLogMixin:
     """The public loot log: one line per award recorded in a guild's ledger (lootctx.LEDGER_LISTENERS — Confirm, a
     companion award, a correction, the crash repair alike; a test council writes no ledger rows, so nothing), in the
@@ -543,6 +572,7 @@ class LootLogMixin:
         reg = (getattr(self.registries, "by_key", {}) or {}).get(guild_key)
         if reg is None:
             return False
+        award_notice(reg, award, was)  # the line's member copy on their Me page (D26), log on or off — never a DM
         ch, fell_back = self.loot_log_target(reg, run_key)
         if fell_back:
             warned = self.__dict__.setdefault("_loot_log_warned", set())

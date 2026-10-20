@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Switch, Text, Textarea, Tooltip } from "@mantine/core";
-import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconPin, IconPinnedOff, IconPlayerPause, IconPlayerPlay, IconUserOff, IconUsersPlus } from "@tabler/icons-react";
+import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
-import { api, type Meta, type Sheet, type Signup } from "../../api";
+import { api, type Meta, type Person, type Sheet, type Signup } from "../../api";
+import { MemberMenu, RepostSheetModal, SomeoneElse } from "./MemberMenu";
 import { classColour } from "../../theme";
 import { GameIcon } from "../Icons";
 import { Eyebrow, fail } from "../Page";
@@ -16,7 +17,7 @@ import type { LockPreview, NightSheet } from "./types";
 /** One sheet: header + timeline, who joined by class, bench / no-thanks rows, the board, the detail accordion. Raid-night
  *  state (dual interfaces phase 2) comes as words from the server: the lock failure, the fill state, asks waiting on the
  *  site, the D3 banner, the spec switches and regulars left out — nothing here composes a sentence the bot didn't. */
-export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
+export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, people }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void>; people?: Person[] }) {
   const e = sheet as unknown as NightSheet;
   const locked = e.state !== "open";
   const n = e.needs;
@@ -38,33 +39,9 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload }: { 
   const name = runName(e as unknown as Sheet);
   const hints = (e.health?.roles || []).filter((r) => r.need && r.have < r.need && r.hint);
 
-  const pin = (s: Signup, p: "in" | "out" | null) => onAct(`pin${s.uid}`, `/api/run/${e.key}/pin`, { uid: s.uid, pin: p });
-  /** Officer sets an answer for someone. Before lock it only changes the sheet; after lock the same verb as the board applies:
-   *  Join seats them and asks them to confirm, No thanks releases the seat and fills it, Bench keeps them as a fill candidate. */
-  async function set(s: Signup, status: string) {
-    const label = meta.labels[status] || status;
-    const after = status === "in" ? `Join after lock seats ${s.display_name} (${s.character}) and asks them to confirm — by DM, or on their Me page if their DMs are off. If every seat is taken they join unrostered; move them in on the board.`
-      : status === "out" ? `No thanks after lock releases ${s.display_name}'s seat; their confirmation card and the site say so (no DM). The bench is asked to fill it.`
-      : `Bench after lock is the answer only: ${s.display_name} keeps a seat they already hold until you set No thanks; off the roster, they are a fill candidate.`;
-    const before = status === "in" ? `${s.display_name} counts as joined on ${s.character}; the board picks them up at lock.`
-      : status === "out" ? `${s.display_name} is off the sheet for this run; they are told nothing — this is an officer answer, not theirs.`
-      : `${s.display_name} sits on the bench for this run; the fill engine may ask them after lock.`;
-    if (!(await ask({ title: `Set ${label} for ${s.display_name}?`, message: `${locked ? after : before} The log records that ${meta.viewer.name} set it.`, confirmLabel: `Set ${label}`, color: status === "out" ? "red" : undefined }))) return;
-    await onAct(`set${s.uid}`, `/api/run/${e.key}/set`, { uid: s.uid, status });
-  }
-  const menu = (s: Signup) => (
-    <Menu shadow="md" width={200} position="bottom-end">
-      <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`actions for ${s.display_name}`}><IconDotsVertical size={14} /></ActionIcon></Menu.Target>
-      <Menu.Dropdown>
-        <Menu.Label>{s.display_name}</Menu.Label>
-        {!locked && s.pin !== "in" && s.status === "in" && <Menu.Item leftSection={<IconPin size={14} />} onClick={() => pin(s, "in")}>Pin to roster</Menu.Item>}
-        {!locked && s.pin !== "out" && s.status !== "out" && <Menu.Item leftSection={<IconUserOff size={14} />} onClick={() => pin(s, "out")}>Keep on bench</Menu.Item>}
-        {!locked && s.pin && <Menu.Item leftSection={<IconPinnedOff size={14} />} onClick={() => pin(s, null)}>Unpin</Menu.Item>}
-        {!locked && <Menu.Divider />}
-        {meta.statuses.filter((st) => st !== s.status).map((st) => <Menu.Item key={st} onClick={() => set(s, st)}>Set {meta.labels[st] || st}</Menu.Item>)}
-      </Menu.Dropdown>
-    </Menu>
-  );
+  // the row ⋮ menu (design B5): the member's filtered on-behalf list from the server — the same one /raid set offers
+  const menu = (s: Signup) => <MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload} />;
+  const [repostOpen, setRepostOpen] = useState(false);
 
   async function remind() {
     if (!(await ask({ title: `Remind the unconfirmed on ${name}?`, message: `Everyone rostered who hasn't answered gets their Confirm / Can't DM again — the same card, the same deadline. Once an hour per run.`, confirmLabel: "Remind" }))) return;
@@ -101,7 +78,10 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload }: { 
           )}
           <RunLinks e={e} />
         </Box>
-        <RunMenu e={e} busy={busy} onRemind={remind} onPause={pause} onEnd={endNow} />
+        <Group gap={4}>
+          {e.live && people && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
+          <RunMenu e={e} busy={busy} onRemind={remind} onPause={pause} onEnd={endNow} onRepost={() => setRepostOpen(true)} />
+        </Group>
       </Group>
 
       {e.lock_error && <Alert color="red" variant="light" mt="sm" p="xs"><Text size="sm">{e.lock_error}</Text></Alert>}
@@ -123,7 +103,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload }: { 
       )}
 
       {locked && <NightBlock e={e} meta={meta} onFill={() => setFillOpen(true)} />}
-      {!locked && <NotAnswered e={e} meta={meta} />}
+      {!locked && <NotAnswered e={e} meta={meta} onDone={onReload} />}
 
       <Group gap="xl" mt="md" align="flex-start" wrap="wrap">
         {byClass.length === 0 && <Text size="sm" c="dimmed">Nobody has joined yet.</Text>}
@@ -174,6 +154,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload }: { 
       <Detail e={e} onAct={onAct} busy={busy} />
       <FillModal e={e as unknown as Sheet} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />
       <LockModal e={e} meta={meta} opened={lockOpen} onClose={() => setLockOpen(false)} onLock={() => onAct(`lock${e.key}`, `/api/run/${e.key}/lock`)} />
+      <RepostSheetModal run={e.key} opened={repostOpen} onClose={() => setRepostOpen(false)} onDone={onReload} />
       <CancelModal e={e} opened={cancelOpen} onClose={() => setCancelOpen(false)} onCancel={(reason, notify) => onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason, notify })} />
       {confirmDialog}
     </Box>
@@ -195,7 +176,7 @@ function RunLinks({ e }: { e: NightSheet }) {
 
 /** The header menu: the raid-night levers that aren't the board's — Remind the unconfirmed (once an hour), pause or resume
  *  autofill (D18), End the run now (after the start). Disabled items carry the server's reason. */
-function RunMenu({ e, busy, onRemind, onPause, onEnd }: { e: NightSheet; busy: string | null; onRemind: () => void; onPause: (paused: boolean) => void; onEnd: () => void }) {
+function RunMenu({ e, busy, onRemind, onPause, onEnd, onRepost }: { e: NightSheet; busy: string | null; onRemind: () => void; onPause: (paused: boolean) => void; onEnd: () => void; onRepost: () => void }) {
   if (!e.live) return null;
   const locked = e.state !== "open";
   return (
@@ -208,6 +189,7 @@ function RunMenu({ e, busy, onRemind, onPause, onEnd }: { e: NightSheet; busy: s
         {e.autofill_paused
           ? <Menu.Item leftSection={<IconPlayerPlay size={14} />} onClick={() => onPause(false)}>Resume autofill</Menu.Item>
           : <Menu.Item leftSection={<IconPlayerPause size={14} />} disabled={!locked} onClick={() => onPause(true)}>Pause autofill</Menu.Item>}
+        <Menu.Item leftSection={<IconSend size={14} />} onClick={onRepost}>Re-post sheet…</Menu.Item>
         <Menu.Divider />
         <Tooltip label={e.end_note || ""} disabled={!e.end_note} position="left" withinPortal>
           <div><Menu.Item leftSection={<IconFlagCheck size={14} />} color="red" disabled={!e.may_end} onClick={onEnd}>End the run now</Menu.Item></div>
@@ -314,7 +296,7 @@ function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: 
 /** Officer-facing: who the bot expects an answer from and hasn't heard from — the series' regulars (every main while it
  *  has none), one member per line (spec icon + character, the name in the tooltip), and how the rest of the regulars
  *  answered as icon + number. Ad hoc runs expect nobody, so nothing shows. */
-function NotAnswered({ e, meta }: { e: NightSheet; meta: Meta }) {
+function NotAnswered({ e, meta, onDone }: { e: NightSheet; meta: Meta; onDone: () => Promise<void> }) {
   const waiting = e.not_answered || [];
   if (!e.expected_from || e.expected_from === "none") return null;
   const regs = e.regulars || [];
@@ -339,6 +321,7 @@ function NotAnswered({ e, meta }: { e: NightSheet; meta: Meta }) {
             <Group key={s.uid || s.display_name} gap={6} wrap="nowrap" style={{ lineHeight: 1.8 }}>
               <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={18} title={`${s.spec} · ${s.role}`} />
               <Tooltip label={s.display_name}><Text size="sm" fw={600} c={classColour(meta, s.cls)} truncate>{s.character}</Text></Tooltip>
+              {s.uid && <MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onDone} />}
             </Group>
           ))}
         </Stack>
@@ -354,7 +337,8 @@ function ChipRow({ label, items, menu }: { label: string; items: Signup[]; menu:
       {items.length === 0 && <Text size="sm" c="dimmed">—</Text>}
       {items.map((s) => (
         <Group key={s.uid} gap={4} wrap="nowrap" px={8} py={2} style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 7, background: "var(--mantine-color-slate-6)" }}>
-          <Text size="sm">{s.display_name}</Text>{menu(s)}
+          {/* a callout's note (officers only — never the public sheet) rides on the chip's tooltip */}
+          <Tooltip label={s.note || ""} disabled={!s.note} multiline maw={280}><Text size="sm" td={s.note ? "underline dotted" : undefined}>{s.display_name}</Text></Tooltip>{menu(s)}
         </Group>
       ))}
     </Group>

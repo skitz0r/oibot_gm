@@ -334,3 +334,39 @@ def test_roster_overview_is_ephemeral_and_officers_can_post_it(reg, officer):
                             response=SimpleNamespace(send_message=send_message, edit_message=edit_message), followup=SimpleNamespace(send=followup))
     run(btn.callback(press))
     assert ch.sent and any(f.name.startswith("Regulars") for f in ch.sent[0]["embed"].fields) and edits and follow
+
+
+def test_every_backticked_me_hint_names_a_command_that_exists(reg):
+    """Regression (merge of the inbox and people builds): /me view's Roles hint said `/me plan roles`, a command the
+    people build removed. Every backticked `/me …` hint in the member-facing modules must name a live command path."""
+    import re
+    from pathlib import Path
+
+    import discord
+    from discord import app_commands
+
+    from oibot_gm.discord_registry import Guilds, register_commands
+    from oibot_gm.ops import Ops
+
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    register_commands(tree, Guilds.of(reg.store, reg), Ops(client), lambda k, v: "")
+    paths: set[str] = set()
+
+    def walk(c, p=""):
+        name = f"{p} {c.name}".strip()
+        paths.add(name)
+        for s in getattr(c, "commands", None) or []:
+            walk(s, name)
+    for c in tree.get_commands():
+        walk(c)
+    src = Path(__file__).resolve().parents[1] / "src" / "oibot_gm"
+    bad = []
+    for f in ("discord_registry.py", "inbox.py"):
+        for hint in re.findall(r"`/(me(?: [a-z-]+)*)", (src / f).read_text()):
+            words = hint.split()
+            k = max(k for k in range(1, len(words) + 1) if " ".join(words[:k]) in paths)
+            prefix = " ".join(words[:k])
+            if k < len(words) and any(p.startswith(prefix + " ") for p in paths):  # a group, and the next word is no child of it
+                bad.append(f"{f}: /{hint}")
+    assert not bad, bad

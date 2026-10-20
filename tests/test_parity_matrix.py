@@ -30,7 +30,7 @@ from oibot_gm.wizard import FLOWS
 SURFACES: dict[str, dict[str, str]] = {
     "absence": {"discord": "flow:absence", "web": "POST /api/me/absence", "mcp": "add_absence"},
     "absence_clear": {"discord": "slash:me absent clear", "web": "POST /api/me/absence/clear", "mcp": "clear_absence"},
-    "dm": {"web": "POST /api/me/dm", "mcp": "set_dm"},
+    "dm": {"discord": "slash:me dms", "web": "POST /api/me/dm", "mcp": "set_dm"},
     "character": {"discord": "flow:member_char", "web": "POST /api/me/characters", "mcp": "save_characters"},  # /me char, /roster char
     "set_main": {"discord": "flow:member_char", "web": "POST /api/me/main", "mcp": "set_member"},
     "rank": {"discord": "flow:roster_rank", "web": "POST /api/members/set", "mcp": "set_member"},
@@ -46,14 +46,14 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_move": {"web": "POST /api/run/{key}/move"},
     "run_propose": {"web": "POST /api/run/{key}/split", "mcp": "propose_split"},
     "run_sheet": {"discord": "flow:raid_sheet", "web": "POST /api/run/{key}/sheet", "mcp": "repost_sheet"},
-    "confirm_for": {"web": "POST /api/admin/placement", "mcp": "confirm_for"},
+    "confirm_for": {"discord": "flow:raid_set", "web": "POST /api/admin/placement", "mcp": "confirm_for"},
     # raid-night levers (phase 2 A): the lock / closed card's RunButton, the Suggest… screen, the run routes, the tools
     "run_remind": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/remind", "mcp": "remind_unconfirmed"},
     "run_pause": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/pause", "mcp": "pause_autofill"},
     "run_withdraw": {"discord": "flow:raid_suggest", "web": "POST /api/run/{key}/withdraw", "mcp": "withdraw_ask"},
     "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
     "comp_target": {}, "comp_target_clear": {}, "comp_groups": {},
-    "pin": {"web": "POST /api/run/{key}/pin", "mcp": "pin"},
+    "pin": {"discord": "flow:raid_set", "web": "POST /api/run/{key}/pin", "mcp": "pin"},
     "policy_append": {"discord": "flow:rule", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},
     "raid_set": {"discord": "flow:raid_config", "web": "POST /api/admin/raid", "mcp": "raid_set"},
     "raid_reset": {"discord": "flow:raid_config", "web": "POST /api/admin/raid/reset", "mcp": "raid_reset"},

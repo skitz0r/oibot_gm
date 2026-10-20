@@ -37,6 +37,10 @@ fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg,
 src/oibot_gm/
   constants.py         ROLES / MARK / LEVEL_COLOUR / TEAL shared by Discord, web and render (no per-module copies); CLOCK12 + fmt12 = the one 12-hour formatter behind every clock that is not Registry.local12
   consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release: the ONE confirm sentence from code (design §5.33); ev_json.consequences carries it to the site, wizard.decide shows it in Discord
+  inbox.py             the member inbox (design §5.40): asks_of (every open ask, wherever it waits: dm | web), notices_of / inbox_lines
+                       (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
+                       do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
+                       THE pin write (every surface; re-renders the sheet's pin footer). Never a DM from here
   presets.py           shared presets: raid cadence PRESETS (standard/short/same_week), test-run TEMPOS, absence DURATIONS (the wizard's For how long
                        and /api/meta.durations); used by the wizards, plain text and the web
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
@@ -83,7 +87,7 @@ src/oibot_gm/
                        `config_rev(section)` for settings | raids:<id> | buffs | recruitment | plain (computed, excludes rosters[] / *_message_id),
                        `characters_rev(member)`, verbs take `rev=` and raise `ConfigChanged`; `preview(fn)` runs on shadow(); `member(uid, name)`
                        never renames — `rename(uid, name, by)` is the explicit step.
-                       People (design §5.40): save_character_table(officer=, by_id=, rev=) validates the whole table on a copy (check_character_table)
+                       People (design §5.41): save_character_table(officer=, by_id=, rev=) validates the whole table on a copy (check_character_table)
                        then one commit; CharactersChanged on a stale rev; rank per MEMBER on the main (Member.rank, settle_ranks — alts always "alt"),
                        set_rank(uid, rank, by, by_id) / confirm(uid, label, by, by_id) refuse your own (owner aside) and another officer's live puppet
                        (puppet_refusal); add_absence refuses overlaps + a reason past ABSENCE_REASON_MAX (check_absence = no write); set_dm;
@@ -126,7 +130,7 @@ src/oibot_gm/
                        coverage + 4-week forecast: Registry.series_coverage / rc.series_outlook (officer-only).
                        split_reason / split_reason_text: why the joiners make fewer runs than the headcount (what the next run is short, in code);
                        leftovers() = joiners the full roster(s) left out; another_run_hint = one line when leftovers + bench + pool could field another run.
-                       People (§5.40): character_changes / character_effects / character_preview / after_character_change (a respec rewrites the
+                       People (§5.41): character_changes / character_effects / character_preview / after_character_change (a respec rewrites the
                        sheet answers; a retired / deleted / respecced seat is freed — a role flip on a locked RECURRING run keeps it); join_while_away.
                        Raid night (design §5.39): expire_confirmations expires only a held ask; unasked_seats (the lock's recovery); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
@@ -163,7 +167,7 @@ src/oibot_gm/
                        Test bench: Member.test puppets, /gm test seed|run|answer|clear; RaidMixin.send_member_dm routes puppet DMs to the TESTER's own DMs
                        (never the roster channel), may_answer_for lets the tester press their buttons, a test run's pool is puppets + tester only and its
                        sheet refuses presses from real members
-  discord_people.py    THE people verbs (design §5.40), module functions taking the client (bare test clients work) + PeopleMixin:
+  discord_people.py    THE people verbs (design §5.41), module functions taking the client (bare test clients work) + PeopleMixin:
                        save_characters (the character table + its ripple: rc.character_changes/effects/preview/after_character_change → drop_seated
                        for a freed seat, a run-update + warn line for a kept role flip; preview=), record_absence, im_back (THE "I'm back"),
                        transfer_owner (D50), absence_lines / absence_clear_lines (the preview words). No DMs anywhere
@@ -223,6 +227,9 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first
                        guild the person may open (guild_routing.member_of); homepage/not-member page = one card per server (one guild: the old page byte for byte)
   web/api_agents.py    /api/news, /api/proposals…, /api/agents (the monitor), /api/agents/profile (effective profile, overrides marked)
+  web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
+                       /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
+                       officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras
   web/api_loot.py      the loot council on the web (design §5.36): /api/loot (+ /run/{run}), /api/loot/{run}/open|tick|distribute|override|confirm|
                        discard|reason|correct|end|… (the LootMixin verbs; LootChanged/LootBusy → 409 + `state`), history, precedents (+ retire), items
                        (+ tiers with the D12 re-weight ask), wishlists (+ TMB import), /api/me/loot, /api/me/wishlist, /api/members/wishlist, /api/loot/log

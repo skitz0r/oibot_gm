@@ -1,4 +1,4 @@
-"""People verbs on the client (dual interfaces phase 2: dual interface design §3.3, docs/design.md §5.40): the ONE
+"""People verbs on the client (dual interfaces phase 2: dual interface design §3.3, docs/design.md §5.41): the ONE
 character verb with its ripple into runs, "I'm back" (an absence cleared, its sheets re-opened), recording an absence, and the owner transfer.
 
 Every surface is a caller: the Me and Members pages (web/api.py), the Discord wizards (/me char, /roster char, /roster

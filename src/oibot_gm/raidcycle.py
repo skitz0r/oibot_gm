@@ -104,6 +104,10 @@ class FillAsk(BaseModel):
     channel: Literal["dm", "web"] = "dm"
     dm_channel_id: Optional[int] = None  # the DM card, so it can be edited to its final state when the ask closes
     dm_message_id: Optional[int] = None
+    # D14: an ask sent IN PARALLEL with this member's (a DMs-off candidate in the last hours before start can't be counted
+    # on to see the Me page in time): the discord_id of that primary ask. Both stay open, the first yes takes the seat and
+    # the other closes (`released`); while the primary is in play this twin counts for nothing (parallel_shadowed)
+    parallel_of: Optional[int] = None
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -151,6 +155,9 @@ class RaidEvent(BaseModel):
     callouts: list[Callout] = Field(default_factory=list)
     channel_id: Optional[int] = None
     message_id: Optional[int] = None
+    # labelled read-only copies a member posted with /raid sheet (D21): [channel id, message id] — never the live sheet
+    # (channel_id / message_id stay where they are); refresh_sheet edits them too, without buttons
+    mirror_messages: list[list[int]] = Field(default_factory=list)
     thread_id: Optional[int] = None
     health_posted: bool = False
     health_early: bool = False  # the early-warning health card went up when the sheet opened (the regulars can't cover a minimum)
@@ -1182,7 +1189,9 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
         return reg.profile.spec(cls, spec).role
 
     def ok(m: Member | None) -> bool:
-        return bool(m) and m.discord_id not in asked and not m.dm_opt_out and not m.absent_on(day) and m.discord_id not in busy
+        # DMs off is no reason to skip someone (D14): they are asked in the same order, the ask waits on their Me page
+        # (channel "web", same deadline); fill_batch adds a reachable twin when the hours before start run short
+        return bool(m) and m.discord_id not in asked and not m.absent_on(day) and m.discord_id not in busy
 
     # ---- who counts now
     cur: list[dict] = []
@@ -1205,7 +1214,7 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
                             "role": role_of(c.cls, c.spec), "signed": False})
     have = {r: sum(1 for p in cur if p["role"] == r) for r in ROLES}
     # asks still out — minus anyone who can't come any more (away that day, or No thanks since): theirs covers nothing
-    waiting = [a for a in ev.fill_asks if a.pending and ask_live(reg, ev, a)]
+    waiting = [a for a in ev.fill_asks if a.pending and ask_live(reg, ev, a) and not parallel_shadowed(ev, a)]  # a parallel twin covers its primary's seat, not a second one
     counted = waiting if (count_waiting or not locked) else []
     for a in counted:  # asks still out count as covering their seat (no second ask for it meanwhile)
         have[a.role] = have.get(a.role, 0) + 1
@@ -1220,7 +1229,7 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     headcount = seats_free if locked else 0  # before lock suggestions are for the minimums only; the reminder chases the rest
     plan = Plan(phase="fill" if locked else "prelock", short={"headcount": headcount, "roles": dict(short_roles)}, have=dict(have), need=need, full=full,
                 expected=sum(1 for p in cur if not p["signed"]), short_after={"headcount": headcount, "roles": dict(short_roles)},
-                waiting=[a.display_name for a in waiting], out=sum(1 for a in ev.fill_asks if a.pending) if locked else 0)
+                waiting=[a.display_name for a in waiting], out=sum(1 for a in ev.fill_asks if a.pending and not parallel_shadowed(ev, a)) if locked else 0)
     if not short_roles and not headcount:
         plan.rev = plan_rev(plan)
         return plan
@@ -1448,15 +1457,17 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | No
 def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> list[FillAsk]:
     """The next asks the fill engine sends now: shortfall + FILL_OVERASK, capped so at most FILL_MAX_OPEN are
     outstanding — never cutting a tied swap from its backfill."""
-    open_asks = [a for a in ev.fill_asks if a.pending]
+    open_asks = [a for a in ev.fill_asks if a.pending and not parallel_shadowed(ev, a)]  # a parallel twin is not a second ask out
     nd = needs(reg, ev, team)
     want = nd["headcount"] + sum(nd["roles"].values())
     if want <= 0:
         return []
     room = max(0, min(want + FILL_OVERASK, FILL_MAX_OPEN) - len(open_asks))
-    batch = role_plan(reg, rs, ev, team, swaps=swaps, count_waiting=False).asks[:room]  # the engine's over-ask: its own asks out aren't counted
+    plan = role_plan(reg, rs, ev, team, swaps=swaps, count_waiting=False)
+    batch = plan.asks[:room]  # the engine's over-ask: its own asks out aren't counted
     ids = {a.discord_id for a in batch}
-    return [a for a in batch if a.pair is None or a.pair in ids]
+    batch = [a for a in batch if a.pair is None or a.pair in ids]
+    return add_parallel_twins(reg, ev, plan, batch)
 
 
 def pick_asks(plan: Plan, picks: dict | None = None, limit: int | None = None) -> list[FillAsk]:
@@ -1655,7 +1666,9 @@ def release_member_asks(reg: Registry, rs: RaidStore, ev: RaidEvent, uid: int, w
 
 
 def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[FillAsk], list[FillAsk]]:
-    """Open asks past their deadline count as no. Returns (expired, released partners)."""
+    """Open asks past their deadline count as no. Returns (expired, released partners). An ask that waited on the site
+    (channel "web", DMs off) gets a notice saying it closed (design §2.5 — the outcome reaches them somewhere); a DM
+    ask's card is the scheduler's to edit (RaidMixin.close_ask_card)."""
     t = datetime.now(ev.start.tzinfo)
     expired, released = [], []
     for a in ev.fill_asks:
@@ -1670,6 +1683,9 @@ def expire_fill_asks(reg: Registry, rs: RaidStore, ev: RaidEvent) -> tuple[list[
             other = release_partner(reg, rs, ev, a)
             if other:
                 released.append(other)
+            if a.channel == "web":
+                reg.notify(a.discord_id, "ask_closed", f"The seat question for {run_words(reg, ev)} closed at {reg.local12(t)} without your answer. "
+                           "Nothing to do.", run=ev.key)
         rs.save(ev, f"fill expired {len(expired)}")
     return expired, released
 
@@ -1700,6 +1716,7 @@ def apply_fill_answer(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk,
         ev.log.append(f"{'suggestion' if ev.state == 'open' else 'fill'}: {ask.display_name} said yes — waiting for {other.display_name} (a tied pair needs both)")
         rs.save(ev, f"fill {ask.display_name} yes, held")
         return f"{ask.display_name} said yes — waiting for {other.display_name}; nothing changes until both say yes"
+    close_parallel(reg, rs, ev, ask)  # D14: the first yes of a parallel pair takes the seat; the other ask closes
     line = _apply_yes(reg, rs, ev, ask, m)
     if other is not None and other.held:  # the partner said yes first: now both happen
         other.held = False
@@ -2404,6 +2421,8 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str) -> Pla
     name = sg.display_name if sg else p.signup_name
     ev.log.append(f"seat freed: {name} ({why})")
     rs.save(ev, f"seat freed {name}")
+    if uid is not None:
+        seat_gone(reg, ev, uid, why)  # their open Confirm ask closes (a later Confirm is refused) and their inbox hears why
     on_roster_change(rs.key, ev, removed=[uid if uid is not None else name], roster_of={uid if uid is not None else name: i})
     return p
 
@@ -2989,3 +3008,285 @@ def join_while_away(reg: Registry, ev: RaidEvent, m: Member, mine: bool = True) 
     their = "your" if mine else "their"
     return (f"{who} marked away {reg.day_label(day)} — joined for this run; {their} absence {reg.span_label(a.start, a.end)} "
             "still stands for the other sheets (I'm back clears it).")
+
+# ---------------------------------------------------------------- the member inbox (dual interfaces phase 2 B, design §5.40)
+# D14 (DMs-off asks by phase), the receipt that renders state (§2.7), the on-behalf union (B5) and the notices the run's
+# verbs write (D26: an outcome is a notice on the Me page and the card edited — never a courtesy DM).
+
+RELEASE_NOTICE = {"no-confirm": "no confirmation came in time", "absence": "you're marked away that day", "moved to bench": "an officer moved you to the bench on the board",
+                  "board": "the board was changed", "officer": "an officer took you off"}
+
+
+def run_words(reg: Registry, ev: RaidEvent) -> str:
+    """A run as a notice reads it: raid name + 12-hour guild time ('Barrow Deeps Tue 9 Dec 7:30 PM'), never the key."""
+    return f"{reg.raid_def(ev.instance).get('name', ev.instance or ev.team)} {reg.local12(ev.start)}"
+
+
+def reachable(m: Member | None) -> bool:
+    """Can a DM reach them? Not with DMs off (their asks wait on the Me page)."""
+    return m is not None and not m.dm_opt_out
+
+
+def parallel_shadowed(ev: RaidEvent, a: FillAsk) -> bool:
+    """A parallel twin while its primary is still in play: it covers the primary's seat, never a second one."""
+    if a.parallel_of is None:
+        return False
+    return any(p is not a and p.discord_id == a.parallel_of and p.phase == a.phase and p.pending for p in ev.fill_asks)
+
+
+def parallel_window(reg: Registry, ev: RaidEvent, at: datetime | None = None) -> bool:
+    """D14: the last hours before start — when an ask can no longer run its whole fill_ask_hours (ask_deadline caps it at
+    the start), a DMs-off candidate (who must find the Me page in time) gets a reachable twin asked in parallel."""
+    at = at or datetime.now(ev.start.tzinfo)
+    return ask_deadline(reg, ev, at) >= ev.start
+
+
+def add_parallel_twins(reg: Registry, ev: RaidEvent, plan: "Plan", batch: list[FillAsk], at: datetime | None = None) -> list[FillAsk]:
+    """The fill engine's batch with D14's parallel asks: after lock, in the last hours before start, every plain seat ask
+    (not a swap, no tied partner) to someone a DM can't reach is followed by its seat's first alternate a DM CAN reach,
+    marked `parallel_of`. Both go out; the first yes takes the seat (close_parallel). Before lock, outside the window,
+    or with no reachable alternate: the batch as it was (same order — D14: the DMs-off person is not skipped)."""
+    if plan.phase != "fill" or not batch or not parallel_window(reg, ev, at):
+        return batch
+    ids = {a.discord_id for a in batch}
+    out: list[FillAsk] = []
+    for a in batch:
+        out.append(a)
+        if a.swap or a.pair is not None or reachable(reg.members.get(a.discord_id)):
+            continue
+        seat = next((st for st in plan.seats if st.options and any(x.discord_id == a.discord_id for x in st.options[0])), None)
+        for opt in (seat.options[1:] if seat else []):
+            if len(opt) != 1 or opt[0].swap or opt[0].pair is not None or opt[0].discord_id in ids or not reachable(reg.members.get(opt[0].discord_id)):
+                continue
+            twin = opt[0].model_copy()
+            twin.parallel_of, twin.reason = a.discord_id, a.reason
+            twin.why = (twin.why or "") + f" · asked in parallel: {a.display_name}'s DMs are off and the raid is close — the first yes takes the seat"
+            out.append(twin)
+            ids.add(twin.discord_id)
+            break
+    return out
+
+
+def parallel_linked(ev: RaidEvent, ask: FillAsk) -> list[FillAsk]:
+    """The asks tied to `ask` by D14's parallel pairing (its primary, or its twins), any state, same phase."""
+    return [a for a in ev.fill_asks if a is not ask and a.phase == ask.phase
+            and ((ask.parallel_of is not None and a.discord_id == ask.parallel_of and a.parallel_of is None)
+                 or (a.parallel_of is not None and a.parallel_of == ask.discord_id))]
+
+
+def close_parallel(reg: Registry, rs: "RaidStore", ev: RaidEvent, ask: FillAsk) -> list[FillAsk]:
+    """A yes on one ask of a parallel pair: the others still open close (`released`) — the seat is taken. Their DM card is
+    the caller's to edit (RaidMixin.after_fill_answer); an ask that waited on the site gets a notice. Saves when any closed."""
+    gone = [a for a in parallel_linked(ev, ask) if a.pending and not a.held]
+    for a in gone:
+        a.answer, a.answered_at, a.answered_by = "released", now(), None
+        ev.log.append(f"fill: {a.display_name}'s ask withdrawn ({ask.display_name} said yes first)")
+        if a.channel == "web":
+            reg.notify(a.discord_id, "ask_closed", f"Never mind the seat question for {run_words(reg, ev)} — someone else took the seat first. Nothing to do.", run=ev.key)
+    if gone:
+        rs.save(ev, f"fill: parallel ask(s) closed for {ask.display_name}'s yes")
+    return gone
+
+
+def seat_gone(reg: Registry, ev: RaidEvent, uid: int, why: str) -> None:
+    """A seat was freed (free_seat — every path: an officer, the board, an absence, expiry, a Can't make it): the member's
+    OPEN Confirm ask on this run closes (`released`; a Confirm pressed later on the Me page or an old card is then
+    refused from one place) and — unless it was their own doing, or an officer's on-behalf write that tells them
+    itself — their inbox says why. Never a DM (the card is RaidMixin.seat_released's to edit)."""
+    reg.close_placement_ask(uid, ev.team, "released")
+    if why in ("declined", "callout", "callout (test)", "officer"):
+        return
+    reason = RELEASE_NOTICE.get(why, why)
+    reg.notify(uid, "released", f"Your seat on {run_words(reg, ev)} was released ({reason}). Nothing to do — if that's wrong, tell an officer.", run=ev.key)
+
+
+def leftover_notices(reg: Registry, ev: RaidEvent) -> int:
+    """At lock: everyone who joined and was not rostered gets ONE notice (D26 — never a DM unless a seat is offered, the
+    DM rule): how many seats, how many joined, and that a freed seat would reach them. Returns how many were told."""
+    left = [s for s in ev.by_status("in") if not ev.seat_of(s.discord_id)]
+    if not left or not ev.all_rosters:
+        return 0
+    seats = len(ev.all_rosters) * run_size(reg, ev)
+    joined = len(ev.by_status("in"))
+    with reg.store.batch(f"{reg.key}: notices — not rostered on {ev.key}"):
+        for s in left:
+            m = reg.members.get(s.discord_id)
+            how = "you'd get a DM" if reachable(m) else "it would wait on your Me page"
+            reg.notify(s.discord_id, "not_rostered", f"You weren't rostered for {run_words(reg, ev)} ({seats} seats, {joined} joined). You're in line for a freed seat — {how}.", run=ev.key)
+    return len(left)
+
+
+def cancel_notices(reg: Registry, ev: RaidEvent, by: str, by_id: int | None = None) -> int:
+    """A cancelled run: one notice to everyone who joined or benched it, held a seat or had an ask open — never the
+    reason (that is for officers) and never a DM. The canceller is not told. Returns how many were told."""
+    who: dict[int, bool] = {}
+    for s in ev.signups.values():
+        if s.status in ("in", "sub"):
+            who[s.discord_id] = False
+    for p in ev.seated():
+        uid = player_uid(ev, p)
+        if uid is not None:
+            who[uid] = True
+    for a in ev.fill_asks:
+        if a.answer == "cancelled":
+            who.setdefault(a.discord_id, False)
+    who.pop(by_id, None)
+    with reg.store.batch(f"{reg.key}: notices — {ev.key} cancelled"):
+        for uid, seated in who.items():
+            reg.notify(uid, "cancelled", f"{run_words(reg, ev)} was cancelled by {by}." + (" Your seat is released — nothing to do." if seated else " Nothing to do."), run=ev.key)
+    return len(who)
+
+
+def on_behalf_notice(reg: Registry, ev: RaidEvent, uid: int, what: str, by: str) -> dict | None:
+    """An officer changed a member's standing for them (B5: set_answer / call_out / a Confirm or fill answer recorded for
+    them): one notice line — 'Jon set you to No thanks for Barrow Deeps Tue 7:30 PM'. Their open DM card, when there is
+    one, is the verb's to edit; nothing else is sent."""
+    return reg.notify(uid, "answered_for_you", f"{by} {what} for {run_words(reg, ev)}.", run=ev.key)
+
+
+def _ordinal(n: int) -> str:
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def answer_receipt(reg: Registry, ev: RaidEvent, m: Member) -> str:
+    """THE receipt for an answer (design §2.7: it renders STATE, not the action) — the sheet button's ephemeral reply, the
+    Me page's toast: what they are now on this run, as which character, and what happens next. On an ad hoc run the
+    queue position ('14th of 25 seats — in if nothing changes'); a recurring run with several rosters says which roster
+    is decided at lock; after lock rostered / confirmed / in line. Markdown bold; the web strips it. A Join on a day
+    they are recorded away carries join_while_away's sentence (the absence stands for the other sheets; I'm back)."""
+    text = _answer_state(reg, ev, m)
+    s = ev.signups.get(str(m.discord_id))
+    if s is not None and s.status == "in" and ev.state not in ("done", "cancelled"):
+        note = join_while_away(reg, ev, m)
+        if note:
+            text += "\n" + note
+    return text
+
+
+def _answer_state(reg: Registry, ev: RaidEvent, m: Member) -> str:
+    """answer_receipt without the away note: the state line alone."""
+    s = ev.signups.get(str(m.discord_id))
+    run = run_words(reg, ev)
+    dm = "you'd get a DM" if reachable(m) else "it would wait on your Me page"
+    if ev.state in ("done", "cancelled"):
+        return f"{run} is {ev.state}."
+    if s is None:
+        return f"You haven't answered {run} yet."
+    as_ = f"{s.character} ({s.spec})"
+    if ev.state == "open":
+        if s.status == "in":
+            ins = ev.by_status("in")
+            n = run_rosters(reg, ev)
+            seats = n * run_size(reg, ev)
+            if run_kind(reg, ev) == "adhoc":
+                pos = next((i for i, x in enumerate(ins, 1) if x.discord_id == s.discord_id), len(ins))
+                if pos <= seats:
+                    return f"You're **joined** as {as_} for {run} — {_ordinal(pos)} of {seats} seats, in if nothing changes (first come, first rostered)."
+                return f"You're **joined** as {as_} for {run} — {_ordinal(pos)} for {seats} seats: a seat opens only if someone drops; {dm}."
+            return (f"You're **joined** as {as_} for {run} · {len(ins)}/{seats} so far."
+                    + (f" Join counts for 1 of {n} rosters — which one is decided at lock." if n > 1 else " The roster is decided at lock."))
+        if s.status == "sub":
+            return f"You're on the **Bench** as {as_} for {run} — not coming unless needed; the officers ask you if a seat opens."
+        away = " (you're marked away that day)" if s.source == "absence" else ""
+        return f"You're **No thanks** for {run}{away}."
+    seat = ev.seat_of(m)
+    if seat:
+        i, p = seat
+        where = f" · roster {i + 1} of {len(ev.all_rosters)}" if len(ev.all_rosters) > 1 else ""
+        ask = next((a for a in reversed(m.placement_asks) if a["roster"] == ev.team), None)
+        if not run_confirms(reg, ev):
+            then = " — you're in; press Can't make it on the sheet if that changes."
+        elif ask and ask.get("answer") == "yes":
+            then = " — confirmed."
+        elif ask and ask.get("answer") is None:
+            by = f" by {reg.local12(ev.confirm_by)}" if ev.confirm_by else ""
+            then = f" — confirm{by} ({'your DM or ' if reachable(m) and ask.get('channel', 'dm') == 'dm' else ''}your Me page)."
+        else:
+            then = "."
+        return f"You're **rostered** as {p.character or s.character} ({p.spec}) for {run}{where}{then}"
+    if s.status == "in":
+        return f"You joined {run} but weren't rostered — you're in line for a freed seat; {dm}."
+    if s.status == "sub":
+        return f"You're on the **Bench** for {run} — not rostered; the officers ask you if a seat opens."
+    return f"You're **No thanks** for {run}."
+
+
+# the on-behalf union (B5): every verb an officer may record for a member on one run, in the members' own words, raid-night
+# first. `key` is what the wizard / the web send back; `needs` = "character" (a pick) | "note" (optional prose) | None.
+ACTION_LABELS = {"callout": "Record a callout…", "confirm_yes": "Confirm for them", "confirm_no": "Can't make it for them",
+                 "fill_yes": "Confirm their fill", "fill_no": "No to their fill", "join": "Join", "bench": "Bench", "no_thanks": "No thanks",
+                 "pin_in": "Pin to roster", "pin_out": "Keep on bench", "unpin": "Unpin"}
+
+
+def member_actions(reg: Registry, ev: RaidEvent, m: Member) -> list[dict]:
+    """What an officer can record for `m` on `ev` right now — ONLY the verbs that apply (the SetWizard's buttons and the
+    site's row ⋮ menu read this one list): Confirm / Can't make it for their open Confirm ask · Confirm / No to their
+    open fill ask · Record a callout (with an optional note; before lock it is No thanks + the callout) · Join (as
+    <alt>) · Bench · No thanks (an answer change: no callout record) · Pin to roster / Keep on bench / Unpin (open
+    sheet, on it). Each: {key, label, needs, characters?: [labels]}."""
+    if ev.state not in ("open", "locked"):
+        return []
+    s = ev.signups.get(str(m.discord_id))
+    seat = ev.seat_of(m) if ev.state != "open" else None
+    chars = [c.label for c in m.active()]
+    out: list[dict] = []
+
+    def add(key: str, needs: str | None = None, label: str | None = None, **extra) -> None:
+        out.append({"key": key, "label": label or ACTION_LABELS[key], "needs": needs, **extra})
+
+    if ev.state == "locked" and any(a["roster"] == ev.team and a.get("answer") is None for a in m.placement_asks):
+        add("confirm_yes")
+        add("confirm_no")
+    ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.open), None)
+    if ask is not None:
+        add("fill_yes", label=f"Confirm their {'swap' if ask.swap else 'fill'} ({ask.character}, {ask.spec})")
+        add("fill_no", label=f"No to their {'swap' if ask.swap else 'fill'}")
+    if seat or s is None or s.status != "out":  # a callout for someone who told an officer they can't come (answered or not)
+        add("callout", "note")
+    if ev.state == "open" or not seat:
+        if s is None or s.status != "in":
+            add("join", "character" if len(chars) > 1 else None, characters=chars)
+        elif len(chars) > 1:
+            add("join", "character", label="Join as another character", characters=[c for c in chars if c != s.character])
+    elif len(chars) > 1:  # rostered: a character swap keeps the seat (set_answer reseats)
+        add("join", "character", label="Play another character", characters=[c for c in chars if c != (s.character if s else None)])
+    if s is None or s.status != "sub":
+        add("bench", "character" if len(chars) > 1 and s is None else None, characters=chars)
+    if s is None or s.status != "out":
+        add("no_thanks")
+    if ev.state == "open" and s is not None:
+        pin = ev.pins.get(str(m.discord_id))
+        if pin != "in" and s.status == "in":
+            add("pin_in")
+        if pin != "out":
+            add("pin_out")
+        if pin:
+            add("unpin")
+    return out
+
+
+def member_state_rev(ev: RaidEvent, m: Member) -> str:
+    """What the SetWizard re-reads at Confirm: the member's answer, seat, pin and open asks on this run. A change since the
+    screen was drawn is shown ('Kestrel is now Bench … — keep going?') before anything is written."""
+    s = ev.signups.get(str(m.discord_id))
+    open_place = any(a["roster"] == ev.team and a.get("answer") is None for a in m.placement_asks)
+    open_fill = any(a.discord_id == m.discord_id and a.open for a in ev.fill_asks)
+    return "|".join(str(x) for x in (ev.state, s.status if s else "", s.character if s else "", s.updated_at if s else "", bool(ev.seat_of(m)),
+                                       ev.pins.get(str(m.discord_id), ""), open_place, open_fill))
+
+
+def member_change_words(reg: Registry, ev: RaidEvent, m: Member) -> str:
+    """'Kestrel is now Bench as Kestrel (since 5:12 PM)' — the member's answer as it is now, for the re-read screen."""
+    s = ev.signups.get(str(m.discord_id))
+    if s is None:
+        return f"{m.display_name} has no answer on this run now"
+    seat = " and rostered" if ev.state != "open" and ev.seat_of(m) else ""
+    return f"{m.display_name} is now {LABELS.get(s.status, s.status)} as {s.character}{seat} (since {reg.local12(s.updated_at, '%I:%M %p')})"
+
+
+def pin_counts(ev: RaidEvent) -> str:
+    """The sheet footer's pin line (B5, numbers only — who is officer data): 'Pinned: 2 · Bench-pinned: 1', or ''."""
+    on = {str(sg.discord_id) for sg in ev.signups.values()}
+    ins = sum(1 for u, v in ev.pins.items() if v == "in" and u in on)
+    outs = sum(1 for u, v in ev.pins.items() if v == "out" and u in on)
+    return " · ".join(p for p in ((f"Pinned: {ins}" if ins else ""), (f"Bench-pinned: {outs}" if outs else "")) if p)

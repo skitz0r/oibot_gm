@@ -84,7 +84,8 @@ def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
         opt = h._items()[0].options
         assert any("Altone · Mage Fire · " + a.display_name == o.label for o in opt)
         await h.pick(h.selects()[0], pick_value(h, "Altone"))
-        assert "Confirm **Altone**" in h.text and a.display_name in h.text and "no DM" in h.text
+        assert "Confirm **Altone**" in h.text and a.display_name in h.text
+        assert "Me page (no DM)" in h.text and "get a DM" not in h.text, "the confirm screen says what the save does"
         await h.press("Confirm")
         assert "✅ Confirmed **Altone**" in h.text and "1 character waiting" in h.text
         await h.press("Confirm next")
@@ -93,7 +94,9 @@ def test_confirm_walks_two_pending_in_a_row(reg, rs, officer):
         assert "Nothing left to confirm" in h.text and h.screen["view"] is None
     run(go())
     assert reg.find("Altone")[1].confirmed_by == "Tester" and reg.find("Alttwo")[1].confirmed_by == "Tester"
-    assert not h.dms  # the DM rule: a confirmation is an outcome (the Me page), never a courtesy DM
+    assert not h.dms, "no 'welcome aboard' DM (the DM rule)"
+    for m, label in ((a, "Altone"), (b, "Alttwo")):  # the member hears it on their Me page instead (D26)
+        assert [n["text"] for n in reg.notices(m.discord_id)] == [f"{label} was confirmed by Tester. Welcome aboard."]
     assert len(h.client.ops.lines) == 2
 
 

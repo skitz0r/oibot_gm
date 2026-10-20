@@ -58,7 +58,7 @@ export function PlainPermissions() {
         action={data.owner && !editing ? <Button variant="default" size="sm" leftSection={<IconPencil size={15} />} onClick={start}>Edit permissions</Button> : null} />
       <Box p="md">
         <Text size="sm" c="dimmed" mb="sm">
-          Applies to @mentions, DMs, <Text span ff="monospace" size="sm">/gm change</Text> and MCP <Text span ff="monospace" size="sm">plain_change</Text> (which counts as a place where plain text acts). The bot always shows the change first and waits for Apply; the owner can always do everything. Only the owner changes these permissions, in chat too.
+          Applies to @mentions, DMs, <Text span ff="monospace" size="sm">/gm change</Text> and MCP <Text span ff="monospace" size="sm">plain_change</Text> (which counts as a place where plain text acts). The bot always shows the change first and waits for Apply; the owner can always do everything. Only the owner changes these permissions, in chat too. Pinning someone in or out of a run is a <b>Runs</b> change (it decides who the lock rosters), not Comp &amp; policy.
         </Text>
         <Table.ScrollContainer minWidth={560}>
           <Table verticalSpacing="xs">
