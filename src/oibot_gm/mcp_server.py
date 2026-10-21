@@ -260,8 +260,13 @@ def guild_overview(guild: Guild = None) -> dict:
     news keywords, the channels the bot uses ({id, name, missing}: missing = set but no longer a channel the bot can
     see), the policy documents (compiled or not, summary, the text up to 1500 characters), each raid's cadence and
     live-run count, the live runs (key, when, state, counts), and the test bench (puppets, test runs). `guild` says
-    which guild answered (key, name, Discord id). Start here."""
+    which guild answered (key, name, Discord id), and `summary`: the effective configuration in words, by section (the
+    same sections config_summary, /gm config show and the site's Config Overview print). Start here."""
     cfg = api(guild).get("/api/config")
+    try:  # officers' words for the config; a bot from before the route answers 404 and the overview still stands
+        summary = api(guild).get("/api/config/summary")
+    except ToolError:
+        summary = {}
     raids = api(guild).get("/api/raids")
     rosters = api(guild).get("/api/rosters")
     live = [run_summary(e) for r in rosters.get("raids", []) for e in r.get("open", []) + r.get("locked", [])] + [run_summary(e) for e in rosters.get("orphans", [])]
@@ -277,6 +282,7 @@ def guild_overview(guild: Guild = None) -> dict:
                    "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "class": s.get("class"), "regulars": s.get("regulars", 0), "next": s.get("next", [])} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
         "live_runs": live,
         "test_bench": cfg.get("test_bench"),
+        "summary": summary.get("sections", []) if isinstance(summary, dict) else [],
     }
 
 
@@ -780,6 +786,9 @@ def set_config(field: str | None = None, value: Any = None, fields: dict[str, An
     """Guild settings (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
     phrases that make a news item relevant), loot_log (bool: the public award log), officer_roles (the WHOLE list of role
     ids or names the bot knows, always a list: ["123456789", "Officer"]; [] for none — a bare string is refused), channel:<kind> (as set_channel) — one `field` + `value` or several as `fields`.
+    A timezone change while runs are open or locked: preview first (it names each run whose clock reading changes), then
+    send `timezone_runs` with it — "keep" (they stay at their real moment; needed while a run is LOCKED) or "move" (the
+    open runs keep their wall-clock time on the new zone, signups kept; locked runs stay).
     `preview=True`: current → new and the consequences, nothing saved."""
     want = dict(fields or {})
     if field:

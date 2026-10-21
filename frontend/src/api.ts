@@ -149,7 +149,8 @@ export interface RaidRuns {
 }
 export interface Regular { uid: string; display_name: string; character: string; cls: string; spec: string; role: string }
 /** One upcoming start of a recurring series: its regulars minus recorded absences, against the minimums. */
-export interface ForecastRow { start: string; day: string; when: string; expected: number; seats: number; short: Record<string, number>; away: string[] }
+/** `open_key`: the run already open (or locked) at that start — the Readiness page shows it instead of "Open this run early" (GET /api/readiness only). */
+export interface ForecastRow { start: string; day: string; when: string; expected: number; seats: number; short: Record<string, number>; away: string[]; open_key?: string | null }
 /** `level`: green = regular mains cover the tank/healer minimums with a spare, amber = no spare (`no_spare`) or only with offspecs / flex / alts (`cover`), red = not even then (`recruit`); null = no regulars yet. */
 export interface Series { key: string; id: string; name: string; label: string; active: boolean; seats: number; regulars: Regular[]; counts: Record<string, number>; need: Record<string, number>;
   level?: "green" | "amber" | "red" | null; no_spare?: string[]; cover?: string[]; recruit?: string[]; forecast?: ForecastRow[] }

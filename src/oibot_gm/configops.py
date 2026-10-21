@@ -46,7 +46,8 @@ async def report_error(ops, cfg, e: BaseException, where: str) -> str:
     return text
 
 SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never guess)
-Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
+Guild (owner only, op=set): timezone (IANA name; field=keep when they say to change it anyway while a run is locked — runs
+  already open stay at their real moment —, field=move when they want the open runs moved with the clock too), signup_channel (channel mention), ops_channel, applications_channel,
   roster_channel (officer channel for health cards and roster proposals), registration_channel (public card with the
   Register / Add an alt / My status buttons), analytics_channel (bank + per-raid readiness cards), absences_channel
   (the "I'll be away" card), news_channel (where the news webhook posts; the bot keeps the relevant items) — a channel
@@ -191,7 +192,7 @@ class ConfigOp(BaseModel):
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|news_keywords|ask_audience|about")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain), item name or id (tier)")
-    field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>")
+    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none)")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
@@ -2312,7 +2313,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op == "set":
         with reg.config_lock:  # mutate-validate-save under the registry's lock, like its own verbs (design §2.4)
             reg.check_rev("settings", rev)
-            return _apply_set(reg, op, by)
+            return _apply_set(reg, op, by, raids)
     if op.op == "recruit":
         kw, _ = _recruit(reg, op)
         if "invite_create" in kw:
@@ -2578,6 +2579,19 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
             return await bot.set_channel(reg, op.path.removesuffix("_channel"), cid, by, via=via or "discord", by_id=by_id)
         except ValueError as e:
             raise RegistryError(str(e))
+    if bot is not None and op.op == "set" and op.path == "timezone" and getattr(bot, "raids", None) is not None:
+        # on the loop with the live run store: the open runs it moves are the bot's own objects (never a fresh copy the
+        # scheduler would overwrite), then every live sheet is redrawn — its clock words read the new zone
+        rs = bot.raids.store(reg)
+        line = apply(reg, op, by, is_owner, policy_store, raids=rs, rev=rev, by_id=by_id)
+        refresh = getattr(bot, "refresh_sheet", None)
+        if refresh is not None and rs is not None:
+            for ev in list(rs.live()):
+                try:
+                    await refresh(reg, ev)
+                except Exception:  # noqa: BLE001 — the zone is saved; a sheet catches up on its next redraw
+                    log.exception("sheet refresh after a timezone change failed (%s)", ev.key)
+        return line
     if bot is not None and op.op == "absence":
         from . import discord_people
 
@@ -2625,15 +2639,13 @@ async def _warm_roles(reg: Registry, bot) -> None:
         await asyncio.to_thread(reg.resolve_officer_roles, guild)
 
 
-def _apply_set(reg: Registry, op: ConfigOp, by: str) -> str:
-    """The `set` op's write (one guild setting): called by apply() under config_lock after the rev check."""
+def _apply_set(reg: Registry, op: ConfigOp, by: str, raids=None) -> str:
+    """The `set` op's write (one guild setting): called by apply() under config_lock after the rev check. `raids`: the
+    bot's live run store (a timezone change reads and may move the live runs)."""
     cfg = reg.config
     if op.path == "timezone":
-        from zoneinfo import ZoneInfo
-
-        ZoneInfo(op.value or "")
-        cfg.timezone = op.value or cfg.timezone
-    elif op.path == "ask_audience":
+        return _apply_timezone(reg, op, by, raids)
+    if op.path == "ask_audience":
         if op.value not in ("officers", "confirmed", "registered", "everyone"):
             raise RegistryError("ask_audience is officers|confirmed|registered|everyone")
         cfg.ask_audience = op.value
@@ -2661,6 +2673,30 @@ def _apply_set(reg: Registry, op: ConfigOp, by: str) -> str:
         raise RegistryError(f"unknown setting {op.path}")
     reg.save_config(f"{op.path} → {op.value} (by {by})")
     return f"{op.path} = {op.value}"
+
+
+def _apply_timezone(reg: Registry, op: ConfigOp, by: str, raids=None) -> str:
+    """`set timezone` (dual interfaces §3.5): `op.field` = what to do with the live runs whose clock reading changes —
+    "" refuses while a LOCKED one is affected (Registry.timezone_refusal), "keep" leaves them all at their real moment,
+    "move" also moves every open real run with the clock (rc.move_runs_with_clock: same wall clock, signups kept). The
+    zone and the moved runs are one commit. The rows are computed on the OLD zone, before it changes."""
+    from . import raidcycle as rc
+
+    zone = (op.value or "").strip()
+    mode = (op.field or "").strip().lower()
+    _zone, _z = reg._tz_zone(zone)  # a zone that doesn't exist: refused in the registry's words
+    rs = raids if raids is not None else (None if getattr(reg, "_shadow", False) else rc.RaidStore(reg.store, reg.key))
+    why = reg.timezone_refusal(zone, rs, mode)
+    if why:
+        raise RegistryError(why)
+    if zone == reg.config.timezone:
+        return f"timezone = {zone} (already)"
+    rows = reg.timezone_runs(zone, rs) if mode == "move" and rs is not None and not getattr(reg, "_shadow", False) else []
+    with reg.store.batch(f"{reg.key}: timezone → {zone} (by {by})"):
+        reg.config.timezone = zone
+        reg.save_config(f"timezone → {zone} (by {by})")
+        moved = rc.move_runs_with_clock(reg, rs, rows, zone, by) if rows else []
+    return f"timezone = {zone}" + (f" — {len(moved)} open run{'s' if len(moved) != 1 else ''} moved with the clock ({join_words([e.key for e in moved])})" if moved else "")
 
 
 
@@ -3114,7 +3150,8 @@ def host_facts(reg: Registry, bot=None) -> list[str]:
 
 
 def summary_text(sections: list[SummarySection]) -> str:
-    """The sections as plain lines (a title line, then its lines) — help's snapshot and MCP read this."""
+    """The sections as plain lines (one per section: its title, then its lines) — the officers' help snapshot reads this
+    (help._config, the `config` section); MCP gets the sections themselves (config_summary, guild_overview's `summary`)."""
     return "\n".join(f"{s.title}: " + " · ".join(s.lines) for s in sections)
 
 
@@ -3212,6 +3249,9 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
     ops: list[ConfigOp] = []
     k = (kind or "").strip().lower()
     if k == "settings":
+        tz_runs = fields.pop("timezone_runs", None)  # what a timezone change does with the live runs: keep | move (the confirm's pick)
+        if tz_runs not in (None, "") and str(tz_runs).strip().lower() not in ("keep", "move"):
+            raise RegistryError("timezone_runs is keep (runs already open stay at their real moment) or move (open runs move with the clock)")
         for f, v in fields.items():
             f = str(f)
             path = f[8:] + "_channel" if f.startswith("channel:") else f
@@ -3235,7 +3275,11 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
             elif path in SETTINGS_FIELDS:
                 ops.append(ConfigOp(op="set", path=path, value=_value_text(v) if path != "news_keywords" or not isinstance(v, list) else ", ".join(str(w) for w in v)))
             else:
-                raise RegistryError(f"unknown setting {f} (one of {', '.join(SETTINGS_FIELDS)}, officer_roles, channel:<kind>)")
+                raise RegistryError(f"unknown setting {f} (one of {', '.join(SETTINGS_FIELDS)}, officer_roles, channel:<kind>, timezone_runs)")
+        if tz_runs not in (None, ""):
+            for o in ops:
+                if o.op == "set" and o.path == "timezone":
+                    o.field = str(tz_runs).strip().lower()
         return ops
     if k == "raid":
         return _raid_ops(reg, (target or "").strip(), fields)
@@ -3598,7 +3642,7 @@ def _timezone_consequences(reg: Registry, op: ConfigOp) -> list[str]:
     """A timezone change with runs already open or locked: each run whose clock reading moves, in the words of
     Registry.timezone_change_effects (the TimezoneWizard, the Config page's review and MCP's preview print them)."""
     if op.op == "set" and op.path == "timezone" and (op.value or "").strip() and op.value.strip() != reg.config.timezone:
-        return reg.timezone_change_effects(op.value.strip())
+        return reg.timezone_change_effects(op.value.strip(), mode=(op.field or "").strip().lower())
     return []
 
 
@@ -3661,6 +3705,8 @@ def op_consequences(reg: Registry, op: ConfigOp) -> list[str]:
     for hook in CONSEQUENCE_HOOKS:
         try:
             out += [s for s in hook(reg, op) or [] if s not in out]
+        except RegistryError:
+            pass  # a bad pick (an unknown zone): the line's own refusal says so — nothing for the log
         except Exception:  # noqa: BLE001 — a hook never breaks a preview
             log.exception("consequence hook failed")
     return out
@@ -4013,6 +4059,8 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
             return False
         if op.op == "set" and op.path in CHANNEL_PATHS and bot is not None and getattr(bot, "set_channel", None) is not None:
             return False  # the Config page's verb: posts / drops the card on the loop
+        if op.op == "set" and op.path == "timezone" and (op.field or "").strip().lower() == "move" and bot is not None and getattr(bot, "raids", None) is not None:
+            return False  # moves live runs: the loop's own run store (rule L3), then every sheet is redrawn (_apply_async)
         if op.op == "recruit" and not isinstance(op, MergedOp) and (op.field or "").strip().lower() == "invite_create":
             return False
         return True
@@ -4034,7 +4082,7 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
                 res.append((op, line, None))
         return res
 
-    i, card = 0, False
+    i, card, sheets = 0, False, False
     while i < len(merged):
         if pure(merged[i]):
             j = i
@@ -4044,6 +4092,7 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
                 if e is None:
                     landed(op, line, False)
                     card = card or op.op == "recruit"
+                    sheets = sheets or (op.op == "set" and op.path == "timezone")
                 elif isinstance(e, (RegistryError, ValueError)):
                     failed(op, e)
                 else:
@@ -4070,6 +4119,12 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
             continue
         refresh_revs(reg, revs, raids, stale, before)
         landed(op, line, self_audited(reg, op, bot))  # (a recruit op here — invite_create — refreshed the card itself)
+    if sheets and bot is not None and getattr(bot, "raids", None) is not None and getattr(bot, "refresh_sheet", None) is not None:
+        for ev in list(getattr(bot.raids.store(reg), "live", list)()):  # a new zone: every live sheet's clock words read it (a move redraws in _apply_async)
+            try:
+                await bot.refresh_sheet(reg, ev)
+            except Exception:  # noqa: BLE001 — the zone is saved; a sheet catches up on its next redraw
+                log.exception("sheet refresh after a timezone change failed (%s)", ev.key)
     if card and bot is not None:
         refresh = getattr(bot, "refresh_registration_card", None)
         if refresh is not None:  # open/closed, the note and the invite show on the card

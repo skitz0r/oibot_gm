@@ -2,7 +2,7 @@ import { useRefresh } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Accordion, Alert, Anchor, Avatar, Badge, Box, Button, Card, Code, Group, MultiSelect, Select, SimpleGrid, Stack, Switch, Tabs, TagsInput, Text, Textarea, Title } from "@mantine/core";
+import { Accordion, Alert, Anchor, Avatar, Badge, Box, Button, Card, Code, Group, MultiSelect, SegmentedControl, Select, SimpleGrid, Stack, Switch, Tabs, TagsInput, Text, Textarea, Title } from "@mantine/core";
 import { IconPencil, IconRefresh } from "@tabler/icons-react";
 import { api, opsApi, type ConfigSummary, type LootLogState, type Meta, type OpsReply, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
@@ -38,6 +38,8 @@ const CHANNELS: { kind: string; label: string; hint: string }[] = [
 const AUDIENCES = ["officers", "confirmed", "registered", "everyone"];
 
 type SettingsDraft = { timezone: string; ask_audience: string; about: string; officer_roles: string[] };
+const FIELD_WORDS: Record<keyof SettingsDraft, string> = { timezone: "Timezone", ask_audience: "Who may ask", about: "About the guild", officer_roles: "Officer roles" };
+const same = (a: unknown, b: unknown) => JSON.stringify(Array.isArray(a) ? [...a].sort() : a) === JSON.stringify(Array.isArray(b) ? [...b].sort() : b);
 
 export function ConfigPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<ConfigData | null>(null);
@@ -173,18 +175,24 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
   const aboutMax = meta.about_max || 600;
   const base: SettingsDraft = { timezone: st.timezone, ask_audience: st.ask_audience, about: st.about || "", officer_roles: st.officer_roles.map((r) => r.id) };
   const d = draft;
-  // a reload while editing re-bases the draft: a field nobody touched here takes the new stored value, a field edited here
-  // keeps the edit — never a whole-draft overwrite of someone else's change (design §2.4)
+  // a reload while editing re-bases the draft: a field nobody touched here takes the new stored value; a field edited here
+  // AND changed by someone else is a conflict the owner settles field by field (Keep mine / Take theirs) before Save —
+  // never a whole-draft overwrite either way (design §2.4)
   const startRef = useRef<SettingsDraft | null>(null);
+  const [conflicts, setConflicts] = useState<(keyof SettingsDraft)[]>([]);
   useEffect(() => {
     const s0 = startRef.current;
     if (!d || !s0) return;
     const nd = { ...d };
     let moved = false;
+    const clash: (keyof SettingsDraft)[] = [];
     for (const k of Object.keys(base) as (keyof SettingsDraft)[]) {
-      if (JSON.stringify(d[k]) === JSON.stringify(s0[k]) && JSON.stringify(base[k]) !== JSON.stringify(s0[k])) { (nd as Record<string, unknown>)[k] = base[k]; moved = true; }
+      const mine = !same(d[k], s0[k]), theirs = !same(base[k], s0[k]);
+      if (!mine && theirs) { (nd as Record<string, unknown>)[k] = base[k]; moved = true; }
+      else if (mine && theirs && !same(d[k], base[k])) clash.push(k);
     }
     startRef.current = base;
+    setConflicts((c) => [...new Set([...c, ...clash])]);
     if (moved) setDraft(nd);
   }, [data]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -193,21 +201,29 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
     api.get<PublicInfo | { guilds: PublicInfo[] }>("/api/public").then((x) => setPub("guilds" in x ? x.guilds.find((g) => g.key === meta.guild_key) || null : x)).catch(() => setPub(null));
   }, [d !== null]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // what a timezone change does with the runs already open or locked (Registry.timezone_change_effects): keep them at their
+  // real moment, or move the open ones with the clock — the Save carries the pick (timezone_runs); a locked run never moves
+  const [tzRuns, setTzRuns] = useState<"keep" | "move">("keep");
   const tzSeq = useRef(0);
   useEffect(() => {  // the timezone's preview from the server: rc.timezone_preview rows (notes) + Registry.timezone_change_effects (consequences)
     if (!d || d.timezone === st.timezone) { setTzPreview(null); return; }
     const n = ++tzSeq.current;
-    opsApi.preview([{ kind: "settings", fields: { timezone: d.timezone } }]).then((x) => { if (n === tzSeq.current) setTzPreview(x); }).catch(() => { if (n === tzSeq.current) setTzPreview(null); });
-  }, [d?.timezone]);  // eslint-disable-line react-hooks/exhaustive-deps
+    opsApi.preview([{ kind: "settings", fields: { timezone: d.timezone, timezone_runs: tzRuns } }]).then((x) => { if (n === tzSeq.current) setTzPreview(x); }).catch(() => { if (n === tzSeq.current) setTzPreview(null); });
+  }, [d?.timezone, tzRuns]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const known = new Set(data.guild_roles.map((r) => r.id));
   const roleOptions = [...data.guild_roles.map((r) => ({ value: r.id, label: r.name })), ...st.officer_roles.filter((r) => !known.has(r.id)).map((r) => ({ value: r.id, label: `${r.name} (deleted role)` }))];
   const tzLabel = (z: string) => meta.timezones?.flatMap((g) => g.items).find((i) => i.value === z)?.label || z;
+  const roleName = (id: string) => roleOptions.find((o) => o.value === id)?.label || id;
+  /** a draft value in words, for the conflict lines */
+  const show = (k: keyof SettingsDraft, v: SettingsDraft[keyof SettingsDraft]) => k === "timezone" ? tzLabel(String(v))
+    : k === "officer_roles" ? ((v as string[]).map((x) => `@${roleName(x)}`).join(", ") || "none")
+    : k === "about" ? (String(v).trim() ? `“${String(v).trim().slice(0, 60)}${String(v).trim().length > 60 ? "…" : ""}”` : "empty") : String(v);
 
   function changes(): Record<string, unknown> {
     if (!d) return {};
     const f: Record<string, unknown> = {};
-    if (d.timezone !== base.timezone) f.timezone = d.timezone;
+    if (d.timezone !== base.timezone) { f.timezone = d.timezone; if (tzPreview?.described?.consequences?.length) f.timezone_runs = tzRuns; }
     if (d.ask_audience !== base.ask_audience) f.ask_audience = d.ask_audience;
     if (d.about.trim() !== base.about.trim()) f.about = d.about.trim();
     if ([...d.officer_roles].sort().join(",") !== [...base.officer_roles].sort().join(",")) f.officer_roles = d.officer_roles;
@@ -215,6 +231,7 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
   }
 
   async function submit() {
+    if (conflicts.length) return;  // settle each clash first (Keep mine / Take theirs)
     const f = changes();
     if (!Object.keys(f).length) { setDraft(null); ok("nothing changed"); return; }
     if (f.ask_audience && AUDIENCES.indexOf(String(f.ask_audience)) > AUDIENCES.indexOf(base.ask_audience)) {
@@ -223,7 +240,8 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
     setBusy(true);
     try {
       const r = await save([{ kind: "settings", fields: f }], { revs: data.revs?.settings ? { "config:settings": data.revs.settings } : undefined, title: "Save the guild settings?" });
-      if (r === null || r.changed?.length) return;  // Back to edits, or someone changed them meanwhile (the draft stays; Reload)
+      if (r === null) return;  // Back to edits
+      if (r.changed?.length) { await onReload(); return; }  // someone changed them meanwhile: reload under the draft — untouched fields re-base, clashes ask Keep mine / Take theirs
       if (!r.refused?.length) await onSaved();
     } finally { setBusy(false); }
   }
@@ -251,6 +269,21 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
       <CardHeader title="Settings" hint="edit mode — nothing is saved until Save" />
       <Stack gap="md" p="md">
         {stale && <Alert color="yellow" variant="light" p="xs"><Group justify="space-between"><Text size="sm">Someone changed the settings since you opened them.</Text><Button size="xs" variant="default" leftSection={<IconRefresh size={13} />} onClick={onReload}>Reload (keeps your edits)</Button></Group></Alert>}
+        {conflicts.length > 0 && (
+          <Alert color="orange" variant="light" p="xs" title="Changed by someone else while you edited">
+            <Stack gap={6}>
+              {conflicts.map((k) => (
+                <Group key={k} justify="space-between" wrap="wrap" gap="xs">
+                  <Text size="sm" style={{ minWidth: 0, overflowWrap: "anywhere" }}><b>{FIELD_WORDS[k]}</b>: yours {show(k, d[k])} · saved now {show(k, base[k])}</Text>
+                  <Group gap={4} wrap="nowrap">
+                    <Button size="compact-xs" variant="default" onClick={() => setConflicts((c) => c.filter((x) => x !== k))}>Keep mine</Button>
+                    <Button size="compact-xs" variant="light" onClick={() => { setDraft({ ...d, [k]: base[k] }); setConflicts((c) => c.filter((x) => x !== k)); }}>Take theirs</Button>
+                  </Group>
+                </Group>
+              ))}
+            </Stack>
+          </Alert>
+        )}
         <Box>
           <Select label="Timezone" description="every schedule, lock and clock on the site and in Discord — pick the city whose clock you keep" data={meta.timezones || [{ group: "Current", items: [{ value: st.timezone, label: st.timezone }] }]}
             value={d.timezone} onChange={(v) => v && setDraft({ ...d, timezone: v })} searchable allowDeselect={false} nothingFoundMessage="no such city" maxDropdownHeight={320} w={360} />
@@ -259,6 +292,10 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
               {tzError && <Text size="sm" c="red">⛔ {tzError}</Text>}
               {notes.map((n, i) => <Text key={i} size="xs" c="dimmed">{n}</Text>)}
               {cons.map((c, i) => <Text key={`c${i}`} size="xs" c="yellow">⚠ {c}</Text>)}
+              {cons.length > 0 && (
+                <SegmentedControl size="xs" mt={4} value={tzRuns} onChange={(v) => setTzRuns(v as "keep" | "move")}
+                  data={[{ value: "keep", label: "Keep runs at their real moment" }, { value: "move", label: "Move open runs with the clock" }]} />
+              )}
             </Stack>
           )}
         </Box>
@@ -271,8 +308,8 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
           <HomepageCard info={pub} about={d.about} name={meta.guild} />
         </Box>
         <Group justify="flex-end" gap="sm">
-          <Button variant="default" size="sm" onClick={() => setDraft(null)} disabled={busy}>Cancel</Button>
-          <Button size="sm" loading={busy} onClick={submit}>Save settings</Button>
+          <Button variant="default" size="sm" onClick={() => { setConflicts([]); setDraft(null); }} disabled={busy}>Cancel</Button>
+          <Button size="sm" loading={busy} onClick={submit} disabled={conflicts.length > 0}>Save settings</Button>
         </Group>
       </Stack>
       {review}

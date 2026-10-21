@@ -863,6 +863,16 @@ def _test_bench(ask: Ask) -> list[str]:
             "specs: " + (", ".join(f"{k} ×{v}" for k, v in sorted(specs.items())) or "none")]
 
 
+def _config(ask: Ask) -> list[str]:
+    """The effective configuration in words (configops.config_summary — the sections /gm config show, the Config page's
+    Overview and MCP config_summary print), for the asker's audience: the owner (or a superuser) also gets Host facts."""
+    from .configops import config_summary, summary_text
+
+    reg = ask.reg
+    audience = "owner" if ask.officer and reg.is_owner_id(ask.user_id) else "officer"
+    return ["### Effective configuration (in words; as /gm config show prints it)", *summary_text(config_summary(reg, None, audience)).splitlines()]
+
+
 GENERIC = re.compile(r"\b(status|overview|what'?s (going on|up|new|happening)|summary|summari[sz]e|catch me up|anything i should know|state of (the )?guild)\b")
 
 # key -> (question keywords, builder, character cap, officer only). Order = priority when a generic question fills the budget.
@@ -877,6 +887,7 @@ SECTIONS: dict[str, tuple[re.Pattern, Callable[[Ask], list[str]], int, bool]] = 
     "policy": (re.compile(r"\b(polic(y|ies)|loot rules?|comp rules?|persona|standing instructions?)\b"), _policy, 3_000, True),
     "auras": (re.compile(r"\b(auras?|buffs?|stacks?|stacking|totems?|provides?|providers?|famil(y|ies)|blessings?)\b"), _auras, 4_000, False),
     "test": (re.compile(r"\b(test|tests|testing|puppets?|rehears\w*)\b"), _test_bench, 1_200, True),
+    "config": (re.compile(r"\b(config\w*|settings?|set ?up|host|superusers?|channels?|invite)\b"), _config, 3_000, True),
 }
 
 

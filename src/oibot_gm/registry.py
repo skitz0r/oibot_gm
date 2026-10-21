@@ -985,11 +985,14 @@ class Effects(BaseModel):
     """What removing a schedule does beyond the schedule itself (dual interfaces §3.5 RD-11) — ONE computation for the
     wizard's Review line, the web's confirm, describe_ops' consequences and MCP's preview. `regulars` = the display names
     who come off it (D30: automatically, a notice and no DM — D47); `open_runs` = the names of the runs already open from
-    it (they keep their time and their sheet)."""
+    it (they keep their time and their sheet); `loses` = what those runs no longer get at their lock once the schedule is
+    gone, in words ("the raid's weights instead of the schedule's own", "no regulars" — rc.run_weights falls back by class
+    and the series' regulars come off with it), empty when nothing changes for them."""
     name: str
     label: str = ""
     regulars: list[str] = Field(default_factory=list)
     open_runs: list[str] = Field(default_factory=list)
+    loses: list[str] = Field(default_factory=list)
 
     def lines(self) -> list[str]:
         out = []
@@ -999,8 +1002,9 @@ class Effects(BaseModel):
                        "they see a notice on the Me page, nobody is DMed.")
         k = len(self.open_runs)
         if k:
+            fate = f", but lock{'' if k != 1 else 's'} with {join_words(self.loses)}" if self.loses else ""
             out.append(f"{k} run{'s' if k != 1 else ''} already open from it keep{'' if k != 1 else 's'} {'their' if k != 1 else 'its'} "
-                       f"time and sheet ({join_words(self.open_runs)}).")
+                       f"time and sheet ({join_words(self.open_runs)}){fate}.")
         else:
             out.append("No run from it is open right now.")
         return out
@@ -1227,23 +1231,27 @@ class Registry:
             rs = RaidStore(self.store, self.key)
         return list(rs.live())
 
-    def timezone_change_effects(self, zone: str, rs=None) -> list[str]:
-        """What moving the guild to `zone` does to the runs already open or locked (dual interfaces §3.5 "Settings edit
-        mode"): a run keeps its real moment (its key and sheet were made from the old wall clock), so each run whose
-        clock reading changes is named with its new reading — one sentence per run, from code, for the TimezoneWizard's
-        confirm, the Config page's review and MCP's preview. Empty when the zone is the current one or nothing is live.
-        A zone that doesn't exist raises RegistryError."""
-        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    TZ_MODES = ("", "keep", "move")  # a timezone change with live runs: (refuse a locked one) · keep them at their moment · move the open ones
 
-        from .constants import fmt12
+    def _tz_zone(self, zone: str):
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
         zone = str(zone or "").strip()
         try:
-            z = ZoneInfo(zone)
+            return zone, ZoneInfo(zone)
         except (ZoneInfoNotFoundError, ValueError):
             raise RegistryError(f"{zone or '(empty)'} isn't a timezone; pick one from the list") from None
+
+    def timezone_runs(self, zone: str, rs=None, now_: datetime | None = None) -> list[dict]:
+        """The live runs whose clock reading a move to `zone` changes — one computation for timezone_change_effects (the
+        words), the refusal of a locked one and rc.move_runs_with_clock. Each row: {ev, name, old (the start on today's
+        clock), new (the same moment on `zone`'s clock), moved (the same WALL CLOCK on `zone`: where "move with the
+        clock" puts it, DST-safe), locked, test, movable (an open real run whose lock would still be ahead once
+        moved)}. Empty when the zone is the current one. A zone that doesn't exist raises RegistryError."""
+        zone, z = self._tz_zone(zone)
         if zone == self.config.timezone:
             return []
+        now_ = now_ or datetime.now(timezone.utc)
         out = []
         for ev in self._live_runs(rs):
             try:
@@ -1253,10 +1261,57 @@ class Registry:
             old, new = start.astimezone(self.tz), start.astimezone(z)
             if old.replace(tzinfo=None) == new.replace(tzinfo=None):
                 continue  # the same reading on both clocks (same offset at that moment)
-            name = self.raid_def(ev.instance).get("name", ev.instance) if ev.instance in self.profile.raids else ev.instance
-            state = " (locked)" if ev.state == "locked" else ""
-            out.append(f"{name} {fmt12(old)}{state} stays at its real moment (now {fmt12(new)} in {zone}) — cancel and re-open it to move it.")
+            naive = old.replace(tzinfo=None)
+            a, b = naive.replace(tzinfo=z, fold=0), naive.replace(tzinfo=z, fold=1)
+            moved = (naive + timedelta(hours=1)).replace(tzinfo=z) if a.utcoffset() != b.utcoffset() and a.timestamp() > b.timestamp() else a  # the gap: past it
+            t = self.config.roster(ev.team) or {}
+            test = bool(t.get("test") or getattr(ev, "test", False))
+            hard = float(t.get("cutoff_hard_hours") or 0)
+            name = self.raid_def(ev.instance).get("name", ev.instance) if ev.instance in self.profile.raids else (ev.instance or ev.key)
+            out.append({"ev": ev, "name": name, "old": old, "new": new, "moved": moved, "locked": ev.state == "locked", "test": test,
+                        "movable": ev.state == "open" and not test and moved - timedelta(hours=hard) > now_})
         return out
+
+    def timezone_change_effects(self, zone: str, rs=None, mode: str = "") -> list[str]:
+        """What moving the guild to `zone` does to the runs already open or locked (dual interfaces §3.5 "Settings edit
+        mode"), one sentence per run whose clock reading changes, from code — the TimezoneWizard's confirm, the Config
+        page's review and MCP's preview. A run's key and sheet were made from the old wall clock, so by default (`mode`
+        "" or "keep") it stays at its real moment and its reading changes; `mode` "move" moves every OPEN real run with
+        the clock (the same wall-clock time on the new zone, its signups kept — rc.move_runs_with_clock). A LOCKED run
+        never moves (its roster confirmed that moment), and with mode "" the change is refused while one is affected
+        (timezone_refusal). Empty when the zone is the current one or nothing is live; a bad zone raises RegistryError."""
+        from .constants import fmt12
+
+        zone, _z = self._tz_zone(zone)
+        mode = str(mode or "").strip().lower()
+        out = []
+        for r in self.timezone_runs(zone, rs):
+            was, now_ = f"{r['name']} {fmt12(r['old'])}", f"now {fmt12(r['new'])} in {zone}"
+            if r["locked"]:
+                out.append(f"{was} is locked: it stays at its real moment ({now_}) — its roster was confirmed for that moment.")
+            elif r["test"]:
+                out.append(f"{was} (a test run) stays at its real moment ({now_}).")
+            elif mode == "move" and r["movable"]:
+                out.append(f"{was} moves with the clock: still {fmt12(r['moved'])} on the new clock, its signups kept.")
+            elif mode == "move":
+                out.append(f"{was} stays at its real moment ({now_}): moved, its lock would already be past.")
+            else:
+                out.append(f"{was} stays at its real moment ({now_}) — move open runs with the clock to keep its time.")
+        return out
+
+    def timezone_refusal(self, zone: str, rs=None, mode: str = "") -> str | None:
+        """Why a timezone change is refused as asked, or None: a LOCKED run whose clock reading would change, with no
+        `mode` saying what to do with the live runs ("keep" / "move") — its roster was confirmed for that moment, so
+        the owner must have seen it. Every surface sends the mode its confirm showed; plain text says "keep"."""
+        if str(mode or "").strip().lower() not in self.TZ_MODES:
+            raise RegistryError("what to do with the runs already open: keep (they stay at their real moment) or move (open runs move with the clock)")
+        if str(mode or "").strip():
+            return None
+        locked = [f"{r['name']} {self.local12(r['old'])}" for r in self.timezone_runs(zone, rs) if r["locked"]]
+        if not locked:
+            return None
+        return (f"{join_words(locked)} {'is' if len(locked) == 1 else 'are'} locked, and {zone} reads {'its' if len(locked) == 1 else 'their'} time differently: "
+                "say keep to change it anyway (locked runs stay at their real moment), or move to also move the open runs with the clock")
 
     def load_config(self) -> GuildConfig:
         p = self.store.root / self.key / "guild.yaml"
@@ -1283,7 +1338,12 @@ class Registry:
         cfg = self.config.model_dump()
         own = {"raids", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain"}
         if section.startswith("raids:"):
-            return cfg.get("raids", {}).get(section[6:]) or {}
+            rid = section[6:]
+            if rid not in self.profile.raids and self.config.roster(rid) is not None:
+                # a RUN key (set_comp_targets on one run): its own comp targets live on the run's entry in `rosters`, which
+                # REV_SKIP leaves out of every other section — so the rev covers exactly what a run-level target edits
+                return {"comp_targets": (self.config.roster(rid) or {}).get("comp_targets") or {}}
+            return cfg.get("raids", {}).get(rid) or {}
         if section == "buffs":
             return {"buffs": cfg.get("buffs") or {}, "families": cfg.get("families") or {}}
         if section == "recruitment":
@@ -2191,7 +2251,18 @@ class Registry:
             raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'} (it has {', '.join(x['id'] for x in schedules_of(rd)) or 'none'})")
         regs = sorted({m.display_name for m, _c in self.schedule_regulars(instance, sid)}, key=str.lower)
         runs = [str(t.get("name") or t.get("key")) for t in self.schedule_runs_open(instance, sid, rs)]
-        return Effects(name=s.get("name") or sid, label=self.schedule_label(instance, s), regulars=regs, open_runs=runs)
+        # what the open runs' lock reads once the schedule is gone (rc.run_weights: the class's fallback; the series'
+        # regulars come off with it) — named so nobody expects the schedule's own weights or its regulars on them
+        loses: list[str] = []
+        if runs:
+            adhoc = schedule_class(s.get("kind")) == "adhoc"
+            if s.get("weights") and not adhoc:
+                loses.append("the raid's weights instead of the schedule's own")
+            elif s.get("weights"):
+                loses.append("the ad hoc defaults' weights instead of the schedule's own")
+            if regs and not adhoc:
+                loses.append("no regulars")
+        return Effects(name=s.get("name") or sid, label=self.schedule_label(instance, s), regulars=regs, open_runs=runs, loses=loses)
 
     @_config_verb(_raid_section)
     def remove_schedule(self, instance: str, sid: str, by: str) -> str:

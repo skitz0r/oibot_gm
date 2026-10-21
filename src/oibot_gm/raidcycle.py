@@ -700,6 +700,26 @@ def timezone_preview(reg: Registry, zone: str, now_: datetime | None = None) -> 
     return [r["line"] for r in timezone_preview_rows(reg, zone, now_)]
 
 
+def move_runs_with_clock(reg: Registry, rs: "RaidStore", rows: list[dict], zone: str, by: str) -> list["RaidEvent"]:
+    """"Move open runs with the clock" (dual interfaces §3.5, a timezone change): every movable row of
+    Registry.timezone_runs (computed BEFORE the zone changed) keeps its wall-clock time on the new zone. The run's key,
+    its roster entry and its name were all made from that wall clock, so they stay; only the instant (`starts_at`)
+    moves — the sheet, its signups, pins and board are the same run, nobody re-answers, nobody is DMed. Its nudge, lock
+    and confirm marks are hours before the start, so they move with it. Locked runs, test runs and a run whose lock would
+    already be past are left at their real moment (the confirm said so). On the event loop with the bot's live store
+    (rc.open_run's rule L3); the caller refreshes the sheets. Returns the moved runs."""
+    moved = []
+    for r in rows:
+        ev = rs.events.get(r["ev"].key)
+        if ev is None or not r.get("movable") or ev.state != "open":
+            continue
+        ev.starts_at = r["moved"].isoformat()
+        ev.log.append(f"moved with the clock to {zone} by {by}: still {reg.local12(r['moved'])}")
+        rs.save(ev, f"moved with the clock ({zone})")
+        moved.append(ev)
+    return moved
+
+
 def rosters_copy(reg: Registry, instance: str, sid: str, n: int, rs=None) -> str:
     """What changing a schedule's rosters per run to `n` does, in ONE sentence for the schedule wizard, the Raids page's
     editor (schedule_json `rosters_copy`) and describe_ops (dual interfaces §3.4 RD-10): ensure_run copies the schedule's

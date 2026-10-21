@@ -34,7 +34,7 @@ HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
 STARTED = time.time()  # fallback when the bot has no start stamp
 from ..constants import ROLES  # noqa: E402 — the order role counts are shown in
-from ..registry import COMP_NOTE_MAX  # noqa: E402
+from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE  # noqa: E402
 
 ASK_MAX = 1500  # help.answer reads this much of a question
 ASK_DOWN = "The bot can't read sentences right now — use the controls on this page."  # dual interfaces §2.7, LLM down
@@ -1012,8 +1012,17 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         def one(rid: str) -> dict:
             # the Readiness page's Edit targets (RD-12): the officers' stored targets, the owner's bounds they must sit inside,
             # and the raid section rev an edit-mode Save sends back (revs["config:raids:<id>"])
-            size = int(reg.raid_def(rid).get("size") or 20)
+            size = int(reg.raid_def(rid).get("size") or DEFAULT_RAID_SIZE)
             r = comp.readiness(reg, rid, rs)
+            live = {e.key: e for e in rs.live()}
+            for sr in r.get("series") or []:  # a forecast row's run already open: the page links it instead of "Open this run early"
+                sid = str(sr.get("id") or sr.get("key", "").partition(":")[2] or "default")
+                for f in sr.get("forecast") or []:
+                    try:
+                        k = rc.event_key(rid, datetime.fromisoformat(f["start"]).astimezone(reg.tz), None if sid == "default" else sid)
+                    except (KeyError, ValueError):
+                        k = None
+                    f["open_key"] = k if k in live and live[k].state in ("open", "locked") else None
             buffs = {b.id: b for b in reg.profile.buffs}  # the page draws missing buffs as icon-only chips (name in the tooltip)
             r["missing_buffs"] = [{**x, "abbr": getattr(buffs.get(x["id"]), "abbr", x["name"][:3]), "colour": getattr(buffs.get(x["id"]), "colour", "#888"),
                                    "art": getattr(buffs.get(x["id"]), "art", None)} for x in r["missing_buffs"]]

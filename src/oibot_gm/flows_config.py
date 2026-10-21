@@ -234,6 +234,21 @@ def next_runs(reg: Registry, slots: Sequence[str], first_open: datetime | None, 
 TARGET_MAX_PICK = 24  # selects hold 25 options: 0…24 (a target past that is a plain-text one)
 
 
+def target_numbers(top: int, keep, room: int = MAX_OPTIONS, drop_low: bool = False) -> list[int]:
+    """The numbers a target select offers: 0…top, plus the stored value `keep` when it lies outside (a max equal to the
+    run size, a target set on the web or in plain text) so the form preselects it and a Submit never drops it; trimmed to
+    `room` options from the high end (`drop_low`: from the low end — a max of 0 or 1 is the rarest pick), never `keep`."""
+    vals = list(range(0, max(0, int(top)) + 1))
+    k = None if keep in (None, "") else int(keep)
+    if k is not None and k not in vals:
+        vals.append(k)
+        vals.sort()
+    while len(vals) > room:
+        cut = next(v for v in (vals if drop_low else reversed(vals)) if v != k)
+        vals.remove(cut)
+    return vals
+
+
 class CompTargetsBlock:
     """The targets block, mixed into a Wizard that has `reg` and `raid`. `tdraft` = {slot: entry | None} not yet saved;
     `trev` = the raid section rev when the block opened (a change meanwhile refuses the Save); `targets_back` = where Back
@@ -333,8 +348,9 @@ class CompTargetsBlock:
             self.tdraft[slot] = entry
             await self.targets(it, f"{words}: {'at least ' + str(entry['min'])}{', at most ' + str(entry['max']) if entry['max'] is not None else ''} — not saved yet.")
         await self.open_form(i, Form(f"Target · {words}"[:45], [
-            Field("min", "We aim for at least", [Opt(str(n), str(n), default=n == lo) for n in range(0, top + 1)], description="what readiness counts as enough"),
-            Field("max", "And at most", [Opt("none", "No upper limit", default=hi in (None, ""))] + [Opt(str(n), str(n), default=hi not in (None, "") and n == int(hi)) for n in range(0, top)],
+            Field("min", "We aim for at least", [Opt(str(n), str(n), default=n == lo) for n in target_numbers(top, lo)], description="what readiness counts as enough"),
+            Field("max", "And at most", [Opt("none", "No upper limit", default=hi in (None, ""))]
+                  + [Opt(str(n), str(n), default=hi not in (None, "") and n == int(hi)) for n in target_numbers(top, hi, MAX_OPTIONS - 1, drop_low=True)],
                   description="more than this shows as over"),
             Field("note", "Why", required=False, default=cur.get("note") or None, max_length=COMP_NOTE_MAX, placeholder="e.g. Windfury for every melee group",
                   description="shown on the readiness card (optional)"),
@@ -1748,30 +1764,42 @@ class TimezoneWizard(OwnerWizard):
                  f"• Now: **{fmt12(datetime.now(new))}** there (it's {fmt12(self.reg.now_local())} in {cur})."]
         from . import raidcycle as rc
 
+        rs = _run_store(i, self.reg)
         try:  # the same words plain text's `set timezone` shows (a shadow registry, nothing saved), plus Discord's own
             # <t:…:f> stamps so each reader sees the new and the old moment in their own locale (the clock rule)
             lines += [f"• {r['line']} · <t:{int(r['start'].timestamp())}:f> your time" + (f" (was <t:{int(r['was'].timestamp())}:f>)" if r["was"] else "")
                       for r in rc.timezone_preview_rows(self.reg, zone)]
-            lines += [f"⚠ {x}" for x in self.reg.timezone_change_effects(zone, rs=_run_store(i, self.reg))]  # runs already open keep their moment
+            live = self.reg.timezone_runs(zone, rs)  # the runs already open or locked whose clock reading changes
+            lines += [f"⚠ {x}" for x in self.reg.timezone_change_effects(zone, rs=rs)]
         except RegistryError as e:
             await self.refuse(i, str(e), self.start, "Pick another")
             return
         lines.append("-# Run times keep their clock time (Tue 7:30 PM stays Tue 7:30 PM), so the real moment moves with the zone.")
-        await self.show(i, "\n".join(lines), self._saver(zone), self.button("Pick another", self.start), self.button("Cancel", self.cancel))
+        if not live:
+            await self.show(i, "\n".join(lines), self._saver(zone), self.button("Pick another", self.start), self.button("Cancel", self.cancel))
+            return
+        # live runs: the owner picks what happens to them (the save carries it — a locked run is never changed unasked)
+        items = [self._saver(zone, "keep", "Save · keep runs at their moment")]
+        if any(r["movable"] for r in live):
+            moving = [f"⚠ {x}" for x in self.reg.timezone_change_effects(zone, rs=rs, mode="move") if "moves with the clock" in x]
+            lines += ["-# Or move the open runs with the clock:", *[f"-# {x}" for x in moving]]
+            items.append(self._saver(zone, "move", "Save · move open runs with the clock"))
+        await self.show(i, "\n".join(lines), *items, self.button("Pick another", self.start), self.button("Cancel", self.cancel))
 
-    def _saver(self, zone: str) -> discord.ui.Button:
+    def _saver(self, zone: str, runs: str | None = None, label: str = "Save") -> discord.ui.Button:
         async def save(i: discord.Interaction) -> None:
             await self.working(i, "Saving…")
             if self.reg.config.timezone == zone:
                 await self.finish(i, f"The guild is already on **{zone}**; nothing changed.")
                 return
-            res = await _save_settings(self.reg, i, {"timezone": zone}, self.rev)  # THE structured core: config_lock, rev, one audit line
+            fields = {"timezone": zone, **({"timezone_runs": runs} if runs else {})}
+            res = await _save_settings(self.reg, i, fields, self.rev)  # THE structured core: config_lock, rev, one audit line
             if not res["applied"]:
                 self.rev = self.reg.config_rev("settings")
                 await self.refuse(i, "; ".join(r["line"] for r in res["results"] if not r["ok"]) or "Nothing was changed.", self.start, "Look again")
                 return
-            await self.finish(i, f"✅ Timezone **{zone}** — it's {fmt12(self.reg.now_local())} there.")
-        return self.button("Save", save, discord.ButtonStyle.success)
+            await self.finish(i, f"✅ Timezone **{zone}** — it's {fmt12(self.reg.now_local())} there." + "".join(f"\n{x}" for x in res["applied"] if "moved with the clock" in x))
+        return self.button(label, save, discord.ButtonStyle.success)
 
 
 def _run_store(i: discord.Interaction, reg: Registry):

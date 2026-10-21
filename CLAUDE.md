@@ -96,7 +96,10 @@ src/oibot_gm/
                        single-field verbs call them); family_slug(name) (ids never typed; taken → -2); aura_override_counts / aura_reset_sentence.
                        Phase 3 (§5.44): set_comp_targets(raid|run, {slot: {min,max,note}|None}, by, rev=) = THE writer of officer comp targets (bounds
                        stay the owner's; outside them → "change the bounds first (owner)"), comp_slot / comp_slot_words; schedule_removal_effects →
-                       Effects(regulars, open_runs).lines()/sentence(); schedule_runs_open; timezone_change_effects(zone) (live runs that keep their moment)
+                       Effects(regulars, open_runs, loses).lines()/sentence() (loses = the open runs' lock fate: the raid's weights, no regulars);
+                       schedule_runs_open; timezone_runs(zone, rs) = THE rows (old/new/moved, locked, movable) behind timezone_change_effects(zone, rs,
+                       mode) and timezone_refusal (a locked run + no mode → refused); set timezone carries field keep|move (ops_from_fields
+                       timezone_runs), rc.move_runs_with_clock moves only starts_at (same key/sheet/signups), on the loop via _apply_async
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
@@ -186,7 +189,8 @@ src/oibot_gm/
                        transfer_owner (D50; Discord only — /gm config owner, BY_DESIGN_ONLY), absence_lines / absence_clear_lines (the preview words);
                        a member's own retire / delete frees the seat with no self-notice (by_id decides). No DMs anywhere
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
-  help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`)
+  help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
+                       officers' `config` section = configops.summary_text(config_summary(audience)) (owner: Host too)
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
                        @mentions and DMs routed by intent under the plain-text policy)
   wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms; Wizard.decide = THE confirm screen (consequence · Do it · Do it with a note… · Back; guard re-run on every press)

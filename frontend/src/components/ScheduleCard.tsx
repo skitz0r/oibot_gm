@@ -26,6 +26,12 @@ function ownWords(s: Schedule): string {
 
 /** A raid's schedules: WHEN it runs. Each is weekly nights, day N of each lockout, or a pickup template officers open on
  *  demand, with the rosters a run expects and any cadence of its own (the rest follows the raid's rules above). */
+/** The raid section rev the page loaded: every schedule write carries it, so a write against settings someone changed
+ *  meanwhile is refused (409) instead of landing on top of theirs (design §2.4). */
+export function raidRevs(r: RaidRule): { revs?: Record<string, string> } {
+  return r.rev ? { revs: { [`config:raids:${r.id}`]: r.rev } } : {};
+}
+
 export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEditing }: { r: RaidRule; meta?: Meta; owner: boolean; policies: string[]; maxRosters: number; onSaved: () => void; onEditing?: (on: boolean) => void }) {
   const [edit, setEditState] = useState<Schedule | "new" | null>(null);
   const setEdit = (v: Schedule | "new" | null) => { if ((v === null) !== (edit === null)) onEditing?.(v !== null); setEditState(v); };
@@ -34,13 +40,13 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
     // the sentence is the server's (Registry.schedule_removal_effects): its regulars by name (a notice, no DM) and the runs already open
     const extra = s.is_default ? " These are the raid's own run times, so it is left with none." : "";
     if (!(await ask({ title: `Remove ${s.name}?`, message: `${s.removal_sentence || `${s.label}. Runs already open keep their times.`}${extra}`, confirmLabel: "Remove", color: "red" }))) return;
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule/remove", { instance: r.id, id: s.id }); ok(x.message); onSaved(); } catch (e) { fail(e); }
+    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule/remove", { instance: r.id, id: s.id, ...raidRevs(r) }); ok(x.message); onSaved(); } catch (e) { fail(e); onSaved(); }
   }
   /** Pause / Resume beside Edit (design RD-10): one field, confirmed with the server's sentence — never hidden behind the editor's Save. */
   async function pause(s: Schedule, on: boolean) {
     const message = on ? s.pause_sentence : s.resume_sentence;
     if (!(await ask({ title: `${on ? "Pause" : "Resume"} ${s.name}?`, message: message || (on ? "Nothing new opens from it." : "It opens sheets again."), confirmLabel: on ? "Pause" : "Resume", color: on ? "yellow" : undefined }))) return;
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id: s.id, fields: { active: !on } }); ok(x.message); onSaved(); } catch (e) { fail(e); }
+    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id: s.id, fields: { active: !on }, ...raidRevs(r) }); ok(x.message); onSaved(); } catch (e) { fail(e); onSaved(); }
   }
   return (
     <Box px="md" pb="md">
@@ -78,7 +84,7 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
           </Group>
         ))}
       </Stack>
-      {edit && <ScheduleEditor r={r} meta={meta} s={edit === "new" ? null : edit} policies={policies} maxRosters={maxRosters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} />}
+      {edit && <ScheduleEditor r={r} meta={meta} s={edit === "new" ? null : edit} policies={policies} maxRosters={maxRosters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} onStale={onSaved} />}
       {confirmDialog}
     </Box>
   );
@@ -108,7 +114,7 @@ function slug(name: string, kind: string, taken: string[]): string {
 
 /** Add or edit one schedule. Every time is picked (weekday + 12-hour time picker, lockout day selects); cadence fields
  *  left empty follow the raid's. One POST, one registry write: a refusal comes back as a toast and nothing is saved. */
-function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; onClose: () => void; onSaved: () => void }) {
+function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(s));
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<OpsReply | null>(null);
@@ -175,7 +181,8 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved }: 
     const fields = fieldsOf(d);
     if (!Object.keys(fields).length) { ok("nothing changed"); onClose(); return; }
     setBusy(true);
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id, fields }); ok(x.message); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
+    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id, fields, ...raidRevs(r) }); ok(x.message); onSaved(); }
+    catch (e) { fail(e); onStale?.(); }  // a 409 (changed meanwhile): the page reloads under the open editor, the draft stays, the next Save carries the new rev finally { setBusy(false); }
   }
 
   const hm = /^(\d{1,2}):(\d{2})/.exec(d.time || "");

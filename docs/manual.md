@@ -95,7 +95,8 @@ members of the Discord server can log in; officer pages follow the same rules as
 Me, Rosters, Members, Loot, the Loot log, Ops, Agents, Raids, Readiness, Auras and Config update live the moment something changes (a press on a sheet, a drag by another
 officer, a change in Discord); a 45-second refresh is only the fallback when the live connection drops. A page in edit mode is never
 reloaded under you: the Config page's Settings say *Someone changed the settings since you opened them* with **Reload (keeps your
-edits)** — a field you didn't touch takes the new value, a field you edited keeps yours.
+edits)** — a field you didn't touch takes the new value; a field you edited that someone else changed too is listed
+(*yours … · saved now …*) with **Keep mine** / **Take theirs**, and Save waits until you've picked for each.
 
 **Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail, and every live sheet on the Rosters page has
 **Tell the bot about this run** (it starts with the run's name). Type a question ("who hasn't answered tonight?") and the answer comes
@@ -299,7 +300,9 @@ the one character they raid on there. Regulars are the people the bot *expects* 
   **red** (they can't field the minimum — the card names members who play the missing role, best rank first, to
   recruit). Beside it a **4-week forecast**: for each upcoming
   run in the next four weeks (counted from the raid's first opening until then) the regulars minus recorded absences, e.g. "Tue 15 Dec: short
-  1 tank, 1 healer (Thorn, Ona away)" — the hole shows a week ahead instead of at reminder time. The same numbers show
+  1 tank, 1 healer (Thorn, Ona away)" — the hole shows a week ahead instead of at reminder time. On the **Readiness**
+  page a short run has **Open this run early**: after a confirm the bot opens that run's sheet now (the same as opening it
+  from the Raids page), so the hole is worked on from today; a run already open says *sheet open* instead. The same numbers show
   on the Rosters page's *Regulars* cards (the colour under the role counts, a *Next 4 weeks* list: role icon and a
   number per short role, who is away on hover), in an officer's `/roster overview` (*Regulars*), on each raid's analytics card (one
   line per schedule: a 🟢/🟠/🔴 dot, role icons with counts, ⚠ when short, regulars / seats, then a line per short run)
@@ -682,7 +685,7 @@ edits that new family and leaves the one it shared alone.
   **bounds** — *at least / at most* of each role the **solver seats** — are the owner's (*Group make-up* in `/gm config
   raid`, *tank min / max* on the Raids page, `tank_min` in plain text); **targets** — what the guild **aims for**, what
   readiness measures — are the officers': per role (tank, healer, melee, ranged), class or spec, *at least*, an optional
-  *at most* and *why*. Set them on the **Readiness** page (**Edit targets**: slot icon · at least · at most · why, one
+  *at most* and *why* (the selects also offer a value already stored past their range, such as a max equal to the run size). Set them on the **Readiness** page (**Edit targets**: slot icon · at least · at most · why, one
   **Save targets**), in the Raids page's **Desired comp** table, with `/roster comp` (pick the raid, *Set a target for…*
   a role, a class or *A particular spec…*, then at least / at most / why in one form; *Remove a target*; **Save
   targets**), in plain text ("reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin target")
@@ -767,7 +770,8 @@ edits that new family and leaves the one it shared alone.
   **Host** (the host superusers by name, the AI spend against the shared cap, whether the MCP token works only on the
   host, *Settings on disk (.env) changed since the bot started — restart to apply*); officers read *Host facts: owner
   only.*; a long block ends *+N more on the site* — the Config page's **Overview** prints the same sections in full.
-  Never the raw file).
+  Never the raw file). An officer's `/ask` about the settings, the setup, the channels or the host reads the same
+  sections (the owner's with Host).
 - Every refusal and error reads the same on Discord, the site, in plain text and over MCP: a refusal as written, a bug
   as *Something went wrong and nothing was changed. The owner has the details.* (the details go to the ops channel).
 
@@ -864,8 +868,11 @@ the site's **Config** page (channel pickers per function — changing a channel 
 does — and **Settings**: press **Edit settings**, change any of the timezone, who may ask the bot, the officer roles and the
 about text, then one **Save settings**. The **timezone** is picked from a searchable list grouped by region (type a city to
 find it; never an IANA name to spell); under it the bot shows each raid's next run under the new zone and on today's clock,
-and every run already open or locked that keeps its real moment (*"Barrow Deeps Tue 20 Oct 8:00 PM stays at its real moment
-(now 11:00 PM in America/New_York) — cancel and re-open it to move it"*). A timezone or officer-role change is reviewed before
+and every run already open or locked whose time reads differently on the new clock (*"Barrow Deeps Tue 20 Oct 8:00 PM stays
+at its real moment (now 11:00 PM in America/New_York) — move open runs with the clock to keep its time"*). Then you pick:
+**Keep runs at their real moment**, or **Move open runs with the clock** — an open run keeps its 8:00 PM on the new clock,
+same sheet, same signups, nobody asked again. A **locked** run never moves (its roster confirmed that moment), and while one
+is affected the change only goes through once you've picked. `/gm config timezone` offers the same two Saves. A timezone or officer-role change is reviewed before
 it is written, with those lines; the rest saves at once. Widening **who may ask** asks first: *widening this shares the
 model budget with everyone who may ask*. The **about** text counts its characters against the cap and shows the homepage
 card as it will look. Under Channels the **News** card keeps the news **keywords** (saved once when you leave the field),
@@ -892,7 +899,9 @@ Save would give) and removes them. **Pause / Resume** sits beside Edit with one 
 … is already open and keeps its sheet. Regulars stay."*). The editor saves only the fields you changed, so a pause made in
 Discord a moment ago is never undone by a Save on the site. **Remove** confirms with what goes: *"Removes Alt run (Saturdays
 8:00 PM). 3 regulars come off it (Ana, Bo, Cy); they see a notice on the Me page, nobody is DMed. 1 run already open from it
-keeps its time and sheet (…)."* — the same lines on the wizard, the review, plain text and MCP. In plain text: `schedule_set` (e.g. "add an alt run on Saturdays at 8 to Barrow Deeps",
+keeps its time and sheet (…), but locks with the raid's weights instead of the schedule's own and no regulars."* — the
+same lines on the wizard, the review, plain text and MCP. If someone changed the raid meanwhile, Pause, Remove and the
+editor's Save say so and write nothing; the page reloads. In plain text: `schedule_set` (e.g. "add an alt run on Saturdays at 8 to Barrow Deeps",
 "Barrow Deeps alt run locks 12 hours before", "make the alt run two rosters") and `schedule_remove`. Comp
 bounds: *Group make-up* in `/gm config raid` ↔ *tank min / max* on the Raids page ↔ `tank_min` / `tank_max` in
 plain text (same for healers and dps).
@@ -943,7 +952,8 @@ the Mac mini (GM ✓ / ⟳ / ⚠ / ✕) shows the same at a glance, even when th
 **Channels in plain text.** "post raid sheets in #signups", "use #away for absences" — the same as the Config page's
 pickers (the bot checks it can see the channel and posts that channel's card); "stop posting absences anywhere" or
 "clear the news channel" unsets one (its card is forgotten). "Set the timezone to America/New_York" shows, before
-you Apply, each raid's next run on the new clock and on today's. A setup change asked in plain words reads in the
+you Apply, each raid's next run on the new clock and on today's; with a run locked, add "keep the runs where they are"
+(or "and move the open runs with the clock"). A setup change asked in plain words reads in the
 proposal exactly as the site's review does: one line per thing it writes (two settings of one buff are one line),
 each setting *current → new*, a part the bot would refuse marked ⛔, and what else happens marked ⚠ — and when a
 plain-text permission change would stop the bot acting in the channel you are asking in, the line says so.
@@ -1223,7 +1233,7 @@ news post says can make the review read or write another server.
 | Tool | Does |
 |---|---|
 | `list_guilds` | every server the bot serves, and which one a tool uses when `guild` is left out |
-| `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench |
+| `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench, and `summary`: the configuration in words by section (as `config_summary`) |
 | `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
 | `list_raids` · `get_raid` | effective raid settings and overrides; each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
 | `set_regular` | add or remove a regular of a recurring schedule (member, character, schedule; the Rosters page's route) |
@@ -1245,7 +1255,7 @@ news post says can make the review read or write another server.
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
-| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles (the whole list, ids or names the bot knows; `[]` for none), news keywords, `loot_log` on/off — one or several as `fields` |
+| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone (with runs open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list, ids or names the bot knows; `[]` for none), news keywords, `loot_log` on/off — one or several as `fields` |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |

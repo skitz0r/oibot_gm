@@ -153,7 +153,9 @@ def test_timezone_change_effects_lists_live_runs_whose_clock_moves(reg, rs):
     ev = open_real(reg, rs)
     effects = reg.timezone_change_effects("America/New_York", rs)
     assert len(effects) == 1 and "stays at its real moment" in effects[0] and "11:00 PM in America/New_York" in effects[0]
-    assert "cancel and re-open it to move it" in effects[0] and not MILITARY.search(effects[0])
+    assert "move open runs with the clock to keep its time" in effects[0] and not MILITARY.search(effects[0])
+    moving = reg.timezone_change_effects("America/New_York", rs, mode="move")
+    assert "moves with the clock: still " in moving[0] and "8:00 PM on the new clock, its signups kept" in moving[0]
     assert reg.timezone_change_effects(reg.config.timezone, rs) == []
     with pytest.raises(RegistryError, match="isn't a timezone"):
         reg.timezone_change_effects("Mars/Olympus", rs)
@@ -162,6 +164,163 @@ def test_timezone_change_effects_lists_live_runs_whose_clock_moves(reg, rs):
     assert d.warn and d.review and effects[0] in d.consequences
     assert any("on today's clock" in n for n in d.lines[0].notes)  # rc.timezone_preview rows under the setting
     del ev
+
+
+def lock(rs, ev):
+    ev.state = "locked"
+    rs.save(ev, "locked (test)")
+    return ev
+
+
+def test_a_locked_run_refuses_a_timezone_change_unless_the_owner_says_keep(reg, rs):
+    """The design's "refuse when a live run is locked unless force": the mode the confirm showed is the force."""
+    alt_schedule(reg)
+    ev = lock(rs, open_real(reg, rs))
+    was = ev.starts_at
+    eff = reg.timezone_change_effects("America/New_York", rs, mode="move")
+    assert "is locked: it stays at its real moment" in eff[0] and "moves with the clock" not in eff[0]
+    with pytest.raises(RegistryError, match=r"is locked, and America/New_York reads its time differently: say keep"):
+        configops.apply(reg, ConfigOp(op="set", path="timezone", value="America/New_York"), "Jon", True, raids=rs)
+    assert reg.config.timezone == "America/Los_Angeles"
+    # the structured preview shows the refusal on the line, so the review never offers a Save that can't land
+    d = configops.describe_ops(reg, configops.ops_from_fields(reg, "settings", None, {"timezone": "America/New_York"}))
+    assert d.lines[0].error and "is locked" in d.lines[0].error
+    ops = configops.ops_from_fields(reg, "settings", None, {"timezone": "America/New_York", "timezone_runs": "keep"})
+    assert ops[0].field == "keep" and configops.describe_ops(reg, ops).lines[0].error is None
+    line = configops.apply(reg, ops[0], "Jon", True, raids=rs)
+    assert line == "timezone = America/New_York" and reg.config.timezone == "America/New_York" and rs.events[ev.key].starts_at == was
+    with pytest.raises(RegistryError, match="timezone_runs is keep"):
+        configops.ops_from_fields(reg, "settings", None, {"timezone": "UTC", "timezone_runs": "sideways"})
+
+
+def test_move_open_runs_with_the_clock_keeps_the_wall_clock_and_the_signups(reg, rs, store):
+    alt_schedule(reg)
+    ev = open_real(reg, rs)
+    m = real(reg, 1)
+    rc.set_signup(reg, rs, ev, m, None, "in", source="self")
+    old = ev.start
+    n0 = commits(store)
+    line = configops.apply(reg, ConfigOp(op="set", path="timezone", value="America/New_York", field="move"), "Jon", True, raids=rs)
+    assert "1 open run moved with the clock" in line and ev.key in line and commits(store) == n0 + 1  # the zone and the run: one commit
+    moved = rs.events[ev.key]
+    assert moved.key == ev.key and str(m.discord_id) in moved.signups  # the same run, nobody re-answers
+    assert moved.start.astimezone(reg.tz).replace(tzinfo=None) == old.astimezone(old.tzinfo).replace(tzinfo=None)  # 8:00 PM stays 8:00 PM
+    assert moved.start != old and (old - moved.start).total_seconds() == 3 * 3600  # three hours earlier in real time
+    assert "moved with the clock to America/New_York" in moved.log[-1]
+    assert rc.RaidStore(store, reg.key).events[ev.key].starts_at == moved.starts_at  # saved, not just in memory
+
+
+def test_a_structured_timezone_move_runs_on_the_loop_and_redraws_the_sheets(reg, rs):
+    alt_schedule(reg)
+    ev = open_real(reg, rs)
+    bot = FakeBot(reg, rs)
+    ops = configops.ops_from_fields(reg, "settings", None, {"timezone": "America/New_York", "timezone_runs": "move"})
+    res = run(configops.apply_ops(reg, ops, by="Jon", by_id=OWNER, bot=bot))
+    assert res["applied"] and "moved with the clock" in res["applied"][0] and bot.refreshed == [ev.key]
+    assert rs.events[ev.key].start.astimezone(reg.tz).hour == 20
+    # keep: a pure write in the worker thread (one commit), then every live sheet is redrawn on the loop all the same
+    bot.refreshed = []
+    res = run(configops.apply_ops(reg, configops.ops_from_fields(reg, "settings", None, {"timezone": "Europe/London", "timezone_runs": "keep"}),
+                                  by="Jon", by_id=OWNER, bot=bot))
+    assert res["applied"] == ["timezone = Europe/London"] and bot.refreshed == [ev.key]
+
+
+def test_an_unknown_zone_in_a_preview_logs_nothing(reg, caplog):
+    """Regression: the consequence hook's RegistryError for a bad pick wrote a stack trace to the log on every preview."""
+    with caplog.at_level("ERROR"):
+        cons = configops.op_consequences(reg, ConfigOp(op="set", path="timezone", value="Mars/Olympus"))
+    assert cons == [] and not [r for r in caplog.records if r.levelname == "ERROR"]
+
+
+def test_timezone_wizard_offers_keep_or_move_and_moves(reg, rs, monkeypatch):
+    from oibot_gm import discord_registry
+
+    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: True)
+    alt_schedule(reg)
+    ev = open_real(reg, rs)
+    h = Harness(reg, rs)
+
+    async def go():
+        await FLOWS["timezone"](h.command(), reg)
+        await h.press("Eastern · New York")
+        assert "Save · keep runs at their moment" in h.buttons() and "Save · move open runs with the clock" in h.buttons() and "Save" not in h.buttons()
+        assert "moves with the clock: still " in h.text
+        await h.press("Save · move open runs with the clock")
+        assert "✅ Timezone **America/New_York**" in h.text and "moved with the clock" in h.text
+    run(go())
+    assert reg.config.timezone == "America/New_York" and rs.events[ev.key].start.astimezone(reg.tz).hour == 20
+
+
+def test_timezone_wizard_with_only_a_locked_run_offers_keep_only(reg, rs, monkeypatch):
+    from oibot_gm import discord_registry
+
+    monkeypatch.setattr(discord_registry, "is_owner", lambda i, r: True)
+    alt_schedule(reg)
+    ev = lock(rs, open_real(reg, rs))
+    was = ev.starts_at
+    h = Harness(reg, rs)
+
+    async def go():
+        await FLOWS["timezone"](h.command(), reg)
+        await h.press("Eastern · New York")
+        assert h.buttons()[0] == "Save · keep runs at their moment" and "Save · move open runs with the clock" not in h.buttons()
+        await h.press("Save · keep runs at their moment")
+        assert "✅" in h.text
+    run(go())
+    assert reg.config.timezone == "America/New_York" and rs.events[ev.key].starts_at == was
+
+
+def test_schedule_removal_names_the_open_runs_lock_fate(reg, rs):
+    """RD-11: a run already open from a removed schedule keeps its time and sheet, but its lock reads the raid's weights
+    (rc.run_weights' fallback) and no regulars (they came off with it) — the sentence says so, and it is true."""
+    reg.set_schedule("barrow_deeps", "alt", {"kind": "weekly", "slots": "Sat 20:00", "name": "Alt run", "weights": {"regular": 9}}, "t")
+    m = real(reg, 0)
+    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+    ev = open_real(reg, rs)
+    assert rc.run_weights(reg, ev)["regular"] == 9 and rc.run_regulars(reg, ev)
+    eff = reg.schedule_removal_effects("barrow_deeps", "alt", rs)
+    assert eff.loses == ["the raid's weights instead of the schedule's own", "no regulars"]
+    assert eff.lines()[-1].endswith("keeps its time and sheet (" + reg.config.roster(ev.team)["name"] + "), but locks with the raid's weights instead of the schedule's own and no regulars.")
+    reg.remove_schedule("barrow_deeps", "alt", "t")
+    assert rc.run_weights(reg, ev)["regular"] != 9  # the raid's weights now
+    assert rc.run_regulars(reg, ev) == []
+
+
+def test_run_level_comp_targets_have_a_rev_that_moves(reg, rs):
+    """Regression: a run key's section rev was the rev of an empty blob, so a stale rev never refused."""
+    alt_schedule(reg)
+    ev = open_real(reg, rs)
+    rev0 = reg.config_rev(f"raids:{ev.team}")
+    reg.set_comp_targets(ev.team, {"Mage": {"min": 1}}, "t")
+    assert reg.config_rev(f"raids:{ev.team}") != rev0
+    with pytest.raises(ConfigChanged):
+        reg.set_comp_targets(ev.team, {"Mage": {"min": 2}}, "t", rev=rev0)
+    assert reg.config.roster(ev.team)["comp_targets"] == {"Mage": {"min": 1}}
+
+
+def test_target_numbers_keep_a_stored_value_and_fit_a_select():
+    assert flows_config.target_numbers(10, None) == list(range(0, 11))
+    assert flows_config.target_numbers(10, 12) == [*range(0, 11), 12]
+    v = flows_config.target_numbers(24, 25, 24, drop_low=True)
+    assert len(v) == 24 and v[-1] == 25 and v[0] == 2
+    v = flows_config.target_numbers(24, 25)
+    assert len(v) == 25 and 25 in v and 24 not in v
+
+
+def test_the_target_form_preselects_a_max_equal_to_the_run_size(reg, rs, officer_only):
+    """Regression: 'And at most' offered 0…size-1, so a stored max = size (the web allows it) preselected nothing and a
+    Submit dropped it."""
+    reg.set_comp_targets("barrow_deeps", {"Mage": {"min": 1, "max": 10}}, "t")
+    h = Harness(reg, rs)
+
+    async def go():
+        await FLOWS["roster_comp"](h.command(), reg)
+        await h.pick("Pick a raid", "barrow_deeps")
+        await h.pick("Set a target for…", "Mage")
+        mx = h.modal._items["max"]
+        assert [o.value for o in mx.options if o.default] == ["10"] and len(mx.options) <= 25
+        assert [o.value for o in h.modal._items["min"].options if o.default] == ["1"]
+    run(go())
 
 
 # ---------------------------------------------------------------- config_summary(audience) → /gm config show
@@ -249,6 +408,76 @@ def test_raids_route_schedule_words_paused_and_sentences(owner_client, reg, rs):
     assert s["next"] == [] and len(s["next_if_active"]) == 3 and not any(MILITARY.search(x) for x in s["next_if_active"])
     assert s["pause_sentence"].startswith("Nothing new opens from Alt run") and s["resume_sentence"].startswith("Alt run opens its sheets again")
     assert s["removal_sentence"].startswith("Removes Alt run") and s["rosters_copy"]["2"] == "From the next run: the sheet advertises 2 × 10 seats."
+
+
+def test_readiness_forecast_rows_open_early_and_then_say_open(reg, rs, monkeypatch):
+    """R46: a red forecast row's one action, Open this run early = POST /api/raid/<id>/open {start, schedule}; once the
+    run is open the row carries its key (open_key) and the page links it instead."""
+    monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+
+    class Bot(FakeBot):
+        async def open_run_and_post(self, reg_, rs_, instance, start, by, schedule=None):
+            return rc.open_run(reg_, rs_, instance, start, by=by, schedule=schedule)
+    c = TestClient(web.create_app(Bot(reg, rs)))
+    alt_schedule(reg)
+    m = real(reg, 0)  # one Holy Priest regular: the series is short of tanks every week
+    reg.regular_add(m.discord_id, "barrow_deeps:alt", "t")
+
+    def rows():
+        r = c.get("/api/readiness", params={"raid": "barrow_deeps"}, headers=bearer()).json()["raids"][0]
+        return next(x for x in r["series"] if x["key"] == "barrow_deeps:alt")["forecast"]
+    f = rows()[1]
+    assert f["short"] and f["open_key"] is None
+    res = c.post("/api/raid/barrow_deeps/open", json={"start": f["start"], "schedule": "alt"}, headers=bearer())
+    assert res.status_code == 200, res.text
+    key = res.json()["key"]
+    assert rows()[1]["open_key"] == key and rows()[0]["open_key"] is None and key.endswith("-alt-" + f["start"][:10])
+    src = (FRONT / "pages" / "Readiness.tsx").read_text()
+    assert "Open this run early" in src and "/api/raid/${r.raid}/open" in src and "start: f.start, schedule: s.id" in src and "useConfirm" in src
+
+
+def test_schedule_writes_from_the_raids_page_carry_the_raid_rev(owner_client, reg, rs):
+    """Regression: Pause / Resume / Remove posted with no config:raids rev, so a stale page overwrote a change."""
+    alt_schedule(reg)
+    rev = reg.config_rev("raids:barrow_deeps")
+    reg.set_schedule("barrow_deeps", "alt", {"name": "Alt night"}, "someone else")
+    for path, body in (("/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"}),
+                       ("/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": {"active": False}})):
+        r = owner_client.post(path, json={**body, "revs": {"config:raids:barrow_deeps": rev}}, headers=bearer())
+        assert r.status_code == 409 and r.json()["changed"] == ["raids:barrow_deeps"], r.text
+    assert any(x["id"] == "alt" and x["active"] for x in reg.schedules("barrow_deeps"))
+    src = (FRONT / "components" / "ScheduleCard.tsx").read_text()
+    posts = [ln for ln in src.splitlines() if re.search(r'api\.post<[^>]*>\("/api/admin/raid/schedule(?:/remove)?"', ln)]
+    assert len(posts) == 3 and all("...raidRevs(r) })" in p for p in posts), posts
+
+
+def test_mcp_guild_overview_carries_the_summary(owner_client, reg, monkeypatch):
+    from oibot_gm import mcp_server as ms
+
+    class Api:
+        def get(self, path, **params):
+            return owner_client.get(path, params={k: v for k, v in params.items() if v is not None}, headers=bearer()).json()
+    monkeypatch.setattr(ms, "api", lambda guild=None: Api())
+    out = ms.guild_overview()
+    assert [x["key"] for x in out["summary"]][0] == "guild" and out["summary"][-1]["key"] == "host"
+
+
+def test_help_snapshot_has_the_config_summary_for_officers_only(reg, rs, monkeypatch):
+    from oibot_gm import help as help_mod
+
+    monkeypatch.setenv("OIBOT_SUPERUSERS", "")
+    officer = help_mod.guild_state(reg, rs, OWNER, True, "what are our settings?")
+    assert "### Effective configuration" in officer and "Host" in officer  # the owner: Host facts too
+    other = help_mod.guild_state(reg, rs, 5, True, "what are our settings?")
+    assert "### Effective configuration" in other and "Host facts: owner only." in other
+    assert "### Effective configuration" not in help_mod.guild_state(reg, rs, 5, False, "what are our settings?")
+
+
+def test_config_settings_edit_mode_settles_clashes_and_carries_the_runs_choice():
+    src = (FRONT / "pages" / "Config.tsx").read_text()
+    assert "Keep mine" in src and "Take theirs" in src and "disabled={conflicts.length > 0}" in src
+    assert "timezone_runs: tzRuns" in src and "Move open runs with the clock" in src
 
 
 # ---- /api/ask (the officers' Tell the bot box; members get the member view)

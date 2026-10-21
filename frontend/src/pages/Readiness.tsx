@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Anchor, Badge, Box, Card, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
-import { api, type Meta, type Readiness, type ReadinessRaid } from "../api";
-import { CardHeader, Eyebrow, PageTitle, fail } from "../components/Page";
+import { Anchor, Badge, Box, Button, Card, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { api, type ForecastRow, type Meta, type Readiness, type ReadinessRaid, type Series } from "../api";
+import { CardHeader, Eyebrow, PageTitle, fail, ok } from "../components/Page";
+import { useConfirm } from "../components/ConfirmModal";
 import { RaidHeader } from "../components/RaidHeader";
 import { GameIcon } from "../components/Icons";
 import { Aura } from "../components/board/shared";
@@ -36,6 +37,16 @@ export function ReadinessPage({ meta }: { meta: Meta }) {
 function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRaid; meta: Meta; slots: Readiness["slots"]; onSaved: () => void; onEditing: (on: boolean) => void }) {
   const words = (k: string) => slots.find((x) => x.value === k)?.label || k;
   const hc = r.headcount;
+  const [ask, confirmDialog] = useConfirm();
+  const [opening, setOpening] = useState<string | null>(null);
+  /** A red forecast row's one action (design §3.3 R46): open that run's sheet now, ahead of its cadence, so the hole is
+   *  worked on early — the same POST /api/raid/<id>/open (rc.open_run with the schedule) as the Raids page and /raid open. */
+  async function openEarly(s: Series, f: ForecastRow) {
+    const short = Object.entries(f.short).map(([role, k]) => `${k} ${role}${k === 1 ? "" : "s"}`).join(", ");
+    if (!(await ask({ title: `Open ${s.name} · ${f.when} now?`, message: `Its regulars leave it short (${short}). The sheet posts in the signup channel now instead of on its cadence, so everyone can answer from today; nobody is DMed unless the schedule DMs on open.`, confirmLabel: "Open it now" }))) return;
+    setOpening(f.start);
+    try { const x = await api.post<{ message: string }>(`/api/raid/${r.raid}/open`, { start: f.start, schedule: s.id }); ok(x.message); onSaved(); } catch (e) { fail(e); } finally { setOpening(null); }
+  }
   return (
     <Card>
       <RaidHeader id={r.raid} name={r.name} meta={`${hc.mains} of ${r.size} mains${hc.alts ? ` · ${hc.alts} alts` : ""}${hc.unnamed ? ` · ${hc.unnamed} unnamed` : ""}`}
@@ -100,7 +111,10 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
                   {(s.forecast || []).filter((f) => Object.keys(f.short || {}).length).map((f) => (
                     <Group key={f.start} gap={6} wrap="nowrap"><Text size="xs">{f.when}</Text>{Object.entries(f.short).map(([role, k]) => (
                       <Group key={role} gap={2} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={12} title={role} /><Text size="xs" c="red" fw={700}>{k}</Text></Group>
-                    ))}</Group>
+                    ))}
+                    {f.open_key ? <Anchor component={Link} to="/rosters" size="xs">sheet open</Anchor>
+                      : <Button size="compact-xs" variant="light" color="red" loading={opening === f.start} onClick={() => openEarly(s, f)}>Open this run early</Button>}
+                    </Group>
                   ))}
                 </Box>
               ))}
@@ -108,6 +122,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
           </Card>
         )}
       </Stack>
+      {confirmDialog}
     </Card>
   );
 }
