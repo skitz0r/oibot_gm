@@ -11,7 +11,6 @@ import asyncio
 import logging
 import contextlib
 import inspect
-import secrets
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -142,7 +141,7 @@ def application_json(reg, a) -> dict:
 
 
 HISTORY_PAGE = 8  # past runs per raid on the Rosters page; GET /api/runs pages the rest
-PREVIEW_TTL = 600  # seconds a plain_change preview token stays good (Discord's Apply view waits as long)
+from .api_ops import PREVIEW_TTL  # noqa: E402,F401 — the preview tokens live in api_ops (the structured ops path)
 
 
 def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_officer=None) -> None:
@@ -1696,70 +1695,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid),
-                        "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)]})
+                        "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)], "rev": reg.config_rev(f"raids:{rid}")})
         return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES),
                 "schedule_kinds": list(SCHEDULE_KINDS), "schedule_cadence": list(SCHEDULE_CADENCE), "max_rosters": MAX_SCHEDULE_ROSTERS}
-
-    @app.post("/api/admin/raid/schedule")
-    async def admin_raid_schedule(request: Request):
-        """Change or create one schedule (owner): {instance, id, fields: {setting: value}} — a cadence value of null goes
-        back to the raid's. One registry write (Registry.set_schedule): validated as a whole, one commit."""
-        def go(v, d):
-            need_owner(v)
-            inst, sid = parse(d, InstanceBody).instance, str(d.get("id") or "").strip()
-            fields = d.get("fields")
-            if not isinstance(fields, dict) or not fields:
-                raise HTTPException(400, "fields: a map of schedule settings to change")
-            return "; ".join(v.reg.set_schedule(inst, sid, fields, v.name)) or f"{inst}: no changes"
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/raid/schedule/remove")
-    async def admin_raid_schedule_remove(request: Request):
-        def go(v, d):
-            need_owner(v)
-            return v.reg.remove_schedule(parse(d, InstanceBody).instance, str(d.get("id") or ""), v.name)
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/raid")
-    async def admin_raid(request: Request):
-        def go(v, d):
-            need_owner(v)
-            inst = parse(d, InstanceBody).instance
-            cur, want = v.reg.raid_def(inst), {}  # collect every changed field, then ONE atomic write
-            if "slots" in d:
-                raw = d["slots"] if isinstance(d["slots"], list) else str(d["slots"])
-                from ..registry import parse_slots
-
-                if parse_slots(raw) != list(cur["slots"]):
-                    want["slots"] = raw
-            for f in RAID_HOURS_FIELDS + RAID_BOOL_FIELDS + ("lockout_days", "duration_hours", "notes", "split_policy"):
-                val = d.get(f)
-                if val not in (None, "") and str(val) != str(cur.get(f, "")):
-                    want[f] = str(val)
-            if "nudge" in d and d["nudge"] is not None and bool(d["nudge"]) != bool(cur.get("nudge", True)):
-                want["nudge"] = "true" if d["nudge"] else "false"
-            for k, val in (d.get("weights") or {}).items():
-                if k in RAID_WEIGHT_DEFAULTS and val not in (None, "") and as_int(val, f"weight {k}") != int(cur["weights"].get(k, 0)):
-                    want[f"weight_{k}"] = str(val)
-            fo = d.get("first_open") or ""
-            cur_fo = v.reg.first_open(inst)
-            if fo and (cur_fo is None or fo[:16] != cur_fo.astimezone(ZoneInfo(v.reg.config.timezone)).strftime("%Y-%m-%dT%H:%M")):
-                want["first_open"] = fo
-            for role in ("tank", "healer", "dps"):
-                for bound in ("min", "max"):
-                    val = (d.get("comp") or {}).get(role, {}).get(bound)
-                    if val not in (None, "") and str(val) != str(((cur.get("comp") or {}).get(role) or {}).get(bound, "")):
-                        want[f"{role}_{bound}"] = str(val)
-            done = v.reg.set_raid_overrides(inst, want, v.name)  # a refused field leaves the raid exactly as it was
-            return "; ".join(done) or f"{inst}: no changes"
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/raid/reset")
-    async def admin_raid_reset(request: Request):
-        def go(v, d):
-            need_owner(v)
-            return v.reg.clear_raid_override(parse(d, InstanceBody).instance, v.name)
-        return await run(request, go, officer=True)
 
     # ---- auras: the buff matrix with the guild's learned facts (owner edits; officers read)
     @app.get("/api/auras")
@@ -1780,49 +1718,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             over = reg.config.buffs.get(b.id, {})
             buffs.append({"id": b.id, "name": b.short, "abbr": b.abbr, "colour": b.colour, "art": b.art, "providers": list(b.providers), "scope": b.scope, "kind": b.kind, "slot": b.slot,
                           "family": b.family_id, "strength": b.strength, "status": b.status, "note": b.note, "overridden": sorted(over), "choices": list(b.choices)})
-        return {"families": fams, "buffs": buffs, "value_keys": list(reg.VALUE_KEYS), "specs": specs, "scopes": list(reg.BUFF_SCOPES), "statuses": list(reg.STATUSES), "owner": v.owner}
-
-    @app.post("/api/admin/aura")
-    async def admin_aura(request: Request):
-        """One buff: any of scope / family / strength / status / note (only fields present in the body change)."""
-        def go(v, d):
-            need_owner(v)
-            bid, done = parse(d, IdBody).id, []
-            cur = v.reg.buff(bid)
-            for f in ("scope", "family", "strength", "status", "note"):
-                if f in d and d[f] is not None and str(d[f]) != str(getattr(cur, "family_id" if f == "family" else f)):
-                    done.append(v.reg.set_buff_override(bid, f, d[f], v.name))
-            return "; ".join(done) or f"{bid}: no changes"
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/family")
-    async def admin_family(request: Request):
-        """One family: name / status / note / value (whole beneficiary map)."""
-        def go(v, d):
-            need_owner(v)
-            fid, done = parse(d, IdBody).id, []
-            cur = v.reg.profile.families.get(fid)
-            for f in ("name", "status", "note"):
-                if f in d and d[f] is not None and (cur is None or str(d[f]) != str(getattr(cur, f))):
-                    done.append(v.reg.set_family_override(fid, f, d[f], v.name))
-            if "value" in d and d["value"] is not None:
-                if not isinstance(d["value"], dict):
-                    raise HTTPException(400, "value must be a map of beneficiary → number")
-                try:
-                    want = {k: float(x) for k, x in d["value"].items() if x not in (None, "")}
-                except (TypeError, ValueError):
-                    raise HTTPException(400, "value entries must be numbers")
-                if cur is None or want != {k: float(x) for k, x in cur.value.items()}:
-                    done.append(v.reg.set_family_override(fid, "value", want, v.name))
-            return "; ".join(done) or f"{fid}: no changes"
-        return await run(request, go, officer=True)
-
-    @app.post("/api/admin/aura/reset")
-    async def admin_aura_reset(request: Request):
-        def go(v, d):
-            need_owner(v)
-            return v.reg.clear_aura_overrides(v.name, d.get("id") or None)
-        return await run(request, go, officer=True)
+        return {"families": fams, "buffs": buffs, "value_keys": list(reg.VALUE_KEYS), "specs": specs, "scopes": list(reg.BUFF_SCOPES), "statuses": list(reg.STATUSES), "owner": v.owner,
+                "rev": reg.config_rev("buffs"), "reset_sentence": reg.aura_reset_sentence()}  # rev: an edit-mode Save sends it back as revs["config:buffs"]
 
     # ---- members: every member's characters and absences; officers edit them like their own Me page
     @app.get("/api/members")
@@ -2039,7 +1936,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                              "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None,
                              "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids]},
                 "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner,
-                "guild": {"key": reg.key, "name": cfg.name, "discord_guild_id": str(cfg.discord_guild_id)}}  # which guild answered (MCP guild_overview)
+                "guild": {"key": reg.key, "name": cfg.name, "discord_guild_id": str(cfg.discord_guild_id)},  # which guild answered (MCP guild_overview)
+                "revs": {s: reg.config_rev(s) for s in ("settings", "recruitment", "plain")}}  # what an edit-mode Save sends back as revs["config:<section>"]
 
     # ---- policy documents (loot, comp, persona): edit → compile → confirm | discard, what /gm policy edit does
     def policy_store(reg):
@@ -2128,45 +2026,6 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
         return {"message": line, **policy_json(v.reg, doc)}
 
-    @app.post("/api/admin/config")
-    async def admin_config(request: Request):
-        """Owner: one setting at a time — channel:<kind> (channel id or null), timezone, ask_audience, about, officer_roles (list of role ids)."""
-        v, d = await body(request, officer=True)
-        need_owner(v)
-        field, value = d.get("field") or "", d.get("value")
-        try:
-            if field.startswith("channel:"):
-                if value and not str(value).strip("<#>").isdigit():  # a channel *name* (the MCP server) → its id
-                    want = str(value).strip().lstrip("#").lower()
-                    hits = [c for c in bot.guild_channels(v.reg) if c["name"].lower() == want]
-                    if len(hits) != 1:
-                        return JSONResponse({"error": f"no channel named #{want}" if not hits else f"#{want}: several channels match"}, status_code=400)
-                    value = hits[0]["id"]
-                msg = await bot.set_channel(v.reg, field[8:], as_int(str(value).strip("<#>"), "channel id") if value else None, v.name, via=v.via, by_id=v.uid)
-            elif field == "officer_roles":
-                # the editor sends the whole list of role IDS (as /gm config officer-role stores them); applied as the
-                # command's role_add / role_remove ops so the same code path and audit lines are used
-                from .. import configops
-
-                want = {as_int(r, "role id") for r in (value or []) if str(r).strip()}
-                have = set(v.reg.config.officer_role_ids)
-                for rid in sorted(have - want):
-                    await configops.apply_async(v.reg, configops.ConfigOp(op="role_remove", value=str(rid)), v.name, True, bot=bot)
-                for rid in sorted(want - have):
-                    await configops.apply_async(v.reg, configops.ConfigOp(op="role_add", value=str(rid)), v.name, True, bot=bot)
-                msg = ("officer roles: " if want != have else "officer roles unchanged: ") + (", ".join(bot.officer_role_names(v.reg)) or "(none; Manage Server only)")
-            elif field in ("timezone", "ask_audience", "about", "news_keywords", "loot_log"):
-                from .. import configops
-
-                text = ", ".join(str(w) for w in value) if isinstance(value, list) else ("true" if value is True else "false" if value is False else str(value or ""))  # news_keywords: a list from the page
-                msg = await configops.apply_async(v.reg, configops.ConfigOp(op="set", path=field, value=text), v.name, True, bot=bot)
-            else:
-                return JSONResponse({"error": f"unknown setting {field}"}, status_code=400)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)  # '[web] Jon: …' / '[mcp] Jon: …'
-        return {"message": msg}
-
     # ---- plain-text permissions (design §5.25): officers read, the owner edits
     def plain_json(reg) -> dict:
         from ..configops import OP_GROUP
@@ -2187,25 +2046,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.get("/api/plain-permissions")
     async def plain_get(request: Request):
         v = await who(request, officer=True)
-        return {**plain_json(v.reg), "owner": v.owner}
-
-    @app.post("/api/admin/plain-permissions")
-    async def plain_set(request: Request):
-        """Owner: the whole policy — {groups: {group: [who…]}, channels: {channel id: mode}, dm, default}; or
-        `set_channels` {channel id: mode | null} to change some channels and keep the rest. Groups or fields left out
-        keep their current value."""
-        v, d = await body(request, officer=True)
-        need_owner(v)
-        guild = bot.get_guild(v.reg.config.discord_guild_id)
-        if guild is not None:
-            v.reg.cache_roles(guild)
-        patch = {k: d[k] for k in ("groups", "channels", "set_channels", "dm", "default") if k in d}
-        try:  # the merge plain text's `plain` op uses too (Registry.merge_plain_policy), then one validated write
-            msg = await asyncio.to_thread(v.reg.set_plain_policy, v.reg.merge_plain_policy(patch), v.name)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e).splitlines()[0]}, status_code=400)
-        await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)
-        return {"message": msg, **plain_json(v.reg), "owner": True}
+        return {**plain_json(v.reg), "owner": v.owner, "rev": v.reg.config_rev("plain")}
 
     # ---- recruitment (design §5.29): the homepage's public facts, the owner's settings, the officers' applications
     @app.get("/api/public")
@@ -2224,35 +2065,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.get("/api/recruitment")
     async def recruitment_get(request: Request):
         v = await who(request, officer=True)
-        return {**recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": v.owner}
-
-    @app.post("/api/admin/recruitment")
-    async def recruitment_set(request: Request):
-        """Owner: any of {open, note, questions: [{id?, label, hint, required}], invite_url, member_role_ids} in one
-        validated write (Registry.set_recruitment); a refusal names the part and nothing is saved."""
-        v, d = await body(request, officer=True)
-        need_owner(v)
-        kw: dict = {}
-        if "open" in d:
-            kw["open"] = bool(d["open"])
-        for k in ("note", "invite_url"):
-            if k in d:
-                kw[k] = str(d[k] or "")
-        if "questions" in d:
-            if not isinstance(d["questions"], list) or not all(isinstance(q, dict) for q in d["questions"]):
-                return JSONResponse({"error": "questions must be a list of {label, hint, required}"}, status_code=400)
-            kw["questions"] = d["questions"]
-        if "member_role_ids" in d:
-            kw["member_role_ids"] = [as_int(r, "role id") for r in (d["member_role_ids"] or []) if str(r).strip()]
-        try:
-            msg = await asyncio.to_thread(v.reg.set_recruitment, v.name, **kw)
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        refresh = getattr(bot, "refresh_registration_card", None)
-        if refresh is not None:  # open/closed and the note show on the registration card, as with /gm config recruitment
-            await maybe_await(refresh(v.reg))
-        await ops_mod.audited(bot.ops, v.reg, v.name, msg, via=v.via, by_id=v.uid)
-        return {"message": msg, **recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": True}
+        return {**recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": v.owner, "rev": v.reg.config_rev("recruitment")}
 
     @app.get("/api/applications")
     async def applications(request: Request):
@@ -2299,109 +2112,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         await ops_mod.audited(bot.ops, v.reg, v.name, f"created invite {url}", via=v.via, by_id=v.uid)
         return {"invite_url": url, "message": f"invite created: {url} (save the section to use it)"}
 
-    previews: dict[str, dict] = {}  # plain_change preview token -> the authorized ops + board revs it showed (single use)
+    from .api_ops import install_ops_api  # the structured ops path + the admin routes as its translators (design §5.43)
 
-    def mcp_actor_rule(v, allowed, refused):
-        """D8: from MCP without X-Oibot-Actor, the loot decisions (an award, a confirm, a reason, a correction, a retired
-        precedent, tiers, someone else's wishlist) are refused — the owner's token is not the officer who decided."""
-        if v.via != "mcp" or getattr(v, "actor", None):
-            return allowed, refused
-        from ..configops import people_needs_actor
-        from ..loot_ops import needs_actor
-
-        keep = [op for op in allowed if not needs_actor(op, v.uid)]
-        if len(keep) != len(allowed):
-            refused = [*refused, "Loot decisions (an award, a confirm, a reason, a correction, tiers, someone else's wishlist) from MCP need the "
-                                 "X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
-        people = [op for op in keep if not people_needs_actor(op)]
-        if len(people) != len(keep):  # D8: a rank or a character's confirmation is a decision about a person
-            refused = [*refused, "A rank or a confirmation from MCP needs the X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
-        return people, refused
-
-    @app.post("/api/ops/change")
-    async def ops_change(request: Request):
-        """Plain-text configuration (what `/gm change` and the ops-channel @mention do), in two calls like Discord's
-        diff + Apply. Preview `{text}`: Claude parses it into whitelisted ConfigOps, `authorize` keeps what this
-        caller may do, `describe()` says current → new per op; a change also returns `token` (single use, valid
-        PREVIEW_TTL seconds) holding exactly those ops and the boards' revs as shown. Apply `{token, apply: true}`:
-        those ops — never a re-parse — authorized again in code for the same caller and applied with the revs, so a
-        board someone changed since the preview is refused. Questions come back instead of ops."""
-        from .. import configops
-        from ..configops import ConfigOp
-        from ..policy import PolicyStore
-
-        v, d = await body(request, officer=True)
-        now = time.monotonic()
-        for k in [k for k, p in previews.items() if p["expires"] < now]:
-            previews.pop(k, None)
-        raids = bot.raids.store(v.reg) if getattr(bot, "raids", None) is not None else None
-        if d.get("apply"):
-            held = previews.pop(str(d.get("token") or ""), None)
-            if held is None or held["uid"] != v.uid or held["guild"] != v.reg.key:
-                return JSONResponse({"error": "apply needs the token of a preview you made in the last "
-                                              f"{PREVIEW_TTL // 60} minutes — preview again (without apply) and apply that"}, status_code=400)
-            ops = [ConfigOp(**o) for o in held["ops"]]
-            if live_officer is not None:  # a write: the rights are decided now (PRIV_LIVE), not from the login's lookup
-                await live_officer(v)
-            allowed, refused = configops.authorize(v.reg, ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
-            allowed, refused = mcp_actor_rule(v, allowed, refused)
-            out = {"kind": "change", "reply": held["reply"], "questions": [], "ops": [op.model_dump(exclude_none=True) for op in allowed],
-                   "describe": held["describe"], "applied": [], "refused": refused, "error": None}
-            revs, stale = dict(held["revs"]), set()
-            ps = PolicyStore(bot.registries.store, v.reg.key)
-
-            def failed(op, e) -> None:  # as Discord's Apply: listed with what it was, and the rest of the request still applies
-                out["refused"].append(f"{configops.describe(v.reg, op, PLAIN_WEB)} — {e}")
-                out["error"] = out["error"] or str(e)
-
-            for op in configops.coalesce(allowed):  # consecutive raid/schedule settings save as one write (as on Discord)
-                key = configops.op_run_key(v.reg, op, raids)
-                if op.op in configops.BOARD_OPS and key in stale:  # an earlier step found someone else's change on this board
-                    failed(op, rc.BoardChanged())
-                    continue
-                before = configops.snapshot_revs(v.reg, revs, raids)
-                try:
-                    line = await configops.apply_async(v.reg, op, v.name, True, ps, bot=bot, by_id=v.uid, channel_id=PLAIN_WEB,  # authorize() allowed it
-                                                       rev=configops.op_rev(op, key, revs), via=v.via)
-                except (RegistryError, ValueError) as e:
-                    failed(op, e)
-                    if isinstance(e, rc.BoardChanged) and key:
-                        stale.add(key)  # keep the old rev: the rest of this request can't overwrite that change either
-                    continue
-                except Exception as e:  # noqa: BLE001 — Discord or the solver: never a 500 after a partial apply; the caller sees what landed
-                    failed(op, await configops.report_error(bot.ops, v.reg.config, e, f"[{v.via}] plain change {op.op}"))
-                    continue
-                configops.refresh_revs(v.reg, revs, raids, stale, before)  # this request's own write is not someone else's change
-                out["applied"].append(line)  # apply_async(via=) wrote the audit line
-            return out
-        text = str(d.get("text") or "").strip()
-        if not text:
-            return JSONResponse({"error": "text required"}, status_code=400)
-        provider = getattr(getattr(bot, "ctx", None), "provider", None)
-        if provider is None:
-            return JSONResponse({"error": "the LLM provider is off (ANTHROPIC_API_KEY unset)"}, status_code=503)
-        try:
-            req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name, officer=v.officer)
-        except Exception as e:  # noqa: BLE001 — provider/schema errors are 502s the caller can retry
-            return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
-        # the same policy check as Discord: the site (and MCP, as the owner) counts as a channel where plain text acts
-        allowed, refused = configops.authorize(v.reg, req.ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
-        allowed, refused = mcp_actor_rule(v, allowed, refused)
-        req.ops = allowed
-        ops = [op.model_dump(exclude_none=True) for op in req.ops]
-        desc = []
-        for op in req.ops:
-            try:
-                desc.append(configops.describe(v.reg, op, PLAIN_WEB))
-            except Exception as e:  # noqa: BLE001
-                desc.append(f"{op.op}: {e}")
-        out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": [], "refused": refused}
-        if req.kind == "change" and req.ops:
-            token = secrets.token_urlsafe(16)
-            previews[token] = {"uid": v.uid, "guild": v.reg.key, "ops": ops, "describe": desc, "reply": req.reply,
-                               "revs": configops.board_revs(v.reg, req.ops, raids), "expires": now + PREVIEW_TTL}
-            out.update(token=token, expires_in=PREVIEW_TTL)
-        return out
+    install_ops_api(app, bot, who=who, body=body, live_officer=live_officer, plain_json=plain_json, recruitment_json=recruitment_json,
+                    guild_role_refs=guild_role_refs, need_owner=need_owner, parse=parse, InstanceBody=InstanceBody, IdBody=IdBody)
 
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
 

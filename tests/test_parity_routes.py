@@ -285,13 +285,15 @@ def test_new_tools_hit_their_routes(mocked):
 
 
 def test_changed_tools_send_one_body(mocked):
+    # the setup tools send TYPED changes in one body (design §5.43): the bot builds the ops and coalesces them into one write
     ms.raid_set("barrow", fields={"signup_lead_hours": 48, "nudge_hours_before": 36, "tank_min": 2, "weight_rank": 4, "autofill": "no"})
-    assert mocked[-1] == ("POST", "/api/admin/raid", {"instance": "barrow_deeps", "signup_lead_hours": 48, "nudge_hours_before": 36,
-                                                      "comp": {"tank": {"min": 2}}, "weights": {"rank": 4}, "autofill": False})
+    assert mocked[-1] == ("POST", "/api/ops/change", {"changes": [{"kind": "raid", "target": "barrow_deeps", "fields": {"signup_lead_hours": 48, "nudge_hours_before": 36,
+                                                                  "tank_min": 2, "weight_rank": 4, "autofill": "no"}}], "apply": True, "confirmed": True})
     ms.raid_set("barrow", "notes", "bring flasks")
-    assert mocked[-1][2] == {"instance": "barrow_deeps", "notes": "bring flasks"}
+    assert mocked[-1][2]["changes"] == [{"kind": "raid", "target": "barrow_deeps", "fields": {"notes": "bring flasks"}}]
     ms.schedule_set("barrow", "alt", fields={"kind": "weekly", "slots": "Sat 20:00"})
-    assert mocked[-1] == ("POST", "/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": {"kind": "weekly", "slots": "Sat 20:00"}})
+    assert mocked[-1] == ("POST", "/api/ops/change", {"changes": [{"kind": "schedule", "target": "barrow_deeps:alt", "fields": {"kind": "weekly", "slots": "Sat 20:00"}}],
+                                                      "apply": True, "confirmed": True})
     ms.set_answer("bd", "Kessa", "out", note="sick")
     assert mocked[-1][2]["note"] == "sick"
     ms.set_layout("bd", [["A"]], rev="abc")

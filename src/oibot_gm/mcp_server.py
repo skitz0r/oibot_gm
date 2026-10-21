@@ -46,8 +46,6 @@ Guild = Annotated[str | None, Field(description="guild: key or name; omit for OI
 HEADERS = {"X-Requested-With": "oibot", "Accept": "application/json"}
 STATUSES = ("in", "sub", "out")
 POLICY_TEXT_MAX = 1500  # guild_overview's excerpt of each policy document (policy_get has the whole text)
-RAID_FIELDS = ("slots", "signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours", "lockout_days", "duration_hours",
-               "notes", "split_policy", "nudge", "autofill", "open_dm", "confirm", "first_open")
 
 
 class Api:
@@ -210,6 +208,26 @@ def msg(data: Any) -> str:
     if isinstance(data, dict):
         return str(data.get("message") or data.get("error") or json.dumps(data, ensure_ascii=False))
     return str(data)
+
+
+def ops_change(guild: str | None, changes: list[dict], preview: bool = False) -> str | dict:
+    """THE write path of the setup tools (design §5.43): typed changes ({kind, target, fields}) to POST /api/ops/change —
+    the bot builds the ops (configops.ops_from_fields), so no tool carries the plain-text value grammar. `preview`:
+    the Described preview (lines current → new, refused lines with who may and where, consequences, review), nothing
+    saved — read it to the person. Otherwise applied at once (`confirmed`: the person asked for it here), answering the
+    applied lines; a write that was refused raises with why (anything else in the call still applied, and says so)."""
+    if preview:
+        d = api(guild).post("/api/ops/change", {"changes": changes})
+        out = d.get("described") or {}
+        return {"preview": out.get("lines", []), "refused": d.get("refused", []), "consequences": out.get("consequences", []), "review": d.get("review", False),
+                "describe": d.get("describe", [])}
+    d = api(guild).post("/api/ops/change", {"changes": changes, "apply": True, "confirmed": True})
+    applied, refused = d.get("applied") or [], d.get("refused") or []
+    if refused and not applied:
+        raise ToolError("; ".join(refused))
+    if not applied and not refused:
+        return d.get("summary") or "nothing to change"
+    return "; ".join(applied) + (f" — refused: {'; '.join(refused)} (the rest was saved)" if refused else "")
 
 
 def excerpt(text: str | None, n: int = POLICY_TEXT_MAX) -> str | None:
@@ -552,107 +570,95 @@ def repost_sheet(run: str, channel: str | None = None, guild: Guild = None) -> s
 # ---------------------------------------------------------------- writes: raids and auras (owner)
 
 @mcp.tool()
-def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, guild: Guild = None) -> str:
+def raid_set(raid: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Override raid settings for the guild (owner): one `field` + `value`, or several at once as `fields`
     {field: value} — ONE validated write, so settings that are only legal together (signup lead and nudge raised
-    together) go through, and a refusal leaves the raid as it was. field = slots ('Tue 19:30, Thu 19:30'),
-    signup_lead_hours, nudge_hours_before, lock_hours_before, confirm_hours_before, fill_ask_hours, lockout_days,
-    duration_hours, notes, split_policy, nudge/autofill/open_dm/confirm (true|false; confirm = the lock asks the
-    rostered to Confirm), first_open ('YYYY-MM-DDTHH:MM' guild time), weight_<key> (see list_raids weight_keys), or
-    tank_min/tank_max/healer_min/healer_max/dps_min/dps_max."""
+    together) go through, and a refusal leaves the raid as it was. field = slots (a list ['Tue 19:30', 'Thu 19:30']),
+    cadence (standard|short|same_week), signup_lead_hours, nudge_hours_before, lock_hours_before, confirm_hours_before,
+    fill_ask_hours, lockout_days, duration_hours, notes, split_policy, nudge/autofill/open_dm/confirm (booleans; confirm =
+    the lock asks the rostered to Confirm), first_open ('YYYY-MM-DDTHH:MM' guild time), weight_<key> (see list_raids
+    weight_keys), or tank_min/tank_max/healer_min/healer_max/dps_min/dps_max. Values are typed (numbers, booleans,
+    lists); the bot builds the change. `preview=True`: what would change (current → new, consequences), nothing saved."""
     rid = get_raid(raid, guild)["id"]
     want = dict(fields or {})
     if field:
         want[field] = value
     if not want:
         raise ToolError("give a field and value, or fields = {field: value, …}")
-    body: dict[str, Any] = {"instance": rid}
-    for raw, v in want.items():
-        f = str(raw).strip()
-        if f.startswith("weight_"):
-            body.setdefault("weights", {})[f[7:]] = v
-        elif f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max"):
-            role, bound = f.split("_", 1)
-            body.setdefault("comp", {}).setdefault(role, {})[bound] = v
-        elif f in ("nudge", "autofill", "open_dm", "confirm"):
-            body[f] = v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")
-        elif f in RAID_FIELDS:
-            body[f] = v
-        else:
-            raise ToolError(f"unknown raid field {raw}; one of " + ", ".join(RAID_FIELDS) + ", weight_<key>, <role>_min/<role>_max")
-    return msg(api(guild).post("/api/admin/raid", body))
+    return ops_change(guild, [{"kind": "raid", "target": rid, "fields": want}], preview)
 
 
 @mcp.tool()
-def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, guild: Guild = None) -> str:
+def schedule_set(raid: str, schedule: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False,
+                 guild: Guild = None) -> str | dict:
     """Change settings of a raid's schedule (owner) — or create the schedule. One `field` + `value`, or several at
     once as `fields` {field: value} in ONE validated write (a new schedule's kind and run times together). Schedules are
     listed per raid by list_raids / get_raid (`schedules`: id, name, kind, plain-words label, next runs); `default` is
-    the raid's own weekly slots. field = kind (weekly|lockout|pickup) | name | active (true|false) | rosters (1-4) |
-    slots ('Sat 20:00, Sun 20:00') | days ('1, 3' = days of each lockout, 1 = reset day) | time ('20:00') |
-    signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge |
-    autofill | open_dm | confirm (true|false: the lock asks the rostered to Confirm) | split_policy | weights (the
-    schedule's own seat weights: {rank, main, sat_out, signup_order, regular} or 'regular 6, rank 0'; 'inherit' drops
-    them). A cadence field set to 'inherit' goes back to the raid's value. A new schedule starts with its kind, slots,
-    or days/time."""
+    the raid's own weekly slots. field = kind (weekly|lockout|pickup) | name | active (bool) | rosters (1-4) | slots (a
+    list ['Sat 20:00', 'Sun 20:00']) | days (a list [1, 3] = days of each lockout, 1 = reset day) | time ('20:00') |
+    signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge | autofill |
+    open_dm | confirm (bools) | split_policy | weights (the schedule's own seat weights {rank, main, sat_out,
+    signup_order, regular}; a key set to null follows the raid). A cadence field set to null goes back to the raid's
+    value. A new schedule starts with its kind, slots, or days/time. `preview=True`: what would change, nothing saved."""
     rid = get_raid(raid, guild)["id"]
     want = {str(k).strip(): v for k, v in (fields or {}).items()}
     if field:
         want[field.strip()] = value
     if not want:
         raise ToolError("give a field and value, or fields = {field: value, …}")
-    return msg(api(guild).post("/api/admin/raid/schedule", {"instance": rid, "id": schedule, "fields": want}))
+    return ops_change(guild, [{"kind": "schedule", "target": f"{rid}:{schedule}", "fields": want}], preview)
 
 
 @mcp.tool()
-def schedule_remove(raid: str, schedule: str, guild: Guild = None) -> str:
+def schedule_remove(raid: str, schedule: str, preview: bool = False, guild: Guild = None) -> str | dict:
     """Remove a raid's schedule (owner). Removing `default` clears the raid's weekly slots; runs already open keep
-    their times."""
+    their times; its regulars come off it (they see a notice, nobody is DMed). `preview=True` names them first."""
     rid = get_raid(raid, guild)["id"]
-    return msg(api(guild).post("/api/admin/raid/schedule/remove", {"instance": rid, "id": schedule}))
+    return ops_change(guild, [{"kind": "schedule_remove", "target": f"{rid}:{schedule}"}], preview)
 
 
 @mcp.tool()
-def raid_reset(raid: str, guild: Guild = None) -> str:
-    """Drop every guild override on a raid (owner): back to the game profile's cadence."""
+def raid_reset(raid: str, preview: bool = False, guild: Guild = None) -> str | dict:
+    """Drop every guild override on a raid (owner): back to the game profile's cadence. `preview=True` lists what goes."""
     rid = get_raid(raid, guild)["id"]
-    return msg(api(guild).post("/api/admin/raid/reset", {"instance": rid}))
+    return ops_change(guild, [{"kind": "raid_reset", "target": rid}], preview)
 
 
 @mcp.tool()
-def aura_set(buff: str, field: str, value: str, guild: Guild = None) -> str:
+def aura_set(buff: str, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """What the guild learns about a buff (owner): field = scope (party|raid), family (a family id or another buff's id;
-    'own' = stands alone), strength (number, 1 = full), status (confirmed|reported|assumed), note. `buff` = buff id
-    from list_auras (e.g. fortitude, windfury_totem)."""
-    if field not in ("scope", "family", "strength", "status", "note"):
-        raise ToolError("field must be scope, family, strength, status or note")
-    return msg(api(guild).post("/api/admin/aura", {"id": buff, field: value}))
+    'own' = stands alone), strength (number, 1 = full), status (confirmed|reported|assumed), note — or several as
+    `fields` {field: value}: ONE write, a refused field leaves the buff as it was. `family_new` = a NEW family's name
+    (its id is made from the name) that the buff joins. `buff` = buff id from list_auras (e.g. fortitude,
+    windfury_totem). `preview=True`: current → new, nothing saved."""
+    want = dict(fields or {})
+    if field:
+        want[field] = value
+    if not want:
+        raise ToolError("give a field and value, or fields = {field: value, …}")
+    return ops_change(guild, [{"kind": "buff", "target": buff, "fields": want}], preview)
 
 
 @mcp.tool()
-def family_set(family: str, field: str, value: str, guild: Guild = None) -> str:
-    """A stacking family (owner): field = name, status, note, or value = the whole beneficiary map as 'all: 3, mana: 2'
-    (keys: all, physical, spell, mana, melee, ranged, healer, tank, spec:<Name>). New family ids are created."""
-    if field not in ("name", "status", "note", "value"):
-        raise ToolError("field must be name, status, note or value")
-    if field == "value":
-        vm: dict[str, float] = {}
-        for part in str(value).replace(";", ",").split(","):
-            if not part.strip():
-                continue
-            k, _, x = part.partition(":")
-            try:
-                vm[k.strip()] = float(x)
-            except ValueError:
-                raise ToolError(f"value entries look like 'all: 3, mana: 2' (bad: {part.strip()})") from None
-        return msg(api(guild).post("/api/admin/family", {"id": family, "value": vm}))
-    return msg(api(guild).post("/api/admin/family", {"id": family, field: value}))
+def family_set(family: str | None = None, field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False,
+               guild: Guild = None) -> str | dict:
+    """A stacking family (owner): field = name, status, note, value (the WHOLE beneficiary map as an object
+    {"all": 3, "mana": 2, "spec:Holy": 1}) or value:<key> (ONE beneficiary: a number, or null to remove it — keys: all,
+    physical, spell, mana, melee, ranged, healer, tank, spec:<Name>) — or several as `fields`, in ONE write. `family`
+    empty + a `name` field = a NEW family (its id is made from the name, never typed). `preview=True`: current → new."""
+    want = dict(fields or {})
+    if field:
+        want[field] = value
+    if not want:
+        raise ToolError("give a field and value, or fields = {field: value, …}")
+    return ops_change(guild, [{"kind": "family", "target": family or None, "fields": want}], preview)
 
 
 @mcp.tool()
-def aura_reset(id: str | None = None, guild: Guild = None) -> str:
-    """Back to the game defaults (owner): one buff or family id, or everything when `id` is empty."""
-    return msg(api(guild).post("/api/admin/aura/reset", {"id": id or None}))
+def aura_reset(id: str | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
+    """Back to the game defaults (owner): one buff or family id, or everything when `id` is empty (`preview=True` says
+    what every-aura reset drops)."""
+    return ops_change(guild, [{"kind": "aura_reset", "target": id or None}], preview)
 
 
 # ---------------------------------------------------------------- writes: members
@@ -719,18 +725,25 @@ def set_regular(raid: str, member: str, on: bool = True, schedule: str | None = 
 # ---------------------------------------------------------------- writes: config (owner) and the test bench
 
 @mcp.tool()
-def set_channel(kind: str, channel: str | None = None, guild: Guild = None) -> str:
+def set_channel(kind: str, channel: str | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Point a bot channel at a server channel (owner): kind = ops | applications | signup | roster | registration |
-    analytics | absences | news | loot (the public award log); `channel` = a channel name (#general), an id, or empty to unset. Cards are (re)posted."""
-    return msg(api(guild).post("/api/admin/config", {"field": f"channel:{kind}", "value": channel or None}))
+    analytics | absences | news | loot (the public award log); `channel` = a channel name (#general), an id, or empty to
+    unset. Cards are (re)posted. `preview=True`: current → new and what it does, nothing saved."""
+    return ops_change(guild, [{"kind": "settings", "fields": {f"channel:{kind}": channel or None}}], preview)
 
 
 @mcp.tool()
-def set_config(field: str, value: Any, guild: Guild = None) -> str:
-    """One guild setting (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
-    phrases that make a news item relevant), loot_log (true|false: the public award log), or officer_roles (a list of role ids
-    — the whole list; role names are NOT resolved here, use plain_change for that)."""
-    return msg(api(guild).post("/api/admin/config", {"field": field, "value": value}))
+def set_config(field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
+    """Guild settings (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
+    phrases that make a news item relevant), loot_log (bool: the public award log), officer_roles (the WHOLE list of role
+    ids or names the bot knows), channel:<kind> (as set_channel) — one `field` + `value` or several as `fields`.
+    `preview=True`: current → new and the consequences, nothing saved."""
+    want = dict(fields or {})
+    if field:
+        want[field] = value
+    if not want:
+        raise ToolError("give a field and value, or fields = {field: value, …}")
+    return ops_change(guild, [{"kind": "settings", "fields": want}], preview)
 
 
 @mcp.tool()
@@ -807,21 +820,25 @@ def plain_permissions(guild: Guild = None) -> dict:
 
 
 @mcp.tool()
-def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: dict[str, str] | None = None, dm: str | None = None, default: str | None = None, guild: Guild = None) -> str:
+def set_plain_permissions(groups: dict[str, list[str]] | None = None, channels: dict[str, str] | None = None, set_channels: dict[str, str | None] | None = None,
+                          dm: str | None = None, default: str | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Change the plain-text permissions (owner). `groups`: {group id: [who…]} for the groups to change — who is
     everyone | registered | officers | owner | role:<role id> (the owner can always do everything; [] = owner only).
     `channels`: the WHOLE per-channel map {channel id: act|self|answer|ignore} (unlisted channels use `default`; the ops
-    and analytics channels act unless listed). `dm` / `default`: act | self | answer | ignore. Read plain_permissions first."""
-    body: dict[str, Any] = {}
+    and analytics channels act unless listed); `set_channels`: some channels only ({id: mode | null = back to the
+    default}). `dm` / `default`: act | self | answer | ignore. Read plain_permissions first; `preview=True` first."""
+    fields: dict[str, Any] = {}
     if groups is not None:
-        body["groups"] = groups
+        fields["groups"] = groups
     if channels is not None:
-        body["channels"] = channels
+        fields["channels"] = channels
+    if set_channels is not None:
+        fields["set_channels"] = set_channels
     if dm:
-        body["dm"] = dm
+        fields["dm"] = dm
     if default:
-        body["default"] = default
-    return msg(api(guild).post("/api/admin/plain-permissions", body))
+        fields["default"] = default
+    return ops_change(guild, [{"kind": "plain", "fields": fields}], preview)
 
 
 # ---------------------------------------------------------------- recruitment (applications happen in Discord)
@@ -839,31 +856,24 @@ def recruitment(guild: Guild = None) -> dict:
 
 @mcp.tool()
 def set_recruitment(open: bool | None = None, note: str | None = None, questions: list[dict] | None = None, invite_url: str | None = None,
-                    member_roles: list[str] | None = None, guild: Guild = None) -> str:
+                    member_roles: list[str] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Change the recruitment settings (owner); anything left out keeps its value, and nothing is saved if any part is
-    refused. `note=""` / `invite_url=""` clear them (an invite looks like https://discord.gg/abc123). `questions` is the
-    WHOLE ordered list [{label, hint?, required?}] (≤15; label ≤45 characters, hint ≤100; keep an existing `id` to keep
-    it). `member_roles`: role names or ids (the whole list; [] = none). Read recruitment() first."""
-    body: dict[str, Any] = {}
+    refused (one write). `note=""` / `invite_url=""` clear them (an invite looks like https://discord.gg/abc123).
+    `questions` is the WHOLE ordered list [{label, hint?, required?}] (≤15; label ≤45 characters, hint ≤100; keep an
+    existing `id` to keep it). `member_roles`: role ids or names the bot knows (the whole list; [] = none). Read
+    recruitment() first; `preview=True` shows current → new."""
+    fields: dict[str, Any] = {}
     if open is not None:
-        body["open"] = bool(open)
+        fields["open"] = bool(open)
     if note is not None:
-        body["note"] = note
+        fields["note"] = note
     if invite_url is not None:
-        body["invite_url"] = invite_url
+        fields["invite_url"] = invite_url
     if questions is not None:
-        body["questions"] = questions
+        fields["questions"] = questions
     if member_roles is not None:
-        roles = api(guild).get("/api/recruitment").get("guild_roles", [])
-        ids = []
-        for ref in member_roles:
-            raw = str(ref).strip().lstrip("@").strip("<&>")
-            hit = [r for r in roles if r["id"] == raw or r["name"].lower() == raw.lower()]
-            if len(hit) != 1:
-                raise ToolError(f"no role named {ref}" if not hit else f"{ref}: several roles match")
-            ids.append(hit[0]["id"])
-        body["member_role_ids"] = ids
-    return msg(api(guild).post("/api/admin/recruitment", body))
+        fields["member_role_ids"] = [str(r).strip().lstrip("@").strip("<&>") for r in member_roles]
+    return ops_change(guild, [{"kind": "recruitment", "fields": fields}], preview)
 
 
 @mcp.tool()

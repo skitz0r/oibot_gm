@@ -2461,11 +2461,11 @@ class Registry:
             raise RegistryError(f"unknown spec {spec}")
         raise RegistryError(f"benefit key {key!r} must be one of {', '.join(self.VALUE_KEYS)} or spec:<Name>")
 
-    @_config_verb("buffs")
-    def set_buff_override(self, bid: str, field: str, value, by: str) -> str:
-        """scope | family (a family id, another buff's id, or 'own' to stand alone) | strength | status | note."""
-        self.buff(bid)
-        over = self.config.buffs.setdefault(bid, {})
+    BUFF_FIELDS = ("scope", "family", "strength", "status", "note")
+    FAMILY_FIELDS = ("name", "status", "note", "value")  # plus value:<key> (one beneficiary)
+
+    def _buff_field(self, bid: str, over: dict, field: str, value) -> str:
+        """One buff field validated into `over` (the buff's override dict); nothing saved. Returns the reply line."""
         if field == "scope":
             if value not in self.BUFF_SCOPES:
                 raise RegistryError(f"scope must be one of {', '.join(self.BUFF_SCOPES)}")
@@ -2493,19 +2493,39 @@ class Registry:
         elif field == "note":
             over["note"] = str(value or "").strip()
         else:
-            raise RegistryError(f"unknown buff field {field}")
-        self.save_config(f"aura {bid} {field} → {value} (by {by})")
+            raise RegistryError(f"unknown buff field {field} (one of {', '.join(self.BUFF_FIELDS)})")
         return f"{bid}: {field} = {value}"
 
     @_config_verb("buffs")
-    def set_family_override(self, fid: str, field: str, value, by: str) -> str:
-        """name | status | note | value (whole map as 'all: 3, mana: 2') | value:<key> (one entry; 0 or blank removes it)."""
-        fid = str(fid or "").strip().lower().replace(" ", "_")
-        if not fid:
-            raise RegistryError("which family?")
-        over = self.config.families.setdefault(fid, {})
-        if fid not in self.profile.families and "name" not in over and field != "name":
-            over["name"] = fid.replace("_", " ").title()
+    def set_buff_override(self, bid: str, field: str, value, by: str) -> str:
+        """scope | family (a family id, another buff's id, or 'own' to stand alone) | strength | status | note."""
+        return self.set_buff_overrides(bid, {field: value}, by)[0]
+
+    @_config_verb("buffs")
+    def set_buff_overrides(self, bid: str, fields: dict, by: str) -> list[str]:
+        """Several fields of ONE buff as one change (the Auras page's row, the AuraWizard's Save this buff, a structured
+        batch's coalesced aura_set ops): every field validated, one save_config, one commit. A refused field leaves the
+        buff exactly as it was — the set_raid_overrides pattern, so a half-saved buff never reaches git."""
+        import copy
+
+        self.buff(bid)
+        if not fields:
+            return []
+        before = copy.deepcopy(self.config.buffs.get(bid))
+        try:
+            over = self.config.buffs.setdefault(bid, {})
+            lines = [self._buff_field(bid, over, f, v) for f, v in fields.items()]
+        except RegistryError:
+            if before is None:
+                self.config.buffs.pop(bid, None)
+            else:
+                self.config.buffs[bid] = before
+            raise
+        self.save_config(f"aura {bid} " + ", ".join(f"{f} → {v}" for f, v in fields.items()) + f" (by {by})")
+        return lines
+
+    def _family_field(self, fid: str, over: dict, field: str, value) -> str:
+        """One family field validated into `over` (the family's override dict); nothing saved."""
         if field == "name":
             over["name"] = str(value or "").strip() or fid
         elif field == "status":
@@ -2515,7 +2535,6 @@ class Registry:
         elif field == "note":
             over["note"] = str(value or "").strip()
         elif field == "value":
-            cur = dict(self.profile.families[fid].value) if fid in self.profile.families else {}
             new: dict[str, float] = {}
             raw = value if isinstance(value, dict) else {kv.partition(":")[0]: kv.partition(":")[2] for kv in str(value or "").replace(";", ",").split(",") if kv.strip()}
             for k, v in raw.items():
@@ -2527,7 +2546,6 @@ class Registry:
                     raise RegistryError(f"{k}: can't be negative")
                 new[self._value_key(str(k))] = n  # an explicit 0 on a spec key means "this spec gets nothing"
             over["value"] = new
-            _ = cur
         elif field.startswith("value:"):
             key = self._value_key(field[6:])
             cur = dict(over.get("value") or (self.profile.families[fid].value if fid in self.profile.families else {}))
@@ -2545,9 +2563,70 @@ class Registry:
                 cur.pop(key, None)
             over["value"] = cur
         else:
-            raise RegistryError(f"unknown family field {field}")
-        self.save_config(f"aura family {fid} {field} → {value} (by {by})")
+            raise RegistryError(f"unknown family field {field} (one of {', '.join(self.FAMILY_FIELDS)}, value:<key>)")
         return f"family {fid}: {field} = {value}"
+
+    @_config_verb("buffs")
+    def set_family_override(self, fid: str, field: str, value, by: str) -> str:
+        """name | status | note | value (whole map as 'all: 3, mana: 2') | value:<key> (one entry; 0 or blank removes it)."""
+        return self.set_family_overrides(fid, {field: value}, by)[0]
+
+    @_config_verb("buffs")
+    def set_family_overrides(self, fid: str, fields: dict, by: str) -> list[str]:
+        """Several fields of ONE stacking family as one change (a new family's name and beneficiaries together, the web's
+        per-key deltas, the AuraWizard's draft): every field validated, one save_config; a refusal restores the family.
+        An id that doesn't exist yet is created (named after itself unless `name` is given) — a new id comes from
+        `family_slug(name)`, never typed."""
+        import copy
+
+        fid = str(fid or "").strip().lower().replace(" ", "_")
+        if not fid:
+            raise RegistryError("which family?")
+        if not fields:
+            return []
+        before = copy.deepcopy(self.config.families.get(fid))
+        try:
+            over = self.config.families.setdefault(fid, {})
+            if fid not in self.profile.families and "name" not in over and "name" not in fields:
+                over["name"] = fid.replace("_", " ").replace("-", " ").title()
+            lines = [self._family_field(fid, over, f, v) for f, v in fields.items()]
+        except RegistryError:
+            if before is None:
+                self.config.families.pop(fid, None)
+            else:
+                self.config.families[fid] = before
+            raise
+        self.save_config(f"aura family {fid} " + ", ".join(f"{f} → {v}" for f, v in fields.items()) + f" (by {by})")
+        return lines
+
+    def family_slug(self, name: str) -> str:
+        """A new family's id from its name (family ids are never typed — design §3.5 A-03): lower-case words joined by
+        '_'; '-2', '-3', … when that id is already a family's or a buff's."""
+        base = re.sub(r"[^a-z0-9]+", "_", str(name or "").lower()).strip("_")[:24].strip("_") or "family"
+        taken = set(self.profile.families) | set(self.config.families) | {b.id for b in self.profile.buffs}
+        if base not in taken:
+            return base
+        n = 2
+        while f"{base}-{n}" in taken:
+            n += 1
+        return f"{base}-{n}"
+
+    def aura_override_counts(self) -> dict:
+        """What 'Reset everything to game defaults' drops: the buffs and families the guild changed (names, in order)."""
+        buffs = [b.short for b in self.profile.buffs if self.config.buffs.get(b.id)]
+        fams = [self.profile.families[f].name if f in self.profile.families else f for f, o in self.config.families.items() if o]
+        return {"buffs": len(buffs), "families": len(fams), "buff_names": buffs, "family_names": fams}
+
+    def aura_reset_sentence(self) -> str:
+        """The one sentence every surface prints before an aura reset-all (the wizard's confirm, the Auras page's review,
+        MCP's preview, the plain-text diff)."""
+        c = self.aura_override_counts()
+        if not c["buffs"] and not c["families"]:
+            return "Nothing to reset: every aura already reads the game defaults."
+        parts = [f"{c['buffs']} buff{'' if c['buffs'] == 1 else 's'} ({', '.join(c['buff_names'])})" if c["buffs"] else "",
+                 f"{c['families']} famil{'y' if c['families'] == 1 else 'ies'} ({', '.join(c['family_names'])})" if c["families"] else ""]
+        return (f"Overrides on {' and '.join(p for p in parts if p)} go, guild-declared families included. The solver, the cards and the "
+                "board read the defaults from the next run on; nothing already locked is re-solved.")
 
     @_config_verb("buffs")
     def clear_aura_overrides(self, by: str, bid: str | None = None) -> str:

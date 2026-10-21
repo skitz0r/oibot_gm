@@ -394,6 +394,8 @@ def test_mcp_schedule_tools_call_the_routes():
         seen.append((request.method, request.url.path, json.loads(request.content or b"{}")))
         if request.url.path == "/api/raids":
             return httpx.Response(200, json={"raids": [{"id": RID, "name": "Barrow Deeps"}]})
+        if request.url.path == "/api/ops/change":
+            return httpx.Response(200, json={"applied": ["ok"], "refused": []})
         return httpx.Response(200, json={"message": "ok"})
 
     import httpx
@@ -406,8 +408,8 @@ def test_mcp_schedule_tools_call_the_routes():
     finally:
         ms.use(None)
     posts = [(p, b) for m, p, b in seen if m == "POST"]
-    assert posts[0] == ("/api/admin/raid/schedule", {"instance": RID, "id": "alt", "fields": {"lock_hours_before": "12"}})
-    assert posts[1] == ("/api/admin/raid/schedule/remove", {"instance": RID, "id": "alt"})
+    assert posts[0] == ("/api/ops/change", {"changes": [{"kind": "schedule", "target": f"{RID}:alt", "fields": {"lock_hours_before": "12"}}], "apply": True, "confirmed": True})
+    assert posts[1] == ("/api/ops/change", {"changes": [{"kind": "schedule_remove", "target": f"{RID}:alt"}], "apply": True, "confirmed": True})
     assert posts[2] == (f"/api/raid/{RID}/open", {"when": "", "schedule": "alt"})
 
 

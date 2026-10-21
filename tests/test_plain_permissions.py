@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import time
 import types
 
@@ -392,7 +393,7 @@ def test_mcp_tools_call_the_routes():
         if request.method == "GET":
             return httpx.Response(200, json={"groups": [{"id": "runs", "label": "Runs", "who": ["officers"], "who_text": "officers", "ops": ["run_lock"], "example": "lock it", "default": ["officers"]}],
                                              "channels": [{"id": "1", "name": "ops", "mode": "act"}], "listed": {}, "dm": "self", "default": "self", "guild_roles": []})
-        return httpx.Response(200, json={"message": "plain-text permissions: Runs → officers or @Raid Lead"})
+        return httpx.Response(200, json={"applied": ["plain-text permissions: Runs → officers or @Raid Lead"], "refused": []})
 
     ms.use(ms.Api(url="http://bot", token="a" * 64, transport=httpx.MockTransport(handler)))
     try:
@@ -400,8 +401,8 @@ def test_mcp_tools_call_the_routes():
         assert ms.set_plain_permissions(groups={"runs": ["officers", "role:5"]}, dm="act").startswith("plain-text permissions")
     finally:
         ms.use(None)
-    assert calls[0][:2] == ("GET", "/api/plain-permissions") and calls[1][:2] == ("POST", "/api/admin/plain-permissions")
-    assert b'"dm":"act"' in calls[1][2].replace(b" ", b"")
+    assert calls[0][:2] == ("GET", "/api/plain-permissions") and calls[1][:2] == ("POST", "/api/ops/change")
+    assert json.loads(calls[1][2]) == {"changes": [{"kind": "plain", "fields": {"groups": {"runs": ["officers", "role:5"]}, "dm": "act"}}], "apply": True, "confirmed": True}
 
 
 # ---- the router: intent first, one model call for a plain question

@@ -254,6 +254,13 @@ def fake_api(calls: list):
             return httpx.Response(200, json={"open": True, "note": "", "invite_url": INVITE, "questions": [], "member_role_ids": ["11"], "questions_max": 15, "guild_roles": roles, "owner": True})
         if p == "/api/admin/recruitment":
             return httpx.Response(200, json={"message": "recruitment: applications closed"})
+        if p == "/api/ops/change":  # the setup tools' one write path (design §5.43): the bot resolves role names server-side
+            names = {r["name"].lower(): r["id"] for r in roles}
+            ids = [str(x).lstrip("@") for x in body["changes"][0]["fields"].get("member_role_ids", [])]
+            bad = [x for x in ids if not x.isdigit() and x.lower() not in names]
+            if bad:
+                return httpx.Response(200, json={"applied": [], "refused": [f"recruit member_roles — no role “{bad[0]}” I know of"]})
+            return httpx.Response(200, json={"applied": ["recruitment: applications closed"], "refused": []})
         if p == "/api/applications":
             return httpx.Response(200, json={"open": opens, "decided": [], "recruiting": True})
         if p == "/api/admin/application/decide":
@@ -275,9 +282,10 @@ def test_mcp_recruitment_tools_request_shapes(mocked):
     r = ms.recruitment()
     assert r["member_roles"] == [{"id": "11", "name": "Raider"}] and r["invite_url"] == INVITE
     assert ms.set_recruitment(open=False, note="", member_roles=["@Social", "11"], questions=[{"label": "Why us?"}]) == "recruitment: applications closed"
-    post = [c for c in mocked if c[1] == "/api/admin/recruitment"][-1]
-    assert post[2] == {"open": False, "note": "", "questions": [{"label": "Why us?"}], "member_role_ids": ["12", "11"]} and post[3] == "oibot"
-    with pytest.raises(ToolError, match="no role named Nobody"):
+    post = [c for c in mocked if c[1] == "/api/ops/change"][-1]  # typed changes; role names are resolved by the bot (design §5.43)
+    assert post[2] == {"changes": [{"kind": "recruitment", "fields": {"open": False, "note": "", "questions": [{"label": "Why us?"}], "member_role_ids": ["Social", "11"]}}],
+                       "apply": True, "confirmed": True} and post[3] == "oibot"
+    with pytest.raises(ToolError, match="no role “Nobody” I know of"):
         ms.set_recruitment(member_roles=["Nobody"])
     assert ms.list_applications()["open"][0]["uid"] == "77"
     assert ms.decide_application("newbie brightwood", True, note="welcome") == "Newbie Brightwood: accepted"

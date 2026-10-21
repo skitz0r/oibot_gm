@@ -369,10 +369,10 @@ def test_mcp_raid_set_takes_confirm():
 
     ms.use(ms.Api(url="http://bot", token="t" * 64, transport=httpx.MockTransport(handler)))
     try:
-        ms.raid_set("barrow", "confirm", "off")
-        assert seen[-1] == ("/api/admin/raid", {"instance": "barrow_deeps", "confirm": False})
+        ms.raid_set("barrow", "confirm", "off")  # sent as given: the bot reads 'off' (configops._raid_ops), no client-side grammar
+        assert seen[-1] == ("/api/ops/change", {"changes": [{"kind": "raid", "target": "barrow_deeps", "fields": {"confirm": "off"}}], "apply": True, "confirmed": True})
         ms.raid_set("barrow", fields={"confirm": True})
-        assert seen[-1][1]["confirm"] is True
+        assert seen[-1][1]["changes"][0]["fields"]["confirm"] is True
     finally:
         ms.use(None)
     assert "confirm" in (ms.raid_set.__doc__ or "") and "weights" in (ms.schedule_set.__doc__ or "")

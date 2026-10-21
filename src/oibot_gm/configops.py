@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from typing import Literal, Optional
 
 import yaml
@@ -734,7 +735,20 @@ def _schedule_fields(setting: str, value: str | None) -> dict:
         if not sep:
             raise RegistryError('lockout is "<days> at <time>", e.g. "1, 3 at 20:00"')
         return {"kind": "lockout", "days": days, "time": at.strip()}
-    return {setting: value}
+    return {setting: _typed(value) if setting == "weights" else value}
+
+
+def _typed(value):
+    """A structured op's JSON value (ops_from_fields writes maps and lists as JSON: a family's whole beneficiary map, a
+    schedule's seat weights with per-key 'inherit' as null) back to its type; any other value is itself."""
+    import json
+
+    if isinstance(value, str) and value[:1] in ("{", "["):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
 
 
 def _schedule_words(reg: Registry, rid: str, fields: dict) -> str:
@@ -854,9 +868,11 @@ def _runs_preview(reg: Registry, rid: str, **kw) -> str:
 
 
 class MergedOp(ConfigOp):
-    """Consecutive raid_set ops on one raid, or schedule_set ops on one schedule, applied as ONE registry write
-    (set_raid_overrides / set_schedule): a change only valid as a whole can't fail half way. Built by coalesce(); never
-    part of the parser's schema."""
+    """Consecutive ops on one thing applied as ONE registry write: raid_set ops on one raid (set_raid_overrides),
+    schedule_set ops on one schedule (set_schedule), aura_set ops on one buff (set_buff_overrides), family_set ops on one
+    family (set_family_overrides), plain ops (one set_plain_policy) and the absolute recruit fields (one set_recruitment).
+    A change only valid as a whole can't fail half way, and a refused field leaves that thing as it was. Built by
+    coalesce(); never part of the parser's schema."""
     parts: list[ConfigOp] = Field(default_factory=list)
 
 
@@ -868,12 +884,19 @@ def _merge_key(op: ConfigOp):
             return ("schedule_set", op.target, _schedule_ref(op)[0])
         except RegistryError:
             return None
+    if op.op in ("aura_set", "family_set") and op.target:
+        return (op.op, op.target.strip().lower())
+    if op.op == "plain":
+        return ("plain",)
+    if op.op == "recruit" and (op.field or "").strip().lower() in RECRUIT_MERGE:
+        return ("recruit",)
     return None
 
 
 def coalesce(ops: list[ConfigOp]) -> list[ConfigOp]:
-    """Merge consecutive raid_set ops on the same raid, and schedule_set ops on the same raid and schedule, into one
-    MergedOp each (Apply on Discord and /api/ops/change use it after authorize). Everything else stays as it is, in order."""
+    """Merge consecutive ops on the same thing into one MergedOp each (Apply on Discord, /api/ops/change and the
+    structured path use it after authorizing): raid_set on one raid, schedule_set on one raid and schedule, aura_set on
+    one buff, family_set on one family, plain ops, the absolute recruit fields. Everything else stays as it is, in order."""
     out: list[ConfigOp] = []
     for op in ops:
         key = _merge_key(op)
@@ -893,6 +916,17 @@ def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) 
         for p in op.parts:
             fields.update(_raid_fields(p))
         return "; ".join(reg.set_raid_overrides(op.target or "", fields, by, rev=rev))
+    if op.op == "aura_set":
+        return "; ".join(reg.set_buff_overrides(op.target or "", {(p.field or ""): p.value for p in op.parts}, by, rev=rev))
+    if op.op == "family_set":
+        return "; ".join(reg.set_family_overrides(op.target or "", _family_fields(op.parts), by, rev=rev))
+    if op.op == "plain":
+        return reg.set_plain_policy(reg.merge_plain_policy(_plain_merged(reg, op.parts)), by, rev=rev)
+    if op.op == "recruit":
+        kw: dict = {}
+        for p in op.parts:
+            kw.update(_recruit(reg, p)[0])
+        return reg.set_recruitment(by, rev=rev, **kw)
     sid = _schedule_ref(op)[0]
     fields = {}
     for p in op.parts:
@@ -1473,9 +1507,13 @@ def _plain_group(ref: str) -> str | None:
 def _plain_who(reg: Registry, value: str) -> list[str]:
     """'officers, @Raid Lead' → ['officers', 'role:<id>'] (roles through the registry's role cache)."""
     words = [w.strip() for w in value.replace(" and ", ",").replace(" or ", ",").replace(";", ",").split(",") if w.strip()]
+    if [w.lower() for w in words] in (["nobody"], ["no one"], ["noone"]):
+        return []  # the owner only (an empty list: the owner can always do everything) — what the Ops page's cleared row sends
     out = []
     for w in words:
         tok = PLAIN_WHO_WORDS.get(w.lower())
+        if tok is None and w.lower().startswith("role:") and w[5:].strip().isdigit():
+            tok = f"role:{int(w[5:].strip())}"  # the stored token as the Ops page / MCP send it
         if tok is None:
             rid = reg.role_id_for(w)
             if rid is None:
@@ -1537,6 +1575,22 @@ def _plain_warning(reg: Registry, patch: dict, channel) -> str:
 
 
 RECRUIT_FIELDS = ("open", "note", "question_add", "question_edit", "question_move", "question_remove", "member_role_add", "member_role_remove", "invite", "invite_create")
+# the structured path's absolute recruit fields (ops_from_fields; never in the parser's schema): the WHOLE question list and the
+# WHOLE member-role list as JSON — what the Config page and MCP send — so consecutive ones merge into one set_recruitment write
+RECRUIT_WHOLE = ("questions", "member_roles")
+RECRUIT_MERGE = ("open", "note", "invite") + RECRUIT_WHOLE  # absolute fields: several of them save as ONE write (coalesce)
+
+
+def _json_list(value: str | None, what: str) -> list:
+    import json
+
+    try:
+        out = json.loads(value or "[]")
+    except ValueError:
+        raise RegistryError(f"{what} must be a JSON list")
+    if not isinstance(out, list):
+        raise RegistryError(f"{what} must be a list")
+    return out
 
 
 def _recruit(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
@@ -1544,6 +1598,22 @@ def _recruit(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
     can't apply (an unknown field, a question that isn't there); set_recruitment checks the rest (lengths, the invite)."""
     r, cfg = reg.config.recruitment, reg.config
     f, value = (op.field or "").strip().lower(), (op.value or "").strip()
+    if f == "questions":  # structured only: the whole ordered list [{id?, label, hint, required}]
+        qs = _json_list(value, "questions")
+        if not all(isinstance(q, dict) for q in qs):
+            raise RegistryError("questions must be a list of {label, hint, required}")
+        old = [q.label for q in r.questions]
+        new = [str(q.get("label") or "").strip() for q in qs]
+        return {"questions": qs}, f"questions: {len(old)} → {len(new)}" + ("" if old == new else f" ({'; '.join(new) or 'none'})")
+    if f == "member_roles":  # structured only: the whole member-role list (ids)
+        ids = []
+        for x in _json_list(value, "member_roles"):
+            rid = reg.role_id_for(x)
+            if rid is None:
+                raise RegistryError(f"no role “{x}” I know of")
+            ids.append(rid)
+        names = lambda xs: ", ".join(f"<@&{int(x)}>" for x in xs) or "none"  # noqa: E731
+        return {"member_role_ids": ids}, f"member roles (register without applying): {names(cfg.member_role_ids)} → {names(ids)}"
     if f == "open":
         words = {"true": True, "yes": True, "on": True, "open": True, "false": False, "no": False, "off": False, "closed": False}
         if value.lower() not in words:
@@ -2264,7 +2334,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     if op.op == "aura_set":
         return reg.set_buff_override(op.target or "", op.field or "", op.value, by, rev=rev)
     if op.op == "family_set":
-        return reg.set_family_override(op.target or "", op.field or "", op.value, by, rev=rev)
+        return "; ".join(reg.set_family_overrides(op.target or "", _family_fields([op]), by, rev=rev))
     if op.op == "aura_reset":
         return reg.clear_aura_overrides(by, op.target or None, rev=rev)
     if op.op == "comp_groups":
@@ -2426,20 +2496,29 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
     raise RegistryError(f"unsupported op {op.op}")
 
 
+def self_audited(reg: Registry, op: ConfigOp, bot) -> bool:
+    """Whether the verb behind an op writes its own ops line (so apply_async / the structured core must not write a second):
+    a channel setting (SetupMixin.set_channel), the loot verbs, the people verbs, the audited RaidMixin verbs, the test bench."""
+    if bot is None:
+        return False
+    return ((op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None)
+            or (op.op == "loot" and hasattr(bot, "open_council"))  # LootMixin's verbs write their own line
+            or _people_verb(reg, op)  # so does PeopleMixin.save_characters (discord_people)
+            or (op.op in RUN_VERBS_AUDITED and hasattr(bot, "remind"))  # so do these RaidMixin verbs (via, by_id passed)
+            or op.op == "test")  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
+
+
 async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, bot=None, by_id: int | None = None,
-                      rev: str | None = None, channel_id: int | None = None, self_id: int | None = None, via: str | None = None) -> str:
+                      rev: str | None = None, channel_id: int | None = None, self_id: int | None = None, via: str | None = None,
+                      audit: bool = True) -> str:
     """`_apply_async` plus the audit line: with `via` ("web" | "mcp" | "chat" | "discord") the applied op is written to the
     ops feed through `ops.audited` (one format everywhere: prefix from via, ' (host)' for a superuser in a guild they
     don't own); without it the caller writes its own summary (Discord's Apply). A channel setting is audited by
-    `set_channel` itself."""
+    `set_channel` itself. `audit=False`: the surface tag still reaches the verbs that audit themselves, but no line is
+    written here — the structured core (apply_ops) writes ONE line for its whole batch."""
     line = await _apply_async(reg, op, by, is_owner, policy_store, bot, by_id, rev, channel_id, self_id, via)
     ops = getattr(bot, "ops", None) if bot is not None else None
-    channel_op = op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None
-    verb_audits = ((op.op == "loot" and bot is not None and hasattr(bot, "open_council"))  # LootMixin's verbs write their own line
-                   or (bot is not None and _people_verb(reg, op))  # so does PeopleMixin.save_characters (discord_people)
-                   or (op.op in RUN_VERBS_AUDITED and bot is not None and hasattr(bot, "remind"))  # so do these RaidMixin verbs (via, by_id passed)
-                   or (op.op == "test" and bot is not None))  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
-    if via is not None and ops is not None and not channel_op and not verb_audits:
+    if audit and via is not None and ops is not None and not self_audited(reg, op, bot):
         from . import ops as ops_mod
 
         await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
@@ -2492,7 +2571,7 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
     if bot is not None and (op.op in ("role_add", "role_remove", "plain") or (op.op == "recruit" and (op.field or "").strip().lower().startswith("member_role"))):
         await _warm_roles(reg, bot)  # role names → ids against the live guild before the op
     if bot is not None and op.op == "recruit":
-        kw, _ = _recruit(reg, op)
+        kw, _ = ({}, "") if isinstance(op, MergedOp) else _recruit(reg, op)  # a merged write: apply() saves its parts as one
         if "invite_create" in kw:  # the Config page's Create invite: Discord makes it, the recruitment settings keep it
             try:
                 url = await bot.create_invite(reg, kw["invite_create"])
@@ -2914,3 +2993,872 @@ def _hours_words(h) -> str:
     if v >= 48 and v % 24 == 0:
         return f"{int(v // 24)} days"
     return f"{v:g} h"
+
+
+# ================================================================ the structured ops path (dual interfaces §2.3, §3.5 S2)
+# The web's edit modes, the admin routes and MCP send TYPED drafts — {kind, target, fields} — and ops_from_fields turns them
+# into ConfigOps server-side, so no client carries the plain-text value grammar ('Tue 19:30', 'all: 3, mana: 2'). Preview =
+# describe_ops (STRUCTURE: Described, formatted per surface); apply = authorize_ops (by PRIVILEGE, not the chat policy) →
+# coalesce → apply_ops (one write per raid / schedule / buff / family, a batch in one commit, one audit line). Ceremony
+# follows consequence: a batch with a WARN_OPS op or a consequence line is reviewed first; anything else saves directly.
+
+STRUCTURED_KINDS = ("settings", "raid", "raid_reset", "schedule", "schedule_remove", "buff", "family", "aura_reset", "recruitment", "plain")
+SETTINGS_FIELDS = ("timezone", "ask_audience", "about", "news_keywords", "loot_log")  # + officer_roles (whole list) + channel:<kind>
+RAID_FORM_FIELDS = ("lockout_days", "duration_hours", "notes", "split_policy")
+AURA_VALUE_WORDS = {"all": "Everyone", "physical": "Physical damage", "spell": "Spell damage", "mana": "Mana users", "melee": "Melee",
+                    "ranged": "Ranged", "healer": "Healers", "tank": "Tanks"}
+SETTING_WORDS = {"timezone": "Timezone", "ask_audience": "Who may ask questions", "about": "About", "news_keywords": "News keywords",
+                 "loot_log": "Public loot log", **{p: p.removesuffix("_channel").capitalize() + " channel" for p in CHANNEL_PATHS}}
+BUFF_FIELD_WORDS = {"scope": "Scope", "family": "Stacking family", "strength": "Strength", "status": "Status", "note": "Note"}
+FAMILY_FIELD_WORDS = {"name": "Name", "status": "Status", "note": "Note", "value": "Who benefits"}
+
+
+def aura_key_words(key: str) -> str:
+    """A beneficiary key in words: 'mana' → 'Mana users', 'spec:Holy' → 'Holy'."""
+    return key[5:] if key.startswith("spec:") else AURA_VALUE_WORDS.get(key, key)
+
+
+def _num(x) -> str:
+    try:
+        return f"{float(x):g}"
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def _value_text(value) -> str:
+    """A typed draft value as a ConfigOp value: None stays None, a bool is true|false, a list is a comma list, a map is
+    JSON (read back by _typed), anything else its text. Machine form only — people read describe_ops."""
+    import json
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, dict):
+        return json.dumps(value, sort_keys=False)
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(x) for x in value)
+    return str(value)
+
+
+def _family_fields(parts: list[ConfigOp]) -> dict:
+    """family_set ops as Registry.set_family_overrides fields (a whole map arrives as JSON from ops_from_fields)."""
+    return {(p.field or ""): (_typed(p.value) if (p.field or "") == "value" else p.value) for p in parts}
+
+
+def _plain_merged(reg: Registry, parts: list[ConfigOp]) -> dict:
+    """Several plain ops as ONE merge_plain_policy patch (groups and channels merged, the last dm / default wins)."""
+    patch: dict = {}
+    for p in parts:
+        one, _ = _plain_patch(reg, p)
+        if "groups" in one:
+            patch.setdefault("groups", {}).update(one["groups"])
+        if "set_channels" in one:
+            patch.setdefault("set_channels", {}).update(one["set_channels"])
+        for k in ("dm", "default"):
+            if k in one:
+                patch[k] = one[k]
+    return patch
+
+
+def _schedule_target(target: str | None) -> tuple[str, str]:
+    """'<raid id>:<schedule id>' (the series key form) → (raid, schedule)."""
+    rid, sep, sid = str(target or "").partition(":")
+    if not rid.strip():
+        raise RegistryError("a schedule is named '<raid id>:<schedule id>', e.g. barrow_deeps:alt")
+    return rid.strip(), sid.strip().lower()  # an empty schedule id: the verb says which ones the raid has
+
+
+def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict | None, *, channels: list[dict] | None = None) -> list[ConfigOp]:
+    """A typed draft as ConfigOps — THE translation every structured caller shares (the web's edit modes and admin routes,
+    MCP's tools, the AuraWizard). `kind` (STRUCTURED_KINDS) names what it edits and `target` which one; `fields` holds
+    typed values (bools, numbers, lists, maps — never the plain-text grammar). Fields equal to the current value are left
+    out where the old route did so (a raid, a buff, a family), so an unchanged Save is no write. `channels`: the guild's
+    channels ({id, name}) so a channel may be named (MCP). Raises RegistryError on a draft that can't be expressed."""
+    fields = dict(fields or {})
+    ops: list[ConfigOp] = []
+    k = (kind or "").strip().lower()
+    if k == "settings":
+        for f, v in fields.items():
+            f = str(f)
+            path = f[8:] + "_channel" if f.startswith("channel:") else f
+            if path in CHANNEL_PATHS:
+                cid = _channel_ref(v, channels)
+                ops.append(ConfigOp(op="set", path=path, value=f"<#{cid}>" if cid else "none"))
+            elif path == "officer_roles":
+                want = []
+                for r in (v or []):
+                    rid = reg.role_id_for(r)
+                    if rid is None:
+                        raise RegistryError(f"officer role {r}: give a role id (or a name the bot knows)")
+                    want.append(rid)
+                have = set(reg.config.officer_role_ids)
+                ops += [ConfigOp(op="role_remove", value=str(rid)) for rid in sorted(have - set(want))]
+                ops += [ConfigOp(op="role_add", value=str(rid)) for rid in sorted(set(want) - have)]
+            elif path in SETTINGS_FIELDS:
+                ops.append(ConfigOp(op="set", path=path, value=_value_text(v) if path != "news_keywords" or not isinstance(v, list) else ", ".join(str(w) for w in v)))
+            else:
+                raise RegistryError(f"unknown setting {f} (one of {', '.join(SETTINGS_FIELDS)}, officer_roles, channel:<kind>)")
+        return ops
+    if k == "raid":
+        return _raid_ops(reg, (target or "").strip(), fields)
+    if k == "raid_reset":
+        return [ConfigOp(op="raid_reset", target=(target or "").strip())]
+    if k == "schedule":
+        rid, sid = _schedule_target(target)
+        return [ConfigOp(op="schedule_set", target=rid, field=f"{sid}.{str(f).strip().lower()}", value=_value_text(v)) for f, v in fields.items()]
+    if k == "schedule_remove":
+        rid, sid = _schedule_target(target)
+        return [ConfigOp(op="schedule_remove", target=rid, field=sid)]
+    if k == "buff":
+        bid = (target or "").strip()
+        cur = reg.buff(bid)
+        if fields.get("family_new"):  # "New family…": the family is created first (its id from its name), then the buff joins it
+            name = str(fields.pop("family_new")).strip()
+            fid = reg.family_slug(name)
+            ops.append(ConfigOp(op="family_set", target=fid, field="name", value=name))
+            fields["family"] = fid
+        for f, v in fields.items():
+            if f not in reg.BUFF_FIELDS:
+                raise RegistryError(f"unknown buff field {f} (one of {', '.join(reg.BUFF_FIELDS)}, family_new)")
+            now = getattr(cur, "family_id" if f == "family" else f)
+            if v is None or (str(v) == str(now) and f != "family") or (f == "family" and str(v) == str(now) and not ops):
+                continue
+            if f == "strength":
+                try:
+                    if float(v) == float(now):
+                        continue
+                except (TypeError, ValueError):
+                    pass  # the verb refuses it with its own words
+            ops.append(ConfigOp(op="aura_set", target=bid, field=f, value=_value_text(v)))
+        return ops
+    if k == "family":
+        fid = (target or "").strip().lower()
+        if not fid:
+            name = str(fields.get("name") or "").strip()
+            if not name:
+                raise RegistryError("a new family needs a name (its id is made from it)")
+            fid = reg.family_slug(name)
+        cur = reg.profile.families.get(fid)
+        for f, v in fields.items():
+            f = str(f)
+            if f in ("name", "status", "note"):
+                if v is not None and (cur is None or str(v) != str(getattr(cur, f))):
+                    ops.append(ConfigOp(op="family_set", target=fid, field=f, value=_value_text(v)))
+            elif f == "value":
+                if v is None:
+                    continue
+                if not isinstance(v, dict):
+                    ops.append(ConfigOp(op="family_set", target=fid, field="value", value=str(v)))  # the stored grammar ('all: 3') as given
+                    continue
+                try:
+                    want = {str(kk): float(x) for kk, x in v.items() if x not in (None, "")}
+                except (TypeError, ValueError):
+                    raise RegistryError("value entries must be numbers")
+                if cur is None or want != {kk: float(x) for kk, x in cur.value.items()}:
+                    ops.append(ConfigOp(op="family_set", target=fid, field="value", value=_value_text(want)))
+            elif f.startswith("value:"):  # one beneficiary (a per-key delta; null / "" removes it)
+                now = cur.value.get(reg._value_key(f[6:])) if cur is not None else None
+                if (v in (None, "") and now is None) or (v not in (None, "") and now is not None and float(v) == float(now)):
+                    continue
+                ops.append(ConfigOp(op="family_set", target=fid, field=f, value=_value_text(v) if v not in (None,) else ""))
+            else:
+                raise RegistryError(f"unknown family field {f} (one of {', '.join(reg.FAMILY_FIELDS)}, value:<key>)")
+        return ops
+    if k == "aura_reset":
+        return [ConfigOp(op="aura_reset", target=(target or "").strip() or None)]
+    if k == "recruitment":
+        for f, v in fields.items():
+            if f == "open":
+                ops.append(ConfigOp(op="recruit", field="open", value=_value_text(bool(v))))
+            elif f == "note":
+                ops.append(ConfigOp(op="recruit", field="note", value=str(v or "")))
+            elif f == "invite_url":
+                ops.append(ConfigOp(op="recruit", field="invite", value=str(v or "")))
+            elif f == "questions":
+                if not isinstance(v, list) or not all(isinstance(q, dict) for q in v):
+                    raise RegistryError("questions must be a list of {label, hint, required}")
+                ops.append(ConfigOp(op="recruit", field="questions", value=_json(v)))
+            elif f in ("member_role_ids", "member_roles"):
+                ops.append(ConfigOp(op="recruit", field="member_roles", value=_json([str(x) for x in (v or []) if str(x).strip()])))
+            else:
+                raise RegistryError(f"unknown recruitment setting {f} (open, note, invite_url, questions, member_role_ids)")
+        return ops
+    if k == "plain":
+        cur = reg.config.plain
+        for g, who in (fields.get("groups") or {}).items():
+            words = [str(w) for w in (who or [])]
+            ops.append(ConfigOp(op="plain", target=str(g), value=", ".join(words) if words else "nobody"))
+        if "channels" in fields:  # the WHOLE per-channel map: what changed against the stored one
+            want = {str(c).strip("<#>"): m for c, m in (fields.get("channels") or {}).items()}
+            for cid, mode in want.items():
+                if cur.channels.get(cid) != mode:
+                    ops.append(ConfigOp(op="plain", target=f"<#{cid}>", value=str(mode)))
+            for cid in cur.channels:
+                if cid not in want:
+                    ops.append(ConfigOp(op="plain", target=f"<#{cid}>", value="clear"))
+        for cid, mode in (fields.get("set_channels") or {}).items():
+            ops.append(ConfigOp(op="plain", target=f"<#{str(cid).strip('<#>')}>", value=str(mode) if mode not in (None, "") else "clear"))
+        for key in ("dm", "default"):
+            if fields.get(key):
+                ops.append(ConfigOp(op="plain", target=key, value=str(fields[key])))
+        bad = [f for f in fields if f not in ("groups", "channels", "set_channels", "dm", "default")]
+        if bad:
+            raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default)")
+        return ops
+    raise RegistryError(f"unknown kind {kind!r} (one of {', '.join(STRUCTURED_KINDS)})")
+
+
+def _json(v) -> str:
+    import json
+
+    return json.dumps(v)
+
+
+def _channel_ref(value, channels: list[dict] | None) -> int | None:
+    """A channel draft value: an id, <#id>, or (MCP) a channel name looked up in the guild's channels; empty = unset."""
+    if value in (None, "", 0):
+        return None
+    raw = str(value).strip()
+    if raw.strip("<#>").isdigit():
+        return int(raw.strip("<#>"))
+    want = raw.lstrip("#").lower()
+    hits = [c for c in (channels or []) if str(c.get("name", "")).lower() == want]
+    if len(hits) != 1:
+        raise RegistryError(f"no channel named #{want}" if not hits else f"#{want}: several channels match")
+    return int(hits[0]["id"])
+
+
+def _raid_ops(reg: Registry, inst: str, d: dict) -> list[ConfigOp]:
+    """The Raids page's form (or MCP's fields) as raid_set ops — only the fields that differ from the raid as it stands,
+    exactly as POST /api/admin/raid always compared them; consecutive ones coalesce into ONE set_raid_overrides write."""
+    from .registry import RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, parse_slots
+
+    if inst not in reg.profile.raids:
+        raise RegistryError(f"unknown raid {inst or '?'} (one of {', '.join(reg.profile.raids)})")
+    cur, want = reg.raid_def(inst), {}
+    d = dict(d)
+    for f in list(d):  # flat names (MCP, plain words): weight_<key>, <role>_<min|max>
+        if f.startswith("weight_"):
+            d.setdefault("weights", {})[f[7:]] = d.pop(f)
+        elif f.split("_")[0] in ("tank", "healer", "dps") and f.split("_")[-1] in ("min", "max") and f.count("_") == 1:
+            role, bound = f.split("_")
+            d.setdefault("comp", {}).setdefault(role, {})[bound] = d.pop(f)
+    if "cadence" in d:  # a preset: four cadence hours together
+        want["cadence"] = str(d.pop("cadence"))
+    if "slots" in d:
+        raw = d["slots"] if isinstance(d["slots"], list) else str(d["slots"])
+        if parse_slots(raw) != list(cur["slots"]):
+            want["slots"] = ", ".join(raw) if isinstance(raw, list) else raw
+    for f in RAID_HOURS_FIELDS + RAID_FORM_FIELDS:
+        val = d.get(f)
+        if val not in (None, "") and str(val) != str(cur.get(f, "")):
+            want[f] = str(val)
+    for f in RAID_BOOL_FIELDS:
+        if f in d and d[f] is not None:
+            on = d[f] if isinstance(d[f], bool) else str(d[f]).strip().lower() in ("1", "true", "yes", "on")
+            if on != bool(cur.get(f, f != "open_dm")):
+                want[f] = "true" if on else "false"
+    for kk, val in (d.get("weights") or {}).items():
+        if kk in RAID_WEIGHT_DEFAULTS and val not in (None, ""):
+            try:
+                n = int(val)
+            except (TypeError, ValueError):
+                raise RegistryError(f"weight {kk} must be a whole number")
+            if n != int(cur["weights"].get(kk, 0)):
+                want[f"weight_{kk}"] = str(val)
+    fo = d.get("first_open") or ""
+    cur_fo = reg.first_open(inst)
+    if fo and (cur_fo is None or str(fo)[:16] != cur_fo.astimezone(reg.tz).strftime("%Y-%m-%dT%H:%M")):
+        want["first_open"] = str(fo)
+    for role in ("tank", "healer", "dps"):
+        for bound in ("min", "max"):
+            val = ((d.get("comp") or {}).get(role) or {}).get(bound)
+            if val not in (None, "") and str(val) != str(((cur.get("comp") or {}).get(role) or {}).get(bound, "")):
+                want[f"{role}_{bound}"] = str(val)
+    unknown = [f for f in d if f not in ("slots", "weights", "comp", "first_open", "instance") + RAID_HOURS_FIELDS + RAID_FORM_FIELDS + RAID_BOOL_FIELDS]
+    if unknown:
+        raise RegistryError(f"unknown raid field {unknown[0]}")
+    return [ConfigOp(op="raid_set", target=inst, field=f, value=v) for f, v in want.items()]
+
+
+def ops_from_changes(reg: Registry, changes, raw_ops=None, *, channels: list[dict] | None = None) -> list[ConfigOp]:
+    """A request's `changes` ([{kind, target, fields}]) and/or raw `ops` ([ConfigOp as JSON], the plain grammar) as one
+    ordered op list. RegistryError on a malformed entry (nothing is applied)."""
+    ops: list[ConfigOp] = []
+    for c in changes or []:
+        if not isinstance(c, dict):
+            raise RegistryError("each change is {kind, target, fields}")
+        f = c.get("fields") or {}
+        if not isinstance(f, dict):
+            raise RegistryError("fields must be a map of setting → value")
+        ops += ops_from_fields(reg, str(c.get("kind") or ""), c.get("target"), f, channels=channels)
+    for o in raw_ops or []:
+        if not isinstance(o, dict):
+            raise RegistryError("each op is a ConfigOp object")
+        try:
+            ops.append(ConfigOp(**{k: v for k, v in o.items() if k in ConfigOp.model_fields}))
+        except Exception as e:  # noqa: BLE001 — a pydantic error reads as a refusal
+            raise RegistryError(f"not an op: {e}") from None
+    return ops
+
+
+# ---- who may: by privilege (the chat policy governs chat, not a UI table)
+
+GROUP_WHERE = {
+    "members": "on the site's Members page or with /roster", "runs": "on the site's Rosters page or with /raid",
+    "comp": "on the site or with /gm policy and /roster", "raids": "on the site's Raids and Auras pages or with /gm config raid | aura",
+    "setup": "on the site's Config page or with /gm config", "test": "on the Members page's Test bench or with /gm test",
+    "loot": "on the site's Loot page or in the council thread",
+}
+
+
+def authorize_ops(reg: Registry, ops: list[ConfigOp], author_id: int, *, role: str, role_ids=(), raids=None) -> tuple[list[ConfigOp], list[str]]:
+    """Split structured ops into (allowed, refusal lines) by PRIVILEGE — the owner for OWNER_OPS (and HARD_OWNER_OPS),
+    officers for every other op, a member only for their own record (bind_self decides it in code, as for chat). `role`
+    comes from guild_routing.role_of (owner | officer | member | outside), decided live for a write. A refusal says who
+    may, and where. Never Registry.may_plain: the plain-text policy governs plain text, not a page's Save."""
+    allowed, refused = [], []
+
+    def no(line: str) -> None:
+        if line not in refused:
+            refused.append(line)
+
+    for op in ops:
+        group = OP_GROUP.get(op.op)
+        if group is None:
+            no(f"{op.op} isn't something the bot can do")
+            continue
+        if role == "outside":
+            no(f"Only members of {reg.config.name} can change anything here.")
+            continue
+        if op.op in HARD_OWNER_OPS or op.op in OWNER_OPS:
+            if role != "owner":
+                no(HARD_OWNER_OPS.get(op.op) or f"Only the owner can change {PLAIN_GROUPS[group][0].lower()} — {GROUP_WHERE.get(group, 'on the site')}.")
+                continue
+            allowed.append(op)
+            continue
+        grp, bad = bind_self(reg, op, author_id)
+        if bad is None and op.op == "run_sheet":
+            bad = "from the site or MCP a sheet is re-posted with repost_sheet (it names the channel)"
+        if bad is None and role not in ("owner", "officer"):
+            key = "rank" if op.op == "character" and (op.field or "").strip().lower() == "rank" else op.op
+            if grp != "self":
+                noun = OP_NOUN.get(key, (None, None))[1] or PLAIN_GROUPS[group][0].lower()
+                bad = f"Only officers can change {noun} — {GROUP_WHERE.get(group, 'on the site')}."
+            elif op.op == "character" and (op.field or "").strip().lower() == "add" and reg.must_apply(author_id, officer=False, role_ids=role_ids):
+                bad = APPLY_FIRST
+            elif op.op == "run_answer":
+                bad = _locked_self_join(reg, op, raids)
+        if bad is None:
+            allowed.append(op)
+        else:
+            no(bad)
+    return allowed, refused
+
+
+# ---- ceremony follows consequence (§2.3): the warn class, and consequence lines from code
+
+def _always(reg: Registry, op: ConfigOp) -> bool:
+    return True
+
+
+def _warn_plain(reg: Registry, op: ConfigOp) -> bool:
+    t = (op.target or "").strip().lower()
+    return t in ("dm", "dms", "direct messages") or (_channel_id(op.target) is not None and str(_channel_id(op.target)) == str(reg.config.ops_channel_id))
+
+
+def _warn_schedule(reg: Registry, op: ConfigOp) -> bool:
+    try:
+        _sid, setting = _schedule_ref(op)
+    except RegistryError:
+        return False
+    from .registry import parse_bool
+
+    return setting == "active" and not parse_bool(op.value or "")
+
+
+WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
+    # the warn class (design §2.3, D51): a Save that contains one is reviewed first on every surface; anything else saves directly
+    "set": lambda reg, op: op.path in CHANNEL_PATHS or op.path == "timezone",  # where things post; every run's wall clock
+    "role_add": _always, "role_remove": _always,  # who counts as an officer
+    "schedule_remove": _always, "schedule_set": _warn_schedule,  # a schedule removed or paused
+    "aura_set": lambda reg, op: (op.field or "").strip() in ("scope", "family"),  # what stacks and how far it reaches
+    "aura_reset": lambda reg, op: not (op.target or "").strip(),  # every aura back to the defaults
+    "recruit": lambda reg, op: (op.field or "").strip().lower() == "open" and (op.value or "").strip().lower() in ("false", "no", "off", "closed"),
+    "plain": _warn_plain,  # plain text on the ops channel or in DMs
+    "run_lock": _always, "run_cancel": _always, "proposal": _always,
+    "test": lambda reg, op: (op.value or "").strip().lower().startswith("clear"),
+}
+
+
+def is_warn(reg: Registry, op: ConfigOp) -> bool:
+    """Whether an op is in the warn class (WARN_OPS); a merged write is when any of its parts is."""
+    if isinstance(op, MergedOp):
+        return any(is_warn(reg, p) for p in op.parts)
+    fn = WARN_OPS.get(op.op)
+    try:
+        return bool(fn and fn(reg, op))
+    except Exception:  # noqa: BLE001 — a malformed op is refused by its apply, never by the warn check
+        return False
+
+
+# consequence hooks: (reg, op) → sentences a person must read before the write (later phases append their own, e.g. the channel ones)
+CONSEQUENCE_HOOKS: list[Callable[[Registry, ConfigOp], list[str]]] = []
+
+
+def op_consequences(reg: Registry, op: ConfigOp) -> list[str]:
+    """What a write does beyond the setting itself, in sentences from code (seats, regulars, members, where things post) —
+    the same words on every surface. Empty for a routine reversible edit."""
+    if isinstance(op, MergedOp):
+        return list(dict.fromkeys(s for p in op.parts for s in op_consequences(reg, p)))
+    out: list[str] = []
+    try:
+        if op.op == "schedule_remove" and op.target in reg.profile.raids:
+            sid = (op.field or op.value or "").strip().lower()
+            held = sorted({m.display_name for m, _c in reg.schedule_regulars(op.target, sid)})
+            if held:
+                out.append(f"{len(held)} regular{'s' if len(held) != 1 else ''} come off it ({', '.join(held)}); they see a notice, nobody is DMed.")
+            out.append("Runs already open from it keep their times.")
+        elif op.op == "schedule_set" and _warn_schedule(reg, op):
+            sid, _ = _schedule_ref(op)
+            s = next((x for x in reg.schedules(op.target) if x["id"] == sid), None)
+            out.append(f"Nothing new opens from {s['name'] if s else sid}; a run already open keeps its sheet. Regulars stay.")
+        elif op.op == "aura_reset" and not (op.target or "").strip():
+            out.append(reg.aura_reset_sentence())
+        elif op.op == "role_remove":
+            rid = reg.role_id_for(op.value)
+            left = [r for r in reg.config.officer_role_ids if r != rid]
+            if not left:
+                out.append("No officer roles now: only the server owner and Manage Server count.")
+        elif op.op == "recruit" and is_warn(reg, op):
+            out.append("/apply and the Apply button say applications are closed; open applications stay open.")
+        elif op.op == "set" and op.path in CHANNEL_PATHS and _clear_word(op.value) and getattr(reg.config, f"{op.path}_id", None):
+            if op.path == "signup_channel":
+                out.append("Sheets will have nowhere to post until a signup channel is set.")
+            else:
+                out.append(f"Nothing is posted in <#{getattr(reg.config, f'{op.path}_id')}> for this any more (what is there stays).")
+        elif op.op == "plain" and _warn_plain(reg, op):
+            patch, _ = _plain_patch(reg, op)
+            sh = reg.shadow()
+            sh.config.plain = PlainPolicy.model_validate(sh.merge_plain_policy(patch))
+            cid = None if "dm" in patch else reg.config.ops_channel_id
+            before, after = reg.plain_mode(cid), sh.plain_mode(cid)
+            where = "in DMs" if cid is None else f"in the ops channel <#{cid}>"
+            if before != after:
+                out.append(f"Plain text {where} goes from {before} to {after}" + (" — the bot would ignore @mentions there, yours too." if after == "ignore" else "."))
+    except RegistryError:
+        pass  # the line's own refusal says what is wrong
+    for hook in CONSEQUENCE_HOOKS:
+        try:
+            out += [s for s in hook(reg, op) or [] if s not in out]
+        except Exception:  # noqa: BLE001 — a hook never breaks a preview
+            log.exception("consequence hook failed")
+    return out
+
+
+# ---- Described: the preview as STRUCTURE, formatted per surface
+
+class DescribedPart(BaseModel):
+    """One setting of a write: 'Scope: party → raid'. Text may hold Discord mentions (<#id>, <@&id>, <@id>) — ids stay ids
+    here; render() turns them into names per surface."""
+    label: str = ""
+    before: Optional[str] = None
+    after: Optional[str] = None
+
+
+class DescribedLine(BaseModel):
+    """One write (a coalesced op is ONE line: one write per raid / schedule / buff / family). `label` names the thing
+    ('Blood Pact', 'Barrow Deeps · Alt run', 'Guild settings'); `parts` are its settings, current → new; `text` is the
+    chat diff line (describe()); `error` = it can't apply as written (the refusal its apply would give); `warn` = the
+    warn class; `consequences` = what else happens."""
+    op: str
+    target: Optional[str] = None
+    label: str
+    parts: list[DescribedPart] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    text: str = ""
+    error: Optional[str] = None
+    warn: bool = False
+    consequences: list[str] = Field(default_factory=list)
+    ops: list[dict] = Field(default_factory=list)
+
+    @property
+    def before(self) -> Optional[str]:
+        return " · ".join(f"{p.label} {p.before}".strip() for p in self.parts if p.before is not None) or None
+
+    @property
+    def after(self) -> Optional[str]:
+        return " · ".join(f"{p.label} {p.after}".strip() for p in self.parts if p.after is not None) or None
+
+
+class Described(BaseModel):
+    """describe_ops' answer: per write current → new (`lines`), authorization refusals with who may and where
+    (`refused`), consequence sentences (`consequences`, every line's, in order) and `warn` (a warn-class op is in it).
+    `review` = the batch must be reviewed before it is written (warn or a consequence line); `fingerprint` = the lines as
+    shown (a re-preview with the same fingerprint applies without asking again)."""
+    lines: list[DescribedLine] = Field(default_factory=list)
+    refused: list[str] = Field(default_factory=list)
+    consequences: list[str] = Field(default_factory=list)
+    warn: bool = False
+
+    @property
+    def review(self) -> bool:
+        return self.warn or bool(self.consequences)
+
+    @property
+    def fingerprint(self) -> str:
+        import hashlib
+        import json
+
+        blob = json.dumps([[ln.text, ln.error, ln.consequences] for ln in self.lines] + [self.refused], sort_keys=True, default=str)
+        return hashlib.sha1(blob.encode()).hexdigest()[:16]
+
+    def summary(self) -> str:
+        """'scope raid → party · Who benefits: healers 2 → 3 · 2 changes' — the AuraWizard's draft line, from the same parts."""
+        bits = [(f"{p.label} {p.before} → {p.after or '—'}" if p.before is not None else f"{p.label} {p.after or ''}").strip() for ln in self.lines for p in ln.parts]
+        n = len(bits)
+        return " · ".join(bits + ([f"{n} change{'s' if n != 1 else ''}"] if n else ["no changes"]))
+
+    def json_for(self, reg: Registry, surface: str = "web", channels: list[dict] | None = None) -> dict:
+        """The structure with every mention rendered for `surface` ('web' and 'mcp' read names; 'discord' keeps mentions),
+        plus review / fingerprint. What /api/ops/change returns as `described`."""
+        r = lambda t: render(t, reg, surface, channels)  # noqa: E731
+        return {"lines": [{"op": ln.op, "target": ln.target, "label": r(ln.label), "text": r(ln.text), "error": r(ln.error) if ln.error else None, "warn": ln.warn,
+                           "parts": [{"label": r(p.label), "before": r(p.before) if p.before is not None else None, "after": r(p.after) if p.after is not None else None} for p in ln.parts],
+                           "notes": [r(n) for n in ln.notes], "consequences": [r(c) for c in ln.consequences], "ops": ln.ops} for ln in self.lines],
+                "refused": [r(x) for x in self.refused], "consequences": [r(c) for c in self.consequences], "warn": self.warn, "review": self.review,
+                "fingerprint": self.fingerprint}
+
+    def as_text(self, reg: Registry, channels: list[dict] | None = None) -> str:
+        """Plain text (MCP's preview message): one line per write, then refusals and consequences."""
+        out = []
+        for ln in self.lines:
+            body = "; ".join(f"{p.label + ': ' if p.label else ''}" + (f"{p.before} → {p.after or '—'}" if p.before is not None else (p.after or "")) for p in ln.parts) or ln.text
+            out.append(f"- {ln.label}: {body}" + ("".join(f" ({n})" for n in ln.notes)) + (f" — refused: {ln.error}" if ln.error else ""))
+        out += [f"refused: {x}" for x in self.refused]
+        out += [f"note: {c}" for c in self.consequences]
+        return render("\n".join(out) or "nothing to change", reg, "mcp", channels)
+
+    def as_discord(self) -> str:
+        """Discord markdown (mentions kept: Discord renders them by name)."""
+        out = []
+        for ln in self.lines:
+            body = " · ".join(f"{p.label + ' ' if p.label else ''}" + (f"{p.before} → **{p.after or '—'}**" if p.before is not None else f"**{p.after or ''}**") for p in ln.parts) or ln.text
+            out.append(f"• **{ln.label}** — {body}" + (f"\n  ⛔ {ln.error}" if ln.error else ""))
+        out += [f"⛔ {x}" for x in self.refused]
+        out += [f"⚠ {c}" for c in self.consequences]
+        return "\n".join(out) or "Nothing to change."
+
+
+_MENTION_RE = re.compile(r"<(#|@&|@!?)(\d+)>")
+
+
+def render(text: str | None, reg: Registry, surface: str, channels: list[dict] | None = None) -> str:
+    """Mentions for a surface: Discord keeps `<#id>` / `<@&id>` / `<@id>` (it renders names); the web and MCP read
+    '#name', '@Role', '@Member' — never a raw snowflake. `channels`: the guild's channels ({id, name}) when the bot has them."""
+    if text is None or surface == "discord":
+        return text or ""
+    names = {str(c.get("id")): c.get("name") for c in channels or []}
+
+    def sub(m):
+        kind, ident = m.group(1), m.group(2)
+        if kind == "#":
+            return "#" + (names.get(ident) or "deleted-channel")
+        if kind == "@&":
+            return "@" + reg.role_names.get(int(ident), "unknown role")
+        mem = reg.members.get(int(ident))
+        return "@" + (mem.display_name if mem else "someone")
+    return _MENTION_RE.sub(sub, text)
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def _split_line(text: str) -> tuple[str, str | None, str | None, list[str]]:
+    """A describe() line 'label: before → after — notes' as its pieces (the shape every config line has)."""
+    head, sep, rest = text.partition(" → ")
+    if not sep:
+        return text, None, None, []
+    label, colon, before = head.rpartition(": ")
+    if not colon:
+        label, before = "", head
+    after, dash, notes = rest.partition(" — ")
+    return label, before, after, [notes] if dash else []
+
+
+def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
+    """(the thing's label, its one part, notes) for one op — the setup ops structured explicitly, others from describe()."""
+    try:
+        if op.op == "aura_set":
+            b = reg.buff(op.target or "")
+            f = (op.field or "").strip()
+            fam_name = lambda fid: ("stands alone" if fid in ("own", "", b.id) else (reg.profile.families[fid].name if fid in reg.profile.families else fid))  # noqa: E731
+            if f == "family":
+                return b.short, DescribedPart(label="Stacking family", before=fam_name(b.family_id), after=fam_name(str(op.value or "").strip().lower().replace(" ", "_"))), []
+            if f == "strength":
+                return b.short, DescribedPart(label="Strength", before=f"×{_num(b.strength)}", after=f"×{_num(op.value)}"), []
+            cur = getattr(b, f, None)
+            return b.short, DescribedPart(label=BUFF_FIELD_WORDS.get(f, f), before=(str(cur) if cur not in (None, "") else "none"), after=(op.value or "none")), []
+        if op.op == "family_set":
+            fid = (op.target or "").strip().lower()
+            fam = reg.profile.families.get(fid)
+            name = fam.name if fam else f"New family {fid}"
+            f = (op.field or "").strip()
+            if f.startswith("value:"):
+                key = reg._value_key(f[6:])
+                now = fam.value.get(key) if fam else None
+                new = None if op.value in (None, "") or (not key.startswith("spec:") and float(op.value or 0) == 0) else op.value
+                return name, DescribedPart(label=f"Who benefits: {aura_key_words(key)}", before=_num(now) if now is not None else "none", after=_num(new) if new is not None else "none"), []
+            if f == "value":
+                val = _typed(op.value)
+                text = lambda m: " · ".join(f"{aura_key_words(k)} {_num(v)}" for k, v in m.items()) or "nobody"  # noqa: E731
+                new = val if isinstance(val, dict) else {kv.partition(":")[0].strip(): kv.partition(":")[2].strip() for kv in str(val or "").split(",") if kv.strip()}
+                return name, DescribedPart(label="Who benefits", before=text(fam.value) if fam else "nobody", after=text(new)), []
+            cur = getattr(fam, f, None) if fam else None
+            return name, DescribedPart(label=FAMILY_FIELD_WORDS.get(f, f), before=(str(cur) if cur not in (None, "") else "none"), after=(op.value or "none")), []
+        if op.op == "aura_reset":
+            t = (op.target or "").strip()
+            if not t:
+                return "Every aura", DescribedPart(label="Overrides", before="the guild's", after="the game defaults"), []
+            b = next((x for x in reg.profile.buffs if x.id == t), None)
+            name = b.short if b else (reg.profile.families[t].name if t in reg.profile.families else t)
+            return name, DescribedPart(label="Overrides", before="the guild's", after="the game defaults"), []
+        if op.op == "set":
+            cfg = reg.config
+            if op.path in CHANNEL_PATHS:
+                cid = getattr(cfg, f"{op.path}_id", None)
+                new = None if _clear_word(op.value) else _channel_id(op.value)
+                return "Guild settings", DescribedPart(label=SETTING_WORDS[op.path], before=f"<#{cid}>" if cid else "not set", after=f"<#{new}>" if new else "not set"), []
+            cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:80] or "none",
+                   "news_keywords": ", ".join(cfg.news_keywords) or "none", "loot_log": "on" if cfg.loot_log else "off"}.get(op.path or "", "?")
+            new = op.value or "none"
+            if op.path == "loot_log":
+                from .registry import parse_bool
+
+                new = "on" if parse_bool(op.value or "") else "off"
+            notes = []
+            if op.path == "timezone" and op.value and op.value != cfg.timezone:
+                from . import raidcycle as rc
+
+                notes = rc.timezone_preview(reg, op.value)
+            return "Guild settings", DescribedPart(label=SETTING_WORDS.get(op.path or "", op.path or ""), before=cur, after=new[:80]), notes
+        if op.op in ("role_add", "role_remove"):
+            rid = reg.role_id_for(op.value)
+            have = list(reg.config.officer_role_ids)
+            after = (have + ([rid] if rid not in have else [])) if op.op == "role_add" else [r for r in have if r != rid]
+            words = lambda ids: ", ".join(f"<@&{r}>" for r in ids) or "none (Manage Server only)"  # noqa: E731
+            if rid is None:
+                return "Guild settings", DescribedPart(label="Officer roles", before=words(have), after=f"{words(have)} {'+' if op.op == 'role_add' else '−'} {op.value} (by name)"), []
+            return "Guild settings", DescribedPart(label="Officer roles", before=words(have), after=words(after)), []
+        if op.op in ("raid_set", "raid_reset", "schedule_set", "schedule_remove"):
+            rid = op.target or ""
+            name = reg.raid_def(rid).get("name", rid) if rid in reg.profile.raids else rid
+            text = describe(reg, op, PLAIN_WEB)
+            if op.op == "schedule_remove":
+                sid = (op.field or op.value or "").strip().lower()
+                s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
+                return f"{name} · {s['name'] if s else sid}", DescribedPart(label="Schedule", before=reg.schedule_label(rid, s) if s else None, after="removed"), []
+            if op.op == "raid_reset":
+                over = reg.config.raids.get(rid, {}) or {}
+                return name, DescribedPart(label="Overrides", before=_overrides_words(reg, rid, over) if over else "none", after="the profile defaults"), []
+            if op.op == "schedule_set":
+                sid, setting = _schedule_ref(op)
+                s = next((x for x in reg.schedules(rid) if x["id"] == sid), None)
+                label = f"{name} · {s['name'] if s else sid}"
+                if s is None:  # a new schedule: what it will be
+                    return label, DescribedPart(label=_cap(setting.replace("_", " ")), before="new", after=_schedule_words(reg, rid, _schedule_fields(setting, op.value))), []
+                _l, before, after, notes = _split_line(text.split(": ", 1)[1] if ": " in text else text)
+                return label, DescribedPart(label=_cap(setting.replace("_", " ")), before=before, after=after), notes
+            f = (op.field or "").strip()
+            _l, before, after, notes = _split_line(text)
+            return name, DescribedPart(label=_cap(f.replace("_", " ")), before=before, after=after if after is not None else text), notes
+        if op.op in ("recruit", "plain"):
+            text = describe(reg, op, PLAIN_WEB)
+            label, before, after, notes = _split_line(text)
+            thing = "Recruitment" if op.op == "recruit" else "Plain-text permissions"
+            if after is None:  # 'add question 3: “…”': no current → new, the sentence is the change
+                return thing, DescribedPart(after=text), []
+            return thing, DescribedPart(label=_cap(label.removeprefix("plain text · ")), before=before, after=after), notes
+    except (RegistryError, ValueError, KeyError, AttributeError):
+        pass  # the generic line below (describe() words the refusal)
+    text = describe(reg, op, PLAIN_WEB)
+    label, before, after, notes = _split_line(text)
+    if after is None:
+        return _cap(op.op.replace("_", " ")), DescribedPart(after=text), []
+    return _cap(label) or _cap(op.op.replace("_", " ")), DescribedPart(before=before, after=after), notes
+
+
+def _op_error(sh: Registry, op: ConfigOp) -> str | None:
+    """The refusal applying this op would give, found on a throw-away copy (`sh` = Registry.shadow(), one per batch so a
+    family created earlier exists for the buff that joins it) — nothing live is touched. Only the pure config writes are
+    dry-run; anything else answers None (its apply says it)."""
+    if op.op not in PURE_OPS or (op.op == "recruit" and not isinstance(op, MergedOp) and (op.field or "").strip().lower() == "invite_create"):
+        return None
+    try:
+        apply(sh, op, "preview", True)
+    except (RegistryError, ValueError) as e:
+        return str(e) or GENERIC_ERROR
+    except Exception:  # noqa: BLE001 — a preview never fails on an unexpected error; the apply reports it
+        log.exception("dry run of %s failed", op.op)
+    return None
+
+
+# the registry-only config writes: applied in a worker thread, in one commit, under config_lock (no Discord side effect;
+# a channel setting with a bot goes through SetupMixin.set_channel on the loop instead)
+PURE_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "schedule_set", "schedule_remove", "aura_set", "family_set", "aura_reset", "plain", "recruit"}
+
+
+def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None = None, channel=PLAIN_WEB) -> Described:
+    """The structured preview of a batch: ops coalesced exactly as apply_ops will write them (one line per write), each
+    with its parts (current → new, in words), the refusal its apply would give (dry-run on a shadow copy), its warn flag
+    and consequences. Never mutates the live config."""
+    d = Described(refused=list(refused or []))
+    sh = reg.shadow()
+    for op in coalesce(list(ops)):
+        parts_ops = op.parts if isinstance(op, MergedOp) else [op]
+        label, parts, notes = None, [], []
+        for p in parts_ops:
+            lab, part, n = _part(reg, p)
+            label = label or lab
+            parts.append(part)
+            notes += [x for x in n if x not in notes]
+        try:
+            text = describe(reg, op, channel)
+        except Exception as e:  # noqa: BLE001
+            text = f"{op.op}: {e}"
+        cons = op_consequences(reg, op)
+        line = DescribedLine(op=op.op, target=op.target, label=label or op.op, parts=parts, notes=notes, text=text, error=_op_error(sh, op),
+                             warn=is_warn(reg, op), consequences=cons, ops=[p.model_dump(exclude_none=True) for p in parts_ops])
+        d.lines.append(line)
+        d.consequences += [c for c in cons if c not in d.consequences]
+        d.warn = d.warn or line.warn
+    return d
+
+
+# ---- the one core: apply a batch the caller has authorized
+
+async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int | None, bot=None, via: str = "web", revs: dict | None = None,
+                    raids=None, policy_store=None, self_id: int | None = None, channel_id=PLAIN_WEB) -> dict:
+    """Apply authorized ops as the structured path does — the honest contract ConfigConfirmView has: coalesce() first
+    (one write per raid / schedule / buff / family), consecutive pure config writes in ONE worker-thread call under
+    `config_lock` and ONE store.batch (one commit), anything with a Discord side effect through apply_async on the loop.
+    A refused write is listed and the others still apply ('nothing else was changed' is true per write). `revs`: the
+    section revs ('config:<section>') and board / plan revs the author saw — a stale one raises ConfigChanged for that
+    write. ONE ops.audited line for the batch (verbs that audit themselves are left out of it). Returns {applied,
+    refused, results [{label, ok, line}], error, changed [sections]}."""
+    from . import raidcycle as rc
+    from .registry import ConfigChanged
+
+    revs, stale = dict(revs or {}), set()
+    out = {"applied": [], "refused": [], "results": [], "error": None, "changed": []}
+    audit_lines: list[str] = []
+    merged = coalesce(list(ops))
+
+    def label_of(op) -> str:
+        try:
+            return _part(reg, op.parts[0] if isinstance(op, MergedOp) else op)[0]
+        except Exception:  # noqa: BLE001
+            return op.op
+
+    def failed(op, e) -> None:
+        text = str(e) or GENERIC_ERROR
+        out["refused"].append(f"{describe(reg, op, channel_id)} — {text}")
+        out["results"].append({"label": label_of(op), "ok": False, "line": text})
+        out["error"] = out["error"] or text
+        if isinstance(e, ConfigChanged) and e.section not in out["changed"]:
+            out["changed"].append(e.section)
+
+    def landed(op, line: str, audited: bool) -> None:
+        out["applied"].append(line)
+        out["results"].append({"label": label_of(op), "ok": True, "line": line})
+        if not audited:
+            audit_lines.append(line)
+
+    if bot is not None and any(o.op in ("role_add", "role_remove", "plain") or (o.op == "recruit") for o in merged):
+        await _warm_roles(reg, bot)
+
+    def pure(op) -> bool:
+        if op.op not in PURE_OPS:
+            return False
+        if op.op == "set" and op.path in CHANNEL_PATHS and bot is not None and getattr(bot, "set_channel", None) is not None:
+            return False  # the Config page's verb: posts / drops the card on the loop
+        if op.op == "recruit" and not isinstance(op, MergedOp) and (op.field or "").strip().lower() == "invite_create":
+            return False
+        return True
+
+    def run_chunk(chunk: list) -> list:
+        res = []
+        with reg.config_lock, reg.store.batch():
+            for op in chunk:
+                before = snapshot_revs(reg, revs, raids)
+                try:
+                    line = apply(reg, op, by, True, policy_store, raids=raids, rev=op_rev(op, None, revs), by_id=by_id)
+                except (RegistryError, ValueError) as e:
+                    res.append((op, None, e))
+                    continue
+                except Exception as e:  # noqa: BLE001 — reported on the loop; the rest of the chunk still applies
+                    res.append((op, None, e))
+                    continue
+                refresh_revs(reg, revs, raids, stale, before)
+                res.append((op, line, None))
+        return res
+
+    i, card = 0, False
+    while i < len(merged):
+        if pure(merged[i]):
+            j = i
+            while j < len(merged) and pure(merged[j]):
+                j += 1
+            for op, line, e in await asyncio.to_thread(run_chunk, merged[i:j]):
+                if e is None:
+                    landed(op, line, False)
+                    card = card or op.op == "recruit"
+                elif isinstance(e, (RegistryError, ValueError)):
+                    failed(op, e)
+                else:
+                    failed(op, await report_error(getattr(bot, "ops", None), reg.config, e, f"[{via}] structured {op.op}"))
+            i = j
+            continue
+        op = merged[i]
+        i += 1
+        key = op_run_key(reg, op, raids)
+        if op.op in BOARD_OPS and key in stale:
+            failed(op, rc.BoardChanged())
+            continue
+        before = snapshot_revs(reg, revs, raids)
+        try:
+            line = await apply_async(reg, op, by, True, policy_store, bot=bot, by_id=by_id, rev=op_rev(op, key, revs), channel_id=channel_id,
+                                     self_id=self_id, via=via, audit=False)
+        except (RegistryError, ValueError) as e:
+            failed(op, e)
+            if isinstance(e, rc.BoardChanged) and key:
+                stale.add(key)
+            continue
+        except Exception as e:  # noqa: BLE001 — Discord or the solver: never a 500 after a partial apply
+            failed(op, await report_error(getattr(bot, "ops", None), reg.config, e, f"[{via}] structured {op.op}"))
+            continue
+        refresh_revs(reg, revs, raids, stale, before)
+        landed(op, line, self_audited(reg, op, bot))  # (a recruit op here — invite_create — refreshed the card itself)
+    if card and bot is not None:
+        refresh = getattr(bot, "refresh_registration_card", None)
+        if refresh is not None:  # open/closed, the note and the invite show on the card
+            try:
+                await refresh(reg)
+            except Exception:  # noqa: BLE001 — the setting is saved; the card catches up on its next refresh
+                log.exception("registration card refresh failed")
+    ops_feed = getattr(bot, "ops", None) if bot is not None else None
+    if audit_lines and ops_feed is not None:
+        from . import ops as ops_mod
+
+        await ops_mod.audited(ops_feed, reg, by, "; ".join(audit_lines), via=via, by_id=by_id)
+    return out
+
+
+def result_summary(res: dict) -> str:
+    """'3 saved, 1 refused' — the toast after a structured Save (never a bare 'saved')."""
+    ok_n, bad_n = len(res.get("applied") or []), len(res.get("refused") or [])
+    if not ok_n and not bad_n:
+        return "nothing to change"
+    return ", ".join(x for x in (f"{ok_n} saved" if ok_n else "", f"{bad_n} refused" if bad_n else "") if x)
