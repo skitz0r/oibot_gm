@@ -5,6 +5,8 @@ import { Alert, Anchor, Badge, Box, Card, Code, Group, MultiSelect, Select, Stac
 import { api, type LootLogState, type Meta, type RoleRef } from "../api";
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { Recruitment } from "../components/Recruitment";
+import { ChannelsCard } from "../components/ChannelsCard";
+import { SetupCard } from "../components/SetupCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -16,17 +18,6 @@ interface ConfigData {
   test_bench: { members: number; runs: string[] }; owner: boolean;
 }
 
-const CHANNELS: { kind: string; label: string; hint: string }[] = [
-  { kind: "registration", label: "Registration", hint: "public, read-only: the registration card with its buttons" },
-  { kind: "signup", label: "Signups", hint: "public: one sheet per run (Join / Bench / No thanks)" },
-  { kind: "absences", label: "Absences", hint: "public: the I'll be away card; one line per absence" },
-  { kind: "roster", label: "Roster (officers)", hint: "health cards, lock cards, fill progress" },
-  { kind: "analytics", label: "Analytics (officers)", hint: "character bank, readiness, groups and desired comp cards + change log" },
-  { kind: "applications", label: "Applications (officers)", hint: "review cards for /apply (defaults to ops)" },
-  { kind: "ops", label: "Ops (officers)", hint: "one line per action the bot takes; plain-text config by @mention" },
-  { kind: "news", label: "News", hint: "where the news webhook posts; the bot keeps the items about our game and raids (Agents page)" },
-  { kind: "loot", label: "Loot log", hint: "public: one line per confirmed award (no reasons, no scores); empty = each run's updates thread" },
-];
 
 export function ConfigPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<ConfigData | null>(null);
@@ -43,7 +34,6 @@ export function ConfigPage({ meta }: { meta: Meta }) {
   }
   /** Fields here save as you change them; the mark beside the label says which one was just written. */
   const lab = (field: string, text: string) => <>{text}{saved === field && <Text span size="xs" c="teal" ml={8}>✓ saved</Text>}</>;
-  const channelOptions = [{ value: "", label: "— not set —" }, ...data.guild_channels.map((c) => ({ value: c.id, label: `#${c.name}${c.category ? ` · ${c.category}` : ""}` }))];
   // values are role ids, labels the current names; a configured role the server no longer has stays selectable so it can be removed
   const known = new Set(data.guild_roles.map((r) => r.id));
   const roleOptions = [...data.guild_roles.map((r) => ({ value: r.id, label: r.name })), ...data.settings.officer_roles.filter((r) => !known.has(r.id)).map((r) => ({ value: r.id, label: `${r.name} (deleted role)` }))];
@@ -51,15 +41,13 @@ export function ConfigPage({ meta }: { meta: Meta }) {
     <Stack gap="lg">
       <PageTitle title={meta.guilds.length > 1 ? `Configuration · ${meta.guild}` : "Configuration"} intro={ro ? "Read-only for officers; the owner edits here, with /gm config, or in plain text via /gm change or an @mention in the ops channel." : "Each function of the bot lives in a channel. Changing a channel does what the slash command does: the registration and absence cards are posted, the analytics cards re-post."} />
 
+      <SetupCard />
+
+      <ChannelsCard />
+
       <Card>
-        <CardHeader title="Channels" hint="which channel each function of the bot uses" />
+        <CardHeader title="News keywords" hint="beside our game version's names and raid names" />
         <Stack gap="sm" p="md">
-          {CHANNELS.map(({ kind, label, hint }) => (
-            <Group key={kind} gap="md" wrap="wrap" align="flex-end">
-              <Select label={lab(`channel:${kind}`, label)} description={hint} data={channelOptions} value={data.channels[kind]?.id || ""} onChange={(v) => v !== null && v !== (data.channels[kind]?.id || "") && set(`channel:${kind}`, v || null)} disabled={ro || busy === `channel:${kind}`} searchable w={360} />
-              {data.channels[kind]?.id && !data.channels[kind]?.name && <Badge color="red" variant="light">channel not found</Badge>}
-            </Group>
-          ))}
           <TagsInput label={lab("news_keywords", "News keywords")} description="extra words or phrases that make a news post relevant, beside our game version's names and raid names" value={data.settings.news_keywords || []}
             onChange={(v) => set("news_keywords", v)} disabled={ro || busy === "news_keywords"} clearable maw={560} />
         </Stack>

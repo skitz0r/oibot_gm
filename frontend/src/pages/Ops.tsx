@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Badge, Box, Card, SimpleGrid, Stack, Table, Text } from "@mantine/core";
+import { Badge, Box, Card, Group, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { api, type Ops as OpsData } from "../api";
 import { CardHeader, Eyebrow, PageTitle, fail } from "../components/Page";
 import { PlainPermissions } from "../components/PlainPermissions";
@@ -21,7 +21,11 @@ export function OpsPage() {
   const bot = data.scope === "bot" ? " · whole bot" : "";  // several guilds: these are the process's, not this guild's
   return (
     <Stack gap="lg">
-      <PageTitle title="Ops" intro="What the bot has been doing, and where its data lives. The page refreshes itself while open. Precedents and the award log are on the Loot pages." />
+      <PageTitle title="Ops" intro="What the bot has been doing, and where its data lives. The page refreshes itself while open. Precedents and the award log are on the Loot pages."
+        right={(data.suppressed || data.ops_failing) ? <Group gap="xs">
+          {data.suppressed ? <Badge color="red" variant="light" title="errors folded into an earlier alert instead of a DM of their own (one DM per distinct error per 30 minutes)">{data.suppressed} more errors, not DMed</Badge> : null}
+          {data.ops_failing ? <Badge color="red" variant="light" title="the bot couldn't post its last lines in the ops channel">ops channel failing</Badge> : null}
+        </Group> : undefined} />
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
         <Stat label={`data repo${bot}`} value={data.head} sub={`push ${data.push ? "on" : "off"}`} />
         <Stat label={`model${bot}`} value={data.llm} />

@@ -3,7 +3,7 @@ import { REFRESH_EVENT } from "./hooks/usePoll";
 import { AppShell, Avatar, Box, Burger, Button, Group, Menu, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList } from "@tabler/icons-react";
+import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconUserPlus } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
@@ -17,12 +17,15 @@ import { AurasPage } from "./pages/Auras";
 import { AgentsPage } from "./pages/Agents";
 import { LootPage } from "./pages/Loot";
 import { LootLogPage } from "./pages/LootLog";
+import { ApplicationsPage } from "./pages/Applications";
+import { anyDirty } from "./hooks/useDirty";
 
 const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", label: "Loot log", icon: IconClipboardList }];
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
   { to: "/members", label: "Members", icon: IconUsers },
+  { to: "/applications", label: "Applications", icon: IconUserPlus },
   { to: "/loot", label: "Loot", icon: IconDiamond },
   { to: "/auras", label: "Auras", icon: IconSparkles },
   { to: "/ops", label: "Ops", icon: IconChartBar },
@@ -39,6 +42,10 @@ function ServerIcon({ g, size = 26 }: { g: Pick<GuildChoice, "name" | "icon">; s
 /** Switch server: the browser's selection (cookie) changes on the server, then the page reloads on the new guild —
  *  every page re-fetches, the live stream reconnects, officer-only pages send a member back to Me. */
 async function switchGuild(key: string) {
+  if (anyDirty()) {  // design §3.5 S-01: the switch is a full reload — never under an unsaved draft
+    notifications.show({ message: "Save or discard your edits first — switching server reloads the page.", color: "yellow" });
+    return;
+  }
   try {
     await api.post("/api/guild", { key });
     window.location.assign(window.location.pathname);
@@ -149,6 +156,7 @@ export default function App() {
             <Route path="/rosters" element={officer(<RostersPage meta={meta} />)} />
             <Route path="/raids" element={officer(<RaidsPage />)} />
             <Route path="/members" element={officer(<MembersPage meta={meta} />)} />
+            <Route path="/applications" element={officer(<ApplicationsPage meta={meta} />)} />
             <Route path="/bank" element={<Navigate to="/members" replace />} />
             <Route path="/admin" element={<Navigate to="/members" replace />} />
             <Route path="/auras" element={officer(<AurasPage meta={meta} />)} />

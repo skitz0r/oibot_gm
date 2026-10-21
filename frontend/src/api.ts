@@ -68,6 +68,9 @@ export interface Meta {
   durations?: { days: number; label: string }[]; max_absence_days?: number; absence_reason_max?: number; ranks?: string[];
   /** the DM toggle's one sentence each way (inbox.DM_ON_SENTENCE / DM_OFF_SENTENCE) */
   dm_sentences?: { on: string; off: string };
+  /** §2.9: Discord reachable for this guild (channel / role editing waits while not); `stale` = this viewer's membership is the
+   *  last-known "yes" (reads go on, officer writes refuse) */
+  discord?: { ready: boolean; stale: boolean };
 }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[] }
@@ -194,7 +197,9 @@ export interface Members { rows: MemberRow[]; members: number; tz: string }
 /** Clearing an absence: `message` is the headline plus the ripple; `lines` is the ripple alone (sheets re-opened, seat that had been freed). */
 export interface AbsenceCleared { message: string; lines: string[] }
 /** `scope: "bot"` (several guilds only): head, push, llm and uptime are the whole bot's, the rest is this guild's. */
-export interface Ops { scope?: "bot"; head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[] }  // bot health only: precedents and the award log live on the Loot pages
+export interface Ops { scope?: "bot"; head: string; push: boolean; llm: string; feed: string; up: number; started_at: number; rows: { time: string; level: string; text: string }[];
+  /** OPS-01: errors folded into an earlier alert (no DM of their own) since the bot started; failed ops-channel posts in a row */
+  suppressed?: number; ops_failing?: number }  // bot health only: precedents and the award log live on the Loot pages
 /** A Discord role by id (a string: snowflakes overflow JS numbers); officer roles are stored by id so renames are safe. */
 export interface RoleRef { id: string; name: string }
 /** GET /api/public (anonymous): what the homepage and the not-a-member screen show. One guild: this shape; several:
@@ -227,6 +232,8 @@ export interface Me {
   characters_rev?: string | null; rank?: string | null;
   /** the one DM sentence (inbox.DM_ON/OFF_SENTENCE): the same words on /me view, /me dms and the manual */
   dm_sentence?: string;
+  /** their own application (registry.application_state): open → waiting; decided → the decision (components/MyApplication.tsx) */
+  application?: import("./setupApi").MyApplicationState | null;
 }
 
 // ---- the loot council (mirror src/oibot_gm/web/api_loot.py). Every label a person reads arrives as words from the server
