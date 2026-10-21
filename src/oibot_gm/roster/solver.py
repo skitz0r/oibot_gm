@@ -290,13 +290,14 @@ def _add_avoid(s: _Model, avoid: list[dict[str, int]] | None, avoid_groups: list
 
 
 def _selection_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
-    """Seat quality: signed beats bench, attendance, an unknown-character penalty, the per-player `bonus`. With
+    """Seat quality: signed beats bench, attendance (unknown — no counted run — weighs as full, the loot factor's
+    neutral 1.0: never a penalty; design §3.1 decision 10), an unknown-character penalty, the per-player `bonus`. With
     several rosters the value is earned per roster — doubled for roster 1 under `first`, plus `roster_bonus[r]` —
     and its positive part feeds the per-roster quality totals the balance step compares."""
     sel, opts = s.rules["selection"], s.opts
     for p in s.players:
         v = sel["signed_bonus"] if p.status == "signed" else -sel["bench_penalty"]
-        v += int(round(sel["attendance_weight"] * p.attendance))
+        v += int(round(sel["attendance_weight"] * (p.attendance if p.attendance_total else 1.0)))  # unknown: neutral, never a penalty
         if p.unmapped:
             v -= sel["unknown_character_penalty"]
         v += int((opts.bonus or {}).get(p.signup_name, 0))

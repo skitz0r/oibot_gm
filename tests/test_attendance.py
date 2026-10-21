@@ -183,3 +183,56 @@ def test_the_sentence_is_computed(reg, rs):
     assert reg.attendance_text(a) == "1 of 1 in the last 30 days"
     b = reg.test_members()[1]
     assert reg.attendance_text(b) == "no runs for you in the last 30 days"
+
+
+# ---------------------------------------------------------------- the roster solver's input (design §3.1 decision 10)
+
+def test_players_for_carries_run_history(reg, rs):
+    """§6 Phase 3 row 14: raidcycle.players_for fills attended / attendance_total from Registry.attendance (the
+    solver's attendance_weight used to see 0/0 for everyone); unknown — the window not tracked yet, or a member with
+    no counted run — stays 0/0."""
+    people = reg.test_members()[:5]
+    a, b, newcomer = people[0], people[1], people[4]
+    start = (reg.now_local() + timedelta(days=9, hours=3)).replace(second=0, microsecond=0)
+    nxt = rc.open_run(reg, rs, "barrow_deeps", start, by="t")
+    join(reg, rs, nxt, [a, b, newcomer])
+    assert all((p.attended, p.attendance_total) == (0, 0) for p in rc.players_for(reg, nxt)), "nothing tracked yet"
+    done_run(reg, rs, [a, b], [a, b], 3, regulars=[a, b], confirm=[(a, "yes"), (b, "yes")], n=1)
+    done_run(reg, rs, [a, b], [a, b], 4, regulars=[a, b], confirm=[(a, "yes"), (b, "yes")], n=2)
+    assert all(p.attendance_total == 0 for p in rc.players_for(reg, nxt)), "two runs: still unknown for everyone"
+    done_run(reg, rs, [a, b], [a], 5, regulars=[a, b], confirm=[(a, "yes")], n=3)
+    got = {p.discord_id: (p.attended, p.attendance_total) for p in rc.players_for(reg, nxt)}
+    assert got[a.discord_id] == (3, 3) and got[b.discord_id] == (2, 3), "the loot factor's count (bench is not attended)"
+    assert got[newcomer.discord_id] == (0, 0), "no counted run: unknown"
+
+
+def test_the_solver_weighs_unknown_attendance_as_neutral():
+    """Unknown attendance (0/0) is the loot factor's neutral 1.0 in the solver too — never below a known attender
+    (decision 10: never a penalty); a known ratio weighs as before."""
+    import types
+
+    from oibot_gm.models import Player
+    from oibot_gm.roster import solver
+
+    def value(**kw) -> int:
+        p = Player(signup_name="P", pos=1, status="signed", cls="Priest", spec="Holy", role="healer", **kw)
+        sel = {"signed_bonus": 30, "bench_penalty": 15, "attendance_weight": 10, "unknown_character_penalty": 3}
+        s = types.SimpleNamespace(rules={"selection": sel}, opts=types.SimpleNamespace(bonus=None), players=[p], rosters=1, x={"P": 1}, terms=[])
+        solver._selection_terms(s, None)
+        return s.terms[0] // solver.SCALE
+
+    assert value() == value(attended=4, attendance_total=4) == 40, "unknown = full: neutral"
+    assert value(attended=2, attendance_total=4) == 35 and value(attended=0, attendance_total=4) == 30
+
+
+def test_the_loot_lookup_reads_the_tracked_window_once(reg, rs, monkeypatch):
+    """Perf: attendance_lookup asks whether the window is tracked once per lookup, not once per member."""
+    people = reg.test_members()[:4]
+    three_runs(reg, rs, people)
+    calls = []
+    real = reg.attendance_tracked
+    monkeypatch.setattr(reg, "attendance_tracked", lambda *a, **k: calls.append(1) or real(*a, **k))
+    look = scoring.attendance_lookup(reg)
+    seats = [p for p in rs.events[next(iter(sorted(rs.events)))].seated()]
+    got = [look(p) for p in seats]
+    assert len(calls) == 1 and all(g == (3, 3) for g in got)

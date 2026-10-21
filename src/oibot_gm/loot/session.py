@@ -594,9 +594,10 @@ def run_distribution(ctx, snap: LootSession, roster: list[Player], drop_ids: lis
 
     # pass 3: re-score against actual picks (in judging order), flag shifts
     actual: list[LootAward] = []
+    att = attendance_of(ctx)  # one lookup for the pass (each member read once)
     for p in sorted(results, key=lambda p: p.order):
         item, d = items[p.drop_id], snap.drop(p.drop_id)
-        fresh = scoring.candidates(ctx.profile, item, roster, pl["base"] + actual, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=attendance_of(ctx))
+        fresh = scoring.candidates(ctx.profile, item, roster, pl["base"] + actual, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=att)
         top = next((c for c in fresh if not c.already_has), None)
         if top and not p.override and p.award_to != top.character and not p.result.recommendation.deviates_from_score:
             rank = next((i for i, c in enumerate(fresh, 1) if c.character == p.award_to), None)

@@ -74,8 +74,10 @@ def attendance_factor(attended: int, total: int, cfg: dict) -> float:
 def attendance_lookup(reg) -> Callable[[Player], Optional[tuple[int, int]]]:
     """Player → (attended, total) from Registry.attendance_known over the loot policy's window, or None when unknown.
     By the Player's Discord id; a sub kept by name (no id) is found by character name. Memoised per call site: one
-    candidates() call reads each member once."""
+    candidates() call reads each member once, and whether the window is tracked at all is read once per lookup (not
+    once per member)."""
     memo: dict = {}
+    tracked: list = []
 
     def look(p: Player) -> Optional[tuple[int, int]]:
         uid = p.discord_id
@@ -88,7 +90,13 @@ def attendance_lookup(reg) -> Callable[[Player], Optional[tuple[int, int]]]:
         if uid is None:
             return None
         if uid not in memo:
-            memo[uid] = reg.attendance_known(uid)
+            if not tracked:
+                tracked.append(bool(reg.attendance_tracked()["known"]))
+            if not tracked[0]:
+                memo[uid] = None
+            else:
+                att, total = reg.attendance(uid)
+                memo[uid] = (att, total) if total else None
         return memo[uid]
     return look
 
@@ -109,7 +117,8 @@ def candidates(
     """The candidate table for one drop. `cfg`: the guild's loot settings (default Registry.loot_cfg() with `reg`, else
     the profile's); `items`: the item lookup for past awards' slots (default Registry.items() with `reg`, else the
     profile's tables); `attendance`: Player → (attended, total) | None (default attendance_lookup(reg) with `reg`) —
-    used for a Player that carries no attendance of its own (an imported roster's does)."""
+    it decides for every Player with a Discord id (a run's seats carry players_for's count from the lock: a snapshot)
+    and for one with no attendance of its own; a Player with no id keeps its own (an imported roster's)."""
     if reg is not None:
         cfg = cfg or reg.loot_cfg()
         items = items if items is not None else reg.items()
@@ -150,10 +159,14 @@ def candidates(
 
         if offspec:
             upgrade *= cfg["wishlist"]["offspec_multiplier"]
-        if not p.attendance_total and attendance is not None:
+        if attendance is not None and (p.discord_id is not None or not p.attendance_total):
+            # the registry's history decides for a member it knows (a seat's count was a snapshot at lock — runs may
+            # have ended since); unknown there is neutral (0/0). A Player with no id keeps its own (an imported roster's)
             seen = attendance(p)
             if seen:
                 p = p.model_copy(update={"attended": seen[0], "attendance_total": seen[1]})
+            elif p.discord_id is not None and p.attendance_total:
+                p = p.model_copy(update={"attended": 0, "attendance_total": 0})
         known_att = bool(p.attendance_total)
         att_factor = attendance_factor(p.attended, p.attendance_total, cfg)  # unknown attendance is neutral (decision 10)
         rank_factor = cfg["rank_factor"].get("unknown" if p.unmapped else p.rank, cfg["rank_factor"]["unknown"])

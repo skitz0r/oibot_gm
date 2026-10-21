@@ -609,7 +609,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         v = await who(request)
         if v.member is None:
             return {"sentence": "nothing registered yet", "window_days": v.reg.attendance_window(), "attended": 0, "total": 0, "runs": [], "tracked": 0}
-        return attendance_json(v.reg, v.member, False)
+        return await asyncio.to_thread(attendance_json, v.reg, v.member, False)  # parses run files: off the loop
 
     @app.get("/api/members/attendance")
     async def member_attendance(request: Request, member: str):
@@ -617,7 +617,28 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         factor's count."""
         v = await who(request, officer=True)
         m = resolve_member(v.reg, member)
-        return {"member": m.display_name, **attendance_json(v.reg, m, True)}
+        return {"member": m.display_name, **(await asyncio.to_thread(attendance_json, v.reg, m, True))}
+
+    def attendance_counts(reg) -> dict:
+        """Every member's count for the Members page's att column: {uid: {attended, total, text 'att 5/6' | None (nothing
+        counted), loot 'loot 4/6' | None}} — the view's count (bench counts, D49) and the loot factor's."""
+        days = reg.attendance_window()
+        known = reg.attendance_tracked(days)["known"]
+        out = {}
+        for m in reg.members.values():
+            att, total = reg.attendance(m, days, bench=True)
+            loot = reg.attendance(m, days) if known else (0, 0)
+            out[str(m.discord_id)] = {"attended": att, "total": total, "text": f"att {att}/{total}" if total else None,
+                                      "loot": f"loot {loot[0]}/{loot[1]}" if loot[1] else None}
+        return out
+
+    @app.get("/api/members/attendance/all")
+    async def members_attendance(request: Request):
+        """Members page › att column (design §3.5 M43), officers: every member's count over the loot policy's window
+        and the window itself."""
+        v = await who(request, officer=True)
+        rows = await asyncio.to_thread(attendance_counts, v.reg)
+        return {"window_days": v.reg.attendance_window(), "rows": rows}
 
     # ------------------------------------------------------------ wishlists (D5)
     def received_map(reg, ctx, m) -> dict[tuple[str, str], str]:

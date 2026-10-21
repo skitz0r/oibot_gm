@@ -1880,7 +1880,13 @@ class Registry:
         (<guild>/items/<key>.yaml — a learned item's file keeps its `learned` facts; a profile item gets a file of its
         own that layers over the profile's tiers). `tiers`: {spec key: tier | None}; a spec key is 'Class:Spec',
         'Class:*' or 'role:<role>', a tier one of TIER_VALUES, None or '-' clears a tier the guild set. Returns
-        (the change line, {key: (before, after)}). Re-weighting past awards is the caller's (D12: asked, default no)."""
+        (the change line, {key: (before, after)}). Re-weighting past awards is the caller's (D12: asked, default no).
+        The read and the write run under ONE config_lock (an RLock: a CSV import already holding it nests), so a CSV
+        import's rev check and batch and a grid Save never interleave — each Save reads the tiers as they are."""
+        with self.config_lock:
+            return self._set_item_tiers(ref, tiers, by)
+
+    def _set_item_tiers(self, ref, tiers: dict, by: str) -> tuple[str, dict]:
         it = self.item(ref, ref if isinstance(ref, str) else None)
         if it is None:
             raise RegistryError(f"No item {ref} on the tables or among the learned items.")
@@ -1912,10 +1918,9 @@ class Registry:
             return f"{it.name}: tiers unchanged", {}
         doc["tiers"] = own
         doc.setdefault("name", it.name)
-        with self.config_lock:
-            self.store.write_text(rel, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
-            self.store.commit(f"{self.key}: tiers for {it.name} ({by})")
-            self.__dict__.pop("_items_cache", None)
+        self.store.write_text(rel, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+        self.store.commit(f"{self.key}: tiers for {it.name} ({by})")
+        self.__dict__.pop("_items_cache", None)
         words = ", ".join(f"{k} {a or '—'}" for k, (_, a) in changes.items())
         return f"{it.name}: {words}", changes
 

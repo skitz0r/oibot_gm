@@ -150,6 +150,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
               <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} loading={busy === `loot${e.key}`} onClick={() => onAct(`loot${e.key}`, `/api/loot/${e.key}/open`)}>Open loot council</Button>
             </Tooltip>
           )}
+          {e.loot?.open && e.loot.bosses && <Text size="xs" c={e.loot.bosses.all_down ? "teal" : "dimmed"}>{e.loot.bosses.text}</Text>}
           {e.loot?.open && <Button size="xs" variant="light" leftSection={<IconDiamond size={13} />} component={Link} to="/loot">Loot council</Button>}
         </Group>
       </Group>

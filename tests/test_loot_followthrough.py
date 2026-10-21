@@ -516,4 +516,138 @@ def test_mcp_attendance_draft_and_export(mocked):
 
 def test_me_view_has_the_attendance_line():
     src = (Path(__file__).resolve().parents[1] / "src" / "oibot_gm" / "discord_registry.py").read_text()
-    assert 'e.add_field(name="Attendance", value=reg.attendance_text(m)' in src
+    assert 'e.add_field(name="Attendance", value=(await asyncio.to_thread(reg.attendance_text, m))' in src, \
+        "the attendance line, computed off the event loop (it parses the run files)"
+
+
+# ---------------------------------------------------------------- review fixes (G4 fixer)
+
+def test_members_get_403_on_the_tier_csv_routes(w):
+    """The CSV export and both halves of the import are officers' (who(officer=True)): a member is refused."""
+    member = as_user(w.c, w.ms[2].discord_id)
+    assert w.c.get("/api/loot/items/export", headers=member).status_code == 403
+    assert w.c.post("/api/loot/items/import", json={"csv": "item,Priest:Holy\nRobe of Tests,S\n"}, headers=member).status_code == 403
+    assert w.c.post("/api/loot/items/import", json={"csv": "item,Priest:Holy\nRobe of Tests,S\n", "preview": False, "rev": "x"}, headers=member).status_code == 403
+
+
+def test_a_grid_save_reads_the_item_under_the_config_lock(reg):
+    """Regression: Registry.set_item_tiers read the item file BEFORE taking config_lock, so a grid Save that read
+    first could overwrite a CSV import's write that landed between its read and its write. Now the read and the
+    write are one locked section (an RLock: apply_csv already holding it nests)."""
+    robe = tiered_item(reg, tiers={"Priest:Holy": "S"})
+    held = []
+    real = reg.item
+
+    def spy(*a, **k):
+        held.append(reg.config_lock._is_owned())
+        return real(*a, **k)
+
+    reg.item = spy
+    try:
+        reg.set_item_tiers(item_key(robe.id, robe.name), {"Priest:Holy": "A"}, "Mira")
+    finally:
+        del reg.item
+    assert held and all(held), "the item is read while the config lock is held"
+    assert reg.item(robe.id).tiers["Priest:Holy"] == "A"
+
+
+def test_csv_export_escapes_formula_names_and_round_trips(reg):
+    """Learned item names come from the companion's chat-log parse: a name starting with '=' (or + - @) is written
+    with a leading quote so a spreadsheet opens it as text, and the import reads the quote back off."""
+    import yaml
+
+    d = reg.store.root / reg.key / "items"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "90007.yaml").write_text(yaml.safe_dump({"id": 90007, "name": '=HYPERLINK("http://x","Robe")', "slot": "chest", "type": "misc", "boss": "@Boss", "tiers": {}}))
+    reg.__dict__.pop("_items_cache", None)
+    it = reg.item(90007)
+    text = tierdraft.export_csv(reg)
+    row = next(r for r in rows_of(text)[1:] if "HYPERLINK" in r[1])
+    assert row[1].startswith("'=") and row[2] == "'@Boss", "no cell opens as a formula"
+    assert tierdraft.csv_untext(row[1]) == it.name and tierdraft.csv_untext("'plain") == "'plain"
+    header = rows_of(text)[0]
+    edit = list(row)
+    edit[header.index("Priest:Holy")] = "S"
+    pv = tierdraft.parse_csv(reg, to_csv([header, edit]))
+    assert not pv["unknown"] and [r["name"] for r in pv["items"]] == [it.name], "the escaped name finds its item"
+
+
+def test_csv_text_escapes_every_formula_lead():
+    for lead in ("=", "+", "-", "@", "\t", "\r"):
+        assert tierdraft.csv_text(lead + "x") == "'" + lead + "x"
+        assert tierdraft.csv_untext(tierdraft.csv_text(lead + "x")) == lead + "x"
+    assert tierdraft.csv_text("Robe of Tests") == "Robe of Tests" and tierdraft.csv_text(None) == ""
+
+
+def test_the_kill_line_stamp_for_every_kind():
+    """Regression: a zoned ISO stamp rendered as a clock in the raider's offset and a string epoch as an empty '()'.
+    Both name an instant: a native <t:unix:t> stamp (feed.ts_epoch); a zone-less stamp is a 12-hour clock; junk is ''."""
+    assert _log_clock("1765000000") == "<t:1765000000:t>" and _log_clock("1765000000.5") == "<t:1765000000:t>"
+    from datetime import datetime as dt
+
+    zoned = "2026-12-09T20:15:33-08:00"
+    assert _log_clock(zoned) == f"<t:{int(dt.fromisoformat(zoned).timestamp())}:t>", "the instant, not the raider's offset"
+    assert _log_clock("2026-12-09T20:15:33") == "8:15 PM"
+    assert _log_clock("junk") == "" and _log_clock(None) == "" and _log_clock("") == ""
+    assert feed_mod.ts_epoch("20:15") is None and feed_mod.ts_epoch(1765000000) == 1765000000.0
+
+
+def test_a_kill_with_an_unreadable_stamp_has_no_empty_parentheses(council, bosses):
+    c = council
+    run(c.bot._feed_kill(c.reg, c.s, {"type": "kill", "boss": "Gatekeeper", "ts": "1765000000"}))
+    assert ("kill", "☠ **Gatekeeper** down (<t:1765000000:t>)") in c.bot.posts, "a string epoch is an instant too"
+
+
+class CouncilPosts(LootBot):
+    async def loot_notify(self, reg, session, line=None, *, kind="", drop_id=None):
+        self.posts.append((kind, line or "", session.id))
+
+
+def test_all_bosses_down_reaches_every_council_of_a_split_run(reg, rs, bosses):
+    """Regression: on a split run ALL_DOWN_LINE went only to the thread of the council whose kill completed the set;
+    every council of the run now gets it, once per thread."""
+    ev, _ = real_run(reg, rs)
+    bot = CouncilPosts(reg, rs)
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer", by_id=1))
+    other = LootSession(**{**s.model_dump(), "id": f"{ev.key}-r1", "roster_index": 1, "raid_thread_id": 7777, "bosses_done": list(BOSSES)})
+    other.attach(s.store())
+    other.save("t: roster 2's council, its bosses down")
+    bot.events[(GUILD, other.id)] = other
+    for b in BOSSES:
+        run(bot._feed_kill(reg, s, {"type": "kill", "boss": b, "ts": 1_765_000_000}))
+    downs = [p for p in bot.posts if p[0] == "all_down"]
+    assert sorted(p[2] for p in downs) == sorted([s.id, other.id]), "each council's thread, once"
+    run(bot._feed_kill(reg, s, {"type": "kill", "boss": BOSSES[-1], "ts": 1_765_000_001}))
+    assert len([p for p in bot.posts if p[0] == "all_down"]) == 2, "a duplicate report prompts nobody again"
+
+
+def test_the_web_run_card_shows_bosses(w, bosses):
+    """Design §3.5 L12: the web run card (ev_json loot) carries 'Bosses N / M' as words from the server."""
+    opened(w)
+    card = w.c.get(f"/api/run/{w.ev.key}", headers=H).json()["loot"]
+    assert card["bosses"] == {"done": 0, "total": 2, "all_down": False, "text": "Bosses 0 / 2"}
+    s = w.bot.events[(GUILD, w.ev.key)]
+    for b in BOSSES:
+        run(w.bot._feed_kill(w.reg, s, {"type": "kill", "boss": b}))
+    card = w.c.get(f"/api/run/{w.ev.key}", headers=H).json()["loot"]
+    assert card["bosses"]["all_down"] and card["bosses"]["text"].startswith("Bosses 2 / 2 · all down")
+    sheet = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "SheetCard.tsx").read_text()
+    assert "e.loot.bosses.text" in sheet, "the card prints the server's words"
+
+
+def test_members_attendance_column_route(w):
+    """Design §3.5 M43: the Members page's 'att 5/6' — officers only; the view's count (bench counts) and the loot
+    factor's once the window is tracked."""
+    from test_attendance import done_run
+
+    m = w.ms[0]
+    for i in range(3):
+        done_run(w.reg, w.rs, [m], [m], 3 + i, confirm=[(m, "yes")], n=60 + i)
+    r = w.c.get("/api/members/attendance/all", headers=H)
+    assert r.status_code == 200, r.text
+    row = r.json()["rows"][str(m.discord_id)]
+    assert row["text"] == "att 3/3" and row["loot"] == "loot 3/3" and row["attended"] == 3
+    assert r.json()["rows"][str(w.ms[5].discord_id)]["text"] is None, "nothing counted: no column text"
+    assert w.c.get("/api/members/attendance/all", headers=as_user(w.c, w.ms[1].discord_id)).status_code == 403
+    page = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "Members.tsx").read_text()
+    assert "/api/members/attendance/all" in page and "meta.viewer.officer" in page

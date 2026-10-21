@@ -332,7 +332,7 @@ class FeedMixin:
                 raid.current_boss = boss
                 raid.save(f"{raid.guild}: loot {raid.id}: {boss} down")
         if new:  # a second companion's report of the same kill adds no second line
-            await self.loot_notify(reg, raid, f"☠ **{boss}** down" + (f" ({_log_clock(ev['ts'])})" if ev.get("ts") else ""), kind="kill")
+            await self.loot_notify(reg, raid, f"☠ **{boss}** down" + (f" ({_log_clock(ev['ts'])})" if _log_clock(ev.get("ts")) else ""), kind="kill")
             await self.loot_boss_down(reg, raid, boss)  # the last boss: "All bosses down — End the run?" once (L12)
         self.loot_auto_soon(reg, raid, boss)
         return {"boss": boss}
@@ -476,14 +476,17 @@ def _game_time(ts) -> datetime | None:
 
 
 def _log_clock(ts) -> str:
-    """The companion's stamp as a person reads it: epoch seconds → a native Discord stamp (the reader's own clock); an
-    ISO chat-log stamp (the raider's PC clock, no zone) → '8:15 PM', never '20:15'."""
+    """The companion's stamp as a person reads it: an instant (epoch seconds as a number or a digit string, or a zoned
+    ISO stamp — feed.ts_epoch) → a native Discord stamp (the reader's own clock); a zone-less ISO chat-log stamp (the
+    raider's PC clock) → '8:15 PM', never '20:15'; anything else → '' (the line goes without a time)."""
     from .constants import fmt12
+    from .feed import ts_epoch
 
-    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
-        return f"<t:{int(ts)}:t>"
+    at = ts_epoch(ts)
+    if at is not None:
+        return f"<t:{int(at)}:t>"
     try:
-        return fmt12(datetime.fromisoformat(str(ts)), "%I:%M %p")
-    except ValueError:
-        return str(ts)[11:16]
+        return fmt12(datetime.fromisoformat(str(ts).strip()), "%I:%M %p")
+    except (TypeError, ValueError):
+        return ""
 

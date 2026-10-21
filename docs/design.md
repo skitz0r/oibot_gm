@@ -2326,9 +2326,18 @@ until the window holds `ATTENDANCE_MIN_RUNS` = 3 real runs or when the member ha
 ("not tracked yet — counts from the first run that ends" / "5 of 6 in the last 30 days" / "2 of 2 since Tue 9 Dec" /
 "no runs for you in the last 30 days"), computed, never a hard-coded date.
 
+**The roster solver's input (§3.1 decision 10, phase 3 row 14).** `raidcycle.players_for` fills each Player's
+`attended / attendance_total` from `Registry.attendance` (the loot factor's count, memoised per member per call) once
+`attendance_tracked` says the window is known; until then, and for a member with no counted run, 0/0. The solver's
+selection term (`roster/solver._selection_terms`) weighs 0/0 as a full ratio — the loot factor's neutral 1.0, never a
+penalty for a newcomer — and a known ratio × `attendance_weight` as before (the seat count is fixed, so a uniform value
+moves nobody).
+
 **Scoring.** `scoring.candidates(…, reg=None, attendance=None)`: with `reg`, cfg defaults to `reg.loot_cfg()`, items to
 `reg.items()` and attendance to `attendance_lookup(reg)` (Player → (attended, total) | None by Discord id, a sub kept by
-name found by character; memoised per lookup). A Player carrying its own attendance (an imported roster) keeps it.
+name found by character; memoised per lookup, the tracked check read once per lookup). For a Player with a Discord id the
+lookup decides — a seat's own count is players_for's snapshot from the lock, and runs may have ended since; unknown there
+is 0/0 (neutral). A Player with no id carrying its own attendance (an imported roster) keeps it.
 `attendance_factor(attended, total, cfg) = 1 - weight × 0.5 × (1 - ratio)` (0.5 + 0.5 × ratio at the default weight);
 unknown → 1.0 and `attendance_known False`. `loot/session.py` passes one lookup per plan / judge (`attendance_of(ctx)`).
 The Discord cards never show factor prose (iconography rule); the site's candidate table shows the factors.
@@ -2341,11 +2350,14 @@ the companion's guild's ops channel) once per (character, guild, reason). `LootS
 bosses first (unchanged; now tested). `loot.session.raid_bosses / boss_progress / run_boss_progress(reg, run_key,
 instance)` read the councils' session files: {done, total (None while the profile lists no bosses), all_down (every
 council of a split run)}. `LootMixin.loot_boss_down(reg, session, boss)` — called by `_feed_kill` on a NEW kill — posts
-`ALL_DOWN_LINE` into the thread once (only the kill that completes the set: a duplicate isn't new, a kill of an unlisted
-boss never completes it) and redraws the lock card (`refresh_cards`). The lock card (`raid_views.boss_lines`) shows
+`ALL_DOWN_LINE` once into the thread of EVERY council of the run (a split run: each roster's; one line per thread — only
+the kill that completes the set: a duplicate isn't new, a kill of an unlisted boss never completes it) and redraws the lock card (`refresh_cards`). The lock card (`raid_views.boss_lines`) shows
 "☠ Bosses 3 / 6" and, on roster 1's card when all are down, "All bosses down — End the run?"; the night row's End button
 reads "End the run" (enabled) — the same `RunButton …:end` → `end_decide` → `LootMixin.end_run`; never a second meaning
-for "end". Loot › Tonight carries `bosses_progress` per council.
+for "end". Loot › Tonight carries `bosses_progress` per council; the web run card (`ev_json` → `loot.bosses`
+{done, total, all_down, text}) prints "Bosses 3 / 6" (" · all down — End the run on the loot council") as the server's
+words. The kill line's stamp: `feed.ts_epoch` = epoch seconds for an instant (a number, a digit string, a zoned ISO
+stamp) → `<t:unix:t>`; a zone-less ISO stamp → a 12-hour clock; anything else → no time (never an empty "()").
 
 **Items page (D53 storage stays the per-file guild override).** `loot/tierdraft.py`: `draft(reg, item, provider, policy)`
 asks the `tier_draft` route (llm/provider.py ROUTES: sonnet, medium) for a `TierDraft` (structured output: spec, tier,
@@ -2360,15 +2372,22 @@ item, boss, a column per profile spec, then any wide key an item carries; a cell
 `parse_csv` (a tier sets, empty leaves, `-` clears a guild tier — a profile tier can't be cleared; rows naming one item
 twice merge, the later cell winning, listed as duplicates; unknown items and bad cells/columns listed and skipped; `rev`
 = the affected items' tiers) → `apply_csv(reg, preview, by, rev)` = `Registry.set_item_tiers` per item in one store batch,
-the rev check and the writes under one `Registry.config_lock` (a grid Save can't land between them); refused without a
-rev or when it moved. Routes: GET `/api/loot/items/export` (text/csv attachment) and POST `/api/loot/items/import`
+the rev check and the writes under one `Registry.config_lock`; refused without a rev or when it moved.
+`Registry.set_item_tiers` reads the item AND writes it under that same lock (an RLock: the import nests), so a grid Save
+and an import never interleave — each reads the tiers as they are; the grid sends only the cells the officer changed, so
+a later Save overrides an import only on those cells. Item and boss names go out through `tierdraft.csv_text` (a
+leading `= + - @` tab or CR gets a quote: learned names come from the companion's chat-log parse, and no cell may open as
+a formula — CSV injection) and come back through `csv_untext`. Routes: GET `/api/loot/items/export` (text/csv attachment) and POST `/api/loot/items/import`
 ({csv, preview (default true), rev, reweight}: preview for officers; the apply needs the MCP actor and the preview's rev — 400 without one, 409 on a stale one,
 the D12 ask when an item has awards) — both declared before `/api/loot/items/{key}`.
 
 **Surfaces.** Me › Attendance (`components/AttendanceCard.tsx`, GET `/api/me/attendance`: the sentence, the view's
 count, one row per run — day · raid · the spec icon alone · outcome); `/me view`'s Attendance field (the sentence); GET
 `/api/members/attendance?member=` (officers: + the loot factor's count, `loot` null while unknown) and MCP `get_member`'s
-`attendance`; MCP `draft_tiers(item)` and `export_tiers()`. Loot › Companions (`components/loot/Companions.tsx`, GET
+`attendance`; GET `/api/members/attendance/all` (officers: {window_days, rows: {uid: {attended, total, text "att 5/6" |
+null, loot "loot 4/6" | null}}}) → the Members page's "att 5/6" under each member's name, the loot count in its tooltip
+(members don't load it). The attendance routes and `/me view` compute off the event loop (`asyncio.to_thread`: the first
+call parses every run file). MCP `draft_tiers(item)` and `export_tiers()`. Loot › Companions (`components/loot/Companions.tsx`, GET
 `/api/loot/companions`): presence for officers; for the owner `feed.token_state(key, many=)` — which of
 OIBOT_FEED_TOKEN_<KEY> / OIBOT_FEED_TOKEN / OIBOT_FEED_BIND are set, and whether the shared token feeds this guild —
 names and yes/no only, never a value. Single-surface features in `configops.BY_DESIGN_ONLY`: items_csv, tier_draft,

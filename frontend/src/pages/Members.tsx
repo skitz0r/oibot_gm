@@ -38,7 +38,10 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const [absKey, setAbsKey] = useState(0);
   const [ask, confirmDialog] = useConfirm();
   const draftsRef = useRef<unknown>(null);
-  const load = () => api.get<MembersData>("/api/members").then(setData).catch(fail);
+  // design §3.5 M43: "att 5/6" per member (officers; GET /api/members/attendance/all — the view's count, bench counts)
+  const [att, setAtt] = useState<Record<string, { text: string | null; loot: string | null }>>({});
+  const loadAtt = () => { if (meta.viewer.officer) api.get<{ window_days: number; rows: Record<string, { text: string | null; loot: string | null }> }>("/api/members/attendance/all").then((r) => setAtt(r.rows)).catch(() => setAtt({})); };
+  const load = () => { loadAtt(); return api.get<MembersData>("/api/members").then(setData).catch(fail); };
   useEffect(() => { load(); }, []);
   useRefresh(load);
   useLive(() => { if (draftsRef.current === null) load(); }, ["member", "run:"]);  // never under an edit in progress
@@ -137,6 +140,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
         )}
       </Group>
       <Text size="xs" c="dimmed">{r.verification}</Text>
+      {att[r.uid]?.text && <Tooltip label={att[r.uid].loot ? `${att[r.uid].loot} (rostered and confirmed: the loot factor's)` : "finished runs in the loot policy's window; the bench counts here"}><Text size="xs" c="dimmed">{att[r.uid].text}</Text></Tooltip>}
       {stale[r.uid] && <Text size="xs" c="red">{stale[r.uid]}</Text>}
       {r.asks.map((a) => <Badge key={a.roster} size="xs" variant="light" color="yellow" mt={4}>confirm {a.raid}{a.when ? ` · ${a.when}` : ""}?</Badge>)}
       <Group gap={4} mt={6} wrap="wrap">

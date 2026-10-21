@@ -259,6 +259,20 @@ def ts_kind(ts: Any) -> str | None:
     return "zoned" if t.tzinfo is not None else "clock"
 
 
+def ts_epoch(ts: Any) -> float | None:
+    """The stamp as epoch seconds when it names an instant (ts_kind 'epoch' — a number or a digit string — or 'zoned'),
+    else None (a clock time or a zone-less stamp: the raider's PC clock, no instant to name)."""
+    kind = ts_kind(ts)
+    if kind == "epoch":
+        try:
+            return float(ts)
+        except (TypeError, ValueError):
+            return None
+    if kind == "zoned":
+        return datetime.fromisoformat(str(ts).strip()).timestamp()
+    return None
+
+
 def refuse_event(ev: dict) -> str | None:
     """Why the bot refuses a companion event before routing it, or None: a KILL stamped with a clock time only (an old
     companion) — the bot never guesses which zone the raider's PC was in. A kill with no stamp is taken (received now)."""

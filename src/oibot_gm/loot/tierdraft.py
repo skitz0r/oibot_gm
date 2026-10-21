@@ -28,6 +28,20 @@ LLM_DOWN = "The bot can't read sentences right now — tier this item by hand on
 CSV_FIXED = ("item_id", "item", "boss")
 CSV_MAX_BYTES = 512 * 1024
 CLEAR = ("-", "–")
+FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r")  # a spreadsheet reads a cell starting with one of these as a formula
+
+
+def csv_text(value) -> str:
+    """A free-text cell (an item or boss name — learned names come from the companion's chat-log parse, member-supplied
+    data) as the file carries it: a leading formula character is escaped with a quote, so a spreadsheet opens it as
+    text, never as a formula (CSV injection). `csv_untext` reads it back."""
+    text = str(value or "")
+    return "'" + text if text.startswith(FORMULA_LEAD) else text
+
+
+def csv_untext(text: str) -> str:
+    """The inverse of csv_text: "'=Foo" → "=Foo" (only a quote put in front of a formula character is taken off)."""
+    return text[1:] if text.startswith("'") and text[1:].startswith(FORMULA_LEAD) else text
 
 
 class SpecTier(BaseModel):
@@ -140,14 +154,14 @@ def columns(reg, items: dict) -> list[str]:
 def export_csv(reg) -> str:
     """The whole tier grid as CSV: item_id, item, boss, then one column per spec key; a cell is the tier stored under
     exactly that key (the guild's over the profile's), empty when none. Every item the council knows — tiered ones and
-    untiered ones (empty rows to fill in)."""
+    untiered ones (empty rows to fill in). Names go through csv_text (no cell opens as a formula)."""
     items = reg.items()
     cols = columns(reg, items)
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
     w.writerow(list(CSV_FIXED) + cols)
     for key, it in sorted(items.items(), key=lambda kv: (kv[1].name.lower(), kv[0])):
-        w.writerow([it.id or "", it.name, it.boss or ""] + [it.tiers.get(c, "") for c in cols])
+        w.writerow([it.id or "", csv_text(it.name), csv_text(it.boss)] + [it.tiers.get(c, "") for c in cols])
     return buf.getvalue()
 
 
@@ -195,7 +209,7 @@ def parse_csv(reg, text: str) -> dict:
             continue
         rows += 1
         cell = (lambda i: row[i].strip() if i is not None and i < len(row) else "")
-        iid, name = cell(i_id), cell(i_name)
+        iid, name = cell(i_id), csv_untext(cell(i_name))
         it = reg.item(int(iid) if iid.isdigit() else None, name or None)
         if it is None:
             unknown.append(name or iid or f"row {n}")

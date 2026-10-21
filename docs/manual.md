@@ -164,6 +164,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   runs you were rostered on — and on a regular raid confirmed — count, and attendance counts in loot scores only once
   the guild has three finished raids in the window (until then it is neutral for everyone). A pickup run counts only
   for those who joined it. Before the first raid ends it reads *"not tracked yet — counts from the first run that ends"*.
+  Officers see each member's count as *att 5/6* under their name on the Members page (the loot count in its tooltip),
+  and once the guild has three finished raids in the window the roster builder prefers better attendance too — someone
+  with no finished raid yet is treated as full attendance, never held back for being new.
 - **DMs on or off**: `/me dms on|off`, the switch on the Me page, or "turn my DMs off". The bot says it in one sentence
   everywhere: *"With DMs off, Confirm and fill asks wait on your Me page and the sheet; nothing is sent anywhere else."*
 - **Wishlist**: `/me wishlist` — per character, up to 10 items in the order you want them, main spec or offspec, a
@@ -1387,8 +1390,9 @@ breaks) or **disconnected**, in the thread and at the top of Loot › Tonight.
 
 **Kills and stamps.** The companion sends every event's time as an instant (it reads the chat log's clock on the PC
 that wrote it), so the thread's *"☠ Gatekeeper down (8:15 PM)"* shows in each reader's own time zone. Each kill counts
-toward **Bosses 3 / 6** on the lock card and Loot › Tonight, and a killed boss's drops are judged first. When the
-raid's **last boss** goes down the thread says once *"All bosses down — End the run?"* and the lock card shows the same
+toward **Bosses 3 / 6** on the lock card, the run's card on the Rosters page and Loot › Tonight, and a killed boss's
+drops are judged first. When the raid's **last boss** goes down the thread says once *"All bosses down — End the run?"*
+(on a split run, each roster's thread — once every roster's last boss is down) and the lock card shows the same
 line with its End button reading **End the run** — the same End as always (the confirm screen first, then the run and
 its council close). A raid whose bosses the game profile doesn't list yet shows *Bosses 3* and never asks. A companion
 older than the one in the repo sends kills with a clock time only; the bot refuses those (it won't guess which time zone
@@ -1471,7 +1475,9 @@ file a tier sets a cell, an empty cell leaves it as it is, and `-` clears a tier
 would change per item, rows that name the same item twice (merged — the later row wins), items the council doesn't know
 (skipped until they first drop) and cells that aren't a tier; **Import** writes exactly the preview you saw, in one go — refused with
 *"Tiers changed since this preview"* if someone saved the grid meanwhile — and asks the same re-weight question when an item
-already has awards. MCP `export_tiers` returns the file.
+already has awards. MCP `export_tiers` returns the file. An item or boss name that starts with `=`, `+`, `-` or `@`
+is written with a leading `'` so a spreadsheet shows it as text instead of running it as a formula; the import reads it
+back as the same item.
 
 **Wishlists**: who wants each item most, and every member's lists; **Import from ThatsMyBIS** takes a TMB wishlist
 export (preview first; per character in TMB's order; an item already on someone's list stays as it is; a re-import

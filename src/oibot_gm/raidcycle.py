@@ -1881,7 +1881,21 @@ def health(reg: Registry, ev: RaidEvent, team: dict) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------- lock → propose
 
 def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
+    """The run's signups as solver Players (first come = when the Join began), each carrying its member's attendance
+    from run history (Registry.attendance over the loot policy's window, every character rolled up by Discord id;
+    design §3.1 decision 10, D49) — left 0/0 = unknown (the solver weighs it neutral) while the window holds fewer than
+    ATTENDANCE_MIN_RUNS real runs, or for a member with none counted."""
     players = []
+    tracked = getattr(reg, "attendance_tracked", None)
+    known = bool(tracked and tracked()["known"])
+    seen: dict = {}
+
+    def attendance_of(uid) -> tuple[int, int]:
+        if not known or uid is None:
+            return 0, 0
+        if uid not in seen:
+            seen[uid] = reg.attendance(uid)
+        return seen[uid]
     for i, s in enumerate(sorted(ev.signups.values(), key=lambda s: s.order_at)):  # first come = when the Join began
         if s.status == "out":
             continue
@@ -1895,7 +1909,9 @@ def players_for(reg: Registry, ev: RaidEvent) -> list[Player]:
             alt = next((c for c in (m.active() if m else []) if not c.is_main and reg.profile.spec(c.cls, c.spec).role == "tank"), None)
             if alt:
                 tank_alt = f"{alt.label} ({alt.cls} {alt.spec})"
-        players.append(Player(signup_name=s.display_name, discord_id=s.discord_id, pos=i + 1, status="signed" if s.status == "in" else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, rank=rank, tank_capable_main=tank_alt))
+        attended, total = attendance_of(s.discord_id)
+        players.append(Player(signup_name=s.display_name, discord_id=s.discord_id, pos=i + 1, status="signed" if s.status == "in" else "bench", cls=s.cls, spec=s.spec, role=s.role, offspec=s.offspec, character=s.character, map_confidence="high", unmapped=False, rank=rank, tank_capable_main=tank_alt,
+                              attended=attended, attendance_total=total))
     return players
 
 

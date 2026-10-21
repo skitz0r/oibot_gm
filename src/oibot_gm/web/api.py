@@ -862,9 +862,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         sessions = run_sessions(reg, ev)
         if not sessions:
             return {"open": False, "councils": 0, "thread": None, "awards": 0, "pending": 0, "reasons": 0, "may_open": ev.state == "locked"}
+        from ..raid_views import boss_progress
+
+        prog = boss_progress(reg, ev)  # "Bosses 3 / 6" on the run card (design §3.5 L12): the slowest council's kills
         return {"open": True, "councils": len(sessions), "thread": discord_url(reg, next((s.raid_thread_id for s in sessions if s.raid_thread_id), None)),
                 "awards": sum(1 for s in sessions for a in s.awards if not a.void), "pending": sum(len(s.proposals) for s in sessions),
-                "reasons": sum(len(s.pending_reasons) for s in sessions), "may_open": False}
+                "reasons": sum(len(s.pending_reasons) for s in sessions), "may_open": False,
+                "bosses": {"done": prog["done"], "total": prog["total"], "all_down": prog["all_down"],
+                           "text": f"Bosses {prog['done']}" + (f" / {prog['total']}" if prog["total"] else "")
+                                   + (" · all down — End the run on the loot council" if prog["all_down"] else "")} if prog else None}
 
     def health_json(reg, ev, t) -> dict:
         """The open sheet's health card as data (MCP get_run, the help context): headcount against the seats the run

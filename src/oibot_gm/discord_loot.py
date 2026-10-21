@@ -1038,7 +1038,7 @@ class LootMixin:
 
     async def loot_boss_down(self, reg, session: LootSession, boss: str) -> bool:
         """After a NEW kill of `boss` was recorded on `session` (design §3.5 L12): when it brings down the raid's last
-        boss — every council's, on a split run — the council's thread gets ALL_DOWN_LINE once and the run's lock card is
+        boss — every council's, on a split run — EVERY council's thread of the run gets ALL_DOWN_LINE once and the run's lock card is
         redrawn with "All bosses down — End the run?" (its End button: the decide screen, then end_run — never a second
         meaning for "end"). Once: only the kill that completes the set prompts (a duplicate report is not new, a kill of
         a boss the raid doesn't list never completes it). Returns True when it prompted."""
@@ -1052,7 +1052,16 @@ class LootMixin:
         prog = ls.run_boss_progress(reg, ev.key, ev.instance)
         if not prog or not prog["all_down"]:
             return False
-        await self.loot_notify(reg, session, self.ALL_DOWN_LINE, kind="all_down")
+        # every council of the run hears it (a split run: each roster's thread), each thread once
+        councils = [session] + [s for s in getattr(self, "events", {}).values()
+                                if s is not session and s.guild == reg.key and s.run_key == ev.key and s.origin == "raid"]
+        told: set = set()
+        for s in councils:
+            where = s.raid_thread_id or ("session", s.id)
+            if where in told:
+                continue
+            told.add(where)
+            await self.loot_notify(reg, s, self.ALL_DOWN_LINE, kind="all_down")
         refresh = getattr(self, "refresh_cards", None)
         if refresh is not None:
             try:

@@ -131,7 +131,9 @@ export interface Sheet {
    *  `release_named` is the release sentence about one member with `{name}` where the name goes (the board substitutes the dragged member) */
   consequences?: { lock: string; cancel: string; clear: string; release: string; release_named?: string };
   /** the run's loot council at a glance (web/api.py loot_json): `may_open` = locked with no council yet */
-  loot?: { open: boolean; councils: number; thread: string | null; awards: number; pending: number; reasons: number; may_open: boolean };
+  loot?: { open: boolean; councils: number; thread: string | null; awards: number; pending: number; reasons: number; may_open: boolean;
+    /** "Bosses 3 / 6" (design §3.5 L12): the slowest council's kills against the raid's bosses (total null while unlisted) */
+    bosses?: { done: number; total: number | null; all_down: boolean; text: string } | null };
 }
 export interface RaidRuns {
   id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null;
