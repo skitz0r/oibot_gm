@@ -248,17 +248,21 @@ def parse_csv(reg, text: str) -> dict:
 
 def apply_csv(reg, preview: dict, by: str, rev: str | None) -> list[tuple[str, str, dict]]:
     """Write a parsed preview: per item Registry.set_item_tiers (the grid's verb) inside one store batch — one commit.
-    `rev` is the preview's: when any affected item's tiers moved since, RegistryError and nothing is written. Returns
-    [(item key, the change line, {spec key: (before, after)})] for items that changed."""
-    items = reg.items()
+    `rev` is the preview's and is required: None, or any affected item's tiers moved since, raises RegistryError and
+    nothing is written. The rev check and every write run under ONE Registry.config_lock, so a grid Save can't land
+    between the check and the batch. Returns [(item key, the change line, {spec key: (before, after)})] for items that
+    changed."""
+    if not rev:
+        raise RegistryError("Preview the file first — an import applies the preview it was shown (its rev).")
     keys = [r["key"] for r in preview["items"]]
-    if rev is not None and _rev(items, keys) != rev:
-        raise RegistryError("Tiers changed since this preview (someone saved the grid) — preview the file again.")
     done = []
-    with reg.store.batch(f"{reg.key}: tiers imported from a CSV ({by}, {len(keys)} item(s))"):
-        for r in preview["items"]:
-            cleared = set(r.get("clear") or [])
-            line, changes = reg.set_item_tiers(r["key"], {sk: (None if sk in cleared else after) for sk, (_b, after) in r["changes"].items()}, by)
-            if changes:
-                done.append((r["key"], line, changes))
+    with reg.config_lock:
+        if _rev(reg.items(), keys) != rev:
+            raise RegistryError("Tiers changed since this preview (someone saved the grid) — preview the file again.")
+        with reg.store.batch(f"{reg.key}: tiers imported from a CSV ({by}, {len(keys)} item(s))"):
+            for r in preview["items"]:
+                cleared = set(r.get("clear") or [])
+                line, changes = reg.set_item_tiers(r["key"], {sk: (None if sk in cleared else after) for sk, (_b, after) in r["changes"].items()}, by)
+                if changes:
+                    done.append((r["key"], line, changes))
     return done

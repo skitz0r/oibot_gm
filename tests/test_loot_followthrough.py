@@ -38,7 +38,7 @@ from oibot_gm.loot import tierdraft
 from oibot_gm.loot.session import Drop, LootSession
 from oibot_gm.loot_ops import guild_ctx
 from oibot_gm.raid_buttons import RunButton
-from oibot_gm.registry import item_key
+from oibot_gm.registry import RegistryError, item_key
 from oibot_gm.web import api_loot
 
 BOSSES = ["Gatekeeper", "Warden of Tests"]
@@ -400,6 +400,36 @@ def test_csv_round_trip_dedupe_unknown_and_the_rev(w):
     # and exporting again round-trips the new grid
     pv = w.c.post("/api/loot/items/import", json={"csv": w.c.get("/api/loot/items/export", headers=H).text}, headers=H).json()["preview"]
     assert pv["cells"] == 0
+
+
+def test_csv_apply_needs_the_rev_and_checks_it_under_the_config_lock(w):
+    """Regression: the rev check and the item writes run under ONE Registry.config_lock (a grid Save can't land between
+    them), and an apply without the preview's rev is refused — by the route (400) and by tierdraft.apply_csv."""
+    robe = tiered_item(w.reg, tiers={"Priest:Holy": "S"})
+    header = rows_of(w.c.get("/api/loot/items/export", headers=H).text)[0]
+    row = [""] * len(header)
+    row[1], row[header.index("Priest:Holy")] = "Robe of Tests", "A"
+    text = to_csv([header, row])
+    r = w.c.post("/api/loot/items/import", json={"csv": text, "preview": False}, headers=ACTOR)
+    assert r.status_code == 400 and "Preview the file first" in r.json()["error"]
+    assert w.reg.item(robe.id).tiers["Priest:Holy"] == "S", "no rev: nothing written"
+    pv = tierdraft.parse_csv(w.reg, text)
+    with pytest.raises(RegistryError, match="Preview the file first"):
+        tierdraft.apply_csv(w.reg, pv, "Officer", None)
+    held = []
+    real = tierdraft._rev
+
+    def spy(items, keys):
+        held.append(w.reg.config_lock._is_owned())
+        return real(items, keys)
+
+    tierdraft._rev = spy
+    try:
+        done = tierdraft.apply_csv(w.reg, pv, "Officer", pv["rev"])
+    finally:
+        tierdraft._rev = real
+    assert held == [True], "the rev is checked while the config lock is held"
+    assert done and w.reg.item(robe.id).tiers["Priest:Holy"] == "A"
 
 
 def test_csv_import_asks_to_reweight_past_awards(w):

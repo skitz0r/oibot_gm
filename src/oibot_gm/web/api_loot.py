@@ -765,7 +765,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
     async def loot_items_import(request: Request):
         """Import a tier CSV: {csv, preview?: true (default), rev?, reweight?}. Preview writes nothing and answers what
         would change per item, duplicates (merged), unknown items, bad cells, the items that already have awards and a
-        `rev`. Apply (`preview: false`) needs that `rev` (a tier changed since → 409, preview again); with past awards
+        `rev`. Apply (`preview: false`) needs that `rev` (none → 400; a tier changed since → 409, preview again); with past awards
         and no `reweight` answer nothing is written and the reply asks (D12, default no). From MCP the apply is a
         decision: X-Oibot-Actor (D8)."""
         from ..loot import tierdraft
@@ -775,6 +775,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         applying = d.get("preview", True) is False
         if applying:
             need_actor(v, "Importing tiers")
+            if not isinstance(d.get("rev"), str) or not d["rev"]:
+                return JSONResponse({"error": "Preview the file first — an import applies the preview it was shown (send its rev)."}, status_code=400)
         text = d.get("csv")
         if not isinstance(text, str) or not text.strip():
             raise HTTPException(400, "csv is the file's text (export the grid first to see the columns)")

@@ -158,7 +158,8 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
 - **Attendance**: *"5 of 6 in the last 30 days"* in `/me view`, and the Me page's **Attendance** card lists each run —
   day, raid, the character's spec icon and what happened (rostered, benched, away, can't make it, no thanks, no
   answer). It counts finished raids only, over the window your loot policy uses (30 days unless the guild changed it):
-  a run counts when you were one of its regulars or joined it, and a day you marked away is shown but never counted.
+  a run counts when you were one of its regulars or joined it, and a day you marked away **before the raid started** is
+  shown but never counted (an absence added after a raid you missed doesn't take the miss away).
   Every character of yours counts toward the same number. Rostered and benched both count here; for **loot** only
   runs you were rostered on — and on a regular raid confirmed — count, and attendance counts in loot scores only once
   the guild has three finished raids in the window (until then it is neutral for everyone). A pickup run counts only
@@ -1468,8 +1469,8 @@ suggestion; only `tier_item` saves.
 one column per spec (`Priest:Holy`; a whole class `Priest:*` or a role `role:tank` only when some item has one). In the
 file a tier sets a cell, an empty cell leaves it as it is, and `-` clears a tier the guild set. **Preview** shows what
 would change per item, rows that name the same item twice (merged — the later row wins), items the council doesn't know
-(skipped until they first drop) and cells that aren't a tier; **Import** writes it in one go — refused with *"Tiers
-changed since this preview"* if someone saved the grid meanwhile — and asks the same re-weight question when an item
+(skipped until they first drop) and cells that aren't a tier; **Import** writes exactly the preview you saw, in one go — refused with
+*"Tiers changed since this preview"* if someone saved the grid meanwhile — and asks the same re-weight question when an item
 already has awards. MCP `export_tiers` returns the file.
 
 **Wishlists**: who wants each item most, and every member's lists; **Import from ThatsMyBIS** takes a TMB wishlist

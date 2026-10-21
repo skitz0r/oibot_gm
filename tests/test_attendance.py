@@ -70,15 +70,39 @@ def test_ad_hoc_counts_rostered_and_only_for_those_who_joined(reg, rs):
     assert reg.attendance(c) == (0, 0), "never joined the pickup: it was never theirs to miss"
 
 
+def away_before(reg, member, ev, days_before: float = 2):
+    """Record an absence for `ev`'s day that was on file `days_before` days before the run started (notice given)."""
+    reg.add_absence(member.discord_id, ev.start.date().isoformat(), None, "trip", by="t")
+    m = reg.members[member.discord_id]
+    m.absences[-1].created_at = (ev.start - timedelta(days=days_before)).isoformat()
+    reg.save(m, "t: absence on file before the run")
+
+
 def test_away_runs_are_shown_and_never_counted(reg, rs):
     a, b = reg.test_members()[:2]
     ev = done_run(reg, rs, [a], [a], 6, regulars=[a, b], confirm=[(a, "yes")])
-    reg.add_absence(b.discord_id, ev.start.date().isoformat(), None, "trip", by="t")
+    away_before(reg, b, ev)
     assert reg.attendance(b) == (0, 0)
     assert [r["outcome"] for r in reg.attendance_runs(b)] == ["away"]
     other = done_run(reg, rs, [a], [a], 9, regulars=[a, b], confirm=[(a, "yes")], n=1)
     assert reg.attendance(b) == (0, 1), "a regular who didn't answer and wasn't away: counted, missed"
     assert {r["key"]: r["outcome"] for r in reg.attendance_runs(b)}[other.key] == "no_answer"
+
+
+def test_an_absence_recorded_after_the_run_is_no_notice(reg, rs):
+    """D49 'not away WITH NOTICE': a no-show who files an absence for the day afterwards keeps the miss in the total
+    (else writing it up the next day would raise their loot attendance factor)."""
+    a, b = reg.test_members()[:2]
+    ev = done_run(reg, rs, [a], [a], 6, regulars=[a, b], confirm=[(a, "yes")])
+    reg.add_absence(b.discord_id, ev.start.date().isoformat(), None, "forgot", by="t")  # created now: after the run
+    assert reg.members[b.discord_id].absent_on(ev.start.date().isoformat()) is not None
+    assert reg.attendance(b) == (0, 1), "the run still counts: the absence came after it"
+    assert [r["outcome"] for r in reg.attendance_runs(b)] == ["no_answer"]
+    # the same absence on file before the start is notice: shown, never counted
+    m = reg.members[b.discord_id]
+    m.absences[-1].created_at = (ev.start - timedelta(hours=1)).isoformat()
+    reg.save(m, "t: backdate")
+    assert reg.attendance(b) == (0, 0) and [r["outcome"] for r in reg.attendance_runs(b)] == ["away"]
 
 
 def test_test_runs_and_runs_without_seats_are_left_out(reg, rs):

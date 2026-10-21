@@ -1751,8 +1751,8 @@ class Registry:
         """One done run as `m`'s attendance sees it, or None when the run wasn't theirs to attend (D49):
         - in the pool: a regular of the run when it opened (recurring), or they Joined / Benched, held a seat or called
           out; an ad hoc run counts only for those who joined it (No thanks to a pickup costs nothing);
-        - away = an absence on file for the day (the sheet's 'away' answer, or the member's absence record): shown,
-          never counted;
+        - away = an absence on file for the day BEFORE the run started (the sheet's 'away' answer, or an absence record
+          created before the start — `_away_with_notice`): shown, never counted; one recorded afterwards is no notice;
         - attended (the loot factor's): rostered when the run ended AND, on a recurring run that asks for confirmations,
           confirmed (a seat that came after the lock — a fill yes, an officer's add — carries no placement ask: the yes
           was the commitment). The attendance VIEW also counts the bench (`attended_view`)."""
@@ -1767,8 +1767,7 @@ class Registry:
         regular = (not adhoc) and uid in (ev.regulars or [])
         if not (regular or joined or seat is not None or called):
             return None
-        day = ev.start.date().isoformat()
-        away = bool(sg and sg.source == "absence") or m.absent_on(day) is not None
+        away = bool(sg and sg.source == "absence") or self._away_with_notice(m, ev)
         if seat is not None:
             p = seat[1]
             character, cls, spec = p.character or p.signup_name, p.cls, p.spec
@@ -1804,6 +1803,26 @@ class Registry:
                 "kind": "adhoc" if adhoc else "recurring", "outcome": outcome, "counted": counted,
                 "attended": counted and outcome == "rostered", "attended_view": counted and outcome in ("rostered", "benched"),
                 "character": character, "cls": cls, "spec": spec}
+
+    @staticmethod
+    def _away_with_notice(m: "Member", ev) -> bool:
+        """Whether `m` was away WITH NOTICE for `ev` (D49): an absence covering the run's day that was on file before the
+        run started. An absence recorded afterwards (a no-show written up the next day) never takes the miss out of the
+        total. A legacy record without a readable `created_at` counts as given in time."""
+        day = ev.start.date().isoformat()
+        start = ev.start if ev.start.tzinfo else ev.start.replace(tzinfo=timezone.utc)
+        for a in m.absences:
+            if not (a.start <= day <= a.end):
+                continue
+            try:
+                made = datetime.fromisoformat(a.created_at)
+            except (TypeError, ValueError):
+                return True
+            if made.tzinfo is None:
+                made = made.replace(tzinfo=timezone.utc)
+            if made <= start:
+                return True
+        return False
 
     def _attendance_member(self, member) -> "Member | None":
         if isinstance(member, Member):

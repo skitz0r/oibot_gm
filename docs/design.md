@@ -2312,7 +2312,9 @@ DONE runs (`Registry.done_runs()`: `<guild>/raids/*.json` parsed and cached agai
 cancelled, test runs and runs nobody held a seat on are left out — `attendance_runs_in`). A run is the member's when they
 were a regular of it at open (recurring: `ev.regulars`), joined it (Join / Bench), held a seat or called out; an ad hoc
 run counts only for those who joined (No thanks to a pickup costs nothing). Away = the sheet's absence answer
-(`Signup.source == "absence"`) or `Member.absent_on(day)`: shown, never counted (an ad hoc away row is dropped). Attended
+(`Signup.source == "absence"`) or an absence covering the day that was on file BEFORE the run started
+(`Registry._away_with_notice`: `Absence.created_at <= ev.start` — D49 "not away with notice"; an absence written up
+after a no-show leaves the miss in the total): shown, never counted (an ad hoc away row is dropped). Attended
 (the loot factor's) = holding a seat when the run ended and, on a recurring run with confirmations, a placement ask on the
 run's roster key answered yes — a seat with no ask (a fill yes, an officer's add after the lock) counts, the yes was the
 commitment; an unanswered or declined ask is `unconfirmed`. `bench=True` (the VIEW: Me card, `/me view`) also counts the
@@ -2358,8 +2360,9 @@ item, boss, a column per profile spec, then any wide key an item carries; a cell
 `parse_csv` (a tier sets, empty leaves, `-` clears a guild tier — a profile tier can't be cleared; rows naming one item
 twice merge, the later cell winning, listed as duplicates; unknown items and bad cells/columns listed and skipped; `rev`
 = the affected items' tiers) → `apply_csv(reg, preview, by, rev)` = `Registry.set_item_tiers` per item in one store batch,
-refused when the rev moved. Routes: GET `/api/loot/items/export` (text/csv attachment) and POST `/api/loot/items/import`
-({csv, preview (default true), rev, reweight}: preview for officers; the apply needs the MCP actor, 409 on a stale rev,
+the rev check and the writes under one `Registry.config_lock` (a grid Save can't land between them); refused without a
+rev or when it moved. Routes: GET `/api/loot/items/export` (text/csv attachment) and POST `/api/loot/items/import`
+({csv, preview (default true), rev, reweight}: preview for officers; the apply needs the MCP actor and the preview's rev — 400 without one, 409 on a stale one,
 the D12 ask when an item has awards) — both declared before `/api/loot/items/{key}`.
 
 **Surfaces.** Me › Attendance (`components/AttendanceCard.tsx`, GET `/api/me/attendance`: the sentence, the view's
