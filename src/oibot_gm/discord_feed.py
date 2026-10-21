@@ -333,6 +333,7 @@ class FeedMixin:
                 raid.save(f"{raid.guild}: loot {raid.id}: {boss} down")
         if new:  # a second companion's report of the same kill adds no second line
             await self.loot_notify(reg, raid, f"☠ **{boss}** down" + (f" ({_log_clock(ev['ts'])})" if ev.get("ts") else ""), kind="kill")
+            await self.loot_boss_down(reg, raid, boss)  # the last boss: "All bosses down — End the run?" once (L12)
         self.loot_auto_soon(reg, raid, boss)
         return {"boss": boss}
 

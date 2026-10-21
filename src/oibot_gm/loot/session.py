@@ -371,6 +371,50 @@ class LootSession(BaseModel):
         return bool(c["proposals"] or c["undistributed"] or self.distributing)
 
 
+# ---------------------------------------------------------------- boss kills (design §3.5 L12)
+
+def raid_bosses(reg, instance: str | None) -> list[str]:
+    """The raid's bosses by name from its definition (Registry.raid_def — profile + guild); [] when the profile lists
+    none yet (WoW: Forever before unlock): then progress has no denominator and "all bosses down" never fires."""
+    try:
+        return [str(b["name"]) for b in (reg.raid_def(instance).get("bosses") or []) if isinstance(b, dict) and b.get("name")]
+    except Exception:  # noqa: BLE001 — an instance the profile no longer has
+        return []
+
+
+def boss_progress(bosses_done: list[str], bosses: list[str]) -> dict:
+    """{done, total, all_down}: the raid's bosses killed (a kill the profile doesn't list counts only without a list),
+    total = len(bosses) or None (unknown); all_down only with a known list, every boss of it down."""
+    if bosses:
+        names = {b.lower() for b in bosses}
+        done = len({b.lower() for b in bosses_done if b and b.lower() in names})
+        return {"done": done, "total": len(bosses), "all_down": done >= len(bosses)}
+    return {"done": len({b.lower() for b in bosses_done if b}), "total": None, "all_down": False}
+
+
+def run_boss_progress(reg, run_key: str, instance: str | None) -> dict | None:
+    """The kills of a run's council(s), read from their session files (<guild>/events/<run>.json, and <run>-r<N>.json
+    per roster of a split run): {done, total, all_down, rosters: {roster index | None: progress}} — the run's
+    done/all_down are its slowest council's (a split run is over when every roster's last boss is down). None when
+    the run has no council (nothing to show)."""
+    d = reg.store.root / reg.key / "events"
+    per: dict = {}
+    for f in ([d / f"{run_key}.json"] + sorted(d.glob(f"{run_key}-r*.json"))) if d.is_dir() else []:
+        if not f.exists():
+            continue
+        try:
+            doc = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if doc.get("origin") != "raid" or doc.get("run_key", doc.get("id")) != run_key:
+            continue
+        per[doc.get("roster_index")] = boss_progress(list(doc.get("bosses_done") or []), raid_bosses(reg, instance))
+    if not per:
+        return None
+    slow = min(per.values(), key=lambda p: p["done"])
+    return {**slow, "all_down": all(p["all_down"] for p in per.values()), "rosters": per}
+
+
 # ---------------------------------------------------------------- revs (computed, never stored)
 
 def _sha(blob) -> str:
@@ -418,6 +462,13 @@ def _award(item: Item, cands, who: str, raid_date: date, instance: str, boss: st
                      received=raid_date, instance=instance, boss=boss, drop_id=drop_id, tiered=bool(item.tiers))
 
 
+def attendance_of(ctx):
+    """The attendance lookup a context's candidate tables use (scoring.attendance_lookup over its Registry: done runs,
+    D49); None for a context without a registry (unknown → neutral)."""
+    reg = getattr(ctx, "reg", None)
+    return scoring.attendance_lookup(reg) if reg is not None and hasattr(reg, "attendance_known") else None
+
+
 def base_awards(ctx, session: LootSession) -> list[LootAward]:
     return [a for a in ctx.ledger if not a.void] + [a for a in session.awards if not a.void]
 
@@ -425,6 +476,7 @@ def base_awards(ctx, session: LootSession) -> list[LootAward]:
 def provisional_awards(ctx, session: LootSession, roster: list[Player], exclude: set[str], raid_date: date) -> list[LootAward]:
     """Earlier pending picks count as provisional awards (decision 6): the effective recipient of every pending
     proposal not being judged now."""
+    att = attendance_of(ctx)
     out = []
     base = base_awards(ctx, session)
     for p in session.proposals:
@@ -434,7 +486,7 @@ def provisional_awards(ctx, session: LootSession, roster: list[Player], exclude:
         if d is None:
             continue
         item = drop_item(ctx, d)
-        cands = scoring.candidates(ctx.profile, item, roster, base + out, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items)
+        cands = scoring.candidates(ctx.profile, item, roster, base + out, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=att)
         a = _award(item, cands, p.to, raid_date, session.raid_name, d.boss, d.drop_id)
         if a:
             out.append(a)
@@ -453,10 +505,10 @@ def plan(ctx, session: LootSession, roster: list[Player], drop_ids: list[str]) -
     base = base_awards(ctx, session) + provisional_awards(ctx, session, roster, set(items), raid_date)
     fixed = {p.drop_id: p.override.to for p in session.proposals if p.drop_id in items and p.override}
     kill_order = [d.drop_id for d in drops]
-    cfg, lookup = ctx.loot_cfg, ctx.items
+    cfg, lookup, att = ctx.loot_cfg, ctx.items, attendance_of(ctx)
 
     def cands_for(did: str, extra: list[LootAward]):
-        return scoring.candidates(ctx.profile, items[did], roster, base + extra, ctx.wishlists, raid_date, cfg=cfg, items=lookup)
+        return scoring.candidates(ctx.profile, items[did], roster, base + extra, ctx.wishlists, raid_date, cfg=cfg, items=lookup, attendance=att)
 
     impact = {did: max((c.upgrade_value for c in cands_for(did, []) if not c.already_has), default=0.0) for did in kill_order}
     mode = (cfg.get("distribution") or {}).get("order", "impact")
@@ -544,7 +596,7 @@ def run_distribution(ctx, snap: LootSession, roster: list[Player], drop_ids: lis
     actual: list[LootAward] = []
     for p in sorted(results, key=lambda p: p.order):
         item, d = items[p.drop_id], snap.drop(p.drop_id)
-        fresh = scoring.candidates(ctx.profile, item, roster, pl["base"] + actual, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items)
+        fresh = scoring.candidates(ctx.profile, item, roster, pl["base"] + actual, ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=attendance_of(ctx))
         top = next((c for c in fresh if not c.already_has), None)
         if top and not p.override and p.award_to != top.character and not p.result.recommendation.deviates_from_score:
             rank = next((i for i, c in enumerate(fresh, 1) if c.character == p.award_to), None)
@@ -629,7 +681,7 @@ def make_award(ctx, session: LootSession, d: Drop, to: str, roster: list[Player]
     item = drop_item(ctx, d)
     raid_date = date.fromisoformat(session.date)
     if cands is None:
-        cands = scoring.candidates(ctx.profile, item, roster, base_awards(ctx, session), ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items)
+        cands = scoring.candidates(ctx.profile, item, roster, base_awards(ctx, session), ctx.wishlists, raid_date, cfg=ctx.loot_cfg, items=ctx.items, attendance=attendance_of(ctx))
     who, uid, seat = recipient_of(reg, roster, to) if to != DISENCHANT else (DISENCHANT, None, None)
     c = next((c for c in cands if c.character.lower() == who.lower()), None)
     if to == DISENCHANT:

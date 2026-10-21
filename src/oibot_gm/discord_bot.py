@@ -22,7 +22,7 @@ from .discord_loot_surface import LootSurfaceMixin
 from .discord_policy import CfgApplyButton, PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
-from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_tokens
+from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_tokens, ops_warner as feed_ops_warner
 from .discord_pool import AbsenceButton, AbsencesMixin, LootLogMixin, LootWishButton, SetupMixin
 from .flows_test import TestAnswerButton
 from .discord_news import NewsMixin, ProposalButton
@@ -677,6 +677,7 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
             self.feed = FeedServer(self.handle_feed_event, token, bind,
                                    auth=lambda t: feed_authorize(t, token, per_guild, lambda: list(self.registries.by_key)))
             self.feed.on_disconnect = self.feed_disconnected
+            self.feed.on_warn = feed_ops_warner(self)  # "companion too old" (a clock-only kill stamp): once per companion, to ops
             await self.feed.start()
         else:
             print("loot feed disabled (set OIBOT_FEED_TOKEN or OIBOT_FEED_TOKEN_<KEY>, and OIBOT_FEED_BIND)")

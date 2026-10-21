@@ -8,7 +8,11 @@ Protocol (JSON text frames):
   client → {"type":"kill","boss":"Supremus","ts":"…","idem":"…"}
   client → {"type":"heartbeat","ts":"…"}
   server → {"type":"ack","idem":"…","session":"<guild>:<run>"} | {"type":"error","idem":"…","message":"…"} | {"type":"welcome","routes_to":"<run>","session":"<guild>:<run>"}
-`ts` may be epoch seconds (preferred: the bot renders a native Discord stamp) or the chat log's ISO stamp. The companion
+`ts` is epoch seconds (the companion turns the chat log's local stamp into one on the raider's own PC, whose clock and
+zone wrote it; the bot renders a native Discord stamp, <t:unix:t>, in each reader's own zone). An ISO stamp WITH an offset
+is read as is. A KILL whose `ts` is a clock time only ('20:15', or a zone-less ISO stamp — an old companion) is refused
+rather than guessed into the guild's zone (design §3.5 L12): the companion gets an error naming the update, the guild's
+ops channel one "companion too old" warn per companion (`on_warn`). The companion
 keeps an event until its ack and re-sends it after a reconnect with the same idem; the bot dedupes per loot SESSION
 (LootSession.seen_idem), not per connection, so a re-send is acked ("dup") and never applied twice. An error reply is
 not an ack (the companion may re-send). Presence per companion: live · quiet (no event for QUIET_AFTER_S) · disconnected.
@@ -24,12 +28,15 @@ from __future__ import annotations
 import asyncio
 import hmac
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
 from aiohttp import web
+
+log = logging.getLogger(__name__)
 
 Handler = Callable[[dict[str, Any], "Companion"], Awaitable[dict[str, Any] | None]]
 QUIET_AFTER_S = 120  # no event for this long: "quiet" (breaks and trash pulls are quiet every night — no line, amber)
@@ -75,6 +82,8 @@ class FeedServer:
         self.companions: dict[str, Companion] = {}  # peer -> companion
         self.gone: dict[tuple, Companion] = {}  # (character, guild) -> a companion whose socket closed (presence: disconnected)
         self.on_disconnect: Callable[["Companion"], Awaitable[None]] | None = None  # the bot's thread line
+        self.on_warn: Callable[["Companion", str], Awaitable[None]] | None = None  # the bot's ops warn (ops_warner)
+        self.warned: set[tuple] = set()  # (character, guild, why): a warn goes out once per companion
         self._runner: web.AppRunner | None = None
 
     async def start(self) -> None:
@@ -118,6 +127,11 @@ class FeedServer:
                 continue
             comp.touch()
             idem = ev.get("idem")
+            refusal = refuse_event(ev)
+            if refusal is not None:  # not an ack: the companion prints it (and gives up after its retry window)
+                await ws.send_json({"type": "error", "idem": idem, "message": refusal})
+                await self.warn_once(comp, "too_old", f"companion {comp.character} ({comp.client}) is too old: {refusal}")
+                continue
             try:
                 reply = await self.handler(ev, comp) or {}
                 if reply.get("error"):  # refused (routing): not an ack — the companion prints it and may re-send
@@ -137,6 +151,22 @@ class FeedServer:
                 except Exception:  # noqa: BLE001 — presence is a courtesy
                     pass
         return ws
+
+    async def warn_once(self, comp: "Companion", why: str, text: str) -> bool:
+        """One warn per (companion, reason) for the life of the process — the companion re-sends a refused event every
+        30 s, the ops channel hears of it once. False when it was said already."""
+        key = (comp.character, comp.guild, why)
+        if key in self.warned:
+            return False
+        self.warned.add(key)
+        if self.on_warn is not None:
+            try:
+                await self.on_warn(comp, text)
+            except Exception:  # noqa: BLE001 — a warn is a courtesy
+                log.exception("feed warn failed")
+        else:
+            log.warning(text)
+        return True
 
     def authorize(self, token: Any) -> tuple[bool, str | None]:
         if self.auth is not None:
@@ -200,3 +230,66 @@ def authorize(token: str, shared: str | None, per_guild: dict[str, str], keys: C
             if key:
                 return True, key
     return same(token, shared), None
+
+
+# ---------------------------------------------------------------- stamps (design §3.5 L12)
+TOO_OLD = ("companion too old: a kill must carry epoch seconds (ts), not a clock time the bot would have to guess a zone "
+           "for — update oibot_companion.py from the repo's companion/ folder")
+CLOCK_ONLY = re.compile(r"^\s*\d{1,2}:\d{2}(:\d{2}(\.\d+)?)?\s*$")
+
+
+def ts_kind(ts: Any) -> str | None:
+    """'epoch' (seconds since 1970) · 'zoned' (ISO with an offset) · 'clock' (a time of day, or a zone-less ISO stamp —
+    the raider's PC clock with no zone) · None (no stamp)."""
+    if ts is None or ts == "":
+        return None
+    if isinstance(ts, bool):
+        return "clock"
+    if isinstance(ts, (int, float)):
+        return "epoch"
+    text = str(ts).strip()
+    if re.fullmatch(r"\d{9,11}(\.\d+)?", text):
+        return "epoch"
+    if CLOCK_ONLY.match(text):
+        return "clock"
+    try:
+        t = datetime.fromisoformat(text)
+    except ValueError:
+        return "clock"
+    return "zoned" if t.tzinfo is not None else "clock"
+
+
+def refuse_event(ev: dict) -> str | None:
+    """Why the bot refuses a companion event before routing it, or None: a KILL stamped with a clock time only (an old
+    companion) — the bot never guesses which zone the raider's PC was in. A kill with no stamp is taken (received now)."""
+    if ev.get("type") == "kill" and ts_kind(ev.get("ts")) == "clock":
+        return TOO_OLD
+    return None
+
+
+def ops_warner(bot) -> Callable[["Companion", str], Awaitable[None]]:
+    """FeedServer.on_warn for the bot: the warn goes to the ops channel of the guild the companion feeds
+    (bot.companion_guild), else to the process log."""
+    async def warn(comp: "Companion", text: str) -> None:
+        gk = bot.companion_guild(comp) if hasattr(bot, "companion_guild") else None
+        cfg_for = getattr(getattr(bot, "registries", None), "cfg_for", None)
+        cfg = cfg_for(gk) if (gk and cfg_for) else None
+        if cfg is not None and getattr(bot, "ops", None) is not None:
+            await bot.ops.emit(cfg, "warn", text)
+        else:
+            log.warning(text)
+    return warn
+
+
+# ---------------------------------------------------------------- the companion tokens card (Loot › Companions)
+def token_state(key: str, *, many: bool, env: dict | None = None) -> dict:
+    """What the owner's card shows about the feed tokens for guild `key` — WHICH variables are set, never a value:
+    {shared: OIBOT_FEED_TOKEN set, shared_feeds: whether the shared token feeds this guild's raids (one guild served),
+    var: 'OIBOT_FEED_TOKEN_<KEY>', set: that variable set, listener: the feed listens at all, bind_set: OIBOT_FEED_BIND
+    set (the address itself is a host fact and not shown)}."""
+    env = os.environ if env is None else env
+    shared = bool(env.get("OIBOT_FEED_TOKEN"))
+    var = GUILD_TOKEN_PREFIX + token_suffix(key)
+    own = bool(env.get(var))
+    return {"shared": shared, "shared_feeds": shared and not many, "var": var, "set": own,
+            "listener": shared or bool(guild_tokens(env)), "bind_set": bool(env.get("OIBOT_FEED_BIND"))}

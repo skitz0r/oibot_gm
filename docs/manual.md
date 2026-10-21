@@ -153,8 +153,16 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   edited to say so — no new DM) and the bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
   someone else with `/roster absent` and a member picker, same screens.
 - **See everything the bot has on you**: `/me view` (your inbox first — open asks and unread notices, with **Mark
-  notices read** — then characters, rosters, absences, your last ten awards and how many items are on your wishlist) or
-  the *My status* button.
+  notices read** — then characters, rosters, absences, your attendance, your last ten awards and how many items are on
+  your wishlist) or the *My status* button.
+- **Attendance**: *"5 of 6 in the last 30 days"* in `/me view`, and the Me page's **Attendance** card lists each run —
+  day, raid, the character's spec icon and what happened (rostered, benched, away, can't make it, no thanks, no
+  answer). It counts finished raids only, over the window your loot policy uses (30 days unless the guild changed it):
+  a run counts when you were one of its regulars or joined it, and a day you marked away is shown but never counted.
+  Every character of yours counts toward the same number. Rostered and benched both count here; for **loot** only
+  runs you were rostered on — and on a regular raid confirmed — count, and attendance counts in loot scores only once
+  the guild has three finished raids in the window (until then it is neutral for everyone). A pickup run counts only
+  for those who joined it. Before the first raid ends it reads *"not tracked yet — counts from the first run that ends"*.
 - **DMs on or off**: `/me dms on|off`, the switch on the Me page, or "turn my DMs off". The bot says it in one sentence
   everywhere: *"With DMs off, Confirm and fill asks wait on your Me page and the sheet; nothing is sent anywhere else."*
 - **Wishlist**: `/me wishlist` — per character, up to 10 items in the order you want them, main spec or offspec, a
@@ -1183,12 +1191,13 @@ news post says can make the review read or write another server.
 | `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
 | `list_raids` · `get_raid` | effective raid settings and overrides; each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
 | `set_regular` | add or remove a regular of a recurring schedule (member, character, schedule; the Rosters page's route) |
-| `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record |
+| `list_members` · `get_member` | everyone's characters, absences, asks (`filter` narrows) · one record, with its `attendance` (the sentence, the count the site shows, the loot factor's count — null while unknown — and a row per run) |
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and award log (up to 100) from the Loot pages, `member` narrowing both to one person |
 | `get_loot` · `open_loot` · `loot_tick` · `loot_distribute` · `loot_discard` · `end_loot` | the councils (every locked run, or one run in full: drops by boss, picks with their candidate tables, pending overrides, awards, reasons owed, the roster, `batch_rev` / `drops_rev`, the End sentence) · open the council on a locked run · tick drops by name or id (`remove` un-ticks) · judge the ticked drops · drop pending picks (`batch_rev`, or `only` some = decide later; `preview`) · end the run and its council (`preview` = the sentence) |
 | `loot_confirm` · `loot_award` · `loot_reason` · `loot_correct` | **decisions — need `OIBOT_MCP_ACTOR`**: record picks (one with `expect_to`, or the rest with `batch_rev`; `preview` needs no actor) · override a pick with a reason · the reason for an in-game award (an ended council too) · fix a recorded award |
 | `loot_history` · `loot_log` · `list_precedents` · `retire_precedent` | ended councils (one in full) · the award log (`scores` for officers' columns) · precedents with their refs and the awards still needing a reason · retire or restore one (actor) |
 | `list_items` · `tier_item` | the untiered items and one item's tier grid · set tiers per spec (actor); with past awards and no `reweight` answer nothing is written and the reply asks |
+| `draft_tiers` · `export_tiers` | Claude's suggested tiers for one item — a proposal, nothing saved (confirm it with `tier_item`) · the whole tier grid as CSV text |
 | `get_wishlists` · `set_wishlist` · `import_wishlists` | who wants each item / one member's lists with their `rev` · replace a character's whole list (actor; a list changed since `rev` is refused) · a ThatsMyBIS export (preview first; writing needs the actor) |
 | `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
@@ -1248,7 +1257,11 @@ card or the page redraws so you can look again.
 **How a pick is made.** Code scores every candidate for a drop — the item's tier for their spec × the slot's weight,
 attendance, rank, wishlist, discounted by recent loot and by a second item in the same slot this week — and Claude
 judges the top candidates against the guild's written loot policy, explains, and flags close calls. Officers decide.
-Attendance nobody has tracked yet counts as **neutral** (it never lowers anyone's score).
+Attendance nobody has tracked yet counts as **neutral** (it never lowers anyone's score). Attendance is the finished
+raids in the loot policy's window (30 days by default) the member was rostered on — and, on a regular raid, confirmed
+— out of the ones they were expected at or joined and weren't away for, every character of theirs together; it starts
+counting once the window holds three finished raids (§3 *Attendance*). The site's candidate table shows the factor; the
+Discord cards show only numbers.
 
 ### In Discord: the thread and its cards
 
@@ -1371,6 +1384,21 @@ council's only DM (never for an ended rehearsal). A rehearsal takes drops only f
 companion. The companion shows as **live**, **quiet** (no events for a couple of minutes — normal during trash and
 breaks) or **disconnected**, in the thread and at the top of Loot › Tonight.
 
+**Kills and stamps.** The companion sends every event's time as an instant (it reads the chat log's clock on the PC
+that wrote it), so the thread's *"☠ Gatekeeper down (8:15 PM)"* shows in each reader's own time zone. Each kill counts
+toward **Bosses 3 / 6** on the lock card and Loot › Tonight, and a killed boss's drops are judged first. When the
+raid's **last boss** goes down the thread says once *"All bosses down — End the run?"* and the lock card shows the same
+line with its End button reading **End the run** — the same End as always (the confirm screen first, then the run and
+its council close). A raid whose bosses the game profile doesn't list yet shows *Bosses 3* and never asks. A companion
+older than the one in the repo sends kills with a clock time only; the bot refuses those (it won't guess which time zone
+the raider's PC was in) — the companion prints *"companion too old"* and the ops channel says so once. Update the file
+from the repo's `companion/` folder.
+
+**Loot › Companions** (officers) lists the companions feeding your server — live / quiet / disconnected, last seen,
+events. The owner also sees which feed-token settings the host has (`OIBOT_FEED_TOKEN_<KEY>` for your server, the
+shared `OIBOT_FEED_TOKEN`, the listen address) as **set / not set** — never a token's value; tokens live in `.env` on
+the host.
+
 ### Asking the bot in the thread
 
 Only messages addressed to it count — an @mention, a message starting with **?**, or a reply to one of the council's
@@ -1427,6 +1455,22 @@ tiers for an item that already has awards asks *"N past awards used the old weig
 default) keeps them as they were; **Re-weight them** changes their weight in recent-loot scores only — who got what
 never changes. Either answer is logged. The grid is on the site only (a grid doesn't fit Discord); "tier the Robe S
 for holy priests" works in plain text, `tier_item` over MCP.
+
+**Draft with Claude** on the grid asks Claude to suggest tiers for that item from what is known about it (slot, armour
+or weapon type, boss, note), your specs and your loot policy. The suggestion fills the grid marked **draft**
+(*"drafted by Claude, unverified"*), with a line on who it's for and what Claude couldn't tell; anything it named that
+isn't one of your specs, or a spec that can't wear the item, is left out and listed. **Nothing is saved**: change any
+cell, then **Save** — the ordinary save, with the re-weight question — or close the draft. A draft is forgotten when the
+bot restarts. When the bot can't reach Claude it says so and the grid works by hand. MCP `draft_tiers` returns the same
+suggestion; only `tier_item` saves.
+
+**Export CSV / Import CSV…** move the whole grid in and out of a spreadsheet: one row per item (item_id, item, boss),
+one column per spec (`Priest:Holy`; a whole class `Priest:*` or a role `role:tank` only when some item has one). In the
+file a tier sets a cell, an empty cell leaves it as it is, and `-` clears a tier the guild set. **Preview** shows what
+would change per item, rows that name the same item twice (merged — the later row wins), items the council doesn't know
+(skipped until they first drop) and cells that aren't a tier; **Import** writes it in one go — refused with *"Tiers
+changed since this preview"* if someone saved the grid meanwhile — and asks the same re-weight question when an item
+already has awards. MCP `export_tiers` returns the file.
 
 **Wishlists**: who wants each item most, and every member's lists; **Import from ThatsMyBIS** takes a TMB wishlist
 export (preview first; per character in TMB's order; an item already on someone's list stays as it is; a re-import
@@ -1583,13 +1627,13 @@ Servers: there is no per-server spending cap — the monthly budget is shared by
 removing a server (when the bot leaves it) or renaming a guild's key is a manual job in the data repo.
 
 Loot: a ThatsMyBIS import has no Discord path (the Loot › Wishlists page and MCP `import_wishlists`); the item tier
-grid is on the site only; importing a loot history from another addon (Gargul, RCLC,
-BisCouncil) and drafting tiers with Claude are not built yet; the member's "ask the council about an item" thread
+grid, its CSV import and Claude's tier drafts are on the site only (MCP: `draft_tiers`, `export_tiers`); importing a
+loot history from another addon (Gargul, RCLC, BisCouncil) is not built yet; a Claude draft is forgotten on a restart;
+the member's "ask the council about an item" thread
 doesn't exist yet; a companion bound to a council with **Bind companion…** is forgotten on a restart (the card offers it
 again). Splits: the **Loot-quality** split philosophy is a greyed placeholder, not built yet (Balanced, Raid one first
 and Rotation work). Buff facts, comp bounds, cadence and split policy *can* be changed (Auras page, Raids page,
 `/gm config raid|aura`, plain text); the buff list itself and the item tables are files in the code
 repository. Regulars are a list of who is expected, never a standing answer: there is no standing availability or
-standing signup to set and no attendance view on
-`/me` yet: each run is answered on its own sheet (or by telling the bot, or an officer for you). If you ask for one
+standing signup to set: each run is answered on its own sheet (or by telling the bot, or an officer for you). If you ask for one
 of these, say so plainly.

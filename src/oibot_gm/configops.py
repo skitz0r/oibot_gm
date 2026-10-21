@@ -471,6 +471,10 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "plain_permissions_grid": {"surface": "web", "path": "POST /api/admin/plain-permissions", "reason": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
     "items_grid": {"surface": "web", "path": "POST /api/loot/items/{key}/tiers", "reason": "the item × spec tier grid (Loot › Items) is two-dimensional editing; Discord shows untiered counts and links there (D4)"},
     "loot_history": {"surface": "web", "path": "GET /api/loot/history", "reason": "ended councils, precedents and the award log are tables (Loot › History, Precedents, the Loot log); Discord has the summary on the closed card"},
+    # phase 3 (G4): the grid's bulk path and its Claude draft are part of the grid; the companions card is a host fact
+    "items_csv": {"surface": "web", "path": "POST /api/loot/items/import", "reason": "a CSV of the item × spec grid is a file to export, edit and import with a preview (MCP export_tiers reads it); Discord has no file editor"},
+    "tier_draft": {"surface": "web", "path": "POST /api/loot/items/{key}/draft", "reason": "Claude's tier draft is reviewed ON the grid it fills and saved per item there (MCP draft_tiers + tier_item); Discord has no grid"},
+    "companion_tokens": {"surface": "web", "path": "GET /api/loot/companions", "reason": "which feed-token variables are set and each companion's presence is an owner's host card; Discord shows presence on the council card"},
 }
 
 

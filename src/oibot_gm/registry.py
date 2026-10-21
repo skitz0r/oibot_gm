@@ -503,6 +503,8 @@ RAID_IDENTITY = ("name", "size", "comp", "lockout_days", "duration_hours", "firs
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
 CLOCK12 = "%a %d %b %I:%M %p"  # the one human-facing clock format; %H:%M is for machines
 UNTIERED_WEIGHT = 0.5  # loot: the upgrade value of an item with no tier data (Registry.loot_cfg `untiered_weight`)
+ATTENDANCE_WINDOW_DAYS = 30  # attendance window when the loot policy names none (loot_defaults.yaml attendance.window_days)
+ATTENDANCE_MIN_RUNS = 3  # below this many real done runs in the window attendance is unknown: neutral in loot scoring
 
 
 def item_key(item_id, name: str | None = None) -> str:
@@ -1686,6 +1688,173 @@ class Registry:
             out[k] = {**out[k], **v} if isinstance(v, dict) and isinstance(out.get(k), dict) else v
         out.setdefault("untiered_weight", UNTIERED_WEIGHT)
         return out
+
+    # ---- attendance (design §3.5 L35/M43, D49): from DONE runs, keyed by the member (every character rolls up)
+    def attendance_window(self, window_days: int | None = None) -> int:
+        """The attendance window in days: `window_days`, else the loot policy's (Registry.loot_cfg `attendance.window_days`,
+        D49 "window = the policy's"), else ATTENDANCE_WINDOW_DAYS."""
+        if window_days:
+            return max(1, int(window_days))
+        att = self.loot_cfg().get("attendance") or {}
+        return max(1, int(att.get("window_days") or ATTENDANCE_WINDOW_DAYS))
+
+    def done_runs(self) -> list:
+        """Every DONE run of the guild (raidcycle.RaidEvent), oldest first, parsed from <guild>/raids/*.json — cached
+        against each file's name, size and mtime, so a run a worker thread just closed is read on the next call."""
+        from .raidcycle import RaidEvent
+
+        d = self.store.root / self.key / "raids"
+        files = sorted(d.glob("*.json")) if d.is_dir() else []
+        stamp = []
+        for f in files:
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            stamp.append((f.name, st.st_size, st.st_mtime_ns))
+        held = self.__dict__.get("_done_runs")
+        if held is not None and held[0] == tuple(stamp):
+            return held[1]
+        out = []
+        for f in files:
+            try:
+                ev = RaidEvent.model_validate_json(f.read_text())
+            except Exception:  # noqa: BLE001 — one unreadable run never hides the others
+                log.warning("%s: unreadable run file %s", self.key, f.name)
+                continue
+            if ev.state == "done":
+                out.append(ev)
+        out.sort(key=lambda e: e.starts_at)
+        self.__dict__["_done_runs"] = (tuple(stamp), out)
+        return out
+
+    def attendance_runs_in(self, window_days: int | None = None, at: datetime | None = None) -> list:
+        """The runs attendance counts over: done, not a test run, with activity (somebody held a seat), started within
+        the window before `at` (default now). Cancelled runs never count."""
+        from . import raidcycle as rc
+
+        t = at or self.now_local()
+        lo = t - timedelta(days=self.attendance_window(window_days))
+        return [ev for ev in self.done_runs() if lo < ev.start <= t and not rc.is_test_run(self, ev) and ev.seated()]
+
+    def attendance_tracked(self, window_days: int | None = None, at: datetime | None = None) -> dict:
+        """{runs: real done runs in the window, first: ISO start of the guild's first real done run ever (None: none
+        yet), known: whether the window holds ATTENDANCE_MIN_RUNS runs — below that attendance is unknown for everyone,
+        neutral in loot scoring (§3.1 decision 10), never a penalty}."""
+        from . import raidcycle as rc
+
+        runs = self.attendance_runs_in(window_days, at)
+        first = next((ev.starts_at for ev in self.done_runs() if not rc.is_test_run(self, ev) and ev.seated()), None)
+        return {"runs": len(runs), "first": first, "known": len(runs) >= ATTENDANCE_MIN_RUNS}
+
+    def _attendance_row(self, m: "Member", ev) -> dict | None:
+        """One done run as `m`'s attendance sees it, or None when the run wasn't theirs to attend (D49):
+        - in the pool: a regular of the run when it opened (recurring), or they Joined / Benched, held a seat or called
+          out; an ad hoc run counts only for those who joined it (No thanks to a pickup costs nothing);
+        - away = an absence on file for the day (the sheet's 'away' answer, or the member's absence record): shown,
+          never counted;
+        - attended (the loot factor's): rostered when the run ended AND, on a recurring run that asks for confirmations,
+          confirmed (a seat that came after the lock — a fill yes, an officer's add — carries no placement ask: the yes
+          was the commitment). The attendance VIEW also counts the bench (`attended_view`)."""
+        from . import raidcycle as rc
+
+        uid = m.discord_id
+        sg = ev.signups.get(str(uid))
+        seat = ev.seat_of(uid)
+        called = any(c.discord_id == uid for c in ev.callouts)
+        adhoc = rc.run_kind(self, ev) == "adhoc"
+        joined = bool(sg and sg.status in ("in", "sub"))
+        regular = (not adhoc) and uid in (ev.regulars or [])
+        if not (regular or joined or seat is not None or called):
+            return None
+        day = ev.start.date().isoformat()
+        away = bool(sg and sg.source == "absence") or m.absent_on(day) is not None
+        if seat is not None:
+            p = seat[1]
+            character, cls, spec = p.character or p.signup_name, p.cls, p.spec
+        elif sg is not None:
+            character, cls, spec = sg.character, sg.cls, sg.spec
+        else:
+            c = m.main
+            character, cls, spec = (c.label, c.cls, c.spec) if c else ("", "", "")
+        if seat is not None:
+            outcome = "rostered"
+            if not adhoc and rc.run_confirms(self, ev):
+                ask = next((a for a in reversed(m.placement_asks) if a.get("roster") == ev.team), None)
+                if ask is not None and ask.get("answer") != "yes":
+                    outcome = "unconfirmed"
+        elif away:
+            outcome = "away"
+        elif called:
+            outcome = "called_out"
+        elif joined:
+            outcome = "benched"
+        elif sg is not None and sg.status == "out":
+            outcome = "no_thanks"
+        else:
+            outcome = "no_answer"
+        if adhoc and outcome == "away":
+            return None  # an ad hoc run was never theirs to miss
+        counted = outcome != "away"
+        try:
+            raid = self.raid_def(ev.instance).get("name", ev.instance) if ev.instance else ev.team
+        except Exception:  # noqa: BLE001 — a raid removed from the profile since
+            raid = ev.instance or ev.team
+        return {"key": ev.key, "start": ev.starts_at, "when": self.local12(ev.start, "%a %d %b"), "raid": raid,
+                "kind": "adhoc" if adhoc else "recurring", "outcome": outcome, "counted": counted,
+                "attended": counted and outcome == "rostered", "attended_view": counted and outcome in ("rostered", "benched"),
+                "character": character, "cls": cls, "spec": spec}
+
+    def _attendance_member(self, member) -> "Member | None":
+        if isinstance(member, Member):
+            return member
+        try:
+            return self.members.get(int(member))
+        except (TypeError, ValueError):
+            return None
+
+    def attendance_runs(self, member, window_days: int | None = None, at: datetime | None = None) -> list[dict]:
+        """`member`'s (a Member or a Discord id) rows over the window, newest first: {key, start, when, raid, kind,
+        outcome rostered|unconfirmed|benched|away|called_out|no_thanks|no_answer, counted, attended (loot factor),
+        attended_view (bench counts), character, cls, spec}. Every character of theirs counts (the rollup is by Discord
+        id, never by character name)."""
+        m = self._attendance_member(member)
+        if m is None:
+            return []
+        rows = [r for ev in self.attendance_runs_in(window_days, at) if (r := self._attendance_row(m, ev)) is not None]
+        return sorted(rows, key=lambda r: r["start"], reverse=True)
+
+    def attendance(self, member, window_days: int | None = None, *, bench: bool = False, at: datetime | None = None) -> tuple[int, int]:
+        """(attended, total) for `member` (a Member or a Discord id) over the done runs of the window (default the loot
+        policy's): total = the runs they were in the pool for and not away; attended = rostered (+ confirmed on a
+        recurring run) — `bench` True also counts the bench (the attendance VIEW, D49; the loot factor never does).
+        (0, 0) = nothing to count: unknown, which loot scoring treats as neutral and leaves out."""
+        rows = self.attendance_runs(member, window_days, at)
+        key = "attended_view" if bench else "attended"
+        return sum(1 for r in rows if r[key]), sum(1 for r in rows if r["counted"])
+
+    def attendance_known(self, member, window_days: int | None = None, at: datetime | None = None) -> tuple[int, int] | None:
+        """The loot factor's input: (attended, total) when it is known — the window holds ATTENDANCE_MIN_RUNS real
+        runs and the member had at least one — else None (neutral, excluded; §3.1 decision 10)."""
+        if not self.attendance_tracked(window_days, at)["known"]:
+            return None
+        att, total = self.attendance(member, window_days, at=at)
+        return (att, total) if total else None
+
+    def attendance_text(self, member, window_days: int | None = None, at: datetime | None = None) -> str:
+        """The attendance sentence every surface prints (Me › Attendance, /me view, MCP get_member), computed — never
+        a hard-coded date: 'not tracked yet — counts from the first run that ends' / '5 of 6 in the last 30 days' /
+        '2 of 2 since Tue 9 Dec' (the window reaches back past the guild's first run) / 'no runs for you in the last 30
+        days'. Counts the bench (the attendance view, D49)."""
+        days = self.attendance_window(window_days)
+        tracked = self.attendance_tracked(days, at)
+        if tracked["first"] is None:
+            return "not tracked yet — counts from the first run that ends"
+        att, total = self.attendance(member, days, bench=True, at=at)
+        t = at or self.now_local()
+        first = datetime.fromisoformat(tracked["first"])
+        span = f"since {self.local12(first, '%a %d %b')}" if first > t - timedelta(days=days) else f"in the last {days} days"
+        return f"{att} of {total} {span}" if total else f"no runs for you {span}"
 
     def set_item_tiers(self, ref, tiers: dict, by: str) -> tuple[str, dict]:
         """Loot › Items, the `tier` op and MCP tier_item: write tiers per spec key into the guild's item file

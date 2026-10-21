@@ -1034,6 +1034,33 @@ class LootMixin:
                 "undistributed": undist, "reasons_pending": list(session.pending_reasons), "conflicts": list(session.conflicts),
                 "test": session.test, "ended_at": now_iso(), "text": "\n".join(lines)}
 
+    ALL_DOWN_LINE = "☠ All bosses down — End the run? The lock card's End the run asks once more, then closes it (or /raid end)."
+
+    async def loot_boss_down(self, reg, session: LootSession, boss: str) -> bool:
+        """After a NEW kill of `boss` was recorded on `session` (design §3.5 L12): when it brings down the raid's last
+        boss — every council's, on a split run — the council's thread gets ALL_DOWN_LINE once and the run's lock card is
+        redrawn with "All bosses down — End the run?" (its End button: the decide screen, then end_run — never a second
+        meaning for "end"). Once: only the kill that completes the set prompts (a duplicate report is not new, a kill of
+        a boss the raid doesn't list never completes it). Returns True when it prompted."""
+        if reg is None or not session.run_key:
+            return False
+        rs, ev = self.loot_run(session)
+        if ev is None or ev.state != "locked":
+            return False
+        if str(boss or "").lower() not in {b.lower() for b in ls.raid_bosses(reg, ev.instance)}:
+            return False
+        prog = ls.run_boss_progress(reg, ev.key, ev.instance)
+        if not prog or not prog["all_down"]:
+            return False
+        await self.loot_notify(reg, session, self.ALL_DOWN_LINE, kind="all_down")
+        refresh = getattr(self, "refresh_cards", None)
+        if refresh is not None:
+            try:
+                await refresh(reg, ev)
+            except Exception:  # noqa: BLE001 — the card is a courtesy; the kill is recorded
+                log.exception("lock card refresh after the last kill failed")
+        return True
+
     def end_consequence(self, reg, rs, ev) -> str:
         """The End decide screen's sentence: 'End <run>: 6 awards, 1 override, 2 drops never distributed, 1 award
         waiting for a reason.'"""

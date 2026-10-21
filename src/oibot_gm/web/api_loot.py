@@ -15,7 +15,11 @@ the `loot:<run>` topic). Routes only decide who may (§2.6) and translate:
 - D2: members (logged in, `who` = member_of) see their own loot and the guild award log; scores, candidates, the bot's
   pick, reasons and who recorded what are officers' only, filtered HERE by `v.officer` — never client-side. Nothing
   loot-related is on /api/public.
-- D12: tiering an item that already has awards asks "re-weight them?" (answer `reweight`: default no, logged)."""
+- D12: tiering an item that already has awards asks "re-weight them?" (answer `reweight`: default no, logged).
+- Phase 3 (G4): Loot › Items' "Draft with Claude" (a PROPOSAL — nothing written; the officer saves it per item through
+  the tiers route) and the CSV export / import of the tier grid (preview first, then apply with the preview's rev);
+  attendance (Me › Attendance, an officer's view of a member: Registry.attendance, D49); the companions card (presence,
+  and for the owner WHICH feed-token variables are set — never a value); the council's "Bosses 3 / 6"."""
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +28,7 @@ import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .. import ops as ops_mod
 from ..raid_views import run_title
@@ -38,6 +42,9 @@ ACTOR_NEEDED = ("{what} is a decision a person makes: from MCP it needs the X-Oi
                 "distribute, discard and end.")
 LOG_LIMIT = 200
 HISTORY_LIMIT = 50
+# the last Claude draft per (guild key, item key): a PROPOSAL shown on the grid until an officer saves tiers for that
+# item; process memory only (a restart forgets it — draft again), never the data repo
+DRAFTS: dict[tuple[str, str], dict] = {}
 
 
 def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolve_member, live_officer=None) -> None:
@@ -167,7 +174,14 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             "closing": {"notice_label": clock(reg, s.closing_notice_at), "keep_open_label": clock(reg, s.keep_open_until)},
             "last_change": s.last_change(), "opened_by": s.opened_by, "opened_label": clock(reg, s.opened_at),
             "batch_rev": base["batch_rev"], "drops_rev": base["drops_rev"],
+            "bosses_progress": boss_progress_of(reg, s),
         }
+
+    def boss_progress_of(reg, s) -> dict:
+        """'Bosses 3 / 6' for one council (L12): its kills against the raid's bosses (total None while unlisted)."""
+        from ..loot.session import boss_progress, raid_bosses
+
+        return boss_progress(list(s.bosses_done), raid_bosses(reg, s.instance))
 
     def run_json(reg, rs, ev, sessions) -> dict:
         return {"key": ev.key, "title": run_title(reg, ev), "when": reg.local12(ev.start), "state": ev.state, "instance": ev.instance,
@@ -558,6 +572,53 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
         return {"rows": [log_row(reg, a, chars, False, False, ctx, v.uid, mine) for a in rows[:max(1, min(int(limit), 200))]]}
 
+    # ------------------------------------------------------------ the companions card (officers; token names: owner)
+    @app.get("/api/loot/companions")
+    async def loot_companions(request: Request):
+        """Loot › Companions: this guild's companions (live · quiet · disconnected, last seen in words, events) for
+        officers; for the owner also which feed-token variables are set (OIBOT_FEED_TOKEN, OIBOT_FEED_TOKEN_<KEY>) —
+        names and yes/no only, never a value (secrets stay in .env, §2.8)."""
+        from ..feed import token_state
+
+        v = await who(request, officer=True)
+        many = bool(getattr(bot.registries, "many", False))
+        return {"companions": companion_json(v.reg), "listening": getattr(bot, "feed", None) is not None, "many": many,
+                "tokens": token_state(v.reg.key, many=many) if v.owner else None, "owner": v.owner}
+
+    # ------------------------------------------------------------ attendance (design §3.5 L35/M43, D49)
+    OUTCOME_WORDS = {"rostered": "rostered", "unconfirmed": "rostered, never confirmed", "benched": "benched", "away": "away",
+                     "called_out": "can't make it", "no_thanks": "no thanks", "no_answer": "no answer"}
+
+    def attendance_json(reg, m, officer: bool) -> dict:
+        """One member's attendance: the sentence, the view's count (bench counts), one row per run of the window; the
+        loot factor's count (rostered + confirmed, unknown → None) for officers only (it is a scoring input)."""
+        days = reg.attendance_window()
+        att, total = reg.attendance(m, days, bench=True)
+        rows = [{**{k: r[k] for k in ("key", "when", "raid", "kind", "outcome", "counted", "character", "cls", "spec")},
+                 "outcome_label": OUTCOME_WORDS.get(r["outcome"], r["outcome"])} for r in reg.attendance_runs(m, days)]
+        out = {"sentence": reg.attendance_text(m, days), "window_days": days, "attended": att, "total": total, "runs": rows,
+               "tracked": reg.attendance_tracked(days)["runs"]}
+        if officer:
+            known = reg.attendance_known(m, days)
+            out["loot"] = {"attended": known[0], "total": known[1]} if known else None
+        return out
+
+    @app.get("/api/me/attendance")
+    async def me_attendance(request: Request):
+        """Me › Attendance: my runs in the loot policy's window (every character of mine counts) and the sentence."""
+        v = await who(request)
+        if v.member is None:
+            return {"sentence": "nothing registered yet", "window_days": v.reg.attendance_window(), "attended": 0, "total": 0, "runs": [], "tracked": 0}
+        return attendance_json(v.reg, v.member, False)
+
+    @app.get("/api/members/attendance")
+    async def member_attendance(request: Request, member: str):
+        """An officer's view of one member's attendance (MCP get_member adds it): the Me card's data plus the loot
+        factor's count."""
+        v = await who(request, officer=True)
+        m = resolve_member(v.reg, member)
+        return {"member": m.display_name, **attendance_json(v.reg, m, True)}
+
     # ------------------------------------------------------------ wishlists (D5)
     def received_map(reg, ctx, m) -> dict[tuple[str, str], str]:
         """(character label lower, item key) → the day it was received: an awarded wish shows as received, greyed —
@@ -690,6 +751,71 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         hits.sort(key=lambda kv: (not kv[1].name.lower().startswith(n), kv[1].name.lower()))
         return {"items": [{"key": k, "id": it.id, "name": it.name, "boss": it.boss, "slot": it.slot, "tiered": bool(it.tiers)} for k, it in hits[:max(1, min(int(limit), 50))]]}
 
+    @app.get("/api/loot/items/export")
+    async def loot_items_export(request: Request):
+        """The tier grid as CSV (officers; MCP export_tiers): item_id, item, boss, one column per spec key."""
+        from ..loot import tierdraft
+
+        v = await who(request, officer=True)
+        text = await asyncio.to_thread(tierdraft.export_csv, v.reg)
+        name = re.sub(r"[^a-z0-9]+", "-", v.reg.key.lower()).strip("-") or "guild"
+        return Response(text, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}-tiers.csv"'})
+
+    @app.post("/api/loot/items/import")
+    async def loot_items_import(request: Request):
+        """Import a tier CSV: {csv, preview?: true (default), rev?, reweight?}. Preview writes nothing and answers what
+        would change per item, duplicates (merged), unknown items, bad cells, the items that already have awards and a
+        `rev`. Apply (`preview: false`) needs that `rev` (a tier changed since → 409, preview again); with past awards
+        and no `reweight` answer nothing is written and the reply asks (D12, default no). From MCP the apply is a
+        decision: X-Oibot-Actor (D8)."""
+        from ..loot import tierdraft
+
+        v, d = await writer(request)  # officers; the apply below is the decision that needs the actor from MCP (D8)
+        reg = v.reg
+        applying = d.get("preview", True) is False
+        if applying:
+            need_actor(v, "Importing tiers")
+        text = d.get("csv")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(400, "csv is the file's text (export the grid first to see the columns)")
+        try:
+            pv = await asyncio.to_thread(tierdraft.parse_csv, reg, text)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        ctx = ctx_of(reg)
+        items = reg.items()
+        for row in pv["items"]:
+            it = items.get(row["key"])
+            row["awards"] = len(ctx.awards_of_item(it)) if it is not None else 0
+        pv["with_awards"] = sum(1 for r in pv["items"] if r["awards"])
+        if not applying:
+            return {"preview": pv}
+        if not pv["items"]:
+            return {"message": "Nothing to change — every tier in the file is already set.", "preview": pv}
+        if pv["with_awards"] and d.get("reweight") is None:
+            n = sum(r["awards"] for r in pv["items"])
+            return {"ask": f"{n} past award(s) of {pv['with_awards']} item(s) used the old weight — re-weight them? (changes recent-loot scores only, not who got what)",
+                    "preview": pv}
+        try:
+            done = await asyncio.to_thread(tierdraft.apply_csv, reg, pv, by_of(v), d.get("rev"))
+        except RegistryError as e:
+            return JSONResponse({"error": str(e), "preview": pv}, status_code=409 if "changed since" in str(e) else 400)
+        reweighted = 0
+        if d.get("reweight"):
+            for key, _line, _ch in done:
+                it = reg.items().get(key)
+                if it is not None and ctx.awards_of_item(it):
+                    reweighted += ctx.reweight(it, by_of(v))
+            if reweighted:
+                reg.store.commit(f"{reg.key}: {reweighted} award(s) re-weighted after a tier import ({by_of(v)})")
+        line = f"tiers imported from a CSV: {sum(len(c) for _k, _l, c in done)} tier(s) on {len(done)} item(s)" + (f", {reweighted} past award(s) re-weighted" if reweighted else "")
+        if done:
+            for key, _l, _c in done:
+                DRAFTS.pop((reg.key, key), None)
+            await ops_mod.audited(bot.ops, reg, by_of(v), line, via=v.via, by_id=v.uid)
+            publish("items", reg.key)
+        return {"message": line, "items": [{"key": k, "line": ln} for k, ln, _c in done], "reweighted": reweighted}
+
     @app.get("/api/loot/items")
     async def loot_items(request: Request):
         """Loot › Items: the untiered items (learned from drops, or on the tables without tiers) with when they were
@@ -736,8 +862,33 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             rows.append({**r, "tier": it.tier_for(spec), "own": own.get(r["key"]), "profile": (prof.tiers.get(r["key"]) if prof else None),
                          "equippable": ok, "why": why})
         wide = {k: v for k, v in it.tiers.items() if k.endswith(":*") or k.startswith("role:")}
+        dr = DRAFTS.get((reg.key, key))
         return {**item_brief(reg, key, it, ctx), "rows": rows, "wide": wide, "own": own, "tiers": list(TIER_VALUES), "roles": list(ROLES),
-                "awards": len(ctx.awards_of_item(it))}
+                "awards": len(ctx.awards_of_item(it)), "draft": draft_json(reg, dr) if dr else None}
+
+    def draft_json(reg, dr: dict) -> dict:
+        return {**dr, "at_label": reg.local12(dr["at"]) if dr.get("at") else ""}
+
+    @app.post("/api/loot/items/{key}/draft")
+    async def loot_item_draft(request: Request, key: str):
+        """Loot › Items "Draft with Claude": the model PROPOSES tiers for this item from its facts, the guild's specs
+        and the loot policy — validated (profile spec keys only, specs that can't equip it dropped, S+ | S | A | B),
+        marked "drafted, unverified" and NOTHING is written: an officer reviews it on the grid and saves it per item
+        through POST /api/loot/items/{key}/tiers (which asks the D12 re-weight question). Officers; from MCP no actor
+        is needed — a draft decides nothing (draft_tiers)."""
+        from ..loot import tierdraft
+
+        v, _d = await writer(request)
+        reg = v.reg
+        k, it = item_of(reg, key)
+        ctx = ctx_of(reg)
+        try:
+            dr = await asyncio.to_thread(tierdraft.draft, reg, it, ctx.provider, ctx.policy)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=503 if str(e) == tierdraft.LLM_DOWN else 400)
+        dr["by"] = by_of(v)
+        DRAFTS[(reg.key, k)] = dr
+        return {"draft": draft_json(reg, dr), "item": item_detail(reg, k, it)}
 
     @app.get("/api/loot/items/{key}")
     async def loot_item(request: Request, key: str):
@@ -778,6 +929,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             else:
                 line += " — past awards kept their weight"
         if changes:
+            DRAFTS.pop((reg.key, k), None)  # the draft became tiers (or was overruled): nothing left to confirm
             await ops_mod.audited(bot.ops, reg, by_of(v), f"tiers: {line}", via=v.via, by_id=v.uid)
             publish("items", reg.key)
         return {"message": line, "reweighted": done, "item": item_detail(reg, k, reg.items().get(k) or it)}

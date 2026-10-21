@@ -5,10 +5,16 @@ All factors are returned so the LLM (and the officer) can see the arithmetic.
 
 An item without tier data (a drop the tables don't know yet — every drop on WoW: Forever's first night, design §3.1
 decision 4) is still scored: everyone rostered who can equip it is a candidate at `untiered_weight` (default 0.5),
-ranked by attendance and recent loot only. Attendance nobody has tracked yet is neutral (factor 1.0), never a penalty."""
+ranked by attendance and recent loot only. Attendance nobody has tracked yet is neutral (factor 1.0), never a penalty.
+
+Attendance (design §3.5 L35, D49) comes from Registry.attendance — done runs, rostered (+ confirmed on a recurring run),
+every character of a member rolled up by Discord id — through `attendance_lookup`; when it is unknown (the window holds
+fewer than ATTENDANCE_MIN_RUNS real runs, or the member had none) the factor stays 1.0 and the candidate says
+`attendance_known: False`."""
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Callable, Optional
 
 from ..models import Candidate, LootAward, Player
 from ..profiles import GameProfile, Item, equippable
@@ -56,6 +62,37 @@ def weight_for(profile: GameProfile, item: Item, spec, cfg: dict) -> tuple[str, 
     return tier, round(cfg["tier_weight"].get(tier, cfg["tier_weight"].get("B", 0.05)) * sw, 3)
 
 
+def attendance_factor(attended: int, total: int, cfg: dict) -> float:
+    """The attendance factor: 1 - weight × 0.5 × (1 - ratio) — with the default weight 1.0 that is 0.5 + 0.5 × ratio
+    (never zero, never above 1). `total` 0 = unknown → 1.0 (neutral)."""
+    if not total:
+        return 1.0
+    w = float((cfg.get("attendance") or {}).get("weight", 1.0))
+    return max(0.0, min(1.0, 1 - w * 0.5 * (1 - attended / total)))
+
+
+def attendance_lookup(reg) -> Callable[[Player], Optional[tuple[int, int]]]:
+    """Player → (attended, total) from Registry.attendance_known over the loot policy's window, or None when unknown.
+    By the Player's Discord id; a sub kept by name (no id) is found by character name. Memoised per call site: one
+    candidates() call reads each member once."""
+    memo: dict = {}
+
+    def look(p: Player) -> Optional[tuple[int, int]]:
+        uid = p.discord_id
+        if uid is None and p.character:
+            try:
+                hit = reg.find(p.character)
+            except Exception:  # noqa: BLE001 — an ambiguous name is simply unknown
+                hit = None
+            uid = hit[0].discord_id if hit else None
+        if uid is None:
+            return None
+        if uid not in memo:
+            memo[uid] = reg.attendance_known(uid)
+        return memo[uid]
+    return look
+
+
 def candidates(
     profile: GameProfile,
     item: Item,
@@ -66,9 +103,17 @@ def candidates(
     *,
     cfg: dict | None = None,
     items: dict | None = None,
+    reg=None,
+    attendance: Callable[[Player], Optional[tuple[int, int]]] | None = None,
 ) -> list[Candidate]:
-    """The candidate table for one drop. `cfg`: the guild's loot settings (Registry.loot_cfg; default the profile's);
-    `items`: the item lookup for past awards' slots (Registry.items(); default the profile's tables)."""
+    """The candidate table for one drop. `cfg`: the guild's loot settings (default Registry.loot_cfg() with `reg`, else
+    the profile's); `items`: the item lookup for past awards' slots (default Registry.items() with `reg`, else the
+    profile's tables); `attendance`: Player → (attended, total) | None (default attendance_lookup(reg) with `reg`) —
+    used for a Player that carries no attendance of its own (an imported roster's does)."""
+    if reg is not None:
+        cfg = cfg or reg.loot_cfg()
+        items = items if items is not None else reg.items()
+        attendance = attendance or attendance_lookup(reg)
     cfg = cfg or {**profile.loot, "untiered_weight": profile.loot.get("untiered_weight", UNTIERED_WEIGHT)}
     tiered = is_tiered(item)
     window = timedelta(days=cfg["loot_divisor"]["window_days"])
@@ -105,8 +150,12 @@ def candidates(
 
         if offspec:
             upgrade *= cfg["wishlist"]["offspec_multiplier"]
+        if not p.attendance_total and attendance is not None:
+            seen = attendance(p)
+            if seen:
+                p = p.model_copy(update={"attended": seen[0], "attendance_total": seen[1]})
         known_att = bool(p.attendance_total)
-        att_factor = (0.5 + 0.5 * p.attendance) if known_att else 1.0  # unknown attendance is neutral (decision 10)
+        att_factor = attendance_factor(p.attended, p.attendance_total, cfg)  # unknown attendance is neutral (decision 10)
         rank_factor = cfg["rank_factor"].get("unknown" if p.unmapped else p.rank, cfg["rank_factor"]["unknown"])
         wl_bonus = cfg["wishlist"]["rank_bonus"].get(wl["rank"], 0.0) if wl else 0.0
         ld = cfg["loot_divisor"]

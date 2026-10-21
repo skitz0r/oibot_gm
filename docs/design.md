@@ -2302,6 +2302,78 @@ Plain-permissions edit modes on `useOpsSave` (their pages still use the admin tr
 the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
 AuraWizard hub in tests/test_flows_config.py.
 
+### 5.44 Dual interfaces, phase 3 — loot and attendance follow-through (built 2026-10-20)
+
+Rows 14 and 15 of phase 3 (out/dual_interface_design.md §3.5 L12/L35/M43, §3.1 decision 10's data part and the Items
+page remainder; owner decisions D12, D49, D53). Code computes; Claude only drafts; officers decide.
+
+**Attendance (D49).** `Registry.attendance(member, window_days=None, *, bench=False, at=None) -> (attended, total)` over
+DONE runs (`Registry.done_runs()`: `<guild>/raids/*.json` parsed and cached against each file's name, size and mtime;
+cancelled, test runs and runs nobody held a seat on are left out — `attendance_runs_in`). A run is the member's when they
+were a regular of it at open (recurring: `ev.regulars`), joined it (Join / Bench), held a seat or called out; an ad hoc
+run counts only for those who joined (No thanks to a pickup costs nothing). Away = the sheet's absence answer
+(`Signup.source == "absence"`) or `Member.absent_on(day)`: shown, never counted (an ad hoc away row is dropped). Attended
+(the loot factor's) = holding a seat when the run ended and, on a recurring run with confirmations, a placement ask on the
+run's roster key answered yes — a seat with no ask (a fill yes, an officer's add after the lock) counts, the yes was the
+commitment; an unanswered or declined ask is `unconfirmed`. `bench=True` (the VIEW: Me card, `/me view`) also counts the
+bench. The window is the loot policy's (`loot_cfg().attendance.window_days`, 30 by default; `attendance_window`). The
+rollup is by Discord id — every character of a member, whatever the seat names. `attendance_runs` gives the rows
+(outcome rostered | unconfirmed | benched | away | called_out | no_thanks | no_answer); `attendance_tracked` the guild's
+real runs in the window and its first done run; `attendance_known` = the loot input, None (unknown → neutral, excluded)
+until the window holds `ATTENDANCE_MIN_RUNS` = 3 real runs or when the member had none; `attendance_text` THE sentence
+("not tracked yet — counts from the first run that ends" / "5 of 6 in the last 30 days" / "2 of 2 since Tue 9 Dec" /
+"no runs for you in the last 30 days"), computed, never a hard-coded date.
+
+**Scoring.** `scoring.candidates(…, reg=None, attendance=None)`: with `reg`, cfg defaults to `reg.loot_cfg()`, items to
+`reg.items()` and attendance to `attendance_lookup(reg)` (Player → (attended, total) | None by Discord id, a sub kept by
+name found by character; memoised per lookup). A Player carrying its own attendance (an imported roster) keeps it.
+`attendance_factor(attended, total, cfg) = 1 - weight × 0.5 × (1 - ratio)` (0.5 + 0.5 × ratio at the default weight);
+unknown → 1.0 and `attendance_known False`. `loot/session.py` passes one lookup per plan / judge (`attendance_of(ctx)`).
+The Discord cards never show factor prose (iconography rule); the site's candidate table shows the factors.
+
+**Kills (L12).** The companion ships `ts` as epoch seconds (the chat-log stamp read on the PC whose clock and zone wrote
+it); the thread line is `<t:unix:t>` (`discord_feed._log_clock`). `feed.refuse_event` refuses a KILL whose stamp is a clock
+time only (`ts_kind`: epoch | zoned | clock — HH:MM or a zone-less ISO stamp) before routing: an error frame (not an ack:
+the old companion prints it and gives up after its retry window) and `FeedServer.warn_once` → `on_warn` (`feed.ops_warner`:
+the companion's guild's ops channel) once per (character, guild, reason). `LootSession.undistributed()` orders killed
+bosses first (unchanged; now tested). `loot.session.raid_bosses / boss_progress / run_boss_progress(reg, run_key,
+instance)` read the councils' session files: {done, total (None while the profile lists no bosses), all_down (every
+council of a split run)}. `LootMixin.loot_boss_down(reg, session, boss)` — called by `_feed_kill` on a NEW kill — posts
+`ALL_DOWN_LINE` into the thread once (only the kill that completes the set: a duplicate isn't new, a kill of an unlisted
+boss never completes it) and redraws the lock card (`refresh_cards`). The lock card (`raid_views.boss_lines`) shows
+"☠ Bosses 3 / 6" and, on roster 1's card when all are down, "All bosses down — End the run?"; the night row's End button
+reads "End the run" (enabled) — the same `RunButton …:end` → `end_decide` → `LootMixin.end_run`; never a second meaning
+for "end". Loot › Tonight carries `bosses_progress` per council.
+
+**Items page (D53 storage stays the per-file guild override).** `loot/tierdraft.py`: `draft(reg, item, provider, policy)`
+asks the `tier_draft` route (llm/provider.py ROUTES: sonnet, medium) for a `TierDraft` (structured output: spec, tier,
+why; summary; warnings) from the item's facts in `<item>`, the equippable specs in `<specs>` and the policy in `<policy>`
+(data, never instructions); `validate` keeps only profile `Class:Spec` keys that can equip it and tiers in S+ | S | A | B,
+listing what it dropped; no provider / an API error → RegistryError(LLM_DOWN) (§2.7's "can't read sentences"), the budget's
+own words when it's spent. POST `/api/loot/items/{key}/draft` (officers; no MCP actor — a draft decides nothing) returns
+it and keeps it in `api_loot.DRAFTS[(guild, item)]` (process memory, never the data repo) so the grid shows it until a
+tiers Save for that item clears it; the page puts the drafted cells into the editor marked "draft", and the officer's
+ordinary Save (`POST …/tiers`, the D12 re-weight ask, the actor from MCP) is the only write. CSV: `export_csv` (item_id,
+item, boss, a column per profile spec, then any wide key an item carries; a cell = the tier under exactly that key) and
+`parse_csv` (a tier sets, empty leaves, `-` clears a guild tier — a profile tier can't be cleared; rows naming one item
+twice merge, the later cell winning, listed as duplicates; unknown items and bad cells/columns listed and skipped; `rev`
+= the affected items' tiers) → `apply_csv(reg, preview, by, rev)` = `Registry.set_item_tiers` per item in one store batch,
+refused when the rev moved. Routes: GET `/api/loot/items/export` (text/csv attachment) and POST `/api/loot/items/import`
+({csv, preview (default true), rev, reweight}: preview for officers; the apply needs the MCP actor, 409 on a stale rev,
+the D12 ask when an item has awards) — both declared before `/api/loot/items/{key}`.
+
+**Surfaces.** Me › Attendance (`components/AttendanceCard.tsx`, GET `/api/me/attendance`: the sentence, the view's
+count, one row per run — day · raid · the spec icon alone · outcome); `/me view`'s Attendance field (the sentence); GET
+`/api/members/attendance?member=` (officers: + the loot factor's count, `loot` null while unknown) and MCP `get_member`'s
+`attendance`; MCP `draft_tiers(item)` and `export_tiers()`. Loot › Companions (`components/loot/Companions.tsx`, GET
+`/api/loot/companions`): presence for officers; for the owner `feed.token_state(key, many=)` — which of
+OIBOT_FEED_TOKEN_<KEY> / OIBOT_FEED_TOKEN / OIBOT_FEED_BIND are set, and whether the shared token feeds this guild —
+names and yes/no only, never a value. Single-surface features in `configops.BY_DESIGN_ONLY`: items_csv, tier_draft,
+companion_tokens (web; MCP reads beside them). The companion tokens are still `.env` + restart (issuing / revoking from
+the card is not built). Tests: tests/test_attendance.py (D49 cases), tests/test_loot_followthrough.py (kill order, the
+prompt once, the lock card and its harness press, stamps and the one warn on a real FeedServer, the draft never writes,
+CSV round trip / dedupe / rev / re-weight ask, the tokens card, attendance routes, MCP).
+
 ## 6. Architecture
 
 ```mermaid

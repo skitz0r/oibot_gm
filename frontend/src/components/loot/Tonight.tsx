@@ -149,6 +149,7 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
         {many && <Text fw={700}>{c.label}</Text>}
         {c.thread_pending && <Badge variant="light" color="yellow">thread pending — made when Discord answers</Badge>}
         {c.test && <Badge variant="light" color="violet">rehearsal</Badge>}
+        {bossLine(c) && <Text size="sm" fw={600}>{bossLine(c)}</Text>}
         <Text size="xs" c="dimmed">opened by {c.opened_by || "?"} · {c.opened_label}{c.last_change ? ` · last: ${c.last_change}` : ""}</Text>
         <Switch ml="auto" size="xs" label="Scores only" checked={!!c.scores_only} onChange={(e) => go("scores", "scores-only", { on: e.currentTarget.checked })} disabled={busy === "scores"} />
       </Group>
@@ -319,4 +320,13 @@ function CouncilBlock({ meta, run, c, onState, goItems, many }: { meta: Meta; ru
       {dialog}
     </Box>
   );
+}
+
+
+/** "Bosses 3 / 6" (design §3.5 L12): the council's kills against the raid's bosses; "Bosses 3" while the raid lists none;
+ *  nothing before the first kill of a raid with no list. */
+function bossLine(c: LootCouncil): string {
+  const p = (c as LootCouncil & { bosses_progress?: { done: number; total: number | null; all_down: boolean } }).bosses_progress;
+  if (!p || (!p.total && !p.done)) return "";
+  return `Bosses ${p.done}${p.total ? ` / ${p.total}` : ""}${p.all_down ? " · all down" : ""}`;
 }

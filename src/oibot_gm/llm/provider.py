@@ -25,6 +25,7 @@ ROUTES: dict[str, tuple[str, str]] = {
     "policy_compile": ("claude-opus-5", "high"),    # prose policy -> rules/constraints (rare, must be right)
     "config_change": ("claude-sonnet-5", "medium"), # plain-text config -> typed ops (cheap, confirmed by a human)
     "help": ("claude-sonnet-5", "low"),             # "how does X work?" from the manual + live state (cached prefix)
+    "tier_draft": ("claude-sonnet-5", "medium"),    # Loot › Items "Draft with Claude": a tier proposal an officer confirms per item
 }
 
 # $ per million tokens: (input, output, cache read, cache write)

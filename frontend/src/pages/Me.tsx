@@ -13,6 +13,7 @@ import { useLive } from "../hooks/useLive";
 import { MyLootCard, WishlistCard } from "../components/loot/MyLoot";
 import { CharacterTable } from "../components/CharacterTable";
 import { AbsencesCard } from "../components/AbsencesCard";
+import { AttendanceCard } from "../components/AttendanceCard";
 
 
 export function MePage({ meta }: { meta: Meta }) {
@@ -86,6 +87,7 @@ export function MePage({ meta }: { meta: Meta }) {
             </Stack>
           </Card>
           {!me.must_apply && <MyLootCard meta={meta} />}
+          {!me.must_apply && me.characters.length > 0 && <AttendanceCard meta={meta} />}
           <AbsencesCard meta={meta} absences={me.absences} onChanged={load} />
           <Card>
             <CardHeader title="Direct messages" action={<Switch checked={me.dm} onChange={(e) => setDm(e.currentTarget.checked)} />} />

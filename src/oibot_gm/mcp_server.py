@@ -348,9 +348,19 @@ def list_members(filter: str | None = None, guild: Guild = None) -> dict:
 
 @mcp.tool()
 def get_member(member: str, guild: Guild = None) -> dict:
-    """One member's record: characters, every absence on file, placement asks, live sheets they answered, DM setting.
-    `member` = display name, character name or Discord id (ambiguous names come back with the candidates)."""
-    return api(guild).get("/api/member", name=member)
+    """One member's record: characters, every absence on file, placement asks, live sheets they answered, DM setting,
+    and `attendance` (D49, done runs over the loot policy's window, every character rolled up): the sentence, the count
+    the site shows (bench counts), the loot factor's count (rostered + confirmed; null = unknown, neutral) and one row
+    per run. `member` = display name, character name or Discord id (ambiguous names come back with the candidates)."""
+    data = api(guild).get("/api/member", name=member)
+    if isinstance(data, dict) and not data.get("candidates"):
+        who = str(data.get("uid") or member)
+        try:
+            att = api(guild).get("/api/members/attendance", member=who)
+            data["attendance"] = {k: v for k, v in att.items() if k != "member"} if isinstance(att, dict) else None
+        except ToolError:
+            data["attendance"] = None  # the record is still the answer; attendance is a read beside it
+    return data
 
 
 @mcp.tool()
@@ -1141,6 +1151,26 @@ def tier_item(item: str, tiers: dict[str, str], reweight: bool | None = None, gu
 
     data = api(guild).post(f"/api/loot/items/{quote(item, safe='')}/tiers", _loot_body(tiers=tiers, reweight=reweight), actor=True)
     return {k: data.get(k) for k in ("message", "ask", "awards", "reweighted") if data.get(k) is not None}
+
+
+@mcp.tool()
+def draft_tiers(item: str, guild: Guild = None) -> dict:
+    """Ask Claude for a DRAFT of an item's tiers (Loot › Items "Draft with Claude"): a proposal from the item's facts,
+    the guild's specs and its loot policy, validated by code (profile spec keys only, specs that can't equip it dropped).
+    NOTHING is written: show the person the draft, and only when they confirm it call tier_item with the tiers they
+    accept (that is the decision, with the re-weight question). `item` = a name, id or key from list_items."""
+    from urllib.parse import quote
+
+    data = api(guild).post(f"/api/loot/items/{quote(item, safe='')}/draft", {})
+    return {"draft": data.get("draft"), "item": (data.get("item") or {}).get("name")}
+
+
+@mcp.tool()
+def export_tiers(guild: Guild = None) -> str:
+    """The guild's whole tier grid as CSV text (item_id, item, boss, then one column per spec key; empty = no tier) —
+    the same file Loot › Items exports. Edit it and import it on the site (preview, then apply)."""
+    data = api(guild).get("/api/loot/items/export")
+    return data if isinstance(data, str) else str(data)
 
 
 @mcp.tool()

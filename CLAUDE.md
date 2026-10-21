@@ -46,9 +46,13 @@ src/oibot_gm/
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
-  loot/                scoring.py (candidates + base score; untiered items, neutral attendance), recommend.py (Claude structured output + fallback),
+  loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
+                       Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
                        session.py (LootSession keyed (guild, run), Drop/drop_id, Proposal + pending Override, batch_rev/drops_rev, LootChanged/LootBusy,
-                       run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS) — design §5.35
+                       run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS; undistributed() =
+                       killed bosses first; raid_bosses / boss_progress / run_boss_progress = "Bosses 3 / 6" from the session files) — design §5.35;
+                       tierdraft.py (design §5.44): draft = Claude's tier PROPOSAL for one item (route tier_draft, validated, nothing written —
+                       the officer's tiers Save is the write), export_csv / parse_csv / apply_csv = the tier grid's CSV (preview, dedupe, rev)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
@@ -61,7 +65,8 @@ src/oibot_gm/
                        only LootSession.blocks_close — picks/undistributed — holds it, once announced; reasons/conflicts outlive it: set_reason/correct take a
                        session id after the end); loot_ensure_thread (a pending thread retried on /raid loot, on_resumed, ready); hooks the surfaces replace:
                        loot_notify(…, kind, drop_id) / loot_view / loot_open_thread / loot_ended / loot_closing / loot_held (minimal defaults);
-                       retire_precedent = THE retire / restore (wraps RegistryLootContext.set_precedent_status; /gm precedents, the site, plain text, MCP)
+                       retire_precedent = THE retire / restore (wraps RegistryLootContext.set_precedent_status; /gm precedents, the site, plain text, MCP);
+                       loot_boss_down (after a NEW kill: the raid's last boss → ALL_DOWN_LINE once + the lock card redrawn; its End = end_decide → end_run)
   discord_loot_surface.py  LootSurfaceMixin (OibotGM, before LootMixin; design §5.36): the council's Discord surface replacing those hooks —
                        a PUBLIC thread on officer_channel (refused when none), the pinned session card (raid_views.loot_layout) and the proposal
                        cards (batch_layout: ≤5 items, per boss, Confirm the rest · Discard on the newest) edited after every write from any surface,
@@ -93,7 +98,10 @@ src/oibot_gm/
                        (puppet_refusal); add_absence refuses overlaps + a reason past ABSENCE_REASON_MAX (check_absence = no write); set_dm;
                        remove_schedule takes its regulars off (D30, no DM); owner_refusal / owner_consequence / set_owner (D50).
                        Auras (§5.43): set_buff_overrides / set_family_overrides = one validated write per buff / family, restored on refusal (the
-                       single-field verbs call them); family_slug(name) (ids never typed; taken → -2); aura_override_counts / aura_reset_sentence
+                       single-field verbs call them); family_slug(name) (ids never typed; taken → -2); aura_override_counts / aura_reset_sentence.
+                       Attendance (§5.44, D49): done_runs (cached), attendance(member, window_days, bench=) → (attended, total) = rostered (+ confirmed on
+                       recurring) of the runs they were a regular of / joined and not away; attendance_runs (rows), attendance_tracked, attendance_known
+                       (None until ATTENDANCE_MIN_RUNS real runs: neutral), attendance_text = THE sentence; window = loot_cfg attendance.window_days
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
@@ -150,7 +158,8 @@ src/oibot_gm/
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
                        run_times, run_label/run_title/clock12, gaps_text/ask_line, leftover_block, split_away (the sheet's Away row); BotProto = what the mixins expect from the client;
                        the loot council: loot_layout (session card) / batch_layout + loot_chunks (proposal cards) / item_layout (the ephemeral item card) /
-                       loot_closed_layout / loot_stub_layout, loot_status_text + presence_line (the companion chip), why_not_text
+                       loot_closed_layout / loot_stub_layout, loot_status_text + presence_line (the companion chip), why_not_text;
+                       boss_lines = the lock card's "☠ Bosses 3 / 6" + "All bosses down — End the run?" (night_actions_row's End reads "End the run")
   raid_buttons.py      persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
                        RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/End; the closed card's
                        Reopen; lock_decide = THE lock screen with Preview lock, cancel_decide = THE cancel screen, end_decide), LootButton `loot.<gk>:<session>:<drop|->:<action>[:<arg>]`,
@@ -227,7 +236,9 @@ src/oibot_gm/
   agents.py            local jobs on the Mac mini: out/agents/<job>.json status + runs/<job>-<stamp>.jsonl transcripts (last 30), stream-json → steps,
                        launchctl print/kickstart, claude command lines (allow/deny lists, dontAsk; never a permission bypass)
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token;
-                       dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line
+                       dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line;
+                       ts = epoch seconds (ts_kind); refuse_event = a clock-only KILL refused + warn_once → on_warn (ops_warner: "companion too old", once);
+                       token_state(key, many=) = which feed-token variables are set (names only — the Loot › Companions card)
   discord_feed.py      FeedMixin through the LootMixin verbs: drop → tick (+ auto-distribute); loot → confirm / mismatch (recorded, reason pending) / manual /
                        conflict; kill. loot_route(comp): the token's guild → one live council (test only from a puppet/tester companion; several → by
                        seated character; else refused; a council past its run's close never competes with tonight's); no live run → held 10 min
@@ -256,7 +267,9 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
   web/api_loot.py      the loot council on the web (design §5.36): /api/loot (+ /run/{run}), /api/loot/{run}/open|tick|distribute|override|confirm|
                        discard|reason|correct|end|… (the LootMixin verbs; LootChanged/LootBusy → 409 + `state`), history, precedents (+ retire), items
                        (+ tiers with the D12 re-weight ask), wishlists (+ TMB import), /api/me/loot, /api/me/wishlist, /api/members/wishlist, /api/loot/log
-                       (members logged in; officers' `scores` filtered server-side, D2). D8: decisions from MCP need X-Oibot-Actor (app.py mcp_actor)
+                       (members logged in; officers' `scores` filtered server-side, D2). D8: decisions from MCP need X-Oibot-Actor (app.py mcp_actor).
+                       Phase 3 (§5.44): /api/loot/items/{key}/draft (DRAFTS in memory), /api/loot/items/export|import (CSV), /api/loot/companions,
+                       /api/me/attendance, /api/members/attendance; councils carry bosses_progress
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
                        sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`
@@ -264,7 +277,7 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        components/CharacterTable.tsx (the Me page's characters), AbsencesModal/AbsencesCard/AbsencesTable.tsx (From picked on a calendar + For how long, I'm back),
                        components/ConfirmModal.tsx (useConfirm), components/ReviewModal.tsx (THE edit-mode review: ReviewModal + useOpsSave = the tiered Save over
                        /api/ops/change, the result sheet, stale-token / restart handling; api.ts opsApi + OpsChange / Described / OpsReply), components/PlainPermissions.tsx (Ops page: who may do what, where), components/ScheduleCard.tsx (Raids page schedules + editor), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist) · Loot log (members) · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items · Wishlists) · Agents (the news review's monitor) · Ops · Config (Mantine, left rail,
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Rosters · Raids · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Companions) · Agents (the news review's monitor) · Ops · Config (Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            raid thumbnails and generated class / role / buff badges (the emoji fallback; no roster or analytics images any more);  report_html.py → out/coverage.html

@@ -10,6 +10,9 @@ writes; touches nothing else.
 Turn on logging in game with /chatlog (the companion warns when the file goes stale).
 Dependency: `pip install websockets`.
 
+Stamps: every event's `ts` is epoch seconds (the chat log's local stamp read on this PC); a bot refuses a kill stamped
+with a clock time only (a companion older than this one) and tells its ops channel once — update this file then.
+
 Delivery: an event stays in the Outbox until the bot acks it (matched by its idem). A dropped socket re-sends the
 in-flight event first after the reconnect; an error reply (the bot refused it — e.g. several loot councils are live and
 this character is rostered on none, until an officer binds the companion on a council card) is retried every RETRY_S
@@ -42,7 +45,9 @@ def parse_line(line: str, year: int | None = None) -> dict | None:
     if not m:
         return None
     year = year or datetime.now().year
-    ts = datetime(year, int(m["m"]), int(m["d"]), int(m["h"]), int(m["mi"]), int(m["s"]), int(m["ms"]) * 1000).isoformat(timespec="milliseconds")
+    # epoch seconds (design §3.5 L12): the chat log's stamp is this PC's local clock with no zone — turned into an instant
+    # here, on the machine whose clock and zone wrote it, so the bot never guesses a zone (it refuses a clock-only kill)
+    ts = round(datetime(year, int(m["m"]), int(m["d"]), int(m["h"]), int(m["mi"]), int(m["s"]), int(m["ms"]) * 1000).timestamp(), 3)
     body = m["body"].strip()
     # strip "[Raid] Name: " / "[Raid Warning] Name: " / "Name whispers: " prefixes for announcements
     speaker = None
@@ -222,7 +227,7 @@ async def run(args: argparse.Namespace) -> None:
                     async def heartbeat():
                         while True:
                             await asyncio.sleep(60)
-                            await ws.send(json.dumps({"type": "heartbeat", "ts": datetime.now().isoformat(timespec="seconds"), "log_age": tailer.age() if tailer else None}))
+                            await ws.send(json.dumps({"type": "heartbeat", "ts": round(time.time(), 3), "log_age": tailer.age() if tailer else None}))
 
                     hb = asyncio.create_task(heartbeat())
                     try:

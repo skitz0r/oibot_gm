@@ -434,9 +434,35 @@ def night_actions_row(reg: Registry, ev: rc.RaidEvent):
     ui = discord.ui
     started = datetime.now(ev.start.tzinfo) >= ev.start
     remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else "no confirmations"
+    down = bool((boss_progress(reg, ev) or {}).get("all_down"))  # the last boss is down: End is the next thing to press (L12)
     return ui.ActionRow(RunButton(reg.key, ev.key, "remind", disabled=bool(remind_no)),
                         RunButton(reg.key, ev.key, "pause", label="Resume autofill" if ev.autofill_paused else None),
-                        RunButton(reg.key, ev.key, "end", disabled=not started))
+                        RunButton(reg.key, ev.key, "end", disabled=not (started or down), label="End the run" if down else None))
+
+
+def boss_progress(reg: Registry, ev: rc.RaidEvent) -> dict | None:
+    """The run's kills from its loot council(s) (loot.session.run_boss_progress), None without a council."""
+    from .loot.session import run_boss_progress
+
+    try:
+        return run_boss_progress(reg, ev.key, ev.instance)
+    except Exception:  # noqa: BLE001 — a card never fails over a session file
+        return None
+
+
+def boss_lines(reg: Registry, ev: rc.RaidEvent, i: int) -> list[str]:
+    """The lock card's kill lines (design §3.5 L12): "☠ Bosses 3 / 6" (this roster's council; "☠ Bosses 3" while the
+    raid's bosses aren't listed), and on roster 1's card, once every council's last boss is down, the end prompt —
+    "All bosses down — End the run?" (the End button below; the decide screen, then end_run). Numbers only: no prose."""
+    prog = boss_progress(reg, ev)
+    if prog is None or ev.state != "locked":
+        return []
+    per = prog["rosters"]
+    mine = per.get(i) or per.get(None) or prog
+    out = [f"☠ Bosses {mine['done']}" + (f" / {mine['total']}" if mine["total"] else "")]
+    if i == 0 and prog["all_down"]:
+        out.append("**All bosses down — End the run?**")
+    return out
 
 
 def ask_closed_layout(text: str) -> discord.ui.LayoutView:
@@ -624,6 +650,7 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
     if confirms:
         tail.append(f"-# ✓ confirm by <t:{int(confirm.timestamp())}:f> · unanswered then counts as out"
                     + (" · confirmations not yet sent" if ev.state == "locked" and not ev.confirmations_sent_at else ""))
+    tail += boss_lines(reg, ev, i)
     if i == 0 and ev.state == "locked":
         site = rc.asks_on_site(reg, ev)
         tail.append(f"-# fill: {rc.fill_state_text(reg, ev)}" + (f" · {site} ask{'s' if site != 1 else ''} wait on the site" if site else "")

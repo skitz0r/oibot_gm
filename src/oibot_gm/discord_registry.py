@@ -779,6 +779,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             e.insert_field_at(0, name="Inbox", value="\n".join(box)[:1000], inline=False)
         ups = m.upcoming_absences(today)
         e.add_field(name="Upcoming absences", value="\n".join(reg.span_label(a.start, a.end) for a in ups) or "none", inline=True)
+        e.add_field(name="Attendance", value=reg.attendance_text(m) + "\n-# the Me page lists each run", inline=True)  # D49 (bench counts here)
         from .loot_ops import guild_ctx, loot_block, member_awards
 
         got = member_awards(reg, guild_ctx(interaction.client, reg), m, 10)
