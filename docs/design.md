@@ -2183,6 +2183,113 @@ when cutoffs are given. The puppet digest (`send_digest`) is listed in the DM-ru
 for the puppets). `/raid set` on a test run offers a real member nothing (§5.40's `rc.on_bench_side`), so the refusal
 comes before any Confirm; `do_member_action` refuses the same. The Test tab's sheets carry the on-behalf `people` list.
 
+### 5.43 Dual interfaces, phase 3 — the structured ops path (built 2026-10-20)
+
+The foundation of phase 3's setup review (out/dual_interface_design.md §2.3, §2.4, §3.5 S2; owner decision D51 = tiered
+web review). Before it, the site's admin routes, MCP's setup tools, the AuraWizard and plain text each wrote config their
+own way: MCP carried a copy of the plain-text value grammar ('all: 3, mana: 2', 'min-max'), the Auras page saved a buff
+field by field (a refused field after a saved one left a half-changed buff in git), and the web confirmed either nothing or
+everything. Now every structured write goes through ONE core in `configops`.
+
+**Typed drafts → ops, server-side.** `configops.ops_from_fields(reg, kind, target, fields, *, channels=None) -> list[ConfigOp]`
+is the translation every structured caller shares. `kind` ∈ `STRUCTURED_KINDS` = settings (fields: timezone, ask_audience,
+about, news_keywords, loot_log, officer_roles = the whole id list → role_add/role_remove diffs, `channel:<kind>` = an id, a
+`<#id>` or — MCP — a channel name) · raid (the Raids page form or flat names `weight_<k>`, `<role>_<min|max>`, `cadence`;
+only fields that differ, as the old route compared) · raid_reset · schedule (target `"<raid>:<schedule>"`; null = inherit,
+bools, lists, a weights map with per-key null) · schedule_remove · buff (scope / family / strength / status / note, only what
+differs; `family_new` = a new family's name: a family_set op first, then the buff joins it) · family (target null + `name` =
+new, id from `Registry.family_slug`; name / status / note / `value` = the whole map / `value:<key>` = one beneficiary,
+null removes) · aura_reset (target null = everything) · recruitment (open, note, invite_url, questions = the whole list,
+member_role_ids) · plain (groups, channels = the whole map → per-channel diffs, set_channels, dm, default). Structured values
+the plain grammar can't carry travel as JSON in the op's value (`_typed` reads them back): a family's whole map, a
+schedule's weights, the recruit `questions` / `member_roles` fields (structured only; `RECRUIT_WHOLE`). `ops_from_changes(reg,
+changes, raw_ops)` joins a request's `changes` and raw `ops`.
+
+**One write per thing (`coalesce`).** Consecutive ops merge into a `MergedOp` per raid (set_raid_overrides), per schedule
+(set_schedule), per buff (the new `Registry.set_buff_overrides(bid, fields, by, rev=)`), per family (the new
+`set_family_overrides(fid, fields, by, rev=)`), the plain ops (one set_plain_policy over the merged patch) and the absolute
+recruit fields (`RECRUIT_MERGE`: one set_recruitment). The two new verbs follow the set_raid_overrides pattern: every field
+validated (`_buff_field` / `_family_field`), one save_config, a refusal restores the buff / family exactly; the single-field
+verbs are now one-field calls of them. `family_slug(name)` = lower-case words joined by `_`, `-2`, `-3`… when taken (by a
+family or a buff id). `aura_override_counts()` / `aura_reset_sentence()` = the one reset-all sentence.
+
+**Preview = structure.** `describe_ops(reg, ops, refused=None, channel=PLAIN_WEB) -> Described`: the ops coalesced as
+apply_ops will write them; per write a `DescribedLine(op, target, label, parts=[DescribedPart(label, before, after)], notes,
+text, error, warn, consequences, ops)` — `label` names the thing (the buff's name, "Barrow Deeps · Alt run", "Guild
+settings"), `parts` its settings current → new in words, `text` the chat diff (describe()), `error` the refusal its apply
+gives found by a dry run on ONE `Registry.shadow()` per batch (so a family created earlier exists for the buff that joins it;
+nothing live is touched), `warn` from `WARN_OPS`, `consequences` from `op_consequences`. `Described(lines, refused,
+consequences, warn)` + `review` (warn or a consequence) + `fingerprint` + `summary()` ('Scope party → raid · Who benefits:
+Healers 2 → 3 · 2 changes'). Mentions stay ids (`<#id>`, `<@&id>`, `<@id>`) in the structure; `render()` turns them into
+'#name' / '@Role' / '@Member' per surface: `json_for(reg, "web"|"mcp", channels)`, `as_text()` (MCP), `as_discord()`.
+
+**Who may: by privilege.** `authorize_ops(reg, ops, uid, *, role, role_ids=(), raids=None)`: the owner for OWNER_OPS and
+HARD_OWNER_OPS, officers for the rest, a member only for their own record (`bind_self`, as chat; must_apply and a locked
+self-join refused as there); `outside` nothing. Refusals name who may and where (`GROUP_WHERE`). Never `may_plain` — the chat
+policy governs chat, not a page's Save. `role` comes from `role_of` (web: `viewer_role(v)`, decided live via `live_officer`
+for a write).
+
+**Ceremony follows consequence.** `WARN_OPS` (op → predicate) = channel changes and the timezone, officer roles, a schedule
+removed or paused, a buff's scope or family, every-aura reset, applications closed, plain text on the ops channel or in DMs —
+plus lock, cancel, test clear and proposals (§2.3). `op_consequences` gives sentences for a schedule's regulars, a pause, the
+reset-all, the last officer role removed, closing applications, clearing a channel, plain text leaving the ops channel / DMs;
+`CONSEQUENCE_HOOKS` lets the channel and timezone work append theirs. A Save with neither applies directly.
+
+**The core.** `apply_ops(reg, ops, *, by, by_id, bot=None, via="web", revs=None, raids=None, policy_store=None, self_id=None)`
+→ `{applied, refused, results[{label, ok, line}], error, changed}`: coalesce; consecutive pure config writes (`PURE_OPS`) in
+ONE `asyncio.to_thread` call under `config_lock` and ONE `store.batch` (one commit; GitStore's batch depth was already
+thread-local); a channel setting with a bot (set_channel posts cards) and every non-config op through `apply_async(audit=False)`
+on the loop; section revs (`config:<section>`) and board/plan revs through `op_rev` / `snapshot_revs` / `refresh_revs`, so a
+batch's own earlier write is not "someone else's change" while a real one raises ConfigChanged for that write (listed in
+`changed`); a refused write is listed and the rest still apply; ONE `ops.audited` line for the batch (verbs that audit
+themselves — `self_audited` — left out); the registration card refreshed once after recruit writes. `result_summary(res)` =
+'3 saved, 1 refused'.
+
+**The route (web/api_ops.py).** `POST /api/ops/change` keeps `{text}` (officers; Claude parses; `authorize` under the chat
+policy) and adds `{changes: [{kind, target, fields}], ops?: [ConfigOp], revs?}` for any member: stale `revs` → 409
+`{error, changed, revs}`; preview → `{described, describe, ops, refused, review, warn, fingerprint, token, expires_in, revs}`;
+`apply: true` = a Save (applied at once unless `review` — then `needs_review` + token, nothing written); `confirmed: true`
+applies regardless (MCP after its own preview, the translators); `{token, apply: true}` applies a reviewed preview; with
+`changes` + `seen` an expired token re-previews and applies silently when the fingerprint matches, else answers `updated: true`;
+tokens carry the process's `BOOT` prefix, so one from before a restart answers `restarted: true` (never applied without a
+press) or, alone, the 400 "apply needs the token" with `restarted`. Apply answers `{applied, refused, results, error,
+changed, summary, note}` (409 when nothing applied because a section changed). Members reach it (D40: no box on Me, but
+the route answers them correctly — their own record applies, anything else is refused with who may); text stays officers'.
+The admin routes — /api/admin/config, aura, family, aura/reset, raid, raid/reset, raid/schedule, raid/schedule/remove,
+recruitment, plain-permissions — moved here as TRANSLATORS: the old body becomes changes, `translate()` runs the core with
+the old answers (`{message}`, the plain/recruitment extras, 400 with the reason, 403 for non-owners); none calls a Registry
+verb (tests/test_structured_ops.py asserts it). GET /api/auras, /api/raids (per raid), /api/config, /api/recruitment and
+/api/plain-permissions return the section rev(s) for an edit-mode Save to send back.
+
+**MCP.** The setup tools (raid_set, schedule_set, schedule_remove, raid_reset, aura_set, family_set, aura_reset,
+set_channel, set_config, set_recruitment, set_plain_permissions) send typed `changes` through `ops_change(guild, changes,
+preview)` — `confirmed: true` to apply, `preview=True` returns the Described structure; RAID_FIELDS, the 'all: 3' parser and
+the client-side role-name lookup are gone (the bot resolves role names against its live role cache).
+
+**The AuraWizard (/gm config aura)** is a draft hub per buff: value selects and the note modal update `buff_draft` /
+`fam_draft` (per-key `value:<key>` on the family the buff will be in), the menu prints `Described.summary()` as "✏️ Not saved
+yet: …", **Save this buff** runs the draft's changes through `apply_ops` (a buff = one write, its family = one write, one
+commit), *Another buff* / *Done* with a dirty draft ask Save / Discard / Back, **New family…** asks a name (the id is fixed
+at naming), **Reset everything to game defaults** uses the decide screen with `aura_reset_sentence()`. The buffs rev is
+snapshotted at start and after each save; a ConfigChanged offers **Reload and keep my changes** (`normalize()` keeps only
+deltas that still change something).
+
+**The site.** `components/ReviewModal.tsx` = THE review of edit modes: `ReviewModal({opened, title, preview, result, busy,
+notice, onApply, onClose})` renders `described` as structure and becomes the result sheet; `useOpsSave()` →
+`[save(changes, {revs, title}) → Promise<OpsReply | null>, dialog]` implements the tiered Save (direct + toast, or review;
+refusals open the result sheet; expired / restarted tokens; a 409 resolves with `changed`). The Auras page's edit mode is one
+structured batch (strength = the preset select with *other…*, *New family…* by name, refused buffs stay drafted and
+marked), the family editor sends per-key deltas and no id, reset-all goes through the review (warn), and the page follows
+`useLive(["config"])` unless an edit is open. `api.ts`: `OpsChange`, `Described`, `DescribedLine`, `DescribedPart`,
+`OpsReply`, `OpsResult`, `opsApi.preview|save|apply`.
+
+Not in this part (other phase 3 builders): the Discord plain-text diff (ConfigConfirmView) printing `as_discord()`, the
+channel / timezone consequence sentences (`CONSEQUENCE_HOOKS`), Settings / Raids / Recruitment / Plain-permissions edit
+modes on `useOpsSave`, TellTheBot. TimezoneWizard and AboutWizard still save on the loop without the lock (the Settings
+work moves them onto `apply_ops`). Tests: tests/test_structured_ops.py (verbs, slugs, coalesce, Described, warn, privilege,
+the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
+AuraWizard hub in tests/test_flows_config.py.
+
 ## 6. Architecture
 
 ```mermaid

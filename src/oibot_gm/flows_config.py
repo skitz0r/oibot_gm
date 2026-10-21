@@ -1054,14 +1054,27 @@ def key_words(key: str) -> str:
 
 
 class AuraWizard(OwnerWizard):
+    """/gm config aura — a DRAFT HUB per buff (design §3.5 A-01): the menu shows the buff as it stands plus the draft line
+    ('Scope party → raid · Who benefits: Healers 2 → 3 · 2 changes', configops.describe_ops(...).summary() — the same
+    structure the site's review and MCP's preview print); a value select or the note modal only updates the draft (buff
+    fields and its family's beneficiaries alike); ONE 'Save this buff' writes it through the structured core
+    (configops.apply_ops: a buff = one set_buff_overrides write, its family one set_family_overrides write, one commit).
+    'Another buff' / 'Done' with a dirty draft ask Save / Discard / Back. The buffs section rev is snapshotted at start
+    and after every save; a save refused because someone else changed the auras offers 'Reload and keep my changes'
+    (the draft is per-field deltas, so a re-base is a merge). Family ids are never typed: 'New family…' asks a name."""
+
     def __init__(self, reg: Registry, owner_id: int):
         super().__init__(reg, owner_id, title="Aura facts", guard=_owner_guard(reg))
         self.bid: str | None = None
         self.saved: list[str] = []
         self._key: str | None = None
         self._cls: str | None = None
+        self.buff_draft: dict = {}  # field → value ('family_new' = a new family's name)
+        self.fam_draft: dict = {}  # 'value:<key>' → points ('' removes) — on the family the buff will be in
+        self.new_fid: str | None = None  # a new family's id, fixed when it is named (family_slug), so a retry can't re-slug it
+        self.rev = reg.config_rev("buffs")
 
-    # ---- facts
+    # ---- facts (as stored) and the draft over them
     def fam(self):
         b = self.reg.buff(self.bid)
         return b, self.reg.profile.families[b.family_id]
@@ -1069,21 +1082,127 @@ class AuraWizard(OwnerWizard):
     def map_text(self, value: dict) -> str:
         return " · ".join(f"{key_words(k)} {num(v)}" for k, v in value.items()) or "nobody"
 
+    def dirty(self) -> bool:
+        return bool(self.buff_draft or self.fam_draft)
+
+    def new_family_name(self) -> str | None:
+        return self.buff_draft.get("family_new")
+
+    def target_family(self) -> tuple[str | None, dict]:
+        """(family id, its beneficiary map) the draft's benefit edits apply to: the drafted family, else the buff's own."""
+        b, fam = self.fam()
+        if self.new_family_name():
+            return None, {}
+        fid = self.buff_draft.get("family")
+        if fid == "own":
+            fid = b.id
+        f = self.reg.profile.families.get(fid or b.family_id) or fam
+        return f.id, dict(f.value)
+
+    def drafted_map(self) -> dict:
+        _fid, value = self.target_family()
+        out = dict(value)
+        for k, v in self.fam_draft.items():
+            key = k[6:]
+            if v in ("", None) or float(v) <= 0 and not key.startswith("spec:"):
+                out.pop(key, None)
+            else:
+                out[key] = float(v)
+        return out
+
+    def changes(self) -> list[dict]:
+        """The draft as typed changes (configops.ops_from_fields): a new family first (its id from its name), then its
+        or the existing family's beneficiaries, then the buff."""
+        out: list[dict] = []
+        bf = {k: v for k, v in self.buff_draft.items() if k != "family_new"}
+        name = self.new_family_name()
+        if name:
+            out.append({"kind": "family", "target": self.new_fid, "fields": {"name": name, **self.fam_draft}})
+            bf["family"] = self.new_fid
+        elif self.fam_draft:
+            fid, _ = self.target_family()
+            out.append({"kind": "family", "target": fid, "fields": dict(self.fam_draft)})
+        if bf:
+            out.append({"kind": "buff", "target": self.bid, "fields": bf})
+        return out
+
+    def described(self):
+        from .configops import describe_ops, ops_from_changes
+
+        return describe_ops(self.reg, ops_from_changes(self.reg, self.changes()))
+
+    def draft_line(self) -> str:
+        if not self.dirty():
+            return ""
+        try:
+            return "✏️ Not saved yet: " + self.described().summary()
+        except RegistryError as e:
+            return f"✏️ Not saved yet — {e}"
+
+    def put(self, field: str, value) -> None:
+        """One buff field into the draft; a value equal to the stored one drops out of it (nothing to save)."""
+        b, _ = self.fam()
+        if field == "family_new":
+            self.buff_draft.pop("family", None)
+            self.buff_draft["family_new"] = value
+            self.new_fid = self.reg.family_slug(value)
+            self.fam_draft.clear()  # a new family starts with nobody benefiting
+            return
+        now = {"family": "own" if b.family_id == b.id else b.family_id, "strength": num(b.strength)}.get(field, getattr(b, field, None))
+        if field == "family":
+            self.buff_draft.pop("family_new", None)
+            if self.fam_draft and value != self.buff_draft.get("family", now):
+                self.fam_draft.clear()  # benefit edits belonged to the family the buff was going to be in
+        if str(value) == str(now if now is not None else ""):
+            self.buff_draft.pop(field, None)
+        else:
+            self.buff_draft[field] = value
+
+    def drafted(self, field: str):
+        b, _ = self.fam()
+        if field in self.buff_draft:
+            return self.buff_draft[field]
+        return {"family": "own" if b.family_id == b.id else b.family_id, "strength": num(b.strength)}.get(field, getattr(b, field, None))
+
     # ---- which buff
     async def start(self, i: discord.Interaction, page: int = 0) -> None:
         buffs = self.reg.profile.buffs
         opts = [Opt(b.id, b.short, f"{b.scope} · {self.reg.profile.families[b.family_id].name} · {b.status}") for b in buffs]
         items, pageline = self.paged("Pick a buff", opts, self.buff_picked, page, self.start)
-        await self.show(i, "Which buff?" + (f"\n{pageline}" if pageline else ""), *items, self.button("Done", self.done))
+        counts = self.reg.aura_override_counts()
+        extra = [self.button("Reset everything to game defaults", self.reset_all, discord.ButtonStyle.danger)] if counts["buffs"] or counts["families"] else []
+        await self.show(i, "Which buff?" + (f"\n{pageline}" if pageline else ""), *items, *extra, self.button("Done", self.done))
 
     async def buff_picked(self, i: discord.Interaction, values: list[str]) -> None:
         self.bid = values[0]
+        self.buff_draft, self.fam_draft = {}, {}
         await self.menu(i)
 
     async def done(self, i: discord.Interaction) -> None:
+        if self.bid and self.dirty():
+            await self.unsaved(i, then=self.done)
+            return
         await self.finish(i, ("✅ " + "\n✅ ".join(self.saved)) if self.saved else "Closed — nothing was changed.")
 
-    # ---- what to change
+    async def another(self, i: discord.Interaction) -> None:
+        if self.dirty():
+            await self.unsaved(i, then=self.start)
+            return
+        await self.start(i)
+
+    async def unsaved(self, i: discord.Interaction, then) -> None:
+        b, _ = self.fam()
+
+        async def save_then(it: discord.Interaction) -> None:
+            await self.save(it, after=then)
+
+        async def discard_then(it: discord.Interaction) -> None:
+            self.buff_draft, self.fam_draft = {}, {}
+            await then(it)
+        await self.show(i, f"**{b.short}** has changes that aren't saved:\n{self.draft_line()}", self.button("Save this buff", save_then, discord.ButtonStyle.success),
+                        self.button("Discard them", discard_then, discord.ButtonStyle.danger), self.button("Back", self.back))
+
+    # ---- the hub: the buff as it stands, the draft, what to change
     async def menu(self, i: discord.Interaction, note: str = "") -> None:
         b, fam = self.fam()
         shared = [x.short for x in self.reg.profile.buffs if x.family_id == b.family_id and x.id != b.id]
@@ -1093,48 +1212,68 @@ class AuraWizard(OwnerWizard):
                   f"Who benefits: {self.map_text(fam.value)}"]
         if b.note:
             lines.append(f"-# {b.note}")
-        opts = [Opt("scope", "Scope", f"{b.scope} — {SCOPE_WORDS.get(b.scope, '')}"),
-                Opt("family", "Stacking family", f"{fam.name}" + (" — stands alone" if not shared else f" — with {', '.join(shared)}")),
-                Opt("strength", "Strength", f"×{num(b.strength)} of the family's value"),
-                Opt("status", "Status", f"{b.status} — {STATUS_WORDS.get(b.status, '')}"),
-                Opt("benefits", "Who benefits", self.map_text(fam.value)),
-                Opt("note", "Note", b.note or "none"),
+        if self.dirty():
+            lines.append(self.draft_line())
+        scope, fid, strength, status, bnote = (self.drafted(f) for f in ("scope", "family", "strength", "status", "note"))
+        fam_label = (f"{self.new_family_name()} (new)" if self.new_family_name() else
+                     "stands alone" if fid in ("own", b.id) else self.reg.profile.families[fid].name if fid in self.reg.profile.families else str(fid))
+        opts = [Opt("scope", "Scope", f"{scope} — {SCOPE_WORDS.get(scope, '')}"),
+                Opt("family", "Stacking family", fam_label),
+                Opt("strength", "Strength", f"×{strength} of the family's value"),
+                Opt("status", "Status", f"{status} — {STATUS_WORDS.get(status, '')}"),
+                Opt("benefits", "Who benefits", self.map_text(self.drafted_map())),
+                Opt("note", "Note", (bnote or "none")[:100]),
                 Opt("reset", "Reset to game defaults", "drop the guild's changes to this buff")]
-        await self.show(i, "\n".join(lines), self.select("What to change", opts, self.field_picked),
-                        self.button("Another buff", self.start), self.button("Done", self.done))
+        items = [self.select("What to change", opts, self.field_picked),
+                 self.button("Save this buff", self.save_pressed, discord.ButtonStyle.success, disabled=not self.dirty())]
+        if self.dirty():
+            items.append(self.button("Discard changes", self.discard))
+        items += [self.button("Another buff", self.another), self.button("Done", self.done)]
+        await self.show(i, "\n".join(lines), *items)
 
     async def back(self, i: discord.Interaction) -> None:
         await self.menu(i)
+
+    async def discard(self, i: discord.Interaction) -> None:
+        self.buff_draft, self.fam_draft = {}, {}
+        await self.menu(i, "Changes discarded — nothing was saved.")
 
     async def field_picked(self, i: discord.Interaction, values: list[str]) -> None:
         b, fam = self.fam()
         f = values[0]
         if f == "note":
-            await self.open_form(i, Form(f"Note · {b.short}"[:45], [Field("note", "Note", required=False, paragraph=True, default=b.note or None, max_length=300,
+            cur = self.drafted("note") or None
+            await self.open_form(i, Form(f"Note · {b.short}"[:45], [Field("note", "Note", required=False, paragraph=True, default=cur, max_length=300,
                                                                           description="what we know and where it came from; empty clears it")], self.note_submitted))
             return
         if f == "benefits":
             await self.benefits(i)
             return
         if f == "reset":
-            await self.confirm(i, f"Reset **{b.short}** to the game's defaults (scope, family, strength, status, note, and its own family's beneficiaries)?",
-                               lambda by: self.reg.clear_aura_overrides(by, b.id), "Reset")
+            from .configops import describe_ops, ops_from_changes
+
+            d = describe_ops(self.reg, ops_from_changes(self.reg, [{"kind": "aura_reset", "target": b.id}]))
+            text = (f"Reset **{b.short}** to the game's defaults (scope, family, strength, status, note, and its own family's beneficiaries)?"
+                    + (f"\n{d.as_discord()}" if d.lines else "") + ("\n-# Your unsaved changes to it are dropped too." if self.dirty() else ""))
+            await self.decide(i, text, do=self.do_reset_one, do_label="Reset", danger=True, back_label="Cancel")
             return
+        cur = self.drafted(f)
         if f == "scope":
             scopes = ["party", "raid"] + ([b.scope] if b.scope not in ("party", "raid") else [])
-            opts = [Opt(s, s.capitalize(), SCOPE_WORDS.get(s), default=s == b.scope) for s in scopes]
+            opts = [Opt(s, s.capitalize(), SCOPE_WORDS.get(s), default=s == cur) for s in scopes]
         elif f == "family":
-            opts = [Opt("own", "Stands alone", "stacks with everything", default=b.family_id == b.id)]
+            opts = [Opt("own", "Stands alone", "stacks with everything", default=cur in ("own", b.id))]
             for fid, fm in self.reg.profile.families.items():
                 if fid == b.id:
                     continue
                 members = [x.short for x in self.reg.profile.buffs if x.family_id == fid]
-                opts.append(Opt(fid, fm.name, ("with " + ", ".join(members)) if members else "no buffs yet", default=fid == b.family_id))
+                opts.append(Opt(fid, fm.name, ("with " + ", ".join(members)) if members else "no buffs yet", default=fid == cur))
+            opts = opts[:MAX_OPTIONS - 1] + [Opt("__new", "New family…", "name a new stacking family; its id is made from the name")]
         elif f == "strength":
-            opts = [Opt(num(s), f"×{num(s)}", "the family's full value" if s == 1 else None, default=float(b.strength) == s)
+            opts = [Opt(num(s), f"×{num(s)}", "the family's full value" if s == 1 else None, default=num(s) == str(cur))
                     for s in sorted(set(STRENGTHS) | {float(b.strength)})]
         else:
-            opts = [Opt(s, s.capitalize(), STATUS_WORDS[s], default=s == b.status) for s in self.reg.STATUSES]
+            opts = [Opt(s, s.capitalize(), STATUS_WORDS[s], default=s == cur) for s in self.reg.STATUSES]
         await self.value_screen(i, f, opts)
 
     async def value_screen(self, i: discord.Interaction, field: str, opts: list[Opt], page: int = 0) -> None:
@@ -1149,26 +1288,37 @@ class AuraWizard(OwnerWizard):
         await self.show(i, f"**{b.short}** — {field}?" + (f"\n{pageline}" if pageline else ""), *items, self.button("Back", self.back))
 
     async def picked_value(self, i: discord.Interaction, field: str, value: str) -> None:
-        b, _ = self.fam()
-        words = {"scope": lambda v: f"reach {SCOPE_WORDS.get(v, v)}", "strength": lambda v: f"count ×{v} of its family's value",
-                 "status": lambda v: f"be marked {v} ({STATUS_WORDS.get(v, '')})",
-                 "family": lambda v: "stand alone" if v == "own" else f"join the **{self.reg.profile.families[v].name}** family (the strongest one present counts)"}
-        await self.confirm(i, f"**{b.short}** will {words[field](value)}.", lambda by: self.reg.set_buff_override(b.id, field, float(value) if field == "strength" else value, by))
+        if field == "family" and value == "__new":
+            await self.open_form(i, Form("A new stacking family", [Field("name", "Name", max_length=40, placeholder="e.g. Stamina buffs",
+                                                                         description="the family's id is made from this name")], self.new_family_submitted))
+            return
+        self.put(field, value)
+        await self.menu(i)
+
+    async def new_family_submitted(self, i: discord.Interaction, v: dict[str, str]) -> None:
+        name = (v.get("name") or "").strip()
+        if not name:
+            await self.menu(i, "A new family needs a name.")
+            return
+        self.put("family_new", name)
+        await self.menu(i, f"**{name}** will be a new family ({self.new_fid}) once you save — set who benefits from it next.")
 
     async def note_submitted(self, i: discord.Interaction, v: dict[str, str]) -> None:
-        b, _ = self.fam()
-        note = v.get("note", "")
-        await self.confirm(i, f"**{b.short}** note → " + (f"“{note}”" if note else "cleared") + ".", lambda by: self.reg.set_buff_override(b.id, "note", note, by))
+        self.put("note", (v.get("note") or "").strip())
+        await self.menu(i)
 
-    # ---- who benefits: one key at a time through set_family_override(fid, "value:<key>") — never the whole map
+    # ---- who benefits: one key at a time into the draft (value:<key>) — never the whole map
     async def benefits(self, i: discord.Interaction) -> None:
         b, fam = self.fam()
-        shared = [x.short for x in self.reg.profile.buffs if x.family_id == b.family_id]
-        keys = list(self.reg.VALUE_KEYS) + [k for k in fam.value if k.startswith("spec:")]
-        opts = [Opt(k, key_words(k), f"{num(fam.value[k])} points" if k in fam.value else "no points", default=False) for k in keys][:MAX_OPTIONS - 1]
+        fid, _value = self.target_family()
+        cur = self.drafted_map()
+        name = self.new_family_name() or (self.reg.profile.families[fid].name if fid in self.reg.profile.families else fam.name)
+        shared = [x.short for x in self.reg.profile.buffs if x.family_id == fid]
+        keys = list(self.reg.VALUE_KEYS) + [k for k in cur if k.startswith("spec:")]
+        opts = [Opt(k, key_words(k), f"{num(cur[k])} points" if k in cur else "no points", default=False) for k in keys][:MAX_OPTIONS - 1]
         opts.append(Opt("__spec", "A particular spec…", "pick a class, then the spec"))
-        text = (f"**Who benefits** from the **{fam.name}** family" + (f" (every buff in it: {', '.join(shared)})" if len(shared) > 1 else "")
-                + f":\n{self.map_text(fam.value)}\n-# Points per beneficiary; the strongest matching key counts, a spec's own entry wins. Pick one to change — the others stay.")
+        text = (f"**Who benefits** from the **{name}** family" + (f" (every buff in it: {', '.join(shared)})" if len(shared) > 1 else "")
+                + f":\n{self.map_text(cur)}\n-# Points per beneficiary; the strongest matching key counts, a spec's own entry wins. Pick one to change — the others stay.")
         await self.show(i, text, self.select("Pick who", opts, self.key_picked), self.button("Back", self.back))
 
     async def key_picked(self, i: discord.Interaction, values: list[str]) -> None:
@@ -1189,41 +1339,114 @@ class AuraWizard(OwnerWizard):
         await self.points(i, f"spec:{values[0]}")
 
     async def points(self, i: discord.Interaction, key: str) -> None:
-        _, fam = self.fam()
         self._key = key
-        cur = fam.value.get(key)
+        cur = self.drafted_map().get(key)
+        name = self.new_family_name() or self.reg.profile.families[self.target_family()[0]].name
         vals = sorted(set(POINTS) | ({float(cur)} if cur else set()))
         opts = [Opt("0", "Remove", "this key gets no points of its own", default=not cur)]
         opts += [Opt(num(p), f"{num(p)} point{'' if p == 1 else 's'}", default=cur is not None and float(cur) == float(p)) for p in vals]
-        await self.show(i, f"**{key_words(key)}** — how much does the **{fam.name}** family give them? (now {num(cur) + ' points' if cur else 'none'})",
+        await self.show(i, f"**{key_words(key)}** — how much does the **{name}** family give them? (now {num(cur) + ' points' if cur else 'none'})",
                         self.select("How many points", opts, self.points_picked), self.button("Back", self.benefits))
 
     async def points_picked(self, i: discord.Interaction, values: list[str]) -> None:
-        b, fam = self.fam()
         key, n = self._key, values[0]
-        fid = b.family_id
-        after = dict(fam.value)
-        if float(n) > 0:
-            after[key] = float(n)
+        _fid, stored = self.target_family()
+        want = n if float(n) > 0 else ""
+        now = stored.get(key)
+        if (want == "" and now is None) or (want != "" and now is not None and float(want) == float(now)):
+            self.fam_draft.pop(f"value:{key}", None)  # back to what is stored: nothing to save for this key
         else:
-            after.pop(key, None)
-        await self.confirm(i, f"**{fam.name}** — {key_words(key)}: {num(fam.value[key]) if key in fam.value else 'none'} → **{n if float(n) > 0 else 'none'}**.\n"
-                              f"Who benefits becomes: {self.map_text(after)}",
-                           lambda by: self.reg.set_family_override(fid, f"value:{key}", n if float(n) > 0 else "", by))  # "" = remove the key
+            self.fam_draft[f"value:{key}"] = want
+        await self.benefits(i)
 
-    # ---- confirm → one write → back to the buff
-    async def confirm(self, i: discord.Interaction, text: str, apply: Callable[[str], str], label: str = "Confirm") -> None:
-        async def go(it: discord.Interaction) -> None:
-            await self.working(it, "Saving…")
-            try:
-                line = apply(it.user.display_name)
-            except RegistryError as e:
-                await self.refuse(it, str(e), self.back, "Back to the buff")
-                return
-            self.saved.append(line)
-            await self.menu(it, f"✅ {line}")
-        await self.show(i, text, self.button(label, go, discord.ButtonStyle.danger if label == "Reset" else discord.ButtonStyle.success),
-                        self.button("Back", self.back))
+    # ---- Save this buff: ONE batch through the structured core
+    async def save_pressed(self, i: discord.Interaction) -> None:
+        await self.save(i)
+
+    async def save(self, i: discord.Interaction, after=None) -> None:
+        from .configops import apply_ops, ops_from_changes
+        from .registry import ConfigChanged
+
+        b, _ = self.fam()
+        try:
+            ops = ops_from_changes(self.reg, self.changes())
+        except RegistryError as e:
+            await self.refuse(i, str(e), self.back, "Back to the buff")
+            return
+        await self.working(i, "Saving…")
+        res = await apply_ops(self.reg, ops, by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
+                              revs={"config:buffs": self.rev})
+        if res["changed"] and not res["applied"]:
+            await self.show(i, f"❌ {ConfigChanged('buffs')}\nYour changes to **{b.short}** are kept:\n{self.draft_line()}",
+                            self.button("Reload and keep my changes", self.rebase, discord.ButtonStyle.primary),
+                            self.button("Discard my changes", self.discard), self.button("Cancel", self.cancel))
+            return
+        self.rev = self.reg.config_rev("buffs")
+        if res["refused"]:
+            self.saved += res["applied"]
+            self.normalize()  # what did save drops out of the draft; what was refused stays for "Fix this"
+            await self.refuse(i, "Not saved — " + "; ".join(r["line"] for r in res["results"] if not r["ok"]) + ("\n✅ " + "\n✅ ".join(res["applied"]) if res["applied"] else ""),
+                              self.back, "Back to the buff")
+            return
+        self.saved += res["applied"]
+        self.buff_draft, self.fam_draft = {}, {}
+        if after is not None:
+            await after(i)
+            return
+        await self.menu(i, "✅ " + "; ".join(res["applied"]))
+
+    async def rebase(self, i: discord.Interaction) -> None:
+        """Someone else saved the auras meanwhile: take the current state as the base and keep only the draft's deltas
+        that still change something (per-field, never a whole-list overwrite)."""
+        self.rev = self.reg.config_rev("buffs")
+        self.normalize()
+        await self.menu(i, "Reloaded — your changes are on top of the current facts. Save when ready.")
+
+    def normalize(self) -> None:
+        """Drop the draft's deltas that no longer change anything against what is stored now (a re-base, or what a partly
+        refused save did write); a new family that now exists becomes a plain family pick."""
+        if self.new_fid and self.new_fid in self.reg.profile.families and "family_new" in self.buff_draft:
+            self.buff_draft.pop("family_new")
+            self.buff_draft["family"] = self.new_fid
+        fam_keep = dict(self.fam_draft)
+        for f, v in list(self.buff_draft.items()):
+            if f != "family_new":
+                self.put(f, v)
+        self.fam_draft = fam_keep
+        if "family_new" in self.buff_draft:
+            return
+        _fid, stored = self.target_family()
+        for k, v in list(self.fam_draft.items()):
+            now = stored.get(k[6:])
+            if (v == "" and now is None) or (v != "" and now is not None and float(v) == float(now)):
+                self.fam_draft.pop(k)
+
+    # ---- resets: the decide screen (THE confirm), one write each
+    async def do_reset_one(self, i: discord.Interaction, _note: str | None) -> None:
+        await self._reset(i, self.bid)
+
+    async def reset_all(self, i: discord.Interaction) -> None:
+        await self.decide(i, f"**Reset every aura to the game defaults?**\n{self.reg.aura_reset_sentence()}", do=self.do_reset_all, do_label="Reset everything",
+                          danger=True, back_label="Cancel")
+
+    async def do_reset_all(self, i: discord.Interaction, _note: str | None) -> None:
+        await self._reset(i, None)
+
+    async def _reset(self, i: discord.Interaction, target: str | None) -> None:
+        from .configops import apply_ops, ops_from_changes
+
+        res = await apply_ops(self.reg, ops_from_changes(self.reg, [{"kind": "aura_reset", "target": target}]), by=i.user.display_name, by_id=i.user.id,
+                              bot=getattr(i, "client", None), via="discord", revs={"config:buffs": self.rev})
+        self.rev = self.reg.config_rev("buffs")
+        if res["refused"]:
+            await self.refuse(i, "; ".join(r["line"] for r in res["results"] if not r["ok"]), self.back if target else self.start, "Back")
+            return
+        self.saved += res["applied"]
+        self.buff_draft, self.fam_draft = {}, {}
+        if target:
+            await self.menu(i, "✅ " + "; ".join(res["applied"]))
+        else:
+            await self.start(i)
 
 
 @flow("aura")

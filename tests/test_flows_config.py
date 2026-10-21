@@ -266,9 +266,9 @@ def test_raid_config_is_owner_only(reg, store):
     assert commits(store) == n0
 
 
-# ---------------------------------------------------------------- aura facts
+# ---------------------------------------------------------------- aura facts: a draft hub per buff, one Save (design §5.43)
 
-def test_aura_benefit_edit_keeps_the_familys_other_beneficiaries(reg, store, owner):
+def test_aura_benefit_edits_are_a_draft_and_one_save_writes_them(reg, store, owner):
     h = Harness(reg)
     before = dict(reg.profile.families["windfury_totem"].value)
     melee = f"Melee {before['melee']:g}"  # from the profile, so a vetted value change doesn't break the test
@@ -276,52 +276,145 @@ def test_aura_benefit_edit_keeps_the_familys_other_beneficiaries(reg, store, own
     async def go():
         await FLOWS["aura"](h.command(), reg)
         await h.pick("Pick a buff", "windfury_totem")
+        n0 = commits(store)
         await h.pick("What to change", "benefits")
         assert melee in h.text and "Feral 4" in h.text
         await h.pick("Pick who", "mana")
         await h.pick("How many points", "2")
-        assert "Mana users" in h.text and melee in h.text  # the confirm shows the whole map it will leave
-        await h.press("Confirm")
-        await h.pick("What to change", "benefits")
+        assert "Mana users 2" in h.text and melee in h.text  # the benefits screen shows the drafted map
         await h.pick("Pick who", "__spec")
         await h.pick("Pick a class", "Shaman")
         await h.pick("Pick a spec", "Elemental")
         await h.pick("How many points", "3")
-        await h.press("Confirm")
-        await h.pick("What to change", "benefits")
         await h.pick("Pick who", "tank")
         await h.pick("How many points", "0")  # remove one key: only that one
-        await h.press("Confirm")
+        await h.press("Back")
+        assert "Not saved yet:" in h.text and "3 changes" in h.text and commits(store) == n0  # nothing written yet
+        await h.press("Save this buff")
+        assert "✅" in h.text and commits(store) == n0 + 1  # ONE write for the family's three keys
         await h.press("Done")
-        assert h.text.count("✅") == 3
+        assert h.text.count("✅") == 1 and h.text.count("value:") == 3  # one write, its three keys
     asyncio.run(go())
     after = reg.profile.families["windfury_totem"].value
     expect = {k: v for k, v in before.items() if k != "tank"} | {"mana": 2.0, "spec:Elemental": 3.0}
     assert after == expect
 
 
-def test_aura_scope_family_and_note_and_back_writes_nothing(reg, store, owner):
+def test_aura_scope_family_and_note_are_drafted_then_saved_together(reg, store, owner):
     h = Harness(reg)
 
     async def go():
         await FLOWS["aura"](h.command(), reg)
         await h.pick("Pick a buff", "blood_pact")
         n = commits(store)
+        assert "Save this buff" in h.buttons() and next(b for b in h._items() if getattr(b, "label", None) == "Save this buff").disabled
         await h.pick("What to change", "family")
         await h.pick("New family", "fortitude")
-        assert "Fortitude" in h.text or "Stamina" in h.text
-        await h.press("Back")  # no Confirm: nothing written
-        assert commits(store) == n
+        await h.pick("What to change", "family")
+        await h.pick("New family", "own")  # back to how it is: drops out of the draft
+        assert "Not saved yet" not in h.text
         await h.pick("What to change", "scope")
         await h.pick("New scope", "raid")
-        await h.press("Confirm")
         await h.pick("What to change", "note")
         await h.submit(h.modal, note="tested on the PTR")
-        await h.press("Confirm")
+        assert "Scope party → raid" in h.text and "2 changes" in h.text and commits(store) == n
+        await h.press("Save this buff")
+        assert commits(store) == n + 1  # scope and note: ONE set_buff_overrides write
         await h.press("Done")
     asyncio.run(go())
     b = reg.buff("blood_pact")
     assert b.scope == "raid" and b.note == "tested on the PTR" and b.family_id == "blood_pact"
+
+
+def test_aura_done_with_a_dirty_draft_asks_save_discard_back(reg, store, owner):
+    h = Harness(reg)
+
+    async def go():
+        await FLOWS["aura"](h.command(), reg)
+        await h.pick("Pick a buff", "blood_pact")
+        n = commits(store)
+        await h.pick("What to change", "scope")
+        await h.pick("New scope", "raid")
+        await h.press("Another buff")
+        assert "aren't saved" in h.text and h.buttons() == ["Save this buff", "Discard them", "Back"]
+        await h.press("Back")
+        assert "Not saved yet" in h.text  # the draft survived
+        await h.press("Done")
+        await h.press("Discard them")
+        assert "nothing was changed" in h.text and commits(store) == n
+    asyncio.run(go())
+    assert reg.buff("blood_pact").scope == "party"
+
+
+def test_aura_dirty_draft_saved_from_the_leave_screen(reg, store, owner):
+    h = Harness(reg)
+
+    async def go():
+        await FLOWS["aura"](h.command(), reg)
+        await h.pick("Pick a buff", "blood_pact")
+        await h.pick("What to change", "status")
+        await h.pick("New status", "confirmed")
+        await h.press("Another buff")
+        await h.press("Save this buff")
+        assert "Which buff?" in h.text  # saved, then on to the buff list
+    asyncio.run(go())
+    assert reg.buff("blood_pact").status == "confirmed"
+
+
+def test_aura_new_family_is_named_never_typed_as_an_id(reg, store, owner):
+    h = Harness(reg)
+    slug = reg.family_slug("Stamina buffs")
+
+    async def go():
+        await FLOWS["aura"](h.command(), reg)
+        await h.pick("Pick a buff", "blood_pact")
+        await h.pick("What to change", "family")
+        assert "__new" in options(h, "New family")
+        await h.pick("New family", "__new")
+        await h.submit(h.modal, name="Stamina buffs")
+        assert slug in h.text
+        await h.pick("What to change", "benefits")
+        await h.pick("Pick who", "all")
+        await h.pick("How many points", "3")
+        await h.press("Back")
+        await h.press("Save this buff")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert reg.buff("blood_pact").family_id == slug and reg.profile.families[slug].name == "Stamina buffs" and reg.profile.families[slug].value == {"all": 3.0}
+
+
+def test_aura_save_after_someone_else_changed_the_auras_offers_a_rebase(reg, store, owner):
+    h = Harness(reg)
+
+    async def go():
+        await FLOWS["aura"](h.command(), reg)
+        await h.pick("Pick a buff", "blood_pact")
+        await h.pick("What to change", "scope")
+        await h.pick("New scope", "raid")
+        reg.set_buff_overrides("fortitude", {"note": "someone else"}, "Ana")  # the section rev the wizard snapshotted moved
+        await h.press("Save this buff")
+        assert "changed since you looked" in h.text and "Reload and keep my changes" in h.buttons()
+        assert reg.buff("blood_pact").scope == "party"
+        await h.press("Reload and keep my changes")
+        assert "Scope party → raid" in h.text
+        await h.press("Save this buff")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert reg.buff("blood_pact").scope == "raid" and reg.buff("fortitude").note == "someone else"
+
+
+def test_aura_reset_everything_uses_the_decide_screen(reg, store, owner):
+    reg.set_buff_overrides("blood_pact", {"scope": "raid"}, "Jon")
+    h = Harness(reg)
+
+    async def go():
+        await FLOWS["aura"](h.command(), reg)
+        await h.press("Reset everything to game defaults")
+        assert reg.aura_reset_sentence() in h.text and h.buttons() == ["Reset everything", "Cancel"]
+        await h.press("Reset everything")
+        assert "Which buff?" in h.text and "Reset everything to game defaults" not in h.buttons()
+    asyncio.run(go())
+    assert reg.config.buffs == {} and reg.buff("blood_pact").scope == "party"
 
 
 def test_aura_is_owner_only(reg):

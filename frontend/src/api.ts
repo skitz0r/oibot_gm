@@ -277,3 +277,31 @@ export interface ItemGrid extends ItemBrief {
   rows: { key: string; cls: string; spec: string; role: string; tier: string; own: string | null; profile: string | null; equippable: boolean; why: string | null }[];
   wide: Record<string, string>; own: Record<string, string>; tiers: string[]; roles: string[]; awards: number;
 }
+
+// ---- the structured ops path (design §5.43): typed changes → POST /api/ops/change → Described (preview) → apply
+/** A typed draft: `kind` names what it edits, `target` which one, `fields` typed values (never the plain-text grammar).
+ *  kinds: settings · raid · raid_reset · schedule (target "<raid>:<schedule>") · schedule_remove · buff · family (target null + name = new) ·
+ *  aura_reset (target null = everything) · recruitment · plain. The server builds the ops (configops.ops_from_fields). */
+export interface OpsChange { kind: "settings" | "raid" | "raid_reset" | "schedule" | "schedule_remove" | "buff" | "family" | "aura_reset" | "recruitment" | "plain"; target?: string | null; fields?: Record<string, unknown> }
+/** One setting of a write, current → new, in words (mentions already rendered as #channel / @Role). `before` null = a new thing. */
+export interface DescribedPart { label: string; before: string | null; after: string | null }
+/** One WRITE (a buff, a family, a raid, a schedule, the guild settings): its parts, the refusal its apply would give, warn, consequences. */
+export interface DescribedLine { op: string; target: string | null; label: string; text: string; error: string | null; warn: boolean; parts: DescribedPart[]; notes: string[]; consequences: string[] }
+/** configops.Described as the site gets it: `review` = the batch must be reviewed before it is written (warn class or a consequence line). */
+export interface Described { lines: DescribedLine[]; refused: string[]; consequences: string[]; warn: boolean; review: boolean; fingerprint: string }
+export interface OpsResult { label: string; ok: boolean; line: string }
+/** POST /api/ops/change's answer. Preview: described + token. A Save: applied directly (applied/results/summary) or `needs_review` + token.
+ *  A stale token: `updated` (re-previewed, the lines moved) or `restarted` (from before a restart). 409: `changed` = config sections someone else changed. */
+export interface OpsReply {
+  kind: "change"; described?: Described; describe?: string[]; refused: string[]; review?: boolean; warn?: boolean; fingerprint?: string;
+  token?: string; expires_in?: number; needs_review?: boolean; updated?: boolean; restarted?: boolean;
+  applied?: string[]; results?: OpsResult[]; error?: string | null; changed?: string[]; summary?: string; note?: string; revs?: Record<string, string>;
+}
+export const opsApi = {
+  /** Preview only: nothing is written. `revs`: the section revs the page loaded ({"config:buffs": rev}) — a stale one is a 409. */
+  preview: (changes: OpsChange[], revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { changes, revs }),
+  /** A Save: applied at once unless the batch needs review (then `needs_review` + token, nothing written). */
+  save: (changes: OpsChange[], revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { changes, revs, apply: true }),
+  /** Apply a reviewed preview. With `changes` + `seen` (the fingerprint shown) an expired token re-previews and applies when nothing moved. */
+  apply: (token: string, changes?: OpsChange[], seen?: string, revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { token, apply: true, changes, seen, revs }),
+};

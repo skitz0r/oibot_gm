@@ -3715,7 +3715,8 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
     with its parts (current → new, in words), the refusal its apply would give (dry-run on a shadow copy), its warn flag
     and consequences. Never mutates the live config."""
     d = Described(refused=list(refused or []))
-    sh = reg.shadow()
+    with reg.config_lock:  # a consistent copy: the config verbs write under this lock (previews may run in a worker thread)
+        sh = reg.shadow()
     for op in coalesce(list(ops)):
         parts_ops = op.parts if isinstance(op, MergedOp) else [op]
         label, parts, notes = None, [], []

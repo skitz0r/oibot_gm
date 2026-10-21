@@ -606,7 +606,19 @@ run: *"Joining was the commitment — nobody is asked to confirm."* — then **D
 very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would
 not send. Tables (Me, Members, Raids, Auras)
 share one edit mode: an Edit button in the header, then a footer with any reset far left and *Cancel* / *Save changes*
-on the right. Config saves each field as you change it and marks it *✓ saved*. Pages update on their own; *Refresh* in
+on the right. Config saves each field as you change it and marks it *✓ saved*. **How much a Save asks depends on what it
+does** (the same rule on every surface): a routine, reversible edit (a note, a status, a strength, an hour) saves at once
+and the toast says what happened — *"2 saved"*, or *"1 saved, 1 refused"*, never a bare "saved". A change that moves
+where things post or who counts — a channel, the timezone, an officer role, a schedule removed or paused, a buff's scope
+or stacking family, every aura reset at once, applications closed, plain text in DMs or the ops channel — or one with a
+consequence (regulars coming off a schedule, say) opens a **Review** first: one block per thing it writes, each setting
+*current → new*, any part the bot would refuse already marked ⛔, the consequences in a yellow box, then **Apply N
+changes** or **Back to edits** (your draft stays). After Apply the same window lists ✅ / ⛔ per write — a refused one
+names why, and nothing else was changed; the table stays in edit mode holding only what was refused. Each thing is one
+write: a buff's fields save together or not at all. If someone else saved the same settings while you were editing, the
+Save is refused (*"…changed since you looked"*) and your edits are kept — reload to see their change. If the review sat
+open past ten minutes it is checked again on Apply and goes through when nothing moved; after a bot restart it says
+*"The bot restarted — review again"* and shows the fresh lines. Pages update on their own; *Refresh* in
 the left rail is the manual fallback. Every yes/no DM (confirmations and fill asks) reads **Confirm / Can't make it**;
 a pre-lock ask reads **Yes, as <spec>** / **No**.
 A run is locked once, whoever asks first — the site, a card, chat, MCP or the schedule: a second *Lock now* while the
@@ -636,9 +648,17 @@ stack (the strongest present one counts) and **who benefits** from it, as points
 mana user, or a specific spec. Examples: put Blood Pact into Fortitude's family if they turn out not to
 stack; set Devotion Aura to raid if it turns out to reach the whole raid; set "only mana users" on Intellect. Plain
 text works too ("fortitude and blood pact don't stack", "devotion aura is raid-wide", "hunters don't
-benefit from blood pact"), as does `/gm config aura` (pick the buff, then what to change; *Who benefits* changes one beneficiary at a
-time and leaves the rest of the family's map alone). Amber on the page marks a guild override; *Reset*
-returns to the game defaults.
+benefit from blood pact"; naming a family that doesn't exist yet creates it). On the page, **Edit auras** turns the buff table
+into one draft: scope, stacking family (or **New family…** — you name it, the bot makes its id from the name; ids are never
+typed), strength as a preset (×0.5 … ×3, or *other…* for any number), status and note, then one **Save changes**; a scope or
+family change is reviewed first (above). A family's editor saves only the beneficiaries you changed, so a key someone else
+set meanwhile is kept. `/gm config aura` works the same way in Discord: pick the buff, then change what you like — each pick
+only updates a draft, shown as one line (*"✏️ Not saved yet: Scope party → raid · Who benefits: Healers 2 → 3 · 2
+changes"*) — and **Save this buff** writes it all at once; *Another buff* or *Done* with unsaved changes asks Save /
+Discard / Back. *Who benefits* changes one beneficiary at a time and leaves the rest of the family's map alone. **Reset
+everything to game defaults** (on the buff list) says exactly what goes — *"Overrides on 3 buffs (…) and 1 family (…)
+go…"* — before it does it. Amber on the page marks a guild override; *Reset* returns one buff or family to the game
+defaults.
 
 ## 6. Analytics (officers)
 
@@ -1134,6 +1154,13 @@ included (sheets re-rendered, roster cards, DMs, ops lines). If the bot is not r
 (`uv run oibot-mcp`); `claude mcp list` shows `oibot_gm`. `uv run oibot-mcp --list-tools` prints the tools.
 The bot's address defaults to `http://127.0.0.1:8788` (`OIBOT_MCP_URL` to change it).
 
+**Setup tools take typed values and can preview.** `raid_set`, `schedule_set`, `schedule_remove`, `raid_reset`,
+`aura_set`, `family_set`, `aura_reset`, `set_channel`, `set_config`, `set_recruitment` and `set_plain_permissions` send
+plain values — numbers, booleans, lists, objects (`slots: ["Tue 19:30"]`, `active: false`, `value: {"all": 3}`) — and the
+bot builds the change, the same way the site's Save does. With `preview=true` nothing is written and the tool returns the
+review: each write with its settings current → new, anything the bot would refuse with who may and where, the
+consequences, and whether the site would ask for a review first. Read that to the person before writing.
+
 **Several servers.** Every tool takes an optional `guild`: the server's key or its name (any case). Leave it out
 and the tool uses `OIBOT_MCP_GUILD` from `.env` (or `uv run oibot-mcp --guild <key>`), else the only server; when
 the bot serves several and no default is set, the tool answers with the list instead of guessing. `list_guilds`
@@ -1165,10 +1192,10 @@ news post says can make the review read or write another server.
 | `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per run) · pause (`paused=true`) or resume the fill engine for one run · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled run) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | raid settings — one, or several as `fields` in one write (slots, hours, the switches nudge/autofill/open_dm/confirm, weights, comp bounds, first open…) · back to defaults |
-| `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs and stacking families |
+| `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
-| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles, `loot_log` on/off |
+| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles (ids or names the bot knows), news keywords, `loot_log` on/off — one or several as `fields` |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |

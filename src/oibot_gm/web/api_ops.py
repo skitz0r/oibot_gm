@@ -201,6 +201,8 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
             return await text_apply(v, held, raids)
         if "changes" in d or "ops" in d:
             return await structured(v, d)
+        if d.get("apply"):  # plain text applies only a preview's token — never a fresh parse of the text
+            return JSONResponse(need_token_error(False), status_code=400)
         if not v.officer:
             raise HTTPException(403, "Officers only.")
         return await text_preview(v, d, raids, now)
