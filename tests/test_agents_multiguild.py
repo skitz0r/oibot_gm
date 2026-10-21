@@ -314,7 +314,9 @@ def test_approving_a_shared_profile_edit_needs_every_owner(duo):
     with pytest.raises(PermissionError, match=r"that Duo Guild also uses: the owner"):  # never names the proposing guild itself
         ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5)
     assert ps.move(p.id, "dismissed", "an officer", officer=True, job=False, by_id=5).state == "dismissed", "dismissing stays open"
-    q = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    newer = "https://example.com/news/newer"  # a dismissed game-data proposal's news alone is refused (design §3.4 OFF-14)
+    add_news(duo.a, url=newer, title="Barrow Deeps hotfix: 10-player lockout clarified on WoW: Forever")
+    q = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT, news=[newer]))
     duo.b.config.owner_discord_id = OWNER  # one person owns both
     assert ps.move(q.id, "approved", "owner", officer=True, job=False, by_id=OWNER).state == "approved"
     duo.b.config.game_profile = "tbc"

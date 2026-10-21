@@ -38,13 +38,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from oibot_gm import agents  # noqa: E402
+from oibot_gm.news import INTERRUPTED  # noqa: E402 — the same words as the owner's Mark as interrupted
 
 JOB = "apply"
 ROOT = agents.ROOT
 PROMPT = Path(__file__).with_name("apply_profile.md")
 HEALTH_TIMEOUT_S = 90
 TRAILER = "Co-Authored-By: Claude <noreply@anthropic.com>"
-INTERRUPTED = "the apply run was interrupted; approve again to retry"
 
 
 def sh(*args: str, check: bool = False, timeout: int = 900) -> subprocess.CompletedProcess:

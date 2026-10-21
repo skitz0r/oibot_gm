@@ -161,7 +161,8 @@ src/oibot_gm/
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json (compiled_at, text_sha, confirmed_by), confirmed by an officer;
                        the waiting edit ON DISK (<doc>.pending.json, one commit with the draft; PENDING = a rev cache only); policy_state = Written vs
                        Applied (differs) + the pending edit; persona two-step (PersonaReading, live_text); append_rule = THE policy_append verb
-                       (refused while another officer's draft waits) — design §5.44
+                       and appended/rule_bullet THE text it writes (every surface; refused while another officer's draft waits);
+                       POLICY_LISTENERS on every committed write → the web's officers-only `policy` topic — design §5.44
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with one native
                        card per raid (pool_layout: readiness + comp shortfalls, edited in place, no images) + change log (Registry.listeners, debounced);
                        absences channel (AbsencesMixin: card with I'll be away · I'm back · My absences → AbsenceButton `abs.<gk>:new|back|mine` and a Clear
@@ -231,10 +232,13 @@ src/oibot_gm/
                        guild news_keywords) → <guild>/news.jsonl (dedupe by url); Proposal/ProposalStore (<guild>/proposals/<id>.yaml,
                        proposed → approved|dismissed → applying → applied|failed|reverted; officers decide — a profile approval is the OWNER's —,
                        only the job (bearer + X-Oibot-Job) reports job steps; AlreadyDecided/already_text; annotate = the job's "waiting: …";
-                       consequence(p, reg, state, guilds, busy=, next_run=); guild_busy = D33's raid guard; PROPOSAL_LISTENERS → `agents`)
+                       consequence(p, reg, state, guilds, busy=, next_run=); guild_busy = D33's raid guard (every live loot council counts on its
+                       own, past close too); dismissed_cover refuses a profile proposal citing only dismissed news; RECOVER_MOVE/INTERRUPTED
+                       = the owner's Mark as interrupted (move(recover=True)); MCP_ACTOR_NEEDED (D8: no bare-bearer decision); PROPOSAL_LISTENERS → `agents`)
   discord_news.py      NewsMixin: news_message (the ONE hook at the top of on_message; webhooks are bots), news_backfill, proposal_card_update
                        (ops-channel card edited in place, returns whether Discord took it); decide_proposal = THE proposal verb (move | annotate →
                        card → audit → shared-profile fan-out); guild_busy / busy_map / proposal_consequence; proposal_cards_restore (ready, resume);
+                       agents_status_lines / governance_status = /gm status's News review + Apply lines;
                        ProposalButton (DynamicItem; opens flows_news.proposal_decide, never writes)
   flows_news.py        proposal_decide: the decide screen for Approve / Dismiss / Withdraw approval (news.consequence; owner-only game data)
   pending_views.py     out/pending_views.jsonl: open wizards and plain-text diffs mirrored while they wait; restore_pending_views on ready edits the
@@ -261,7 +265,8 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Several guilds: `selected_reg` picks ONE guild per
                        request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first
                        guild the person may open (guild_routing.member_of); homepage/not-member page = one card per server (one guild: the old page byte for byte)
-  web/api_agents.py    /api/news, /api/proposals… (resolve via decide_proposal; job_of = bearer + X-Oibot-Job; `consequence` per proposal), /api/agents
+  web/api_agents.py    /api/news, /api/proposals… (resolve via decide_proposal; job_of = bearer + X-Oibot-Job; a bare bearer never approves or
+                       dismisses (D8: X-Oibot-Actor); /interrupted = the owner's recovery; `consequence` per proposal), /api/agents
                        (the monitor + apply_mode, elsewhere/install per job, owner's mcp card and llm usage), /api/agents/quiet (quiet_state),
                        busy_json (GET /api/guilds `busy`), /api/agents/profile (effective profile, overrides marked)
   web/api_policy.py    the Policy page's routes (GET /api/policy, /api/policy/{doc} PUT · append · compile · confirm · discard) and GET /api/manual (Help)

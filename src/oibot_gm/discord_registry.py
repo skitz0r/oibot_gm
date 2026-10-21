@@ -1245,6 +1245,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         from .discord_feed import feed_status
 
         e.add_field(name="Loot feed", value=feed_status(interaction.client, reg)[:500], inline=False)
+        gov = getattr(interaction.client, "governance_status", None)  # NewsMixin: the news review and the apply job (design §3.4)
+        if gov is not None:
+            e.add_field(name="Agents", value="\n".join(gov(reg))[:1000], inline=False)
         recent = ops.recent_for(reg.key)
         if recent:
             e.add_field(name="Recent ops", value="\n".join(f"`{t}` {LEVEL[l]} {x}"[:120] for t, l, x in recent[-8:])[:1000], inline=False)

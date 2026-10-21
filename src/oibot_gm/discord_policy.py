@@ -244,10 +244,12 @@ class PolicyEditModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         typed = str(self.text.value)
-        new = self.ps.read(self.doc).rstrip() + "\n\n" + typed.strip() + "\n" if self.append_only else typed
         try:  # the one pending edit per doc (policy.begin_edit): remembers the text before it, for Discard
-            policy_mod.begin_edit(self.ps, self.doc, new, interaction.user.display_name, by_id=interaction.user.id, append=self.append_only,
-                                  when=self.reg.local12)
+            if self.append_only:  # THE append verb, as a paragraph (policy.append_rule, bullet=False)
+                policy_mod.append_rule(self.ps, self.doc, typed, interaction.user.display_name, by_id=interaction.user.id, when=self.reg.local12,
+                                       bullet=False)
+            else:
+                policy_mod.begin_edit(self.ps, self.doc, typed, interaction.user.display_name, by_id=interaction.user.id, when=self.reg.local12)
         except policy_mod.PolicyPendingError as e:
             await interaction.response.send_message(f"⛔ {e}", ephemeral=True)
             return

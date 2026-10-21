@@ -39,6 +39,48 @@ TERMINAL = ("dismissed", "applied", "reverted")
 BACKFILL_LIMIT = 100
 
 
+def agents_status_lines(reg, *, many: bool = False, out=None, now=None) -> list[str]:
+    """/gm status's two governance lines (design §3.4 OFF-13/OFF-15), from the jobs' status files and this guild's
+    proposals — Discord stamps, never a typed clock:
+    'News review: last <t:f> · <result> · next <t:R> · N proposals waiting' and
+    'Apply: idle | running: <step> | busy with another server's proposal | failed: <result>'. `many`: the bot serves
+    several guilds (only then can the apply job be busy with another one's proposal)."""
+    from datetime import datetime, timezone
+
+    from . import agents
+
+    def t(value, style: str) -> str:
+        at = agents.aware(value)
+        return f"<t:{int(at.timestamp())}:{style}>" if at else ""
+
+    rv = agents.read_status("review", out)
+    last = rv.get("finished") or rv.get("started")
+    try:
+        nxt = agents.next_run("review", rv, now)
+    except Exception:  # noqa: BLE001 — no schedule to promise
+        nxt = None
+    waiting = len(ProposalStore(reg.store, reg.key).all("proposed"))
+    parts = [f"last {t(last, 'f')}" if last else "never ran here"]
+    if rv.get("state") == "running":
+        parts.append("running now")
+    elif last and rv.get("result"):
+        parts.append(str(rv["result"])[:140])
+    if nxt is not None and nxt > (now or datetime.now(timezone.utc)):
+        parts.append(f"next {t(nxt, 'R')}")
+    parts.append(f"{waiting} proposal{'' if waiting == 1 else 's'} waiting")
+    review = "News review: " + " · ".join(parts)
+    ap = agents.read_status("apply", out)
+    g = ap.get("guild")
+    if ap.get("state") == "running":
+        apply = ("Apply: busy with another server's proposal" if many and g and g != reg.key
+                 else "Apply: running" + (f": {str(ap.get('step') or ap.get('result'))[:140]}" if ap.get("step") or ap.get("result") else ""))
+    elif ap.get("state") == "failed":
+        apply = f"Apply: failed: {str(ap.get('result') or 'see the Agents page')[:160]}"
+    else:
+        apply = "Apply: idle"
+    return [review, apply]
+
+
 def proposal_embed(p: Proposal, news_rows: dict[str, dict] | None = None, shared_with: list[str] | None = None) -> discord.Embed:
     """The card: what the news says, what it would change, where it stands. Pure (tests render it offline).
     `shared_with`: the other servers a profile edit's game data is shared with (Affects names them)."""
@@ -152,15 +194,20 @@ class NewsMixin:
 
     # ---------------------------------------------------------------- the raid guard (D33) and the job's next run
     def guild_busy(self, reg, now=None) -> dict:
-        """news.guild_busy for one guild from the bot's own state: its live runs and its live loot councils."""
+        """news.guild_busy for one guild from the bot's own state: its live runs and EVERY live loot council (the
+        sessions themselves, so a council past its run's close still counts and a test run's never does)."""
         rs = self.raids.store(reg) if getattr(self, "raids", None) is not None else None
         sessions = getattr(self, "loot_sessions", None)
-        loot = [s.run_key for s in (sessions(reg) if sessions is not None else []) if getattr(s, "run_key", None)]
+        loot = [s for s in (sessions(reg) if sessions is not None else []) if getattr(s, "run_key", None)]
         return news.guild_busy(reg, rs.live() if rs is not None else [], loot, now)
 
     def busy_map(self, now=None) -> dict[str, dict]:
         """{guild key: guild_busy} for every served guild — the whole process restarts, so every guild counts (D33)."""
         return {r.key: self.guild_busy(r, now) for r in self.registries.ordered()}
+
+    def governance_status(self, reg) -> list[str]:
+        """/gm status's news-review and apply lines (agents_status_lines) for this guild."""
+        return agents_status_lines(reg, many=bool(getattr(self.registries, "many", False)))
 
     def apply_next_label(self, reg) -> str | None:
         """When the apply job polls next, in the guild's words (None when it never ran on this host)."""
@@ -183,11 +230,13 @@ class NewsMixin:
 
     # ---------------------------------------------------------------- THE verb
     async def decide_proposal(self, reg, pid: str, state: str | None, *, by: str, by_id: int | None = None, officer: bool = False, job: bool = False,
-                              owner: bool | None = None, note: str | None = None, commit: str | None = None, via: str = "discord") -> tuple[Proposal, bool]:
+                              owner: bool | None = None, note: str | None = None, commit: str | None = None, via: str = "discord",
+                              recover: bool = False) -> tuple[Proposal, bool]:
         """Move proposal `pid` of `reg` to `state` (or, `state` None, annotate it with `note` — the apply job's
         "waiting: …" line) and follow through everywhere: the ops-channel card, one audit line, and for a profile
         edit that landed or was rolled back, a line in every other guild on the game version. Raises
         news.ProposalError (AlreadyDecided for a repeat) / PermissionError — the caller words them per surface.
+        `recover`: the owner's Mark as interrupted (applying → failed; POST /api/proposals/{pid}/interrupted).
         Returns (proposal, whether the Discord card took the edit)."""
         ps = ProposalStore(self.registries.store, reg.key)
 
@@ -200,7 +249,8 @@ class NewsMixin:
         if state is None:
             p, written = await asyncio.to_thread(ps.annotate, pid, note, by)
             return p, (await card(p)) if written else True
-        p = await asyncio.to_thread(ps.move, pid, state, by, officer=officer, job=job, by_id=by_id, commit=commit, note=note, owner=owner)
+        p = await asyncio.to_thread(ps.move, pid, state, by, officer=officer, job=job, by_id=by_id, commit=commit, note=note, owner=owner,
+                                    recover=recover)
         card_ok = await card(p)
         tail = (f" @ {p.commit}" if p.commit and state in ("applied", "reverted") else "") + (f" — {p.note}" if p.note and note else "")
         from . import ops as ops_mod

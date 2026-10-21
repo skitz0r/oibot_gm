@@ -73,7 +73,13 @@ export function AgentsPage() {
     } catch (e) { fail(e); } finally { setBusy(null); }
   }
 
-  async function decide(p: Proposal, state: "approved" | "dismissed") {
+  async function decide(p: Proposal, state: Verdict) {
+    if (state === "interrupted") {  // the owner's recovery press: the apply run that held it is gone
+      const yes = await ask({ title: `Mark as interrupted: ${p.title}`, message: (p.consequence?.interrupted || []).join("\n"), confirmLabel: "Mark as interrupted", color: "red" });
+      if (!yes) return;
+      try { ok((await api.post<{ message: string }>(`/api/proposals/${p.id}/interrupted`, {})).message); load(); } catch (e) { fail(e); load(); }
+      return;
+    }
     const verb = state === "approved" ? "Approve" : p.state === "approved" ? "Withdraw approval" : "Dismiss";
     const res = await ask({
       title: `${verb}: ${p.title}`,
@@ -87,6 +93,7 @@ export function AgentsPage() {
   }
   const botUp = !!data.bot.pid;
   const apply = data.jobs.find((j) => j.job === "apply");
+  const recover = data.owner && apply?.state !== "running";  // Mark as interrupted: the owner, while the apply job isn't running
 
   return (
     <Stack gap="lg">
@@ -140,7 +147,7 @@ export function AgentsPage() {
         <CardHeader title={`Proposals (${proposals.length})`} hint="officers decide here or on the card in the ops channel; a game-data change is the owner's" />
         {proposals.length === 0 && <Text size="sm" c="dimmed" p="md">No proposals yet: the review proposes only when the news contradicts what the bot believes.</Text>}
         {phone ? (
-          <Stack gap="sm" p="sm">{proposals.map((p) => <ProposalCard key={p.id} p={p} owner={data.owner} onDecide={decide} />)}</Stack>
+          <Stack gap="sm" p="sm">{proposals.map((p) => <ProposalCard key={p.id} p={p} owner={data.owner} recover={recover} onDecide={decide} />)}</Stack>
         ) : proposals.length > 0 && (
           <Table.ScrollContainer minWidth={720}>
             <Table>
@@ -152,7 +159,7 @@ export function AgentsPage() {
                     <Table.Td><ProposalBody p={p} /></Table.Td>
                     <Table.Td w={130}><Text size="xs">{KIND[p.kind] || p.kind}</Text><Text size="xs" c="dimmed">{p.confidence} confidence</Text></Table.Td>
                     <Table.Td w={200}><ProposalState p={p} /></Table.Td>
-                    <Table.Td w={190}><Decide p={p} owner={data.owner} onDecide={decide} /></Table.Td>
+                    <Table.Td w={190}><Decide p={p} owner={data.owner} recover={recover} onDecide={decide} /></Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -236,7 +243,10 @@ function ProposalState({ p }: { p: Proposal }) {
   );
 }
 
-function Decide({ p, owner, onDecide }: { p: Proposal; owner: boolean; onDecide: (p: Proposal, s: "approved" | "dismissed") => void }) {
+type Verdict = "approved" | "dismissed" | "interrupted";
+type DecideProps = { p: Proposal; owner: boolean; recover: boolean; onDecide: (p: Proposal, s: Verdict) => void };
+
+function Decide({ p, owner, recover, onDecide }: DecideProps) {
   const canApprove = (p.state === "proposed" || p.state === "failed") && p.kind !== "needs_developer";
   const ownerOnly = p.kind === "profile" && !owner;
   return (
@@ -246,12 +256,13 @@ function Decide({ p, owner, onDecide }: { p: Proposal; owner: boolean; onDecide:
         : <Button size="xs" onClick={() => onDecide(p, "approved")}>Approve</Button>)}
       {["proposed", "approved", "failed"].includes(p.state) && <Button size="xs" variant="default" color={p.state === "approved" ? "red" : undefined} onClick={() => onDecide(p, "dismissed")}>{p.state === "approved" ? "Withdraw approval" : "Dismiss"}</Button>}
       {p.kind === "needs_developer" && p.state === "proposed" && <Text size="xs" c="dimmed">needs a developer: dismiss it once handled</Text>}
+      {recover && p.state === "applying" && <Button size="xs" variant="default" color="red" onClick={() => onDecide(p, "interrupted")}>Mark as interrupted</Button>}
     </Group>
   );
 }
 
 /** A proposal as one stacked card (phones: the table's buttons would sit off screen). */
-function ProposalCard({ p, owner, onDecide }: { p: Proposal; owner: boolean; onDecide: (p: Proposal, s: "approved" | "dismissed") => void }) {
+function ProposalCard({ p, owner, recover, onDecide }: DecideProps) {
   return (
     <Card withBorder p="sm">
       <Group justify="space-between" align="flex-start" wrap="nowrap" mb={4}>
@@ -259,7 +270,7 @@ function ProposalCard({ p, owner, onDecide }: { p: Proposal; owner: boolean; onD
       </Group>
       <ProposalBody p={p} />
       <Box mt="xs"><ProposalState p={p} /></Box>
-      <Box mt="xs"><Decide p={p} owner={owner} onDecide={onDecide} /></Box>
+      <Box mt="xs"><Decide p={p} owner={owner} recover={recover} onDecide={onDecide} /></Box>
     </Card>
   );
 }

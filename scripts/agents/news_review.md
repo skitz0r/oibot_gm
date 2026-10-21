@@ -13,7 +13,8 @@ This session is for **one guild** (named under "## This run"); every tool alread
 - `get_profile(section)` — the effective profile: `buffs`, `families`, `raids`, `comp_rules`. Guild overrides are
   marked (`overridden`, with the game file's `default`).
 - `list_proposals(state)` — what has already been proposed (all states). Never propose the same thing twice; a
-  dismissed proposal means officers disagreed — don't re-propose it unless the news is newer and says more.
+  dismissed proposal means officers disagreed — don't re-propose it unless the news is newer and says more (a game-data
+  proposal citing only news a dismissed one cited is refused by `post_proposal`; cite the newer item).
 - `guild_overview`, `list_raids`, `get_raid`, `list_auras` — guild settings, read only.
 - `Read`, `Grep`, `Glob` — the repo, read only (profiles/<version>/*.yaml, docs/research.md for sources).
 - `post_proposal(...)` — the only write you have. If it answers with `duplicate_of`, another guild on the same game version already

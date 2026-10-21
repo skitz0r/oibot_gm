@@ -1152,5 +1152,8 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str
 
 def answer(provider, tree, reg: Registry, rs, user_id: int, is_officer: bool, question: str, extras: HelpExtras | None = None,
            public: bool = False) -> HelpAnswer:
+    from .llm.provider import for_guild
+
     # the asker line above comes from the registry (code); the question itself is delimited data
-    return provider.complete("help", system_prompt(tree), guild_state(reg, rs, user_id, is_officer, question, extras, public=public) + "\n\n## Question\n<question>\n" + question.strip()[:1500] + "\n</question>", HelpAnswer)
+    with for_guild(reg.key):  # D45: every answer is its guild's spend (/ask, plain text, the loot thread, the site)
+        return provider.complete("help", system_prompt(tree), guild_state(reg, rs, user_id, is_officer, question, extras, public=public) + "\n\n## Question\n<question>\n" + question.strip()[:1500] + "\n</question>", HelpAnswer)

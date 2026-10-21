@@ -42,8 +42,15 @@ JOB_MOVES = {("approved", "applying"), ("approved", "failed"), ("applying", "app
 PROFILE_OWNER_ONLY = ("only the owner approves a game-data change: it edits the shared game files, and the bot restarts for every "
                       "server it serves")
 JOB_NOT_OFFICER = "the apply job only reports its own steps; an officer decides whether a proposal goes ahead"
+INTERRUPTED = "the apply run was interrupted; approve again to retry"  # the job's recovery note and the owner's Mark as interrupted
+RECOVER_MOVE = ("applying", "failed")  # the owner's "Mark as interrupted" (Agents page) while the apply job is not running
+DECISIONS = ("approved", "dismissed")  # an officer's verdict (OFFICER_MOVES' targets); from MCP it needs X-Oibot-Actor (D8)
+MCP_ACTOR_NEEDED = ("Approving or dismissing a proposal is a decision a person makes: from MCP it needs the X-Oibot-Actor header "
+                    "naming an officer of {guild} (set OIBOT_MCP_ACTOR to their Discord id; a game-data change, the owner's) — "
+                    "the owner's token alone can read proposals, post them and run the jobs.")
 BUSY_LOCKED_HOURS = 4  # D33: a locked run counts as raid time from 4 h before its start until it closes
 BUSY_OPEN_HOURS = 1  # D33: an open run counts from 1 h before its start
+BUSY_LOOT_MIN = 30  # D33: a live loot council holds a restart however late it runs; `until` is at least this far out (D10's idle end)
 SETTING_OPS = ("raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "comp_target", "comp_target_clear", "comp_groups")
 MAX_ITEMS_PER_CALL = 200
 PROPOSAL_LISTENERS: list = []  # fn(guild key, proposal id) after every proposal save (web/api_agents publishes `agents`)
@@ -272,18 +279,24 @@ class ProposalStore:
         if unknown:
             raise ProposalError(f"not in the news list: {', '.join(unknown[:3])}")
         validate_edit(reg, p)
+        if p.kind == "profile":
+            hit = dismissed_cover(self.store, reg, p.news)
+            if hit:
+                raise ProposalError(f"every news item it cites was cited by {hit}, which an officer dismissed — propose it again only "
+                                    "when newer news says more (cite that item)")
         p.history.append({"state": "proposed", "by": by, "at": p.created_at, "note": None})
         return self.save(p, f"proposed: {p.title[:70]}")
 
     def move(self, pid: str, state: str, by: str, *, officer: bool, job: bool, by_id: int | None = None, commit: str | None = None,
-             note: str | None = None, owner: bool | None = None) -> Proposal:
+             note: str | None = None, owner: bool | None = None, recover: bool = False) -> Proposal:
         """One state change — the one path for the card's buttons, the site, MCP and plain text (configops), all through
         NewsMixin.decide_proposal. `officer`: approve/dismiss allowed; `job`: the apply job's steps (the bearer WITH the
         X-Oibot-Job header) — a job never makes an officer's decision. Approving a `profile` proposal needs the OWNER
         (`owner`, else `Registry.is_owner_id(by_id)` through the Guilds index the store carries), even of a lone guild
         (design §3.4: it restarts the whole process); when several served guilds run this guild's game version, the
         owner of every one of them (K3). Dismissing stays with the proposing guild's officers. Moving to the state it
-        already has raises AlreadyDecided (who decided, when)."""
+        already has raises AlreadyDecided (who decided, when). `recover`: the owner's "Mark as interrupted" — the one
+        job move a person makes (RECOVER_MOVE, applying → failed), only as the owner; the route checks the job isn't running."""
         if state not in STATES:
             raise ProposalError(f"state is one of {', '.join(STATES)}")
         with self.store.lock:
@@ -297,7 +310,10 @@ class ProposalStore:
                 if not officer:
                     raise PermissionError("officers only")
             elif move in JOB_MOVES:
-                if not job:
+                if recover and move == RECOVER_MOVE:
+                    if not (owner if owner is not None else owner_of(self.store, self.key, by_id)):
+                        raise PermissionError("only the owner marks an apply run as interrupted")
+                elif not job:
                     raise PermissionError("only the apply job reports that")
             else:
                 raise ProposalError(f"{p.id} is {p.state}: it can't become {state}")
@@ -386,6 +402,31 @@ def shared_profile_refusal(guilds, key: str, by_id: int | None) -> str | None:
             "the owner of every guild on this game version approves it")
 
 
+def dismissed_cover(store: GitStore, reg, urls) -> str | None:
+    """The dismissed game-data proposal(s) whose cited news covers ALL of `urls` ("<id>" here, "<guild name>'s <id>"
+    for another guild on the same game profile — a profile edit is shared), or None. A new profile proposal citing only
+    news an officer already said no to is refused in code (design §3.4 OFF-14), not only by the review's prompt."""
+    want = {NewsStore.ident({"url": u}) for u in (urls or [])}
+    if not want:
+        return None
+    guilds = getattr(store, "guilds", None)
+    ordered = getattr(guilds, "ordered", None)
+    regs = [reg] + [o for o in (ordered() if ordered else []) if o.key != reg.key and o.config.game_profile == reg.config.game_profile]
+    seen: set[str] = set()
+    ids: list[str] = []
+    for r in regs:
+        for d in ProposalStore(store, r.key).all("dismissed"):
+            if d.kind != "profile":
+                continue
+            cited = {NewsStore.ident({"url": u}) for u in d.news} & want
+            if cited:
+                ids.append(d.id if r.key == reg.key else f"{r.config.name}'s {d.id}")
+                seen |= cited
+    if want <= seen:
+        return ", ".join(ids[:3])
+    return None
+
+
 def duplicate_profile_proposal(guilds, reg, data: dict) -> str | None:
     """`<guild key>/<proposal id>` of another guild's open (proposed/approved) profile proposal citing one of the same
     news items, when that guild runs the same game profile: a profile edit is shared, so one proposal is enough."""
@@ -465,8 +506,13 @@ def consequence(p: Proposal, reg, state: str, guilds=None, *, busy: dict[str, di
                     lines.append(f"⚠ {r.config.name} has a run right now ({b.get('why') or 'raid time'}) — the job will wait until it is over.")
             return lines
         return ["This one needs a developer: the apply job can't do it."]
+    if state == "interrupted":
+        return ["Marks it failed: the apply run that held it is gone (nothing is committed, restarted or reverted by this); "
+                "approve it again to retry."]
     if state == "dismissed":
         lines = ["Dismissed: nothing changes, and the review is told not to propose it again unless newer news says more."]
+        if p.kind == "profile":
+            lines[0] = "Dismissed: nothing changes, and a game-data proposal citing only this news is refused from now on (newer news can say more)."
         if p.state == "approved":
             lines.insert(0, "This withdraws the approval before the job picks it up.")
         return lines
@@ -476,21 +522,40 @@ def consequence(p: Proposal, reg, state: str, guilds=None, *, busy: dict[str, di
 def guild_busy(reg, runs, loot_runs=(), now: datetime | None = None) -> dict:
     """D33's raid guard for one guild: {raiding, until (ISO or None), until_label, why} from its live runs (test runs
     never count) — a LOCKED run from BUSY_LOCKED_HOURS before its start until it closes (rc.run_close_at), an OPEN run
-    from BUSY_OPEN_HOURS before its start, and the run of every live loot council (`loot_runs`: run keys). Computed on
-    demand by the bot (GET /api/guilds carries it per guild); the apply job defers a restart while any guild is busy."""
+    from BUSY_OPEN_HOURS before its start — and every live loot council on its own (`loot_runs`: the live sessions, or
+    their run keys): from its run's 4-hour window on, a council counts whatever its run's state and however far past
+    the scheduled close it runs (D10
+    ends one only past close + 30 min idle), so a restart never cuts into one; a test run's council never counts.
+    Computed on demand by the bot (GET /api/guilds carries it per guild); the apply job defers a restart while any
+    guild is busy."""
     from . import raidcycle as rc
 
     now = now or datetime.now(timezone.utc)
-    loot = set(loot_runs or ())
+    by_key = {ev.key: ev for ev in runs}
     hits: list[tuple[datetime, str]] = []
+    councils: set[str] = set()
+    for s in loot_runs or ():
+        key = s if isinstance(s, str) else getattr(s, "run_key", None)
+        if not key or key in councils:
+            continue
+        ev = by_key.get(key)
+        if getattr(s, "test", False) or getattr(ev, "test", False):
+            continue
+        if ev is not None and now < ev.start - timedelta(hours=BUSY_LOCKED_HOURS):
+            continue  # a council opened days early is not raid time yet (the run's own window starts 4 h before)
+        councils.add(key)
+        inst = getattr(ev, "instance", None) or getattr(s, "instance", None)
+        name = reg.raid_def(inst).get("name", inst) if inst else (getattr(ev, "team", None) or key)
+        until = now + timedelta(minutes=BUSY_LOOT_MIN)
+        if ev is not None:
+            until = max(until, rc.run_close_at(reg, ev))
+        hits.append((until, f"{name}: the loot council is open"))
     for ev in runs:
-        if getattr(ev, "test", False) or ev.state not in ("open", "locked"):
+        if getattr(ev, "test", False) or ev.state not in ("open", "locked") or ev.key in councils:
             continue
         start, end = ev.start, rc.run_close_at(reg, ev)
         name = reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else ev.team
-        if ev.key in loot and now <= end:
-            hits.append((end, f"{name}: the loot council is open"))
-        elif ev.state == "locked" and start - timedelta(hours=BUSY_LOCKED_HOURS) <= now <= end:
+        if ev.state == "locked" and start - timedelta(hours=BUSY_LOCKED_HOURS) <= now <= end:
             hits.append((end, f"{name} {reg.local12(start)} is locked"))
         elif ev.state == "open" and start - timedelta(hours=BUSY_OPEN_HOURS) <= now <= end:
             hits.append((end, f"{name} {reg.local12(start)} starts within the hour"))

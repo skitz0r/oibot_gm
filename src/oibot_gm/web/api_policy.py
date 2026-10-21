@@ -7,7 +7,8 @@ Policy (officers, as in Discord): GET /api/policy = every document's state (poli
 site is where long text is edited); POST /api/policy/{doc}/append {text} = THE policy_append verb (refused while another
 officer's draft waits, naming them); /compile → the reading; /confirm and /discard. Every step is the same function the
 Discord flows and plain text call (policy.begin_edit / append_rule / compile_pending / confirm_pending / discard_pending),
-on disk (`<doc>.pending.json`), audited through ops.audited.
+on disk (`<doc>.pending.json`), audited through ops.audited. Every write (from any surface: policy.POLICY_LISTENERS)
+publishes the officers-only `policy` topic, so a second officer's Policy page reloads.
 
 Help (everyone logged in): GET /api/manual = docs/manual.md split by its own `## ` headings (help.manual_sections,
 mtime-cached), each tagged officers | owner | none but never hidden, plus the live command tree filtered by the viewer's
@@ -22,8 +23,14 @@ from fastapi.responses import JSONResponse
 from .. import ops as ops_mod
 
 
-def install_policy_api(app: FastAPI, bot, *, who, body) -> None:
+def install_policy_api(app: FastAPI, bot, *, who, body, publish=None) -> None:
     from .. import help as help_mod, policy as pol
+
+    def policy_saved(guild_key: str, _doc: str) -> None:
+        if publish is not None:  # every policy write, from any surface: the guild's officers' pages reload (S4)
+            publish("policy", guild_key, officers=True)
+
+    pol.POLICY_LISTENERS[:] = [fn for fn in pol.POLICY_LISTENERS if getattr(fn, "__name__", "") != "policy_saved"] + [policy_saved]
 
     def policy_store(reg):
         return pol.PolicyStore(bot.registries.store, reg.key)

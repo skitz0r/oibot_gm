@@ -239,7 +239,7 @@ export interface Proposal {
   /** the apply job's current "waiting: …" line */
   status_note?: string | null;
   /** the decide screen's words for each verdict still open (news.consequence — the page never composes them) */
-  consequence?: { approved?: string[]; dismissed?: string[] };
+  consequence?: { approved?: string[]; dismissed?: string[]; interrupted?: string[] };
   owner_only?: boolean; shared_with?: string[];
 }
 

@@ -593,7 +593,7 @@ def test_an_error_with_no_guild_never_claims_the_owner_was_told(duo):
 def test_a_guild_that_ignores_dms_is_listed_marked_and_never_silent(duo, monkeypatch):
     """D41 (replacing "never offered, all ignoring is silence"): the DM picker lists EVERY guild the person belongs to, a
     guild whose plain-text policy ignores DMs marked "(plain text off here)"; picking it answers once "DMs are off for
-    <server>; /gm change works" and nothing is parsed. A stranger still gets the Join links."""
+    <server> — ask in one of its channels instead" and nothing is parsed (/gm change in that DM is refused too). A stranger still gets the Join links."""
     bot = dm_bot(duo)
     out, asked = [], []
 
@@ -605,7 +605,7 @@ def test_a_guild_that_ignores_dms_is_listed_marked_and_never_silent(duo, monkeyp
     duo.a.config.plain.dm = "ignore"
     assert run(OibotGM.dm_guild(bot, msg)) is None
     assert asked == [([duo.a.key, duo.b.key], {duo.a.key: guild_picker.OFF_MARK})], "both listed, the ignoring one marked"
-    assert out == ["DMs are off for **Demo Guild**; `/gm change` works."], "never silent"
+    assert out == ["DMs are off for **Demo Guild** — ask in one of its channels instead (`/gm change` works there)."], "never silent"
     v = guild_picker.GuildPicker(duo.guilds.ordered(), 1, {duo.a.key: guild_picker.OFF_MARK})
     assert [b.label for b in v.children] == ["Demo Guild (plain text off here)", "Duo Guild"]
     stranger = dm_bot(duo, members={})

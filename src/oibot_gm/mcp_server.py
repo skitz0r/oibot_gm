@@ -968,9 +968,11 @@ def get_proposal(id: str, guild: Guild = None) -> dict:
 
 @mcp.tool()
 def resolve_proposal(id: str, state: str, commit: str | None = None, note: str | None = None, guild: Guild = None) -> str:
-    """Move a proposal: approved | dismissed (an officer's decision), or the apply job's steps applying | applied |
-    failed | reverted, with the commit hash and a short note. The Discord card updates in place."""
-    return msg(api(guild).post(f"/api/proposals/{id}/resolve", {"state": state, "commit": commit, "note": note}))
+    """Move a proposal: approved | dismissed (an officer's decision: needs OIBOT_MCP_ACTOR = the officer's Discord id,
+    and a game-data approval the owner's), or the apply job's steps applying | applied | failed | reverted, with the
+    commit hash and a short note. The Discord card updates in place."""
+    return msg(api(guild).post(f"/api/proposals/{id}/resolve", {"state": state, "commit": commit, "note": note},
+                               actor=state in ("approved", "dismissed")))  # D8
 
 
 @mcp.tool()

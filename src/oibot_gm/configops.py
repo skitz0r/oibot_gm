@@ -390,8 +390,11 @@ def proposals_text(reg: Registry) -> list[str]:
 def parse(provider: Provider, reg: Registry, text: str, by: str | None = None, *, officer: bool = False) -> ConfigRequest:
     """`officer`: the requester is an officer (decided in code by the caller) — only then does the context carry the
     officer-only sections; a member's clarifying question can't name an applicant it never saw."""
+    from .llm.provider import for_guild
+
     asker = f"\n\n## Requested by\n{by} (set by the bot, not the text)" if by else ""
-    return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg, officer=officer) + asker + "\n\n## Request\n<request>\n" + text.strip()[:2000] + "\n</request>", ConfigRequest)
+    with for_guild(reg.key):  # D45: every parse is its guild's spend (Discord, the site's text box, MCP plain_change)
+        return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg, officer=officer) + asker + "\n\n## Request\n<request>\n" + text.strip()[:2000] + "\n</request>", ConfigRequest)
 
 
 OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove", "job", "plain"}
@@ -481,6 +484,7 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "history": {"surface": "web", "path": "GET /api/rosters", "reason": "history views (past runs, the award log) are tables; Discord has the closed card"},
     "plain_permissions_grid": {"surface": "web", "path": "POST /api/admin/plain-permissions", "reason": "D37: the plain-text permissions grid is edited on the web only; /gm config plain is a read view"},
     "items_grid": {"surface": "web", "path": "POST /api/loot/items/{key}/tiers", "reason": "the item × spec tier grid (Loot › Items) is two-dimensional editing; Discord shows untiered counts and links there (D4)"},
+    "proposal_interrupted": {"surface": "web", "path": "POST /api/proposals/{pid}/interrupted", "reason": "the owner's recovery press for a proposal an apply run left applying (the Agents page shows the job is not running); the apply job does the same at its next poll, so Discord and MCP need no second path"},
     "loot_history": {"surface": "web", "path": "GET /api/loot/history", "reason": "ended councils, precedents and the award log are tables (Loot › History, Precedents, the Loot log); Discord has the summary on the closed card"},
 }
 
@@ -1787,7 +1791,9 @@ def _policy_edit(reg: Registry, op: ConfigOp, policy_store=None) -> tuple[str, s
     if op.op == "policy_append":
         if not text:
             raise RegistryError("say the rule to add")
-        return doc, cur.rstrip() + f"\n- {text}\n", f"append to the {doc} policy: “{text}”{after}"
+        from .policy import appended
+
+        return doc, appended(cur, text), f"append to the {doc} policy: “{text}”{after}"  # the text policy.append_rule writes
     f = (op.field or "").strip().lower()
     if f == "compile":
         return doc, None, f"{doc} policy: compile the current text and show my reading (Confirm makes it live; nothing changes until then)"
@@ -2399,7 +2405,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if text is None:
             raise RegistryError(f"policy compile {NEEDS_BOT}")
         try:  # remembers the text it replaced, so Discard can put it back; an append on another officer's waiting draft is refused
-            policy_mod.begin_edit(ps, doc, text, by, by_id=by_id, append=op.op == "policy_append", when=reg.local12)
+            if op.op == "policy_append":  # THE append verb (the site, MCP, /gm rule and this op write through it)
+                policy_mod.append_rule(ps, doc, op.text or "", by, by_id=by_id, when=reg.local12)
+            else:
+                policy_mod.begin_edit(ps, doc, text, by, by_id=by_id, when=reg.local12)
         except policy_mod.PolicyPendingError as e:
             raise RegistryError(str(e))
         return f"{doc} policy saved as a draft (compile pending)"

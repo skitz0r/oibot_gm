@@ -436,7 +436,8 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         picker (buttons, asked every time — owner decision D2), then the chosen one; None after saying why (in none:
         every server's Join link) or when nobody picked in time. D41: EVERY guild the person belongs to is listed, a
         guild whose plain-text policy ignores DMs marked "(plain text off here)"; picking one (or belonging to just that
-        one) answers once "DMs are off for <server>; /gm change works" — never silence. One guild in the process: as
+        one) answers once "DMs are off for <server> — ask in one of its channels instead (/gm change works there)" —
+        never silence (/gm change in a DM is refused by the same DM mode, so the reply points at the server's channels). One guild in the process: as
         before (plain_text applies its DM mode)."""
         import types as _types
 
@@ -457,7 +458,7 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
             await message.reply(guild_routing.not_in_any(regs), allowed_mentions=discord.AllowedMentions.none())
             return None
         if reg is not None and reg.key in off:
-            await message.reply(f"DMs are off for **{guild_name(reg)}**; `/gm change` works.", allowed_mentions=discord.AllowedMentions.none())
+            await message.reply(f"DMs are off for **{guild_name(reg)}** — ask in one of its channels instead (`/gm change` works there).", allowed_mentions=discord.AllowedMentions.none())
             return None
         return reg
 

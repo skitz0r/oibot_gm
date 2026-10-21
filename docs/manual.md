@@ -757,7 +757,9 @@ edits that new family and leaves the one it shared alone.
   entered this way are announced like `/me absent add`; channel changes post (or drop) their card like the Config page
   does. Several raid or schedule settings in a row are saved as one change, so "open 100 hours before and lock 60
   before" can't fail half way.
-- Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, recent ops),
+- Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, the news review — last run,
+  its result, the next run, proposals waiting — and the apply job: idle, running, busy with another server's proposal or
+  failed with why, recent ops),
   `/gm config show` (the effective configuration in words: channels and roles by name, raids with their schedules and
   hours, recruitment, plain-text defaults — never the raw file).
 - Every refusal and error reads the same on Discord, the site, in plain text and over MCP: a refusal as written, a bug
@@ -780,7 +782,8 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   restarts the whole bot, for every server), even when the bot serves one guild; an officer's press is refused at once
   and says so. Approving records who approved it and when; the apply job on the host (every 15 minutes) carries it out.
 - **Dismiss** (officers) gets the same screen (D34): nothing changes, and the review is told not to propose it again
-  unless newer news says more. Once approved, the button reads **Withdraw approval** — it can still be withdrawn until
+  unless newer news says more. For a game-data change that is a rule, not only a request: a new game-data proposal
+  that cites nothing but news a dismissed one cited (in your server or another on the same game version) is refused. Once approved, the button reads **Withdraw approval** — it can still be withdrawn until
   the job picks it up. There is no "edit before approve" (D35): dismiss it and say the change in plain text.
 - A second press after someone decided is told who did and when ("already approved by Jonny Tue 8:12 PM — nothing to
   do"), and the card catches up.
@@ -788,7 +791,7 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   so in its Status. Dismiss it once someone has handled it.
 - **Raid time (D33).** A game-data change restarts the bot, so the apply job never restarts it while any server it
   serves is busy: a locked run from 4 hours before its start until it closes, an open run within the hour, or a live
-  loot council. It waits, and writes why on the proposal ("waiting: Barrow Deeps raids until 11:30 PM") — the card's
+  loot council (however late it runs — a council still open past the run's scheduled end counts until it ends). It waits, and writes why on the proposal ("waiting: Barrow Deeps raids until 11:30 PM") — the card's
   Status and the Agents page show it. If a raid begins while the edit and the tests run, the change is committed and
   the restart waits for the next quiet poll. Guild settings never wait: they need no restart.
 - The card updates in place: **Applying now**, then **Applied** (with the commit for a game data change),
@@ -800,7 +803,9 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   now** when something is approved (the page follows the job for ten seconds and shows its result), the apply mode
   (applies to main, or opens a pull request), the MCP server's state (configured, local only, last write) and this
   month's Claude spend per server under the one shared cap (D45). A job that is busy with another server's proposal
-  says just that. Without an ops channel the page says the cards aren't posted. Plain text does it too: "approve
+  says just that. If an apply run died part-way (a proposal stuck on **Applying now** while the job isn't running), the
+  owner can **Mark as interrupted**: it becomes **Failed** with "the apply run was interrupted; approve again to retry"
+  — the job does the same by itself at its next poll. Without an ops channel the page says the cards aren't posted. Plain text does it too: "approve
   proposal 260927-a1b2", "dismiss 260927-a1b2: handled by hand" (officers by default; the note is kept on the card).
 - **Several servers.** Each server's news is reviewed on its own (its own news channel and keywords, its own cards and
   Agents page — you see your server's review runs only). A **game data** change is shared by every server on that game
@@ -1069,7 +1074,7 @@ asks first.
 
 **DMs with several servers (D41).** When the bot looks after more than one server, a plain DM asks which server it is
 for, listing every server you belong to; one whose policy ignores DMs is marked "(plain text off here)" and picking it
-answers once "DMs are off for <server>; /gm change works" — the bot is never silent.
+answers once "DMs are off for <server> — ask in one of its channels instead (/gm change works there)" — the bot is never silent.
 
 **What** — eight capability groups; every plain-text operation belongs to exactly one (your own wishlist is *Own
 record*; someone else's is *Other people's records*):
@@ -1254,7 +1259,7 @@ news post says can make the review read or write another server.
 | `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default) |
 | `raid_readiness` | each raid's pool readiness (§6): headcount, roles with who could cover, buffs nobody brings, the desired comp with its reasons, short / over cap, the pool plan — one raid or all |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with guild overrides marked |
-| `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full (with the consequence of each verdict), approve or dismiss it as the owner (a game-data approval is the owner's anyway). The apply job's steps (applying · applied · failed · reverted, and its "waiting: …" notes) need the job's own `X-Oibot-Job` header, which only the job scripts send — the owner's token alone reports none, and a call with the job header never decides |
+| `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full (with the consequence of each verdict), approve or dismiss it — a decision a person makes (D8): it needs `OIBOT_MCP_ACTOR` (sent as `X-Oibot-Actor`) naming an officer of the server, and a game-data approval needs that person to be the owner; the token alone is refused. The apply job's steps (applying · applied · failed · reverted, and its "waiting: …" notes) need the job's own `X-Oibot-Job` header, which only the job scripts send — the owner's token alone reports none, and a call with the job header never decides |
 | `job_status` · `get_job_run` · `run_job` | the review and apply jobs: state, last and next run, launchd, recent runs · one run's steps · start a job now (refused when it is running or not installed) |
 
 Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
@@ -1553,7 +1558,7 @@ the bot — a question, a request, a slash command or a wizard used in DMs, `/he
 on with what you asked, for that server; nobody picked in two minutes and it says so — ask again any time. If you are
 in only one of them, it is that one, no question (a server you just joined or left counts within seconds). A server
 whose owner turned DMs off is still listed, marked "(plain text off here)"; picking it answers once "DMs are off for
-<server>; /gm change works" — never silence (§8c). Buttons the bot sent you (Confirm / Can't make it, a seat offer, Join
+<server> — ask in one of its channels instead (/gm change works there)" — never silence (§8c). Buttons the bot sent you (Confirm / Can't make it, a seat offer, Join
 on a sheet, Apply to join) already know their server and never ask. With several servers, DMs and cards start with the
 server's name.
 

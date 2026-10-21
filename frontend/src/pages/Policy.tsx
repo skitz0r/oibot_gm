@@ -21,7 +21,7 @@ export function PolicyPage() {
   const [docs, setDocs] = useState<PolicyDoc[] | null>(null);
   const load = () => api.get<{ docs: PolicyDoc[] }>("/api/policy").then((d) => setDocs(d.docs)).catch(fail);
   useEffect(() => { load(); }, []);
-  useLive(load, ["agents", "config"]);
+  useLive(load, ["agents", "config", "policy"]);
   if (!docs) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">

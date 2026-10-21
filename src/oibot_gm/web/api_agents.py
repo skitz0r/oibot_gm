@@ -108,7 +108,7 @@ def llm_usage(bot, viewer_reg) -> dict | None:
 
 def quiet_state(bot, now: datetime | None = None, *, views: int = 0, previews: int = 0) -> dict:
     """{quiet, why[]}: a restart now would cut into nothing (design §3.4 (6)) — no live run within ±QUIET_WINDOW_H of its
-    lock or start (test runs aside), no solver / board / plan lock held, no live wizard or confirm view (`views`,
+    lock or start (test runs aside), no live loot council, no solver / board / plan lock held, no live wizard or confirm view (`views`,
     pending_views.live_count) and no unexpired preview token (`previews`)."""
     from .. import raidcycle as rc
 
@@ -125,6 +125,12 @@ def quiet_state(bot, now: datetime | None = None, *, views: int = 0, previews: i
             if abs(now - lock) <= win or abs(now - ev.start) <= win:
                 name = reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else ev.team
                 why.append(f"{reg.config.name}: {name} {reg.local12(ev.start)} locks or starts within {QUIET_WINDOW_H} h")
+        sessions = getattr(bot, "loot_sessions", None)
+        for s in (sessions(reg) if sessions is not None else []):  # a live council, however late it runs (D33)
+            if getattr(s, "test", False) or not getattr(s, "run_key", None):
+                continue
+            name = reg.raid_def(s.instance).get("name", s.instance) if getattr(s, "instance", None) else s.run_key
+            why.append(f"{reg.config.name}: {name}: the loot council is open")
     for attr in ("_solver_locks", "_board_locks", "_plan_locks"):
         held = [k for k, lk in (getattr(bot, "__dict__", {}).get(attr) or {}).items() if lk.locked()]
         if held:
@@ -194,6 +200,8 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
                 out[state] = fn(reg, p, state)
             else:
                 out[state] = news.consequence(p, reg, state, guilds=bot.registries, busy={r.key: busy_json(bot, r) for r in bot.registries.ordered()})
+        if p.state == news.RECOVER_MOVE[0]:  # the owner's Mark as interrupted (offered while the apply job isn't running)
+            out["interrupted"] = news.consequence(p, reg, "interrupted")
         return out
 
     def proposal_json(reg, p) -> dict:
@@ -272,6 +280,8 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
 
     async def move(request: Request, v, pid: str, state: str | None, commit: str | None = None, note: str | None = None):
         job = job_of(request, v)
+        if is_bearer(v) and not job and getattr(v, "actor", None) is None and state in news.DECISIONS:
+            raise HTTPException(403, news.MCP_ACTOR_NEEDED.format(guild=v.reg.config.name))  # D8: the token is not who decided
         try:
             return await decide(v.reg, pid, state, by=job and "the apply job" or v.name, by_id=None if job else v.uid, officer=bool(v.officer and not job),
                                 job=bool(job), owner=bool(v.owner and not job), note=note, commit=commit, via=v.via)
@@ -293,6 +303,24 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         p, card_ok = await move(request, v, pid, state, (str(d.get("commit") or "").strip() or None), note)
         word = "noted" if state is None else p.state
         return {"message": f"proposal {p.id} is {word}" + ("" if card_ok else " — the Discord card updates when the bot is back"),
+                "proposal": proposal_json(v.reg, p), "card_updated": card_ok}
+
+    @app.post("/api/proposals/{pid}/interrupted")
+    async def proposal_interrupted(request: Request, pid: str):
+        """The owner, on the Agents page: a proposal left `applying` by an apply run that is gone → failed with the
+        job's own recovery words (design §3.4 apply job (5); the job does the same at its next poll). Refused while the
+        apply job is running (it reports its own proposal) and from MCP (a person's recovery press, not the token's)."""
+        v, _ = await body(request, officer=True)
+        if is_bearer(v) or not v.owner:
+            raise HTTPException(403, "Only the owner marks an apply run as interrupted, on the Agents page.")
+        if agents.read_status("apply", agents.OUT).get("state") == "running":
+            raise HTTPException(409, "The apply job is running — it reports its own proposal; wait for it to finish.")
+        try:
+            p, card_ok = await decide(v.reg, pid, news.RECOVER_MOVE[1], by=v.name, by_id=v.uid, officer=True, owner=True, recover=True,
+                                      note=news.INTERRUPTED, via=v.via)
+        except (ProposalError, PermissionError) as e:
+            raise refusal(v, e)
+        return {"message": f"proposal {p.id} is failed: {news.INTERRUPTED}" + ("" if card_ok else " — the Discord card updates when the bot is back"),
                 "proposal": proposal_json(v.reg, p), "card_updated": card_ok}
 
     @app.post("/api/proposals/{pid}/apply")

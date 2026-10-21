@@ -32,6 +32,17 @@ DEFAULTS = {
     "persona": "You are oibot_GM, the guild's loot master and raid planner. Neutral, concise, specific. Cite numbers and rules, not adjectives.\n",
 }
 MODAL_MAX = 4000  # Discord's TextInput cap: past it /gm policy edit only appends (the full text is on the site)
+# fn(guild key, doc) after every policy write that commits (a draft, a reading held, a confirm, a discard, a revert),
+# whichever surface made it — the web's `policy` topic (web/api_policy.py), so a second officer's Policy page refreshes
+POLICY_LISTENERS: list = []
+
+
+def _changed(key: str, doc: str) -> None:
+    for fn in list(POLICY_LISTENERS):
+        try:
+            fn(key, doc)
+        except Exception:  # noqa: BLE001 — a listener must never break a write
+            pass
 
 
 class LootRule(BaseModel):
@@ -160,6 +171,7 @@ class PolicyStore:
                 held["compiled"], held["text"], held["rev"] = None, None, secrets.token_hex(4)
                 self._dump_pending(doc, held)
             self.store.commit(f"{self.key}: policy {doc} edited by {by} (pending confirmation)")
+        _changed(self.key, doc)
 
     def compiled(self, doc: str) -> dict | None:
         p = self.store.root / self.compiled_path(doc)
@@ -174,12 +186,14 @@ class PolicyStore:
             self.store.write_text(self.compiled_path(doc), json.dumps(row, indent=1, ensure_ascii=False))
             self._drop_pending(doc)
             self.store.commit(f"{self.key}: policy {doc} compiled form confirmed by {by}")
+        _changed(self.key, doc)
 
     def revert(self, doc: str, previous: str, by: str) -> None:
         with self.store.lock:
             self.store.write_text(self.path(doc), previous)
             self._drop_pending(doc)
             self.store.commit(f"{self.key}: policy {doc} edit discarded by {by}")
+        _changed(self.key, doc)
 
     def compile(self, doc: str, provider: Provider, text: str | None = None):
         from .llm.provider import for_guild
@@ -273,22 +287,46 @@ def begin_edit(ps: PolicyStore, doc: str, text: str, by: str, *, by_id: int | No
         ps._dump_pending(doc, entry)
         ps.store.commit(f"{ps.key}: policy {doc} edited by {by} (pending confirmation)")
     PENDING[(ps.key, doc)] = {"rev": entry["rev"]}
+    _changed(ps.key, doc)
     if doc == "persona":
         return "persona saved as a draft — confirm it to make it the bot's voice (Discard puts the previous one back)"
     return f"{doc} policy saved as a draft — compile it to see the bot's reading, then confirm or discard"
 
 
-def append_rule(ps: PolicyStore, doc: str, line: str, by: str, *, by_id: int | None = None, when=None) -> tuple[str, str]:
-    """THE policy_append verb: '- <line>' at the end of the loot or comp document, as a draft (begin_edit with
-    append=True). Returns (the new text, the line to show)."""
-    if doc not in ("loot", "comp"):
+def rule_bullet(text: str) -> str:
+    """A rule as ONE markdown bullet: a leading dash the officer typed is dropped, a multi-line rule keeps its lines,
+    indented under the dash. '' for nothing."""
+    lines = [ln.rstrip() for ln in (text or "").strip().lstrip("-*• ").splitlines()]
+    lines = [ln for ln in lines if ln.strip()]
+    return "- " + "\n  ".join(lines) + "\n" if lines else ""
+
+
+def appended(current: str, text: str, *, bullet: bool = True) -> str:
+    """THE text an append makes: `current` + the rule as a bullet (`bullet`), or + a paragraph (the /gm policy edit box
+    of a document too long for Discord: what was typed, added at the end). Every surface's preview and write use it."""
+    if bullet:
+        return current.rstrip() + "\n" + rule_bullet(text)
+    return current.rstrip() + "\n\n" + (text or "").strip() + "\n"
+
+
+def append_rule(ps: PolicyStore, doc: str, line: str, by: str, *, by_id: int | None = None, when=None, bullet: bool = True) -> tuple[str, str]:
+    """THE policy_append verb — the site and MCP (POST /api/policy/{doc}/append), plain text and the `policy_append` op
+    (configops), /gm rule (flows_misc.RuleWizard) and the /gm policy edit box past Discord's 4000 characters
+    (`bullet=False`: a paragraph, any doc): `appended()` at the end of the document, as a draft (begin_edit with
+    append=True: refused while ANOTHER officer's draft waits, naming them). The read and the write hold the store lock,
+    so two appends never lose one. Returns (the new text, the line to show)."""
+    _check_doc(doc)
+    if bullet and doc not in ("loot", "comp"):
         raise PolicyPendingError("a rule is added to the loot or comp policy")
-    line = (line or "").strip().lstrip("-*• ").strip()
-    if not line:
+    text = (line or "").strip()
+    if bullet:
+        text = text.lstrip("-*• ").strip()
+    if not text:
         raise PolicyPendingError("say the rule to add")
-    new = ps.read(doc).rstrip() + f"\n- {line}\n"
-    begin_edit(ps, doc, new, by, by_id=by_id, append=True, when=when)
-    return new, f"added to the {doc} policy as a draft: “{line}” — compile and confirm to make it live"
+    with ps.store.lock:
+        new = appended(ps.read(doc), text, bullet=bullet)
+        begin_edit(ps, doc, new, by, by_id=by_id, append=True, when=when)
+    return new, f"added to the {doc} policy as a draft: “{text}” — compile and confirm to make it live"
 
 
 def compile_pending(ps: PolicyStore, doc: str, provider: Provider) -> tuple[BaseModel | None, str]:
@@ -310,6 +348,7 @@ def compile_pending(ps: PolicyStore, doc: str, provider: Provider) -> tuple[Base
         ps._dump_pending(doc, entry)
         ps.store.commit(f"{ps.key}: policy {doc} reading held for confirmation")
     PENDING[(ps.key, doc)] = {"rev": entry["rev"]}
+    _changed(ps.key, doc)
     return compiled, render_compiled(doc, compiled)
 
 
@@ -324,6 +363,7 @@ def confirm_pending(ps: PolicyStore, doc: str, by: str) -> str:
         with ps.store.lock:
             ps._dump_pending(doc, p)
             ps.store.commit(f"{ps.key}: policy {doc}: a stale reading dropped")
+        _changed(ps.key, doc)
         raise PolicyPendingError(f"the {doc} policy text changed since that reading was compiled — compile again")
     ps.confirm(doc, p["compiled"], by, p["text"])
     PENDING.pop((ps.key, doc), None)
@@ -345,6 +385,7 @@ def discard_pending(ps: PolicyStore, doc: str, by: str) -> str:
         with ps.store.lock:
             ps._drop_pending(doc)
             ps.store.commit(f"{ps.key}: policy {doc} pending edit dropped by {by}")
+        _changed(ps.key, doc)
     PENDING.pop((ps.key, doc), None)
     return f"edit to the {doc} policy discarded; the previous text is back"
 

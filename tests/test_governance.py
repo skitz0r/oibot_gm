@@ -98,6 +98,52 @@ def test_the_job_header_carries_job_moves_only_and_never_an_officers_decision(re
     assert ProposalStore(reg.store, reg.key).get(pid).status_note is None, "a move clears the annotation"
 
 
+def test_a_bare_mcp_bearer_never_decides_a_proposal(reg, rs, monkeypatch, out_dir):
+    """Regression (G2 review): the owner's token alone (no X-Oibot-Job, no X-Oibot-Actor) approved a game-data proposal
+    — mcp_viewer is the owner, so the owner-only rule was met by the token. D8: a decision from MCP is a NAMED
+    officer's (X-Oibot-Actor, validated now); a game-data approval, the owner's. The ops path refuses it the same way."""
+    add_news(reg)
+    bot, c, job, site = clients(reg, rs, monkeypatch, officer=True)
+    bearer = {k: v for k, v in job.items() if k != "X-Oibot-Job"}
+    ps = ProposalStore(reg.store, reg.key)
+    prof = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    setting = ps.create(reg, proposal_data(title="Barrow Deeps resets weekly (again)"))
+    for pid, state in ((prof.id, "approved"), (prof.id, "dismissed"), (setting.id, "approved"), (setting.id, "dismissed")):
+        r = c.post(f"/api/proposals/{pid}/resolve", json={"state": state}, headers=bearer)
+        assert r.status_code == 403 and "X-Oibot-Actor" in r.json()["error"] and "Demo Guild" in r.json()["error"], (pid, state, r.text)
+    r = c.post("/api/ops/change", json={"ops": [{"op": "proposal", "target": prof.id, "value": "approve"}], "apply": True, "confirmed": True}, headers=bearer)
+    assert not r.json().get("applied") and any("X-Oibot-Actor" in str(x) for x in r.json().get("refused", [])), r.text
+    assert ps.get(prof.id).state == "proposed" and ps.get(setting.id).state == "proposed", "nothing moved"
+    officer = {**bearer, "X-Oibot-Actor": "42"}
+    r = c.post(f"/api/proposals/{prof.id}/resolve", json={"state": "approved"}, headers=officer)
+    assert r.status_code == 403 and "Only the owner approves a game-data change" in r.json()["error"], r.text
+    assert c.post(f"/api/proposals/{setting.id}/resolve", json={"state": "approved"}, headers=officer).status_code == 200
+    owner = {**bearer, "X-Oibot-Actor": str(OWNER)}
+    assert c.post(f"/api/proposals/{prof.id}/resolve", json={"state": "approved"}, headers=owner).status_code == 200
+    assert ps.get(prof.id).state == "approved"
+
+
+def test_mcp_resolve_proposal_sends_the_actor_only_on_a_decision(monkeypatch):
+    import httpx
+    from oibot_gm import mcp_server as ms
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.headers.get("x-oibot-actor"))
+        return httpx.Response(200, json={"message": "ok"})
+
+    ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
+    try:
+        monkeypatch.setenv(ms.ACTOR_ENV, "42")
+        ms.resolve_proposal("260101-aaaa", "approved")
+        ms.resolve_proposal("260101-aaaa", "dismissed")
+        ms.resolve_proposal("260101-aaaa", "applying")
+    finally:
+        ms.use(None)
+    assert calls == ["42", "42", None]
+
+
 def test_get_proposals_carries_the_consequence_and_the_card_state(reg, rs, monkeypatch, out_dir):
     from test_agents import PROP, seed
 
@@ -145,6 +191,42 @@ def test_busy_follows_the_d33_windows(reg):
     late = ev(reg, state="locked", hours=2)
     b = news.guild_busy(reg, [late])
     assert b["until"] == rc.run_close_at(reg, late).astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+def test_a_live_loot_council_holds_a_restart_however_late_it_runs(reg):
+    """Regression (G2 review): the council counted only while its run was open/locked and before its scheduled close —
+    a council still going 8 h after the start (D10 ends one only past close + 30 min idle) read raiding: False, so the
+    apply job could restart in the middle of it. Every live council counts on its own; a test run's never does."""
+    late = ev(reg, state="locked", hours=-8, key="bd-late")
+    assert datetime.now(timezone.utc) > rc.run_close_at(reg, late), "the run is past its scheduled close"
+    assert not news.guild_busy(reg, [late])["raiding"], "no council: past close is not raid time"
+    council = SimpleNamespace(run_key="bd-late", test=False, instance="barrow_deeps")
+    for loot in (["bd-late"], [council]):
+        b = news.guild_busy(reg, [late], loot_runs=loot)
+        assert b["raiding"] and "the loot council is open" in b["why"], loot
+        assert datetime.fromisoformat(b["until"]) >= datetime.now(timezone.utc) + timedelta(minutes=news.BUSY_LOOT_MIN - 1)
+    gone = SimpleNamespace(run_key="bd-done", test=False, instance="barrow_deeps")  # the scheduler marked the run done
+    b = news.guild_busy(reg, [ev(reg, state="done", hours=-8, key="bd-done")], loot_runs=[gone])
+    assert b["raiding"] and b["why"].startswith(reg.raid_def("barrow_deeps").get("name", "barrow_deeps"))
+    assert news.guild_busy(reg, [], loot_runs=[gone])["raiding"], "a council whose run isn't among the live ones still counts"
+    early = ev(reg, state="locked", hours=72, key="bd-early")
+    assert not news.guild_busy(reg, [early], loot_runs=["bd-early"])["raiding"], "a council opened days early is not raid time yet"
+    rehearsal = SimpleNamespace(run_key="bd-t", test=True, instance="barrow_deeps")
+    assert not news.guild_busy(reg, [], loot_runs=[rehearsal])["raiding"]
+    assert not news.guild_busy(reg, [ev(reg, state="locked", hours=-8, key="bd-t", test=True)], loot_runs=["bd-t"])["raiding"]
+
+
+def test_the_bot_counts_its_live_councils_and_the_quiet_check_too(reg):
+    from oibot_gm.discord_news import NewsMixin
+    from oibot_gm.web import api_agents
+
+    council = SimpleNamespace(run_key="bd-late", test=False, instance="barrow_deeps")
+    bot = SimpleNamespace(raids=None, loot_sessions=lambda r: [council], registries=SimpleNamespace(ordered=lambda: [reg]))
+    assert NewsMixin.guild_busy(bot, reg)["raiding"], "the bot's busy map passes the sessions themselves"
+    q = api_agents.quiet_state(bot)
+    assert not q["quiet"] and any("the loot council is open" in w for w in q["why"])
+    bot.loot_sessions = lambda r: [SimpleNamespace(run_key="bd-t", test=True, instance="barrow_deeps")]
+    assert not NewsMixin.guild_busy(bot, reg)["raiding"] and api_agents.quiet_state(bot)["quiet"]
 
 
 def test_api_guilds_carries_busy_per_guild(duo, monkeypatch):
@@ -609,3 +691,228 @@ def test_llm_usage_is_shown_per_guild_under_one_cap(tmp_path, monkeypatch):
     p.budget_usd = 0.1
     with pytest.raises(pv.BudgetExceeded, match="the host raises it"):
         p.complete("help", "s", "u", SimpleNamespace)
+
+
+# ---------------------------------------------------------------- review fixes (G2): status lines, recovery, refusals, SSE, attribution
+
+def test_gm_status_carries_the_news_review_and_apply_lines(reg, out_dir):
+    """Design §3.4 OFF-13/OFF-15: 'News review: last <t:f> · <result> · next <t:R> · N proposals waiting' and
+    'Apply: idle | running | busy with another server's proposal | failed: <result>' — Discord stamps, never a clock."""
+    from oibot_gm.discord_news import agents_status_lines
+
+    add_news(reg)
+    review, apply = agents_status_lines(reg, out=out_dir)
+    assert review == "News review: never ran here · next " + review.split("next ", 1)[1] and review.endswith("0 proposals waiting")
+    assert apply == "Apply: idle"
+    ProposalStore(reg.store, reg.key).create(reg, proposal_data())
+    agents.write_status("review", out_dir, state="idle", started="2026-10-20T16:00:00+00:00", finished="2026-10-20T16:04:00+00:00", result="1 proposal posted")
+    review, _ = agents_status_lines(reg, out=out_dir)
+    assert review.startswith("News review: last <t:") and ":f> · 1 proposal posted · next <t:" in review and review.endswith(":R> · 1 proposal waiting")
+    assert " AM" not in review and " PM" not in review, "Discord renders the stamps in the reader's own clock"
+    agents.write_status("apply", out_dir, state="failed", result="checks failed: tests/test_x.py")
+    assert agents_status_lines(reg, out=out_dir)[1] == "Apply: failed: checks failed: tests/test_x.py"
+    import os
+
+    agents.write_status("apply", out_dir, state="running", pid=os.getpid(), guild="duo", step="running the tests")
+    assert agents_status_lines(reg, out=out_dir, many=True)[1] == "Apply: busy with another server's proposal"
+    assert agents_status_lines(reg, out=out_dir, many=False)[1] == "Apply: running: running the tests"
+
+
+def test_gm_status_shows_the_agents_field(reg, monkeypatch, out_dir):
+    import discord
+    from discord import app_commands
+
+    from oibot_gm import discord_news
+    from oibot_gm.discord_registry import Guilds, register_commands
+    from oibot_gm.ops import Ops
+
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    guilds = Guilds.of(reg.store, reg)
+    register_commands(tree, guilds, Ops(client), lambda k, v: "")
+    bot = SimpleNamespace(registries=guilds, ctx=None, governance_status=lambda r: discord_news.agents_status_lines(r, out=out_dir), get_guild=lambda gid: None)
+    h = Harness(reg, user=SimpleNamespace(id=OWNER, display_name="Owner", mention="@Owner"), client=bot)
+    run(tree.get_command("gm").get_command("status").callback(h.command()))
+    agents_field = next(f for f in h.screen["embed"].fields if f.name == "Agents")
+    assert agents_field.value.startswith("News review: never ran here") and agents_field.value.endswith("Apply: idle")
+
+
+def owner_cookie(c, uid=OWNER):
+    from itsdangerous import URLSafeSerializer
+
+    c.cookies.set(web.COOKIE, URLSafeSerializer("s" * 40, salt="session").dumps({"uid": str(uid), "name": "Owner", "iat": time.time()}))
+
+
+def test_the_owner_marks_an_interrupted_apply_run_while_the_job_is_not_running(reg, rs, monkeypatch, out_dir):
+    """Design §3.4 apply job (5): a proposal an apply run left `applying` is the owner's to mark failed (the job's own
+    recovery words) from the Agents page — never while the job runs, never an officer, never the MCP token."""
+    import os
+
+    add_news(reg)
+    bot, c, job, site = clients(reg, rs, monkeypatch, officer=True)
+    ps = ProposalStore(reg.store, reg.key)
+    p = ps.create(reg, proposal_data())
+    ps.move(p.id, "approved", "Kessa", officer=True, job=False, by_id=5)
+    ps.move(p.id, "applying", "the apply job", officer=False, job=True)
+    shown = next(x for x in c.get("/api/proposals").json()["proposals"] if x["id"] == p.id)
+    assert shown["consequence"]["interrupted"][0].startswith("Marks it failed") and "approve it again" in shown["consequence"]["interrupted"][0]
+    url = f"/api/proposals/{p.id}/interrupted"
+    assert c.post(url, json={}, headers=site).status_code == 403, "an officer who isn't the owner"
+    bearer = {k: v for k, v in job.items() if k != "X-Oibot-Job"}
+    assert c.post(url, json={}, headers=bearer).status_code == 403, "a person's recovery press, not the token's"
+    owner_cookie(c)
+    agents.write_status("apply", out_dir, state="running", pid=os.getpid())
+    r = c.post(url, json={}, headers=site)
+    assert r.status_code == 409 and "apply job is running" in r.json()["error"]
+    agents.write_status("apply", out_dir, state="idle", pid=None)
+    r = c.post(url, json={}, headers=site)
+    assert r.status_code == 200, r.text
+    q = ps.get(p.id)
+    assert (q.state, q.note, q.history[-1]["by"]) == ("failed", news.INTERRUPTED, "Viewer")
+    assert c.post(url, json={}, headers=site).status_code == 400, "only an applying proposal"
+    p2 = ps.create(reg, proposal_data(title="Another one"))
+    ps.move(p2.id, "approved", "Kessa", officer=True, job=False, by_id=5)
+    ps.move(p2.id, "applying", "the apply job", officer=False, job=True)
+    with pytest.raises(PermissionError, match="only the owner marks an apply run as interrupted"):
+        ps.move(p2.id, "failed", "Kessa", officer=True, job=False, by_id=5, owner=False, recover=True)
+    with pytest.raises(PermissionError, match="only the apply job reports that"):
+        ps.move(p2.id, "applied", "the owner", officer=True, job=False, owner=True, recover=True)
+    apply = load_script("apply")
+    assert apply.INTERRUPTED == news.INTERRUPTED, "the job's recovery and the owner's press say the same"
+
+
+def test_a_game_data_proposal_citing_only_dismissed_news_is_refused(duo):
+    """Design §3.4 OFF-14: was only the review prompt's rule — now code: a profile proposal citing nothing but news a
+    dismissed game-data proposal (here or in a guild on the same game version) cited is refused; newer news is fine."""
+    from test_news import URL
+
+    add_news(duo.a)
+    ps = ProposalStore(duo.a.store, GUILD)
+    first = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    ps.move(first.id, "dismissed", "Kessa", officer=True, job=False, by_id=5)
+    with pytest.raises(news.ProposalError, match=f"cited by {first.id}, which an officer dismissed"):
+        ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    assert ps.create(duo.a, proposal_data()).kind == "guild_setting", "a guild setting is the officers' to judge again"
+    newer = "https://example.com/news/newer"
+    add_news(duo.a, url=newer, title="Barrow Deeps hotfix: 10-player lockout clarified on WoW: Forever")
+    assert ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT, news=[URL, newer])).state == "proposed"
+    add_news(duo.b)
+    with pytest.raises(news.ProposalError, match=f"Demo Guild's {first.id}"):
+        ProposalStore(duo.b.store, GUILD2).create(duo.b, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    assert news.consequence(first, duo.a, "dismissed")[0].startswith("Dismissed: nothing changes, and a game-data proposal citing only this news is refused")
+
+
+def test_every_policy_write_publishes_to_the_officers_policy_pages(reg, monkeypatch):
+    """S4: a second officer's Policy page reloads on another officer's draft, reading, confirm or discard — from any
+    surface (policy.POLICY_LISTENERS; web/api_policy.py publishes the officers-only `policy` topic)."""
+    from fastapi import FastAPI
+
+    from oibot_gm.web.api_policy import install_policy_api
+
+    monkeypatch.setattr(pol, "POLICY_LISTENERS", [])
+    sent = []
+    install_policy_api(FastAPI(), SimpleNamespace(registries=SimpleNamespace(store=reg.store)), who=None, body=None,
+                       publish=lambda topic, guild, **kw: sent.append((topic, guild, kw)))
+    install_policy_api(FastAPI(), SimpleNamespace(registries=SimpleNamespace(store=reg.store)), who=None, body=None,
+                       publish=lambda topic, guild, **kw: sent.append((topic, guild, kw)))
+    assert len(pol.POLICY_LISTENERS) == 1, "a second app replaces the listener, never stacks it"
+    ps = pol.PolicyStore(reg.store, reg.key)
+    pol.append_rule(ps, "loot", "Tanks first on tank trinkets", "Kessa", by_id=5)
+    pol.compile_pending(ps, "loot", FakeProvider())
+    pol.confirm_pending(ps, "loot", "Kessa")
+    pol.begin_edit(ps, "comp", "# Comp\n\n- keep A with B", "Kessa")
+    pol.discard_pending(ps, "comp", "Kessa")
+    assert sent == [("policy", reg.key, {"officers": True})] * 5
+
+
+def test_every_append_writes_policy_appended(reg):
+    """THE policy_append verb: the site / MCP (policy.append_rule), the `policy_append` op (plain text), /gm rule and
+    the long-document edit box all write policy.appended()'s text, and all are refused on another officer's draft."""
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+    from oibot_gm.registry import RegistryError
+
+    ps = pol.PolicyStore(reg.store, reg.key)
+    base = ps.read("loot")
+    op = ConfigOp(op="policy_append", doc="loot", text="- Tanks first on tank trinkets")
+    assert configops._policy_edit(reg, op, ps)[1] == pol.appended(base, "Tanks first on tank trinkets") == base.rstrip() + "\n- Tanks first on tank trinkets\n"
+    configops.apply(reg, op, "Kessa", True, ps, None, None, 5)
+    assert ps.read("loot") == base.rstrip() + "\n- Tanks first on tank trinkets\n" and ps.load_pending("loot")["by"] == "Kessa"
+    with pytest.raises(RegistryError, match="A draft by Kessa is waiting"):
+        configops.apply(reg, ConfigOp(op="policy_append", doc="loot", text="Healers second"), "Jonny", True, ps, None, None, 6)
+    assert pol.rule_bullet("Two lines\nof one rule") == "- Two lines\n  of one rule\n" and pol.rule_bullet(" - ") == ""
+    assert pol.appended("# P\n", "a paragraph", bullet=False) == "# P\n\na paragraph\n"
+    import inspect
+
+    from oibot_gm import discord_policy, flows_misc
+
+    assert "append_rule(" in inspect.getsource(flows_misc.RuleWizard) and "append_rule(" in inspect.getsource(discord_policy.PolicyEditModal.on_submit)
+
+
+def test_loot_judging_and_the_sites_parses_are_attributed_to_their_guild(reg, rs, monkeypatch):
+    """D45: the loot council's judge (worker threads), the plain-text parse (Discord, the site's text box, MCP) and the
+    help answer record their guild — no longer '' (unattributed)."""
+    from oibot_gm import configops
+    from oibot_gm.llm import provider as pv
+    from oibot_gm.loot import recommend as rec_mod, session as ls
+
+    seen = []
+
+    class P:
+        def complete(self, workload, system, user, schema):
+            seen.append((workload, pv.CURRENT_GUILD.get()))
+            raise RuntimeError("stop here")
+
+    with pytest.raises(RuntimeError):
+        configops.parse(P(), reg, "set the timezone to Europe/Paris")
+    monkeypatch.setattr(help_mod, "system_prompt", lambda tree: "s")
+    monkeypatch.setattr(help_mod, "guild_state", lambda *a, **kw: "state")
+    with pytest.raises(RuntimeError):
+        help_mod.answer(P(), None, reg, rs, OWNER, True, "when is the raid?")
+    real = rec_mod.recommend
+
+    def recommend(profile, item, cands, policy, provider, cfg=None):
+        if provider is not None:
+            seen.append(("loot_recommend", pv.CURRENT_GUILD.get()))
+        return real(profile, item, cands, policy, None, cfg=cfg)
+    monkeypatch.setattr(rec_mod, "recommend", recommend)
+    from test_loot_verbs import LootBot, real_run
+
+    ev, _ = real_run(reg, rs)
+    bot = LootBot(reg, rs)
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer", by_id=1))
+    run(bot.tick(reg, s, add=[{"name": "Shard of Doom", "boss": "Gatekeeper", "copies": 1}], by="Officer", by_id=1))
+    ls.run_distribution(bot.loot_ctx(s), ls.snapshot(s), bot.loot_roster(s), [s.drop_list[0].drop_id], provider=object())
+    assert seen == [("config_change", GUILD), ("help", GUILD), ("loot_recommend", GUILD)]
+    assert pv.CURRENT_GUILD.get() == ""
+
+
+def test_gm_policy_show_runs_through_the_guild_resolver(reg):
+    """The slash callback itself (not only policy_show_messages): guild_routing.need picks the guild, officers only,
+    the document then its reading; an unconfigured server is told once and never reaches another guild."""
+    import discord
+    from discord import app_commands
+
+    from oibot_gm.discord_policy import PolicyContext, register_policy_commands
+    from oibot_gm.discord_registry import Guilds, register_commands
+    from oibot_gm.ops import Ops
+
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    guilds = Guilds.of(reg.store, reg)
+    register_commands(tree, guilds, Ops(client), lambda k, v: "")
+    register_policy_commands(tree, guilds, Ops(client), SimpleNamespace(), PolicyContext(guilds))
+    show = tree.get_command("gm").get_command("policy").get_command("show")
+    loot = app_commands.Choice(name="loot", value="loot")
+    bot = SimpleNamespace(registries=guilds, get_guild=lambda gid: None)
+    h = Harness(reg, user=SimpleNamespace(id=OWNER, display_name="Owner", mention="@Owner"), client=bot)
+    run(show.callback(h.command(), loot))
+    assert h.screens[0]["text"].startswith("**The loot policy — written**") and "Mainspec before offspec" in h.screens[0]["text"]
+    assert any(s["embed"] is not None for s in h.screens[1:]), "the compiled reading follows the text"
+    member = Harness(reg, user=SimpleNamespace(id=777, display_name="Member", mention="@Member"), client=bot)
+    run(show.callback(member.command(), loot))
+    assert [s["text"] for s in member.screens] == ["Officers only."]
+    stranger = Harness(reg, user=SimpleNamespace(id=OWNER, display_name="Owner", mention="@Owner"), client=bot)
+    stranger.guild_id = 999
+    run(show.callback(stranger.command(), loot))
+    assert len(stranger.screens) == 1 and "set up" in stranger.screens[0]["text"]
