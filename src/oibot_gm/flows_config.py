@@ -1842,57 +1842,108 @@ async def _news_webhook_line(client, reg: Registry) -> str:
     return (f"\nWebhook for your news source: ||{w['url']}||\n-# {w['note']}" if w.get("url") else f"\n-# {w['note']}")
 
 
-class ChannelSetWizard(OwnerWizard):
-    """THE one-screen confirm of `/gm config <kind>-channel channel: | clear:` (the eight shortcuts): the consequence from
-    code (discord_pool.channel_consequences — what is posted, pinned, forgotten, falls back; 'I can't post in #x: missing …'),
-    then [Save] [Back]. Save → SetupMixin.set_channel (its permission check, post first, its own ops line)."""
+SAME = "same"  # ChannelSetWizard: the channel stays as it is (loot-channel log: alone)
 
-    def __init__(self, reg: Registry, owner_id: int, kind: str, channel_id: int | None):
+
+class ChannelSetWizard(OwnerWizard):
+    """THE one-screen confirm of `/gm config <kind>-channel channel: | clear:` (the eight shortcuts and `/gm config
+    loot-channel`): the consequence from code (discord_pool.channel_consequences — what is posted, pinned, forgotten, falls
+    back; 'I can't post in #x: missing …'), then [Save] [Back]. Save → SetupMixin.set_channel (its permission check, post
+    first, its own ops line) under the settings rev the screen was drawn from (a change meanwhile refuses it). `log` (the
+    loot channel only): the public loot log on/off, said on the same screen and saved with it (configops `set loot_log`)."""
+
+    def __init__(self, reg: Registry, owner_id: int, kind: str, channel_id: int | None, *, log: bool | None = None):
         from .discord_pool import CHANNEL_LABELS
 
         super().__init__(reg, owner_id, title=f"{CHANNEL_LABELS.get(kind, (kind,))[0]} channel", guard=_owner_guard(reg))
-        self.kind, self.cid = kind, channel_id
+        self.kind, self.cid, self.log = kind, channel_id, log
+        self.rev = reg.config_rev("settings")
+
+    def log_op(self):
+        from .configops import ConfigOp
+
+        if self.log is None or bool(self.reg.config.loot_log) == bool(self.log):
+            return None
+        return ConfigOp(op="set", path="loot_log", value="true" if self.log else "false")
 
     async def start(self, i: discord.Interaction) -> None:
         from . import perms
+        from .configops import describe
         from .discord_pool import channel_consequences
 
-        lines = channel_consequences(self.reg, self.kind, self.cid, i.client)
-        if self.cid is not None:
+        self.rev = self.reg.config_rev("settings")
+        log_op = self.log_op()
+        lines: list[str] = []
+        if self.cid != SAME:
+            lines = channel_consequences(self.reg, self.kind, self.cid, i.client)
+        if self.cid not in (None, SAME):
             ch = i.client.get_channel(self.cid) if getattr(i.client, "get_channel", None) else None
             missing = perms.missing_for(ch, self.kind) if ch is not None else []
             if missing:  # set_channel would refuse it: say so now, nothing to confirm
                 await self.finish(i, f"❌ {perms.cant_post(ch.name, missing)} Nothing was changed.")
                 return
             if self.cid == getattr(self.reg.config, f"{self.kind}_channel_id", None):
-                await self.finish(i, lines[0] if lines else "Nothing changes.")
-                return
-        head = (f"Use <#{self.cid}> for this?" if self.cid else "Stop using a channel for this?")
-        await self.decide(i, "\n".join([head] + [f"• {x}" for x in lines]), do=self.save, do_label="Save" if self.cid else "Clear it", danger=self.cid is None)
+                if log_op is None:
+                    await self.finish(i, lines[0] if lines else "Nothing changes.")
+                    return
+                self.cid, lines = SAME, []  # the channel stays: only the log changes
+        if self.cid == SAME and log_op is None:
+            from .loot_ops import loot_log_state
+
+            await self.finish(i, "Nothing changes. " + loot_log_state(self.reg)["text"])
+            return
+        head = ("Change the public loot log?" if self.cid == SAME else f"Use <#{self.cid}> for this?" if self.cid else "Stop using a channel for this?")
+        if log_op is not None:
+            lines = lines + [describe(self.reg, log_op)]
+        clearing = self.cid is None
+        await self.decide(i, "\n".join([head] + [f"• {x}" for x in lines]), do=self.save,
+                          do_label="Clear it" if clearing else "Save", danger=clearing)
 
     async def save(self, i: discord.Interaction, _note: str | None) -> None:
+        from .configops import apply_async
+
+        out = []
         try:
-            line = await i.client.set_channel(self.reg, self.kind, self.cid, i.user.display_name, by_id=i.user.id)
+            if self.cid != SAME:
+                out.append(await i.client.set_channel(self.reg, self.kind, self.cid, i.user.display_name, by_id=i.user.id, rev=self.rev))
+                self.rev = self.reg.config_rev("settings")  # this screen's own write: the log below goes on from it
+            log_op = self.log_op()
+            if log_op is not None:
+                out.append(await apply_async(self.reg, log_op, i.user.display_name, True, bot=i.client, by_id=i.user.id, rev=self.rev, via="discord"))
         except (ValueError, RegistryError) as e:
-            await self.finish(i, f"❌ {e}")
+            await self.finish(i, ("✅ " + " · ".join(out) + "\n" if out else "") + f"❌ {e}")
             return
-        extra = await _news_webhook_line(i.client, self.reg) if self.kind == "news" and self.cid else ""
-        await self.finish(i, f"✅ {line}{extra}")
+        extra = await _news_webhook_line(i.client, self.reg) if self.kind == "news" and self.cid not in (None, SAME) else ""
+        if self.kind == "loot":
+            from .loot_ops import loot_log_state
+
+            extra += "\n" + loot_log_state(self.reg)["text"]
+        await self.finish(i, f"✅ {' · '.join(out)}{extra}")
 
 
 @flow("channel_set")
-async def open_channel_set(interaction: discord.Interaction, reg: Registry, *, kind: str, channel=None, clear: bool = False, **_seed) -> None:
-    """The eight `/gm config <kind>-channel` commands: `channel` (Discord's picker) or `clear` — neither or both is refused
-    with what to do; then the one-screen confirm."""
+async def open_channel_set(interaction: discord.Interaction, reg: Registry, *, kind: str, channel=None, clear: bool = False,
+                           log: bool | None = None, **_seed) -> None:
+    """The `/gm config <kind>-channel` commands: `channel` (Discord's picker) or `clear` — neither or both is refused with
+    what to do; then the one-screen confirm. `log` (loot-channel): the public loot log on/off, alone or with a channel."""
     if not await _owner_or_refuse(interaction, reg):
-        return
-    if channel is None and not clear:
-        await interaction.response.send_message("Pick a channel or tick clear. `/gm config channels` shows them all.", ephemeral=True)
         return
     if channel is not None and clear:
         await interaction.response.send_message("Pick a channel or tick clear — not both.", ephemeral=True)
         return
-    await ChannelSetWizard(reg, interaction.user.id, kind, None if clear else int(channel.id)).start(interaction)
+    if channel is None and not clear:
+        if kind == "loot" and log is not None:
+            await ChannelSetWizard(reg, interaction.user.id, kind, SAME, log=log).start(interaction)
+            return
+        if kind == "loot":
+            from .loot_ops import loot_log_state
+
+            await interaction.response.send_message(f"{loot_log_state(reg)['text']}\nPick a channel, tick clear, or set log. `/gm config channels` shows them all.",
+                                                    ephemeral=True)
+            return
+        await interaction.response.send_message("Pick a channel or tick clear. `/gm config channels` shows them all.", ephemeral=True)
+        return
+    await ChannelSetWizard(reg, interaction.user.id, kind, None if clear else int(channel.id), log=log).start(interaction)
 
 
 class ChannelsWizard(OwnerWizard):

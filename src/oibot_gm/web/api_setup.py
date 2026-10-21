@@ -36,6 +36,19 @@ def discord_ready(bot, reg) -> bool:
     return guild is not None and not getattr(guild, "unavailable", False)
 
 
+def error_dm_choices(reg) -> list[dict]:
+    """The people the owner may pick for the error alerts on the Setup card: every registered (non-test) member and the
+    owner, by display name — the ids Registry.set_error_dms takes."""
+    seen, out = set(), []
+    owner = reg.config.owner_discord_id
+    for m in sorted((m for m in reg.members.values() if not m.test), key=lambda m: m.display_name.lower()):
+        seen.add(m.discord_id)
+        out.append({"id": str(m.discord_id), "name": m.display_name})
+    if owner and int(owner) not in seen:
+        out.insert(0, {"id": str(owner), "name": "the owner"})
+    return out
+
+
 def host_viewer(v) -> bool:
     """The host: a superuser on the web, or the MCP bearer (the host's own token)."""
     return v.via == "mcp" or is_superuser(v.uid)
@@ -125,7 +138,11 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         invite = await bot.invite_status(reg) if hasattr(bot, "invite_status") and ready else {"state": "unknown", "text": "Couldn't check the invite (Discord unreachable).", "checked": None}
         ops = getattr(bot, "ops", None)
         out = {"ready": ready, "checklist": rows, "invite": invite, "links": bot.discord_links(reg) if hasattr(bot, "discord_links") else {},
+               "rev": reg.config_rev("settings"),  # the owner's error-alerts edit saves through /api/ops/change with it
                "errors": {"to": [str(u) for u in reg.error_dm_targets()], "words": web(reg.error_dm_words()), "default": reg.config.error_dm_ids is None,
+                          "ids": None if reg.config.error_dm_ids is None else [str(u) for u in reg.config.error_dm_ids],
+                          # who may be picked: the registered people (no puppets) plus the owner — names, never bare ids
+                          "choices": error_dm_choices(reg) if v.owner else [],
                           "suppressed": ops.suppressed_for(reg.key) if ops is not None and hasattr(ops, "suppressed_for") else 0,
                           "ops_failing": ops.ops_channel_failing(reg.key) if ops is not None and hasattr(ops, "ops_channel_failing") else 0},
                "owner": v.owner, "host": None}

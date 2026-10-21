@@ -42,6 +42,7 @@ GUILD_HEADER = "x-oibot-guild"  # an explicit choice: the app sends it once it h
 GUILD_COOKIE_MAX_AGE_S = 365 * 86400
 UNSURE = "Discord didn't answer whether you're in that server; try again in a moment."
 UNSURE_RETRY_S = 5
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")  # reads: a stale membership keeps them going (§2.9)
 CONFIRM_TTL_S = 300  # the "continue as <name>" page (login finished in another browser than it started in)
 MOBILE_LOGIN_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>oibot_GM · sign in</title>
@@ -237,6 +238,7 @@ class Viewer:
         self.member = reg.members.get(uid) if reg else None
         self.actor = actor  # MCP with X-Oibot-Actor: the officer the call acts as (D8); None for the owner's token alone and the web
         self.stale = False  # §2.9: Discord couldn't confirm the membership now — the last-known "yes" (≤ 6 h) keeps reads going; writes refuse
+        self.stale_write = False  # a write on a stale membership: no officer rights for it (api.who answers 503 STALE_OFFICER)
 
 
 MCP_TOKEN_ENV = "OIBOT_MCP_TOKEN"
@@ -497,7 +499,12 @@ def create_app(bot) -> FastAPI:
         owner = reg.is_owner_id(uid)
         name = member.display_name if member else (reg.members[uid].display_name if uid in reg.members else s.get("name", str(uid)))
         v = Viewer(uid, name, reg, officer, owner, moved=moved)
-        v.stale = getattr(request.state, "membership", None) == "stale"  # reads go on; live_officer refuses an officer write
+        v.stale = getattr(request.state, "membership", None) == "stale"  # reads go on (the last-known roles)
+        if v.stale and not owner and request.method not in SAFE_METHODS:
+            # §2.9: officer writes refuse on a stale membership — decided HERE, once, so no route (who(officer=True), a
+            # route's own `v.officer` check, authorize(officer=v.officer)) can act on roles Discord didn't confirm now.
+            # live_officer may still re-decide from a live lookup. The owner's rights come from the id, not the roles.
+            v.officer, v.stale_write = False, True
         return v
 
     async def guild_choices(v: Viewer) -> list[dict]:

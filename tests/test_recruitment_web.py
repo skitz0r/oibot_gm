@@ -201,14 +201,23 @@ def test_applications_list_shape_and_decide(client, bot, reg):
     assert client.post("/api/admin/application/decide", json={"uid": "1", "accept": True}, headers=h).status_code == 403
 
 
-def test_create_invite_owner_only_with_a_clear_refusal(client, bot):
+def test_invite_is_created_at_the_recruitment_save(client, bot, reg):
+    """R-06: no separate Create invite route (nothing made before Save, so nothing orphaned) — the recruitment Save's
+    `invite_create` makes it after the rest; Discord refusing it answers "Saved. Invite not created: …" with the rest saved."""
     h = as_user(client, OFFICER_UID)
-    assert client.post("/api/admin/invite", json={"channel_id": "55"}, headers=h).status_code == 403
+    assert client.post("/api/admin/recruitment", json={"invite_create": "55"}, headers=h).status_code == 403
     client.cookies.clear()
-    r = client.post("/api/admin/invite", json={"channel_id": "55"}, headers=bearer())
-    assert r.status_code == 200 and r.json()["invite_url"] == "https://discord.gg/newcode" and bot.invites == [55]
-    r = client.post("/api/admin/invite", json={"channel_id": "1"}, headers=bearer())
-    assert r.status_code == 400 and "Create Invite" in r.json()["error"]
+    assert client.post("/api/admin/invite", json={"channel_id": "55"}, headers=bearer()).status_code in (404, 405), "the route is gone"
+    assert bot.invites == []
+    r = client.post("/api/admin/recruitment", json={"invite_create": "55", "invite_url": "https://discord.gg/typed", "note": "healers"}, headers=bearer())
+    assert r.status_code == 200, r.text
+    assert bot.invites == [55] and reg.config.invite_url == "https://discord.gg/newcode", "the created invite wins over a typed one"
+    assert r.json()["invite_url"] == "https://discord.gg/newcode" and r.json()["invite_error"] is None and reg.config.recruitment.note == "healers"
+    r = client.post("/api/admin/recruitment", json={"invite_create": "1", "note": "tanks"}, headers=bearer())
+    assert r.status_code == 200 and r.json()["message"].startswith("Saved. Invite not created: I can't create invites in #lobby"), r.text
+    assert reg.config.recruitment.note == "tanks" and reg.config.invite_url == "https://discord.gg/newcode", "the rest saved, the old invite kept"
+    r = client.post("/api/admin/recruitment", json={"invite_create": "1"}, headers=bearer())
+    assert r.status_code == 400 and r.json()["error"].startswith("Invite not created:")
 
 
 def test_setup_mixin_create_invite_needs_the_permission(reg):

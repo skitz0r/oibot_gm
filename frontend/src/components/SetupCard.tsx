@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { Anchor, Badge, Box, Button, Card, Code, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { Anchor, Badge, Box, Button, Card, Code, Group, MultiSelect, SegmentedControl, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { api } from "../api";
 import { useLive } from "../hooks/useLive";
 import type { SetupData } from "../setupApi";
 import { CardHeader, fail, ok } from "./Page";
+import { useOpsSave } from "./ReviewModal";
+
+type AlertMode = "owner" | "people" | "nobody";
 
 const MARK: Record<string, { c: string; t: string }> = { ok: { c: "teal", t: "✓" }, warn: { c: "yellow", t: "!" }, bad: { c: "red", t: "✗" } };
 
@@ -18,6 +21,10 @@ type McpStatus = Record<string, unknown> | null;
 export function SetupCard() {
   const [data, setData] = useState<SetupData | null>(null);
   const [mcp, setMcp] = useState<McpStatus>(null);
+  // OPS-01: the owner's edit of who gets the error alerts (null = not editing) — saved through the structured ops path
+  const [alerts, setAlerts] = useState<{ mode: AlertMode; ids: string[] } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [save, review] = useOpsSave();
   const load = () => api.get<SetupData>("/api/admin/setup").then((d) => {
     setData(d);
     if (d.host) api.get<{ mcp?: McpStatus }>("/api/agents").then((a) => setMcp(a.mcp ?? null)).catch(() => setMcp(null));
@@ -25,6 +32,21 @@ export function SetupCard() {
   useEffect(() => { load(); }, []);
   useLive(load, ["config", "ops"]);
   if (!data) return null;
+  const editAlerts = () => {
+    const ids = data.errors.ids;
+    setAlerts(ids === null ? { mode: "owner", ids: [] } : ids.length ? { mode: "people", ids: [...ids] } : { mode: "nobody", ids: [] });
+  };
+  async function saveAlerts() {
+    if (!alerts || !data) return;
+    const value = alerts.mode === "owner" ? null : alerts.mode === "nobody" ? [] : alerts.ids;
+    setSaving(true);
+    try {
+      const r = await save([{ kind: "settings", fields: { error_dm_ids: value } }], { revs: { "config:settings": data.rev }, title: "Who gets the error alerts" });
+      if (r === null) return;
+      if (r.changed?.length) { fail(new Error("Someone changed the settings since you opened the page — reload and check.")); return; }
+      setAlerts(null); load();
+    } catch (e) { fail(e); } finally { setSaving(false); }
+  }
   const bad = data.checklist.filter((r) => r.state === "bad").length;
   const inviteColour = { ok: "teal", dead: "red", none: "gray", unknown: "gray" }[data.invite.state];
   return (
@@ -51,11 +73,30 @@ export function SetupCard() {
             </Table.Tr>
           </Table.Tbody>
         </Table>
-        <Text size="xs" c="dimmed" px="md" py="xs">
-          Error alerts go to {data.errors.words}: one DM per distinct error per 30 minutes
-          {data.errors.suppressed > 0 ? ` · ${data.errors.suppressed} more folded into earlier alerts since the bot started` : ""}
-          {data.errors.ops_failing > 0 ? ` · the last ${data.errors.ops_failing} posts to the ops channel failed` : ""}. Change who with <Code>/gm config errors-to</Code>.
-        </Text>
+        <Group gap="xs" px="md" py="xs" wrap="wrap" align="center">
+          <Text size="xs" c="dimmed" style={{ flex: "1 1 260px" }}>
+            Error alerts go to {data.errors.words}: one DM per distinct error per 30 minutes
+            {data.errors.suppressed > 0 ? ` · ${data.errors.suppressed} more folded into earlier alerts since the bot started` : ""}
+            {data.errors.ops_failing > 0 ? ` · the last ${data.errors.ops_failing} posts to the ops channel failed` : ""}. {data.owner ? "" : <>The owner changes who (<Code>/gm config errors-to</Code>).</>}
+          </Text>
+          {data.owner && alerts === null && <Button size="compact-xs" variant="default" onClick={editAlerts}>Change who</Button>}
+        </Group>
+        {alerts !== null && (
+          <Stack gap="xs" px="md" pb="md">
+            <SegmentedControl size="xs" value={alerts.mode} onChange={(m) => setAlerts({ ...alerts, mode: m as AlertMode })}
+              data={[{ value: "owner", label: "The owner" }, { value: "people", label: "These people" }, { value: "nobody", label: "Nobody" }]} />
+            {alerts.mode === "people" && (
+              <MultiSelect size="xs" label="Who gets them" placeholder="pick people" searchable maw={520}
+                data={data.errors.choices.map((c) => ({ value: c.id, label: c.name }))} value={alerts.ids} onChange={(ids) => setAlerts({ ...alerts, ids })} />
+            )}
+            {alerts.mode === "nobody" && <Text size="xs" c="dimmed">Errors stay in the ops channel only.</Text>}
+            <Group gap="xs" justify="flex-end">
+              <Button size="xs" variant="default" onClick={() => setAlerts(null)} disabled={saving}>Discard</Button>
+              <Button size="xs" onClick={saveAlerts} loading={saving} disabled={alerts.mode === "people" && alerts.ids.length === 0}>Save</Button>
+            </Group>
+          </Stack>
+        )}
+        {review}
       </Card>
       {data.host && (
         <Card>

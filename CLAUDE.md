@@ -180,10 +180,12 @@ src/oibot_gm/
                        absences channel (AbsencesMixin: card with I'll be away · I'm back · My absences → AbsenceButton `abs.<gk>:new|back|mine` and a Clear
                        `abs.<gk>:clear:<uid>:<start>`; announce_absence → sheets updated; puppets never on the card or the channel; AbsencesMixin inherits
                        discord_people.PeopleMixin);
-                       SetupMixin: set_channel = THE channel write (perms.missing_for refusal, "Discord is unreachable" apart, the card posted FIRST then
-                       the old dropped, ONE ops.audited line — callers write none), channel_consequences (+ configops CONSEQUENCE_HOOKS entry), CHANNEL_LABELS,
-                       news_webhook (D39), role_refusal, invite_status, discord_links, channel_problems / check_channel_perms / setup_tick (hourly, from
-                       raid_scheduler.scheduler_tick), setup_checklist (the Setup card / /gm status), guild_channels/roles, test_bench_clear.
+                       SetupMixin: set_channel(…, rev=) = THE channel write (perms.missing_for refusal, "Discord is unreachable" apart, the settings rev
+                       checked before posting and at the save → ConfigChanged, the card posted FIRST then the old dropped, ONE ops.audited line — callers
+                       write none; the eight shortcuts AND /gm config loot-channel open flows_config.ChannelSetWizard), channel_consequences (+ configops CONSEQUENCE_HOOKS entry), CHANNEL_LABELS,
+                       news_webhook (D39), role_refusal, invite_status, discord_links, channel_problems / check_channel_perms (an error for ops/signup,
+                       else a warn) / setup_tick (hourly, from raid_scheduler.scheduler_tick), note_membership + sweep_left (Member.left_at from Discord's
+                       own 404s and sightings — the bot has no members intent, so on_member_remove never arrives), setup_checklist (the Setup card / /gm status), guild_channels/roles, test_bench_clear.
                        LootLogMixin: the public loot log (LEDGER_LISTENERS → one line per award in the loot channel, else the run's updates thread; never
                        the signup channel; loot_log off = nothing) with LootWishButton (`lootwish.<gk>:<item key>` → /me wishlist on that item)
                        Test bench (design §5.42): Member.test puppets; SetupMixin.test_seed/test_compose/test_comp/test_answer/puppet_asks/test_bench_clear =
@@ -274,8 +276,11 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        raid/reset|raid/schedule|raid/schedule/remove|recruitment|plain-permissions) are TRANSLATORS into changes through apply_ops
   web/api_setup.py     install_setup_api (called from api.py; design §5.44): GET/POST /api/admin/channels (rows with `missing`/`problem`, never while Discord is
                        unreachable; POST = a translator through app.state.ops_translate), POST /api/admin/news-webhook (owner; the URL never in an ops line),
-                       GET /api/admin/setup (checklist, invite, error alerts; Host card for a superuser / the bearer), GET /api/admin/left + POST
-                       /api/admin/member/remove (officers' Remove record); discord_ready(bot, reg) → /api/meta.discord
+                       GET /api/admin/setup (checklist, invite, error alerts + the owner's choices and the settings rev; Host card for a superuser / the
+                       bearer), GET /api/admin/left + POST
+                       /api/admin/member/remove (officers' Remove record); discord_ready(bot, reg) → /api/meta.discord. No /api/admin/invite: the invite
+                       is created AT the recruitment Save (invite_create). A stale membership (§2.9): web/app.viewer drops v.officer for any write
+                       (v.stale_write → api.who 503 STALE_OFFICER)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras

@@ -16,7 +16,11 @@ export interface SetupData {
   invite: { state: "none" | "ok" | "dead" | "unknown"; text: string; checked: number | null };
   links: { server?: string; channels?: Record<string, string> };
   /** OPS-01: who gets the error alerts; how many errors were folded into an earlier alert; failed ops-channel posts in a row */
-  errors: { to: string[]; words: string; default: boolean; suppressed: number; ops_failing: number };
+  errors: { to: string[]; words: string; default: boolean; suppressed: number; ops_failing: number;
+    /** the stored list (null = the owner, the default; [] = nobody) and, for the owner, who may be picked */
+    ids: string[] | null; choices: { id: string; name: string }[] };
+  /** the settings rev the error-alerts edit saves against */
+  rev: string;
   /** the host (a superuser) only: the bot's invite link, servers the bot is in that aren't guilds, parked guilds */
   host: null | { invite_link: string | null; unclaimed: { id: string; name: string; missing: string[] }[]; detached: { key: string; name: string; detached: string | null }[] };
 }

@@ -387,6 +387,8 @@ REQUIRED_KINDS = ("ops", "signup")  # without these the bot can't tell anyone an
 CARD_KINDS = ("registration", "absences", "analytics")  # a card the bot posts there (set_channel posts first, then drops the old one)
 NEWS_WEBHOOK_NAME = "oibot news"  # D39: the webhook the bot creates in the news channel
 PERM_CHECK_S = 3600  # the hourly permission check (design §3.4 X3)
+LEFT_SWEEP_N = 20  # members looked up per guild per hourly sweep (Member.left_at without the members intent)
+LEFT_SWEEP_AGE_S = 6 * 3600  # … each at most one REST fetch per 6 h (cached_member's max_age)
 INVITE_CHECK_S = 86400  # Registry invite validity, checked daily (design §3.3 R-06)
 UNREACHABLE = "Discord is unreachable right now — try again in a minute; nothing was changed."
 
@@ -488,13 +490,16 @@ _install_hook()
 
 
 class SetupMixin:
-    async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, *, via: str = "discord", by_id: int | None = None) -> str:
+    async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, *, via: str = "discord", by_id: int | None = None,
+                          rev: str | None = None) -> str:
         """THE channel-setting verb (/gm config <kind>-channel and the channels hub, the Config page, plain text, MCP):
         refuses a channel the bot can't post in (perms.missing_for) and says so apart from "Discord is unreachable right
         now"; posts the card FIRST (registration, absences, analytics) and only then saves and drops the old one — a
         refused send loses nothing; then writes the ONE audit line (ops.audited: `by` is the person, `via` the surface,
-        `by_id` marks a host superuser). No caller writes its own line."""
-        line = await self._set_channel(reg, kind, channel_id, by)
+        `by_id` marks a host superuser). No caller writes its own line. `rev`: the settings rev the author saw (the channels
+        hub, a confirm screen, a structured batch) — a settings change since raises ConfigChanged before anything is posted
+        and again at the save, so a stale draft never overwrites someone else's change."""
+        line = await self._set_channel(reg, kind, channel_id, by, rev)
         ops = getattr(self, "ops", None)
         if ops is not None:
             await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
@@ -520,13 +525,15 @@ class SetupMixin:
             raise ValueError(perms.cant_post(ch.name, missing))
         return ch
 
-    async def _set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str) -> str:
+    async def _set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, rev: str | None = None) -> str:
         attr = CHANNEL_KINDS.get(kind)
         if not attr:
             raise ValueError(f"unknown channel kind {kind}")
         ch = self._channel_or_refuse(reg, kind, channel_id) if channel_id else None
+        reg.check_rev("settings", rev)  # before any card is posted: a stale draft posts nothing
         if not ch:
             with reg.config_lock:
+                reg.check_rev("settings", rev)
                 setattr(reg.config, attr, None)
                 if kind == "registration":
                     reg.config.registration_message_id = None
@@ -545,11 +552,13 @@ class SetupMixin:
         if kind == "analytics":
             if reg.config.analytics_channel_id != ch.id:
                 with reg.config_lock:
+                    reg.check_rev("settings", rev)
                     reg.config.analytics_channel_id, reg.config.analytics_message_ids = ch.id, {}
                     reg.save_config(f"analytics channel → #{ch.name} (by {by})", notify=False)
             msgs = await self.refresh_pool(reg)
             return f"{len(msgs)} analytics card(s) posted in #{ch.name}"
         with reg.config_lock:
+            reg.check_rev("settings", rev)
             setattr(reg.config, attr, ch.id)
             reg.save_config(f"{kind} channel → #{ch.name} (by {by})")
         return f"{kind} channel → #{ch.name}"
@@ -657,6 +666,45 @@ class SetupMixin:
         base = f"https://discord.com/channels/{gid}"
         return {"server": base, "channels": {k: f"{base}/{getattr(reg.config, a)}" for k, a in CHANNEL_KINDS.items() if getattr(reg.config, a, None)}}
 
+    # ---- who left the server (design §3.3 cluster D): without the privileged members intent on_member_remove never
+    # arrives, so Member.left_at follows Discord's own answers: a 404 from fetch_member marks it, any sighting clears it
+    def note_membership(self, guild_id: int | None, uid: int, present: bool) -> None:
+        """Discord answered for (guild, uid): `present` False = its own 404 (not a timeout — cached_member never calls this
+        for a lookup Discord didn't answer). A registered, non-test member's `left_at` is set or cleared to match (off the
+        loop: a git commit). No notice, no DM."""
+        regs = getattr(self, "registries", None)
+        reg = regs.for_guild(guild_id) if regs is not None and guild_id else None
+        m = reg.members.get(int(uid)) if reg is not None else None
+        if m is None or m.test or bool(m.left_at) != present:  # nothing to change: already as Discord says
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            reg.member_left(m.discord_id, not present)
+            return
+        tasks: set = self.__dict__.setdefault("_left_tasks", set())
+        t = loop.create_task(asyncio.to_thread(reg.member_left, m.discord_id, not present))
+        tasks.add(t)
+        t.add_done_callback(tasks.discard)
+
+    async def sweep_left(self, reg: Registry, limit: int = LEFT_SWEEP_N) -> int:
+        """The hourly sweep: up to `limit` registered members not marked as left, longest unchecked first, looked up through
+        `cached_member` (at most one REST fetch each per LEFT_SWEEP_AGE_S) — its 404s mark `left_at` (note_membership). A
+        guild of a few hundred is covered every few hours without the members intent. Returns how many were looked up."""
+        look = getattr(self, "cached_member", None)
+        guild = self.get_guild(reg.config.discord_guild_id) if getattr(self, "get_guild", None) else None
+        if look is None or guild is None or getattr(guild, "unavailable", False):
+            return 0
+        seen: dict = self.__dict__.setdefault("_left_swept", {})
+        todo = sorted((m for m in reg.members.values() if not m.test and not m.left_at), key=lambda m: seen.get((reg.key, m.discord_id), 0.0))[:limit]
+        for m in todo:
+            seen[(reg.key, m.discord_id)] = time.time()
+            try:
+                await look(guild, m.discord_id, max_age=LEFT_SWEEP_AGE_S)
+            except Exception:  # noqa: BLE001 — a lookup Discord didn't answer is no answer; the next sweep tries again
+                continue
+        return len(todo)
+
     # ---- the permission check (hourly) and the Setup card
     def channel_problems(self, reg: Registry) -> dict[str, str]:
         """kind → what is wrong with that configured channel now: gone (deleted / invisible) or 'I can't post in #x:
@@ -679,8 +727,11 @@ class SetupMixin:
         return out
 
     async def check_channel_perms(self, reg: Registry) -> dict[str, str]:
-        """One pass of the permission check: ONE ops warn listing what newly went wrong (a problem already reported is not
-        repeated; a fixed one is forgotten, so a relapse is reported again). Returns the current problems."""
+        """One pass of the permission check: ONE ops line listing what newly went wrong (a problem already reported is not
+        repeated; a fixed one is forgotten, so a relapse is reported again) — an ERROR when a REQUIRED_KINDS channel (ops,
+        signups) is among them: without it the bot can't tell anyone anything or open a run, so the owner must act and gets
+        the error alert (error_dm_ids, throttled by Ops.emit — the DM rule's one exception); a warn otherwise. Returns the
+        current problems."""
         problems = self.channel_problems(reg)
         warned: dict = self.__dict__.setdefault("_perm_warned", {})
         for k in [k for k in warned if k[0] == reg.key and k[1] not in problems]:
@@ -691,7 +742,8 @@ class SetupMixin:
                 warned[(reg.key, kind)] = text
             ops = getattr(self, "ops", None)
             if ops is not None:
-                await ops.emit(reg.config, "warn", "Channel check: " + " · ".join(fresh.values()) + " — /gm config channels or the Config page fixes it.")
+                level = "error" if any(k in REQUIRED_KINDS for k in fresh) else "warn"
+                await ops.emit(reg.config, level, "Channel check: " + " · ".join(fresh.values()) + " — /gm config channels or the Config page fixes it.")
         return problems
 
     async def setup_tick(self, now: float | None = None) -> None:
@@ -707,6 +759,7 @@ class SetupMixin:
             last[reg.key] = now
             try:
                 await self.check_channel_perms(reg)
+                await self.sweep_left(reg)
                 st = await self.invite_status(reg)
                 dead: set = self.__dict__.setdefault("_invite_dead_warned", set())
                 if st["state"] == "dead" and (reg.key, reg.config.invite_url) not in dead:

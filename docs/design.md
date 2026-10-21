@@ -2325,9 +2325,14 @@ unreachable right now" (gateway not ready / server unavailable) apart from a rea
 card FIRST (registration, absences: `post_*_card` → `_drop_old_card` only after the new message exists — a refused send
 loses nothing) and saves under `config_lock`, then writes the ONE `ops.audited` line. No caller writes its own: the eight
 `/gm config <kind>-channel` commands (ops, applications, roster, registration, analytics, absences, signup, news —
-`discord_registry.CHANNEL_SHORTCUTS`) are ONE helper (`channel_command` → `FLOWS["channel_set"]`) with `channel:
+`discord_registry.CHANNEL_SHORTCUTS`; and `/gm config loot-channel channel: clear: log:`, the ninth kind, whose log toggle
+is said and saved on the same screen) are ONE helper (`channel_command` → `FLOWS["channel_set"]`) with `channel:
 TextChannel | None` and `clear: bool` (neither or both → "Pick a channel or tick clear"), and the one-screen confirm
-(`flows_config.ChannelSetWizard` → `Wizard.decide` with `channel_consequences`). `channel_consequences(reg, kind,
+(`flows_config.ChannelSetWizard` → `Wizard.decide` with `channel_consequences`; its Save carries the settings rev the
+screen was drawn from). `set_channel(…, rev=)` checks that rev before anything is posted and again at the save (under
+`config_lock`), raising `ConfigChanged` — so the hub, the confirm, plain text's Apply (`op_rev` through `apply_async`) and
+a structured batch (`apply_ops`, whose own writes carry the rev on through `refresh_revs`) never write a channel on a stale
+draft; the web's `/api/ops/change` also runs `stale_sections` first. `channel_consequences(reg, kind,
 channel_id, bot)` = what is posted, pinned, forgotten (not deleted) or falls back ("Applications fall back to the ops
 channel #x", "Sheets will have nowhere to post until a signup channel is set") plus the `cant_post` line; registered as a
 configops `CONSEQUENCE_HOOKS` entry (`include_clear=False`, the generic clear sentences stay op_consequences'), so the web's
@@ -2336,9 +2341,10 @@ webhook in the news channel, created when it has Manage Webhooks, else what to a
 ephemeral confirm, spoilered; `POST /api/admin/news-webhook`), never to an ops line. `role_refusal(reg, rid)`: @everyone,
 a managed (bot / integration) role or a role the server lacks — checked by configops `_apply_async` and `apply_ops`
 (`blocked`) for every `role_add`. `invite_status(reg)` (cached `fetch_invite`, daily; dead = Discord's Unknown Invite only),
-`discord_links(reg)` (Open in Discord), `channel_problems` / `check_channel_perms` (ONE ops warn listing what NEWLY went
-wrong; a fixed problem is forgotten so a relapse warns again), `setup_tick` (the scheduler's hook in `scheduler_tick`:
-hourly per guild, the invite daily, a dead invite warned once) and `setup_checklist(reg)` (rows {key, label, ok | warn |
+`discord_links(reg)` (Open in Discord), `channel_problems` / `check_channel_perms` (ONE ops line listing what NEWLY went
+wrong — an ERROR, so the owner's throttled error alert, when a `REQUIRED_KINDS` channel (ops, signups) is among them, a warn
+otherwise; a fixed problem is forgotten so a relapse is reported again), `setup_tick` (the scheduler's hook in
+`scheduler_tick`: hourly per guild — the permission check and `sweep_left` —, the invite daily, a dead invite warned once) and `setup_checklist(reg)` (rows {key, label, ok | warn |
 bad, text, test}: owner, detached, every channel — ops and signup required —, officer roles (none = amber "Manage Server
 only"), server permissions, the optional ones, the error alerts). `/gm status` shows its red rows (and parked guilds to a
 superuser).
@@ -2382,8 +2388,11 @@ else every guild — never the token.
 
 **Discord unsure (§2.9).** `selected_reg` raises `DiscordUnsure` (503) for an unanswered lookup with ONE guild too (it used
 to be NotMember). `cached_member` keeps `_member_last_yes`; `guild_routing.member_of(…, stale_ok=True)` (the web's `look`)
-answers "stale" with that member for up to `STALE_YES_S` (6 h) — reads go on (`Viewer.stale`, `/api/meta.discord.stale`)
-while `live_officer`'s PRIV_LIVE lookup refuses an officer write. `/api/meta.discord.ready` (`api_setup.discord_ready`):
+answers "stale" with that member for up to `STALE_YES_S` (6 h) — reads go on (`Viewer.stale`, `/api/meta.discord.stale`,
+the officers' banner in `App.tsx`) and officer writes refuse: `viewer()` itself drops `v.officer` (and sets
+`v.stale_write`) for a non-GET request on a stale membership of anyone but the owner, so `api.who(officer=True)` answers
+503 `STALE_OFFICER` and no route — the ~100 that check `who(officer=True)`, a route's own `v.officer`, `authorize(officer=)`
+— can act on roles Discord didn't confirm now; `live_officer`'s PRIV_LIVE lookup may still re-decide from a live answer. `/api/meta.discord.ready` (`api_setup.discord_ready`):
 the Config page disables channel editing with "Discord is unreachable; names can't be shown".
 
 **Applications (§3.3 D, D31, D32).** `Registry.decide` adds the character FIRST (a name taken since leaves the application
@@ -2401,8 +2410,12 @@ applicant` opens the same decide screen as the card (`application_decide(…, no
 `role_note`, `consequence{accept, decline}` (the decide screen's sentences, rendered for the web) and `note_max`;
 `pages/Applications.tsx` (officers, rail entry): the queue with every answer, Accept / Decline through `useConfirm` + note.
 
-**Left the server (D29).** `Member.left_at` (`Registry.member_left` from `OibotGM.on_member_remove` / `on_member_join`,
-which need the members intent); `Registry.remove_record(uid, by, seats=)` deletes the member file (git keeps it) only for
+**Left the server (D29).** `Member.left_at` (`Registry.member_left`). The bot doesn't request the privileged members
+intent, so `on_member_remove` / `on_member_join` stay dormant; Discord's own answers keep it true instead:
+`SetupMixin.note_membership(guild_id, uid, present)` — called by `cached_member` on Discord's 404 (never on a lookup it
+didn't answer) and on every sighting (the gateway cache, a fetch, `saw_member`) — sets or clears it for a registered,
+non-test member (a git commit off the loop), and the hourly `sweep_left(reg)` looks up `LEFT_SWEEP_N` (20) members per guild,
+longest unchecked first, each at most one REST fetch per `LEFT_SWEEP_AGE_S` (6 h). `Registry.remove_record(uid, by, seats=)` deletes the member file (git keeps it) only for
 someone who left and holds no live seat; `discord_registry.remove_record` (seats from the run files, one audit line) behind
 `/roster remove-record member:` (decide screen), `POST /api/admin/member/remove` (officers) + `GET /api/admin/left`
 (`components/LeftServer.tsx` on Members) and MCP `remove_record` / `left_members`. No route lets a member delete their own
@@ -2416,7 +2429,9 @@ bearer the Host card: `perms.invite_link`, unclaimed servers, parked guilds), `G
 /api/admin/member/remove`. `GET /api/guilds` lists parked guilds marked `detached` to the bearer and to a superuser.
 Frontend: `components/ChannelsCard.tsx` (edit mode, one structured batch through `useOpsSave` → ReviewModal, refused rows
 stay drafted, Webhook URL), `components/SetupCard.tsx` (Setup + Host, the MCP status from `/api/agents.mcp` rendered as
-given), `pages/Applications.tsx`, `components/MyApplication.tsx`, `components/LeftServer.tsx`, `setupApi.ts`, the Ops badge.
+given; the owner's **Change who** for the error alerts — the owner · these people · nobody — saved as the structured
+settings field `error_dm_ids` through `useOpsSave` with the settings rev; `GET /api/admin/setup` carries `errors.ids`,
+`errors.choices` (registered people, never puppets, for the owner) and `rev`), `pages/Applications.tsx`, `components/MyApplication.tsx`, `components/LeftServer.tsx`, `setupApi.ts`, the Ops badge.
 MCP: `set_channel(kind, channel | clear=True)`, officer roles by name (resolved server-side; refused roles), `error_dm_ids`
 in `set_config`, `setup_status`, `left_members`, `remove_record`; `list_guilds` shows `detached` (the client's `guilds()`
 never returns a parked guild, so neither a tool nor a job targets one).
@@ -2427,10 +2442,20 @@ error_dm_ids, the ops-channel failure alert, the leaked token, applications orde
 decide screen, Remove record and the no-self-delete lint, the hubs and the channel confirm through the harness, every route,
 DiscordUnsure and stale membership, MCP shapes).
 
-Not in this part: invite creation at the recruitment Save (`/api/admin/invite` still exists for the Recruitment card — the
-Recruitment edit mode is G1b's), Settings edit mode rendering `error_dm_ids` (G1b), config_summary's Host section and
-`/gm config show` per audience (G1b), the Agents page's MCP card data (G2; the Host card renders what `/api/agents.mcp`
-holds).
+**Invite at Save (R-06).** `POST /api/admin/invite` is gone: the Recruitment card's channel pick is part of the draft and
+the Save sends `invite_create` (`ops_from_fields('recruitment')` → the `recruit invite_create <#id>` op LAST, a typed
+`invite_url` beside it dropped), so no invite is made before Save and none is orphaned. `_apply_async` checks the
+recruitment rev before Discord makes it; a refusal reads `INVITE_NOT_CREATED` ("Invite not created: …") and the route
+answers 200 "Saved. Invite not created: …" with the rest saved (`translate(…, partial=True)`), the channel left in the
+draft. MCP `create_invite(channel, preview=)` sends the same structured change.
+
+**Host facts.** `configops.config_summary(reg, audience)`: `/gm config show` passes "owner" for the owner and a superuser,
+which adds `host_summary` (who gets the error alerts, the superusers by mention, MCP local-only from
+`web.app.mcp_local_only`, a parked guild); officers read "Host facts (error alerts, superusers): owner only."
+
+Not in this part: the Settings edit mode's own `error_dm_ids` field (G1b — the Setup card edits it meanwhile), the Agents
+page's MCP card data (G2; the Host card renders what `/api/agents.mcp` holds), the Discord recruitment hub's channel pick
+for an invite (the hub keeps the typed link).
 
 ## 6. Architecture
 

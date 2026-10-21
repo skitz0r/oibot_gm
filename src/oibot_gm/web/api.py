@@ -154,6 +154,8 @@ def application_json(reg, a) -> dict:
     return out
 
 
+# §2.9: an officer write while Discord can't confirm the roles (the last-known "yes" of the past 6 h keeps reads going)
+STALE_OFFICER = "Discord can't confirm your officer role right now — reading works, changes wait. Try again in a moment."
 HISTORY_PAGE = 8  # past runs per raid on the Rosters page; GET /api/runs pages the rest
 from .api_ops import PREVIEW_TTL  # noqa: E402,F401 — the preview tokens live in api_ops (the structured ops path)
 
@@ -174,6 +176,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if v is None:
             raise HTTPException(401, "login required")
         if officer and not v.officer:
+            if getattr(v, "stale_write", False):  # §2.9: the roles are the last-known ones — reads go on, officer writes wait
+                raise HTTPException(503, STALE_OFFICER, headers={"Retry-After": "5"})
             raise HTTPException(403, "Officers only.")
         request.state.reg, request.state.via = v.reg, v.via  # the guild and surface an unexpected error's ops line goes to (_api_errors)
         return v
@@ -2128,21 +2132,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         done = v.reg.applicants.get(uid)
         return {"message": line, "application": application_json(v.reg, done) if done else None}
 
-    @app.post("/api/admin/invite")
-    async def create_invite(request: Request):
-        """Owner: {channel_id} → a permanent, unlimited-use invite to that channel. Returned, not saved: the Config page
-        puts it in the invite field and the owner saves the section."""
-        v, d = await body(request, officer=True)
-        need_owner(v)
-        cid = channel_ref(v.reg, d.get("channel_id") or d.get("channel"))  # an id, <#id> or a name (MCP names channels)
-        if cid is None:
-            return JSONResponse({"error": "channel_id: which channel should the invite open?"}, status_code=400)
-        try:
-            url = await maybe_await(bot.create_invite(v.reg, cid))
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        await ops_mod.audited(bot.ops, v.reg, v.name, f"created invite {url}", via=v.via, by_id=v.uid)
-        return {"invite_url": url, "message": f"invite created: {url} (save the section to use it)"}
+    # R-06: there is no separate Create invite route any more — the invite is created at the recruitment Save
+    # (POST /api/admin/recruitment {invite_create: channel} → the `recruit invite_create` op), so none is ever orphaned.
 
     from .api_ops import install_ops_api  # the structured ops path + the admin routes as its translators (design §5.43)
 

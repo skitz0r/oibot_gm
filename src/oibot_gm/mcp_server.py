@@ -889,17 +889,12 @@ def set_recruitment(open: bool | None = None, note: str | None = None, questions
 
 
 @mcp.tool()
-def create_invite(channel: str, save: bool = False, guild: Guild = None) -> dict:
-    """Create a permanent, unlimited-use Discord invite to `channel` (a name like #welcome, or an id) — the homepage's
-    Join our Discord button (owner). Needs the bot's Create Invite permission there. Returned, not saved, unless
-    `save=true`: then it becomes the recruitment invite link (the homepage and registration card follow)."""
-    data = api(guild).post("/api/admin/invite", {"channel": channel})
-    url = data.get("invite_url")
-    out = {"invite_url": url, "message": data.get("message")}
-    if save and url:
-        out["message"] = msg(api(guild).post("/api/admin/recruitment", {"invite_url": url}))
-        out["saved"] = True
-    return out
+def create_invite(channel: str, preview: bool = False, guild: Guild = None) -> str | dict:
+    """Create a permanent, unlimited-use Discord invite to `channel` (a name like #welcome, or an id) and make it the
+    recruitment invite link — the homepage's Join our Discord button (owner). Needs the bot's Create Invite permission
+    there (refused in its words, nothing saved). Created and saved in one step (R-06: the recruitment Save's own
+    `invite_create`, so no invite is made and left unused); `preview=True` shows the change, nothing made."""
+    return ops_change(guild, [{"kind": "recruitment", "fields": {"invite_create": channel}}], preview)
 
 
 @mcp.tool()

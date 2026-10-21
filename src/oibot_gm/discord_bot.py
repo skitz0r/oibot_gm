@@ -305,6 +305,9 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
             return None
         m = guild.get_member(uid)
         if m is not None:
+            note = getattr(self, "note_membership", None)
+            if note is not None:
+                note(guild.id, uid, True)  # in the gateway's cache: in the server (a left_at from before is cleared)
             return m
         cache: dict[tuple[int, int], tuple[float, object]] = self.__dict__.setdefault("_member_cache", {})
         key = (guild.id, uid)
@@ -332,6 +335,9 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
             gone.add(key)
         else:
             gone.discard(key)
+        note = getattr(self, "note_membership", None)  # SetupMixin: Discord's own answer keeps Member.left_at true (§3.3 D)
+        if note is not None:
+            note(guild.id, uid, m is not None)
         blips.pop(key, None)
         if len(cache) > 4096:  # bounded: drop what has aged out
             for k in [k for k, (t, _) in cache.items() if now - t >= max_age]:
@@ -356,6 +362,9 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
             return
         key = (guild_id, uid)
         self.__dict__.setdefault("_member_gone", set()).discard(key)
+        note = getattr(self, "note_membership", None)
+        if note is not None:
+            note(guild_id, uid, True)  # back in the server: a left_at is cleared
         cache = self.__dict__.setdefault("_member_cache", {})
         if isinstance(member, discord.Member):
             cache[key] = (time.time(), member)
@@ -475,9 +484,10 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
                                                  "(nothing was deleted).")
 
     async def on_member_remove(self, member) -> None:
-        """Someone left a configured server (needs the members intent to arrive): their record gets `left_at` (Registry.
-        member_left) — officers see "left the server" on the Members page and may Remove record (D29: never the member
-        themselves). No notice, no DM."""
+        """Someone left a configured server: their record gets `left_at` (Registry.member_left) — officers see "left the
+        server" on the Members page and may Remove record (D29: never the member themselves). No notice, no DM. This event
+        needs the privileged members intent, which the bot doesn't request: in production `left_at` comes from Discord's
+        own 404 in `cached_member` (SetupMixin.note_membership) and the hourly sweep (SetupMixin.sweep_left)."""
         reg = self.registries.for_guild(getattr(getattr(member, "guild", None), "id", None))
         if reg is None or member.id not in reg.members:
             return

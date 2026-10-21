@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { REFRESH_EVENT } from "./hooks/usePoll";
-import { AppShell, Avatar, Box, Burger, Button, Group, Menu, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { Alert, AppShell, Avatar, Box, Burger, Button, Group, Menu, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconUserPlus } from "@tabler/icons-react";
@@ -151,6 +151,9 @@ export default function App() {
       </AppShell.Navbar>
       <AppShell.Main style={{ background: "var(--mantine-color-slate-8)" }}>
         <Box maw={1180} mx="auto">
+          {meta.discord?.stale && meta.viewer.officer && !meta.viewer.owner && (  /* §2.9: the last-known roles — reads go on, officer changes wait */
+            <Alert color="yellow" variant="light" mb="sm" py="xs">Discord can't confirm your officer role right now — you can read everything; changes wait until it answers.</Alert>
+          )}
           <Routes>
             <Route path="/me" element={<MePage meta={meta} />} />
             <Route path="/rosters" element={officer(<RostersPage meta={meta} />)} />

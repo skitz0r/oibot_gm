@@ -388,6 +388,7 @@ OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_rese
 # never opened to anyone else, whatever the plain-text policy says (authorize checks the owner's id): an officer must not
 # widen their own rights, and the local jobs run Claude on the host
 HARD_OWNER_OPS = {"plain": "Only the owner can change the plain-text permissions.", "job": "Only the owner can start the bot's local jobs."}
+INVITE_NOT_CREATED = "Invite not created:"  # R-06: the one refusal prefix of a Create invite at Save (the web says "Saved. Invite not created: …")
 CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel", "loot_channel")
 
 
@@ -2564,7 +2565,9 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
         if cid is None and not _clear_word(op.value):
             raise RegistryError(f"{op.path}: need a channel mention (or none to clear it)")
         try:  # the Config page's verb: checks the bot can see it, posts / drops the card that lives there
-            return await bot.set_channel(reg, op.path.removesuffix("_channel"), cid, by, via=via or "discord", by_id=by_id)
+            return await bot.set_channel(reg, op.path.removesuffix("_channel"), cid, by, via=via or "discord", by_id=by_id, rev=rev)
+        except RegistryError:
+            raise  # ConfigChanged keeps its section (apply_ops reports `changed`)
         except ValueError as e:
             raise RegistryError(str(e))
     if bot is not None and op.op == "absence":
@@ -2584,11 +2587,14 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
                 raise RegistryError(why)
     if bot is not None and op.op == "recruit":
         kw, _ = ({}, "") if isinstance(op, MergedOp) else _recruit(reg, op)  # a merged write: apply() saves its parts as one
-        if "invite_create" in kw:  # the Config page's Create invite: Discord makes it, the recruitment settings keep it
+        if "invite_create" in kw:  # R-06, at Save: Discord makes it, the recruitment settings keep it — nothing made on a stale draft
+            reg.check_rev("recruitment", rev)
             try:
                 url = await bot.create_invite(reg, kw["invite_create"])
+            except RegistryError:
+                raise
             except ValueError as e:
-                raise RegistryError(str(e))
+                raise RegistryError(f"{INVITE_NOT_CREATED} {e}")
             line = reg.set_recruitment(by, invite_url=url) + f" — {url}"
         else:
             line = apply(reg, op, by, is_owner, policy_store, rev=rev)
@@ -2996,10 +3002,12 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
 
 # ---------------------------------------------------------------- /gm config show (words, never raw YAML)
 
-def config_summary(reg: Registry) -> list[str]:
+def config_summary(reg: Registry, audience: str = "officer") -> list[str]:
     """The effective configuration as a person reads it (the clock rule: Registry.local12 and schedule words, never
-    the stored 'Tue 19:30' or ISO; channels and roles as mentions, which Discord renders by name). Officer-facing —
-    the owner's host facts stay on the site's Config page. One line per item, under Discord's 2000 characters."""
+    the stored 'Tue 19:30' or ISO; channels and roles as mentions, which Discord renders by name). One line per item,
+    under Discord's 2000 characters. `audience` "owner" adds the Host section (host_summary: who gets the error alerts,
+    the host's superusers by name — owners must know who can act as them — and MCP's local-only switch); officers get a
+    one-line pointer instead."""
     from .discord_pool import CHANNEL_KINDS
 
     cfg = reg.config
@@ -3022,8 +3030,26 @@ def config_summary(reg: Registry) -> list[str]:
                  + f" · questions from: {cfg.ask_audience}")
     if cfg.about:
         lines.append(f"About: {cfg.about[:200]}")
+    lines += host_summary(reg) if audience == "owner" else ["-# Host facts (error alerts, superusers): owner only."]
     lines.append("-# Everything here is on the site's Config page; `/gm config …` changes it.")
     return lines
+
+
+def host_summary(reg: Registry) -> list[str]:
+    """The owner's Host section of config_summary (design §3.5 O-01 / OPS-01): who gets the error alerts, the host's
+    superusers (owner rights in every guild — by mention, which Discord renders by name), MCP bearer access local-only or
+    not, and a parked guild. Never a secret."""
+    from .registry import superusers
+    from .web.app import mcp_local_only  # the one reading of OIBOT_MCP_LOCAL_ONLY
+
+    supers = sorted(superusers())
+    local = mcp_local_only()
+    out = [f"**Host** — error alerts: {reg.error_dm_words()} (one DM per distinct error per 30 min; `/gm config errors-to`)",
+           "Superusers (owner rights in every guild the bot serves): " + (", ".join(f"<@{u}>" for u in supers) if supers else "none")
+           + f" · MCP: {'this machine only' if local else 'reachable through the tunnel (OIBOT_MCP_LOCAL_ONLY is off)'}"]
+    if reg.config.detached_at:
+        out.append(f"Parked since {reg.local12(reg.config.detached_at)}: the bot is no longer in this server — invite it back")
+    return out
 
 
 def _hours_words(h) -> str:
@@ -3223,6 +3249,9 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
     if k == "aura_reset":
         return [ConfigOp(op="aura_reset", target=(target or "").strip() or None)]
     if k == "recruitment":
+        invite_at = fields.pop("invite_create", None)
+        if invite_at not in (None, "", 0):
+            fields.pop("invite_url", None)  # the created invite IS the link: a typed one beside it would be overwritten
         for f, v in fields.items():
             if f == "open":
                 ops.append(ConfigOp(op="recruit", field="open", value=_value_text(bool(v))))
@@ -3237,7 +3266,10 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
             elif f in ("member_role_ids", "member_roles"):
                 ops.append(ConfigOp(op="recruit", field="member_roles", value=_json([str(x) for x in (v or []) if str(x).strip()])))
             else:
-                raise RegistryError(f"unknown recruitment setting {f} (open, note, invite_url, questions, member_role_ids)")
+                raise RegistryError(f"unknown recruitment setting {f} (open, note, invite_url, invite_create, questions, member_role_ids)")
+        if invite_at not in (None, "", 0):  # R-06: the invite is created AT Save, last — the other settings land even if Discord refuses it
+            cid = _channel_ref(invite_at, channels)
+            ops.append(ConfigOp(op="recruit", field="invite_create", value=f"<#{cid}>"))
         return ops
     if k == "plain":
         cur = reg.config.plain

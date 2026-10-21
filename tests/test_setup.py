@@ -375,7 +375,8 @@ def test_hourly_check_warns_once_and_again_after_a_relapse(reg):
     assert run(bot.check_channel_perms(reg)) == {} and bot.ops.lines == []
     ch._perms = discord.Permissions(view_channel=True)
     probs = run(bot.check_channel_perms(reg))
-    assert "signup" in probs and len(bot.ops.lines) == 1 and bot.ops.lines[0][1] == "warn" and "I can't post in #raids" in bot.ops.lines[0][2]
+    assert "signup" in probs and len(bot.ops.lines) == 1 and "I can't post in #raids" in bot.ops.lines[0][2]
+    assert bot.ops.lines[0][1] == "error", "a required channel (signups): the owner must act — the throttled error alert"
     run(bot.check_channel_perms(reg))
     assert len(bot.ops.lines) == 1, "the same problem is not repeated"
     ch._perms = discord.Permissions(**ALL)
@@ -1158,3 +1159,230 @@ def test_a_batch_that_swaps_officer_roles_never_says_none_left(reg):
     assert configops.NO_OFFICER_ROLES not in swap.consequences and all(configops.NO_OFFICER_ROLES not in ln.consequences for ln in swap.lines)
     none = configops.describe_ops(reg, configops.ops_from_fields(reg, "settings", None, {"officer_roles": []}))
     assert none.consequences == [configops.NO_OFFICER_ROLES] and none.review
+
+
+# ---------------------------------------------------------------- review fixes (G3): stale writes, loot-channel, invite, left_at, host facts
+
+def test_hourly_check_warns_for_an_optional_channel_and_alerts_for_a_required_one(reg):
+    bot = SetupBot(reg)
+    bot.add(60, "officers", view_channel=True)
+    reg.config.roster_channel_id = 60
+    run(bot.check_channel_perms(reg))
+    assert [lvl for _k, lvl, _t in bot.ops.lines] == ["warn"], "the roster channel: an ops warn, no DM"
+    bot.add(61, "ops", view_channel=True)
+    reg.config.ops_channel_id = 61
+    run(bot.check_channel_perms(reg))
+    assert bot.ops.lines[-1][1] == "error" and "#ops" in bot.ops.lines[-1][2] and "#officers" not in bot.ops.lines[-1][2], "only what is new"
+
+
+def test_stale_officer_reads_but_no_officer_route_writes(wc, web_bot, reg):
+    """§2.9 regression: a lookup Discord can't answer falls back to the last-known "yes" — reads go on, but EVERY officer
+    write refuses (503, nothing written), not only the routes that call live_officer."""
+    apply_one(reg, uid=8300)
+    gone = real_member(reg, uid=9300)
+    reg.member_left(gone.discord_id)
+    web_bot.__dict__["_member_last_yes"] = {(1, OFFICER_UID): (time.time(), web_bot.people[OFFICER_UID])}
+    web_bot.flaky.add(OFFICER_UID)
+    h = as_user(wc, OFFICER_UID)
+    assert wc.get("/api/applications", headers=h).status_code == 200, "reads go on"
+    assert wc.get("/api/admin/left", headers=h).status_code == 200
+    r = wc.post("/api/admin/application/decide", json={"uid": "8300", "accept": False, "note": "full"}, headers=h)
+    assert r.status_code == 503 and "can't confirm your officer role" in r.json()["error"], r.text
+    assert reg.applicants[8300].status == "open", "nothing decided"
+    r = wc.post("/api/admin/member/remove", json={"uid": str(gone.discord_id)}, headers=h)
+    assert r.status_code == 503 and gone.discord_id in reg.members
+    assert web_bot.ops.lines == []
+    web_bot.flaky.discard(OFFICER_UID)  # Discord answers again: the officer writes
+    assert wc.post("/api/admin/application/decide", json={"uid": "8300", "accept": False, "note": "full"}, headers=h).status_code == 200
+
+
+def test_stale_member_still_reaches_their_own_routes(wc, web_bot, reg):
+    """The refusal is officer rights only: a member's own reads and the owner are untouched."""
+    web_bot.__dict__["_member_last_yes"] = {(1, MEMBER_UID): (time.time(), web_bot.people[MEMBER_UID])}
+    web_bot.flaky.add(MEMBER_UID)
+    assert wc.get("/api/me", headers=as_user(wc, MEMBER_UID)).status_code == 200
+
+
+def test_channels_hub_refuses_a_save_on_a_stale_settings_rev(reg):
+    """Regression: the hub's Save used to write a channel although the settings changed after Review (set_channel ignored
+    the rev). Now set_channel checks it before posting anything; the line is refused and stays drafted."""
+    from oibot_gm.wizard_flows import FLOWS
+
+    bot = SetupBot(reg)
+    bot.add(50, "raids")
+    h = owner_harness(reg, bot)
+    run(FLOWS["channels"](h.command(), reg))
+    run(h.pick("Change which?", "signup"))
+    run(pick_widget(h, discord.ui.ChannelSelect, "Signups channel", bot.chans[50]))
+    run(h.press("Review 1 change"))
+    reg.set_error_dms([OWNER, 4242], "someone else")  # another settings write lands meanwhile
+    run(h.press("Save"))
+    assert reg.config.signup_channel_id is None and "1 saved" not in h.text and "changed since you looked" in h.text
+    assert bot.chans[50].sent == [] and bot.ops.lines == []
+    run(h.press("Back to edits"))
+    assert "→ ✏️ **<#50>**" in h.text, "the refused channel stays drafted"
+    run(h.press("Review 1 change"))
+    run(h.press("Save"))
+    assert reg.config.signup_channel_id == 50, "a fresh look saves"
+
+
+def test_apply_ops_channel_write_checks_the_rev_on_every_surface(reg):
+    bot = SetupBot(reg)
+    bot.add(50, "raids")
+    bot.add(51, "officers")
+    old = reg.config_rev("settings")
+    ops = configops.ops_from_fields(reg, "settings", None, {"channel:signup": "50", "channel:roster": "51"})
+    res = run(configops.apply_ops(reg, ops, by="Owner", by_id=OWNER, bot=bot, via="discord", revs={"config:settings": old}))
+    assert reg.config.signup_channel_id == 50 and reg.config.roster_channel_id == 51 and not res["refused"], "its own writes carry the rev on"
+    reg.config.timezone = "Europe/Paris"
+    reg.save_config("tz")
+    ops = configops.ops_from_fields(reg, "settings", None, {"channel:signup": None})
+    res = run(configops.apply_ops(reg, ops, by="Owner", by_id=OWNER, bot=bot, via="discord", revs={"config:settings": old}))
+    assert res["changed"] == ["settings"] and reg.config.signup_channel_id == 50, res
+    with pytest.raises(RegistryError, match="changed since you looked"):
+        run(bot.set_channel(reg, "signup", None, "Owner", rev=old))
+    from oibot_gm.registry import ConfigChanged
+
+    with pytest.raises(ConfigChanged):  # plain text's Apply (ConfigConfirmView) passes op_rev through apply_async
+        run(configops.apply_async(reg, ConfigOp(op="set", path="signup_channel", value="none"), "Owner", True, bot=bot, by_id=OWNER, rev=old))
+    assert reg.config.signup_channel_id == 50
+
+
+def test_channel_confirm_refuses_a_stale_save(reg):
+    from oibot_gm.wizard_flows import FLOWS
+
+    bot = SetupBot(reg)
+    ch = bot.add(50, "raids")
+    h = owner_harness(reg, bot)
+    run(FLOWS["channel_set"](h.command(), reg, kind="signup", channel=ch))
+    reg.set_error_dms([], "someone else")
+    run(h.press("Save"))
+    assert "❌" in h.text and "changed since you looked" in h.text and reg.config.signup_channel_id is None
+
+
+def test_loot_channel_is_the_ninth_kind_through_the_one_confirm(reg):
+    from oibot_gm.wizard_flows import FLOWS
+
+    bot = SetupBot(reg)
+    ch = bot.add(70, "loot")
+    h = owner_harness(reg, bot)
+    run(FLOWS["channel_set"](h.command(), reg, kind="loot"))
+    assert "Pick a channel, tick clear, or set log" in h.text
+    run(FLOWS["channel_set"](h.command(), reg, kind="loot", channel=ch))
+    assert "Use <#70> for this?" in h.text and h.buttons() == ["Save", "Back"] and reg.config.loot_channel_id is None, "a confirm first"
+    run(h.press("Save"))
+    assert reg.config.loot_channel_id == 70 and "✅ loot channel → #loot" in h.text and len(bot.ops.lines) == 1
+    was = bool(reg.config.loot_log)
+    run(FLOWS["channel_set"](h.command(), reg, kind="loot", log=not was))
+    assert "Change the public loot log?" in h.text and bool(reg.config.loot_log) == was
+    run(h.press("Save"))
+    assert bool(reg.config.loot_log) == (not was) and reg.config.loot_channel_id == 70, "the log alone: the channel stays"
+    run(FLOWS["channel_set"](h.command(), reg, kind="loot", log=not was))
+    assert "Nothing changes." in h.text
+    run(FLOWS["channel_set"](h.command(), reg, kind="loot", clear=True, log=was))
+    assert "Stop using a channel for this?" in h.text and h.buttons() == ["Clear it", "Back"]
+    run(h.press("Clear it"))
+    assert reg.config.loot_channel_id is None and bool(reg.config.loot_log) == was
+    src = (SRC / "discord_registry.py").read_text().split("def cfg_loot_channel", 1)[1].split("\n    @", 1)[0]
+    assert "set_channel(" not in src and 'FLOWS["channel_set"]' in src and "setattr(reg.config" not in src
+
+
+def test_invite_create_is_the_last_op_and_replaces_a_typed_link(reg):
+    ops = configops.ops_from_fields(reg, "recruitment", None, {"invite_create": "55", "invite_url": "https://discord.gg/typed", "note": "x"})
+    assert [(o.field, o.value) for o in ops] == [("note", "x"), ("invite_create", "<#55>")]
+    ops = configops.ops_from_fields(reg, "recruitment", None, {"invite_url": "https://discord.gg/typed"})
+    assert [o.field for o in ops] == ["invite"]
+
+
+def _left_bot(reg):
+    from oibot_gm.discord_bot import OibotGM
+
+    bot = SetupBot(reg)
+    bot.cached_member = types.MethodType(OibotGM.cached_member, bot)
+    return bot
+
+
+async def _settled(bot):
+    await asyncio.gather(*list(bot.__dict__.get("_left_tasks", ())))
+
+
+def test_discords_own_404_marks_left_and_a_sighting_clears_it(reg):
+    """Regression: on_member_remove needs the members intent the bot doesn't request, so left_at was never set. Now
+    cached_member's 404 for a registered member marks it; seeing them again clears it; a lookup Discord didn't answer
+    changes nothing; test puppets are never marked."""
+    bot = _left_bot(reg)
+    m = real_member(reg)
+
+    async def look(uid, max_age=300):
+        out = await bot.cached_member(bot.guild, uid, max_age=max_age)
+        await _settled(bot)
+        return out
+
+    assert run(look(m.discord_id)) is None and reg.members[m.discord_id].left_at
+    bot.guild.members[m.discord_id] = types.SimpleNamespace(id=m.discord_id, display_name=m.display_name, roles=[])
+    assert run(look(m.discord_id, max_age=0)) is not None and reg.members[m.discord_id].left_at is None
+    bot.guild.members.pop(m.discord_id)
+
+    async def flaky(uid):
+        raise RuntimeError("discord 503")
+
+    bot.guild.fetch_member = flaky
+    bot.__dict__.pop("_member_cache", None)
+    assert run(look(m.discord_id, max_age=0)) is None and reg.members[m.discord_id].left_at is None, "no answer is not a departure"
+    t = reg.test_members()[0]
+    bot.note_membership(bot.guild.id, t.discord_id, False)
+    assert reg.members[t.discord_id].left_at is None
+
+
+def test_saw_member_clears_left_at(reg):
+    from oibot_gm.discord_bot import OibotGM
+
+    bot = SetupBot(reg)
+    m = real_member(reg)
+    reg.member_left(m.discord_id)
+    OibotGM.saw_member(bot, bot.guild.id, types.SimpleNamespace(id=m.discord_id))
+    assert reg.members[m.discord_id].left_at is None
+
+
+def test_hourly_sweep_finds_who_left_without_the_members_intent(reg):
+    bot = _left_bot(reg)
+    here, gone = real_member(reg, uid=9401, name="Stays"), real_member(reg, uid=9402, name="Gone")
+    bot.guild.members[here.discord_id] = types.SimpleNamespace(id=here.discord_id, display_name="Stays", roles=[])
+
+    async def sweep(limit):
+        n = await bot.sweep_left(reg, limit=limit)
+        await _settled(bot)
+        return n
+
+    real = [x for x in reg.members.values() if not x.test]
+    assert run(sweep(limit=500)) == len(real)
+    assert reg.members[gone.discord_id].left_at and reg.members[here.discord_id].left_at is None
+    assert all(not x.left_at for x in reg.members.values() if x.test), "puppets are never looked up"
+    assert run(sweep(limit=500)) == len([x for x in reg.members.values() if not x.test and not x.left_at]), "who left is not looked up again"
+    assert run(sweep(limit=1)) == 1
+
+
+def test_config_show_has_the_host_section_for_the_owner_only(reg, monkeypatch):
+    monkeypatch.setenv("OIBOT_SUPERUSERS", str(SUPER))
+    owner = "\n".join(configops.config_summary(reg, "owner"))
+    assert "**Host**" in owner and f"<@{SUPER}>" in owner and "error alerts: the owner" in owner and "MCP: this machine only" in owner
+    officer = "\n".join(configops.config_summary(reg))
+    assert "**Host**" not in officer and f"<@{SUPER}>" not in officer and "owner only" in officer
+    assert len(owner) < 2000
+
+
+def test_setup_route_lets_the_owner_change_the_error_alerts(wc, web_bot, reg):
+    d = wc.get("/api/admin/setup", headers=as_user(wc, OFFICER_UID)).json()
+    assert d["errors"]["ids"] is None and d["errors"]["choices"] == [] and d["rev"] == reg.config_rev("settings")
+    web_bot.people[OWNER] = types.SimpleNamespace(id=OWNER, display_name="Own", roles=[])
+    h = as_user(wc, OWNER)
+    d = wc.get("/api/admin/setup", headers=h).json()
+    m = real_member(reg, uid=9500, name="Alerty")
+    d = wc.get("/api/admin/setup", headers=h).json()
+    assert {"id": str(m.discord_id), "name": m.display_name} in d["errors"]["choices"]
+    assert all(c["id"] not in {str(t.discord_id) for t in reg.test_members()} for c in d["errors"]["choices"]), "no puppets"
+    r = wc.post("/api/ops/change", json={"changes": [{"kind": "settings", "fields": {"error_dm_ids": [str(m.discord_id)]}}], "apply": True,
+                                         "revs": {"config:settings": d["rev"]}}, headers=h).json()
+    assert r.get("applied"), r
+    assert reg.config.error_dm_ids == [m.discord_id]
+    assert wc.get("/api/admin/setup", headers=h).json()["errors"]["ids"] == [str(m.discord_id)]

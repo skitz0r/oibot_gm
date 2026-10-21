@@ -51,7 +51,8 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 - **Ops channel (officers)** — every action the bot takes, one line each. The same lines go to a rotating log file on
   the host (`out/oibot.log`). **Errors** also DM the owner — once per kind of error per 30 minutes: the same error again
   inside that half hour edits the first DM (*"and 4 more like this since 7:12 PM — details in #ops"*) instead of sending
-  another, and the Ops page shows how many were folded in. `/gm config errors-to member: [remove:] [reset:]` picks who
+  another, and the Ops page shows how many were folded in. `/gm config errors-to member: [remove:] [reset:]` (or
+  **Change who** on the Config page's Setup card: the owner, these people, or nobody) picks who
   gets them (the owner by default; several people, or nobody — then errors stay in the ops channel); errors only, never
   info or warnings. If the bot can't post in the ops channel three times in a row, that is itself an error alert.
 - **Applications channel** — one review card per application (§3a) with Accept / Decline… buttons (they keep
@@ -87,7 +88,9 @@ looks exactly as before.
 
 With unsaved edits on a page (an edit mode with changes), the server selector asks you to **save or discard your
 edits first** — switching reloads the page. If Discord can't confirm right now that you're still in the server, the
-site keeps showing what you could see for up to six hours, but an officer's change waits until Discord answers.
+site keeps showing what you could see for up to six hours, but an officer's change waits until Discord answers (a
+yellow line at the top says so; a change you try meanwhile answers *"Discord can't confirm your officer role right now —
+reading works, changes wait."*).
 
 Log in with Discord. Every member gets **Me** and the **Loot log** (every award the council recorded, §9).
 Someone who has applied sees **Your application** at the top of Me: waiting, or the decision.
@@ -725,7 +728,9 @@ edits that new family and leaves the one it shared alone.
   `/roster applicant member: decision: [note:]` (the same one confirm screen as the card's buttons), the Accept /
   Decline… buttons on the review card, the Applications page, or plain text ("accept Nyx", "decline nyxie: full on
   healers") (§3a).
-- Someone who **left the Discord server**: their record stays (the bot marks when they left, if Discord tells it). The
+- Someone who **left the Discord server**: their record stays. The bot marks when they left as soon as Discord tells it
+  so — when it looks them up (a page, a DM, a sheet) or in its hourly check of the registered members (about twenty per
+  hour) — and clears the mark if they come back. The
   Members page lists them under **Left the server** with **Remove record…** (one confirm saying what goes and what stays;
   loot already awarded stays in the ledger); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
   while they're still in the server or hold a seat on a live run. Members can't delete their own record.
@@ -767,7 +772,8 @@ edits that new family and leaves the one it shared alone.
   before" can't fail half way.
 - Status: `/gm status` (uptime, data repo, registry counts, LLM spend vs budget, companions, recent ops),
   `/gm config show` (the effective configuration in words: channels and roles by name, raids with their schedules and
-  hours, recruitment, plain-text defaults — never the raw file).
+  hours, recruitment, plain-text defaults — never the raw file; for the owner also a **Host** section: who gets the
+  error alerts, the host's superusers — who can act as owner here — and whether MCP is limited to the host machine).
 - Every refusal and error reads the same on Discord, the site, in plain text and over MCP: a refusal as written, a bug
   as *Something went wrong and nothing was changed. The owner has the details.* (the details go to the ops channel).
 
@@ -877,7 +883,11 @@ and what it does), **Save** (a change refused at Save stays in the draft with wh
 the **news webhook** itself when it has Manage Webhooks there, and hands you its URL (privately) to point your news
 source at; without the permission it says what to add. Every hour the bot re-checks each channel it uses: a channel
 deleted or a permission taken away is one warning in the ops channel (and on the Setup card) — not repeated until it
-changes. `loot-channel` (the public loot log, §9), `officer-role role: [remove:]` (applies at once; removing the last one
+changes; for the ops or signup channel, without which the bot can't tell anyone anything or open a run, it is an error,
+so it also reaches whoever gets the error alerts. A change someone else made to the settings after you opened a
+channel screen or the hub makes Save refuse that channel (nothing posted) and keep it in your draft. `loot-channel
+channel: | clear: [log:]` (the public loot log, §9 — the same one confirm screen as the other channels, with the log
+switch said on it), `officer-role role: [remove:]` (applies at once; removing the last one
 says *"No officer roles now: only the server owner and Manage Server count."*), `officers` (Discord's role picker with the
 current roles chosen, a **Map <name>…** button for an old role name the bot never found, Review, Save; @everyone and a
 bot's or integration's own role are refused), `timezone` (five common zones as buttons, or a region then a city; it shows what
@@ -926,9 +936,10 @@ Recruitment is in the **Setup** group of §8c (owner by default).
 officers read). Applications happen in Discord; this section sets what they ask and who needs one:
 - **Applications open** (a switch; closed = `/apply` and the Apply button explain that instead of the form) and
   the **recruitment note**, one line on the Apply screen (up to 200 characters, e.g. "looking for healers").
-- **Discord invite**, the homepage's Join button. Paste one (`https://discord.gg/…`) or pick a channel and press
-  **Create invite**: the bot makes a permanent, unlimited-use invite there and fills the field (it needs the
-  *Create Invite* permission in that channel and says so if it lacks it). Clear the field to hide the button.
+- **Discord invite**, the homepage's Join button. Paste one (`https://discord.gg/…`), or pick a channel under it:
+  **Save recruitment** then makes a permanent, unlimited-use invite there and uses it (nothing is made before you save).
+  It needs the *Create Invite* permission in that channel; without it you read *"Saved. Invite not created: …"* — the
+  rest is saved and the channel stays picked. Clear the field to hide the button.
 - **Member roles**: people with these Discord roles register without applying (existing members who haven't
   registered yet); officers always can.
 - **Application questions**: an ordered list, up to 15 (Discord's forms ask five per page). Each has a short
@@ -1258,7 +1269,7 @@ news post says can make the review read or write another server.
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
 | `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone, ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
-| `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
+| `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, created and saved as the invite link in one step (`preview=true` shows it first) |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
 | `policy_get` · `policy_edit` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full · replace its text (a draft; the persona is live as written) · the bot's reading of it, nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
@@ -1509,7 +1520,8 @@ Kestrel · Gatekeeper"*; a correction *"✎ Robe of Tests: was Kestrel, now Mira
 with an **Add to my wishlist** button — and nothing else goes there (no officer prompts, no reasons, no scores). With
 no loot channel set the lines go to the run's updates thread — never the signup channel — and the first one says so in
 the ops channel and the council's thread. With the log off nothing is posted; the site still shows every award. A
-rehearsal posts nothing. The owner sets it with `/gm config loot-channel` (a channel, and `log` on or off), on the
+rehearsal posts nothing. The owner sets it with `/gm config loot-channel` (a channel or `clear`, and `log` on or off —
+one confirm screen saying what changes), on the
 Config page (the *Loot log* card shows which of the three states it is in), in plain text ("post the loot log in
 #loot", "turn the loot log off") or MCP `set_channel("loot")`.
 

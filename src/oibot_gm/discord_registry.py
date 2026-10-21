@@ -1254,29 +1254,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             await FLOWS["aura"](interaction, reg)
 
     @config.command(name="loot-channel", description="Owner: the public loot log — one line per confirmed award (log off: awards stay on the site)")
-    @app_commands.describe(channel="where award lines go (empty: each run's updates thread)", log="the public loot log on or off")
-    async def cfg_loot_channel(interaction: discord.Interaction, channel: discord.TextChannel | None = None, log: bool | None = None):
+    @app_commands.describe(channel="where award lines go (Discord's picker)", clear="tick to stop using a channel: award lines go to each run's updates thread",
+                           log="the public loot log on or off")
+    async def cfg_loot_channel(interaction: discord.Interaction, channel: discord.TextChannel | None = None, clear: bool = False, log: bool | None = None):
+        # the ninth channel kind: the same helper and one-screen confirm as the eight shortcuts (flows_config.ChannelSetWizard),
+        # with the log toggle said and saved on that screen
         reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        lines = []
-        try:
-            if channel is not None:
-                lines.append(await interaction.client.set_channel(reg, "loot", channel.id, interaction.user.display_name, by_id=interaction.user.id))
-            if log is not None:
-                from . import configops
-
-                lines.append(await configops.apply_async(reg, configops.ConfigOp(op="set", path="loot_log", value="true" if log else "false"),
-                                                         interaction.user.display_name, True, bot=interaction.client, by_id=interaction.user.id, via="discord"))
-        except (ValueError, RegistryError) as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        from .loot_ops import loot_log_state
-
-        await interaction.response.send_message(("✅ " + " · ".join(lines) + "\n" if lines else "") + loot_log_state(reg)["text"], ephemeral=True)
+        if reg:
+            await FLOWS["channel_set"](interaction, reg, kind="loot", channel=channel, clear=clear, log=log)
 
     @config.command(name="ask-audience", description="Owner: who may ask the bot free-form questions (/ask, DMs, @mentions); others get the static guide")
     @app_commands.choices(audience=[app_commands.Choice(name=a, value=a) for a in ("officers", "confirmed", "registered", "everyone")])
@@ -1325,7 +1310,8 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         from .configops import config_summary  # words, mentions and 12-hour times — never the raw YAML (the clock rule)
 
-        await interaction.response.send_message("\n".join(config_summary(reg))[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        audience = "owner" if reg.is_owner_id(interaction.user.id) else "officer"  # the Host section: the owner (and the host) only
+        await interaction.response.send_message("\n".join(config_summary(reg, audience))[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     async def roster_regcard(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
