@@ -397,8 +397,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         await send("⛔ " + "\n⛔ ".join(refused), ephemeral=True, **({"view": view} if view is not None else {}))
         return
     req.ops = allowed
-    lines = [f"• {preview_line(reg, op, channel)}" for op in allowed] + [f"⛔ {r}" for r in refused]
-    e = discord.Embed(title="Proposed changes", colour=TEAL, description="\n".join(lines)[:4000])
+    e = discord.Embed(title="Proposed changes", colour=TEAL, description=(await diff_text(reg, allowed, refused, channel))[:4000])
     if any(op.op in configops.RUN_OPS or op.op == "test" for op in allowed):
         e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
     revs = configops.board_revs(reg, allowed, raids)  # the boards as this diff shows them
@@ -407,6 +406,19 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     sent = await send(req.reply[:500] if req.reply else None, embed=e, view=view, ephemeral=True)
     # how the view edits its own message when it expires (EXPIRED): the reply Message, or the interaction's original response
     confirm.bind(sent if is_msg else getattr(interaction_or_message, "edit_original_response", None))
+
+
+async def diff_text(reg: Registry, allowed: list, refused: list[str], channel) -> str:
+    """The plain-text diff's body. Setup writes (configops.PURE_OPS) are the STRUCTURE every surface shares —
+    configops.describe_ops → Described.as_discord(): one bullet per write as apply_ops will make it (coalesced), current →
+    new, the dry run's refusal, the consequence sentences; the site's review and MCP's preview print the same lines. Run,
+    people and loot actions keep their describe() line (preview_line: a run about to open carries its <t:…:f> stamp)."""
+    setup = [op for op in allowed if op.op in configops.PURE_OPS]
+    lines = [f"• {preview_line(reg, op, channel)}" for op in allowed if op.op not in configops.PURE_OPS]
+    if setup:
+        d = await asyncio.to_thread(configops.describe_ops, reg, setup, None, channel)
+        lines.append(d.as_discord())
+    return "\n".join(lines + [f"⛔ {r}" for r in refused])
 
 
 def preview_line(reg: Registry, op: configops.ConfigOp, channel=configops._UNSET) -> str:

@@ -118,16 +118,26 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         res["refused"] = [*refused, *res["refused"]]
         return res
 
+    async def typed_ops(v, changes, raw_ops=None) -> list | JSONResponse:
+        """configops.ops_from_changes for a request (§2.7): a draft that can't be expressed is a 400 in its own words; an
+        unexpected error is reported (report_error: logged, the owner alerted) and answers the generic line — never a bare 500."""
+        try:
+            return configops.ops_from_changes(v.reg, changes, raw_ops, channels=channels_of(v.reg))
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:  # noqa: BLE001
+            msg = await configops.report_error(getattr(bot, "ops", None), v.reg.config, e, f"[{v.via}] structured change")
+            return JSONResponse({"error": msg}, status_code=500 if msg == configops.GENERIC_ERROR else 400)
+
     async def structured(v, d: dict, *, reason: str | None = None) -> JSONResponse | dict:
         """Preview, tiered Save or confirmed apply of typed changes. `reason`: a token that was 'expired' (re-preview,
         and apply silently when the lines are the ones the person saw — `seen`) or from before a 'restarted' bot (shown
         again, never applied without a press)."""
         reg = v.reg
         warm_roles(reg)
-        try:
-            ops = configops.ops_from_changes(reg, d.get("changes"), d.get("ops"), channels=channels_of(reg))
-        except RegistryError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+        ops = await typed_ops(v, d.get("changes"), d.get("ops"))
+        if isinstance(ops, JSONResponse):
+            return ops
         if not ops:
             return {"kind": "change", "described": configops.Described().json_for(reg), "describe": [], "ops": [], "refused": [], "applied": [], "results": [],
                     "review": False, "warn": False, "summary": "nothing to change"}
@@ -289,10 +299,9 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         changed since the caller's `revs`)."""
         reg = v.reg
         warm_roles(reg)
-        try:
-            ops = configops.ops_from_changes(reg, changes, channels=channels_of(reg))
-        except RegistryError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
+        ops = await typed_ops(v, changes)
+        if isinstance(ops, JSONResponse):
+            return ops
         crevs = config_revs(d or {})
         stale = stale_sections(reg, crevs)
         if stale:

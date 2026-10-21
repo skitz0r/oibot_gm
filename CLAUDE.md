@@ -203,7 +203,8 @@ src/oibot_gm/
                        consequences; json_for / as_text / as_discord render mentions per surface; review, fingerprint, summary); authorize_ops by PRIVILEGE
                        (owner / officer / own record — never may_plain); WARN_OPS + is_warn; op_consequences + CONSEQUENCE_HOOKS; apply_ops = THE core
                        (coalesce → pure writes in one worker-thread store.batch under config_lock, bot ops on the loop, revs, one audit line);
-                       coalesce merges raid / schedule / buff / family / plain / absolute recruit ops into one write each
+                       coalesce merges raid / schedule / buff / family / plain / absolute recruit ops into one write each; aura_reset_one_sentence;
+                       flows_config._save_settings = the settings wizards' (timezone, about) Save through apply_ops
   cli.py               `oibot roster|loot|demo|discord`; root logger → out/oibot.log (rotating) + stderr
   mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
                        that call the RUNNING bot's /api/* over HTTP as the OWNER OF THE CHOSEN GUILD (every tool's optional `guild` = key or name,
@@ -216,7 +217,8 @@ src/oibot_gm/
                        retire_precedent, tier_item, set_wishlist, import_wishlists) send X-Oibot-Actor = OIBOT_MCP_ACTOR (D8; app.py mcp_actor validates it).
                        Setup tools (raid_set, schedule_*, raid_reset, aura_*, family_set, set_channel, set_config, set_recruitment, set_plain_permissions) send
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines)
-  discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change; handle_change for every plain-text path (ConfigConfirmView re-authorizes the presser)
+  discord_policy.py    /gm policy show|edit|reload, /gm rule loot|comp, /gm change; handle_change for every plain-text path (ConfigConfirmView re-authorizes the presser;
+                       diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(), other ops their preview_line)
   news.py              news review (design §5.26): keyword filter of #news webhook embeds (profiles/<v>/news.yaml version_terms + raid names +
                        guild news_keywords) → <guild>/news.jsonl (dedupe by url); Proposal/ProposalStore (<guild>/proposals/<id>.yaml,
                        proposed → approved|dismissed → applying → applied|failed|reverted; officers decide, only the MCP bearer reports job steps)

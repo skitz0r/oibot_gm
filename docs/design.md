@@ -2230,9 +2230,10 @@ policy governs chat, not a page's Save. `role` comes from `role_of` (web: `viewe
 for a write).
 
 **Ceremony follows consequence.** `WARN_OPS` (op → predicate) = channel changes and the timezone, officer roles, a schedule
-removed or paused, a buff's scope or family, every-aura reset, applications closed, plain text on the ops channel or in DMs —
+removed or paused, a buff's scope or family, an aura reset (every aura, or one buff / family: the AuraWizard asks with decide,
+so the web and MCP ask too), applications closed, plain text on the ops channel or in DMs —
 plus lock, cancel, test clear and proposals (§2.3). `op_consequences` gives sentences for a schedule's regulars, a pause, the
-reset-all, the last officer role removed, closing applications, clearing a channel, plain text leaving the ops channel / DMs;
+reset-all, a one-buff / one-family reset (`aura_reset_one_sentence`), the last officer role removed, closing applications, clearing a channel, plain text leaving the ops channel / DMs;
 `CONSEQUENCE_HOOKS` lets the channel and timezone work append theirs. A Save with neither applies directly.
 
 **The core.** `apply_ops(reg, ops, *, by, by_id, bot=None, via="web", revs=None, raids=None, policy_store=None, self_id=None)`
@@ -2283,10 +2284,21 @@ marked), the family editor sends per-key deltas and no id, reset-all goes throug
 `useLive(["config"])` unless an edit is open. `api.ts`: `OpsChange`, `Described`, `DescribedLine`, `DescribedPart`,
 `OpsReply`, `OpsResult`, `opsApi.preview|save|apply`.
 
-Not in this part (other phase 3 builders): the Discord plain-text diff (ConfigConfirmView) printing `as_discord()`, the
-channel / timezone consequence sentences (`CONSEQUENCE_HOOKS`), Settings / Raids / Recruitment / Plain-permissions edit
-modes on `useOpsSave`, TellTheBot. TimezoneWizard and AboutWizard still save on the loop without the lock (the Settings
-work moves them onto `apply_ops`). Tests: tests/test_structured_ops.py (verbs, slugs, coalesce, Described, warn, privilege,
+**Review fixes.** *Stands alone* on a buff that shares a family targets the buff's OWN family (id = the buff's id; it
+starts from the buff's own value map, as `link_families` builds it — `AuraWizard.target_family` / `target_name`,
+`Registry._family_field`, `ops_from_fields`, `_part` agree), never the shared family it is leaving. A `value:<key>` that is
+not a number is a line-level refusal in the verb's words, and the route's translation step (`typed_ops`) answers a
+RegistryError as 400 and anything unexpected through `report_error` (the generic line, 500) — never a bare 500.
+`officer_roles` must be a list (a bare string was read character by character). The Discord plain-text diff
+(`discord_policy.diff_text`, the ConfigConfirmView embed) prints the setup writes as `describe_ops(…, channel).as_discord()`
+(one bullet per write, notes as subtext — incl. "plain text would stop acting in this channel" — ⛔ dry-run refusals, ⚠
+consequences); run, people and loot actions keep their `preview_line`. TimezoneWizard and AboutWizard save through
+`apply_ops` (`_save_settings`: worker thread, config_lock, the settings rev snapshotted when the wizard opened; a change
+meanwhile refuses with "Look again" / "Edit", the text kept).
+
+Not in this part (other phase 3 builders): the channel / timezone consequence sentences (`channel_consequences`,
+`timezone_change_effects`, appended through `CONSEQUENCE_HOOKS` — rows 5 and 6 of phase 3), Settings / Raids / Recruitment /
+Plain-permissions edit modes on `useOpsSave` (their pages still use the admin translators, which apply as before), TellTheBot. Tests: tests/test_structured_ops.py (verbs, slugs, coalesce, Described, warn, privilege,
 the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
 AuraWizard hub in tests/test_flows_config.py.
 

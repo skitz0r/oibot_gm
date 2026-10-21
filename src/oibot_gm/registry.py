@@ -2548,7 +2548,13 @@ class Registry:
             over["value"] = new
         elif field.startswith("value:"):
             key = self._value_key(field[6:])
-            cur = dict(over.get("value") or (self.profile.families[fid].value if fid in self.profile.families else {}))
+            if over.get("value") is not None:
+                cur = dict(over["value"])
+            elif fid in self.profile.families:
+                cur = dict(self.profile.families[fid].value)
+            else:  # a buff's own family that doesn't exist yet (the buff stands alone from now on): its own value map, as link_families builds it
+                own = next((b for b in self.profile.buffs if b.id == fid), None)
+                cur = dict(own.value or {}) if own is not None else {}
             try:
                 n = float(value) if value not in (None, "") else None
             except (TypeError, ValueError):

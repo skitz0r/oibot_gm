@@ -417,6 +417,49 @@ def test_aura_reset_everything_uses_the_decide_screen(reg, store, owner):
     assert reg.config.buffs == {} and reg.buff("blood_pact").scope == "party"
 
 
+def test_aura_stands_alone_then_who_benefits_edits_the_buffs_own_family(reg, store, owner):
+    """Regression: on a buff in a shared family, 'Stands alone' then Who benefits wrote the SHARED family."""
+    h = Harness(reg)
+    shared_before = dict(reg.profile.families["leader_of_the_pack"].value)
+    short = reg.buff("moonkin_aura").short
+
+    async def go():
+        await FLOWS["aura"](h.command(), reg)
+        await h.pick("Pick a buff", "moonkin_aura")
+        assert "shared with" in h.text
+        await h.pick("What to change", "family")
+        await h.pick("New family", "own")
+        await h.pick("What to change", "benefits")
+        assert f"**{short}** family" in h.text and "Leader of the Pack" not in h.text.split("\n")[0]
+        await h.pick("Pick who", "spell")
+        assert f"**{short}** family" in h.text
+        await h.pick("How many points", "2")
+        await h.press("Back")
+        assert "Not saved yet" in h.text and "Leader of the Pack" not in h.text.split("Not saved yet")[1]
+        await h.press("Save this buff")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert reg.buff("moonkin_aura").family_id == "moonkin_aura" and reg.profile.families["moonkin_aura"].value == {"spell": 2.0}
+    assert reg.profile.families["leader_of_the_pack"].value == shared_before
+
+
+def test_aura_reset_one_buff_shows_the_sentence_from_code(reg, store, owner):
+    from oibot_gm.configops import aura_reset_one_sentence
+
+    reg.set_buff_overrides("blood_pact", {"scope": "raid"}, "Jon")
+    h = Harness(reg)
+
+    async def go():
+        await FLOWS["aura"](h.command(), reg)
+        await h.pick("Pick a buff", "blood_pact")
+        await h.pick("What to change", "reset")
+        assert aura_reset_one_sentence(reg, "blood_pact") in h.text and h.buttons()[0] == "Reset"
+        await h.press("Reset")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert "blood_pact" not in reg.config.buffs
+
+
 def test_aura_is_owner_only(reg):
     h = Harness(reg)
 
@@ -476,6 +519,56 @@ def test_timezone_every_city_is_reachable_and_cancel_writes_nothing(reg, store, 
         await h.press("Cancel")
     asyncio.run(go())
     assert reg.config.timezone == "America/Los_Angeles" and commits(store) == n0
+
+
+def test_timezone_save_goes_through_the_core_under_the_lock_with_the_settings_rev(reg, store, owner, monkeypatch):
+    """Regression: the wizard wrote reg.config.timezone on the loop without config_lock. The Save now goes through
+    configops.apply_ops (worker thread, config_lock, the settings rev snapshotted when the wizard opened)."""
+    import threading
+
+    h = Harness(reg)
+    seen = []
+    real = reg.save_config
+
+    def spy(msg, *a, **k):
+        seen.append((threading.current_thread() is threading.main_thread(), reg.config_lock._is_owned()))
+        return real(msg, *a, **k)
+    monkeypatch.setattr(reg, "save_config", spy)
+
+    async def go():
+        await FLOWS["timezone"](h.command(), reg)
+        await h.press("Eastern · New York")
+        reg.config.about = "someone else"
+        real("about by someone else")  # the settings section moved after the wizard opened
+        seen.clear()
+        await h.press("Save")
+        assert "changed since you looked" in h.text and reg.config.timezone == "America/Los_Angeles"
+        await h.press("Look again")
+        await h.press("Eastern · New York")
+        await h.press("Save")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert reg.config.timezone == "America/New_York" and seen == [(False, True)]
+
+
+def test_about_save_refuses_a_stale_settings_rev_and_keeps_the_text(reg, store, owner):
+    h = Harness(reg)
+
+    async def go():
+        await FLOWS["about"](h.command(), reg)
+        await h.submit(h.modal, text="We raid Tuesdays.")
+        reg.set_buff_overrides("blood_pact", {"note": "x"}, "Ana")  # another section: not a conflict
+        reg.config.timezone = "Europe/London"
+        reg.save_config("timezone by someone else")
+        await h.press("Save")
+        assert "changed since you looked" in h.text and "Your text is kept" in h.text and reg.config.about != "We raid Tuesdays."
+        await h.press("Edit")
+        assert h.modal._items["text"].default == "We raid Tuesdays."
+        await h.submit(h.modal, text="We raid Tuesdays.")
+        await h.press("Save")
+        assert "✅" in h.text
+    asyncio.run(go())
+    assert reg.config.about == "We raid Tuesdays."
 
 
 # ---------------------------------------------------------------- about

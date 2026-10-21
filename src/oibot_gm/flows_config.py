@@ -1089,15 +1089,28 @@ class AuraWizard(OwnerWizard):
         return self.buff_draft.get("family_new")
 
     def target_family(self) -> tuple[str | None, dict]:
-        """(family id, its beneficiary map) the draft's benefit edits apply to: the drafted family, else the buff's own."""
-        b, fam = self.fam()
+        """(family id, its beneficiary map) the draft's benefit edits apply to: the drafted family, else the buff's own.
+        'Stands alone' on a buff that shares a family targets the buff's OWN family (id = the buff's id) — the implicit
+        family of one the profile builds from the buff's own value map — never the shared family it is leaving."""
+        b, _ = self.fam()
         if self.new_family_name():
             return None, {}
-        fid = self.buff_draft.get("family")
+        fid = self.buff_draft.get("family") or b.family_id
         if fid == "own":
             fid = b.id
-        f = self.reg.profile.families.get(fid or b.family_id) or fam
+        f = self.reg.profile.families.get(fid)
+        if f is None:  # its own family doesn't exist yet: it starts from the buff's own map (Registry._family_field does the same)
+            return fid, dict(b.value or {})
         return f.id, dict(f.value)
+
+    def target_name(self) -> str:
+        """The name of the family the benefit edits apply to (a new one's typed name, a stand-alone buff's own name)."""
+        b, _ = self.fam()
+        if self.new_family_name():
+            return self.new_family_name()
+        fid, _v = self.target_family()
+        f = self.reg.profile.families.get(fid)
+        return f.name if f is not None else b.short
 
     def drafted_map(self) -> dict:
         _fid, value = self.target_family()
@@ -1253,8 +1266,8 @@ class AuraWizard(OwnerWizard):
             from .configops import describe_ops, ops_from_changes
 
             d = describe_ops(self.reg, ops_from_changes(self.reg, [{"kind": "aura_reset", "target": b.id}]))
-            text = (f"Reset **{b.short}** to the game's defaults (scope, family, strength, status, note, and its own family's beneficiaries)?"
-                    + (f"\n{d.as_discord()}" if d.lines else "") + ("\n-# Your unsaved changes to it are dropped too." if self.dirty() else ""))
+            text = (f"Reset **{b.short}** to the game's defaults?" + (f"\n{d.as_discord()}" if d.lines else "")
+                    + ("\n-# Your unsaved changes to it are dropped too." if self.dirty() else ""))
             await self.decide(i, text, do=self.do_reset_one, do_label="Reset", danger=True, back_label="Cancel")
             return
         cur = self.drafted(f)
@@ -1309,10 +1322,9 @@ class AuraWizard(OwnerWizard):
 
     # ---- who benefits: one key at a time into the draft (value:<key>) — never the whole map
     async def benefits(self, i: discord.Interaction) -> None:
-        b, fam = self.fam()
         fid, _value = self.target_family()
         cur = self.drafted_map()
-        name = self.new_family_name() or (self.reg.profile.families[fid].name if fid in self.reg.profile.families else fam.name)
+        name = self.target_name()
         shared = [x.short for x in self.reg.profile.buffs if x.family_id == fid]
         keys = list(self.reg.VALUE_KEYS) + [k for k in cur if k.startswith("spec:")]
         opts = [Opt(k, key_words(k), f"{num(cur[k])} points" if k in cur else "no points", default=False) for k in keys][:MAX_OPTIONS - 1]
@@ -1341,7 +1353,7 @@ class AuraWizard(OwnerWizard):
     async def points(self, i: discord.Interaction, key: str) -> None:
         self._key = key
         cur = self.drafted_map().get(key)
-        name = self.new_family_name() or self.reg.profile.families[self.target_family()[0]].name
+        name = self.target_name()
         vals = sorted(set(POINTS) | ({float(cur)} if cur else set()))
         opts = [Opt("0", "Remove", "this key gets no points of its own", default=not cur)]
         opts += [Opt(num(p), f"{num(p)} point{'' if p == 1 else 's'}", default=cur is not None and float(cur) == float(p)) for p in vals]
@@ -1475,6 +1487,7 @@ class TimezoneWizard(OwnerWizard):
     def __init__(self, reg: Registry, owner_id: int):
         super().__init__(reg, owner_id, title="Guild timezone", guard=_owner_guard(reg))
         self.region: str | None = None
+        self.rev = reg.config_rev("settings")  # the settings as this wizard showed them (a change meanwhile refuses the Save)
 
     async def start(self, i: discord.Interaction) -> None:
         cur = self.reg.config.timezone
@@ -1535,10 +1548,23 @@ class TimezoneWizard(OwnerWizard):
             if self.reg.config.timezone == zone:
                 await self.finish(i, f"The guild is already on **{zone}**; nothing changed.")
                 return
-            self.reg.config.timezone = zone
-            self.reg.save_config(f"timezone → {zone}")
+            res = await _save_settings(self.reg, i, {"timezone": zone}, self.rev)  # THE structured core: config_lock, rev, one audit line
+            if not res["applied"]:
+                self.rev = self.reg.config_rev("settings")
+                await self.refuse(i, "; ".join(r["line"] for r in res["results"] if not r["ok"]) or "Nothing was changed.", self.start, "Look again")
+                return
             await self.finish(i, f"✅ Timezone **{zone}** — it's {fmt12(self.reg.now_local())} there.")
         return self.button("Save", save, discord.ButtonStyle.success)
+
+
+async def _save_settings(reg: Registry, i: discord.Interaction, fields: dict, rev: str) -> dict:
+    """A settings wizard's Save through configops.apply_ops (the web's and MCP's path): the write runs in a worker thread
+    under config_lock against the settings rev the wizard snapshotted — never reg.config mutated on the loop."""
+    from .configops import apply_ops, ops_from_fields
+
+    ops = ops_from_fields(reg, "settings", None, fields)
+    return await apply_ops(reg, ops, by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
+                           revs={"config:settings": rev})
 
 
 @flow("timezone")
@@ -1557,6 +1583,7 @@ class AboutWizard(OwnerWizard):
     def __init__(self, reg: Registry, owner_id: int):
         super().__init__(reg, owner_id, title="About the guild", guard=_owner_guard(reg))
         self.draft = {"text": reg.config.about or ""}
+        self.rev = reg.config_rev("settings")
 
     def form(self) -> Form:
         return Form("About the guild", [Field("text", "About the guild", required=False, paragraph=True, default=self.draft["text"][:4000] or None,
@@ -1580,8 +1607,15 @@ class AboutWizard(OwnerWizard):
 
     async def save(self, i: discord.Interaction) -> None:
         await self.working(i, "Saving…")
-        self.reg.config.about = self.draft["text"].strip()[:ABOUT_MAX] or None
-        self.reg.save_config("about text updated")
+        text = self.draft["text"].strip()[:ABOUT_MAX]
+        if text == (self.reg.config.about or ""):
+            await self.finish(i, "The about text already reads that; nothing changed.")
+            return
+        res = await _save_settings(self.reg, i, {"about": text}, self.rev)
+        if not res["applied"]:
+            self.rev = self.reg.config_rev("settings")
+            await self.refuse(i, ("; ".join(r["line"] for r in res["results"] if not r["ok"]) or "Nothing was changed.") + "\nYour text is kept.", self.reopen, "Edit")
+            return
         await self.finish(i, "✅ About text saved." if self.reg.config.about else "✅ About text cleared.")
 
 

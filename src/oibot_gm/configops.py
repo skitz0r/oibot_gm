@@ -3086,8 +3086,12 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
                 cid = _channel_ref(v, channels)
                 ops.append(ConfigOp(op="set", path=path, value=f"<#{cid}>" if cid else "none"))
             elif path == "officer_roles":
+                if v is None:
+                    v = []
+                if not isinstance(v, (list, tuple)):  # the WHOLE list; a bare '123' would be read character by character
+                    raise RegistryError("officer_roles is the whole list of officer roles, e.g. [\"123456789\", \"Officer\"] — [] for none")
                 want = []
-                for r in (v or []):
+                for r in v:
                     rid = reg.role_id_for(r)
                     if rid is None:
                         raise RegistryError(f"officer role {r}: give a role id (or a name the bot knows)")
@@ -3158,9 +3162,15 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
                 if cur is None or want != {kk: float(x) for kk, x in cur.value.items()}:
                     ops.append(ConfigOp(op="family_set", target=fid, field="value", value=_value_text(want)))
             elif f.startswith("value:"):  # one beneficiary (a per-key delta; null / "" removes it)
-                now = cur.value.get(reg._value_key(f[6:])) if cur is not None else None
-                if (v in (None, "") and now is None) or (v not in (None, "") and now is not None and float(v) == float(now)):
+                now = cur.value.get(reg._value_key(f[6:])) if cur is not None else _own_value(reg, fid).get(reg._value_key(f[6:]))
+                if v in (None, "") and now is None:
                     continue
+                if v not in (None, "") and now is not None:
+                    try:
+                        if float(v) == float(now):
+                            continue
+                    except (TypeError, ValueError):
+                        pass  # not a number: the verb refuses it in its own words ('melee: 'abc' isn't a number')
                 ops.append(ConfigOp(op="family_set", target=fid, field=f, value=_value_text(v) if v not in (None,) else ""))
             else:
                 raise RegistryError(f"unknown family field {f} (one of {', '.join(reg.FAMILY_FIELDS)}, value:<key>)")
@@ -3207,6 +3217,13 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
             raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default)")
         return ops
     raise RegistryError(f"unknown kind {kind!r} (one of {', '.join(STRUCTURED_KINDS)})")
+
+
+def _own_value(reg: Registry, fid: str) -> dict:
+    """The beneficiary map of a family that doesn't exist yet: a buff's own (implicit) family starts from the buff's own
+    value map, as GameProfile.link_families and Registry._family_field read it; any other new id starts empty."""
+    b = next((x for x in reg.profile.buffs if x.id == fid), None)
+    return dict(b.value or {}) if b is not None else {}
 
 
 def _json(v) -> str:
@@ -3384,7 +3401,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "role_add": _always, "role_remove": _always,  # who counts as an officer
     "schedule_remove": _always, "schedule_set": _warn_schedule,  # a schedule removed or paused
     "aura_set": lambda reg, op: (op.field or "").strip() in ("scope", "family"),  # what stacks and how far it reaches
-    "aura_reset": lambda reg, op: not (op.target or "").strip(),  # every aura back to the defaults
+    "aura_reset": _always,  # every aura, or one buff / family, back to the defaults (the AuraWizard asks with decide, the web with the review)
     "recruit": lambda reg, op: (op.field or "").strip().lower() == "open" and (op.value or "").strip().lower() in ("false", "no", "off", "closed"),
     "plain": _warn_plain,  # plain text on the ops channel or in DMs
     "run_lock": _always, "run_cancel": _always, "proposal": _always,
@@ -3407,6 +3424,20 @@ def is_warn(reg: Registry, op: ConfigOp) -> bool:
 CONSEQUENCE_HOOKS: list[Callable[[Registry, ConfigOp], list[str]]] = []
 
 
+def aura_reset_one_sentence(reg: Registry, target: str) -> str:
+    """What resetting ONE buff or family drops (Registry.clear_aura_overrides(bid)) — the same words on the AuraWizard's
+    decide screen, the Auras page's review and MCP's preview."""
+    b = next((x for x in reg.profile.buffs if x.id == target), None)
+    fam = reg.profile.families.get(target)
+    name = b.short if b else (fam.name if fam else target)
+    if not reg.config.buffs.get(target) and not reg.config.families.get(target):
+        return f"Nothing to reset: {name} already reads the game defaults."
+    if b is not None:
+        return (f"{name} goes back to the game's scope, family, strength, status and note, and its own family's beneficiaries with them. "
+                "Other buffs and shared families keep the guild's changes.")
+    return f"The {name} family goes back to the game's name, status, note and beneficiaries; the buffs in it keep their own changes."
+
+
 def op_consequences(reg: Registry, op: ConfigOp) -> list[str]:
     """What a write does beyond the setting itself, in sentences from code (seats, regulars, members, where things post) —
     the same words on every surface. Empty for a routine reversible edit."""
@@ -3426,6 +3457,8 @@ def op_consequences(reg: Registry, op: ConfigOp) -> list[str]:
             out.append(f"Nothing new opens from {s['name'] if s else sid}; a run already open keeps its sheet. Regulars stay.")
         elif op.op == "aura_reset" and not (op.target or "").strip():
             out.append(reg.aura_reset_sentence())
+        elif op.op == "aura_reset":
+            out.append(aura_reset_one_sentence(reg, (op.target or "").strip()))
         elif op.op == "role_remove":
             rid = reg.role_id_for(op.value)
             left = [r for r in reg.config.officer_role_ids if r != rid]
@@ -3541,11 +3574,12 @@ class Described(BaseModel):
         return render("\n".join(out) or "nothing to change", reg, "mcp", channels)
 
     def as_discord(self) -> str:
-        """Discord markdown (mentions kept: Discord renders them by name)."""
+        """Discord markdown (mentions kept: Discord renders them by name) — the plain-text diff's embed (discord_policy.
+        handle_change) and the AuraWizard's screens: one bullet per write, its notes as subtext, ⛔ refusals, ⚠ consequences."""
         out = []
         for ln in self.lines:
             body = " · ".join(f"{p.label + ' ' if p.label else ''}" + (f"{p.before} → **{p.after or '—'}**" if p.before is not None else f"**{p.after or ''}**") for p in ln.parts) or ln.text
-            out.append(f"• **{ln.label}** — {body}" + (f"\n  ⛔ {ln.error}" if ln.error else ""))
+            out.append(f"• **{ln.label}** — {body}" + "".join(f"\n-# {n}" for n in ln.notes) + (f"\n  ⛔ {ln.error}" if ln.error else ""))
         out += [f"⛔ {x}" for x in self.refused]
         out += [f"⚠ {c}" for c in self.consequences]
         return "\n".join(out) or "Nothing to change."
@@ -3604,18 +3638,20 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
         if op.op == "family_set":
             fid = (op.target or "").strip().lower()
             fam = reg.profile.families.get(fid)
-            name = fam.name if fam else f"New family {fid}"
+            own = next((x for x in reg.profile.buffs if x.id == fid), None) if fam is None else None
+            name = fam.name if fam else (f"{own.short} (its own family)" if own else f"New family {fid}")
+            base = fam.value if fam else _own_value(reg, fid)
             f = (op.field or "").strip()
             if f.startswith("value:"):
                 key = reg._value_key(f[6:])
-                now = fam.value.get(key) if fam else None
+                now = base.get(key)
                 new = None if op.value in (None, "") or (not key.startswith("spec:") and float(op.value or 0) == 0) else op.value
                 return name, DescribedPart(label=f"Who benefits: {aura_key_words(key)}", before=_num(now) if now is not None else "none", after=_num(new) if new is not None else "none"), []
             if f == "value":
                 val = _typed(op.value)
                 text = lambda m: " · ".join(f"{aura_key_words(k)} {_num(v)}" for k, v in m.items()) or "nobody"  # noqa: E731
                 new = val if isinstance(val, dict) else {kv.partition(":")[0].strip(): kv.partition(":")[2].strip() for kv in str(val or "").split(",") if kv.strip()}
-                return name, DescribedPart(label="Who benefits", before=text(fam.value) if fam else "nobody", after=text(new)), []
+                return name, DescribedPart(label="Who benefits", before=text(base), after=text(new)), []
             cur = getattr(fam, f, None) if fam else None
             return name, DescribedPart(label=FAMILY_FIELD_WORDS.get(f, f), before=(str(cur) if cur not in (None, "") else "none"), after=(op.value or "none")), []
         if op.op == "aura_reset":
@@ -3729,6 +3765,13 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
             text = describe(reg, op, channel)
         except Exception as e:  # noqa: BLE001
             text = f"{op.op}: {e}"
+        if op.op == "plain" and channel is not PLAIN_WEB and channel is not _UNSET:  # asked in Discord: taking plain text away from HERE is said
+            try:
+                warning = _plain_warning(reg, _plain_merged(reg, parts_ops), channel).strip().lstrip("⚠").strip()
+            except RegistryError:
+                warning = ""
+            if warning and warning not in notes:
+                notes.append(_cap(warning) + ".")
         cons = op_consequences(reg, op)
         line = DescribedLine(op=op.op, target=op.target, label=label or op.op, parts=parts, notes=notes, text=text, error=_op_error(sh, op),
                              warn=is_warn(reg, op), consequences=cons, ops=[p.model_dump(exclude_none=True) for p in parts_ops])

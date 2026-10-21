@@ -610,7 +610,7 @@ on the right. Config saves each field as you change it and marks it *✓ saved*.
 does** (the same rule on every surface): a routine, reversible edit (a note, a status, a strength, an hour) saves at once
 and the toast says what happened — *"2 saved"*, or *"1 saved, 1 refused"*, never a bare "saved". A change that moves
 where things post or who counts — a channel, the timezone, an officer role, a schedule removed or paused, a buff's scope
-or stacking family, every aura reset at once, applications closed, plain text in DMs or the ops channel — or one with a
+or stacking family, an aura reset, applications closed, plain text in DMs or the ops channel — or one with a
 consequence (regulars coming off a schedule, say) opens a **Review** first: one block per thing it writes, each setting
 *current → new*, any part the bot would refuse already marked ⛔, the consequences in a yellow box, then **Apply N
 changes** or **Back to edits** (your draft stays). After Apply the same window lists ✅ / ⛔ per write — a refused one
@@ -658,7 +658,9 @@ changes"*) — and **Save this buff** writes it all at once; *Another buff* or *
 Discard / Back. *Who benefits* changes one beneficiary at a time and leaves the rest of the family's map alone. **Reset
 everything to game defaults** (on the buff list) says exactly what goes — *"Overrides on 3 buffs (…) and 1 family (…)
 go…"* — before it does it. Amber on the page marks a guild override; *Reset* returns one buff or family to the game
-defaults.
+defaults, and asks first on the page as in Discord (*"Blood Pact goes back to the game's scope, family, strength, status
+and note…"*). Choosing *Stands alone* for a buff that shares a family gives it a family of its own: *Who benefits* then
+edits that new family and leaves the one it shared alone.
 
 ## 6. Analytics (officers)
 
@@ -830,7 +832,8 @@ server, by design: never the site (its **Config** page shows who owns the guild)
 as the owner, so a transfer through it would give the guild away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
 `signup-channel`, `absences-channel`, `applications-channel`, `loot-channel` (the public loot log, §9), `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
-now and the next run become before saving) — or all of these on
+now and the next run become before saving; `about` likewise shows the text first — if someone changed the guild settings
+meanwhile, Save says so and writes nothing) — or all of these on
 the site's **Config** page (channel pickers per function, officer roles, timezone, who may ask the bot,
 the about text; changing a channel posts its card the same way the command does) — and per raid
 `/gm config raid`: pick the raid, then a section — Schedules, Signup cadence (Standard /
@@ -896,7 +899,10 @@ the Mac mini (GM ✓ / ⟳ / ⚠ / ✕) shows the same at a glance, even when th
 **Channels in plain text.** "post raid sheets in #signups", "use #away for absences" — the same as the Config page's
 pickers (the bot checks it can see the channel and posts that channel's card); "stop posting absences anywhere" or
 "clear the news channel" unsets one (its card is forgotten). "Set the timezone to America/New_York" shows, before
-you Apply, each raid's next run on the new clock and on today's.
+you Apply, each raid's next run on the new clock and on today's. A setup change asked in plain words reads in the
+proposal exactly as the site's review does: one line per thing it writes (two settings of one buff are one line),
+each setting *current → new*, a part the bot would refuse marked ⛔, and what else happens marked ⚠ — and when a
+plain-text permission change would stop the bot acting in the channel you are asking in, the line says so.
 
 **Officer roles.** `/gm config officer-role role:@Officers` (add; `remove:true` to take one away), the Config page's
 role picker, or in plain text ("make @Council officers"). The bot remembers the *role itself* (its Discord id), not
@@ -1195,7 +1201,7 @@ news post says can make the review read or write another server.
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
-| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles (ids or names the bot knows), news keywords, `loot_log` on/off — one or several as `fields` |
+| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles (the whole list, ids or names the bot knows; `[]` for none), news keywords, `loot_log` on/off — one or several as `fields` |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |

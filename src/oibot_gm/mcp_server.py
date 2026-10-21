@@ -736,7 +736,7 @@ def set_channel(kind: str, channel: str | None = None, preview: bool = False, gu
 def set_config(field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Guild settings (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
     phrases that make a news item relevant), loot_log (bool: the public award log), officer_roles (the WHOLE list of role
-    ids or names the bot knows), channel:<kind> (as set_channel) — one `field` + `value` or several as `fields`.
+    ids or names the bot knows, always a list: ["123456789", "Officer"]; [] for none — a bare string is refused), channel:<kind> (as set_channel) — one `field` + `value` or several as `fields`.
     `preview=True`: current → new and the consequences, nothing saved."""
     want = dict(fields or {})
     if field:

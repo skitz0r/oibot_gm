@@ -78,9 +78,11 @@ export function AurasPage({ meta }: { meta: Meta }) {
     const r = await save([{ kind: "aura_reset", target: null }], { revs: { "config:buffs": data!.rev }, title: "Back to the game defaults for every aura?" }).catch((e) => { fail(e); return null; });
     if (r && !r.changed?.length) { setDrafts(null); load(); }
   }
-  /** One buff or family back to the game defaults (its own overrides only) — a routine edit: saved at once, the toast says what went. */
+  /** One buff or family back to the game defaults (its own overrides only) — warn-class like the AuraWizard's decide screen: the review
+   *  shows the server's sentence (configops.aura_reset_one_sentence) before anything goes. */
   async function resetOne(id: string, onDone: () => void) {
-    const r = await save([{ kind: "aura_reset", target: id }], { revs: { "config:buffs": data!.rev } }).catch((e) => { fail(e); return null; });
+    const name = data!.buffs.find((b) => b.id === id)?.name || famName(id);
+    const r = await save([{ kind: "aura_reset", target: id }], { revs: { "config:buffs": data!.rev }, title: `Back to the game defaults for ${name}?` }).catch((e) => { fail(e); return null; });
     if (r && !r.changed?.length) onDone();
   }
   return (

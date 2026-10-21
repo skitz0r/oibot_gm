@@ -123,7 +123,7 @@ def test_warn_class_and_consequences(reg):
     assert W(ConfigOp(op="schedule_set", target="barrow_deeps", field="default.active", value="false"))
     assert not W(ConfigOp(op="schedule_set", target="barrow_deeps", field="default.name", value="x"))
     assert W(ConfigOp(op="aura_set", target="blood_pact", field="family", value="own")) and not W(ConfigOp(op="aura_set", target="blood_pact", field="note", value="x"))
-    assert W(ConfigOp(op="aura_reset")) and not W(ConfigOp(op="aura_reset", target="blood_pact"))
+    assert W(ConfigOp(op="aura_reset")) and W(ConfigOp(op="aura_reset", target="blood_pact"))  # one buff too: both surfaces ask first
     assert W(ConfigOp(op="recruit", field="open", value="false")) and not W(ConfigOp(op="recruit", field="open", value="true"))
     assert W(ConfigOp(op="plain", target="dm", value="ignore")) and not W(ConfigOp(op="plain", target="runs", value="everyone"))
     reg.config.ops_channel_id = 777
@@ -515,3 +515,99 @@ def test_mcp_tools_end_to_end_against_the_bot(owner_client, reg, monkeypatch):
         assert pv["review"] and pv["consequences"] == [reg.aura_reset_sentence()]
     finally:
         ms.use(None)
+
+
+# ---------------------------------------------------------------- review fixes (G1a findings)
+
+def test_a_family_value_that_is_not_a_number_is_a_refusal_never_a_500(owner_client, reg):
+    """Regression: ops_from_fields compared float('abc') with the stored value and raised a bare ValueError, which the
+    route did not catch (500). The op now goes through and the verb refuses it in its own words (§2.7)."""
+    fid = "windfury_totem"
+    key = next(iter(reg.profile.families[fid].value))
+    before = dict(reg.profile.families[fid].value)
+    ops = configops.ops_from_fields(reg, "family", fid, {f"value:{key}": "abc"})  # no ValueError
+    assert [(o.op, o.field, o.value) for o in ops] == [("family_set", f"value:{key}", "abc")]
+    r = owner_client.post(CHANGE, json={"changes": [{"kind": "family", "target": fid, "fields": {f"value:{key}": "abc"}}], "apply": True}, headers=bearer())
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert not d["applied"] and "isn't a number" in d["results"][0]["line"] and d["note"] == "Nothing was changed."
+    r = owner_client.post("/api/admin/family", json={"id": fid, f"value:{key}": "abc"}, headers=bearer())
+    assert r.status_code == 400 and "isn't a number" in r.json()["error"]
+    assert reg.profile.families[fid].value == before
+
+
+def test_an_unexpected_error_translating_a_draft_is_reported_not_a_bare_500(owner_client, reg, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("bug in a translator")
+    monkeypatch.setattr(configops, "ops_from_changes", boom)
+    r = owner_client.post(CHANGE, json={"changes": [{"kind": "buff", "target": "blood_pact", "fields": {"note": "x"}}], "apply": True}, headers=bearer())
+    assert r.status_code == 500 and r.json() == {"error": configops.GENERIC_ERROR}  # the generic line, never a traceback or a type name
+    r = owner_client.post("/api/admin/aura", json={"id": "blood_pact", "note": "x"}, headers=bearer())
+    assert r.status_code == 500 and r.json() == {"error": configops.GENERIC_ERROR}
+
+
+def test_officer_roles_is_the_whole_list_never_a_bare_string(owner_client, reg):
+    """Regression: a string '123' was looped character by character (roles 1, 2, 3) and the real officer roles removed."""
+    reg.config.officer_role_ids = [OFFICER_ROLE]
+    with pytest.raises(RegistryError, match="whole list"):
+        configops.ops_from_fields(reg, "settings", None, {"officer_roles": "123"})
+    r = owner_client.post(CHANGE, json={"changes": [{"kind": "settings", "fields": {"officer_roles": "123"}}], "apply": True, "confirmed": True}, headers=bearer())
+    assert r.status_code == 400 and "whole list" in r.json()["error"]
+    r = owner_client.post("/api/admin/config", json={"field": "officer_roles", "value": "123"}, headers=bearer())
+    assert r.status_code == 400
+    assert reg.config.officer_role_ids == [OFFICER_ROLE]
+    assert [o.op for o in configops.ops_from_fields(reg, "settings", None, {"officer_roles": []})] == ["role_remove"]  # [] = none, said as a list
+
+
+def test_resetting_one_aura_is_reviewed_with_its_sentence_on_every_surface(owner_client, reg):
+    """The Discord AuraWizard asks before a per-buff reset (Wizard.decide); the web's Save and MCP's preview now ask too,
+    with the same sentence from code (configops.aura_reset_one_sentence)."""
+    reg.set_buff_overrides("blood_pact", {"scope": "raid"}, "Jon")
+    sentence = configops.aura_reset_one_sentence(reg, "blood_pact")
+    assert reg.buff("blood_pact").short in sentence and "its own family's beneficiaries" in sentence
+    d = owner_client.post(CHANGE, json={"changes": [{"kind": "aura_reset", "target": "blood_pact"}], "apply": True}, headers=bearer()).json()
+    assert d["needs_review"] and not d.get("applied") and reg.buff("blood_pact").scope == "raid"
+    assert sentence in d["described"]["consequences"]
+    r = owner_client.post(CHANGE, json={"token": d["token"], "apply": True}, headers=bearer())
+    assert r.json()["applied"] and reg.buff("blood_pact").scope == "party"
+    assert configops.aura_reset_one_sentence(reg, "blood_pact").startswith("Nothing to reset")
+
+
+def test_stands_alone_targets_the_buffs_own_family_in_ops_and_verbs(reg, store):
+    """Regression: 'Stands alone' on a buff in a shared family, then a Who-benefits edit, wrote the SHARED family
+    (Leader of the Pack) — profile.families has no entry for the buff's own id yet, and the code fell back to the
+    family it was leaving. The edit now targets the buff's own family (id = the buff's id)."""
+    from oibot_gm import flows_config as fc
+
+    shared_before = dict(reg.profile.families["leader_of_the_pack"].value)
+    w = fc.AuraWizard(reg, OWNER)
+    w.bid = "moonkin_aura"
+    w.put("family", "own")
+    assert w.target_family() == ("moonkin_aura", {}) and w.target_name() == reg.buff("moonkin_aura").short
+    w.fam_draft["value:spell"] = "2"
+    ch = w.changes()
+    assert [(c["kind"], c["target"]) for c in ch] == [("family", "moonkin_aura"), ("buff", "moonkin_aura")]
+    d = w.described()
+    assert d.lines[0].label.startswith(reg.buff("moonkin_aura").short) and "Leader" not in d.lines[0].label
+    res = run(configops.apply_ops(reg, configops.ops_from_changes(reg, ch), by="Jon", by_id=OWNER))
+    assert not res["refused"], res
+    assert reg.buff("moonkin_aura").family_id == "moonkin_aura" and reg.profile.families["moonkin_aura"].value == {"spell": 2.0}
+    assert reg.profile.families["leader_of_the_pack"].value == shared_before and reg.buff("leader_of_the_pack").family_id == "leader_of_the_pack"
+
+
+def test_plain_text_diff_prints_the_described_structure(reg):
+    """The Discord plain-text confirm (discord_policy.diff_text) prints setup writes as Described.as_discord(): one
+    bullet per write as apply_ops will make it (two fields of one buff = one line), consequences as ⚠; run actions keep
+    their describe() line; a plain-text change that takes 'act' away from the asking channel says so."""
+    from oibot_gm.discord_policy import diff_text
+
+    reg.set_buff_overrides("blood_pact", {"note": "old"}, "Jon")
+    ops = [ConfigOp(op="aura_set", target="blood_pact", field="scope", value="raid"), ConfigOp(op="aura_set", target="blood_pact", field="note", value="tested"),
+           ConfigOp(op="aura_reset")]
+    text = run(diff_text(reg, ops, ["Only the owner can change x"], 4242))
+    short = reg.buff("blood_pact").short
+    assert text.count(f"• **{short}** —") == 1 and "Scope party → **raid**" in text and "Note old → **tested**" in text
+    assert f"⚠ {reg.aura_reset_sentence()}" in text and text.endswith("⛔ Only the owner can change x")
+    reg.config.plain.channels["4242"] = "act"
+    text = run(diff_text(reg, [ConfigOp(op="plain", target="<#4242>", value="ignore")], [], 4242))
+    assert "-# In this channel the bot would ignore @mentions" in text
