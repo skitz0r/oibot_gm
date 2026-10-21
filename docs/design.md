@@ -2302,6 +2302,113 @@ Plain-permissions edit modes on `useOpsSave` (their pages still use the admin tr
 the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
 AuraWizard hub in tests/test_flows_config.py.
 
+### 5.44 Dual interfaces, phase 3 — config edit modes, schedules, comp targets and the officers' box (built 2026-10-20)
+
+Phase 3 rows 6, 8 and 12 of out/dual_interface_design.md §6, on top of §5.43's structured ops path, as the owner decided
+them: D37 (plain-text permissions edited on the web only — untouched here), D40 (**no** "tell the bot" box on the Me page —
+officer pages only), D44 (no DM to a server owner about a superuser's change), D47 (no DM to regulars when a schedule goes),
+D27 (no "ask to be a regular" button — not built). Every page and wizard below writes through configops (ops_from_fields →
+authorize_ops by privilege → apply_ops); no surface calls a registry verb directly.
+
+**Comp targets: one writer, two tiers (RD-03 / RD-12).** `Registry.set_comp_targets(raid_or_run, {slot: {min, max, note} |
+None}, by, rev=)` is the only writer of officer targets: a `_config_verb` on the raid section, every slot validated first
+(`comp_slot`: a role tank/healer/melee/ranged, a class, or Class:Spec; whole numbers; max ≥ min; ≤ the run size; the reason
+≤ COMP_NOTE_MAX = 200), one save_config. Bounds ("at least / at most" the solver seats) stay the owner's (`raid_set`); a target
+outside them is refused with the owner pointer — *"at least 4 healers but the raid allows at most 3 — change the bounds
+first (owner)"* (tank/healer against their own bounds, melee/ranged against dps). `comp_slot_words` names a slot ('Holy
+Paladins'). The `comp_target` / `comp_target_clear` ops now call it (`_comp_entry`: a structured op carries the whole entry
+as JSON; the plain-text grammar '3', '3-5', '-5' + a reason keeps the parts it leaves out from the stored target);
+`coalesce` merges a raid's comp ops into ONE set_comp_targets write (`_merge_key` ("comp", target)); they are PURE_OPS and
+in the raid section (`config:raids:<id>` revs). `ops_from_fields(reg, "comp", raid, {slot: entry | None})` is the typed kind
+(only what differs; null = clear). `describe_ops` labels it "<raid> · Desired comp" with the slot's words, before → after
+("at least 1, at most 2" / "derived") and "Why: …" as a note; it is routine (no review). Surfaces: the **Readiness** page
+(new, officers: GET /api/readiness per raid + `targets`, `bounds`, `rev`, `comp_groups`, icon-ready `missing_buffs`, and the
+`slots` list with words; **Edit targets** → `components/CompTargets.tsx`), the Raids page Rules card's **Desired comp**
+table (the same component; officers edit it, bounds stay owner inputs), `/roster comp` (FLOWS `roster_comp` =
+`flows_config.CompTargetsWizard`: pick the raid → *Set a target for…* role / class / *A particular spec…* → one Form with
+at least (select 0–24), at most (*No upper limit* or 0–23) and why (prose) → each draft checked at once on
+`Registry.preview` (a refusal offers *Fix this*) → **Save targets** = authorize_ops + apply_ops with the raid rev the block
+opened with), `/gm config raid › Group make-up` (the owner's bounds screen now shows both tiers and opens the same
+targets block — `CompTargetsBlock`, mixed into RaidConfigWizard; targets save on their own, not with the raid draft), MCP
+`set_comp_target(raid, slot, min, max, note, clear, preview)` and plain text. `comp_groups` stays plain text only (D48): its
+parity row names /gm change, the web's text path and plain_change. PARITY_PENDING is empty again.
+
+**Schedules (RD-10 / RD-11).** `Registry.schedule_removal_effects(raid, sid, rs=None) -> Effects(name, label, regulars,
+open_runs)` — `lines()` / `sentence()` ("Removes Alt run (Saturdays 8:00 PM). 3 regulars come off it (Ana, Bo, Cy); they
+see a notice on the Me page, nobody is DMed. 1 run already open from it keeps its time and sheet (…).") — is the one
+computation for `op_consequences` (so the review, the plain diff and MCP's preview), the web's removal confirm and the
+wizard. `Registry.schedule_runs_open(raid, sid, rs)` = the live, non-test run dicts a schedule opened (config.rosters ∩ the
+run store's live runs). `configops.schedule_pause_sentence(reg, raid, sid, pause, rs)` is the Pause / Resume sentence
+(op_consequences of a pause uses it too). `rc.rosters_copy(reg, raid, sid, n, rs)` settles the verified behaviour
+(ensure_run copies `rosters` onto a run at open): *"From the next run: the sheet advertises 2 × 10 seats. The run already
+open keeps its 1 × 10."* — shared by the wizard's rosters screen, the editor (schedule_json `rosters_copy` {n: sentence})
+and describe() (`_describe_schedule` appends it as the line's note). `schedule_json` adds `next_if_active` and empties `next`
+while paused, plus `pause_sentence`, `resume_sentence`, `removal_sentence`. The wizard's schedule screen prints *"⏸ Paused
+— would next run <t12> · nothing opens"*, never "Next runs". The Raids page: **Pause / Resume** beside Edit (useConfirm with
+the server's sentence, one field `active` through the schedule translator); the editor sends ONLY the fields that differ
+from the loaded schedule (weights per key) — a Save never re-sends `active: true` over a pause made in Discord; the
+active switch is on new schedules only; the cadence presets (`/api/meta.cadence_presets` = presets.PRESETS) fill the four
+hours; *With these rules* shows the server's preview of the draft (opsApi.preview of the schedule change: describe's
+"after it: … next …" notes from rc.next_runs_preview, or the dry run's refusal). RD-07's reset already listed the dropped
+overrides in its confirm.
+
+**Timezone with live runs.** `Registry.timezone_change_effects(zone, rs=None) -> list[str]`: every open or locked run whose
+clock reading changes keeps its real moment — *"Barrow Deeps Tue 20 Oct 8:00 PM (locked) stays at its real moment (now
+11:00 PM in America/New_York) — cancel and re-open it to move it."*; an unknown zone is a RegistryError. It is a
+CONSEQUENCE_HOOK of `set timezone` (so the Config page's review, the plain diff and MCP's preview print it — the change is
+warn-class already) and the TimezoneWizard's confirm lists it with ⚠. The design's "refuse while locked unless force" and
+"move open runs with the clock" are not built: the sentence says what happens and how to move a run.
+
+**The effective configuration (O-17 / O-19 / O-20).** `configops.config_summary(reg, bot=None, audience="officer") ->
+[SummarySection(key, title, lines)]`: guild (name · version, timezone with "now", owner by name, officer roles, who may ask,
+about), channels (each kind; one the bot can't see any more is marked — only when the gateway answered), raids and
+schedules in words, recruitment (open/closed, questions, `invite_words`: a Discord invite or not, and what the homepage
+does with it; member roles), plain text, test bench (analytics cards paused while puppets exist), and `host`: for the owner
+`host_facts` (OIBOT_SUPERUSERS by name, the provider's spend line against the shared cap, MCP local-only from
+OIBOT_MCP_LOCAL_ONLY / no token, "Settings on disk (.env) changed since the bot started — restart to apply" from the
+.env mtime against `bot.started_at`), for officers "Host facts: owner only.". Mentions stay ids; the web renders names
+(`render`). `summary_text(sections)` flattens it. Surfaces: `/gm config show` = `discord_registry.config_show_embed` (one
+embed field per section, "+N more on the site" past 1024 characters, a link to the Config page), GET `/api/config/summary`
+(officers; owner audience for the owner) → the Config page's **Overview** tab, MCP `config_summary`.
+
+**Settings edit mode (O-14 / O-16 / N-01).** The Config page has tabs: Overview · Settings · Channels · Recruitment and
+more (the raw YAML moved into an "As stored (advanced)" accordion). **Edit settings** opens one draft (timezone, who may ask,
+officer roles, about) and one **Save settings** through `useOpsSave` with the settings rev. The timezone is a searchable
+Select grouped by region from `/api/meta.timezones` (`web/api.py timezone_groups`: the TimezoneWizard's TZ_REGIONS, city
+words; UTC; a legacy current zone under Other) — never a typed IANA name; under it the server's preview of the draft
+(opsApi.preview: rc.timezone_preview rows as notes, timezone_change_effects as consequences). Widening the ask audience
+asks first ("widening this shares the model budget with everyone who may ask"). The about text counts against
+`/api/meta.about_max` (flows_config.ABOUT_MAX) and renders the homepage card as it will look (/api/public's name, icon and
+invite). The page follows `useLive(["config"])`; with a draft open it shows "Someone changed the settings since you opened
+them" and **Reload (keeps your edits)** re-bases the draft per field (untouched fields take the new value). The **News**
+card (Channels tab): the keywords TagsInput saves once on blur / dropdown close (one write per change), *Always matched:*
+chips from GET /api/news `keywords.version` + `keywords.raid`, the channel's status line from the kept items, and **Re-read
+the channel** on POST /api/news/backfill. Raids, Readiness and PlainPermissions follow `useLive(["config"])` with the same
+drafts guard (Auras did since §5.43).
+
+**The officers' box (OFF-20, D40).** `components/TellTheBot.tsx`: one box, two modes. A question → `POST /api/ask` (new,
+`web/api.py`: a thin face of `HelpMixin.help_answer` → help.answer; the snapshot is decided from the viewer — the officer
+view for an officer, the member view for anyone else; `may_act` only for officers, so an officer's request to DO something
+answers `{act: true}`, a member's is answered in words; outside the ask audience `{answer: null, guide: true}`; the LLM off →
+503 "The bot can't read sentences right now — use the controls on this page."; ≤ 1500 characters). `{act: true}` → POST
+/api/ops/change `{text}` → the preview rendered as the Discord diff (`DescribedView`), "preview good for N more min",
+**Apply N changes** / Cancel → the result (per-write lines, or the text apply's ✅ / ⛔ lines; "3 saved, 1 refused"); a 400
+on Apply (expired / restarted token) previews again once, never applies unseen; a 409 on a board says "the board changed
+since your preview — preview again". Its state lives in a module store (`useSyncExternalStore`, keyed guild + scope) so live
+reloads never blank a preview. It sits on the rail of every OFFICER page (App.tsx `officerPage`: a *Tell the bot…* entry
+opening it in a modal) and on each live SheetCard (*Tell the bot about this run*, prefilled with the run's name, scope
+`run:<key>`) — never on Me (tests/test_phase3_setup.py lints Me.tsx and App.tsx).
+
+**Clock rule, enforced on the site.** A frontend lint (`typed_time_fields`) refuses any TextInput / Textarea / raw input
+whose strings name a timezone, a date or a time — the old typed IANA timezone box would fail it (regression test).
+
+Tests: tests/test_phase3_setup.py (the verbs and their refusals, coalesce into one write, privilege, removal effects, rosters
+copy, pause sentence, timezone effects and the review hook, config_summary audiences and host facts, the /gm config show
+embed, /api/meta, /api/config/summary, /api/readiness + a comp Save with a stale rev, /api/raids schedule words, /api/ask for
+a member / an officer / outside the audience / the LLM off, the /roster comp, Group make-up, paused-schedule and timezone
+wizard screens through the harness, the MCP tools end to end, the D40 and typed-field lints); the parity matrix rows for
+comp_target / comp_target_clear / comp_groups.
+
 ## 6. Architecture
 
 ```mermaid

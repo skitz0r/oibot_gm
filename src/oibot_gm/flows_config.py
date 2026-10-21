@@ -224,7 +224,168 @@ def next_runs(reg: Registry, slots: Sequence[str], first_open: datetime | None, 
     return sorted(out)[:n]
 
 
-class RaidConfigWizard(OwnerWizard):
+# ---------------------------------------------------------------- Group make-up: the TARGETS block (design §3.5 RD-03 / RD-12)
+# One screen, two tiers, the same words everywhere: BOUNDS ("at least / at most" the solver seats — the owner's, raid_set,
+# the Group make-up section above) and TARGETS ("we aim for", what readiness measures — officers, comp_target). /gm config
+# raid › Group make-up (owner) opens this block from its comp screen; /roster comp (officers) opens only this block. A Save
+# goes through configops (ops_from_fields "comp" → authorize_ops by privilege → apply_ops = Registry.set_comp_targets, one
+# write) — never the registry verb directly, so the officer/owner split lives in configops.
+
+TARGET_MAX_PICK = 24  # selects hold 25 options: 0…24 (a target past that is a plain-text one)
+
+
+class CompTargetsBlock:
+    """The targets block, mixed into a Wizard that has `reg` and `raid`. `tdraft` = {slot: entry | None} not yet saved;
+    `trev` = the raid section rev when the block opened (a change meanwhile refuses the Save); `targets_back` = where Back
+    goes (the raid wizard's comp screen), None = the block is the whole wizard (/roster comp)."""
+
+    targets_back = None
+
+    def _tinit(self) -> None:
+        if not hasattr(self, "tdraft"):
+            self.tdraft: dict = {}
+            self.trev = self.reg.config_rev(f"raids:{self.raid}")
+
+    def t_current(self) -> dict:
+        from .configops import _comp_current
+
+        cur = _comp_current(self.reg, self.raid)
+        for slot, t in self.tdraft.items():
+            if t is None:
+                cur.pop(slot, None)
+            else:
+                cur[slot] = {k: v for k, v in t.items() if v not in (None, "")}
+        return cur
+
+    def t_size(self) -> int:
+        return int(self.reg.raid_def(self.raid).get("size") or DEFAULT_RAID_SIZE)
+
+    def bounds_line(self) -> str:
+        b = self.reg.role_bounds(self.raid, self.t_size())
+        return "-# Bounds — what the solver seats (the owner's): " + " · ".join(f"{ROLE_WORDS[r]} {b[r]['min']}–{b[r]['max']}" for r in ROLES if r in b)
+
+    async def targets(self, i: discord.Interaction, note: str = "") -> None:
+        from .configops import _target_words
+
+        self._tinit()
+        rd = self.reg.raid_def(self.raid)
+        cur = self.t_current()
+        lines = [note] if note else []
+        lines += [f"**Desired comp** · {rd.get('name', self.raid)} — what readiness aims for; officers set it.", self.bounds_line()]
+        for slot in sorted(cur, key=lambda s: (s not in ("tank", "healer", "melee", "ranged"), s)):
+            t = cur[slot]
+            lines.append(f"• {self.reg.comp_slot_words(slot)}: {_target_words(t)}" + (f" — {t['note']}" if t.get("note") else " — (no reason given)"))
+        if not cur:
+            lines.append("No officer targets: readiness uses the derived ones (the bounds and the buff matrix).")
+        n = len(self.tdraft)
+        lines.append(f"✎ **{n} unsaved change{'' if n == 1 else 's'}** — nothing is saved until Save." if n else "-# Pick a slot to set its target. Nothing is saved until Save.")
+        slots = [Opt(r, self.reg.comp_slot_words(r), "a role") for r in ("tank", "healer", "melee", "ranged")]
+        slots += [Opt(c, self.reg.comp_slot_words(c), "a class") for c in self.reg.profile.classes]
+        slots.append(Opt("__spec", "A particular spec…", "pick the class, then the spec"))
+        items: list = [self.select("Set a target for…", slots[:MAX_OPTIONS], self.t_slot_picked)]
+        if cur:
+            items.append(self.select("Remove a target", [Opt(s, self.reg.comp_slot_words(s), _target_words(cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
+        items.append(self.button("Save targets", self.t_save, discord.ButtonStyle.success, disabled=not n))
+        if n:
+            items.append(self.button("Discard changes", self.t_discard))
+        items.append(self.button("Back", self.targets_back) if self.targets_back else self.button("Cancel", self.cancel))
+        await self.show(i, "\n".join(lines), *items)
+
+    async def t_slot_picked(self, i: discord.Interaction, values: list[str]) -> None:
+        if values[0] == "__spec":
+            from .wizard_opts import classes
+
+            await self.show(i, "Which class?", self.select("Pick a class", classes(self.reg), self.t_class_picked), self.button("Back", self.t_back))
+            return
+        await self.t_form(i, values[0])
+
+    async def t_class_picked(self, i: discord.Interaction, values: list[str]) -> None:
+        from .wizard_opts import specs_of
+
+        cls = values[0]
+
+        async def spec_picked(it: discord.Interaction, vals: list[str]) -> None:
+            await self.t_form(it, f"{cls}:{vals[0]}")
+        await self.show(i, f"Which {cls} spec?", self.select("Pick a spec", specs_of(self.reg, cls), spec_picked), self.button("Back", self.t_back))
+
+    async def t_back(self, i: discord.Interaction) -> None:
+        await self.targets(i)
+
+    async def t_form(self, i: discord.Interaction, slot: str) -> None:
+        from .registry import COMP_NOTE_MAX
+
+        cur = self.t_current().get(slot) or {}
+        top = min(self.t_size(), TARGET_MAX_PICK)
+        lo = int(cur.get("min") or 0)
+        hi = cur.get("max")
+        words = self.reg.comp_slot_words(slot)
+
+        async def submitted(it: discord.Interaction, v: dict[str, str]) -> None:
+            entry = {"min": int(v.get("min") or 0), "max": None if v.get("max") in (None, "", "none") else int(v["max"]), "note": (v.get("note") or "").strip() or None}
+            raid = self.raid
+            try:  # the registry's own rules on a throw-away copy (bounds, max ≥ min, the run size, the reason's cap)
+                self.reg.preview(lambda sh: sh.set_comp_targets(raid, {slot: entry}, "preview"))
+            except RegistryError as e:
+                async def again(ix: discord.Interaction) -> None:
+                    await self.t_form(ix, slot)
+                await self.refuse(it, str(e), again)
+                return
+            self.tdraft[slot] = entry
+            await self.targets(it, f"{words}: {'at least ' + str(entry['min'])}{', at most ' + str(entry['max']) if entry['max'] is not None else ''} — not saved yet.")
+        await self.open_form(i, Form(f"Target · {words}"[:45], [
+            Field("min", "We aim for at least", [Opt(str(n), str(n), default=n == lo) for n in range(0, top + 1)], description="what readiness counts as enough"),
+            Field("max", "And at most", [Opt("none", "No upper limit", default=hi in (None, ""))] + [Opt(str(n), str(n), default=hi not in (None, "") and n == int(hi)) for n in range(0, top)],
+                  description="more than this shows as over"),
+            Field("note", "Why", required=False, default=cur.get("note") or None, max_length=COMP_NOTE_MAX, placeholder="e.g. Windfury for every melee group",
+                  description="shown on the readiness card (optional)"),
+        ], submitted))
+
+    async def t_removed(self, i: discord.Interaction, values: list[str]) -> None:
+        from .configops import _comp_current
+
+        slot = values[0]
+        self._tinit()
+        if self.tdraft.get(slot) is not None and slot not in _comp_current(self.reg, self.raid):
+            self.tdraft.pop(slot)  # a target drafted here and never saved: just drop it
+        else:
+            self.tdraft[slot] = None
+        await self.targets(i, f"{self.reg.comp_slot_words(slot)}: back to the derived target — not saved yet.")
+
+    async def t_discard(self, i: discord.Interaction) -> None:
+        self.tdraft = {}
+        await self.targets(i, "Changes discarded.")
+
+    async def t_save(self, i: discord.Interaction) -> None:
+        from . import configops, discord_registry
+
+        if not self.tdraft:
+            await self.targets(i)
+            return
+        await self.working(i, "Saving…")
+        role = "owner" if self.reg.is_owner_id(i.user.id) else ("officer" if discord_registry.is_officer(i, self.reg) else "member")
+        try:
+            ops = configops.ops_from_fields(self.reg, "comp", self.raid, dict(self.tdraft))
+        except RegistryError as e:
+            await self.refuse(i, str(e), self.t_back, "Back to the targets")
+            return
+        allowed, refused = configops.authorize_ops(self.reg, ops, i.user.id, role=role)
+        res = await configops.apply_ops(self.reg, allowed, by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
+                                        revs={f"{configops.CONFIG_REV}raids:{self.raid}": self.trev})
+        bad = [*refused, *(r["line"] for r in res["results"] if not r["ok"])]
+        if not res["applied"]:
+            self.trev = self.reg.config_rev(f"raids:{self.raid}")
+            await self.refuse(i, "; ".join(bad) or "Nothing was changed.", self.t_back, "Back to the targets")
+            return
+        self.tdraft = {}
+        self.trev = self.reg.config_rev(f"raids:{self.raid}")
+        text = "✅ " + "\n✅ ".join(res["applied"]) + ("".join(f"\n⛔ {b}" for b in bad))
+        if self.targets_back:
+            await self.targets(i, text)
+        else:
+            await self.finish(i, text + "\n-# The Readiness page and the analytics card measure against these now.")
+
+
+class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     def __init__(self, reg: Registry, owner_id: int, raid: str | None = None):
         super().__init__(reg, owner_id, title="Raid rules", guard=_owner_guard(reg))
         self.raid = raid
@@ -232,6 +393,7 @@ class RaidConfigWizard(OwnerWizard):
         self.sid = DEFAULT_SCHEDULE  # the schedule the Schedules section is on
         self._attempt: dict = {}  # values a section refused, prefilled when the person presses Fix this
         self._fo_day0: date = reg.now_local().date()
+        self.targets_back = self.comp  # the Group make-up screen's targets block comes back here (CompTargetsBlock)
 
     # ---- values
     def eff(self) -> dict:
@@ -478,14 +640,18 @@ class RaidConfigWizard(OwnerWizard):
                          + (", ".join(self.reg.slot_label(x) for x in s["slots"]) or "none yet — nothing opens until a raid has one."))
         else:
             lines.append(f"**{s['name']}** · {self.reg.schedule_label(self.raid, s)}")
-        if not s.get("active", True):
-            lines.append("⏸ Paused: nothing opens from it until it is resumed.")
+        paused = not s.get("active", True)
         cad = self.sched_cadence(sid)
         if cad:
             lines.append(cad)
         if s["kind"] != "pickup":
             runs = self.sched_runs(s)
-            lines.append(("Next runs: " + " · ".join(self.reg.local12(t) for t in runs)) if runs else "-# No run comes up yet.")
+            if paused:  # never "Next runs" on a paused schedule: it would contradict the pause (design §3.4 RD-10)
+                lines.append(f"⏸ Paused — would next run {self.reg.local12(runs[0])} · nothing opens" if runs else "⏸ Paused · nothing opens")
+            else:
+                lines.append(("Next runs: " + " · ".join(self.reg.local12(t) for t in runs)) if runs else "-# No run comes up yet.")
+        elif paused:
+            lines.append("⏸ Paused · /raid open doesn't offer it")
         else:
             lines.append("-# A template: `/raid open` offers it, and the run opens at the day and time you pick there.")
         if s["kind"] == "weekly":
@@ -503,7 +669,7 @@ class RaidConfigWizard(OwnerWizard):
     def change_opts(self, s: dict) -> list[Opt]:
         n = int(s.get("rosters") or 1)
         return [Opt("name", "Rename", f"now “{s['name']}”"),
-                Opt("rosters", "Rosters per run", f"{n} now — the sheet advertises {n} × {self.size()} seats"),
+                Opt("rosters", "Rosters per run", f"{n} now — the sheet advertises {n} × {self.size()} seats from the next run"),
                 Opt("cadence", "Cadence", "when its sheet opens, nudges, locks and confirms"),
                 Opt("behaviour", "Behaviour", "nudge, fill, DM on open, split — or the raid's"),
                 Opt("active", "Resume" if not s.get("active", True) else "Pause", "nothing opens from it while paused"),
@@ -516,7 +682,7 @@ class RaidConfigWizard(OwnerWizard):
                                                                          description="what officers and members read, e.g. Main night, Alt run")], self.renamed))
         elif what == "rosters":
             cur = int(self.sched(sid).get("rosters") or 1)
-            opts = [Opt(str(n), f"{n} roster{'s' if n > 1 else ''}", f"{n * self.size()} seats on the sheet", default=n == cur) for n in range(1, MAX_SCHEDULE_ROSTERS + 1)]
+            opts = [Opt(str(n), f"{n} roster{'s' if n > 1 else ''}", f"{n} × {self.size()} seats on the sheet", default=n == cur) for n in range(1, MAX_SCHEDULE_ROSTERS + 1)]
             await self.show(i, f"**{self.sched(sid)['name']}** — how many rosters does a run expect? The sheet advertises that many × {self.size()} seats, "
                                "the health check measures against it, and the lock aims for it (as far as tanks and healers allow).",
                             self.select("Rosters per run", opts, self.rosters_picked), self.button("Back", self._to_sched))
@@ -544,9 +710,11 @@ class RaidConfigWizard(OwnerWizard):
         await self.sched_checked(i, snapshot, self.sid, f"Renamed to {self.sched(self.sid)['name']}.")
 
     async def rosters_picked(self, i: discord.Interaction, values: list[str]) -> None:
+        from .raidcycle import rosters_copy
+
         snapshot, n = dict(self.draft), int(values[0])
         self.entry_put(self.sid, rosters=None if n == 1 else n)
-        await self.sched_checked(i, snapshot, self.sid, f"{n} roster{'s' if n > 1 else ''} per run: the sheet advertises {n * self.size()} seats.")
+        await self.sched_checked(i, snapshot, self.sid, f"{n} roster{'s' if n > 1 else ''} per run. {rosters_copy(self.reg, self.raid, self.sid, n)}")
 
     async def remove_sched(self, i: discord.Interaction) -> None:
         sid, name = self.sid, self.sched(self.sid)["name"]
@@ -782,9 +950,19 @@ class RaidConfigWizard(OwnerWizard):
 
     # ---- Group make-up (min first, then a max that starts at that min: min above max can't be picked)
     async def comp(self, i: discord.Interaction) -> None:
+        from .configops import _comp_current, _target_words
+
         opts = [Opt(r, ROLE_WORDS[r].capitalize(), f"{self.cur(f'{r}_min')}–{self.cur(f'{r}_max')} now") for r in ROLES]
-        await self.show(i, f"**Group make-up** for a {self.size()}-player run: the fewest and the most of each role the solver seats.",
-                        self.select("Pick a role", opts, self.comp_role), self.button("Back to the sections", self.to_hub))
+        targets = _comp_current(self.reg, self.raid)
+        lines = [f"**Group make-up** for a {self.size()}-player run.",
+                 "**Bounds** (the solver; yours): the fewest and the most of each role a run seats — "
+                 + " · ".join(f"{ROLE_WORDS[r]} {self.cur(f'{r}_min')}–{self.cur(f'{r}_max')}" for r in ROLES) + ". Saved with this wizard's Save.",
+                 "**Targets** (readiness; officers): what the guild aims for — "
+                 + ("; ".join(f"{self.reg.comp_slot_words(k)} {_target_words(t)}" for k, t in sorted(targets.items())) or "none of the officers' own, the derived ones apply")
+                 + ". Saved on their own (officers set them with /roster comp too)."]
+        await self.show(i, "\n".join(lines), self.select("Pick a role", opts, self.comp_role),
+                        self.button("Desired comp (targets)…", self.targets, discord.ButtonStyle.primary),
+                        self.button("Back to the sections", self.to_hub))
 
     async def comp_role(self, i: discord.Interaction, values: list[str]) -> None:
         role = values[0]
@@ -1029,6 +1207,44 @@ class RaidConfigWizard(OwnerWizard):
             return
         self.draft = {}
         await self.finish(i, f"✅ Saved **{self.reg.raid_def(self.raid).get('name', self.raid)}**:\n" + "\n".join(diff))
+
+
+class CompTargetsWizard(CompTargetsBlock, OwnerWizard):
+    """/roster comp (officers): only the targets block of the Group make-up screen, for one raid."""
+
+    def __init__(self, reg: Registry, owner_id: int, raid: str | None = None):
+        async def guard(i: discord.Interaction) -> str | None:
+            from . import discord_registry
+
+            return None if discord_registry.is_officer(i, reg) else "Officers only."
+        super().__init__(reg, owner_id, title="Desired comp", guard=guard)
+        self.raid = raid
+
+    async def start(self, i: discord.Interaction) -> None:
+        if self.raid not in self.reg.profile.raids:
+            self.raid = None
+        if self.raid is None and len(self.reg.profile.raids) == 1:
+            self.raid = next(iter(self.reg.profile.raids))
+        if self.raid is None:
+            from .wizard_opts import raids
+
+            async def picked(it: discord.Interaction, values: list[str]) -> None:
+                self.raid = values[0]
+                await self.targets(it)
+            await self.show(i, "Which raid's desired comp?", self.select("Pick a raid", raids(self.reg), picked), self.button("Cancel", self.cancel))
+            return
+        await self.targets(i)
+
+
+@flow("roster_comp")
+async def open_roster_comp(interaction: discord.Interaction, reg: Registry, *, raid: str | None = None, **_seed) -> None:
+    """/roster comp: officers set the comp targets (what readiness aims for). The bounds stay the owner's (/gm config raid)."""
+    from . import discord_registry
+
+    if not discord_registry.is_officer(interaction, reg):
+        await interaction.response.send_message("Officers only (Manage Server or a configured officer role).", ephemeral=True)
+        return
+    await CompTargetsWizard(reg, interaction.user.id, raid).start(interaction)
 
 
 @flow("raid_config")
@@ -1536,6 +1752,7 @@ class TimezoneWizard(OwnerWizard):
             # <t:…:f> stamps so each reader sees the new and the old moment in their own locale (the clock rule)
             lines += [f"• {r['line']} · <t:{int(r['start'].timestamp())}:f> your time" + (f" (was <t:{int(r['was'].timestamp())}:f>)" if r["was"] else "")
                       for r in rc.timezone_preview_rows(self.reg, zone)]
+            lines += [f"⚠ {x}" for x in self.reg.timezone_change_effects(zone, rs=_run_store(i, self.reg))]  # runs already open keep their moment
         except RegistryError as e:
             await self.refuse(i, str(e), self.start, "Pick another")
             return
@@ -1555,6 +1772,15 @@ class TimezoneWizard(OwnerWizard):
                 return
             await self.finish(i, f"✅ Timezone **{zone}** — it's {fmt12(self.reg.now_local())} there.")
         return self.button("Save", save, discord.ButtonStyle.success)
+
+
+def _run_store(i: discord.Interaction, reg: Registry):
+    """The client's run store for this guild (the live runs), or None — the registry then reads it from the store."""
+    raids = getattr(getattr(i, "client", None), "raids", None)
+    try:
+        return raids.store(reg) if raids is not None else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 async def _save_settings(reg: Registry, i: discord.Interaction, fields: dict, rev: str) -> dict:

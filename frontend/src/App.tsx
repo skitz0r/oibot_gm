@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { REFRESH_EVENT } from "./hooks/usePoll";
-import { AppShell, Avatar, Box, Burger, Button, Group, Menu, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
+import { AppShell, Avatar, Box, Burger, Button, Group, Menu, Modal, NavLink, Stack, Text, Title, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList } from "@tabler/icons-react";
+import { IconChartBar, IconCheck, IconSelector, IconSparkles, IconListDetails, IconMountain, IconTable, IconUser, IconUsers, IconRefresh, IconRobot, IconDiamond, IconClipboardList, IconGauge, IconMessageCircle } from "@tabler/icons-react";
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, ApiError, setGuild, takePrevGuild, type GuildChoice, type Meta } from "./api";
 import { NotMember } from "./components/NotMember";
@@ -17,11 +17,14 @@ import { AurasPage } from "./pages/Auras";
 import { AgentsPage } from "./pages/Agents";
 import { LootPage } from "./pages/Loot";
 import { LootLogPage } from "./pages/LootLog";
+import { ReadinessPage } from "./pages/Readiness";
+import { TellTheBot } from "./components/TellTheBot";
 
 const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", label: "Loot log", icon: IconClipboardList }];
 const OFFICER = [
   { to: "/rosters", label: "Rosters", icon: IconTable },
   { to: "/raids", label: "Raids", icon: IconMountain },
+  { to: "/readiness", label: "Readiness", icon: IconGauge },
   { to: "/members", label: "Members", icon: IconUsers },
   { to: "/loot", label: "Loot", icon: IconDiamond },
   { to: "/auras", label: "Auras", icon: IconSparkles },
@@ -80,6 +83,7 @@ export default function App() {
   const mobile = useMediaQuery("(max-width: 48em)");
   const loc = useLocation();
   const [notMember, setNotMember] = useState(false);
+  const [tellOpen, setTellOpen] = useState(false);
   // a first load that failed for another reason (a 503 "Discord didn't answer", the bot restarting, no network): say
   // so and offer Try again, never sit on "Loading…" (K4)
   const [failed, setFailed] = useState<string | null>(null);
@@ -114,6 +118,8 @@ export default function App() {
   if (!meta) return <Box p="xl"><Text c="dimmed">Loading…</Text></Box>;
 
   const officer = (el: React.ReactElement) => (meta.viewer.officer ? el : <Navigate to="/me" replace />);
+  // the Tell the bot box sits on the rail of OFFICER pages only — never on Me (owner decision D40) or the members' Loot log
+  const officerPage = meta.viewer.officer && OFFICER.some((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + "/"));
   const several = meta.guilds.length > 1;
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
     <NavLink key={n.to} component={Link} to={n.to} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7 }} />
@@ -136,6 +142,9 @@ export default function App() {
             {OFFICER.map(link)}
           </Stack>
         )}
+        {officerPage && (
+          <NavLink mt="md" label="Tell the bot…" leftSection={<IconMessageCircle size={18} stroke={1.8} />} onClick={() => setTellOpen(true)} variant="light" color="teal" style={{ borderRadius: 7 }} />
+        )}
         <NavLink mt="auto" label="Refresh" leftSection={<IconRefresh size={18} stroke={1.8} />} onClick={() => window.dispatchEvent(new Event(REFRESH_EVENT))} style={{ borderRadius: 7, color: "var(--mantine-color-dimmed)" }} />
         <Group gap="sm" px="xs" pt="md" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
           <Box style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, #C79C6E, #6F4E2A)" }} />
@@ -147,7 +156,8 @@ export default function App() {
           <Routes>
             <Route path="/me" element={<MePage meta={meta} />} />
             <Route path="/rosters" element={officer(<RostersPage meta={meta} />)} />
-            <Route path="/raids" element={officer(<RaidsPage />)} />
+            <Route path="/raids" element={officer(<RaidsPage meta={meta} />)} />
+            <Route path="/readiness" element={officer(<ReadinessPage meta={meta} />)} />
             <Route path="/members" element={officer(<MembersPage meta={meta} />)} />
             <Route path="/bank" element={<Navigate to="/members" replace />} />
             <Route path="/admin" element={<Navigate to="/members" replace />} />
@@ -161,6 +171,11 @@ export default function App() {
           </Routes>
         </Box>
       </AppShell.Main>
+      {officerPage && (
+        <Modal opened={tellOpen} onClose={() => setTellOpen(false)} title="Ask or tell the bot" size="lg">
+          <TellTheBot scope="rail" guild={meta.guild_key} autoFocus />
+        </Modal>
+      )}
     </AppShell>
   );
 }

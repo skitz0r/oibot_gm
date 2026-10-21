@@ -52,7 +52,11 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_pause": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/pause", "mcp": "pause_autofill"},
     "run_withdraw": {"discord": "flow:raid_suggest", "web": "POST /api/run/{key}/withdraw", "mcp": "withdraw_ask"},
     "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
-    "comp_target": {}, "comp_target_clear": {}, "comp_groups": {},
+    # comp targets (phase 3, RD-12): /roster comp, the Readiness page + the Raids page's Desired comp (typed `comp` changes), MCP;
+    # comp_groups is plain text only on every surface (D48): /gm change, the officer pages' Tell the bot box, plain_change
+    "comp_target": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_comp_target"},
+    "comp_target_clear": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_comp_target"},
+    "comp_groups": {"discord": "slash:gm change", "web": "POST /api/ops/change", "mcp": "plain_change"},
     "pin": {"discord": "flow:raid_set", "web": "POST /api/run/{key}/pin", "mcp": "pin"},
     "policy_append": {"discord": "flow:rule", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},
     "raid_set": {"discord": "flow:raid_config", "web": "POST /api/admin/raid", "mcp": "raid_set"},

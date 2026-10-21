@@ -1,32 +1,39 @@
 import { useRefresh } from "../hooks/usePoll";
-import { useEffect, useState } from "react";
+import { useLive } from "../hooks/useLive";
+import { useEffect, useRef, useState } from "react";
 import { Badge, Box, Button, Card, Group, NumberInput, Select, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 import { IconPencil } from "@tabler/icons-react";
-import { api, type RaidRule, type Raids } from "../api";
+import { api, type CompSlot, type Meta, type RaidRule, type Raids, type Readiness } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
-import { PageTitle, fail, ok } from "../components/Page";
+import { Eyebrow, PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { Schedules } from "../components/ScheduleCard";
+import { CompTargets } from "../components/CompTargets";
 
-export function RaidsPage() {
+export function RaidsPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Raids | null>(null);
+  const [slots, setSlots] = useState<CompSlot[] | null>(null);
+  const editing = useRef(0);  // edit modes open on this page (rules, targets, a schedule editor): live reloads wait for them
+  const onEditing = (on: boolean) => { editing.current = Math.max(0, editing.current + (on ? 1 : -1)); };
   const load = () => api.get<Raids>("/api/raids").then(setData).catch(fail);
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get<Readiness>("/api/readiness").then((r) => setSlots(r.slots)).catch(() => setSlots([])); }, []);
   useRefresh(load);
+  useLive(() => { if (!editing.current) load(); }, ["config"]);  // a change made elsewhere shows — never under a draft (design §2.4)
   if (!data) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">
       <PageTitle title="Raids" intro={`Each raid's rules: cadence (signup opens, lock, confirmation deadline), first opening, lockout, desired comp, and how the solver weighs seats — then its schedules, which say when it runs. Amber marks an override of the game defaults. Times are ${data.tz}.`} />
-      {data.raids.map((r) => <RuleCard key={r.id} r={r} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} onSaved={load} />)}
+      {data.raids.map((r) => <RuleCard key={r.id} r={r} meta={meta} slots={slots} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} onSaved={load} onEditing={onEditing} />)}
     </Stack>
   );
 }
 
 type Draft = { split_policy: string; nudge: boolean; autofill: boolean; open_dm: boolean; confirm: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; fill_ask_hours: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
 
-function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: RaidRule; owner: boolean; weightKeys: string[]; policies: string[]; maxRosters: number; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
+function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onSaved, onEditing }: { r: RaidRule; meta: Meta; slots: CompSlot[] | null; owner: boolean; weightKeys: string[]; policies: string[]; maxRosters: number; onSaved: () => void; onEditing: (on: boolean) => void }) {
+  const [editing, setEditingState] = useState(false);
+  const setEditing = (on: boolean) => { if (on !== editing) onEditing(on); setEditingState(on); };
   const [d, setD] = useState<Draft>(() => toDraft(r));
   const [busy, setBusy] = useState(false);
   const [ask, confirmDialog] = useConfirm();
@@ -47,7 +54,7 @@ function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: 
   const metaLine = [`${r.size}-player`, r.schedules.length ? `${r.schedules.length} schedule${r.schedules.length === 1 ? "" : "s"}` : "no schedules", r.live ? `${r.live} live` : null, r.opened ? `window ${r.window[0]} → ${r.window[1]}` : r.first_open_local ? `opens ${r.window[0]}` : "no opening date set"].filter(Boolean).join(" · ");
 
   return (
-    <Card>
+    <Card id={`raid-${r.id}`} style={{ scrollMarginTop: 16 }}>
       <RaidHeader id={r.id} name={r.name} meta={metaLine} right={owner && !editing ? <Button variant="default" size="sm" leftSection={<IconPencil size={15} />} onClick={() => setEditing(true)}>Edit rules</Button> : null} />
       <Box p="md">
         {!editing ? (
@@ -111,12 +118,19 @@ function RuleCard({ r, owner, weightKeys, policies, maxRosters, onSaved }: { r: 
             </Group>
           </Stack>
         )}
-        {(Object.keys(r.comp_targets).length > 0 || r.comp_groups.length > 0) && (
-          <Text size="xs" c="dimmed" mt="sm">Comp targets: {Object.keys(r.comp_targets).length ? JSON.stringify(r.comp_targets) : "—"} · group layout: {r.comp_groups.join(", ") || "default"} (set in plain text in the analytics channel)</Text>
-        )}
-        {!owner && <Text size="xs" c="dimmed" mt="sm">The owner edits raid rules.</Text>}
+        {/* the Group make-up's second tier (design RD-12): officers' TARGETS — what readiness aims for. The bounds above
+            (tank/healer/dps min–max) stay the owner's; any officer edits this table. */}
+        <Box mt="md">
+          <Eyebrow>Desired comp</Eyebrow>
+          <Box mt={4}>
+            <CompTargets meta={meta} rid={r.id} size={r.size} targets={r.comp_targets} slots={slots} rev={r.rev} editable onSaved={onSaved} onEditing={onEditing}
+              bounds={Object.fromEntries(["tank", "healer", "dps"].filter((role) => r.comp[role]).map((role) => [role, { min: r.comp[role].min ?? 0, max: r.comp[role].max ?? r.size }]))} />
+          </Box>
+          {r.comp_groups.length > 0 && <Text size="xs" c="dimmed" mt={4}>Group layout: {r.comp_groups.join(", ")} (set in plain text in the analytics channel)</Text>}
+        </Box>
+        {!owner && <Text size="xs" c="dimmed" mt="sm">The owner edits raid rules; officers edit the desired comp.</Text>}
       </Box>
-      <Schedules r={r} owner={owner} policies={policies} maxRosters={maxRosters} onSaved={onSaved} />
+      <Schedules r={r} meta={meta} owner={owner} policies={policies} maxRosters={maxRosters} onSaved={onSaved} onEditing={onEditing} />
       {confirmDialog}
     </Card>
   );

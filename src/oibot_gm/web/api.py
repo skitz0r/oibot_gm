@@ -23,7 +23,7 @@ from pydantic import BaseModel, ValidationError
 
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from ..consequences import consequence as consequence_lines, consequences_json
-from ..presets import DURATIONS
+from ..presets import DURATIONS, PRESETS
 from ..registry import ABSENCE_REASON_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
@@ -34,6 +34,10 @@ HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
 STARTED = time.time()  # fallback when the bot has no start stamp
 from ..constants import ROLES  # noqa: E402 — the order role counts are shown in
+from ..registry import COMP_NOTE_MAX  # noqa: E402
+
+ASK_MAX = 1500  # help.answer reads this much of a question
+ASK_DOWN = "The bot can't read sentences right now — use the controls on this page."  # dual interfaces §2.7, LLM down
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -142,6 +146,31 @@ def application_json(reg, a) -> dict:
 
 HISTORY_PAGE = 8  # past runs per raid on the Rosters page; GET /api/runs pages the rest
 from .api_ops import PREVIEW_TTL  # noqa: E402,F401 — the preview tokens live in api_ops (the structured ops path)
+
+
+_TZ_GROUPS: list[dict] | None = None
+
+
+def timezone_groups(current: str | None = None) -> list[dict]:
+    """Every timezone the host knows, grouped by region as the TimezoneWizard groups them — [{group, items: [{value, label}]}]
+    (Mantine's grouped Select data): value = the IANA name the setting stores, label = the city in words. UTC on its own;
+    a current zone outside the regions (a legacy alias) is kept under Other so the select can show it."""
+    global _TZ_GROUPS
+    from ..flows_config import TZ_REGIONS, city_words, tz_cities
+
+    if _TZ_GROUPS is None:
+        _TZ_GROUPS = [{"group": "UTC", "items": [{"value": "UTC", "label": "UTC (no daylight saving)"}]}] + [
+            {"group": r, "items": [{"value": z, "label": city_words(z)} for z in tz_cities(r)]} for r in TZ_REGIONS if tz_cities(r)]
+    known = {i["value"] for g in _TZ_GROUPS for i in g["items"]}
+    if current and current not in known:
+        return [*_TZ_GROUPS, {"group": "Other", "items": [{"value": current, "label": current}]}]
+    return _TZ_GROUPS
+
+
+def about_max() -> int:
+    from ..flows_config import ABOUT_MAX
+
+    return ABOUT_MAX
 
 
 def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_officer=None) -> None:
@@ -439,6 +468,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             "ranks": list(RANKS),
             # the DM toggle's one sentence each way (design B2; inbox.DM_ON/OFF_SENTENCE — /me view and /me dms say the same)
             "dm_sentences": {"on": inbox.DM_ON_SENTENCE, "off": inbox.DM_OFF_SENTENCE},
+            # Settings edit mode (dual interfaces §3.5): the timezone is PICKED from these groups (a searchable select, never a
+            # typed IANA name — the TimezoneWizard's regions), and the about text's cap (flows_config.ABOUT_MAX) for the counter
+            "timezones": timezone_groups(reg.config.timezone), "about_max": about_max(),
+            # the cadence presets the raid wizard offers (presets.PRESETS), for the schedule editor's quick picks
+            "cadence_presets": [{"key": k, "name": n, "signup_lead_hours": o, "nudge_hours_before": nu, "lock_hours_before": lo, "confirm_hours_before": c}
+                                for k, n, o, nu, lo, c in PRESETS],
         }
 
     @app.get("/api/meta")
@@ -696,8 +731,26 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "seats": size * int(s.get("rosters") or 1), "slots": list(s.get("slots") or []), "slot_labels": [reg.slot_label(x) for x in s.get("slots") or []],
                 "days": list(s.get("days") or []), "time": s.get("time") or "", "time_label": reg.time_label(s.get("time")) if s.get("time") else "",
                 "label": reg.schedule_label(rid, s), "own": dict(sd["schedule"]["own"]), "is_default": s["id"] == "default",
-                "effective": {k: sd[k] for k in SCHEDULE_CADENCE},
-                "next": [t12(reg, t) for t in rc.next_runs_of(reg, rid, s)]}
+                "effective": {k: sd[k] for k in SCHEDULE_CADENCE}, **schedule_words(reg, rid, s)}
+
+    def schedule_words(reg, rid: str, s: dict) -> dict:
+        """What the Raids page's schedule row and editor say, from code (dual interfaces §3.4 RD-10, §3.5 RD-11): `next` =
+        the runs that WILL open (empty while paused — never a contradiction), `next_if_active` = the runs it would open,
+        `pause_sentence` / `resume_sentence` (the Pause / Resume confirm), `removal_sentence` (Registry.schedule_removal_effects),
+        `rosters_copy` {n: rc.rosters_copy} for the rosters-per-run select."""
+        from ..configops import schedule_pause_sentence
+
+        rs = bot.raids.store(reg)
+        runs = [t12(reg, t) for t in rc.next_runs_of(reg, rid, s)] if s.get("kind") != "pickup" else []
+        active = bool(s.get("active", True))
+        try:
+            removal = reg.schedule_removal_effects(rid, s["id"], rs).sentence()
+        except RegistryError as e:
+            removal = str(e)
+        return {"next": runs if active else [], "next_if_active": runs,
+                "pause_sentence": schedule_pause_sentence(reg, rid, s["id"], True, rs), "resume_sentence": schedule_pause_sentence(reg, rid, s["id"], False, rs),
+                "removal_sentence": removal,
+                "rosters_copy": {str(n): rc.rosters_copy(reg, rid, s["id"], n, rs) for n in range(1, MAX_SCHEDULE_ROSTERS + 1)}}
 
     def signup_json(s, pins: dict) -> dict:
         return {"uid": str(s.discord_id), "display_name": s.display_name, "character": s.character, "cls": s.cls, "spec": s.spec, "offspec": s.offspec, "role": s.role, "status": s.status,
@@ -954,8 +1007,71 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if raid and raid not in v.reg.profile.raids:
             return JSONResponse({"error": f"unknown raid {raid} (one of {', '.join(v.reg.profile.raids)})"}, status_code=404)
         rs = bot.raids.store(v.reg)
-        rows = await asyncio.to_thread(lambda: [comp.readiness(v.reg, rid, rs) for rid in ids])
-        return {"raids": rows}
+        reg = v.reg
+
+        def one(rid: str) -> dict:
+            # the Readiness page's Edit targets (RD-12): the officers' stored targets, the owner's bounds they must sit inside,
+            # and the raid section rev an edit-mode Save sends back (revs["config:raids:<id>"])
+            size = int(reg.raid_def(rid).get("size") or 20)
+            r = comp.readiness(reg, rid, rs)
+            buffs = {b.id: b for b in reg.profile.buffs}  # the page draws missing buffs as icon-only chips (name in the tooltip)
+            r["missing_buffs"] = [{**x, "abbr": getattr(buffs.get(x["id"]), "abbr", x["name"][:3]), "colour": getattr(buffs.get(x["id"]), "colour", "#888"),
+                                   "art": getattr(buffs.get(x["id"]), "art", None)} for x in r["missing_buffs"]]
+            return {**r, "targets": dict((reg.config.raids.get(rid) or {}).get("comp_targets") or {}),
+                    "bounds": reg.role_bounds(rid, size), "rev": reg.config_rev(f"raids:{rid}"),
+                    "comp_groups": list((reg.config.raids.get(rid) or {}).get("comp_groups") or [])}
+        rows = await asyncio.to_thread(lambda: [one(rid) for rid in ids])
+        slots = [{"value": r, "label": reg.comp_slot_words(r), "kind": "role"} for r in ROLES]
+        for cls, specs in reg.profile.classes.items():
+            slots.append({"value": cls, "label": reg.comp_slot_words(cls), "kind": "class"})
+            slots += [{"value": f"{cls}:{sp}", "label": reg.comp_slot_words(f"{cls}:{sp}"), "kind": "spec"} for sp in specs]
+        return {"raids": rows, "slots": slots, "note_max": COMP_NOTE_MAX}
+
+    @app.get("/api/config/summary")
+    async def config_summary_route(request: Request):
+        """The effective configuration in words (configops.config_summary) — the Config page's Overview tab, /gm config
+        show's fields and MCP config_summary print the same sections. Officers; the owner also gets the Host section.
+        Mentions are rendered as names for the site."""
+        from ..configops import config_summary, render
+
+        v = await who(request, officer=True)
+        audience = "owner" if v.owner else "officer"
+        sections = await asyncio.to_thread(config_summary, v.reg, bot, audience)
+        chans = list(bot.guild_channels(v.reg) or []) if getattr(bot, "guild_channels", None) else []
+        surface = "mcp" if v.via == "mcp" else "web"
+        return {"audience": audience, "sections": [{"key": s.key, "title": s.title, "lines": [render(x, v.reg, surface, chans) for x in s.lines]} for s in sections]}
+
+    @app.post("/api/ask")
+    async def ask_route(request: Request):
+        """TellTheBot's question half (dual interfaces §3.4 OFF-20): a thin face of the help answer (HelpMixin.help_answer →
+        help.answer, the asker's snapshot built by help.py). An officer gets the officer snapshot, anyone else the member one
+        (decided here from the viewer, never by the browser). A message that asks the bot to DO something answers
+        `{act: true}` for an officer (the box then previews it as a change on POST /api/ops/change `text`); outside the ask
+        audience `{answer: null, guide: true}`. The LLM off → 503 with the words the box shows."""
+        from ..configops import GENERIC_ERROR, report_error
+        from ..discord_help import ACT
+
+        v, d = await body(request)
+        q = str(d.get("question") or d.get("text") or "").strip()
+        if not q:
+            return JSONResponse({"error": "Ask something first."}, status_code=400)
+        if len(q) > ASK_MAX:
+            return JSONResponse({"error": f"That's {len(q)} characters; a question holds {ASK_MAX}."}, status_code=400)
+        provider = getattr(getattr(bot, "ctx", None), "provider", None)
+        answer_fn = getattr(bot, "help_answer", None)
+        if provider is None or answer_fn is None:
+            return JSONResponse({"error": ASK_DOWN}, status_code=503)
+        officer = bool(v.officer)
+        try:
+            ans = await answer_fn(v.reg, v.uid, officer, q, may_act=officer, public=False)
+        except Exception as e:  # noqa: BLE001 — never a type name in a reply
+            text = await report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} /api/ask")
+            return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)
+        if ans == ACT:
+            return {"act": True, "answer": None}
+        if ans is None:
+            return {"answer": None, "guide": True, "message": f"Free-form questions here are for {v.reg.config.ask_audience}; /help lists what the bot does."}
+        return {"answer": ans, "officer_view": officer}
 
     def live_event(reg, key: str):
         rs = bot.raids.store(reg)

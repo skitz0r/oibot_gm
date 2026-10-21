@@ -972,6 +972,43 @@ def pool_health_data(reg: "Registry", roster: dict, placed: set[int] | None = No
             "unresponsive": not_on_roster, "unnamed": unnamed, "mains": len(mains), "on_roster": len(on_roster), "alts": len(alts)}
 
 
+COMP_NOTE_MAX = 200  # an officer's reason for a comp target (prose, shown on the readiness card)
+COMP_ROLE_WORDS = {"tank": ("tank", "tanks"), "healer": ("healer", "healers"), "melee": ("melee", "melee"), "ranged": ("ranged", "ranged"), "dps": ("damage dealer", "damage dealers")}
+
+
+def _comp_words(role: str, n: int) -> str:
+    one, many = COMP_ROLE_WORDS.get(role, (role, role))
+    return f"{n} {one if n == 1 else many}"
+
+
+class Effects(BaseModel):
+    """What removing a schedule does beyond the schedule itself (dual interfaces §3.5 RD-11) — ONE computation for the
+    wizard's Review line, the web's confirm, describe_ops' consequences and MCP's preview. `regulars` = the display names
+    who come off it (D30: automatically, a notice and no DM — D47); `open_runs` = the names of the runs already open from
+    it (they keep their time and their sheet)."""
+    name: str
+    label: str = ""
+    regulars: list[str] = Field(default_factory=list)
+    open_runs: list[str] = Field(default_factory=list)
+
+    def lines(self) -> list[str]:
+        out = []
+        n = len(self.regulars)
+        if n:
+            out.append(f"{n} regular{'s' if n != 1 else ''} come{'' if n != 1 else 's'} off it ({join_words(self.regulars)}); "
+                       "they see a notice on the Me page, nobody is DMed.")
+        k = len(self.open_runs)
+        if k:
+            out.append(f"{k} run{'s' if k != 1 else ''} already open from it keep{'' if k != 1 else 's'} {'their' if k != 1 else 'its'} "
+                       f"time and sheet ({join_words(self.open_runs)}).")
+        else:
+            out.append("No run from it is open right now.")
+        return out
+
+    def sentence(self) -> str:
+        return f"Removes {self.name}" + (f" ({self.label})" if self.label else "") + ". " + " ".join(self.lines())
+
+
 class Registry:
     # set by discord_registry.Guilds for every guild it serves: True while the process serves several, so a DM or a card
     # names its guild (design §5.32); with one guild every message reads exactly as before
@@ -1181,6 +1218,45 @@ class Registry:
         if t.tzinfo is None:
             t = t.replace(tzinfo=self.tz)
         return fmt12(t.astimezone(self.tz), fmt)  # THE 12-hour formatter (constants.fmt12) in the guild's zone
+
+    def _live_runs(self, rs=None) -> list:
+        """The guild's live runs (open or locked) from `rs` (a raidcycle.RaidStore), else read from the store."""
+        if rs is None:
+            from .raidcycle import RaidStore
+
+            rs = RaidStore(self.store, self.key)
+        return list(rs.live())
+
+    def timezone_change_effects(self, zone: str, rs=None) -> list[str]:
+        """What moving the guild to `zone` does to the runs already open or locked (dual interfaces §3.5 "Settings edit
+        mode"): a run keeps its real moment (its key and sheet were made from the old wall clock), so each run whose
+        clock reading changes is named with its new reading — one sentence per run, from code, for the TimezoneWizard's
+        confirm, the Config page's review and MCP's preview. Empty when the zone is the current one or nothing is live.
+        A zone that doesn't exist raises RegistryError."""
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        from .constants import fmt12
+
+        zone = str(zone or "").strip()
+        try:
+            z = ZoneInfo(zone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise RegistryError(f"{zone or '(empty)'} isn't a timezone; pick one from the list") from None
+        if zone == self.config.timezone:
+            return []
+        out = []
+        for ev in self._live_runs(rs):
+            try:
+                start = datetime.fromisoformat(ev.starts_at)
+            except ValueError:
+                continue
+            old, new = start.astimezone(self.tz), start.astimezone(z)
+            if old.replace(tzinfo=None) == new.replace(tzinfo=None):
+                continue  # the same reading on both clocks (same offset at that moment)
+            name = self.raid_def(ev.instance).get("name", ev.instance) if ev.instance in self.profile.raids else ev.instance
+            state = " (locked)" if ev.state == "locked" else ""
+            out.append(f"{name} {fmt12(old)}{state} stays at its real moment (now {fmt12(new)} in {zone}) — cancel and re-open it to move it.")
+        return out
 
     def load_config(self) -> GuildConfig:
         p = self.store.root / self.key / "guild.yaml"
@@ -2095,6 +2171,28 @@ class Registry:
         out = [(m, c) for m in self.members.values() for c in m.characters if key in c.rosters]
         return sorted(out, key=lambda mc: mc[0].display_name.lower())
 
+    def schedule_runs_open(self, instance: str, sid: str, rs=None) -> list[dict]:
+        """The run dicts (config.rosters) of the live runs a schedule opened — test runs left out. `rs` = the run store
+        that says which runs are still live (read from the store when not given)."""
+        sid = str(sid or "").strip().lower() or DEFAULT_SCHEDULE
+        live = {ev.team for ev in self._live_runs(rs)}
+        return [t for t in self.config.rosters if t.get("instance") == instance and str(t.get("schedule_id") or DEFAULT_SCHEDULE) == sid
+                and not t.get("test") and t.get("key") in live]
+
+    def schedule_removal_effects(self, instance: str, sid: str, rs=None) -> Effects:
+        """Effects(regulars, open_runs) of removing a raid's schedule — what remove_schedule will do, computed before it
+        does it, in code (see Effects). Unknown raid or schedule → RegistryError (the verb's own words)."""
+        if instance not in self.profile.raids:
+            raise RegistryError(f"unknown raid {instance}; known: {', '.join(self.profile.raids)}")
+        sid = str(sid or "").strip().lower()
+        s = next((x for x in self.schedules(instance) if x["id"] == sid), None)
+        if s is None:
+            rd = self.raid_def(instance)
+            raise RegistryError(f"{rd.get('name', instance)} has no schedule {sid or '?'} (it has {', '.join(x['id'] for x in schedules_of(rd)) or 'none'})")
+        regs = sorted({m.display_name for m, _c in self.schedule_regulars(instance, sid)}, key=str.lower)
+        runs = [str(t.get("name") or t.get("key")) for t in self.schedule_runs_open(instance, sid, rs)]
+        return Effects(name=s.get("name") or sid, label=self.schedule_label(instance, s), regulars=regs, open_runs=runs)
+
     @_config_verb(_raid_section)
     def remove_schedule(self, instance: str, sid: str, by: str) -> str:
         """Drop one schedule. `default` is the raid's own run times: removing it clears the raid's slots. Runs already
@@ -2169,6 +2267,91 @@ class Registry:
             raise
         self.save_config(message or f"raid {instance}: {', '.join(fields)} (by {by})")
         return lines
+
+    def comp_slot(self, slot: str) -> str:
+        """A comp target's slot as stored: a role (tank, healer, melee, ranged), a class ('Paladin') or a spec
+        ('Paladin:Holy'); anything else → RegistryError."""
+        slot = str(slot or "").strip()
+        if slot in ROLES:
+            return slot
+        cls, _, spec = slot.partition(":")
+        if cls not in self.profile.classes or (spec and spec not in self.profile.classes[cls]):
+            raise RegistryError(f"unknown comp slot '{slot}' (a role, a class or Class:Spec)")
+        return slot
+
+    def comp_slot_words(self, slot: str) -> str:
+        """A slot in words: 'healer' → 'Healers', 'Paladin' → 'Paladins', 'Paladin:Holy' → 'Holy Paladins'."""
+        if slot in ROLES:
+            return COMP_ROLE_WORDS[slot][1].capitalize()
+        cls, _, spec = slot.partition(":")
+        return f"{spec} {cls}s" if spec else f"{cls}s"
+
+    @_config_verb(_raid_section)
+    def set_comp_targets(self, raid: str, targets: dict, by: str) -> list[str]:
+        """Officers' comp TARGETS ("we aim for", what readiness measures — dual interfaces §3.3 Cluster C, RD-12) for a
+        raid (its runs inherit them) or one run (its key): {slot: {min, max, note} | None} — None removes the target so
+        the derived value applies again; a target is the whole entry (min, an optional max, an optional reason).
+        Bounds ("at least / at most" the solver seats) stay the owner's (raid_set); a target outside them is refused
+        with the owner pointer. Every slot is validated before anything changes; one save_config, one commit."""
+        key = str(raid or "").strip()
+        run = self.config.roster(key)
+        if run is None and key not in self.profile.raids:
+            raise RegistryError(f"no raid or run {key or '?'}")
+        instance = (run or {}).get("instance") or key
+        size = int((run or {}).get("size") or self.raid_def(instance).get("size") or DEFAULT_RAID_SIZE)
+        bounds = self.role_bounds(instance, size)
+        holder = run if run is not None else (self.config.raids.get(key) or {})
+        cur = {k: dict(v) for k, v in (holder.get("comp_targets") or {}).items()}
+        lines = []
+        for raw, t in (targets or {}).items():
+            slot = self.comp_slot(raw)
+            words = self.comp_slot_words(slot)
+            if t is None:
+                if slot in cur:
+                    cur.pop(slot)
+                    lines.append(f"{words}: back to the derived target")
+                continue
+            if not isinstance(t, dict):
+                raise RegistryError(f"{words}: a target is {{min, max, note}}")
+            try:
+                lo = int(t.get("min") or 0)
+                hi = None if t.get("max") in (None, "") else int(t["max"])
+            except (TypeError, ValueError):
+                raise RegistryError(f"{words}: at least / at most are whole numbers") from None
+            note = str(t.get("note") or "").strip() or None
+            if lo < 0 or (hi is not None and hi < 0):
+                raise RegistryError(f"{words}: a target can't be negative")
+            if hi is not None and hi < lo:
+                raise RegistryError(f"{words}: at most {hi} is below at least {lo}")
+            if lo > size:
+                raise RegistryError(f"{words}: at least {lo} but a run seats {size}")
+            role = slot if slot in ("tank", "healer") else ("dps" if slot in ("melee", "ranged") else None)
+            if role and role in bounds:
+                b = bounds[role]
+                if lo > int(b["max"]):
+                    raise RegistryError(f"at least {_comp_words(slot, lo)} but the raid allows at most {int(b['max'])} — change the bounds first (owner)")
+                if hi is not None and slot == role and hi < int(b["min"]):
+                    raise RegistryError(f"at most {_comp_words(slot, hi)} but the raid seats at least {int(b['min'])} — change the bounds first (owner)")
+            if note and len(note) > COMP_NOTE_MAX:
+                raise RegistryError(f"{words}: the reason holds {COMP_NOTE_MAX} characters ({len(note)} given)")
+            entry = {"min": lo, **({"max": hi} if hi is not None else {}), **({"note": note} if note else {})}
+            if cur.get(slot) == entry:
+                continue
+            cur[slot] = entry
+            lines.append(f"{words}: at least {lo}" + (f", at most {hi}" if hi is not None else "") + (f" ({note})" if note else ""))
+        if not lines:
+            return []
+        if run is None:
+            holder = self.config.raids.setdefault(key, {})
+        if cur:
+            holder["comp_targets"] = cur
+        else:
+            holder.pop("comp_targets", None)
+            if run is None and not holder:
+                self.config.raids.pop(key, None)
+        name = (run or {}).get("name") or self.raid_def(instance).get("name", instance)
+        self.save_config(f"{key} comp targets: {'; '.join(lines)} (by {by})"[:400])
+        return [f"{name} · {ln}" for ln in lines]
 
     def _check_raid(self, instance: str) -> None:
         """The cross-field rules, on the merged result (profile → guild override → defaults), never on one field at a

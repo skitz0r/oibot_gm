@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from pathlib import Path
 from collections.abc import Callable
 from typing import Literal, Optional
 
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from .llm.provider import Provider
 from .constants import ROLES
 from .loot_ops import SCHEMA as LOOT_SCHEMA
-from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError
+from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError, join_words
 
 log = logging.getLogger(__name__)
 
@@ -445,9 +446,9 @@ BY_DESIGN_EXEMPT: dict[str, dict[str, str]] = {
 # ops a surface is still missing from, with the plan that adds it — temporary, unlike BY_DESIGN_EXEMPT; the parity test
 # accepts these too but lists them apart, so the gap is written down rather than silent
 PARITY_PENDING: dict[str, dict[str, str]] = {
-    "comp_target": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page (Registry.set_comp_targets)", "mcp": "phase 3: set_comp_target"},
-    "comp_target_clear": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
-    "comp_groups": {"discord": "phase 3: /roster comp", "web": "phase 3: the Readiness page", "mcp": "phase 3: set_comp_target"},
+    # (phase 3 closed the comp-target rows: /roster comp, the Readiness page / Raids page's Desired comp through
+    # POST /api/ops/change `comp` changes, MCP set_comp_target — Registry.set_comp_targets underneath. comp_groups stays
+    # plain text only on every surface — D48 — so its row names the plain-text paths.)
 }
 # features that live on ONE surface by design (§2.1) and are not ops at all — written down so the parity test can refuse a
 # second editor appearing elsewhere, and so the reason is read, not remembered. {feature: {surface, path, reason}}; `path`
@@ -888,6 +889,8 @@ def _merge_key(op: ConfigOp):
         return (op.op, op.target.strip().lower())
     if op.op == "plain":
         return ("plain",)
+    if op.op in ("comp_target", "comp_target_clear") and op.target:
+        return ("comp", op.target.strip())  # one raid's (or run's) targets: one Registry.set_comp_targets write
     if op.op == "recruit" and (op.field or "").strip().lower() in RECRUIT_MERGE:
         return ("recruit",)
     return None
@@ -922,6 +925,9 @@ def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) 
         return "; ".join(reg.set_family_overrides(op.target or "", _family_fields(op.parts), by, rev=rev))
     if op.op == "plain":
         return reg.set_plain_policy(reg.merge_plain_policy(_plain_merged(reg, op.parts)), by, rev=rev)
+    if op.op in ("comp_target", "comp_target_clear"):
+        targets = {reg.comp_slot(p.field or p.path or ""): _comp_entry(reg, p) for p in op.parts}
+        return "; ".join(reg.set_comp_targets(op.target or "", targets, by, rev=rev)) or "the targets already read that — nothing changed"
     if op.op == "recruit":
         kw: dict = {}
         for p in op.parts:
@@ -1158,6 +1164,34 @@ def _range(value: str | None) -> tuple[int | None, int | None]:
     return (int(lo) if lo.isdigit() else None), (int(hi) if hi.isdigit() else None)
 
 
+def _comp_current(reg: Registry, key: str) -> dict:
+    """The comp targets stored for a run (its key) or a raid (its id): {slot: {min, max?, note?}}."""
+    holder = reg.config.roster(key) or reg.config.raids.get(key) or {}
+    return dict(holder.get("comp_targets") or {})
+
+
+def _comp_entry(reg: Registry, op: ConfigOp) -> dict | None:
+    """A comp_target op as the whole entry Registry.set_comp_targets takes (None = clear): a structured op carries it as
+    JSON ({min, max, note} — ops_from_fields); a plain-text op carries 'min', 'min-max' or '-max' and a reason, and the
+    parts it leaves out keep the stored target's."""
+    if op.op == "comp_target_clear":
+        return None
+    v = _typed(op.value)
+    if isinstance(v, dict):
+        return {"min": v.get("min") or 0, "max": v.get("max"), "note": v.get("note")}
+    cur = _comp_current(reg, _key(reg, op)).get((op.field or op.path or "").strip()) or {}
+    lo, hi = _range(op.value)
+    return {"min": lo if lo is not None else cur.get("min", 0), "max": hi if hi is not None else cur.get("max"),
+            "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
+
+
+def _target_words(t: dict | None) -> str:
+    """A target in words: 'at least 2, at most 3' / 'at least 1' / 'derived' (no officer target)."""
+    if not t:
+        return "derived"
+    return f"at least {t.get('min', 0)}" + (f", at most {t['max']}" if t.get("max") not in (None, "") else "")
+
+
 def _clear_word(value: str | None) -> bool:
     """A channel setting's 'clear it' values: none, clear, off, or empty."""
     return (value or "").strip().lower() in ("", "none", "clear", "off", "unset", "nowhere", "-")
@@ -1243,7 +1277,7 @@ PLAN_REV = "plan:"  # board_revs key prefix for a run's plan fingerprint (never 
 CONFIG_REV = "config:"  # … and for a config section's fingerprint (Registry.config_rev; design §2.4)
 _SECTION_OF = {"set": "settings", "role_add": "settings", "role_remove": "settings", "recruit": "recruitment", "plain": "plain",
                "aura_set": "buffs", "family_set": "buffs", "aura_reset": "buffs"}
-_RAID_SECTION_OPS = {"raid_set", "raid_reset", "schedule_set", "schedule_remove"}
+_RAID_SECTION_OPS = {"raid_set", "raid_reset", "schedule_set", "schedule_remove", "comp_target", "comp_target_clear"}
 
 
 def config_section(op: ConfigOp) -> str | None:
@@ -1974,14 +2008,10 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             return f"{op.op} {op.target or '?'} {op.field or ''}: {e}"
     if op.op in ("comp_target", "comp_target_clear"):
         key = _key(reg, op)
-        slot = op.field or op.path or ""
-        cur = ((cfg.roster(key) or cfg.raids.get(key) or {}).get("comp_targets") or {}).get(slot)
-        cur_s = (f"{cur.get('min', '?')}" + (f"–{cur['max']}" if cur.get("max") is not None else "")) if cur else "derived"
-        if op.op == "comp_target_clear":
-            return f"{key} comp {slot}: {cur_s} → derived"
-        lo, hi = _range(op.value)
-        new_s = f"{lo if lo is not None else (cur or {}).get('min', '?')}" + (f"–{hi}" if hi is not None else "")
-        return f"{key} comp {slot}: {cur_s} → {new_s}" + (f" ({op.reason or op.text})" if (op.reason or op.text) else "")
+        slot = (op.field or op.path or "").strip()
+        cur = _comp_current(reg, key).get(slot)
+        new = _comp_entry(reg, op)
+        return f"{key} comp {slot}: {_target_words(cur)} → {_target_words(new)}" + (f" ({new['note']})" if new and new.get("note") else "")
     if op.op in RUN_OPS or op.op in ("character", "absence_clear", "dm", "regular", "test"):
         try:
             return _describe_action(reg, op, channel)
@@ -2015,6 +2045,14 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
         return f"{name}: new schedule {sid} — {new}{after}"
     own = reg.schedule_def(rid, sid)["schedule"]["own"]
     now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name") else cur.get(f) for f in fields}
+    if "rosters" in fields and not after:  # the rosters-per-run sentence (rc.rosters_copy): the next run, never the open one
+        from . import raidcycle as rc
+        from .registry import schedule_value
+
+        try:
+            after = " — " + rc.rosters_copy(reg, rid, sid, int(schedule_value("rosters", fields["rosters"]) or 1))
+        except (RegistryError, TypeError, ValueError):
+            pass
     return f"{name} · {cur['name']}: {_schedule_words(reg, rid, {k: v for k, v in now.items() if v is not None}) or 'not set'} → {new}{after}"
 
 
@@ -2356,31 +2394,11 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
             t.pop("comp_groups", None)
         reg.save_config(f"{key} group layout → {labels or 'default'} (by {by})")
         return f"{key}: groups = {', '.join(labels) if labels else 'default layout'}"
-    if op.op in ("comp_target", "comp_target_clear"):
+    if op.op in ("comp_target", "comp_target_clear"):  # THE verb: Registry.set_comp_targets (one write; bounds stay the owner's)
         key = _key(reg, op)
-        t = cfg.roster(key)
-        if t is None and key in reg.profile.raids:
-            t = cfg.raids.setdefault(key, {})  # targets for the raid itself (its runs inherit them)
-        if t is None:
-            raise RegistryError(f"no raid or run {key}")
-        slot = (op.field or op.path or "").strip()
-        if slot not in ROLES:
-            cls, _, spec = slot.partition(":")
-            if cls not in reg.profile.classes or (spec and spec not in reg.profile.classes[cls]):
-                raise RegistryError(f"unknown comp slot '{slot}' (role, Class or Class:Spec)")
-        targets = t.setdefault("comp_targets", {})
-        if op.op == "comp_target_clear":
-            targets.pop(slot, None)
-            reg.save_config(f"{key} comp target {slot} cleared (by {by})")
-            return f"{key}: {slot} back to derived"
-        cur = targets.get(slot, {})
-        lo, hi = _range(op.value)
-        entry = {"min": lo if lo is not None else cur.get("min", 0), "max": hi if hi is not None else cur.get("max"), "note": (op.reason or op.text or cur.get("note") or "").strip() or None}
-        if entry["max"] is not None and entry["max"] < entry["min"]:
-            raise RegistryError(f"{slot}: max {entry['max']} below min {entry['min']}")
-        targets[slot] = {k: v for k, v in entry.items() if v is not None}
-        reg.save_config(f"{key} comp target {slot} → {targets[slot]} (by {by})")
-        return f"{key}: {slot} = {entry['min']}" + (f"–{entry['max']}" if entry["max"] is not None else "")
+        slot = reg.comp_slot(op.field or op.path or "")
+        lines = reg.set_comp_targets(key, {slot: _comp_entry(reg, op)}, by, rev=rev)
+        return "; ".join(lines) or f"{reg.comp_slot_words(slot)}: already {_target_words(_comp_current(reg, key).get(slot))} — nothing changed"
     if op.op in ("policy_append", "policy"):
         from . import policy as policy_mod
 
@@ -2955,34 +2973,149 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
 
 # ---------------------------------------------------------------- /gm config show (words, never raw YAML)
 
-def config_summary(reg: Registry) -> list[str]:
-    """The effective configuration as a person reads it (the clock rule: Registry.local12 and schedule words, never
-    the stored 'Tue 19:30' or ISO; channels and roles as mentions, which Discord renders by name). Officer-facing —
-    the owner's host facts stay on the site's Config page. One line per item, under Discord's 2000 characters."""
+class SummarySection(BaseModel):
+    """One section of the effective configuration (config_summary): `key` (guild | channels | raids | recruitment | plain |
+    test_bench | host), a title a person reads, and its lines in words (mentions kept as <#id> / <@&id> / <@id> — Discord
+    renders them by name, `render()` turns them into names for the web and MCP)."""
+    key: str
+    title: str
+    lines: list[str] = Field(default_factory=list)
+
+
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+SUMMARY_AUDIENCES = ("owner", "officer")
+
+
+def _person(reg: Registry, bot, uid: int | None) -> str:
+    """A person by name when the registry or the bot knows them, else a mention (Discord renders it)."""
+    if not uid:
+        return "nobody"
+    m = reg.members.get(int(uid))
+    if m is not None:
+        return m.display_name
+    get_user = getattr(bot, "get_user", None) if bot is not None else None
+    try:
+        u = get_user(int(uid)) if get_user else None
+    except Exception:  # noqa: BLE001
+        u = None
+    return getattr(u, "display_name", None) or getattr(u, "name", None) or f"<@{uid}>"
+
+
+def invite_words(url: str | None) -> str:
+    """The recruitment invite in words, with what the homepage does with it (the shape is checked; the bot doesn't call
+    Discord for it here)."""
+    if not url:
+        return "Invite link: none — the homepage shows no Join button (/gm config recruitment makes one)."
+    u = url.strip()
+    if re.match(r"^https://(discord\.gg|(www\.)?discord(app)?\.com/invite)/[A-Za-z0-9-]+/?$", u):
+        return f"Invite link: {u} — the homepage's Join our Discord button opens it."
+    return f"Invite link: {u} — not a Discord invite link, so the Join button may not work; make one with /gm config recruitment."
+
+
+def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[SummarySection]:
+    """The effective configuration as a person reads it (dual interfaces §2.5, §3.5 O-17), in sections — `/gm config show`
+    (one embed field per section), the Config page's Overview tab (GET /api/config/summary) and MCP config_summary print
+    the same words. The clock rule: Registry.local12 and schedule words, never the stored 'Tue 19:30' or ISO. Channels and
+    roles stay mentions (Discord renders names; render() names them for the web); people by name when known. `bot` (the
+    running client) adds what only it knows — channels it can no longer see, the LLM spend, when it started — and degrades
+    to ids without it. `audience` = owner | officer: the owner also gets the Host section (superusers by name, spend vs
+    cap, MCP local-only, a .env changed since the start); officers read "Host facts: owner only."."""
     from .discord_pool import CHANNEL_KINDS
 
     cfg = reg.config
-    now = reg.now_local()
-    lines = [f"**{cfg.name}** · {reg.profile.label} · {cfg.timezone} (now {reg.local12(now)})",
-             f"Owner: <@{cfg.owner_discord_id}>" + (" · officer roles: " + ", ".join(f"<@&{r}>" for r in cfg.officer_role_ids) if cfg.officer_role_ids else " · no officer role set (Manage Server counts)")]
-    chans = [f"{kind}: <#{getattr(cfg, attr)}>" for kind, attr in CHANNEL_KINDS.items() if getattr(cfg, attr, None)]
-    unset = [kind for kind, attr in CHANNEL_KINDS.items() if not getattr(cfg, attr, None)]
-    lines.append("Channels — " + (", ".join(chans) or "none set") + (f" · not set: {', '.join(unset)}" if unset else ""))
+    out: list[SummarySection] = []
+    roles = ", ".join(f"<@&{r}>" for r in cfg.officer_role_ids) or "none set (Manage Server counts)"
+    guild = [f"{cfg.name} · {reg.profile.label}",
+             f"Timezone: {cfg.timezone} (now {reg.local12(reg.now_local())})",
+             f"Owner: {_person(reg, bot, cfg.owner_discord_id)}",
+             f"Officer roles: {roles}",
+             f"Who may ask the bot questions: {cfg.ask_audience}"]
+    if cfg.about:
+        guild.append(f"About: {cfg.about[:200]}{'…' if len(cfg.about) > 200 else ''}")
+    out.append(SummarySection(key="guild", title="Guild", lines=guild))
+    seen: set[str] | None = None
+    if bot is not None and getattr(bot, "guild_channels", None) is not None:
+        try:
+            chans = bot.guild_channels(reg) or []
+            seen = {str(c.get("id")) for c in chans} if chans else None  # an empty list = no gateway: unknown, not "missing"
+        except Exception:  # noqa: BLE001
+            seen = None
+    chan_lines = []
+    for kind, attr in CHANNEL_KINDS.items():
+        cid = getattr(cfg, attr, None)
+        label = SETTING_WORDS.get(attr.removesuffix("_id"), kind.capitalize() + " channel")
+        if not cid:
+            chan_lines.append(f"{label}: not set")
+        elif seen is not None and str(cid) not in seen:
+            chan_lines.append(f"{label}: <#{cid}> — not a channel the bot can see any more")
+        else:
+            chan_lines.append(f"{label}: <#{cid}>")
+    out.append(SummarySection(key="channels", title="Channels", lines=chan_lines))
+    raid_lines = []
     for rid in reg.profile.raids:
         rd = reg.raid_def(rid)
         scheds = reg.schedules(rid)
-        words = "; ".join(f"{s['name']}: {reg.schedule_label(rid, s)}" + ("" if s.get("active", True) else " (paused)") for s in scheds) or "no schedule"
-        lines.append(f"**{rd.get('name', rid)}** ({rd.get('size')}) — {words} · opens {_hours_words(rd.get('signup_lead_hours'))} before, locks {_hours_words(rd.get('lock_hours_before'))} before, "
-                     f"confirm by {_hours_words(rd.get('confirm_hours_before'))} before · autofill {'on' if rd.get('autofill', True) else 'off'}")
+        words = "; ".join(f"{s['name']}: {reg.schedule_label(rid, s)}" for s in scheds) or "no schedule — nothing opens on its own"
+        raid_lines.append(f"{rd.get('name', rid)} ({rd.get('size')}) — {words} · opens {_hours_words(rd.get('signup_lead_hours'))} before, "
+                          f"locks {_hours_words(rd.get('lock_hours_before'))} before, confirm by {_hours_words(rd.get('confirm_hours_before'))} before · "
+                          f"autofill {'on' if rd.get('autofill', True) else 'off'}")
+    out.append(SummarySection(key="raids", title="Raids and schedules", lines=raid_lines or ["No raids in the game profile."]))
     rec = cfg.recruitment
-    lines.append(f"Recruitment: {'open' if rec.open else 'closed'}" + (f" — {rec.note}" if getattr(rec, 'note', None) else "") + (f" · {len(rec.questions)} question(s)" if rec.questions else "")
-                 + (" · invite link set" if getattr(rec, "invite_url", None) else ""))
-    lines.append(f"Plain text: DMs {reg.plain_mode(None)} · elsewhere {cfg.plain.default} by default" + (f" · {len(cfg.plain.channels)} channel(s) set" if cfg.plain.channels else "")
-                 + f" · questions from: {cfg.ask_audience}")
-    if cfg.about:
-        lines.append(f"About: {cfg.about[:200]}")
-    lines.append("-# Everything here is on the site's Config page; `/gm config …` changes it.")
+    rec_lines = [f"Applications: {'open' if rec.open else 'closed'}" + (f" — {rec.note}" if getattr(rec, "note", None) else ""),
+                 f"{len(rec.questions)} question{'s' if len(rec.questions) != 1 else ''} of the guild's own" if rec.questions else "No questions of the guild's own",
+                 invite_words(cfg.invite_url)]
+    if cfg.member_role_ids:
+        rec_lines.append("Member roles (register without applying): " + ", ".join(f"<@&{r}>" for r in cfg.member_role_ids))
+    out.append(SummarySection(key="recruitment", title="Recruitment", lines=rec_lines))
+    out.append(SummarySection(key="plain", title="Plain text", lines=[
+        f"In DMs: {reg.plain_mode(None)} · elsewhere: {cfg.plain.default} by default" + (f" · {len(cfg.plain.channels)} channel(s) set" if cfg.plain.channels else ""),
+        "The whole policy is on the site's Ops page (Plain-text permissions)."]))
+    puppets = reg.test_members()
+    if puppets:
+        tests = [t for t in cfg.rosters if t.get("test")]
+        bench = [f"{len(puppets)} test member{'s' if len(puppets) != 1 else ''} · {len(tests)} test run{'s' if len(tests) != 1 else ''}",
+                 "The analytics cards are paused while test members exist — /gm test clear ends the rehearsal."]
+    else:
+        bench = ["Idle: no test members."]
+    out.append(SummarySection(key="test_bench", title="Test bench", lines=bench))
+    if audience == "owner":
+        out.append(SummarySection(key="host", title="Host", lines=host_facts(reg, bot)))
+    else:
+        out.append(SummarySection(key="host", title="Host", lines=["Host facts: owner only."]))
+    return out
+
+
+def host_facts(reg: Registry, bot=None) -> list[str]:
+    """What the guild's owner must know about the host they share (design §3.5 O-19/O-20, owner only): who can act as
+    them (the host superusers, by name), the LLM spend against the shared cap, whether the MCP owner token works only on
+    the host, and a .env edited since the bot started (restart to apply)."""
+    import os
+
+    from .registry import superusers
+
+    supers = sorted(superusers())
+    lines = [("Host superusers (they can act as the owner of every guild here): " + ", ".join(_person(reg, bot, u) for u in supers))
+             if supers else "No host superusers: only you act as this guild's owner."]
+    provider = getattr(getattr(bot, "ctx", None), "provider", None) if bot is not None else None
+    lines.append(f"Claude: {provider.summary()} (one cap shared by every guild on this host)" if provider is not None else "Claude: off (no API key on the host)")
+    local = (os.environ.get("OIBOT_MCP_LOCAL_ONLY") or "1").strip().lower() not in ("0", "false", "no", "off")
+    if os.environ.get("OIBOT_MCP_TOKEN"):
+        lines.append("MCP: the owner token works only on the host (local only)" if local else "MCP: the owner token also works through the tunnel (OIBOT_MCP_LOCAL_ONLY is off)")
+    else:
+        lines.append("MCP: not set up on this host (no token)")
+    started = float(getattr(bot, "started_at", 0) or 0) if bot is not None else 0.0
+    try:
+        changed = started and ENV_FILE.exists() and ENV_FILE.stat().st_mtime > started
+    except OSError:
+        changed = False
+    if changed:
+        lines.append("Settings on disk (.env) changed since the bot started — restart to apply.")
     return lines
+
+
+def summary_text(sections: list[SummarySection]) -> str:
+    """The sections as plain lines (a title line, then its lines) — help's snapshot and MCP read this."""
+    return "\n".join(f"{s.title}: " + " · ".join(s.lines) for s in sections)
 
 
 def _hours_words(h) -> str:
@@ -3002,7 +3135,7 @@ def _hours_words(h) -> str:
 # coalesce → apply_ops (one write per raid / schedule / buff / family, a batch in one commit, one audit line). Ceremony
 # follows consequence: a batch with a WARN_OPS op or a consequence line is reviewed first; anything else saves directly.
 
-STRUCTURED_KINDS = ("settings", "raid", "raid_reset", "schedule", "schedule_remove", "buff", "family", "aura_reset", "recruitment", "plain")
+STRUCTURED_KINDS = ("settings", "raid", "raid_reset", "schedule", "schedule_remove", "buff", "family", "aura_reset", "recruitment", "plain", "comp")
 SETTINGS_FIELDS = ("timezone", "ask_audience", "about", "news_keywords", "loot_log")  # + officer_roles (whole list) + channel:<kind>
 RAID_FORM_FIELDS = ("lockout_days", "duration_hours", "notes", "split_policy")
 AURA_VALUE_WORDS = {"all": "Everyone", "physical": "Physical damage", "spell": "Spell damage", "mana": "Mana users", "melee": "Melee",
@@ -3216,6 +3349,24 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
         if bad:
             raise RegistryError(f"unknown plain-text setting {bad[0]} (groups, channels, set_channels, dm, default)")
         return ops
+    if k == "comp":  # officers' comp targets: target = a raid id (or a run key); fields = {slot: {min, max, note} | null}
+        key = (target or "").strip()
+        cur = _comp_current(reg, key)
+        for slot, t in fields.items():
+            slot = reg.comp_slot(slot)
+            if t is None:
+                if slot in cur:
+                    ops.append(ConfigOp(op="comp_target_clear", target=key, field=slot))
+                continue
+            if not isinstance(t, dict):
+                raise RegistryError(f"{reg.comp_slot_words(slot)}: a target is {{min, max, note}} (null removes it)")
+            entry = {"min": t.get("min") if t.get("min") not in (None, "") else 0, "max": t.get("max") if t.get("max") not in (None, "") else None,
+                     "note": str(t.get("note") or "").strip() or None}
+            have = cur.get(slot) or {}
+            if have and {"min": have.get("min", 0), "max": have.get("max"), "note": have.get("note")} == entry:
+                continue  # unchanged: no write
+            ops.append(ConfigOp(op="comp_target", target=key, field=slot, value=_json(entry), reason=entry["note"]))
+        return ops
     raise RegistryError(f"unknown kind {kind!r} (one of {', '.join(STRUCTURED_KINDS)})")
 
 
@@ -3424,6 +3575,36 @@ def is_warn(reg: Registry, op: ConfigOp) -> bool:
 CONSEQUENCE_HOOKS: list[Callable[[Registry, ConfigOp], list[str]]] = []
 
 
+def schedule_pause_sentence(reg: Registry, rid: str, sid: str, pause: bool, rs=None) -> str:
+    """Pausing (or resuming) a schedule in one sentence (dual interfaces §3.4 RD-10) — the Raids page's Pause / Resume
+    confirm (schedule_json), the review of a Save that pauses, the wizard and MCP's preview."""
+    s = next((x for x in reg.schedules(rid) if x["id"] == sid), None) if rid in reg.profile.raids else None
+    name = (s or {}).get("name") or sid
+    if not pause:
+        from . import raidcycle as rc
+
+        nxt = rc.next_runs_of(reg, rid, s, n=1) if s and s.get("kind") != "pickup" else []
+        return f"{name} opens its sheets again on its cadence" + (f" — next run {reg.local12(nxt[0])}." if nxt else ".")
+    try:
+        runs = [str(t.get("name") or t.get("key")) for t in reg.schedule_runs_open(rid, sid, rs)]
+    except Exception:  # noqa: BLE001 — the sentence without the run names is still true
+        runs = []
+    held = (f"; {join_words(runs)} {'is' if len(runs) == 1 else 'are'} already open and keep{'s' if len(runs) == 1 else ''} "
+            f"{'its' if len(runs) == 1 else 'their'} sheet") if runs else "; a run already open keeps its sheet"
+    return f"Nothing new opens from {name}{held}. Regulars stay."
+
+
+def _timezone_consequences(reg: Registry, op: ConfigOp) -> list[str]:
+    """A timezone change with runs already open or locked: each run whose clock reading moves, in the words of
+    Registry.timezone_change_effects (the TimezoneWizard, the Config page's review and MCP's preview print them)."""
+    if op.op == "set" and op.path == "timezone" and (op.value or "").strip() and op.value.strip() != reg.config.timezone:
+        return reg.timezone_change_effects(op.value.strip())
+    return []
+
+
+CONSEQUENCE_HOOKS.append(_timezone_consequences)
+
+
 def aura_reset_one_sentence(reg: Registry, target: str) -> str:
     """What resetting ONE buff or family drops (Registry.clear_aura_overrides(bid)) — the same words on the AuraWizard's
     decide screen, the Auras page's review and MCP's preview."""
@@ -3446,15 +3627,10 @@ def op_consequences(reg: Registry, op: ConfigOp) -> list[str]:
     out: list[str] = []
     try:
         if op.op == "schedule_remove" and op.target in reg.profile.raids:
-            sid = (op.field or op.value or "").strip().lower()
-            held = sorted({m.display_name for m, _c in reg.schedule_regulars(op.target, sid)})
-            if held:
-                out.append(f"{len(held)} regular{'s' if len(held) != 1 else ''} come off it ({', '.join(held)}); they see a notice, nobody is DMed.")
-            out.append("Runs already open from it keep their times.")
+            out += reg.schedule_removal_effects(op.target, (op.field or op.value or "").strip().lower()).lines()
         elif op.op == "schedule_set" and _warn_schedule(reg, op):
             sid, _ = _schedule_ref(op)
-            s = next((x for x in reg.schedules(op.target) if x["id"] == sid), None)
-            out.append(f"Nothing new opens from {s['name'] if s else sid}; a run already open keeps its sheet. Regulars stay.")
+            out.append(schedule_pause_sentence(reg, op.target or "", sid, True))
         elif op.op == "aura_reset" and not (op.target or "").strip():
             out.append(reg.aura_reset_sentence())
         elif op.op == "aura_reset":
@@ -3710,6 +3886,14 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
             f = (op.field or "").strip()
             _l, before, after, notes = _split_line(text)
             return name, DescribedPart(label=_cap(f.replace("_", " ")), before=before, after=after if after is not None else text), notes
+        if op.op in ("comp_target", "comp_target_clear"):
+            key = _key(reg, op)
+            run = reg.config.roster(key)
+            name = (run or {}).get("name") or (reg.raid_def(key).get("name", key) if key in reg.profile.raids else key)
+            slot = reg.comp_slot(op.field or op.path or "")
+            new = _comp_entry(reg, op)
+            return f"{name} · Desired comp", DescribedPart(label=reg.comp_slot_words(slot), before=_target_words(_comp_current(reg, key).get(slot)),
+                                                           after=_target_words(new)), ([f"Why: {new['note']}"] if new and new.get("note") else [])
         if op.op in ("recruit", "plain"):
             text = describe(reg, op, PLAIN_WEB)
             label, before, after, notes = _split_line(text)
@@ -3743,7 +3927,8 @@ def _op_error(sh: Registry, op: ConfigOp) -> str | None:
 
 # the registry-only config writes: applied in a worker thread, in one commit, under config_lock (no Discord side effect;
 # a channel setting with a bot goes through SetupMixin.set_channel on the loop instead)
-PURE_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "schedule_set", "schedule_remove", "aura_set", "family_set", "aura_reset", "plain", "recruit"}
+PURE_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "schedule_set", "schedule_remove", "aura_set", "family_set", "aura_reset", "plain", "recruit",
+            "comp_target", "comp_target_clear"}
 
 
 def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None = None, channel=PLAIN_WEB) -> Described:
