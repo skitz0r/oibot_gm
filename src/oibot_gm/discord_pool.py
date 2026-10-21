@@ -364,6 +364,43 @@ CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_
                  "loot": "loot_channel_id"}  # loot: the public award log (one line per confirmed award; LootLogMixin)
 
 
+PLAIN_MODE_WORDS = {"act": "Acts", "self": "Own record only", "answer": "Answers only", "ignore": "Ignored"}
+
+
+def plain_why(reg: Registry, channel) -> str:
+    """Why plain text has its mode in a channel: listed on the site | the ops / analytics channel (acts unless listed) |
+    the default for other channels | DMs."""
+    if channel is None:
+        return "the DMs setting"
+    cid = str(channel)
+    if cid in reg.config.plain.channels:
+        return "listed"
+    if cid == str(reg.config.ops_channel_id):
+        return "the ops channel acts unless listed"
+    if cid == str(reg.config.analytics_channel_id):
+        return "the analytics channel acts unless listed"
+    return "the default for other channels"
+
+
+def plain_read_text(reg: Registry, table: dict, here) -> str:
+    """/gm config plain (owner and officers): where you are first — 'Here (#raids): Answers only — the default for other
+    channels' (a DM: the DMs line) —, then who may change what, then the other listed channels. A read view (D37): the
+    site's Ops page edits it."""
+    name = (table.get("names") or {}).get(str(here)) if here is not None else None
+    where = "Here (DMs)" if here is None else (f"Here (#{name})" if name else f"Here (<#{here}>)")
+    mode = reg.plain_mode(here)
+    lines = [f"**{where}: {PLAIN_MODE_WORDS.get(mode, mode)}** — {plain_why(reg, here)}", "", "**Who may change what**"]
+    lines += [f"• {g['label']}: {g['who']}" for g in table["groups"]]
+    lines += ["", "**Where**", f"• DMs to the bot: {PLAIN_MODE_WORDS.get(table['dm'], table['dm'])}",
+              f"• Any other channel: {PLAIN_MODE_WORDS.get(table['default'], table['default'])}"]
+    for c in table["channels"]:
+        if str(c["id"]) != str(here):
+            label = "#" + c["name"] if c["name"] else "<#" + str(c["id"]) + ">"
+            lines.append(f"• {label}: {PLAIN_MODE_WORDS.get(c['mode'], c['mode'])} — {c['why']}")
+    lines += ["• The site and MCP: Acts (not configurable)", "", "-# The owner edits this on the site (Ops › Plain-text permissions). Refusals say who may and where."]
+    return "\n".join(lines)
+
+
 class SetupMixin:
     async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, *, via: str = "discord", by_id: int | None = None) -> str:
         """THE channel-setting verb (/gm config <kind>-channel, the Config page, plain text, MCP): sets the id and does what
@@ -436,6 +473,23 @@ class SetupMixin:
     def guild_roles(self, reg: Registry) -> list[str]:
         g = self.get_guild(reg.config.discord_guild_id)
         return [r.name for r in sorted(g.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if g else []
+
+    def plain_table(self, reg: Registry) -> dict:
+        """The plain-text permissions in words (D37: Discord READS them, the site edits): who may change what (the
+        groups, role names resolved against the live guild), where plain text acts (DMs, other channels, every listed
+        channel plus the ops / analytics channels that act unless listed) and why each mode holds. It needs the guild's
+        roles and channel names, so it lives on the client, not on Registry. /gm config plain renders it."""
+        from .registry import PLAIN_GROUPS
+
+        cfg = reg.config
+        g = self.get_guild(cfg.discord_guild_id)
+        if g is not None:
+            reg.cache_roles(g)
+        names = {c["id"]: c["name"] for c in self.guild_channels(reg)}
+        groups = [{"id": gid, "label": label, "who": reg.plain_who_text(gid)} for gid, (label, _default, _ex) in PLAIN_GROUPS.items()]
+        ids = list(cfg.plain.channels) + [str(c) for c in (cfg.ops_channel_id, cfg.analytics_channel_id) if c and str(c) not in cfg.plain.channels]
+        channels = [{"id": cid, "name": names.get(cid), "mode": reg.plain_mode(cid), "why": plain_why(reg, cid)} for cid in dict.fromkeys(ids)]
+        return {"groups": groups, "channels": channels, "dm": cfg.plain.dm, "default": cfg.plain.default, "names": names}
 
     # ---- the test bench (dual interfaces phase 2, B9): the verbs every surface calls — /gm test seed|run|answer|compose|
     # comp|clear (flows_misc, flows_test), plain text's `test …` (configops.apply_async), the site's Test bench

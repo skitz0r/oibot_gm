@@ -543,6 +543,6 @@ def test_handle_change_and_apply(g):
         log.clear()
         req = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="raid_set", target="barrow_deeps", field="notes", value="x")])
         await handle_change(it, reg, None, None, Feed(), "x", bot=it.client, channel=GENERAL_CH, req=req)
-        assert log == [("followup", "⛔ Only the owner can change raids & auras.", {"ephemeral": True})]
+        assert log == [("followup", "⛔ Only the owner can change raids & auras.\n-# `/gm config plain` shows the whole policy.", {"ephemeral": True})]
 
     asyncio.run(go())

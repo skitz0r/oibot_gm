@@ -128,12 +128,13 @@ def test_news_consequence_and_decision_refusal(reg):
     add_news(reg)
     ps = news.ProposalStore(reg.store, reg.key)
     p = ps.create(reg, proposal_data())
-    assert news.consequence(p, reg, "approved") == ["Approved: the apply job makes this guild setting within 15 minutes — no restart."]
+    line = news.consequence(p, reg, "approved")[0]
+    assert line.startswith("Approved: the apply job carries it out at its next run") and "no restart: " in line and "3 → 7" in line, line
     assert news.consequence(p, reg, "dismissed")[0].startswith("Dismissed: nothing changes")
     assert news.decision_refusal(reg.store, reg, p.id, "approved", 5) is None
     assert "no proposal" in news.decision_refusal(reg.store, reg, "000000-dead", "approved", 5)
     ps.move(p.id, "approved", "Kessa", officer=True, job=False, by_id=5)
-    assert news.decision_refusal(reg.store, reg, p.id, "approved", 5) == f"{p.id} is approved: it can't become approved"
+    assert news.decision_refusal(reg.store, reg, p.id, "approved", 5).startswith("already approved by Kessa"), "a repeat names the first decider (§3.4 X2)"
     q = ps.get(p.id)
     assert news.consequence(q, reg, "dismissed")[0] == "This withdraws the approval before the job picks it up."
     dev = ps.create(reg, proposal_data(kind="needs_developer"))

@@ -50,6 +50,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 export const api = {
   get: <T>(path: string) => call<T>("GET", path),
   post: <T>(path: string, body?: unknown) => call<T>("POST", path, body),
+  put: <T>(path: string, body?: unknown) => call<T>("PUT", path, body),  // the Policy page's Save draft (PUT /api/policy/{doc})
 };
 
 // ---- shapes (mirror src/oibot_gm/web/api.py)
@@ -210,17 +211,49 @@ export interface LaunchdState { loaded: boolean; state: string | null; pid: numb
 export interface AgentJob {
   job: string; name: string; label: string; state: "idle" | "running" | "failed"; light: "green" | "amber" | "red"; step: string | null; run_id: string | null;
   result: string | null; started_label: string; finished_label: string; next_label: string; schedule: string; launchd: LaunchdState;
+  started?: string | null; finished?: string | null;
+  /** running for another server's proposal (several guilds): the page says so instead of naming it */
+  elsewhere?: boolean;
+  /** not installed with launchd: the exact shell line that installs it */
+  install?: string | null;
 }
+/** D33's raid guard for one guild (GET /api/guilds, GET /api/agents) */
+export interface GuildBusy { raiding: boolean; until: string | null; until_label: string; why: string }
+export interface McpCard { configured: boolean; local_only: boolean; last_used: string | null; last_used_label: string; config_file: boolean }
+export interface LlmUsage { spent: number; cap: number; by_guild: { key: string; name: string; spent: number }[]; unattributed: number; shared: boolean }
 export interface AgentRunRow { id: string; job: string; started: string; started_label: string; outcome: string }
-export interface Agents { jobs: AgentJob[]; bot: LaunchdState; runs: AgentRunRow[]; owner: boolean; waiting: number; approved: number }
+export interface Agents {
+  jobs: AgentJob[]; bot: LaunchdState; runs: AgentRunRow[]; owner: boolean; waiting: number; approved: number; guild?: string;
+  apply_mode?: { mode: "main" | "pr" | "unknown"; source: string | null }; busy?: GuildBusy; ops_channel?: boolean; install_line?: string;
+  /** owner only (host facts) */
+  mcp?: McpCard; llm?: LlmUsage | null;
+}
 export interface AgentStep { kind: "runner" | "start" | "text" | "tool" | "result"; title: string; detail?: string | null; result?: string | null; ok: boolean | null; level?: string; tool?: string }
 export interface AgentRun { id: string; live: boolean; outcome: string; steps: AgentStep[] }
 export interface NewsItem { url: string; title: string; description: string; posted_at: string; posted_label: string; ingested_label: string; matched: string[] }
 export interface Proposal {
   id: string; title: string; news: string[]; affects: string; kind: "guild_setting" | "profile" | "needs_developer"; change: string; edit: Record<string, unknown>;
   evidence: string; confidence: string; state: string; created_label: string; decided_by: string | null; decided_label: string; commit: string | null; note: string | null;
-  history: { state: string; by: string; at_label: string; note: string | null }[];
+  /** state null = the apply job's annotation ("waiting: …"), not a move */
+  history: { state: string | null; by: string; at_label: string; note: string | null; annotation?: boolean }[];
+  /** the apply job's current "waiting: …" line */
+  status_note?: string | null;
+  /** the decide screen's words for each verdict still open (news.consequence — the page never composes them) */
+  consequence?: { approved?: string[]; dismissed?: string[] };
+  owner_only?: boolean; shared_with?: string[];
 }
+
+// ---- the Policy page (mirror policy.policy_state / web/api_policy.py)
+export interface PolicyDoc {
+  doc: "loot" | "comp" | "persona"; text: string; compiled: boolean; summary: string | null; items: string[]; applied_text: string | null;
+  compiled_at: string | null; compiled_label: string; confirmed_by: string | null; differs: boolean; legacy: boolean;
+  pending: boolean; pending_by: string | null; pending_at: string; pending_compiled: boolean; pending_reading: string | null; pending_compiled_label: string;
+  modal_max: number;
+}
+// ---- the Help page (GET /api/manual)
+export interface ManualSection { id: string; title: string; tier: "officers" | "owner" | null; body: string }
+export interface ManualCommand { path: string; description: string; who: "member" | "officer" | "owner" }
+export interface Manual { sections: ManualSection[]; commands: ManualCommand[]; tier: "member" | "officer" | "owner" }
 export interface Me {
   display_name: string; registered: boolean; must_apply?: boolean; characters: Character[]; roles: { primary: string | null; flex: string[] };
   absences: Absence[]; dm: boolean; sheets: MySheet[]; asks: MyAsk[]; notices?: Notice[]; regulars?: MyRegular[];

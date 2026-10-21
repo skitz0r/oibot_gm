@@ -111,7 +111,7 @@ def main(argv: list[str] | None = None, api_factory=None, run_claude=None) -> in
 
     from oibot_gm.mcp_server import Api, ToolError
 
-    make = api_factory or (lambda guild=None: Api(guild=guild))
+    make = api_factory or (lambda guild=None: Api(guild=guild, job=JOB))  # X-Oibot-Job: review on the script's own calls
     started = agents.iso()
     agents.write_status(JOB, state="running", started=started, finished=None, pid=os.getpid(), step="Listing the guilds", result=None)
     try:

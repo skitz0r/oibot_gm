@@ -547,7 +547,7 @@ def test_help_in_a_dm_when_the_picker_runs_out_answers_once(duo, monkeypatch):
 
     from oibot_gm.discord_help import register_help_commands
 
-    monkeypatch.setattr(guild_picker.choose_guild, "__defaults__", (guild_picker.PROMPT, 0.05))
+    monkeypatch.setattr(guild_picker.choose_guild, "__defaults__", (guild_picker.PROMPT, 0.05, None))
     client = discord.Client(intents=discord.Intents.none())
     tree = app_commands.CommandTree(client)
     register_help_commands(tree, duo.guilds, None, None)
@@ -590,18 +590,24 @@ def test_an_error_with_no_guild_never_claims_the_owner_was_told(duo):
     assert i.said == ["Something went wrong; it has been logged."]
 
 
-def test_a_guild_that_ignores_dms_is_never_offered_and_all_ignoring_is_silence(duo):
-    """The DM picker counts only the guilds that answer DMs (plain-text policy dm != ignore): one of two ignoring → the
-    other, no question; both ignoring → silence, for members and strangers alike (no Join-links reply)."""
+def test_a_guild_that_ignores_dms_is_listed_marked_and_never_silent(duo, monkeypatch):
+    """D41 (replacing "never offered, all ignoring is silence"): the DM picker lists EVERY guild the person belongs to, a
+    guild whose plain-text policy ignores DMs marked "(plain text off here)"; picking it answers once "DMs are off for
+    <server>; /gm change works" and nothing is parsed. A stranger still gets the Join links."""
     bot = dm_bot(duo)
-    bot.dm_guild = functools.partial(OibotGM.dm_guild, bot)
-    out = []
+    out, asked = [], []
+
+    async def pick(target, regs, prompt=guild_picker.PROMPT, timeout=0, marks=None):
+        asked.append(([r.key for r in regs], dict(marks or {})))
+        return duo.a, None  # the person presses the marked one
+    monkeypatch.setattr(guild_picker, "choose_guild", pick)
     msg = types.SimpleNamespace(author=types.SimpleNamespace(id=PUPPET), reply=lambda text, **kw: _rec(out, text))
     duo.a.config.plain.dm = "ignore"
-    assert run(OibotGM.dm_guild(bot, msg)) is duo.b and out == [], "only duo answers DMs: no picker"
-    duo.b.config.plain.dm = "ignore"
-    assert run(OibotGM.dm_guild(bot, msg)) is None and out == [], "nobody answers DMs: no picker leading nowhere"
+    assert run(OibotGM.dm_guild(bot, msg)) is None
+    assert asked == [([duo.a.key, duo.b.key], {duo.a.key: guild_picker.OFF_MARK})], "both listed, the ignoring one marked"
+    assert out == ["DMs are off for **Demo Guild**; `/gm change` works."], "never silent"
+    v = guild_picker.GuildPicker(duo.guilds.ordered(), 1, {duo.a.key: guild_picker.OFF_MARK})
+    assert [b.label for b in v.children] == ["Demo Guild (plain text off here)", "Duo Guild"]
     stranger = dm_bot(duo, members={})
-    assert run(OibotGM.dm_guild(stranger, msg)) is None and out == [], "and no Join-links reply either"
-    duo.b.config.plain.dm = "self"
+    out.clear()
     assert run(OibotGM.dm_guild(stranger, msg)) is None and len(out) == 1 and "not in any server" in out[0]

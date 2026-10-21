@@ -15,6 +15,7 @@ from .registry import Registry, RegistryError
 from .wizard_flows import FLOWS
 
 from .constants import TEAL  # noqa: E402
+from .raid_views import guild_prefix  # noqa: E402 — "**Guild** · " when the bot serves several (§2.9)
 
 log = logging.getLogger(__name__)
 
@@ -90,11 +91,22 @@ class PendingView(discord.ui.View):
         WebhookMessage with .edit, an InteractionCallbackResponse with .resource), or an edit coroutine function."""
         edit = sent if callable(sent) and not hasattr(sent, "edit") else getattr(sent, "edit", None) or getattr(getattr(sent, "resource", None), "edit", None)
         self.editor = edit
+        from . import pending_views
+
+        msg = sent if hasattr(sent, "channel") and hasattr(sent, "id") else getattr(sent, "resource", None)
+        owner = getattr(sent, "__self__", None)  # interaction.edit_original_response: the ephemeral reply, by its interaction
+        if msg is not None and getattr(getattr(msg, "channel", None), "id", None) and not getattr(getattr(msg, "flags", None), "ephemeral", False):
+            pending_views.track(f"pv:{self.token}", channel_id=msg.channel.id, message_id=msg.id)
+        elif owner is not None:
+            pending_views.track_interaction(f"pv:{self.token}", owner)
         return self
 
     async def expire(self, text: str = EXPIRED) -> None:
         """Buttons off, the text says to say it again. Called by on_timeout; safe to call twice."""
+        from . import pending_views
+
         PENDING_CONFIRMS.pop(self.token, None)
+        pending_views.untrack(f"pv:{self.token}")
         if self.editor is None:
             return
         try:
@@ -111,6 +123,10 @@ class PendingView(discord.ui.View):
             await interaction.response.send_message(EXPIRED, ephemeral=True)
             return
         await getattr(self, f"press_{action}")(interaction)
+        if self.is_finished():
+            from . import pending_views
+
+            pending_views.untrack(f"pv:{self.token}")
 
 
 def _register(view: PendingView) -> None:
@@ -140,7 +156,9 @@ class CompileConfirmView(PendingView):
     async def _stale(self, interaction: discord.Interaction) -> bool:
         if self.ps.read(self.doc) == self.text:
             return False
-        await interaction.response.edit_message(content=f"The {self.doc} policy changed since this reading — nothing done. Compile it again "
+        held = self.ps.load_pending(self.doc)
+        who = f" ({policy_mod.waiting_words(held, self.reg.local12)})" if held and held.get("by") else ""
+        await interaction.response.edit_message(content=f"The {self.doc} policy changed since this reading{who} — nothing done. Compile it again "
                                                         f"(`/gm policy reload`, or ask me to) and confirm that reading.", embed=None, view=None)
         self.stop()
         return True
@@ -148,8 +166,8 @@ class CompileConfirmView(PendingView):
     async def press_confirm(self, interaction: discord.Interaction):
         if await self._stale(interaction):
             return
-        self.ps.confirm(self.doc, self.compiled, interaction.user.display_name)
-        policy_mod.PENDING.pop((self.ps.key, self.doc), None)  # the text now has a live reading: nothing left pending
+        self.ps.confirm(self.doc, self.compiled, interaction.user.display_name, self.text)  # the pending edit on disk goes in the same commit
+        policy_mod.PENDING.pop((self.ps.key, self.doc), None)
         await interaction.response.edit_message(content=f"✅ {self.doc} policy is live with this reading.", embed=None, view=None)
         await self.ops.emit(self.reg.config, "info", f"{interaction.user.display_name} confirmed the compiled {self.doc} policy ({configops.compiled_count(self.compiled)} items)")
         self.stop()
@@ -157,10 +175,13 @@ class CompileConfirmView(PendingView):
     async def press_discard(self, interaction: discord.Interaction):
         if await self._stale(interaction):
             return
-        held = policy_mod.PENDING.pop((self.ps.key, self.doc), None)
+        held = self.ps.load_pending(self.doc)
+        policy_mod.PENDING.pop((self.ps.key, self.doc), None)
         previous = held["previous"] if held else self.previous
         if self.ps.read(self.doc) != previous:
-            self.ps.revert(self.doc, previous, interaction.user.display_name)
+            self.ps.revert(self.doc, previous, interaction.user.display_name)  # drops the pending file too
+        elif held is not None:
+            policy_mod.discard_pending(self.ps, self.doc, interaction.user.display_name)
         await interaction.response.edit_message(content=f"Edit to {self.doc} discarded; previous text restored.", embed=None, view=None)
         self.stop()
 
@@ -181,9 +202,8 @@ async def compile_and_confirm(interaction: discord.Interaction, reg: Registry, p
     """/gm policy edit|reload and /gm rule after their write (policy.begin_edit): compile the doc's current text as the
     pending reading (policy.compile_pending, off the loop) and show it with Confirm / Discard."""
     send = interaction.followup.send if followup or interaction.response.is_done() else interaction.response.send_message
-    if doc == "persona" or provider is None:
-        note = "Persona saved (no compile step)." if doc == "persona" else "Saved. No LLM available to compile; run `/gm policy reload` when it is."
-        await send(note, ephemeral=True)
+    if provider is None and doc != "persona":  # the persona's reading is its own text: no model needed
+        await send("Saved as a draft. No LLM available to compile; run `/gm policy reload` when it is.", ephemeral=True)
         return
     try:
         await asyncio.to_thread(policy_mod.compile_pending, ps, doc, provider)
@@ -205,16 +225,29 @@ async def pending_reading(send, reg: Registry, ps: policy_mod.PolicyStore, doc: 
 
 
 class PolicyEditModal(discord.ui.Modal):
-    text = discord.ui.TextInput(label="Document", style=discord.TextStyle.paragraph, max_length=4000, required=True)
+    """/gm policy edit. A document that fits Discord's 4000-character box is edited whole (prefilled); a longer one is
+    NEVER prefilled truncated — the box becomes append-only ("the full text is on the site") and what is typed is added
+    at the end, so a save can't cut the document."""
+
+    text = discord.ui.TextInput(label="Document", style=discord.TextStyle.paragraph, max_length=policy_mod.MODAL_MAX, required=True)
 
     def __init__(self, reg: Registry, ps: policy_mod.PolicyStore, doc: str, provider, ops: Ops):
-        super().__init__(title=f"Edit {doc} policy"[:45])
+        current = ps.read(doc)
+        self.append_only = len(current) > policy_mod.MODAL_MAX
+        super().__init__(title=(f"Add to the {doc} policy" if self.append_only else f"Edit {doc} policy")[:45])
         self.reg, self.ps, self.doc, self.provider, self.ops = reg, ps, doc, provider, ops
-        self.text.default = ps.read(doc)[:4000]
+        if self.append_only:
+            self.text.label = "Add at the end (full text on the site)"
+            self.text.placeholder = "The document is longer than Discord's box: what you type here is added at the end."[:100]
+        else:
+            self.text.default = current
 
     async def on_submit(self, interaction: discord.Interaction):
+        typed = str(self.text.value)
+        new = self.ps.read(self.doc).rstrip() + "\n\n" + typed.strip() + "\n" if self.append_only else typed
         try:  # the one pending edit per doc (policy.begin_edit): remembers the text before it, for Discard
-            policy_mod.begin_edit(self.ps, self.doc, str(self.text.value), interaction.user.display_name)
+            policy_mod.begin_edit(self.ps, self.doc, new, interaction.user.display_name, by_id=interaction.user.id, append=self.append_only,
+                                  when=self.reg.local12)
         except policy_mod.PolicyPendingError as e:
             await interaction.response.send_message(f"⛔ {e}", ephemeral=True)
             return
@@ -297,7 +330,7 @@ class ConfigConfirmView(PendingView):
                 done.append(await configops.apply_async(self.reg, op, by, True, self.ps, bot=bot, by_id=interaction.user.id,
                                                         rev=configops.op_rev(op, key, self.revs), channel_id=self.channel,
                                                         self_id=self.requester_id))
-                if op.op in ("policy", "policy_append") and (op.doc or "").strip().lower() in ("loot", "comp"):
+                if op.op in ("policy", "policy_append") and (op.doc or "").strip().lower() in policy_mod.DOCS:
                     docs.append((op.doc or "").strip().lower())
             except (RegistryError, ValueError, Exception) as e:  # noqa: BLE001
                 refused.append(f"{configops.describe(self.reg, op, self.channel)} — {e}")
@@ -306,8 +339,11 @@ class ConfigConfirmView(PendingView):
                 continue
             configops.refresh_revs(self.reg, self.revs, raids, stale, before)  # this request's own write (a pin, a move…) is not someone else's change
         text = ("✅ " + "; ".join(done) if done else "") + ("\n⛔ " + "\n⛔ ".join(refused) if refused else "")
+        text = guild_prefix(self.reg) + (text or "Nothing applied.")
+        if refused:
+            text = configops.plain_footer(text[:1850])
         try:
-            await interaction.edit_original_response(content=text[:1900] or "Nothing applied.", view=None, embed=None)
+            await interaction.edit_original_response(content=text[:1950], view=None, embed=None)
         except discord.HTTPException:  # the change is made either way; the ops line below still records it
             pass
         where = "DMs" if self.channel is None else f"<#{self.channel}>"
@@ -366,7 +402,10 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     # so the parser (whose reply and questions go back verbatim) and the help snapshot get the member-level context
     public = is_msg and not _reply_private(bot, reg, interaction_or_message)
     if req is None:
-        req = await asyncio.to_thread(configops.parse, provider, reg, text, name, officer=officer and not public)
+        from .llm.provider import for_guild
+
+        with for_guild(reg.key):  # D45: the parse is this guild's spend
+            req = await asyncio.to_thread(configops.parse, provider, reg, text, name, officer=officer and not public)
     if req.kind == "ignore":
         return
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
@@ -394,10 +433,13 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
 
     if not allowed:
         view = apply_button()
-        await send("⛔ " + "\n⛔ ".join(refused), ephemeral=True, **({"view": view} if view is not None else {}))
+        await send(configops.plain_footer(guild_prefix(reg) + "⛔ " + "\n⛔ ".join(refused))[:1990], ephemeral=True, **({"view": view} if view is not None else {}))
         return
     req.ops = allowed
-    e = discord.Embed(title="Proposed changes", colour=TEAL, description=(await diff_text(reg, allowed, refused, channel))[:4000])
+    body = await diff_text(reg, allowed, refused, channel)
+    if refused:
+        body = configops.plain_footer(body[:3900])
+    e = discord.Embed(title=f"{reg.config.name} · proposed changes" if reg.many_guilds else "Proposed changes", colour=TEAL, description=body[:4000])
     if any(op.op in configops.RUN_OPS or op.op == "test" for op in allowed):
         e.set_footer(text="Run actions happen at once on Apply: DMs, cards and the sheet, exactly as the /raid command would.")
     revs = configops.board_revs(reg, allowed, raids)  # the boards as this diff shows them
@@ -437,6 +479,53 @@ def preview_line(reg: Registry, op: configops.ConfigOp, channel=configops._UNSET
 
 # ---------------------------------------------------------------- commands
 
+POLICY_SHOW_PARTS = 3  # /gm policy show: the text in at most this many messages, then "continued on the site"
+RULES_SHOWN = 15  # the Compiled reading embed's numbered rules; "+N more on the site" after
+
+
+def help_site_url(reg: Registry, path: str, anchor: str | None = None) -> str | None:
+    from .help import site_url
+
+    return site_url(reg, path, anchor)
+
+
+def policy_show_messages(reg: Registry, ps: policy_mod.PolicyStore, doc: str) -> tuple[list[str], discord.Embed]:
+    """/gm policy show: the written text in whole paragraphs (≤POLICY_SHOW_PARTS messages, the last saying it is
+    continued on the site), then ONE "Compiled reading" embed — the live rules numbered (≤RULES_SHOWN, "+N more on the
+    site") and a state footer (compiled when and by whom · the text reads differently now · a draft waits, by whom). The
+    numbers and words come from policy.policy_state, as the site's Policy page prints them."""
+    from .discord_help import chunk_text
+
+    st = policy_mod.policy_state(ps, doc, reg.local12)
+    url = help_site_url(reg, "/app/policy", doc)
+    parts = chunk_text(st["text"].replace("```", "ʼʼʼ"), 1800) or ["(empty)"]
+    shown = parts[:POLICY_SHOW_PARTS]
+    texts = [f"```md\n{p}\n```" for p in shown]
+    texts[0] = f"{guild_prefix(reg)}**The {doc} policy — written**\n" + texts[0]
+    if len(parts) > POLICY_SHOW_PARTS:
+        texts[-1] += "\n-# … continued on the site" + (f": {url}" if url else " (the Policy page)")
+    e = discord.Embed(title=f"Compiled reading — {doc}" if doc != "persona" else "The persona the bot speaks with", colour=TEAL)
+    if doc == "persona":
+        e.description = (st["applied_text"] or "")[:3500] or "(none)"
+    elif st["compiled"]:
+        items = st["items"]
+        lines = [f"{i}. {t}" for i, t in enumerate(items[:RULES_SHOWN], 1)]
+        if len(items) > RULES_SHOWN:
+            lines.append(f"+{len(items) - RULES_SHOWN} more on the site" + (f" — [the Policy page]({url})" if url else ""))
+        e.description = ("\n".join(lines) or "(no rules)")[:3800] + (f"\n\n_{st['summary']}_" if st.get("summary") else "")
+    else:
+        e.description = "No confirmed reading yet: `/gm policy reload` compiles the text and shows the reading to confirm."
+    foot = []
+    if st["compiled"] and st["compiled_label"]:
+        foot.append(f"compiled {st['compiled_label']}" + (f" by {st['confirmed_by']}" if st.get("confirmed_by") else ""))
+    if st["differs"]:
+        foot.append("the written text no longer reads this way — compile and confirm to apply it")
+    if st["pending"]:
+        foot.append(f"a draft by {st['pending_by'] or 'an officer'} waits ({'its reading is below' if st['pending_compiled'] else 'not compiled yet'})")
+    e.set_footer(text=" · ".join(foot)[:2000] or "the written text and the live reading agree")
+    return texts, e
+
+
 def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: Ops, bot, pctx: PolicyContext) -> None:
     async def officer(interaction: discord.Interaction) -> tuple[Registry | None, discord.Interaction]:
         reg, interaction = await guild_routing.need(interaction, guilds=guilds)
@@ -459,15 +548,29 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
         if not reg:
             return
         ps = pctx.store(reg)
-        text = ps.read(doc.value)
-        comp = ps.compiled(doc.value)
-        e = discord.Embed(title=f"{doc.value} policy", colour=TEAL, description=("```md\n" + text[:1800] + "\n```"))
-        if comp:
-            items = comp.get("rules") or comp.get("constraints") or []
-            e.add_field(name=f"Compiled ({len(items)} items)", value=(comp.get("summary") or "")[:1000], inline=False)
-        else:
-            e.set_footer(text="No confirmed compiled form yet — /gm policy edit or /gm policy reload")
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        texts, e = policy_show_messages(reg, ps, doc.value)
+        await interaction.response.send_message(texts[0], ephemeral=True)
+        for t in texts[1:]:
+            await interaction.followup.send(t, ephemeral=True)
+        await interaction.followup.send(embed=e, ephemeral=True)
+        await pending_reading(interaction.followup.send, reg, ps, doc.value, ops, ephemeral=True)  # a waiting reading: Confirm / Discard here too
+
+    config = next((c for c in gm.commands if c.name == "config"), None)
+    if config is not None and not any(c.name == "plain" for c in config.commands):
+        @config.command(name="plain", description="Read the plain-text permissions: who may change what by chat, and where (edited on the site)")
+        async def config_plain(interaction: discord.Interaction):
+            """D37: a READ view for the owner and officers — this channel's mode and why first, then the groups, then
+            the other listed channels. The site's Ops page is the editor; there is no Discord editor."""
+            reg, interaction = await officer(interaction)
+            if not reg:
+                return
+            from .discord_pool import plain_read_text
+
+            where = None if interaction.guild_id is None else interaction.channel_id
+            text = plain_read_text(reg, bot.plain_table(reg), where)
+            url = help_site_url(reg, "/app/ops", "plain")
+            await interaction.response.send_message((guild_prefix(reg) + text + (f"\n-# [Edit on the site]({url})" if url else ""))[:2000], ephemeral=True,
+                                                    allowed_mentions=discord.AllowedMentions.none())
 
     @policy.command(name="edit", description="Edit a policy document (the bot shows its reading for confirmation)")
     @app_commands.choices(doc=doc_choices)
@@ -513,7 +616,7 @@ def register_policy_commands(tree: app_commands.CommandTree, guilds: Guilds, ops
             return
         where = None if interaction.guild_id is None else interaction.channel_id  # a DM is the policy's DMs entry, not an unlisted channel (stage C L9)
         if reg.plain_mode(where) == "ignore" and not is_owner(interaction, reg):
-            await interaction.response.send_message("Plain text is switched off " + ("in DMs." if where is None else "in this channel."), ephemeral=True)
+            await interaction.response.send_message(configops.plain_footer("Plain text is switched off " + ("in DMs." if where is None else "in this channel.")), ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         await handle_change(interaction, reg, pctx.store(reg), bot.ctx.provider, ops, text, bot=bot, channel=where)

@@ -158,6 +158,9 @@ class Wizard(discord.ui.View):
             self.message_id = (await interaction.original_response()).id
         except discord.HTTPException:
             self.message_id = None
+        from .pending_views import track_interaction
+
+        track_interaction(f"wiz:{id(self)}", interaction, self.title)  # a restart edits it to "The bot restarted …" (§2.9)
 
     async def working(self, interaction: discord.Interaction, text: str = "Working…") -> None:
         """Acknowledge within Discord's 3 seconds before something slow (a solver, a DM fan-out, a git commit)."""
@@ -177,6 +180,9 @@ class Wizard(discord.ui.View):
         """The last screen: the outcome, no buttons. Safe after `working` (edits the original response)."""
         self._closed = True
         self.stop()
+        from .pending_views import untrack
+
+        untrack(f"wiz:{id(self)}")
         body = f"**{self.title}**\n{text}"[:2000]
         if interaction.response.is_done():
             await interaction.edit_original_response(content=body, embed=None, view=None)
@@ -195,6 +201,9 @@ class Wizard(discord.ui.View):
         await self.finish(interaction, "Cancelled — nothing was changed.")
 
     async def on_timeout(self) -> None:
+        from .pending_views import untrack
+
+        untrack(f"wiz:{id(self)}")
         if self._closed or not self._last:
             return
         try:

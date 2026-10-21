@@ -259,7 +259,7 @@ def clients(reg, rs, monkeypatch, officer=True):
     c = TestClient(web.create_app(bot))
     cookie = URLSafeSerializer("s" * 40, salt="session").dumps({"uid": "42", "name": "Viewer", "iat": time.time()})
     c.cookies.set(web.COOKIE, cookie)
-    job = {"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot"}
+    job = {"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot", "X-Oibot-Job": "apply"}  # the job scripts' header (design §5.44)
     site = {"X-Requested-With": "oibot"}
     return bot, c, job, site
 

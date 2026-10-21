@@ -100,13 +100,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
         <CardHeader title="guild.yaml" hint="the whole configuration as stored" />
         <Box style={{ overflowX: "auto" }}><Code block p="md" style={{ background: "transparent", fontSize: 12.5 }}>{data.yaml}</Code></Box>
       </Card>
-      {Object.entries(data.docs).map(([name, d]) => (
-        <Card key={name}>
-          <CardHeader title={`policy · ${name}`} action={d.compiled ? <Badge variant="light" color="teal">compiled</Badge> : name !== "persona" ? <Badge variant="light" color="yellow">not compiled</Badge> : null} />
-          <Box style={{ overflowX: "auto" }}><Code block p="md" style={{ background: "transparent", fontSize: 12.5, whiteSpace: "pre-wrap" }}>{d.text || "(empty)"}</Code></Box>
-          {d.summary && <Text size="xs" c="dimmed" px="md" pb="md">Compiled reading: {d.summary}</Text>}
-        </Card>
-      ))}
+      <Text size="sm" c="dimmed">The loot policy, the standing comp instructions and the persona have their own page: <Anchor component={Link} to="/policy">Policy</Anchor>.</Text>
     </Stack>
   );
 }

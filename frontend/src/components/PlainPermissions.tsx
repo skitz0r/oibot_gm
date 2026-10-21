@@ -3,6 +3,7 @@ import { Badge, Box, Button, Card, Group, MultiSelect, Select, Table, Text } fro
 import { IconPencil } from "@tabler/icons-react";
 import { api, type RoleRef } from "../api";
 import { CardHeader, fail, ok } from "./Page";
+import { useConfirm } from "./ConfirmModal";
 
 // ---- shapes (mirror plain_json in src/oibot_gm/web/api.py)
 interface PlainGroup { id: string; label: string; example: string; who: string[]; default: string[]; who_text: string; ops: string[] }
@@ -24,6 +25,7 @@ export function PlainPermissions() {
   const [data, setData] = useState<PlainPermissionsData | null>(null);
   const [d, setD] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ask, confirmDialog] = useConfirm();
   const load = () => api.get<PlainPermissionsData>("/api/plain-permissions").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   if (!data) return null;
@@ -36,7 +38,12 @@ export function PlainPermissions() {
   const start = () => setD({ who: Object.fromEntries(data.groups.map((g) => [g.id, g.who])), listed: { ...data.listed }, dm: data.dm, default: data.default });
 
   async function save() {
-    if (!d) return;
+    if (!d || !data) return;
+    // switching plain text OFF where it acts by default is the change that locks people out: ask first (design §3.4)
+    const ops = data.channels.find((c) => c.role === "ops");
+    const cut = [ops && d.listed[ops.id] === "ignore" && data.listed[ops.id] !== "ignore" ? `the ops channel (#${ops.name}) — @mentions there would stop working, for you too` : null,
+      d.dm === "ignore" && data.dm !== "ignore" ? "DMs to the bot — nobody could ask or change their own record by DM" : null].filter(Boolean);
+    if (cut.length && !(await ask({ title: "Switch plain text off there?", message: `This would ignore plain text in ${cut.join(" and in ")}. /gm change keeps working.`, confirmLabel: "Save anyway", color: "red" }))) return;
     setBusy(true);
     try {
       const r = await api.post<{ message: string } & PlainPermissionsData>("/api/admin/plain-permissions", { groups: d.who, channels: d.listed, dm: d.dm, default: d.default });
@@ -53,7 +60,8 @@ export function PlainPermissions() {
   );
 
   return (
-    <Card>
+    <Card id="plain">
+      {confirmDialog}
       <CardHeader title="Plain-text permissions" hint="what a sentence to the bot may change, for whom, and where"
         action={data.owner && !editing ? <Button variant="default" size="sm" leftSection={<IconPencil size={15} />} onClick={start}>Edit permissions</Button> : null} />
       <Box p="md">
@@ -107,6 +115,10 @@ export function PlainPermissions() {
                 </Table.Tr>
               ))}
               {data.channels.length === 0 && <Table.Tr><Table.Td colSpan={2}><Text size="xs" c="dimmed">The bot can't see the server's channels right now.</Text></Table.Td></Table.Tr>}
+              <Table.Tr style={{ opacity: 0.55 }}>
+                <Table.Td><Text size="sm" fw={600}>The site and MCP</Text><Text size="xs" c="dimmed">the Ops page's box and MCP plain_change; what they may do is the person's own rights</Text></Table.Td>
+                <Table.Td><Group gap={6}>{modeBadge("act")}<Text size="xs" c="dimmed">not configurable</Text></Group></Table.Td>
+              </Table.Tr>
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>

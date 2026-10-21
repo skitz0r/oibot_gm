@@ -90,7 +90,11 @@ inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make i
 should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
 Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire;
 Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
-bot's recent actions and the plain-text permissions) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
+bot's recent actions and the plain-text permissions), **Policy** (the loot policy, the standing comp instructions and the
+persona: what was written beside what the bot applies, a red bar when they differ, the waiting draft with Confirm /
+Discard, Edit and Add a rule — §7) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss, §7a). Everyone also gets **Help**: the
+whole manual, section by section (sections for officers or the owner are marked, not hidden), and the commands you may
+run; `/help` in Discord links to it. Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 Me, Rosters, Members, Loot, the Loot log, Ops and Agents update live the moment something changes (a press on a sheet, a drag by another
 officer, a change in Discord); a 45-second refresh is only the fallback when the live connection drops. There is no
@@ -719,10 +723,24 @@ edits that new family and leaves the one it shared alone.
   shields", "drop the loot rule about attendance", "recompile the comp policy", or a whole new text; after **Apply**
   the bot shows its reading with **Confirm this reading** / **Discard edit** (Discard puts the previous text back).
   If the reading can't be made right then (Claude unavailable), the change is refused and the text is put back as it
-  was — nothing is left half-done. The persona has no reading: it is live as written. A document has one edit
+  was — nothing is left half-done. The **persona** gets the same two steps: its draft is shown back as written (no
+  Claude needed) and the bot keeps speaking with the old one until someone presses Confirm. A document has one edit
   waiting at a time, whoever started it and wherever (Discord, the site, plain text, MCP): Discard goes back to the
-  text before that edit. A reading only goes live against the text it read — if anyone changed the document after
-  it was compiled, Confirm (and a stale Discard) refuses and asks for a fresh compile.
+  text before that edit. The waiting edit is kept on disk, so a bot restart loses nothing — the draft, its reading and
+  the text to go back to are still there. A reading only goes live against the text it read — if anyone changed the
+  document after it was compiled, Confirm (and a stale Discard) refuses, names whose draft is waiting, and asks for a
+  fresh compile. **Adding a rule** (`/gm rule`, "add a loot rule: …", the site's *Add a rule*, MCP `policy_append`)
+  while ANOTHER officer's draft waits is refused with their name — confirm or discard theirs first; your own draft you
+  may keep adding to.
+  `/gm policy show` sends the written text (up to three messages, then "continued on the site"), one **Compiled
+  reading** card with the live rules numbered (fifteen, then "+N more on the site") and a footer saying when it was
+  compiled and by whom, whether the text still reads that way, and whose draft waits — and, when a draft's reading is
+  waiting, that reading with **Confirm this reading** / **Discard edit**. `/gm policy edit` opens the whole document in
+  the box when it fits Discord's 4,000 characters; a longer document is never shown cut — the box then only adds what
+  you type at the end ("the full text is on the site"). The site's **Policy** page shows each document's written text
+  beside what the bot applies (compiled when), a red bar when they differ, the waiting draft with Confirm / Discard,
+  **Edit** (no length limit) → Save draft → Compile → the reading beside the draft → Confirm or Discard, and **Add a
+  rule**.
 - Plain-text config: `/gm change <text>`, or @mention the bot in the ops or analytics channel — the bot
   shows a "current → new" diff with Apply/Cancel. It never guesses: ambiguous requests come back as a
   question, and a plain question ("who is rostered tonight?") gets the same answer `/ask` would give. Whoever presses
@@ -753,22 +771,36 @@ guild's own overrides. When a post clearly contradicts one of those, it posts a 
 channel: the change in words, what it touches, the sentence from the news it rests on, links to the posts, and a
 confidence (low / medium / high). Most days there is no card: nothing new, or nothing that contradicts anything.
 
-- **Approve** (officers) first shows what approving does (a setting applied within 15 minutes, or a game-data edit
-  with a commit and a restart — and for every server on that game version), then *Approve* / *Approve with a note…* /
-  *Back*; **Dismiss** gets the same screen. Approving records who approved it and when. It changes nothing by itself: the apply job on the host
-  checks every 15 minutes and carries it out. A **guild setting** (a raid's lockout, what the guild knows about a
-  buff) is applied like the same change on the Raids or Auras page, without a restart. A **game data** change edits
-  the bot's profile file for the game version, runs the full test suite, commits, restarts the bot and checks it
-  came back — about two minutes.
-- **Dismiss** (officers) keeps the card as dismissed; nothing changes, and the review won't propose it again unless
-  newer news says more. An approved proposal can still be dismissed until the job picks it up.
-- **Needs a developer** — the change can't be expressed as a setting or a data edit; the card has no Approve. Dismiss
-  it once someone has handled it.
+- **Approve** first shows what approving does, then *Approve* / *Approve with a note…* / *Back* — the press itself never
+  writes. A **guild setting** (a raid's lockout, what the guild knows about a buff; officers approve) reads "the apply
+  job carries it out at its next run (the time), no restart:" and the change as a diff line; it is applied like the same
+  change on the Raids or Auras page. A **game data** change reads "Claude edits the game data for <version>, the tests
+  run, and the bot restarts for every server it serves (every name) for about two minutes", plus "⚠ <server> has a run
+  right now — the job will wait" for each server that is raiding. **Only the owner approves a game-data change** (it
+  restarts the whole bot, for every server), even when the bot serves one guild; an officer's press is refused at once
+  and says so. Approving records who approved it and when; the apply job on the host (every 15 minutes) carries it out.
+- **Dismiss** (officers) gets the same screen (D34): nothing changes, and the review is told not to propose it again
+  unless newer news says more. Once approved, the button reads **Withdraw approval** — it can still be withdrawn until
+  the job picks it up. There is no "edit before approve" (D35): dismiss it and say the change in plain text.
+- A second press after someone decided is told who did and when ("already approved by Jonny Tue 8:12 PM — nothing to
+  do"), and the card catches up.
+- **Needs a developer** — the change can't be expressed as a setting or a data edit; the card has no Approve and says
+  so in its Status. Dismiss it once someone has handled it.
+- **Raid time (D33).** A game-data change restarts the bot, so the apply job never restarts it while any server it
+  serves is busy: a locked run from 4 hours before its start until it closes, an open run within the hour, or a live
+  loot council. It waits, and writes why on the proposal ("waiting: Barrow Deeps raids until 11:30 PM") — the card's
+  Status and the Agents page show it. If a raid begins while the edit and the tests run, the change is committed and
+  the restart waits for the next quiet poll. Guild settings never wait: they need no restart.
 - The card updates in place: **Applying now**, then **Applied** (with the commit for a game data change),
   **Failed — nothing changed** (the setting was refused, or the tests failed and the edit was undone; a failed one can
   be approved again), or **Reverted — the change was rolled back** (the bot did not come back healthy after a game
   data change, so the commit was undone and the bot restarted on the old version).
-- The same list, with Approve / Dismiss, is on the site's **Agents** page, and plain text does it too: "approve
+- The same list is on the site's **Agents** page — cards stacked on a phone, each with its history (every decision and
+  every "waiting" note) and the same consequence text in the confirm (with an optional note). The owner gets **Apply
+  now** when something is approved (the page follows the job for ten seconds and shows its result), the apply mode
+  (applies to main, or opens a pull request), the MCP server's state (configured, local only, last write) and this
+  month's Claude spend per server under the one shared cap (D45). A job that is busy with another server's proposal
+  says just that. Without an ops channel the page says the cards aren't posted. Plain text does it too: "approve
   proposal 260927-a1b2", "dismiss 260927-a1b2: handled by hand" (officers by default; the note is kept on the card).
 - **Several servers.** Each server's news is reviewed on its own (its own news channel and keywords, its own cards and
   Agents page — you see your server's review runs only). A **game data** change is shared by every server on that game
@@ -1027,6 +1059,18 @@ in, or make the bot ignore @mentions there, the diff says so before Apply.
 The owner can always do everything, anywhere the bot listens — an *Answers only* channel included. In an *Ignored*
 channel the bot doesn't read @mentions at all, the owner's included; there the owner uses `/gm change`.
 
+**Reading it in Discord (D37).** `/gm config plain` (owner and officers) shows the policy as words: first where you
+are — "Here (#raid-chat): Answers only — listed" (or *the default for other channels*, *the ops channel acts unless
+listed*, the DMs setting in a DM) — then who may change what, then every other listed channel and "The site and MCP:
+Acts (not configurable)". It is read-only: the table is edited on the site. Every plain-text refusal ends with
+"`/gm config plain` shows the whole policy". On the site the table shows the site/MCP row greyed (it always acts; what
+it may do is the person's own rights), and saving a table that would ignore plain text in the ops channel or in DMs
+asks first.
+
+**DMs with several servers (D41).** When the bot looks after more than one server, a plain DM asks which server it is
+for, listing every server you belong to; one whose policy ignores DMs is marked "(plain text off here)" and picking it
+answers once "DMs are off for <server>; /gm change works" — the bot is never silent.
+
 **What** — eight capability groups; every plain-text operation belongs to exactly one (your own wishlist is *Own
 record*; someone else's is *Other people's records*):
 
@@ -1205,12 +1249,12 @@ news post says can make the review read or write another server.
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
-| `policy_get` · `policy_edit` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full · replace its text (a draft; the persona is live as written) · the bot's reading of it, nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
+| `policy_get` · `policy_edit` · `policy_append` · `policy_compile` · `policy_confirm` | a policy document (loot, comp, persona) in full, with what is applied and the waiting draft · replace its text (a draft, the persona too) · add one rule to the loot or comp policy as a draft (refused while another officer's draft waits) · the bot's reading of it (the persona: its text), nothing live yet · make that reading live, or `confirm=false` to discard the edit and restore the text — what `/gm policy edit` does |
 | `plain_change` | text → the config ops it means, with current → new, and a `token`; `apply=true` with that token (within ten minutes, once) applies exactly those ops — never a new reading of the text — and refuses a board someone changed since the preview; like Discord's Apply, an op that fails is listed in `refused` with why and the rest still apply (`applied` is what landed, `error` the first failure) (everything plain text does, §8 — except re-posting a sheet "here": use `repost_sheet`) |
 | `plain_permissions` · `set_plain_permissions` | who may act through plain text and where (groups with who, every channel's mode, DMs, the default, the server's roles) · change it (owner: groups, per-channel modes, DMs, default) |
 | `raid_readiness` | each raid's pool readiness (§6): headcount, roles with who could cover, buffs nobody brings, the desired comp with its reasons, short / over cap, the pool plan — one raid or all |
 | `list_news` · `get_profile` | the news kept since a time · the effective profile (buffs, families, raids, comp rules) with guild overrides marked |
-| `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full, move its state |
+| `post_proposal` · `list_proposals` · `get_proposal` · `resolve_proposal` | the news review's proposals (§7a): post one, list by state, one in full (with the consequence of each verdict), approve or dismiss it as the owner (a game-data approval is the owner's anyway). The apply job's steps (applying · applied · failed · reverted, and its "waiting: …" notes) need the job's own `X-Oibot-Job` header, which only the job scripts send — the owner's token alone reports none, and a call with the job header never decides |
 | `job_status` · `get_job_run` · `run_job` | the review and apply jobs: state, last and next run, launchd, recent runs · one run's steps · start a job now (refused when it is running or not installed) |
 
 Members can be named by display name, character name or Discord id; runs by key, roster key or the raid's
@@ -1497,7 +1541,9 @@ an absence puts you back to unanswered on any open sheet it had pre-filled (a se
 not handed back automatically — ask an officer). Claude is used sparingly — never for registry, signup or solver work — and spend is
 capped by a monthly budget the owner sets (`OIBOT_BUDGET_USD`, per calendar month, kept across restarts); questions and
 plain-text requests may use at most half of it each, so they can't spend what loot night needs. `/gm status` shows
-this month's spend. The budget is one for the whole bot: if it ever looks after several servers, they share it.
+this month's spend. The budget is one for the whole bot: if it ever looks after several servers, they share it (D45),
+and the owner's Agents page shows each server's part of the month's spend. When it is used up, the bot says "The bot's
+monthly budget for Claude is used up; the host raises it. Slash commands, the sheets and the site keep working."
 
 ## 10a. Asking the bot questions
 
@@ -1506,9 +1552,15 @@ the bot — a question, a request, a slash command or a wizard used in DMs, `/he
 **which server it is for** (one button per server). It asks every time; it never assumes. Pick one and the bot carries
 on with what you asked, for that server; nobody picked in two minutes and it says so — ask again any time. If you are
 in only one of them, it is that one, no question (a server you just joined or left counts within seconds). A server
-whose owner turned DMs off is never offered; if every server has, a plain DM gets no answer. Buttons the bot sent you (Confirm / Can't make it, a seat offer, Join
+whose owner turned DMs off is still listed, marked "(plain text off here)"; picking it answers once "DMs are off for
+<server>; /gm change works" — never silence (§8c). Buttons the bot sent you (Confirm / Can't make it, a seat offer, Join
 on a sheet, Apply to join) already know their server and never ask. With several servers, DMs and cards start with the
 server's name.
+
+**The manual on the site.** The **Help** page shows this whole manual section by section (a section for officers or
+the owner is marked, never hidden — the manual isn't secret, the data is) and the commands you may run; on a phone the
+sections are a picker. `/help` ends with a link to it, and `/help topic:` ends with a link to that section — a long
+section stops after five messages with "continued on the site".
 
 `/ask`, a DM, or an @mention outside the officer channels gets a free-form answer from this manual and
 your own record — or, when you're asking the bot to *do* something about your own record, the change itself to

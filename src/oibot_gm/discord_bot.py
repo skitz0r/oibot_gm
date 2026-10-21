@@ -434,29 +434,32 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
     async def dm_guild(self, message: discord.Message):
         """Which guild a plain DM is about: the only one; else the one the sender belongs to; in several, the server
         picker (buttons, asked every time — owner decision D2), then the chosen one; None after saying why (in none:
-        every server's Join link) or when nobody picked in time. Only the guilds that answer DMs count (plain-text
-        policy `dm` not "ignore"): a guild whose owner switched DMs off is never offered, and when every guild has,
-        a DM gets silence — as one guild with DMs off always has."""
+        every server's Join link) or when nobody picked in time. D41: EVERY guild the person belongs to is listed, a
+        guild whose plain-text policy ignores DMs marked "(plain text off here)"; picking one (or belonging to just that
+        one) answers once "DMs are off for <server>; /gm change works" — never silence. One guild in the process: as
+        before (plain_text applies its DM mode)."""
         import types as _types
 
         from . import guild_routing
-        from .guild_picker import choose_guild
+        from .guild_picker import OFF_MARK, choose_guild, guild_name
 
         only = self.registries.only()
         if only is not None:
             return only  # one guild: plain_text applies its DM mode, as before
         regs = self.registries.ordered()
-        answering = [r for r in regs if r.plain_mode(None) != "ignore"]
-        if not answering:
-            return None
-        mine = await guild_routing.guilds_of(self, message.author.id, _types.SimpleNamespace(ordered=lambda: answering))
+        mine = await guild_routing.guilds_of(self, message.author.id, _types.SimpleNamespace(ordered=lambda: regs))
+        off = {r.key for r in mine if r.plain_mode(None) == "ignore"}
         if len(mine) == 1:
-            return mine[0]
-        if mine:
-            reg, _press = await choose_guild(message, mine)
-            return reg
-        await message.reply(guild_routing.not_in_any(regs), allowed_mentions=discord.AllowedMentions.none())
-        return None
+            reg = mine[0]
+        elif mine:
+            reg, _press = await choose_guild(message, mine, marks={k: OFF_MARK for k in off})
+        else:
+            await message.reply(guild_routing.not_in_any(regs), allowed_mentions=discord.AllowedMentions.none())
+            return None
+        if reg is not None and reg.key in off:
+            await message.reply(f"DMs are off for **{guild_name(reg)}**; `/gm change` works.", allowed_mentions=discord.AllowedMentions.none())
+            return None
+        return reg
 
     # ---- chat handlers
     def officiates(self, user, guild) -> bool:
@@ -717,6 +720,16 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         else:
             await self.loot_threads_pending()  # a later ready (a full reconnect): a council opened while Discord was down gets its thread
         self._pool_booted = True
+        await self.proposal_cards_restore()  # a decision made on the site while Discord was down reaches the card (design §5.44)
+        from .pending_views import restore_pending_views
+
+        await restore_pending_views(self)  # wizards / diffs a restart left behind say so (out/pending_views.jsonl)
+
+    async def on_resumed(self):
+        """The gateway came back: a council opened while Discord was down gets its thread (LootMixin), and every waiting
+        proposal card is redrawn (NewsMixin)."""
+        await LootMixin.on_resumed(self)
+        await self.proposal_cards_restore()
 
 
 def run(guild_dir: Path, signup_file: str) -> None:

@@ -44,6 +44,17 @@ async def report_error(ops, cfg, e: BaseException, where: str) -> str:
                 log.exception("ops emit failed")
     return text
 
+
+# every plain-text refusal ends with where the whole policy is (§2.7; D37: Discord reads it with /gm config plain)
+PLAIN_POLICY_FOOTER = "-# `/gm config plain` shows the whole policy."
+
+
+def plain_footer(text: str) -> str:
+    """A plain-text refusal (a ⛔ line, the 'switched off here' answer, a refused op in an Apply result) with the one
+    footer that says where the whole plain-text policy is read. Idempotent."""
+    text = (text or "").rstrip()
+    return text if text.endswith(PLAIN_POLICY_FOOTER) else f"{text}\n{PLAIN_POLICY_FOOTER}"
+
 SCHEMA_TEXT = """## Settable things (whitelist; anything else → ask, never guess)
 Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mention), ops_channel, applications_channel,
   roster_channel (officer channel for health cards and roster proposals), registration_channel (public card with the
@@ -76,7 +87,7 @@ Policy (officer): policy_append: doc=loot|comp, text=<one rule line> — appende
   policy: doc=loot|comp|persona, field=replace (text = the WHOLE new document) | remove (text = the line to take out, as
   written in the doc) | compile (no text: re-read the current document, e.g. after a PR edit). After a write the bot compiles
   the loot/comp text and shows its reading with Confirm / Discard (Discard puts the previous text back); the persona is
-  live as written. "add a loot rule: …" = policy_append; "drop the rule about …" = policy field=remove.
+  shown back as written for the same Confirm / Discard. "add a loot rule: …" = policy_append; "drop the rule about …" = policy field=remove.
 News proposals (officer): proposal: target=<proposal id like 260927-a1b2 from the open proposals list>, value=approve|dismiss,
   reason=<optional note>. Approve only records the decision (the apply job carries it out); a needs-developer one can only be dismissed.
 Jobs (owner only, never opened to anyone else): job: value=review|apply — start that local job now (the news review, or
@@ -1770,7 +1781,7 @@ def _policy_edit(reg: Registry, op: ConfigOp, policy_store=None) -> tuple[str, s
     docs = ("loot", "comp") if op.op == "policy_append" else DOCS
     if doc not in docs:
         raise RegistryError(f"doc is one of {', '.join(docs)}")
-    after = " — live at once (the persona has no compile step)" if doc == "persona" else " — I show my reading of it to confirm; Discard puts the previous text back"
+    after = " — shown back to confirm; Discard puts the previous one back" if doc == "persona" else " — I show my reading of it to confirm; Discard puts the previous text back"
     cur = ps.read(doc)
     text = (op.text or "").strip()
     if op.op == "policy_append":
@@ -1779,8 +1790,6 @@ def _policy_edit(reg: Registry, op: ConfigOp, policy_store=None) -> tuple[str, s
         return doc, cur.rstrip() + f"\n- {text}\n", f"append to the {doc} policy: “{text}”{after}"
     f = (op.field or "").strip().lower()
     if f == "compile":
-        if doc == "persona":
-            raise RegistryError("the persona has no compiled form: it is used as written")
         return doc, None, f"{doc} policy: compile the current text and show my reading (Confirm makes it live; nothing changes until then)"
     if f == "replace":
         if not text:
@@ -1814,9 +1823,10 @@ def _describe_new(reg: Registry, op: ConfigOp) -> str:
         _, p, state = _proposal(reg, op)
         others = shared_profile_others(getattr(reg.store, "guilds", None), reg) if state == "approved" and p.kind == "profile" else []
         return (f"news proposal {p.id} “{p.title}” ({p.kind}, {p.confidence}): {p.state} → {state}"
-                + (" — the apply job carries it out within 15 minutes" if state == "approved" else "")
+                + (" — the apply job carries it out at its next run" if state == "approved" else "")
                 + (f"; it edits game data {', '.join(others)} also use{'s' if len(others) == 1 else ''}, so only the owner of every guild on this "
                    "game version can approve it" if others else "")
+                + ("; only the owner approves a game-data change (the bot restarts for every server)" if state == "approved" and p.kind == "profile" and not others else "")
                 + (f"; note: {op.reason.strip()}" if (op.reason or "").strip() else ""))
     from . import agents
 
@@ -2388,8 +2398,11 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         doc, text, _ = _policy_edit(reg, op, ps)
         if text is None:
             raise RegistryError(f"policy compile {NEEDS_BOT}")
-        policy_mod.begin_edit(ps, doc, text, by)  # remembers the text it replaced, so Discard can put it back
-        return "persona saved — live as written" if doc == "persona" else f"{doc} policy saved as a draft (compile pending)"
+        try:  # remembers the text it replaced, so Discard can put it back; an append on another officer's waiting draft is refused
+            policy_mod.begin_edit(ps, doc, text, by, by_id=by_id, append=op.op == "policy_append", when=reg.local12)
+        except policy_mod.PolicyPendingError as e:
+            raise RegistryError(str(e))
+        return f"{doc} policy saved as a draft (compile pending)"
     if op.op == "job":
         from . import agents
 
@@ -2505,7 +2518,8 @@ def self_audited(reg: Registry, op: ConfigOp, bot) -> bool:
             or (op.op == "loot" and hasattr(bot, "open_council"))  # LootMixin's verbs write their own line
             or _people_verb(reg, op)  # so does PeopleMixin.save_characters (discord_people)
             or (op.op in RUN_VERBS_AUDITED and hasattr(bot, "remind"))  # so do these RaidMixin verbs (via, by_id passed)
-            or op.op == "test")  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
+            or op.op == "test"  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
+            or (op.op == "proposal" and hasattr(bot, "decide_proposal")))  # NewsMixin.decide_proposal audits the decision
 
 
 async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, bot=None, by_id: int | None = None,
@@ -2551,7 +2565,7 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
     if op.op == "job":  # launchctl: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)
     if bot is not None and op.op in ("policy", "policy_append"):
-        return await _apply_policy(reg, op, by, bot, _policy_store(reg, policy_store))
+        return await _apply_policy(reg, op, by, bot, _policy_store(reg, policy_store), by_id)
     if bot is not None and op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None:
         cid = None if _clear_word(op.value) else _channel_id(op.value)
         if cid is None and not _clear_word(op.value):
@@ -2678,20 +2692,17 @@ def compiled_count(compiled) -> int:
     return len(getattr(compiled, "rules", None) or getattr(compiled, "constraints", None) or [])
 
 
-async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
+async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps, by_id: int | None = None) -> str:
     """policy / policy_append with the bot: the write (policy.begin_edit, which remembers the previous text), then the
     compile (the LLM call, off the loop) held as the pending reading — Discord shows it with Confirm / Discard
     (ConfigConfirmView), the site and MCP confirm it with policy_confirm. The persona is live as written."""
     from . import policy as policy_mod
 
     doc, text, _ = _policy_edit(reg, op, ps)
-    key = (ps.key, doc)
-    before, held = ps.read(doc), policy_mod.PENDING.get(key)  # the state to go back to if the compile fails
-    line = await asyncio.to_thread(apply, reg, op, by, True, ps) if text is not None else f"{doc} policy: compiling the current text"
-    if doc == "persona":
-        return line
+    before, held = ps.read(doc), ps.load_pending(doc)  # the state to go back to if the compile fails (the pending edit is on disk)
+    line = await asyncio.to_thread(apply, reg, op, by, True, ps, None, None, by_id) if text is not None else f"{doc} policy: compiling the current text"
     provider = getattr(getattr(bot, "ctx", None), "provider", None)
-    if provider is None:
+    if provider is None and doc != "persona":
         return line + " — no LLM to compile it right now (/gm policy reload once there is)"
     try:
         compiled, _ = await asyncio.to_thread(policy_mod.compile_pending, ps, doc, provider)
@@ -2701,10 +2712,9 @@ async def _apply_policy(reg: Registry, op: ConfigOp, by: str, bot, ps) -> str:
         log.warning("policy compile failed for %s/%s", reg.key, doc, exc_info=True)
         if ps.read(doc) != before:
             await asyncio.to_thread(ps.revert, doc, before, by)
-        if held is None:
-            policy_mod.PENDING.pop(key, None)
-        else:
-            policy_mod.PENDING[key] = held
+        if held is not None:
+            ps._dump_pending(doc, held)
+            ps.store.commit(f"{ps.key}: policy {doc}: the pending edit before the failed compile restored")
         raise RegistryError(f"could not compile the {doc} policy ({type(e).__name__}); " + ("the text is back as it was — try again in a minute" if text is not None else "nothing changed"))
     amb = len(getattr(compiled, "ambiguities", None) or [])
     return (line.replace(" (compile pending)", "") + f" — my reading: {compiled_count(compiled)} item(s)" + (f", {amb} question(s)" if amb else "")
@@ -2731,12 +2741,21 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "application":  # the card's Accept / Decline, /roster applicant, the web and MCP: one verb
         a, accept, note = _application(reg, op)
         return str(await bot.decide_application(reg, a.discord_id, accept, by, note))
-    if op.op == "proposal":  # the card's Approve / Dismiss and the Agents page: ProposalStore.move + the card + an ops line
+    if op.op == "proposal":  # THE proposal verb (NewsMixin.decide_proposal): move + the card + the audit line + the fan-out
         from .news import ProposalError
 
         ps, p, state = _proposal(reg, op)
-        try:
-            p = await asyncio.to_thread(ps.move, p.id, state, by, officer=True, job=False, by_id=by_id, note=(op.reason or "").strip() or None)
+        note = (op.reason or "").strip() or None
+        owner = by_id is not None and reg.is_owner_id(by_id)  # a game-data approval is the owner's (design §5.44)
+        decide = getattr(bot, "decide_proposal", None)
+        if decide is not None:
+            try:
+                p, _ = await decide(reg, p.id, state, by=by, by_id=by_id, officer=True, owner=owner, note=note, via=via or "discord")
+            except (ProposalError, PermissionError) as e:
+                raise RegistryError(str(e))
+            return f"news proposal {p.id} {state}: {p.title}"
+        try:  # a client without NewsMixin (offline tools): the store's move and the card hook
+            p = await asyncio.to_thread(ps.move, p.id, state, by, officer=True, job=False, by_id=by_id, note=note, owner=owner)
         except (ProposalError, PermissionError) as e:
             raise RegistryError(str(e))
         update = getattr(bot, "proposal_card_update", None)

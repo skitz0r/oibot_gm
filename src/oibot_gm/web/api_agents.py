@@ -1,52 +1,218 @@
-"""The news review's API (design.md §5.26): news kept from the #news channel, proposals and their states, the
-effective profile slice the review compares against, and the local jobs' status for the Agents page.
+"""The news review's API (design.md §5.26; dual interfaces phase 3, design §5.44): news kept from the #news channel,
+proposals and their states, the effective profile slice the review compares against, and the local jobs' status for
+the Agents page.
 
-Officers read everything and approve/dismiss (the same verb as the Discord card's buttons). The apply job's steps
-(applying / applied / failed / reverted) come only from the MCP bearer identity (`via == "mcp"`), which is what the
-local jobs use. Nothing here fetches a news article: the items are the webhook's own text."""
+Officers read everything and approve/dismiss through NewsMixin.decide_proposal (the same verb as the Discord card's
+decide screen and the `proposal` op); approving a game-data (`profile`) proposal is the owner's. The apply job's steps
+(applying / applied / failed / reverted, and the "waiting: …" annotation) need the MCP bearer AND the job header
+(`X-Oibot-Job: apply|review`, which the job scripts send) — the owner's token alone never reports a job step, and a
+call carrying the job header never makes an officer's decision. GET /api/agents/quiet answers whether a restart now
+would cut into anything (the apply job polls it); GET /api/guilds carries each guild's D33 `busy` (api.py calls
+`busy_json`). Nothing here fetches a news article: the items are the webhook's own text."""
 from __future__ import annotations
 
 import asyncio
-import inspect
+import os
+import plistlib
+import re
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from .. import agents, news
-from ..news import ProposalError, ProposalStore
+from ..news import AlreadyDecided, ProposalError, ProposalStore
 from ..registry import RegistryError
+
+JOB_HEADER = "x-oibot-job"
+QUIET_WINDOW_H = 2  # GET /api/agents/quiet: a live run within ±2 h of its lock or its start is not quiet (design §3.4 (6))
+LOG_FILE = agents.ROOT / "out" / "oibot.log"
+LOG_TAIL_BYTES = 2_000_000
+INSTALL_LINE = "sh scripts/agents/install.sh"
+
+
+# ---------------------------------------------------------------- pure helpers (tests call them directly)
+
+def busy_json(bot, reg, now: datetime | None = None) -> dict:
+    """news.guild_busy for one guild, from the bot's runs and live loot councils (NewsMixin.guild_busy when the client
+    has it; a bare client: its RaidStore, no councils)."""
+    fn = getattr(bot, "guild_busy", None)
+    if fn is not None:
+        return fn(reg, now)
+    raids = getattr(bot, "raids", None)
+    rs = raids.store(reg) if raids is not None else None
+    return news.guild_busy(reg, rs.live() if rs is not None else [], (), now)
+
+
+def apply_mode(label: str | None = None) -> dict:
+    """{mode: main | pr | unknown, source}: the apply job's OIBOT_APPLY_MODE from its plist — the installed copy in
+    ~/Library/LaunchAgents when there is one, else the repo's (scripts/launchd)."""
+    label = label or agents.JOBS["apply"]["label"]
+    for path in (Path.home() / "Library" / "LaunchAgents" / f"{label}.plist", agents.ROOT / "scripts" / "launchd" / f"{label}.plist"):
+        try:
+            env = (plistlib.loads(path.read_bytes()).get("EnvironmentVariables") or {})
+        except (OSError, plistlib.InvalidFileException, ValueError):
+            continue
+        mode = str(env.get("OIBOT_APPLY_MODE") or "main").strip().lower()
+        return {"mode": mode if mode in ("main", "pr") else "unknown", "source": "installed" if "LaunchAgents" in str(path) else "repo"}
+    return {"mode": "unknown", "source": None}
+
+
+def mcp_last_used(log: Path | None = None) -> str | None:
+    """When the MCP bearer last wrote through the API (the request log's newest `via=mcp` line; GETs are not logged),
+    as the log's own local time string — None when never seen or no log."""
+    path = log or LOG_FILE
+    try:
+        with path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - LOG_TAIL_BYTES))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in reversed(tail.splitlines()):
+        if "via=mcp" in line:
+            m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+            return m.group(1) if m else None
+    return None
+
+
+def mcp_card(reg, tz=None, log: Path | None = None) -> dict:
+    """The Agents page's MCP card: configured (a token in the bot's environment), local-only, when the token last wrote."""
+    from .app import MCP_TOKEN_ENV, mcp_local_only
+
+    seen = mcp_last_used(log)
+    label = ""
+    if seen:
+        try:
+            label = reg.local12(datetime.strptime(seen, "%Y-%m-%d %H:%M:%S").astimezone())
+        except ValueError:
+            label = ""
+    return {"configured": bool(os.environ.get(MCP_TOKEN_ENV)), "local_only": mcp_local_only(), "last_used": seen, "last_used_label": label,
+            "config_file": (agents.ROOT / ".mcp.json").exists()}
+
+
+def llm_usage(bot, viewer_reg) -> dict | None:
+    """D45: one shared monthly cap, spend shown per guild. None without a provider."""
+    provider = getattr(getattr(bot, "ctx", None), "provider", None)
+    if provider is None or not hasattr(provider, "cost_usd"):
+        return None
+    by = provider.usage_by_guild() if hasattr(provider, "usage_by_guild") else {}
+    names = {r.key: str(r.config.name) for r in bot.registries.ordered()}
+    rows = [{"key": k, "name": names.get(k, k), "spent": round(v, 2)} for k, v in sorted(by.items(), key=lambda kv: -kv[1]) if k]
+    return {"spent": round(provider.cost_usd, 2), "cap": round(float(getattr(provider, "budget_usd", 0.0)), 2), "by_guild": rows,
+            "unattributed": round(by.get("", 0.0), 2), "shared": True}
+
+
+def quiet_state(bot, now: datetime | None = None, *, views: int = 0, previews: int = 0) -> dict:
+    """{quiet, why[]}: a restart now would cut into nothing (design §3.4 (6)) — no live run within ±QUIET_WINDOW_H of its
+    lock or start (test runs aside), no solver / board / plan lock held, no live wizard or confirm view (`views`,
+    pending_views.live_count) and no unexpired preview token (`previews`)."""
+    from .. import raidcycle as rc
+
+    now = now or datetime.now(timezone.utc)
+    win = timedelta(hours=QUIET_WINDOW_H)
+    why: list[str] = []
+    for reg in bot.registries.ordered():
+        raids = getattr(bot, "raids", None)
+        rs = raids.store(reg) if raids is not None else None
+        for ev in (rs.live() if rs is not None else []):
+            if getattr(ev, "test", False):
+                continue
+            lock = ev.start - timedelta(hours=float(rc.team_setting(rc.run_team(reg, ev), "cutoff_hard_hours") or 0))
+            if abs(now - lock) <= win or abs(now - ev.start) <= win:
+                name = reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else ev.team
+                why.append(f"{reg.config.name}: {name} {reg.local12(ev.start)} locks or starts within {QUIET_WINDOW_H} h")
+    for attr in ("_solver_locks", "_board_locks", "_plan_locks"):
+        held = [k for k, lk in (getattr(bot, "__dict__", {}).get(attr) or {}).items() if lk.locked()]
+        if held:
+            why.append(f"{len(held)} {attr.strip('_').replace('_locks', '')} lock(s) held")
+    if views:
+        why.append(f"{views} wizard or confirm screen(s) open in Discord")
+    if previews:
+        why.append(f"{previews} preview(s) waiting for Apply on the site")
+    return {"quiet": not why, "why": why}
 
 
 def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
     def store():
         return bot.registries.store
 
-    def is_job(v) -> bool:
+    def is_bearer(v) -> bool:
         return getattr(v, "via", "web") == "mcp"
 
-    async def card(reg, p) -> None:
+    def job_of(request: Request, v) -> str | None:
+        """The local job a call comes from: the MCP bearer AND `X-Oibot-Job: review|apply` (the job scripts send it). The
+        owner's token alone is no job (it gets officer moves, as the owner), and a header without the bearer is nothing."""
+        if not is_bearer(v):
+            return None
+        j = (request.headers.get(JOB_HEADER) or "").strip().lower()
+        return j if j in agents.JOBS else None
+
+    def saved(guild_key: str, _pid: str) -> None:
+        publish("agents", guild_key)  # this guild's pages only (the jobs' own status pushes reach every guild)
+
+    if saved not in news.PROPOSAL_LISTENERS:
+        news.PROPOSAL_LISTENERS[:] = [fn for fn in news.PROPOSAL_LISTENERS if getattr(fn, "__name__", "") != "saved"] + [saved]
+
+    async def decide(reg, pid: str, state: str | None, **kw):
+        """NewsMixin.decide_proposal on the bot (a bare test client borrows the mixin's function)."""
+        from ..discord_news import NewsMixin
+
+        fn = getattr(bot, "decide_proposal", None)
+        if fn is None:
+            return await NewsMixin.decide_proposal(bot, reg, pid, state, **kw)
+        return await fn(reg, pid, state, **kw)
+
+    async def card(reg, p) -> bool:
         """Post or edit the proposal's Discord card (the bot's NewsMixin); tests run without one."""
         fn = getattr(bot, "proposal_card_update", None)
-        if fn is not None:
-            r = fn(reg, p)
-            if inspect.isawaitable(r):
-                await r
-        publish("agents", reg.key)  # this guild's pages only (the jobs' own status pushes reach every guild)
+        if fn is None:
+            return False
+        r = fn(reg, p)
+        r = await r if asyncio.iscoroutine(r) else r
+        return r is not False
 
     def agents_guild(v) -> str | None:
         """Whose runs a caller sees: the MCP bearer sees every run (the owner's jobs); a web viewer, their selected
         guild's (every run while one guild is configured — agents.runs_scope)."""
-        return None if is_job(v) else agents.runs_scope(bot.registries, v.reg)
+        return None if is_bearer(v) else agents.runs_scope(bot.registries, v.reg)
 
     def news_json(reg, r: dict) -> dict:
         return {**r, "posted_label": reg.local12(r["posted_at"]) if r.get("posted_at") else "", "ingested_label": reg.local12(r["ingested_at"]) if r.get("ingested_at") else ""}
+
+    def consequence_of(reg, p) -> dict:
+        """The decide screen's words for each verdict the proposal can still get (the site never composes them)."""
+        fn = getattr(bot, "proposal_consequence", None)
+        out = {}
+        for state in ("approved", "dismissed"):
+            if (p.state, state) not in news.OFFICER_MOVES or (state == "approved" and p.kind == "needs_developer"):
+                continue
+            if fn is not None:
+                out[state] = fn(reg, p, state)
+            else:
+                out[state] = news.consequence(p, reg, state, guilds=bot.registries, busy={r.key: busy_json(bot, r) for r in bot.registries.ordered()})
+        return out
 
     def proposal_json(reg, p) -> dict:
         d = p.model_dump()
         d["created_label"] = reg.local12(p.created_at)
         d["decided_label"] = reg.local12(p.decided_at) if p.decided_at else ""
-        d["history"] = [{**h, "at_label": reg.local12(h["at"]) if h.get("at") else ""} for h in p.history]
+        d["history"] = [{**h, "at_label": reg.local12(h["at"]) if h.get("at") else "", "annotation": h.get("state") is None} for h in p.history]
+        d["consequence"] = consequence_of(reg, p)
+        d["owner_only"] = p.kind == "profile"
+        d["shared_with"] = news.shared_profile_others(bot.registries, reg) if p.kind == "profile" else []
         return d
+
+    def refusal(v, e: Exception) -> HTTPException:
+        if isinstance(e, AlreadyDecided):
+            return HTTPException(409, news.already_text(e.p, v.reg.local12)[:1].upper() + news.already_text(e.p, v.reg.local12)[1:] + ".")
+        text = str(e)
+        if isinstance(e, PermissionError):
+            return HTTPException(403, text[:1].upper() + text[1:] + ("" if text.endswith(".") else "."))
+        return HTTPException(400, text)
 
     # ---- news
     @app.get("/api/news")
@@ -88,44 +254,46 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
     async def proposal_post(request: Request):
         """A new proposal (the review job, through MCP post_proposal): validated, stored, carded in the ops channel."""
         v, d = await body(request, officer=True)
+        job = job_of(request, v) or ("review" if is_bearer(v) else None)  # the review session's MCP server: the bearer, by the review
         dup = news.duplicate_profile_proposal(bot.registries, v.reg, d)
         if dup:  # a profile edit is shared by every guild on the game version: one proposal is enough (design §5.26)
-            if is_job(v):  # the owner's review job may look it up; a person gets the other guild's name, never its proposal id
+            if is_bearer(v):  # the owner's review job may look it up; a person gets the other guild's name, never its proposal id
                 return {"message": f"already proposed by another guild on this game version ({dup}) — nothing to do", "duplicate_of": dup}
             other = bot.registries.by_key.get(dup.split("/", 1)[0])
             return {"message": f"already proposed by {other.config.name if other else 'another guild'} on this game version — nothing to do",
                     "duplicate": True}
         try:
-            p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).create, v.reg, d, "review" if is_job(v) else v.name)
+            p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).create, v.reg, d, job or v.name)
         except (ProposalError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         await card(v.reg, p)
         await bot.ops.emit(v.reg.config, "info", f"news proposal {p.id}: {p.title} ({p.kind}, {p.confidence})")
         return {"message": f"proposal {p.id} posted: {p.title}", "id": p.id, "proposal": proposal_json(v.reg, p)}
 
-    async def move(v, pid: str, state: str, commit: str | None = None, note: str | None = None):
+    async def move(request: Request, v, pid: str, state: str | None, commit: str | None = None, note: str | None = None):
+        job = job_of(request, v)
         try:
-            p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).move, pid, state, v.name, officer=v.officer, job=is_job(v), by_id=v.uid, commit=commit, note=note)
-        except PermissionError as e:
-            raise HTTPException(403, str(e)[:1].upper() + str(e)[1:] + ".")
-        except ProposalError as e:
-            raise HTTPException(400, str(e))
-        await card(v.reg, p)
-        return p
+            return await decide(v.reg, pid, state, by=job and "the apply job" or v.name, by_id=None if job else v.uid, officer=bool(v.officer and not job),
+                                job=bool(job), owner=bool(v.owner and not job), note=note, commit=commit, via=v.via)
+        except (ProposalError, PermissionError) as e:
+            raise refusal(v, e)
 
     @app.post("/api/proposals/{pid}/resolve")
     async def proposal_resolve(request: Request, pid: str):
-        """Move a proposal: approved | dismissed (officers, like the card's buttons); applying | applied | failed |
-        reverted (the apply job only), with the commit hash and a note."""
+        """Move a proposal: approved | dismissed (officers; a game-data approval is the owner's), or the apply job's
+        applying | applied | failed | reverted with the commit hash and a note — and `state: null` + `note`: the job's
+        annotation ("waiting: …"), no move. The job's calls carry X-Oibot-Job. `card_updated` False = the Discord card
+        couldn't be edited (the page says it updates when the bot is back)."""
         v, d = await body(request, officer=True)
-        state = str(d.get("state") or "")
-        p = await move(v, pid, state, (str(d.get("commit") or "").strip() or None), (str(d["note"]) if d.get("note") is not None else None))
-        await bot.ops.emit(v.reg.config, "info", f"news proposal {p.id} → {p.state} (by {v.name})" + (f" @ {p.commit}" if p.commit and state in ("applied", "reverted") else "") + (f": {p.note}" if p.note else ""))
-        if p.kind == "profile" and p.state in ("applied", "reverted"):  # shared game data: every guild on it hears about it
-            for other in bot.registries.ordered():
-                if other is not v.reg and other.config.game_profile == v.reg.config.game_profile:
-                    await bot.ops.emit(other.config, "info", f"profile change from {v.reg.config.name}'s news {p.state}: {p.title}" + (f" @ {p.commit}" if p.commit else ""))
-        return {"message": f"proposal {p.id} is {p.state}", "proposal": proposal_json(v.reg, p)}
+        raw = d.get("state")
+        state = None if raw is None else str(raw)
+        if state is None and not job_of(request, v):
+            raise HTTPException(403, "Only the apply job annotates a proposal; officers approve or dismiss it.")
+        note = str(d["note"]) if d.get("note") is not None else None
+        p, card_ok = await move(request, v, pid, state, (str(d.get("commit") or "").strip() or None), note)
+        word = "noted" if state is None else p.state
+        return {"message": f"proposal {p.id} is {word}" + ("" if card_ok else " — the Discord card updates when the bot is back"),
+                "proposal": proposal_json(v.reg, p), "card_updated": card_ok}
 
     @app.post("/api/proposals/{pid}/apply")
     async def proposal_apply(request: Request, pid: str):
@@ -134,24 +302,22 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         from .. import configops
 
         v, _ = await body(request, officer=True)
-        if not is_job(v):
-            raise HTTPException(403, "Only the apply job applies proposals; approve it and it runs within 15 minutes.")
+        if job_of(request, v) != "apply":
+            raise HTTPException(403, "Only the apply job applies proposals; approve it and it runs at the job's next poll.")
         try:
             p = ProposalStore(store(), v.reg.key).get(pid)
         except ProposalError as e:
             raise HTTPException(404, str(e))
         if p.kind != "guild_setting":
             raise HTTPException(400, f"{p.id} is a {p.kind} proposal: only guild settings are applied here")
-        p = await move(v, pid, "applying")
+        p, _ = await move(request, v, pid, "applying")
         try:
             op = configops.ConfigOp.model_validate(p.edit)
             line = await configops.apply_async(v.reg, op, f"news review (approved by {p.decided_by or '?'})", True, bot=bot)
         except (RegistryError, ValueError) as e:
-            p = await move(v, pid, "failed", note=f"not applied: {e}")
-            await bot.ops.emit(v.reg.config, "warn", f"news proposal {p.id} failed: {e}")
+            p, _ = await move(request, v, pid, "failed", note=f"not applied: {e}")
             return JSONResponse({"error": str(e), "proposal": proposal_json(v.reg, p)}, status_code=400)
-        p = await move(v, pid, "applied", note=line)
-        await bot.ops.emit(v.reg.config, "info", f"news proposal {p.id} applied: {line}")
+        p, _ = await move(request, v, pid, "applied", note=line)
         return {"message": f"applied: {line}", "proposal": proposal_json(v.reg, p)}
 
     # ---- the effective profile the review compares against
@@ -171,8 +337,29 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         ov = await asyncio.to_thread(agents.overview, agents.OUT, tz, None, agents_guild(v))  # this guild's steps and results only (K7)
         ps = ProposalStore(store(), v.reg.key)
         runs = [{**r, "started_label": agents.clock12(r["started"], tz)} for r in await asyncio.to_thread(agents.list_runs, None, agents.OUT, guild=agents_guild(v))]
-        # waiting / approved: this guild's proposals; the jobs themselves serve every guild
-        return {**ov, "runs": runs, "owner": v.owner, "waiting": len(ps.all("proposed")), "approved": len(ps.all("approved")), "guild": v.reg.key}
+        many = len(bot.registries.ordered()) > 1
+        for j in ov["jobs"]:
+            st = agents.read_status(j["job"], agents.OUT)
+            g = st.get("guild")
+            j["elsewhere"] = bool(many and st.get("state") == "running" and g and g != v.reg.key)  # "busy with another server's proposal"
+            j["install"] = None if j["launchd"].get("loaded") else f"{INSTALL_LINE} {j['job']}"
+        out = {**ov, "runs": runs, "owner": v.owner, "waiting": len(ps.all("proposed")), "approved": len(ps.all("approved")), "guild": v.reg.key,
+               "apply_mode": apply_mode(), "busy": busy_json(bot, v.reg), "ops_channel": bool(v.reg.config.ops_channel_id),
+               "install_line": INSTALL_LINE}
+        if v.owner:  # host facts: the owner only (§2.8)
+            out["mcp"] = mcp_card(v.reg)
+            out["llm"] = llm_usage(bot, v.reg)
+        return out
+
+    @app.get("/api/agents/quiet")
+    async def agents_quiet(request: Request):
+        """{quiet, why[]}: whether restarting the bot now would cut into anything (the apply job asks before a restart)."""
+        await who(request, officer=True)
+        from .. import pending_views
+
+        now_m = time.monotonic()
+        previews = sum(1 for p in (getattr(app.state, "ops_previews", None) or {}).values() if float(p.get("expires", now_m + 1)) > now_m)
+        return quiet_state(bot, views=pending_views.live_count(), previews=previews)
 
     @app.get("/api/agents/run/{run_id}")
     async def agents_run(request: Request, run_id: str):
@@ -191,18 +378,22 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
     @app.post("/api/agents/run")
     async def agents_kick(request: Request):
         """Owner: start a job now. launchd starts it (`launchctl kickstart`, the job's own LaunchAgent) — the bot
-        never runs Claude itself, and a job that is already running is left alone."""
+        never runs Claude itself, and a job that is already running is left alone. The answer carries the status the
+        page polls against (`before`: started / finished as they were) to tell when the kicked run started or ended."""
         v, d = await body(request, officer=True)
         if not v.owner:
             raise HTTPException(403, "Owner only.")
         job = str(d.get("job") or "review")
         if job not in agents.JOBS:
             raise HTTPException(400, f"job is one of {', '.join(agents.JOBS)}")
+        st = agents.read_status(job, agents.OUT)
         ok, line = await asyncio.to_thread(agents.start_job, job)  # the same checks MCP run_job and plain text hit
         if not ok:
             return JSONResponse({"error": line}, status_code=409)
-        await bot.ops.emit(v.reg.config, "info", f"{line} by {v.name}")
-        return {"message": line}
+        from .. import ops as ops_mod
+
+        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
+        return {"message": line, "before": {"started": st.get("started"), "finished": st.get("finished"), "state": st.get("state")}}
 
 
 def effective_profile(reg, section: str | None = None) -> dict:

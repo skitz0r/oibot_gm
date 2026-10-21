@@ -109,7 +109,7 @@ def test_proposal_approve_then_dismiss(reg):
     p = a_proposal(reg)
     op = ConfigOp(op="proposal", target=p.id, value="approve", reason="checked the patch notes")
     assert configops.describe(reg, op) == (f"news proposal {p.id} “Barrow Deeps resets weekly” (guild_setting, high): proposed → approved — the apply job "
-                                           "carries it out within 15 minutes; note: checked the patch notes")
+                                           "carries it out at its next run; note: checked the patch notes")
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, op, "Officer", is_owner=False)
     bot = Bot()
@@ -147,8 +147,8 @@ def test_policy_describe(reg):
     assert configops.describe(reg, ConfigOp(op="policy", doc="loot", field="remove", text="bigger upgrades first")).startswith("loot policy: remove “2. Bigger upgrades first.”")
     assert "no line like" in configops.describe(reg, ConfigOp(op="policy", doc="loot", field="remove", text="free pizza"))
     assert "compile the current text" in configops.describe(reg, ConfigOp(op="policy", doc="comp", field="compile"))
-    assert "no compiled form" in configops.describe(reg, ConfigOp(op="policy", doc="persona", field="compile"))
-    assert "live at once" in configops.describe(reg, ConfigOp(op="policy", doc="persona", field="replace", text="Be terse."))
+    assert "compile the current text" in configops.describe(reg, ConfigOp(op="policy", doc="persona", field="compile")), "the persona is shown back too"
+    assert "shown back to confirm" in configops.describe(reg, ConfigOp(op="policy", doc="persona", field="replace", text="Be terse."))
     assert "doc is one of loot, comp" in configops.describe(reg, ConfigOp(op="policy_append", doc="persona", text="x"))
     assert ps.read("loot") == policy_mod.DEFAULTS["loot"], "describe writes nothing"
 
@@ -173,11 +173,17 @@ def test_policy_replace_compiles_and_the_view_confirms(reg):
     assert confirmed == "loot policy is live with this reading (2 item(s))" and ps.compiled("loot")["summary"] == "Mainspec first."
 
 
-def test_policy_persona_is_live_without_compiling(reg):
+def test_policy_persona_is_shown_back_and_waits_for_confirm(reg):
+    """Design §5.44: the persona is the system prompt of every LLM workload, so it gets the same two steps — its draft
+    is shown back (no model call: its reading is its own text) and the bot keeps speaking with the old one until Confirm."""
     ps, prov = PolicyStore(reg.store, reg.key), FakeProvider()
+    before = ps.live_text("persona")
     line = asyncio.run(configops.apply_async(reg, ConfigOp(op="policy", doc="persona", field="replace", text="Be terse."), "Officer", False, ps, bot=Bot(prov)))
-    assert line == "persona saved — live as written" and prov.calls == 0 and ps.read("persona") == "Be terse.\n"
-    assert policy_mod.pending(ps, "persona") is None
+    assert "waiting for Confirm or Discard" in line and prov.calls == 0 and ps.read("persona") == "Be terse.\n"
+    held = policy_mod.pending(ps, "persona")
+    assert held is not None and held["compiled"].text == "Be terse." and ps.live_text("persona") == before, "not live before Confirm"
+    assert policy_mod.confirm_pending(ps, "persona", "Officer").startswith("the persona is live")
+    assert ps.live_text("persona") == "Be terse." and policy_mod.pending(ps, "persona") is None
 
 
 def test_policy_append_without_an_llm_still_saves(reg):

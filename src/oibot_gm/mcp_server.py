@@ -39,8 +39,10 @@ DEFAULT_URL = "http://127.0.0.1:8788"
 TOKEN_ENV, URL_ENV, GUILD_ENV = "OIBOT_MCP_TOKEN", "OIBOT_MCP_URL", "OIBOT_MCP_GUILD"
 LOCK_ENV = "OIBOT_MCP_GUILD_LOCK"  # "1": every call acts on OIBOT_MCP_GUILD only (the jobs' pinned sessions)
 ACTOR_ENV = "OIBOT_MCP_ACTOR"  # D8: the Discord id of the officer at the keyboard; sent ONLY by the loot / people decision tools
+JOB_ENV = "OIBOT_MCP_JOB"  # review | apply: the job scripts' own calls (Api(job=…)); never set for a Claude session
 GUILD_HEADER = "X-Oibot-Guild"
 ACTOR_HEADER = "X-Oibot-Actor"
+JOB_HEADER = "X-Oibot-Job"  # design §2.6: the job's steps (applying / applied / failed / reverted, its annotations) need it
 # every tool's last parameter, documented once
 Guild = Annotated[str | None, Field(description="guild: key or name; omit for OIBOT_MCP_GUILD or the only guild (list_guilds lists them)")]
 HEADERS = {"X-Requested-With": "oibot", "Accept": "application/json"}
@@ -55,11 +57,12 @@ class Api:
     when not given): then a `guild=` resolving to any other guild is refused (a job's session acts on its guild only)."""
 
     def __init__(self, url: str | None = None, token: str | None = None, transport: httpx.BaseTransport | None = None, timeout: float = 60.0,
-                 guild: str | None = None, lock: bool | None = None):
+                 guild: str | None = None, lock: bool | None = None, job: str | None = None):
         self.url = (url or os.environ.get(URL_ENV) or DEFAULT_URL).rstrip("/")
         self.token = token if token is not None else (os.environ.get(TOKEN_ENV) or "")
         self.guild = guild if guild is not None else (os.environ.get(GUILD_ENV) or "").strip() or None
         self.lock = lock if lock is not None else (os.environ.get(LOCK_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
+        self.job = job if job is not None else (os.environ.get(JOB_ENV) or "").strip() or None  # X-Oibot-Job on every call (the job scripts)
         self._client = httpx.Client(base_url=self.url, headers=HEADERS, transport=transport, timeout=timeout)
         self._guilds: list[dict] | None = None  # GET /api/guilds (name → key); re-read on a miss and by list_guilds
 
@@ -73,6 +76,8 @@ class Api:
         decision about an award or a person (D8) — X-Oibot-Actor carries OIBOT_MCP_ACTOR when it is set; the bot
         validates it as an officer of the chosen guild and refuses the decision without it (the rule lives there)."""
         headers = self._headers()
+        if self.job:
+            headers[JOB_HEADER] = self.job
         who = (os.environ.get(ACTOR_ENV) or "").strip() if actor else ""
         if who:
             headers[ACTOR_HEADER] = who
@@ -1174,22 +1179,31 @@ def import_wishlists(csv: str, preview: bool = True, guild: Guild = None) -> dic
 
 @mcp.tool()
 def policy_get(doc: str, guild: Guild = None) -> dict:
-    """A policy document in full: doc = loot | comp | persona. Its text, whether a compiled reading is live (and its
-    summary), and whether an edit is pending confirmation."""
+    """A policy document in full: doc = loot | comp | persona. Its text, the live reading (its rules, when it was
+    compiled, `differs` = the text no longer reads the way the live reading was made) and the pending edit (pending_by)."""
     return api(guild).get(f"/api/policy/{doc}")
 
 
 @mcp.tool()
 def policy_edit(doc: str, text: str, guild: Guild = None) -> dict:
-    """Replace a policy document's text (officers; the WHOLE text — read policy_get first and edit it). loot/comp: saved
-    as a draft, the live reading is unchanged until policy_compile + policy_confirm; persona: live as written."""
+    """Replace a policy document's text (officers; the WHOLE text — read policy_get first and edit it). Saved as a
+    draft: the live reading (and the persona the bot speaks with) is unchanged until policy_compile + policy_confirm.
+    To add one rule, use policy_append instead."""
     return api(guild).put(f"/api/policy/{doc}", {"text": text})
+
+
+@mcp.tool()
+def policy_append(doc: str, text: str, guild: Guild = None) -> dict:
+    """Add one rule to the loot or comp policy (appended as '- <text>', as a draft — /gm rule and 'add a loot rule: …'
+    write the same). Refused while another officer's draft waits for confirmation (it names them). Then policy_compile
+    and policy_confirm."""
+    return api(guild).post(f"/api/policy/{doc}/append", {"text": text})
 
 
 @mcp.tool()
 def policy_compile(doc: str, guild: Guild = None) -> dict:
     """The bot's reading of a policy document as it is now (an LLM call; nothing goes live): `reading` = the numbered
-    loot rules or comp constraints in words, plus questions it could not settle. Show it to the person, then
+    loot rules or comp constraints in words, plus questions it could not settle (the persona: its own text). Show it to the person, then
     policy_confirm (confirm=true makes it live, false discards the pending edit and restores the previous text)."""
     return api(guild).post(f"/api/policy/{doc}/compile")
 

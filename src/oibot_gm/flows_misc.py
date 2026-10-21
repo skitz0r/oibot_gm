@@ -386,8 +386,14 @@ class RuleWizard(Wizard):
             return
         await self.working(interaction, "Reading the rule…")
         client = interaction.client
-        # the one pending edit per doc (policy.begin_edit, as the site, MCP and plain text): Discard restores the text before it
-        policy_mod.begin_edit(self.ps, self.doc, self.ps.read(self.doc).rstrip() + "\n" + as_bullet(text), interaction.user.display_name)
+        # the one pending edit per doc (policy.begin_edit, as the site, MCP and plain text): Discard restores the text before it;
+        # an appended rule never rides on ANOTHER officer's waiting draft (refused, naming them — design §5.44)
+        try:
+            policy_mod.begin_edit(self.ps, self.doc, self.ps.read(self.doc).rstrip() + "\n" + as_bullet(text), interaction.user.display_name,
+                                  by_id=interaction.user.id, append=True, when=self.reg.local12)
+        except policy_mod.PolicyPendingError as e:
+            await self.finish(interaction, f"⛔ {e}\n-# Your rule was not added:\n> {text[:1200]}")
+            return
         provider = getattr(getattr(client, "ctx", None), "provider", None)
         await discord_policy.compile_and_confirm(interaction, self.reg, self.ps, self.doc, provider, client.ops, followup=True)
         await self.finish(interaction, f"Added to the {RULE_DOCS[self.doc]} draft:\n> {text[:1500]}\n-# Confirm or discard my reading below.")
