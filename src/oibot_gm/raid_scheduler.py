@@ -61,6 +61,9 @@ class RaidSchedulerMixin:
         errors = self._tick_errors()
         try:
             await self.companion_check()
+            setup = getattr(self, "setup_tick", None)  # SetupMixin: the hourly channel-permission check, the daily invite check
+            if setup is not None:
+                await setup()
             errors.pop("", None)
         except Exception as e:  # noqa: BLE001
             await self._tick_failed(None, e)

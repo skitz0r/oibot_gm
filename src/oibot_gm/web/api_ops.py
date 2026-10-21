@@ -315,6 +315,8 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
                                 status_code=409 if res["changed"] and not res["applied"] else 400)
         return res
 
+    app.state.ops_translate = translate  # the other translators (web/api_setup.py's channels) reach the one core through here
+
     @app.post("/api/admin/raid/schedule")
     async def admin_raid_schedule(request: Request):
         """Change or create one schedule (owner): {instance, id, fields: {setting: value}} — a cadence value of null goes

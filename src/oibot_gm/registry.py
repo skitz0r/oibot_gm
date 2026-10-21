@@ -122,6 +122,9 @@ class Member(BaseModel):
     # the person should know (not rostered, seat released, answered for you, cancelled, …); Registry.notify writes them
     notices: list[dict] = Field(default_factory=list)
     dm_opt_out: bool = False
+    # set when they leave the Discord server (on_member_remove, needs the members intent); cleared when they're seen again.
+    # Officers then see "left the server" and may Remove record (Registry.remove_record) — members never delete themselves (D29)
+    left_at: Optional[str] = None
     test: bool = False  # seeded by /gm test: the bot puppets them (DMs go to the roster channel; officers answer for them)
     created_at: str = Field(default_factory=now)
     updated_at: str = Field(default_factory=now)
@@ -184,6 +187,13 @@ class Recruitment(BaseModel):
 
 QUESTIONS_MAX = 15  # three pages of five in Discord's modals
 ANSWER_MAX = 1000
+DECISION_NOTE_MAX = 400  # the officer's note to an applicant (the decide screen's box and the web's)
+ERROR_DM_MAX = 5  # people who get the error alerts (GuildConfig.error_dm_ids)
+
+
+def prior_row(a: "Applicant") -> dict:
+    """An application's verdict as a history row (what the next application of the same person carries)."""
+    return {"label": a.label, "status": a.status, "by": a.decided_by, "at": a.decided_at or a.created_at, "note": a.decision_note}
 
 
 class Applicant(BaseModel):
@@ -211,6 +221,10 @@ class Applicant(BaseModel):
     decided_at: Optional[str] = None
     decision_note: Optional[str] = None
     message_id: Optional[int] = None  # review card in the applications channel
+    # earlier applications of the same person, oldest first: {label, status, by, at, note} — the card's and the
+    # Applications page's "Applied before: declined 12 Mar by Jonny — full on healers" (Registry.prior_decision_line)
+    history: list[dict] = Field(default_factory=list)
+    role_note: Optional[str] = None  # what Accept did about the member role (D31): "gave them @Member" / why it couldn't
 
     @property
     def label(self) -> str:
@@ -304,6 +318,12 @@ class GuildConfig(BaseModel):
     plain: PlainPolicy = Field(default_factory=PlainPolicy)  # who may act through plain text, and where
     # loot scoring overrides over profiles/<game>/loot_defaults.yaml (Registry.loot_cfg merges them; untiered_weight, …)
     loot: dict = Field(default_factory=dict)
+    # who gets the error alerts (ops.Ops.emit, one DM per distinct error per 30 min — the DM rule's one exception): None = the
+    # owner (the default); a list = those Discord users; [] = nobody (errors stay in the ops channel). Registry.error_dm_targets
+    error_dm_ids: Optional[list[int]] = None
+    # the bot was removed from the server (on_guild_remove → Guilds.detach): the guild is parked — out of routing, the
+    # scheduler, the feed, the picker and the homepage — until the bot is back in that server (on_guild_join / available)
+    detached_at: Optional[str] = None
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -1017,6 +1037,85 @@ class Registry:
         self.save_config(f"owner → {name or uid} (by {by})")
         return f"{name or uid} owns {self.config.name} now"
 
+    # ---- error alerts (design §3.5 OPS-01, D46): who the ops feed DMs about an error
+    def error_dm_targets(self) -> list[int]:
+        """The Discord ids ops.Ops.emit DMs about an error: `error_dm_ids` when set (possibly nobody), else the owner."""
+        ids = self.config.error_dm_ids
+        if ids is None:
+            return [int(self.config.owner_discord_id)] if self.config.owner_discord_id else []
+        return [int(x) for x in ids]
+
+    @_config_verb("settings")
+    def set_error_dms(self, ids, by: str) -> str:
+        """Who gets the error alerts: a list of Discord ids ([] = nobody — errors stay in the ops channel) or None (the owner,
+        the default). One settings commit. Errors only: info and warn lines never DM anyone (D46)."""
+        if ids is not None:
+            out: list[int] = []
+            for x in ids:
+                try:
+                    uid = int(str(x).strip().removeprefix("<@").removeprefix("!").removesuffix(">"))
+                except ValueError:
+                    raise RegistryError(f"error alerts: {x} isn't a Discord user (pick the member)") from None
+                if uid not in out:
+                    out.append(uid)
+            if len(out) > ERROR_DM_MAX:
+                raise RegistryError(f"At most {ERROR_DM_MAX} people get the error alerts.")
+            ids = out
+        self.config.error_dm_ids = ids
+        self.save_config(f"error alerts → {self.error_dm_words()} (by {by})")
+        return f"error alerts go to {self.error_dm_words()}"
+
+    def error_dm_words(self) -> str:
+        """'the owner' · '<@1>, <@2>' · 'nobody (the ops channel only)' — mentions stay ids (each surface renders them)."""
+        ids = self.config.error_dm_ids
+        if ids is None:
+            return "the owner"
+        return ", ".join(f"<@{i}>" for i in ids) if ids else "nobody (the ops channel only)"
+
+    # ---- detached guilds (design §3.5 S-05/S-06): the bot was removed from the server
+    def set_detached(self, at: str | None, by: str) -> None:
+        """Park (at = an ISO stamp) or re-attach (None) the guild — Guilds.detach / attach own the routing; this is the
+        stored mark, so a restart keeps a removed server parked until the bot is seen in it again."""
+        with self.config_lock:
+            if self.config.detached_at == at:
+                return
+            self.config.detached_at = at
+            self.save_config(("detached: the bot left the server" if at else "re-attached: the bot is back in the server") + f" ({by})", notify=False)
+
+    # ---- people who left the server (design §3.3 cluster D): left_at, the officers' Remove record (D29: never self-service)
+    @_member_write
+    def member_left(self, discord_id: int, left: bool = True) -> Member | None:
+        """Mark (or clear) that a member left the Discord server. None for an unknown person. No notice, no DM."""
+        m = self.members.get(int(discord_id))
+        if m is None or bool(m.left_at) == bool(left):
+            return m
+        m.left_at = now() if left else None
+        self.save_quiet(m, f"{m.display_name} {'left' if left else 'is back in'} the server")
+        return m
+
+    @_member_write
+    def remove_record(self, discord_id: int, by: str, *, seats: list[str] | None = None) -> str:
+        """THE officers' Remove record: the member file is deleted (git keeps it). Only for someone who LEFT the server —
+        a member still there retires their characters instead — and never while they hold a seat on a live run (`seats`:
+        the caller's run titles from the run files). Members never delete themselves (owner decision D29)."""
+        m = self.members.get(int(discord_id))
+        if m is None:
+            raise RegistryError("No record for that member.")
+        if m.test:
+            raise RegistryError(f"{m.display_name} is a test member — the test bench clears them.")
+        if not m.left_at:
+            raise RegistryError(f"{m.display_name} is still in the server — retire their characters instead (the record stays).")
+        if seats:
+            raise RegistryError(f"{m.display_name} is rostered on {', '.join(seats)} — release that seat first.")
+        path = self.store.root / self.key / "members" / f"{m.discord_id}.json"
+        if path.exists():
+            path.unlink()
+        self.members.pop(m.discord_id, None)
+        self._snap.pop(m.discord_id, None)
+        self.store.commit(f"{self.key}: record of {m.display_name} removed (left the server; by {by})")
+        self._notify("member", [f"{m.display_name}'s record removed (by {by})"])
+        return f"{m.display_name}'s record removed"
+
     def __init__(self, store: GitStore, guild_key: str, profile: GameProfile):
         self.store = store
         self.key = guild_key
@@ -1322,8 +1421,10 @@ class Registry:
         existing = self.applicants.get(discord_id)
         if existing and existing.status == "open":
             raise RegistryError(f"You already have an open application for {existing.name}. An officer will get to it.")
+        history = list(existing.history) + [prior_row(existing)] if existing else []  # one file per person: the earlier verdicts ride along
         a = Applicant(discord_id=discord_id, display_name=display_name, name=name, cls=cls, spec=spec, offspec=offspec, logs_url=(logs_url or "").strip() or None,
-                      availability=(availability or "").strip() or None, about=(about or "").strip() or None, surname=surname, schedules=schedules, answers=answers, source=source)
+                      availability=(availability or "").strip() or None, about=(about or "").strip() or None, surname=surname, schedules=schedules, answers=answers, source=source,
+                      history=history)
         self.save_applicant(a, f"application from {display_name}: {a.label} ({cls} {spec})")
         return a
 
@@ -1410,18 +1511,68 @@ class Registry:
     def open_applicants(self) -> list[Applicant]:
         return sorted([a for a in self.applicants.values() if a.status == "open"], key=lambda a: a.created_at)
 
+    def decided_refusal(self, a: Applicant | None) -> str:
+        """'Already declined by Jonny (Tue 12 Mar 8:02 PM).' — a second decision names who made the first (every surface)."""
+        if not a:
+            return "No open application for that member."
+        when = f" ({self.local12(a.decided_at)})" if a.decided_at else ""
+        return f"Already {a.status} by {a.decided_by}{when}." if a.decided_by else f"That application is {a.status}."
+
+    def application_state(self, discord_id: int) -> dict | None:
+        """A person's OWN application as they read it (GET /api/me.application, the Me page's card, /me view, and the
+        registration paths, which check it BEFORE whether applications are open — a pending applicant is never told
+        "isn't taking applications"): {state open | accepted | declined | withdrawn, label, when, note, by, text}. None =
+        never applied."""
+        a = self.applicants.get(int(discord_id))
+        if a is None:
+            return None
+        sent = self.local12(a.created_at)
+        when = self.local12(a.decided_at) if a.decided_at else None
+        if a.status == "open":
+            text = f"Your application for {a.label} is waiting for an officer (sent {sent}). You'll get a DM with the decision."
+        elif a.status == "accepted":
+            text = f"Your application for {a.label} was accepted" + (f" by {a.decided_by}" if a.decided_by else "") + (f" ({when})." if when else ".")
+        elif a.status == "declined":
+            text = (f"Your application for {a.label} wasn't accepted this time" + (f" ({when})" if when else "") + "."
+                    + (f" Note: {a.decision_note}" if a.decision_note else "") + " You can apply again" + (" later." if not self.config.recruitment.open else "."))
+        else:
+            text = f"Your application for {a.label} was withdrawn."
+        return {"state": a.status, "label": a.label, "sent": sent, "when": when, "note": a.decision_note if a.status != "open" else None,
+                "by": a.decided_by, "text": text}
+
+    def prior_decision_line(self, a: Applicant) -> str | None:
+        """'Applied before: declined 12 Mar by Jonny — full on healers' (the newest earlier verdict; '(+1 earlier)' when
+        there are more), or None for a first application. The review card, /roster applicants and the Applications page."""
+        rows = [r for r in a.history if r.get("status") in ("accepted", "declined", "withdrawn")]
+        if not rows:
+            return None
+        r = rows[-1]
+        when = self.local(r["at"], "%d %b").lstrip("0") if r.get("at") else ""
+        line = f"Applied before: {r['status']}" + (f" {when}" if when else "") + (f" by {r['by']}" if r.get("by") else "")
+        if r.get("note"):
+            line += f" — {r['note']}"
+        if len(rows) > 1:
+            line += f" (+{len(rows) - 1} earlier)"
+        return line
+
     @_member_write
     def decide(self, discord_id: int, accept: bool, by: str, note: str | None = None) -> tuple[Applicant, Optional[RegisteredCharacter]]:
+        """Accept (the main registered as a confirmed trial) or decline an open application. The character is added
+        FIRST: a refusal there (a name taken since) leaves the application open on disk and in memory — never accepted
+        in memory and open on disk. The note is capped here (DECISION_NOTE_MAX); a second decision names the first."""
         a = self.applicants.get(discord_id)
         if not a or a.status != "open":
-            raise RegistryError("No open application for that member.")
-        a.status = "accepted" if accept else "declined"
-        a.decided_by, a.decided_at, a.decision_note = by, now(), (note or "").strip() or None
+            raise RegistryError(self.decided_refusal(a))
+        note = (note or "").strip() or None
+        if note and len(note) > DECISION_NOTE_MAX:
+            raise RegistryError(f"The note is limited to {DECISION_NOTE_MAX} characters (it goes to the applicant).")
         char = None
         if accept:
             m, char = self.add_character(a.discord_id, a.display_name, a.name, a.cls, a.spec, a.offspec, True, surname=a.surname)
             char.confirmed_by, char.confirmed_at = by, now()
             self.save(m, f"{by} accepted {a.display_name} as {a.name}")
+        a.status = "accepted" if accept else "declined"
+        a.decided_by, a.decided_at, a.decision_note = by, now(), note
         self.save_applicant(a, f"{by} {a.status} application from {a.display_name} ({a.name})")
         # the decision's copy on the Me page (D26; the decision DM itself is one they wait on, the bot's to send)
         self.notify(a.discord_id, "application", (f"Your application for {a.label} was accepted by {by} — welcome." if accept

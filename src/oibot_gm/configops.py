@@ -51,7 +51,8 @@ Guild (owner only, op=set): timezone (IANA name), signup_channel (channel mentio
   (the "I'll be away" card), news_channel (where the news webhook posts; the bot keeps the relevant items) — a channel
   path with value "none" clears it ("stop posting absences anywhere"); news_keywords
   (comma list of extra words that make a news item relevant; empty clears), officer_role add/remove (role_add/role_remove: value = the role mention <@&id>, id or name; stored by id),
-  ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb).
+  ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb),
+  error_dms (who gets the error alerts: user mentions <@id> comma-separated, "owner" = the owner (the default), "none" = nobody — errors stay in the ops channel).
 Recruitment (owner, op=recruit): the Discord application. field=open, value=true|false (closed: /apply and the Apply button say so);
   field=note, value=<one line on the Apply screen, e.g. "Looking for healers"; empty clears>;
   field=question_add, value=<the question, at most 45 characters>, reason=<optional hint shown under it, at most 100>,
@@ -188,7 +189,7 @@ class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier")
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|news_keywords|ask_audience|about")
+    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain), item name or id (tier)")
     field: Optional[str] = Field(default=None, description="raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none)")
@@ -1852,10 +1853,15 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             return f"recruit {op.field or ''}: {e}"
     if op.op == "set":
         cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:60], "news_keywords": ", ".join(cfg.news_keywords),
-               "loot_log": "on" if cfg.loot_log else "off",
+               "loot_log": "on" if cfg.loot_log else "off", "error_dms": reg.error_dm_words(),
                **{p: (getattr(cfg, f"{p}_id", None) and f"<#{getattr(cfg, f'{p}_id')}>") for p in CHANNEL_PATHS}}.get(op.path or "", "?")
         if op.path in CHANNEL_PATHS and _clear_word(op.value):
             return f"{op.path}: {cur or '—'} → not set"
+        if op.path == "error_dms":
+            try:
+                return f"error alerts: {cur} → {error_dm_words(_error_dm_ids(op.value))}"
+            except RegistryError as e:
+                return f"error alerts: {e}"
         if op.path == "timezone" and op.value and op.value != cfg.timezone:
             from . import raidcycle as rc
 
@@ -2505,7 +2511,8 @@ def self_audited(reg: Registry, op: ConfigOp, bot) -> bool:
             or (op.op == "loot" and hasattr(bot, "open_council"))  # LootMixin's verbs write their own line
             or _people_verb(reg, op)  # so does PeopleMixin.save_characters (discord_people)
             or (op.op in RUN_VERBS_AUDITED and hasattr(bot, "remind"))  # so do these RaidMixin verbs (via, by_id passed)
-            or op.op == "test")  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
+            or op.op == "test"  # and the test bench's (SetupMixin.test_* / open_test_run, via + by_id passed)
+            or (op.op == "application" and hasattr(bot, "decide_application")))  # settle_application audits the verdict
 
 
 async def apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=None, bot=None, by_id: int | None = None,
@@ -2570,6 +2577,11 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
         return f"{m.display_name} absent {reg.span_label(a.start, a.end)}" + sheets_words(reg, bot, touched)
     if bot is not None and (op.op in ("role_add", "role_remove", "plain") or (op.op == "recruit" and (op.field or "").strip().lower().startswith("member_role"))):
         await _warm_roles(reg, bot)  # role names → ids against the live guild before the op
+        refusal = getattr(bot, "role_refusal", None)
+        if op.op == "role_add" and refusal is not None:  # @everyone, a bot's or integration's managed role, a role the server lacks
+            why = refusal(reg, reg.role_id_for(op.value))
+            if why:
+                raise RegistryError(why)
     if bot is not None and op.op == "recruit":
         kw, _ = ({}, "") if isinstance(op, MergedOp) else _recruit(reg, op)  # a merged write: apply() saves its parts as one
         if "invite_create" in kw:  # the Config page's Create invite: Discord makes it, the recruitment settings keep it
@@ -2607,6 +2619,33 @@ async def _warm_roles(reg: Registry, bot) -> None:
         await asyncio.to_thread(reg.resolve_officer_roles, guild)
 
 
+def _error_dm_ids(value) -> list[int] | None:
+    """A `set error_dms` value as Registry.set_error_dms takes it: 'owner' (or empty) → None (the owner, the default);
+    'none' → [] (nobody); otherwise user mentions / ids, comma-separated."""
+    v = str(value or "").strip()
+    if not v or v.lower() in ("owner", "default", "the owner"):
+        return None
+    if v.lower() in ("none", "nobody", "off", "[]"):
+        return []
+    out = []
+    for part in re.split(r"[,\s]+", v):
+        part = part.strip()
+        if not part:
+            continue
+        digits = part.removeprefix("<@").removeprefix("!").removesuffix(">")
+        if not digits.isdigit():
+            raise RegistryError(f"error alerts: {part} isn't a member (pick them: a mention like <@123> or their id)")
+        out.append(int(digits))
+    return out
+
+
+def error_dm_words(ids: list[int] | None) -> str:
+    """Registry.error_dm_words for a value not saved yet."""
+    if ids is None:
+        return "the owner"
+    return ", ".join(f"<@{i}>" for i in ids) if ids else "nobody (the ops channel only)"
+
+
 def _apply_set(reg: Registry, op: ConfigOp, by: str) -> str:
     """The `set` op's write (one guild setting): called by apply() under config_lock after the rev check."""
     cfg = reg.config
@@ -2630,6 +2669,8 @@ def _apply_set(reg: Registry, op: ConfigOp, by: str) -> str:
         from .registry import parse_bool
 
         cfg.loot_log = parse_bool(op.value)
+    elif op.path == "error_dms":  # one verb: Registry.set_error_dms validates and commits
+        return reg.set_error_dms(_error_dm_ids(op.value), by)
     elif op.path in CHANNEL_PATHS and _clear_word(op.value):
         setattr(cfg, f"{op.path}_id", None)
         reg.save_config(f"{op.path} cleared (by {by})")
@@ -2730,7 +2771,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
 
     if op.op == "application":  # the card's Accept / Decline, /roster applicant, the web and MCP: one verb
         a, accept, note = _application(reg, op)
-        return str(await bot.decide_application(reg, a.discord_id, accept, by, note))
+        return str(await bot.decide_application(reg, a.discord_id, accept, by, note, by_id=by_id, via=via))  # it writes its own ops line
     if op.op == "proposal":  # the card's Approve / Dismiss and the Agents page: ProposalStore.move + the card + an ops line
         from .news import ProposalError
 
@@ -3003,12 +3044,12 @@ def _hours_words(h) -> str:
 # follows consequence: a batch with a WARN_OPS op or a consequence line is reviewed first; anything else saves directly.
 
 STRUCTURED_KINDS = ("settings", "raid", "raid_reset", "schedule", "schedule_remove", "buff", "family", "aura_reset", "recruitment", "plain")
-SETTINGS_FIELDS = ("timezone", "ask_audience", "about", "news_keywords", "loot_log")  # + officer_roles (whole list) + channel:<kind>
+SETTINGS_FIELDS = ("timezone", "ask_audience", "about", "news_keywords", "loot_log")  # + officer_roles (whole list) + channel:<kind> + error_dm_ids
 RAID_FORM_FIELDS = ("lockout_days", "duration_hours", "notes", "split_policy")
 AURA_VALUE_WORDS = {"all": "Everyone", "physical": "Physical damage", "spell": "Spell damage", "mana": "Mana users", "melee": "Melee",
                     "ranged": "Ranged", "healer": "Healers", "tank": "Tanks"}
 SETTING_WORDS = {"timezone": "Timezone", "ask_audience": "Who may ask questions", "about": "About", "news_keywords": "News keywords",
-                 "loot_log": "Public loot log", **{p: p.removesuffix("_channel").capitalize() + " channel" for p in CHANNEL_PATHS}}
+                 "loot_log": "Public loot log", "error_dms": "Error alerts", **{p: p.removesuffix("_channel").capitalize() + " channel" for p in CHANNEL_PATHS}}
 BUFF_FIELD_WORDS = {"scope": "Scope", "family": "Stacking family", "strength": "Strength", "status": "Status", "note": "Note"}
 FAMILY_FIELD_WORDS = {"name": "Name", "status": "Status", "note": "Note", "value": "Who benefits"}
 
@@ -3101,8 +3142,12 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
                 ops += [ConfigOp(op="role_add", value=str(rid)) for rid in sorted(set(want) - have)]
             elif path in SETTINGS_FIELDS:
                 ops.append(ConfigOp(op="set", path=path, value=_value_text(v) if path != "news_keywords" or not isinstance(v, list) else ", ".join(str(w) for w in v)))
+            elif path in ("error_dm_ids", "error_dms"):  # the whole list of Discord ids; null = the owner (the default), [] = nobody
+                if v is not None and not isinstance(v, (list, tuple)):
+                    raise RegistryError("error_dm_ids is the whole list of Discord user ids (null = the owner, [] = nobody)")
+                ops.append(ConfigOp(op="set", path="error_dms", value="owner" if v is None else (", ".join(f"<@{int(x)}>" for x in v) or "none")))
             else:
-                raise RegistryError(f"unknown setting {f} (one of {', '.join(SETTINGS_FIELDS)}, officer_roles, channel:<kind>)")
+                raise RegistryError(f"unknown setting {f} (one of {', '.join(SETTINGS_FIELDS)}, officer_roles, channel:<kind>, error_dm_ids)")
         return ops
     if k == "raid":
         return _raid_ops(reg, (target or "").strip(), fields)
@@ -3667,6 +3712,8 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
                 cid = getattr(cfg, f"{op.path}_id", None)
                 new = None if _clear_word(op.value) else _channel_id(op.value)
                 return "Guild settings", DescribedPart(label=SETTING_WORDS[op.path], before=f"<#{cid}>" if cid else "not set", after=f"<#{new}>" if new else "not set"), []
+            if op.path == "error_dms":
+                return "Guild settings", DescribedPart(label="Error alerts", before=reg.error_dm_words(), after=error_dm_words(_error_dm_ids(op.value))), []
             cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:80] or "none",
                    "news_keywords": ", ".join(cfg.news_keywords) or "none", "loot_log": "on" if cfg.loot_log else "off"}.get(op.path or "", "?")
             new = op.value or "none"
@@ -3778,7 +3825,28 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
         d.lines.append(line)
         d.consequences += [c for c in cons if c not in d.consequences]
         d.warn = d.warn or line.warn
+    _batch_roles(reg, list(ops), d)
     return d
+
+
+NO_OFFICER_ROLES = "No officer roles now: only the server owner and Manage Server count."
+
+
+def _batch_roles(reg: Registry, ops: list[ConfigOp], d: Described) -> None:
+    """op_consequences reads each op alone, so a batch that swaps the officer roles (remove A, add B — the officers hub,
+    the web's MultiSelect) would say 'No officer roles now'. The sentence stands only when the WHOLE batch leaves none."""
+    if not any(o.op == "role_remove" for o in ops):
+        return
+    roles = list(reg.config.officer_role_ids)
+    for o in ops:
+        rid = reg.role_id_for(o.value) if o.op in ("role_add", "role_remove") else None
+        if rid is None:
+            continue
+        roles = [r for r in roles if r != rid] + ([rid] if o.op == "role_add" else [])
+    if roles:
+        d.consequences = [c for c in d.consequences if c != NO_OFFICER_ROLES]
+        for ln in d.lines:
+            ln.consequences = [c for c in ln.consequences if c != NO_OFFICER_ROLES]
 
 
 # ---- the one core: apply a batch the caller has authorized
@@ -3822,6 +3890,8 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
 
     if bot is not None and any(o.op in ("role_add", "role_remove", "plain") or (o.op == "recruit") for o in merged):
         await _warm_roles(reg, bot)
+    refusal = getattr(bot, "role_refusal", None) if bot is not None else None
+    blocked = {id(o): why for o in merged if o.op == "role_add" and refusal is not None and (why := refusal(reg, reg.role_id_for(o.value)))}
 
     def pure(op) -> bool:
         if op.op not in PURE_OPS:
@@ -3836,6 +3906,9 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
         res = []
         with reg.config_lock, reg.store.batch():
             for op in chunk:
+                if id(op) in blocked:  # @everyone, a managed role, a role the server lacks (SetupMixin.role_refusal)
+                    res.append((op, None, RegistryError(blocked[id(op)])))
+                    continue
                 before = snapshot_revs(reg, revs, raids)
                 try:
                     line = apply(reg, op, by, True, policy_store, raids=raids, rev=op_rev(op, None, revs), by_id=by_id)

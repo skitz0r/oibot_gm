@@ -236,6 +236,7 @@ class Viewer:
         self.uid, self.name, self.reg, self.officer, self.owner, self.via, self.moved = uid, name, reg, officer, owner, via, moved
         self.member = reg.members.get(uid) if reg else None
         self.actor = actor  # MCP with X-Oibot-Actor: the officer the call acts as (D8); None for the owner's token alone and the web
+        self.stale = False  # §2.9: Discord couldn't confirm the membership now — the last-known "yes" (≤ 6 h) keeps reads going; writes refuse
 
 
 MCP_TOKEN_ENV = "OIBOT_MCP_TOKEN"
@@ -269,18 +270,42 @@ def bearer_ok(request, token: str | None) -> bool:
     return scheme.lower() == "bearer" and bool(presented.strip()) and secrets.compare_digest(presented.strip(), token)
 
 
-def mcp_authorized(request, token: str | None) -> bool:
+def mcp_authorized(request, token: str | None, bot=None) -> bool:
     """The bearer token is right AND (with OIBOT_MCP_LOCAL_ONLY on, the default) the request was made on this host: the
     right token arriving through the tunnel is refused exactly like a wrong one, and logged (never the token) because
-    it means the token got out. No guild needed (GET /api/guilds lists them all for the bearer)."""
+    it means the token got out — with `bot`, also an ops ERROR line (design §3.5 M-01: the owner's error alert, throttled
+    like every error). No guild needed (GET /api/guilds lists them all for the bearer)."""
     if not bearer_ok(request, token):
         return False
     if mcp_local_only() and not local_request(request):
         host = request.client.host if request.client else "?"
-        log.warning("refused an MCP bearer request from %s (%s): bearer access is local-only (%s)", host,
-                    request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "no proxy header", MCP_LOCAL_ENV)
+        via = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or "no proxy header"
+        log.warning("refused an MCP bearer request from %s (%s): bearer access is local-only (%s)", host, via, MCP_LOCAL_ENV)
+        if bot is not None:
+            report_leak(bot, request, f"{host} ({via})")
         return False
     return True
+
+
+def report_leak(bot, request, where: str) -> None:
+    """The right MCP token arrived from outside this host: the token is out. An ops ERROR line in the guild the request
+    named (X-Oibot-Guild), else every served guild — each guild's error alert DMs its error_dm_ids once per 30 min
+    (ops.Ops.emit's throttle). Never the token itself."""
+    ops = getattr(bot, "ops", None)
+    guilds = getattr(bot, "registries", None)
+    if ops is None or guilds is None:
+        return
+    ref = (request.headers.get(GUILD_HEADER) or "").strip()
+    named = guilds.get(ref) if ref and hasattr(guilds, "get") else None
+    targets = [named] if named is not None else list(guilds.ordered())
+    text = (f"the MCP owner token was used from outside this machine ({where}) and refused — the token has leaked: rotate OIBOT_MCP_TOKEN in "
+            ".env on the host and restart the bot")
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    for reg in targets:
+        loop.create_task(ops.emit(reg.config, "error", text))
 
 
 def guild_list_words(bot) -> str:
@@ -321,7 +346,7 @@ def mcp_viewer(request, bot, token: str | None) -> Viewer | None:
     """The bearer identity: the OWNER OF THE CHOSEN GUILD (mcp_guild; every write is attributed to them by their display
     name, `via='mcp'` gives the audit prefix). None = not authorized (mcp_authorized); 400 = no guild chosen, an unknown
     one, or one without an owner."""
-    if not mcp_authorized(request, token):
+    if not mcp_authorized(request, token, bot):
         return None
     reg = mcp_guild(request, bot)
     if not reg.config.owner_discord_id:
@@ -385,9 +410,10 @@ def create_app(bot) -> FastAPI:
 
     async def look(reg, uid: int) -> tuple[bool, str, object | None]:
         """(may open it, membership answer, Discord member): the guild's owner, or in its server now (guild_routing —
-        the one definition of "belongs to"; no timeout here, a page may wait for a slow fetch as it always did)."""
-        answer, member = await guild_routing.member_of(bot, reg, uid, timeout=None)
-        return answer == "yes" or reg.is_owner_id(uid), answer, member
+        the one definition of "belongs to"; no timeout here, a page may wait for a slow fetch as it always did). A
+        lookup Discord can't answer falls back to the last-known "yes" of the past 6 hours ('stale', §2.9): reads go on."""
+        answer, member = await guild_routing.member_of(bot, reg, uid, timeout=None, stale_ok=True)
+        return answer in ("yes", "stale") or reg.is_owner_id(uid), answer, member
 
     async def accessible_keys(uid: int, skip=None) -> list[str]:
         regs = [r for r in bot.registries.ordered() if r is not skip]
@@ -408,8 +434,8 @@ def create_app(bot) -> FastAPI:
            NotMember naming what the person CAN open; a request that named its guild is never switched silently;
         2. the oibot_guild cookie, when this person may open it (otherwise fall through, moved-from = its name);
         3. the first guild they may open in Guilds.ordered() — the only "first" in the web, over their own list.
-        Several guilds: a lookup Discord didn't answer ('unknown') on 1. or 2. is a 503, never a move (K4). One guild:
-        as before (not in the server = NotMember)."""
+        A lookup Discord didn't answer ('unknown', and no last-known "yes" within 6 h) on 1. or 2. is a 503 (DiscordUnsure),
+        never a move (K4) — with one guild as with several (§2.9: an outage never reads as "not a member")."""
         regs = bot.registries.ordered()
         many = len(regs) > 1
         by_key = {r.key: r for r in regs}
@@ -419,8 +445,9 @@ def create_app(bot) -> FastAPI:
             if reg is not None:
                 ok, answer, member = await look(reg, uid)
                 if ok:
+                    request.state.membership = answer
                     return reg, member, None
-                if answer == "unknown" and many:
+                if answer == "unknown":
                     raise DiscordUnsure()
             raise NotMember(reg.config.name if reg else None, requested=want, guilds=await accessible_keys(uid, skip=reg))
         moved, tried = None, None
@@ -430,18 +457,20 @@ def create_app(bot) -> FastAPI:
             if tried is not None:
                 ok, answer, member = await look(tried, uid)
                 if ok:
+                    request.state.membership = answer
                     return tried, member, None
-                if answer == "unknown" and many:
+                if answer == "unknown":
                     raise DiscordUnsure()
                 moved = tried.config.name
             elif many:
                 moved = ck  # a guild that isn't served any more
         rest = [r for r in regs if r is not tried]
         looks = await asyncio.gather(*(look(r, uid) for r in rest))
-        for r, (ok, _, member) in zip(rest, looks):
+        for r, (ok, answer, member) in zip(rest, looks):
             if ok:
+                request.state.membership = answer
                 return r, member, moved
-        if many and any(answer == "unknown" for _, answer, _ in looks):
+        if any(answer == "unknown" for _, answer, _ in looks):
             raise DiscordUnsure()
         raise NotMember(regs[0].config.name if not many else None)
 
@@ -467,7 +496,9 @@ def create_app(bot) -> FastAPI:
         officer = bot.officiates(member, guild_obj) if member else True  # per guild: owning B grants nothing in A
         owner = reg.is_owner_id(uid)
         name = member.display_name if member else (reg.members[uid].display_name if uid in reg.members else s.get("name", str(uid)))
-        return Viewer(uid, name, reg, officer, owner, moved=moved)
+        v = Viewer(uid, name, reg, officer, owner, moved=moved)
+        v.stale = getattr(request.state, "membership", None) == "stale"  # reads go on; live_officer refuses an officer write
+        return v
 
     async def guild_choices(v: Viewer) -> list[dict]:
         """The selector's list: every guild this person may open, in ordered() order, with their role there

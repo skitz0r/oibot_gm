@@ -48,8 +48,12 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   have/need, buffs nobody brings, and where the desired comp is short or over cap. The cards are edited in place
   (no re-posting), with a change-log line when the registry changes. Officers change comp ideals here in plain
   text by @mentioning the bot. The character bank is the **Members** page; building groups is the **Rosters** board.
-- **Ops channel (officers)** — every action the bot takes, one line each; errors also DM the owner. The same
-  lines go to a rotating log file on the host (`out/oibot.log`).
+- **Ops channel (officers)** — every action the bot takes, one line each. The same lines go to a rotating log file on
+  the host (`out/oibot.log`). **Errors** also DM the owner — once per kind of error per 30 minutes: the same error again
+  inside that half hour edits the first DM (*"and 4 more like this since 7:12 PM — details in #ops"*) instead of sending
+  another, and the Ops page shows how many were folded in. `/gm config errors-to member: [remove:] [reset:]` picks who
+  gets them (the owner by default; several people, or nobody — then errors stay in the ops channel); errors only, never
+  info or warnings. If the bot can't post in the ops channel three times in a row, that is itself an error alert.
 - **Applications channel** — one review card per application (§3a) with Accept / Decline… buttons (they keep
   working after a bot restart).
 - **Loot channel (the public loot log)** — one line per recorded award (item → character · boss), with an **Add to my
@@ -81,7 +85,12 @@ server. Owners and officers are per
 server: owning or running one guild gives you nothing in the other. With one server there is no selector and the site
 looks exactly as before.
 
+With unsaved edits on a page (an edit mode with changes), the server selector asks you to **save or discard your
+edits first** — switching reloads the page. If Discord can't confirm right now that you're still in the server, the
+site keeps showing what you could see for up to six hours, but an officer's change waits until Discord answers.
+
 Log in with Discord. Every member gets **Me** and the **Loot log** (every award the council recorded, §9).
+Someone who has applied sees **Your application** at the top of Me: waiting, or the decision.
 Everything below can also be done there:
 your characters (press **Edit**: add a row, first + last name, spec/offspec, extra roles (*Flex*), main/alt, then one **Save changes**; the crown marks your main; each row's **⋮** menu has *Make main*, *Retire* and *Delete* — when the change reaches a sheet or a seat, the confirm says so first), absences (*Add*: **From** a day **for how long**, previewed; **I'm back** clears one),
 your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the DM switch on **Me**. **Me is your
@@ -89,8 +98,10 @@ inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make i
 "could you come?" — as a card with its two buttons and its deadline, then your **Notices** (what happened that you
 should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
 Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire;
-Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
-bot's recent actions and the plain-text permissions) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
+Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the bot's recent actions and the plain-text permissions; a badge counts errors folded into an earlier alert), **Applications**
+(the open applications oldest first with every answer in full, the earlier verdicts, Accept / Decline with the same
+sentences as the Discord card and an optional note, the last 20 decided — who decided, the note, what happened to the
+member role) and **Agents** (the news review and apply jobs on the host: running or not, what the current run is doing step by step, past runs, the news kept, the proposals with Approve / Dismiss). Only
 members of the Discord server can log in; officer pages follow the same rules as the officer commands.
 Me, Rosters, Members, Loot, the Loot log, Ops and Agents update live the moment something changes (a press on a sheet, a drag by another
 officer, a change in Discord); a 45-second refresh is only the fallback when the live connection drops. There is no
@@ -194,12 +205,21 @@ nothing.
 When applications are closed, `/apply` and the button say so instead of opening. You can have one open application
 at a time; *My status* on the card tells you it is waiting.
 
+**Your own application comes first.** While it is open, `/register`, *Apply to join*, `/me view` and the Me page say
+*"Your application for Kessa Dawnfire is waiting for an officer"* — even if applications have closed since (you are
+never told "isn't taking applications" about one you already sent). Once decided, the Me page and `/me view` show the
+decision (and the note, if any); you also get the decision by DM, since you were waiting on it.
+
 **Officers** get a review card in the applications channel: the full character name, class and spec icons, the logs
-link, the schedules the applicant can make in words, and every answer as its own line. A very long application is
-shortened on the card with "…", and its last line says where the full answers are: ask the bot ("show Kessa's
-application", officers) or MCP `list_applications` — the site has no applications page.
-**Accept** registers the character as the applicant's main, rank trial, already confirmed; **Decline…** turns them
-down. Both open the same small screen first: one sentence saying exactly what happens to the applicant, then
+link, the schedules the applicant can make in words, and every answer as its own line. When the same person applied
+before, the card says so first: *"Applied before: declined 12 Mar by Jonny — full on healers"*. A very long
+application is shortened on the card with "…", and its last line points to the site's **Applications** page (officers),
+which shows every answer in full, the earlier verdicts, and Accept / Decline with the same sentences as the card.
+**Accept** registers the character as the applicant's main, rank trial, already confirmed, and gives them the guild's
+**member role** (the first one in the recruitment settings) when the bot has Manage Roles and the role sits below the
+bot's own — otherwise the verdict says it couldn't and you add it by hand; **Decline…** turns them down. A second
+decision on the same application is refused with who made the first (*"Already declined by Jonny (Tue 12 Mar 8:02
+PM)."*); the note to the applicant holds up to 400 characters. Both open the same small screen first: one sentence saying exactly what happens to the applicant, then
 **Accept** (or **Decline**), **… with a note…** (a box for a note that goes into their DM) and **Back**. Nothing is
 written before that press. Either way the applicant gets a DM, the card updates to show the decision, and the ops
 channel logs it. The same decision is on `/roster applicant`, in plain text ("accept Nyx", "decline nyxie: we're full on
@@ -701,8 +721,14 @@ edits that new family and leaves the one it shared alone.
 - Regulars: `/roster add` (pick the recurring schedule, then the member — or name them in the command — then the
   character), `/roster remove`, `/roster members` (a schedule's regulars by role, one per line). Same list as the
   Rosters page's *Regulars* tab, plain text and MCP `set_regular` (§4 *Regulars*).
-- Applications: `/roster applicants`, `/roster applicant`, the Accept / Decline… buttons on the review card, or plain
-  text ("accept Nyx", "decline nyxie: full on healers") (§3a).
+- Applications: `/roster applicants` (oldest first, ten cards; the rest are on the site's **Applications** page),
+  `/roster applicant member: decision: [note:]` (the same one confirm screen as the card's buttons), the Accept /
+  Decline… buttons on the review card, the Applications page, or plain text ("accept Nyx", "decline nyxie: full on
+  healers") (§3a).
+- Someone who **left the Discord server**: their record stays (the bot marks when they left, if Discord tells it). The
+  Members page lists them under **Left the server** with **Remove record…** (one confirm saying what goes and what stays;
+  loot already awarded stays in the ledger); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
+  while they're still in the server or hold a seat on a live run. Members can't delete their own record.
 - Runs: `/raid open|sheet|health|fill|lock|set|cancel|list|loot|distribute|end` (officers) and `/raid out` (anyone).
   They need no arguments: with one live run they act on it; with several they ask which. `/raid set` takes the member
   (and optionally `what`), then offers only what applies to them (§4 *Officers record anything…*). `/raid sheet`
@@ -796,10 +822,18 @@ without taking it over. Keep the list to the person who runs the bot.
 someone with Manage Server) runs `/gm config owner`: a short screen shows the server's name, the guild key the bot
 picked from it (it never changes; the site and MCP use it), the game version (WoW: Forever unless you pick another) and
 the owner (you, or pick someone). Nothing is saved until **Confirm**; then the server is a guild of its own — empty:
-its own members, raids, schedules, policy and settings — and you continue with the channels below. Every other
+its own members, raids, schedules, policy and settings — and you continue with the channels below. When the bot is
+**added** to a server that isn't a guild yet, the host's superusers (or, with none configured, every guild owner) get
+one DM: *"I was added to X. It isn't a guild yet — `/gm config owner` there claims it. Missing permissions: …"*. When
+the bot is **removed** from a guild's server, that guild is **parked**: nothing opens, no DMs go out, the site and the
+DM server picker no longer list it (the host still sees it on the Config page's **Host** card, in `/gm status` and in
+MCP `list_guilds`); nothing is deleted, and inviting the bot back serves it again at once. A Discord outage never parks
+anything. Every other
 command used in a server that isn't set up answers "This server isn't set up for oibot_GM yet". The bot can look
 after **several** servers, each its own guild with its own data; when another one is claimed the host's superusers
-(`OIBOT_SUPERUSERS`) get a DM — the other guilds' owners don't (the ops log keeps the line). Keep **Public Bot** switched off in the Discord Developer Portal, so only you can invite the bot (any server
+(`OIBOT_SUPERUSERS`) get a DM, and every other guild's ops channel gets one line — their owners get no DM. The host's
+superusers also get the Config page's **Host** card: the bot's invite link (with exactly the permissions it uses), the
+servers it is in that aren't guilds yet, and the parked guilds. Keep **Public Bot** switched off in the Discord Developer Portal, so only you can invite the bot (any server
 the bot is in could otherwise claim itself, show on the homepage and draw on the shared AI budget). The invite link:
 `uv run python scripts/move_guild.py --invite-link` (`--guild <server id>` preselects the server). Commands are global (every server and DMs); the
 development mode `OIBOT_COMMAND_SCOPE=guild` puts them only in the test server and the configured servers, so a new
@@ -831,11 +865,31 @@ as the host here"*: they had no owner rights of their own to lose, and the ops l
 server, by design: never the site (its **Config** page shows who owns the guild), plain text or MCP — an MCP token acts
 as the owner, so a transfer through it would give the guild away and silently change whose rights the token carries. Then
 `/gm config ops-channel`, `registration-channel`, `analytics-channel`, `roster-channel`,
-`signup-channel`, `absences-channel`, `applications-channel`, `loot-channel` (the public loot log, §9), `officer-role`, `timezone` (five common zones as buttons, or a region then a city; it shows what
+`signup-channel`, `absences-channel`, `applications-channel`, `news-channel` — each takes `channel:` (Discord's picker)
+or `clear:` (stop using one; neither or both is refused) and shows **one confirm screen** first: what happens — the card
+posted and pinned there and the old one removed, cards forgotten (not deleted), applications falling back to the ops
+channel, *"Sheets will have nowhere to post until a signup channel is set"* — and *"I can't post in #x: missing Send
+Messages, Embed Links"* when the bot lacks a permission there (then nothing can be saved until it's fixed). A card is
+always posted in the new channel **before** the old one is removed, so a refused post loses nothing. `/gm config
+channels` is all of them on one screen: each function with its channel (and a ⚠ line for one the bot can't post in),
+**Change which?** → Discord's channel picker or **— not set —**, as many as you like as a draft, **Review** (every change
+and what it does), **Save** (a change refused at Save stays in the draft with why). For the news channel the bot creates
+the **news webhook** itself when it has Manage Webhooks there, and hands you its URL (privately) to point your news
+source at; without the permission it says what to add. Every hour the bot re-checks each channel it uses: a channel
+deleted or a permission taken away is one warning in the ops channel (and on the Setup card) — not repeated until it
+changes. `loot-channel` (the public loot log, §9), `officer-role role: [remove:]` (applies at once; removing the last one
+says *"No officer roles now: only the server owner and Manage Server count."*), `officers` (Discord's role picker with the
+current roles chosen, a **Map <name>…** button for an old role name the bot never found, Review, Save; @everyone and a
+bot's or integration's own role are refused), `timezone` (five common zones as buttons, or a region then a city; it shows what
 now and the next run become before saving; `about` likewise shows the text first — if someone changed the guild settings
 meanwhile, Save says so and writes nothing) — or all of these on
-the site's **Config** page (channel pickers per function, officer roles, timezone, who may ask the bot,
-the about text; changing a channel posts its card the same way the command does) — and per raid
+the site's **Config** page — **Setup** (a checklist: owner, each channel, officer roles, the server-wide permissions
+the invite asks for, the optional ones — Manage Roles to give accepted applicants the member role, Manage Channels to
+make the registration channel read-only — the error alerts and the homepage invite; each ✓ is the same test the bot runs
+before it posts, named when you hover it; *Open in Discord*), **Channels** (press **Edit**, pick per function or *— not
+set —*, **Save** → one review of every change and what it does → the result; while Discord is unreachable editing waits
+and the page says so instead of calling channels "not found"; *Webhook URL* beside the news channel), officer roles,
+timezone, who may ask the bot, the about text — and per raid
 `/gm config raid`: pick the raid, then a section — Schedules, Signup cadence (Standard /
 Short notice / Same week, or Custom… hour by hour), Group make-up, Selection weights, Lockout & length, First lockout
 opens, Behaviour (nudge, fill seats automatically, DM on open, split policy, fill-ask expiry), Notes, Reset. Changes
@@ -1178,7 +1232,9 @@ news post says can make the review read or write another server.
 
 | Tool | Does |
 |---|---|
-| `list_guilds` | every server the bot serves, and which one a tool uses when `guild` is left out |
+| `list_guilds` | every server the bot serves, and which one a tool uses when `guild` is left out; `detached` = parked guilds (the bot was removed from their server — never a target) |
+| `setup_status` | the Config page's Setup checklist (each row ok / warn / bad with what was tested), the invite's state, and the Host card (invite link, servers that aren't guilds, parked guilds) |
+| `left_members` · `remove_record` | members who left the Discord server · remove one's record (officers; refused while they're in the server or hold a live seat) |
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench |
 | `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
 | `list_raids` · `get_raid` | effective raid settings and overrides; each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
@@ -1201,7 +1257,7 @@ news post says can make the review read or write another server.
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
-| `set_channel` · `set_config` | a bot channel by name (`loot` = the public loot log) · timezone, ask audience, about, officer roles (the whole list, ids or names the bot knows; `[]` for none), news keywords, `loot_log` on/off — one or several as `fields` |
+| `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone, ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, saved as the invite link with `save=true` |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
@@ -1229,8 +1285,8 @@ change is logged under the owner's own display name with an `[mcp]` prefix (`[mc
 the word "mcp" is never the name on a record. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
 put it in `.mcp.json` or a commit. **Local only** (on by default): the bot accepts the token only from a call made on
 the machine it runs on, which is where the MCP server runs. The same token arriving from anywhere else, through the
-public site's tunnel included, is refused as if it were wrong, and the bot logs a warning (never the token), because
-it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (then restart the bot) lets it work
+public site's tunnel included, is refused as if it were wrong, and the bot writes an **error** to the ops channel —
+which DMs the owner (once per 30 minutes) — never the token itself, because it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (then restart the bot) lets it work
 remotely too; leave it on unless you run the MCP server on another machine. Browser logins are unaffected. Ask for a preview first (`propose_split`, `fill_seats` without send,
 `plain_change` without apply) and read the returned line back: it says what actually happened. There is no tool
 for handing the guild to a new owner, by design: the token *is* the owner, so a transfer through it would give the

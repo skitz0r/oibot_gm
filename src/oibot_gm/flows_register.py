@@ -431,14 +431,15 @@ async def open_register(interaction: discord.Interaction, reg: Registry, *, slot
         if m and m.active():
             await interaction.response.send_message("You're already a member — add characters with `/register` or `/me char` → Add an alt.", ephemeral=True)
             return
-        if not reg.config.recruitment.open:
-            await interaction.response.send_message((f"{lead}\n" if lead else "") + f"{reg.config.name} isn't taking applications right now — check back later, or ask an officer.",
-                                                    ephemeral=True)
-            return
-        a = reg.applicants.get(interaction.user.id)
+        a = reg.applicants.get(interaction.user.id)  # their OWN application first (design §3.3 D): pending is never "not taking applications"
         if a and a.status == "open":
             await interaction.response.send_message(f"You already have an open application for **{a.label}**. An officer will get to it; you'll get a DM either way.",
                                                     ephemeral=True)
+            return
+        if not reg.config.recruitment.open:
+            own = reg.application_state(interaction.user.id)
+            await interaction.response.send_message((f"{lead}\n" if lead else "") + (f"{own['text']}\n" if own else "")
+                                                    + f"{reg.config.name} isn't taking applications right now — check back later, or ask an officer.", ephemeral=True)
             return
     await RegisterWizard(reg, interaction.user.id, slot=slot, plan_only=plan_only, mode=mode, roles=roles, lead=lead).start(interaction)
 

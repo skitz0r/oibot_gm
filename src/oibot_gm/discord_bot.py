@@ -120,13 +120,15 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
 
         return await post_application(self, reg, a)
 
-    async def decide_application(self, reg, discord_id: int, accept: bool, by: str, note: str | None) -> str:
-        """Accept or decline an open application: registry decide, DM the applicant, update the review card, ops line.
-        The one path for the card's buttons, /roster applicant, the web and MCP. Returns the verdict line; raises
-        RegistryError when there is no open application. Never removes anyone from the server."""
+    async def decide_application(self, reg, discord_id: int, accept: bool, by: str, note: str | None, *, by_id: int | None = None,
+                                 via: str = "discord") -> str:
+        """Accept or decline an open application: registry decide, the member role (D31), DM the applicant, update the
+        review card, ONE ops line (audited with `via` / `by_id`). The one path for the card's buttons, /roster applicant,
+        the web and MCP. Returns the verdict line; raises RegistryError when there is no open application ("Already
+        declined by X"). Never removes anyone from the server."""
         from .discord_registry import settle_application
 
-        return await settle_application(self, reg, discord_id, accept, by, note)
+        return await settle_application(self, reg, discord_id, accept, by, note, by_id=by_id, via=via)
 
     async def refresh_registration_card(self, reg) -> bool:
         """The registration card edited in place after a recruitment change (and given the Apply button)."""
@@ -336,6 +338,13 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
                 cache.pop(k, None)
                 gone.discard(k)
         cache[key] = (now, m)
+        last = self.__dict__.setdefault("_member_last_yes", {})  # §2.9: a last-known "yes" for reads while Discord is unsure
+        if m is not None:
+            if len(last) > 4096:
+                last.clear()
+            last[key] = (now, m)
+        else:
+            last.pop(key, None)  # Discord said no: not a member any more
         return m
 
     def saw_member(self, guild_id: int | None, member) -> None:
@@ -382,6 +391,9 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         who = getattr(by, "display_name", None) or str(by)
         line = f"guild created for {guild.name} by {who}; owner <@{owner_id}> · profile {reg.profile.label}"
         await self.ops.emit(reg.config, "warn", line)  # no ops channel yet: the log (and the new guild's ring)
+        for other in self.registries.ordered():  # S-01: every other guild's ops channel hears it — an ops line, never a DM to its owner (D44)
+            if other is not reg:
+                await self.ops.emit(other.config, "info", f"the bot now also serves another server: {guild.name} (shares the bot's LLM budget)")
         claimer = getattr(by, "id", None)
         for oid in sorted(superusers()):  # the bot host learns at once that a new server is served (K5)
             if claimer is not None and int(claimer) == oid:
@@ -393,6 +405,90 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
             except Exception as e:  # noqa: BLE001 — closed DMs: the log line stays
                 log.warning("claim DM to owner %s failed: %s", oid, e)
         return reg
+
+    # ---- the bot added to / removed from servers (design §3.5 O-01 / S-05 / S-06; §5.44)
+    def host_ids(self) -> list[int]:
+        """Who the host-facing DMs go to: the superusers (OIBOT_SUPERUSERS — they run the bot), else, with none configured,
+        every served guild's owner (someone must learn the bot was added somewhere)."""
+        ids = sorted(superusers())
+        if ids:
+            return ids
+        return sorted({int(r.config.owner_discord_id) for r in self.registries.ordered() if r.config.owner_discord_id})
+
+    async def on_guild_join(self, guild) -> None:
+        """Added to a server. A server whose guild was parked (the bot was removed, now back) is served again at once.
+        Otherwise ONE DM to the host (host_ids): it isn't a guild yet — `/gm config owner` there claims it — and the
+        server-wide permissions the invite should have given and didn't (perms.missing_for). The host must act (claim it
+        or remove the bot), so the DM rule allows it; nobody else is told."""
+        from . import perms
+
+        perms.CLIENT = self
+        if await self.reattach(guild, "on_guild_join"):
+            return
+        if self.registries.for_guild(guild.id) is not None:
+            return
+        missing = perms.missing_for(guild)
+        name = discord.utils.escape_markdown(str(getattr(guild, "name", guild.id)))
+        text = (f"🆕 I was added to **{name}**. It isn't a guild yet — `/gm config owner` there claims it."
+                + (f" Missing permissions: {perms.words(missing)} — re-invite me with the link on the Config page's Host card." if missing else " Permissions: all there."))
+        for uid in self.host_ids():
+            try:
+                user = self.get_user(uid) or await self.fetch_user(uid)
+                await user.send(text[:1990])
+            except Exception as e:  # noqa: BLE001 — closed DMs: the log line stays
+                log.warning("join DM to %s failed: %s", uid, e)
+        log.info("added to server %s (%s); not a guild yet", getattr(guild, "name", "?"), guild.id)
+
+    async def on_guild_available(self, guild) -> None:
+        """A server came (back) into view — at startup for every server, after an outage for one: a parked guild whose
+        server this is, is served again."""
+        from . import perms
+
+        perms.CLIENT = self
+        await self.reattach(guild, "on_guild_available")
+
+    async def reattach(self, guild, by: str) -> object | None:
+        """Serve a parked guild again when the bot is in its server (Guilds.attach_server), hooked up like a claim, and
+        say so on its ops channel. None when no parked guild has that server."""
+        if getattr(guild, "unavailable", False):
+            return None
+        reg = self.registries.attach_server(guild.id, by)
+        if reg is None:
+            return None
+        await self.guild_added(reg)
+        await self.ops.emit(reg.config, "warn", f"the bot is back in {getattr(guild, 'name', 'the server')}: {reg.config.name} is served again (runs, the scheduler, the site)")
+        return reg
+
+    async def on_guild_remove(self, guild) -> None:
+        """Removed from a server (kicked, banned, or the server deleted). An OUTAGE is not a removal (`guild.unavailable`):
+        nothing is parked then. Otherwise the guild is detached (Guilds.detach: config.detached_at, out of routing, the
+        scheduler, the feed, the picker, the homepage; pending DMs stop — send_member_card refuses a detached guild) and
+        one ops error line is written (its error alert goes to the guild's error_dm_ids — the owner runs it)."""
+        if getattr(guild, "unavailable", False):
+            return
+        reg = self.registries.for_guild(guild.id)
+        if reg is None:
+            return
+        self.registries.detach(reg.key, "on_guild_remove")
+        await self.ops.emit(reg.config, "error", f"the bot was removed from {getattr(guild, 'name', 'the server')}: {reg.config.name} is parked — nothing opens, "
+                                                 "no DMs go out, the site no longer lists it. Invite the bot back to that server and it is served again "
+                                                 "(nothing was deleted).")
+
+    async def on_member_remove(self, member) -> None:
+        """Someone left a configured server (needs the members intent to arrive): their record gets `left_at` (Registry.
+        member_left) — officers see "left the server" on the Members page and may Remove record (D29: never the member
+        themselves). No notice, no DM."""
+        reg = self.registries.for_guild(getattr(getattr(member, "guild", None), "id", None))
+        if reg is None or member.id not in reg.members:
+            return
+        await asyncio.to_thread(reg.member_left, member.id, True)
+
+    async def on_member_join(self, member) -> None:
+        """Back in the server: `left_at` is cleared (the record was kept)."""
+        reg = self.registries.for_guild(getattr(getattr(member, "guild", None), "id", None))
+        if reg is None or member.id not in reg.members or not reg.members[member.id].left_at:
+            return
+        await asyncio.to_thread(reg.member_left, member.id, False)
 
     async def guild_added(self, reg) -> None:
         """Hook a guild claimed at run time up the way boot does: analytics listener, officer roles, guild-scoped command

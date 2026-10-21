@@ -41,7 +41,7 @@ class Bot:
     def get_channel(self, cid):
         return None
 
-    async def decide_application(self, reg, discord_id, accept, by, note):
+    async def decide_application(self, reg, discord_id, accept, by, note, by_id=None, via="discord"):
         return await settle_application(self, reg, discord_id, accept, by, note)
 
 

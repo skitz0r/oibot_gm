@@ -542,7 +542,8 @@ DM_CALL_SITES = {
     ("discord_raid.py", "send_member_card"): "the one DM path itself",
     ("discord_registry.py", "settle_application"): "a decision the applicant waits on",
     ("discord_loot_surface.py", "_loot_after_end_dm"): "officers must act: record in-game awards that arrived after the end",
-    ("ops.py", "emit"): "the owner's error alert (one per distinct error per 30 min)",
+    ("ops.py", "_dm_all"): "the owner's error alert (one per distinct error per 30 min; error_dm_ids — Ops.emit's throttle)",
+    ("discord_bot.py", "on_guild_join"): "the host must act: the bot was added to a server that isn't a guild yet (claim it or remove the bot)",
     ("discord_bot.py", "claim_guild"): "the host's security alert: a new server claimed this bot (OIBOT_SUPERUSERS only)",
     ("discord_raid.py", "send_digest"): "an ask: a test run's puppet asks, batched into one DM to the tester who answers for them (D20)",
 }

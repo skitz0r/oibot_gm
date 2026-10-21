@@ -62,6 +62,7 @@ class Api:
         self.lock = lock if lock is not None else (os.environ.get(LOCK_ENV) or "").strip().lower() in ("1", "true", "yes", "on")
         self._client = httpx.Client(base_url=self.url, headers=HEADERS, transport=transport, timeout=timeout)
         self._guilds: list[dict] | None = None  # GET /api/guilds (name → key); re-read on a miss and by list_guilds
+        self.parked: list[dict] = []  # guilds whose server removed the bot (GET /api/guilds marks them; list_guilds shows them to the host)
 
     def _headers(self) -> dict[str, str]:
         if not self.token:
@@ -114,7 +115,9 @@ class Api:
         never kept: the next call asks again, so a bot restarted on the new code is seen at once."""
         if self._guilds is None or fresh:
             try:
-                self._guilds = list(self._send("GET", "/api/guilds", scoped=False).get("guilds", []))
+                rows = list(self._send("GET", "/api/guilds", scoped=False).get("guilds", []))
+                self._guilds = [g for g in rows if not g.get("detached")]  # a parked guild is never a target (nor the jobs')
+                self.parked = [g for g in rows if g.get("detached")]
             except ToolError as e:
                 if getattr(e, "status", None) != 404:
                     raise
@@ -247,11 +250,14 @@ def run_summary(ev: dict) -> dict:
 def list_guilds() -> dict:
     """Every guild the bot serves: key, name, Discord server id, owner id, game profile, and `default` = the one a tool
     acts on when `guild` is omitted (OIBOT_MCP_GUILD, else the only guild; none when several and no default). Pass a
-    key or a name as `guild` to any tool; each call acts as the owner of that guild."""
+    key or a name as `guild` to any tool; each call acts as the owner of that guild. `detached`: guilds whose server
+    removed the bot (parked: nothing runs, nothing is deleted; served again once the bot is back) — listed for the host
+    only, never usable as `guild`."""
     base = api()
     rows = base.guilds(fresh=True)  # always the bot's current list (a server claimed while this process runs)
     default = base.default_key()
-    return {"guilds": [{**g, "default": g["key"] == default} for g in rows], "default": default}
+    parked = [{"key": g["key"], "name": g["name"], "detached_at": g.get("detached_at")} for g in getattr(base, "parked", [])]
+    return {"guilds": [{**g, "default": g["key"] == default} for g in rows], "default": default, **({"detached": parked} if parked else {})}
 
 
 @mcp.tool()
@@ -725,19 +731,25 @@ def set_regular(raid: str, member: str, on: bool = True, schedule: str | None = 
 # ---------------------------------------------------------------- writes: config (owner) and the test bench
 
 @mcp.tool()
-def set_channel(kind: str, channel: str | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
+def set_channel(kind: str, channel: str | None = None, clear: bool = False, preview: bool = False, guild: Guild = None) -> str | dict:
     """Point a bot channel at a server channel (owner): kind = ops | applications | signup | roster | registration |
-    analytics | absences | news | loot (the public award log); `channel` = a channel name (#general), an id, or empty to
-    unset. Cards are (re)posted. `preview=True`: current → new and what it does, nothing saved."""
-    return ops_change(guild, [{"kind": "settings", "fields": {f"channel:{kind}": channel or None}}], preview)
+    analytics | absences | news | loot (the public award log); `channel` = a channel name (#general) or an id, OR
+    `clear=True` to stop using a channel for it (one of the two). The bot refuses a channel it can't post in ("I can't
+    post in #x: missing …"); cards are posted first, then the old one is removed. `preview=True`: current → new and what
+    it does (posted, pinned, forgotten, falls back), nothing saved — say that to the person before applying."""
+    if bool(channel) == bool(clear):
+        raise ToolError("give a channel, or clear=True to stop using one for this — not both, not neither")
+    return ops_change(guild, [{"kind": "settings", "fields": {f"channel:{kind}": None if clear else channel}}], preview)
 
 
 @mcp.tool()
 def set_config(field: str | None = None, value: Any = None, fields: dict[str, Any] | None = None, preview: bool = False, guild: Guild = None) -> str | dict:
     """Guild settings (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
     phrases that make a news item relevant), loot_log (bool: the public award log), officer_roles (the WHOLE list of role
-    ids or names the bot knows, always a list: ["123456789", "Officer"]; [] for none — a bare string is refused), channel:<kind> (as set_channel) — one `field` + `value` or several as `fields`.
-    `preview=True`: current → new and the consequences, nothing saved."""
+    ids or role NAMES — the bot resolves names against the server's roles; @everyone and a bot's or integration's managed
+    role are refused; always a list: ["123456789", "Officer"]; [] for none — a bare string is refused), error_dm_ids (who
+    gets the error alerts: a list of Discord user ids; null = the owner, the default; [] = nobody), channel:<kind> (as
+    set_channel) — one `field` + `value` or several as `fields`. `preview=True`: current → new and the consequences, nothing saved."""
     want = dict(fields or {})
     if field:
         want[field] = value
@@ -888,6 +900,33 @@ def create_invite(channel: str, save: bool = False, guild: Guild = None) -> dict
         out["message"] = msg(api(guild).post("/api/admin/recruitment", {"invite_url": url}))
         out["saved"] = True
     return out
+
+
+@mcp.tool()
+def setup_status(guild: Guild = None) -> dict:
+    """The guild's Setup checklist (each row ok | warn | bad with what the bot tested: channels it can't post in, missing
+    server permissions, no officer role, the error alerts), the invite's state, and for the host the bot's invite link,
+    servers the bot is in that aren't guilds yet and parked guilds. Same as the Config page's Setup / Host cards."""
+    return api(guild).get("/api/admin/setup")
+
+
+@mcp.tool()
+def left_members(guild: Guild = None) -> dict:
+    """Members who left the Discord server (their record stays until an officer removes it): name, when, characters, and
+    what Remove record would drop."""
+    return api(guild).get("/api/admin/left")
+
+
+@mcp.tool()
+def remove_record(member: str, guild: Guild = None) -> str:
+    """Remove the record of someone who LEFT the server (officers; refused while they're still in it or hold a seat on a
+    live run). `member`: their name or Discord id from left_members. There is no way for members to delete their own record."""
+    rows = api(guild).get("/api/admin/left").get("left", [])
+    m = member.strip().lower()
+    hit = [r for r in rows if r["uid"] == m.strip("<@!>") or r["name"].lower() == m]
+    if len(hit) != 1:
+        raise ToolError(f"{member} isn't one of the people who left the server" + (" (left: " + ", ".join(r["name"] for r in rows) + ")" if rows else ""))
+    return msg(api(guild).post("/api/admin/member/remove", {"uid": hit[0]["uid"]}))
 
 
 @mcp.tool()

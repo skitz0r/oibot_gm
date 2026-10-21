@@ -151,7 +151,8 @@ def test_news_channel_kind_and_command_exist():
 
     from oibot_gm import discord_registry
 
-    assert 'name="news-channel"' in inspect.getsource(discord_registry.register_commands)
+    assert ("news", "news-channel") in {(k, n) for k, n, _d in discord_registry.CHANNEL_SHORTCUTS}  # one of the eight shortcuts (§5.44)
+    assert "CHANNEL_SHORTCUTS" in inspect.getsource(discord_registry.register_commands)
 
 
 # ---- the card and its buttons
