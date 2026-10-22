@@ -5,14 +5,18 @@ Cheap by default: one API call per guild (design §5.32: one job serves every gu
 Each poll:
 1. Recovery: a proposal left `applying` by a run that died (this job isn't running, so nothing is applying it) → failed,
    "the apply run was interrupted; approve again to retry" — except the one whose restart is pending.
-2. A pending restart (a profile edit committed while a guild was raiding): restart now when no served guild is busy and
-   the bot is quiet (GET /api/guilds `busy`, GET /api/agents/quiet), else annotate the proposal "waiting: …" and keep it.
+2. A pending restart (a profile edit committed while a guild was raiding, or whose proposal was moved meanwhile —
+   `auto: False`): restart now when no served guild is busy and the bot is quiet (GET /api/guilds `busy`, GET
+   /api/agents/quiet), else annotate the proposal "waiting: …" and keep it. The restart belongs to the game version:
+   it is kept when the proposing guild is no longer listed. `auto: False` restarts the same way (the next quiet poll or
+   the owner's Apply now) without moving the proposal; the Agents page shows it until then.
 3. Walk the approved proposals across every guild, oldest first:
    - needs_developer → refused (marked failed) and guild_setting → applied by the bot (POST /api/proposals/<id>/apply,
      no Claude, no restart): every one of them this poll, they are cheap and independent;
    - then the FIRST profile proposal whose preflight (clean tree, on main) and raid guard pass (D33: no served guild
      busy — the restart takes the whole process down): `resolve("applying")` is the gate (refused = it was dismissed
-     meanwhile → nothing done, Claude never starts); Claude edits the YAML under profiles/ (Edit + read tools + self-checks
+     meanwhile → nothing done, Claude never starts; or its approval wasn't the owner's — an officer's from before the
+     owner-only rule: the bot marks it failed, "not applied: only the owner approves a game-data change …"); Claude edits the YAML under profiles/ (Edit + read tools + self-checks
      only, agents.apply_command); then THIS script runs check_commands, pytest and check_bundle, commits to main (or a PR
      with --pr), pushes; re-reads the proposal right before restarting (no longer applying → the commit stays, no restart,
      `restart_pending` recorded for the owner); re-checks the guard and the bot's quiet state (busy → the commit stays,
@@ -39,7 +43,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from oibot_gm import agents  # noqa: E402
-from oibot_gm.news import INTERRUPTED  # noqa: E402 — the same words as the owner's Mark as interrupted
+from oibot_gm.news import INTERRUPTED, PROFILE_OWNER_ONLY  # noqa: E402 — the same words as the owner's Mark as interrupted
 
 JOB = "apply"
 ROOT = agents.ROOT
@@ -272,55 +276,66 @@ def revert_commit(commit: str) -> str | None:
     return None
 
 
-def restart_and_check(run: Run, commit: str) -> tuple[str, bool]:
-    """Restart the bot, wait for the new process; applied, or revert + restart + reverted. (result line, ok)."""
+def restart_and_check(run: Run, commit: str, *, mark: bool = True) -> tuple[str, bool]:
+    """Restart the bot, wait for the new process; applied, or revert + restart + reverted. (result line, ok).
+    `mark` False: the proposal is no longer `applying` (someone moved it while it was applied; its commit is on main
+    anyway) — the restart and the health check run the same, the proposal is not moved."""
     pid = run.prop["id"]
     agents.write_status(JOB, step="Restarting the bot", restart_pending=None)
     run.line("Restarting the bot and waiting for it to come back")
     old = restart_bot()
     if wait_healthy(old):
+        if not mark:
+            return f"{pid}: restarted for {commit} (the proposal was no longer applying), bot healthy", True
         run.resolve("applied", commit, "checks passed, bot restarted healthy")
         return f"{pid}: applied @ {commit}, bot healthy", True
     run.line(f"The bot did not come back within {HEALTH_TIMEOUT_S} s — reverting {commit}", "error")
     why = revert_commit(commit)
     if why:  # HEAD may be someone else's commit by now (a deferred restart): never revert blind, never push a guess
         run.line(f"could not revert {commit}: {why}", "error")
-        run.resolve("failed", commit, f"the bot did not come back healthy after the change and {commit} could not be reverted ({why}) — "
+        mark and run.resolve("failed", commit, f"the bot did not come back healthy after the change and {commit} could not be reverted ({why}) — "
                                       "revert it by hand and restart (out/launchd.log)")
         return f"{pid}: could not revert {commit} ({why}); the bot is not healthy", False
     sh("git", "push", "--quiet")
     old = restart_bot()
     back = wait_healthy(old)
-    run.resolve("reverted", commit, "the bot did not come back healthy after the change; reverted and restarted" + ("" if back else " — STILL DOWN, check out/launchd.log"))
+    mark and run.resolve("reverted", commit, "the bot did not come back healthy after the change; reverted and restarted" + ("" if back else " — STILL DOWN, check out/launchd.log"))
     return f"{pid}: reverted {commit}" + ("" if back else "; the bot is still down"), False
 
 
 def pending_restart(make, apis: dict, guilds: list[dict], pending: dict, named: bool) -> tuple[str | None, bool]:
     """(2) A committed profile edit waiting for its restart: (result line, ok) when it was handled now, (line, True)
-    when it still waits — None as the line when there is nothing to do (an owner-only pending restart)."""
-    if not pending.get("auto"):
-        return None, True
-    g = next((x for x in guilds if x["key"] == pending.get("guild")), None)
-    api = apis.get(pending.get("guild"))
-    if g is None or api is None:
-        agents.write_status(JOB, restart_pending=None)
-        return f"{pending.get('id')}: its guild is gone — the pending restart was dropped (the commit stays)", False
+    when it still waits. The restart belongs to the GAME VERSION, not the proposing guild: the commit is on main and
+    changes every guild on that version, so a guild that is no longer listed never drops it. `auto` False (the proposal
+    was moved while it was applied): the restart still happens at the next quiet poll — or the owner's Apply now — the
+    proposal is just not moved; the status file's `restart_pending` says so until then (the Agents page shows it)."""
+    key = pending.get("guild")
+    g = next((x for x in guilds if x["key"] == key), None)
+    api = apis.get(key)
+    gone = g is None or api is None
+    if gone:  # parked or removed since: its proposal can't be told, the restart is still owed to the version
+        g = {"key": key or "", "name": key or "the guild"}
+        api = next(iter(apis.values()), None) or make()
     prop = {"id": pending["id"], "title": pending.get("title") or pending["id"]}
+    tag = (f"{g['key']}/" if named and g["key"] else "")
     why = restart_block(make, api)
     if why:
-        annotate(api, prop, f"committed {pending.get('commit')}; the restart waits: {why}")
-        return (f"{g['key']}/" if named and g["key"] else "") + f"{prop['id']}: committed {pending.get('commit')}, restart waits — {why}", True
+        if not gone:
+            annotate(api, prop, f"committed {pending.get('commit')}; the restart waits: {why}")
+        return tag + f"{prop['id']}: committed {pending.get('commit')}, restart waits — {why}", True
     tree = preflight()  # the bot runs from this checkout: a restart deploys whatever is in it
     if tree:
-        annotate(api, prop, f"committed {pending.get('commit')}; the restart waits: {tree}")
-        return (f"{g['key']}/" if named and g["key"] else "") + f"{prop['id']}: committed {pending.get('commit')}, restart waits — {tree}", False
+        if not gone:
+            annotate(api, prop, f"committed {pending.get('commit')}; the restart waits: {tree}")
+        return tag + f"{prop['id']}: committed {pending.get('commit')}, restart waits — {tree}", False
     run = Run(g, prop, api, named)
     agents.write_status(JOB, state="running", run_id=run.rid, pid=os.getpid(), step=f"Restarting for {prop['id']}", guild=g["key"] or None)
-    run.line(f"The raid guard is clear: restarting for {prop['id']} (committed {pending.get('commit')})")
-    if run.state_now() not in (None, "applying"):
-        agents.write_status(JOB, restart_pending={**pending, "auto": False, "why": "the proposal is no longer applying"})
-        return run.done(f"{prop['id']}: no longer applying — the commit {pending.get('commit')} stays, not restarted (restart when convenient)", True), True
-    result, ok = restart_and_check(run, pending.get("commit") or "")
+    run.line(f"The raid guard is clear: restarting for {prop['id']} (committed {pending.get('commit')})"
+             + (f" — {key} is no longer served; the commit changes every guild on its game version" if gone else ""))
+    mark = bool(pending.get("auto")) and not gone and run.state_now() in (None, "applying")
+    if pending.get("auto") and not gone and not mark:
+        run.line("The proposal is no longer applying: the bot restarts for the commit, the proposal is not moved")
+    result, ok = restart_and_check(run, pending.get("commit") or "", mark=mark)
     return run.done(result, ok), ok
 
 
@@ -350,6 +365,9 @@ def apply_profile(g: dict, prop: dict, api, make, a, run_claude, named: bool) ->
     run.line((f"{gname(g)}: approved" if named else "Approved") + f" by {prop.get('decided_by') or '?'}: {prop['title']} ({prop['kind']})")
     head0 = sh("git", "rev-parse", "HEAD").stdout.strip()
     if not run.resolve("applying", strict=True):  # (1) the gate: dismissed (or withdrawn) between the list and now → nothing at all
+        refusal = getattr(run, "refusal", "") or ""
+        if PROFILE_OWNER_ONLY in refusal:  # approved by an officer (before the owner-only rule): the bot marked it failed
+            return run.done(f"{pid}: refused, not applied — {refusal}", True), True
         state = run.state_now() or "moved"
         return run.done(f"{pid} was {state} before the job started — nothing done", True), True
     prompt = PROMPT.read_text() + "\n\n## The proposal (data)\n```json\n" + json.dumps(prop, indent=1, ensure_ascii=False) + "\n```\n"
@@ -422,7 +440,7 @@ def apply_profile(g: dict, prop: dict, api, make, a, run_claude, named: bool) ->
     state = run.state_now()  # (2) re-read right before restarting: someone may have moved it while Claude and the checks ran
     if state not in (None, "applying"):
         agents.write_status(JOB, restart_pending={**pending, "auto": False, "why": f"the proposal became {state} while it was applied"})
-        return run.done(f"{pid}: became {state} meanwhile — the commit {commit} stays, the bot was not restarted (restart when convenient)", True), True
+        return run.done(f"{pid}: became {state} meanwhile — the commit {commit} stays, the bot was not restarted now (it restarts at the next quiet poll, or the owner's Apply now)", True), True
     why = restart_block(make, api)  # (3) the raid guard again, across every guild, plus the bot's quiet state
     if why:
         agents.write_status(JOB, restart_pending={**pending, "auto": True})

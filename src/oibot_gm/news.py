@@ -378,10 +378,18 @@ def restart_waiting(status: dict, key: str, pid: str) -> str | None:
     pending = (status or {}).get("restart_pending") or None
     if not pending or str(pending.get("id") or "") != pid or (pending.get("guild") or key) != key:
         return None
+    return restart_pending_text(pending)
+
+
+def restart_pending_text(pending: dict) -> str:
+    """The apply job's pending restart in words (its status file's `restart_pending`): the proposal's line above and the
+    Agents page's banner. `auto` False (the proposal was moved while it was applied) restarts the same way — the next
+    quiet poll or the owner's Apply now — without moving the proposal."""
     commit = pending.get("commit") or "?"
     if pending.get("auto"):
         return f"Committed {commit}; only the restart waits (raid guard or a busy bot) — it restarts at the next quiet poll."
-    return f"Committed {commit}; the bot was not restarted ({pending.get('why') or 'held'}) — restart it when convenient."
+    return (f"Committed {commit}; the bot was not restarted ({pending.get('why') or 'held'}) — it restarts at the next quiet poll, "
+            "or press Apply now.")
 
 
 def owner_setting(p) -> bool:
@@ -442,6 +450,18 @@ def shared_profile_refusal(guilds, key: str, by_id: int | None) -> str | None:
     others = shared_profile_others(guilds, key)
     return (f"this edits game data that {', '.join(others)} also use{'s' if len(others) == 1 else ''}: "
             "the owner of every guild on this game version approves it")
+
+
+def profile_approval_refusal(guilds, reg, p) -> str | None:
+    """At the apply job's approved → applying gate: why a PROFILE proposal's approval doesn't stand (it was not made by
+    the owner — an officer's approval from before the owner-only rule, or one who doesn't own every guild on the game
+    version, K3), or None. Re-authorized by privilege at the apply, as owner_setting proposals are."""
+    if getattr(p, "kind", None) != "profile":
+        return None
+    by_id = getattr(p, "decided_by_id", None)
+    if by_id is not None and reg.is_owner_id(by_id) and shared_profile_refusal(guilds, reg.key, by_id) is None:
+        return None
+    return f"not applied: {PROFILE_OWNER_ONLY} (approved by {getattr(p, 'decided_by', None) or '?'}) — the owner approves it again to apply it"
 
 
 def dismissed_cover(store: GitStore, reg, urls) -> str | None:

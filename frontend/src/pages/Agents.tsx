@@ -100,10 +100,11 @@ export function AgentsPage() {
       {confirmDialog}
       <PageTitle title="Agents" intro="The jobs on the Mac mini that read the game news and apply approved corrections. The page follows a running job step by step."
         right={data.owner && <Group gap="xs">
-          {data.approved > 0 && <Button variant="default" onClick={() => kick("apply")} loading={busy === "apply"} disabled={apply?.state === "running"}>Apply now ({data.approved})</Button>}
+          {(data.approved > 0 || data.restart_pending) && <Button variant="default" onClick={() => kick("apply")} loading={busy === "apply"} disabled={apply?.state === "running"}>Apply now{data.approved > 0 ? ` (${data.approved})` : ""}</Button>}
           <Button leftSection={<IconPlayerPlay size={16} />} onClick={() => kick("review")} loading={busy === "review"} disabled={data.jobs.some((j) => j.job === "review" && j.state === "running")}>Run review now</Button>
         </Group>} />
 
+      {data.restart_pending && <Alert color="yellow" variant="light" title={`Restart owed: ${data.restart_pending.title || data.restart_pending.id}`}>{data.restart_pending.text}</Alert>}
       {data.ops_channel === false && <Alert color="red" variant="light" title="No ops channel">Proposal cards are not posted in Discord — set the ops channel on the Config page. Officers can still decide here.</Alert>}
       {data.busy?.raiding && <Alert color="yellow" variant="light">Raid time: {data.busy.why} — until {data.busy.until_label}. A game-data change waits; guild settings still apply.</Alert>}
 

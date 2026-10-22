@@ -2499,11 +2499,17 @@ validates the officer and a game-data approval still needs that person to be the
 **The apply job (scripts/agents/apply.py).** Each poll: (5) recovery — every proposal still `applying` while the job
 isn't running → failed "the apply run was interrupted; approve again to retry" (except the pending restart's); (2/3) a
 pending restart (`restart_pending` in the status file, `auto`) restarts when `restart_block` (a fresh /api/guilds `busy`
-across EVERY guild, then /api/agents/quiet) is clear, else annotates; (4) every guild setting and needs-developer refusal
+across EVERY guild, then /api/agents/quiet) is clear, else annotates — the restart belongs to the GAME VERSION (the commit
+changes every guild on it), so a proposing guild that is no longer listed never drops it; (4) every guild setting and needs-developer refusal
 this poll, oldest first, each its own tagged run; then the FIRST profile proposal whose preflight and guard pass —
 `resolve("applying")` is the gate (refused → "<id> was <state> before the job started — nothing done", Claude never
-starts); after the checks and the commit the proposal is re-read (no longer applying → commit kept, no restart,
-`restart_pending{auto: False}` for the owner) and the guard re-checked (busy → `restart_pending{auto: True}`, the
+starts; the route re-checks a PROFILE approval there — `news.profile_approval_refusal`: not the owner's, e.g. an officer's
+from before the owner-only rule, or not the owner of every guild on the version (K3) → the bot marks it failed "not
+applied: only the owner approves a game-data change … (approved by X) — the owner approves it again to apply it", 403,
+and the job reports "<id>: refused, not applied — …"); after the checks and the commit the proposal is re-read (no longer
+applying → commit kept, no restart now, `restart_pending{auto: False}`: the next quiet poll — or the owner's Apply now,
+offered on the Agents page with the `restart_pending` banner (GET /api/agents, owner) — restarts for the commit without
+moving the proposal, and clears it) and the guard re-checked (busy → `restart_pending{auto: True}`, the
 proposal annotated, the restart on a later poll); the other profile proposals are listed "waiting (<why>): <gk>/<id>".
 A busy guild annotates every waiting profile proposal "waiting: <server> raids until <time> (<why>)". The status file
 carries `guild` (the Agents page says "busy with another server's proposal"). **Mark as interrupted** (owner, Agents

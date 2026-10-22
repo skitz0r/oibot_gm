@@ -859,7 +859,9 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   restarts the whole bot, for every server), even when the bot serves one guild; an officer's press is refused at once
   and says so. The same holds for a guild setting that only the owner may change on any surface — a raid's lockout or
   run times, a buff, a stacking family, an aura reset: **the owner approves it** (an officer's press is refused, an
-  officer can't post one on the site either, and the apply job checks again who approved it before it applies);
+  officer can't post one on the site either, and the apply job checks again who approved it before it applies — a
+  game-data change an officer approved before this rule is not applied: it reads **Failed** with "only the owner approves
+  a game-data change … (approved by <officer>) — the owner approves it again to apply it");
   officers approve the rest (comp targets). Approving records who approved it and when; the apply job on the host (every 15 minutes) carries it out.
 - **Dismiss** (officers) gets the same screen (D34): nothing changes, and the review is told not to propose it again
   unless newer news says more. For a game-data change that is a rule, not only a request: a new game-data proposal
@@ -874,7 +876,10 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   loot council (however late it runs — a council still open past the run's scheduled end counts until it ends). It waits, and writes why on the proposal ("waiting: Barrow Deeps raids until 11:30 PM") — the card's
   Status and the Agents page show it. If a raid begins while the edit and the tests run, the change is committed and
   the restart waits for the next quiet poll ("committed c0ffee1; the restart waits: …"). It also waits while the host's
-  checkout has uncommitted changes or is on another branch (the bot runs from it), saying so on the proposal. If the
+  checkout has uncommitted changes or is on another branch (the bot runs from it), saying so on the proposal. A
+  committed change waits for its restart even when its server is no longer served: it changes every server on that
+  game version. If the proposal was dismissed while the edit ran, the commit stays and the bot restarts for it at the
+  next quiet poll (the Agents page shows "Restart owed" to the owner, with **Apply now** to do it sooner). If the
   bot doesn't come back healthy, exactly that commit is undone (never whatever landed since); if it can't be undone
   cleanly the proposal reads **Failed** and says to revert it by hand. Guild settings never wait: they need no restart.
 - The card updates in place: **Applying now**, then **Applied** (with the commit for a game data change),
@@ -883,7 +888,7 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   data change, so the commit was undone and the bot restarted on the old version).
 - The same list is on the site's **Agents** page — cards stacked on a phone, each with its history (every decision and
   every "waiting" note) and the same consequence text in the confirm (with an optional note). The owner gets **Apply
-  now** when something is approved (the page follows the job for ten seconds and shows its result), the apply mode
+  now** when something is approved or a restart is owed (the page follows the job for ten seconds and shows its result), the apply mode
   (applies to main, or opens a pull request), the MCP server's state (configured, local only, last write) and this
   month's Claude spend per server under the one shared cap (D45). A job that is busy with another server's proposal
   says just that. If an apply run died part-way (a proposal stuck on **Applying now** while the job isn't running), the

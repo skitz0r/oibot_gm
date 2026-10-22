@@ -303,6 +303,15 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         if state is None and not job_of(request, v):
             raise HTTPException(403, "Only the apply job annotates a proposal; officers approve or dismiss it.")
         note = str(d["note"]) if d.get("note") is not None else None
+        if state == "applying" and job_of(request, v):  # the gate: a game-data approval stands only when the owner made it
+            try:
+                held = ProposalStore(store(), v.reg.key).get(pid)
+            except ProposalError as e:
+                raise HTTPException(404, str(e))
+            why = news.profile_approval_refusal(getattr(bot, "registries", None), v.reg, held) if held.state == "approved" else None
+            if why:
+                held, _ = await move(request, v, pid, "failed", note=why)
+                return JSONResponse({"error": why, "proposal": proposal_json(v.reg, held)}, status_code=403)
         p, card_ok = await move(request, v, pid, state, (str(d.get("commit") or "").strip() or None), note)
         word = "noted" if state is None else p.state
         return {"message": f"proposal {p.id} is {word}" + ("" if card_ok else " — the Discord card updates when the bot is back"),
@@ -387,6 +396,10 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         out = {**ov, "runs": runs, "owner": v.owner, "waiting": len(ps.all("proposed")), "approved": len(ps.all("approved")), "guild": v.reg.key,
                "apply_mode": apply_mode(), "busy": busy_json(bot, v.reg), "ops_channel": bool(v.reg.config.ops_channel_id),
                "install_line": INSTALL_LINE}
+        pending = agents.read_status("apply", agents.OUT).get("restart_pending") or None
+        if v.owner and pending:  # a committed game-data edit the bot hasn't restarted for (the job clears it at the restart)
+            out["restart_pending"] = {"id": pending.get("id"), "guild": pending.get("guild"), "commit": pending.get("commit"), "auto": bool(pending.get("auto")),
+                                      "title": pending.get("title"), "text": news.restart_pending_text(pending)}
         if v.owner:  # host facts: the owner only (§2.8)
             out["mcp"] = mcp_card(v.reg)
             out["llm"] = llm_usage(bot, v.reg)

@@ -242,6 +242,8 @@ export interface LlmUsage { spent: number; cap: number; by_guild: { key: string;
 export interface AgentRunRow { id: string; job: string; started: string; started_label: string; outcome: string }
 export interface Agents {
   jobs: AgentJob[]; bot: LaunchdState; runs: AgentRunRow[]; owner: boolean; waiting: number; approved: number; guild?: string;
+  /** the owner: a committed game-data edit the bot hasn't restarted for (the apply job's status `restart_pending`) */
+  restart_pending?: { id: string; guild: string | null; commit: string | null; auto: boolean; title: string | null; text: string };
   apply_mode?: { mode: "main" | "pr" | "unknown"; source: string | null }; busy?: GuildBusy; ops_channel?: boolean; install_line?: string;
   /** owner only (host facts) */
   mcp?: McpCard; llm?: LlmUsage | null;

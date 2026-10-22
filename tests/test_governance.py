@@ -981,7 +981,7 @@ def test_mark_as_interrupted_is_refused_while_its_commit_waits_for_a_restart(reg
     assert r.status_code == 409 and "Committed c0ffee1" in r.json()["error"] and "next quiet poll" in r.json()["error"], r.text
     assert ps.get(p.id).state == "applying"
     agents.write_status("apply", out_dir, restart_pending={"guild": reg.key, "id": p.id, "commit": "c0ffee1", "auto": False, "why": "held"})
-    assert "restart it when convenient" in c.post(f"/api/proposals/{p.id}/interrupted", json={}, headers=site).json()["error"]
+    assert "or press Apply now" in c.post(f"/api/proposals/{p.id}/interrupted", json={}, headers=site).json()["error"]
     agents.write_status("apply", out_dir, restart_pending=None)
     shown = next(x for x in c.get("/api/proposals").json()["proposals"] if x["id"] == p.id)
     assert shown["consequence"]["interrupted"], "offered again once nothing waits for it"
@@ -1162,3 +1162,73 @@ def test_the_plain_grid_saves_as_one_structured_change_with_its_rev(reg, rs, mon
     assert d["needs_review"] and any("goes from act to ignore" in x for x in d["described"]["consequences"]), d
     r = c.post("/api/ops/change", json={"changes": change, "apply": True, "confirmed": True, "revs": {"config:plain": "stale"}}, headers=site)
     assert r.status_code == 409, r.text  # another owner's edit (MCP, a second tab) is never overwritten silently
+
+
+# ---------------------------------------------------------------- apply job review fixes (owner approval, the version's restart)
+
+def test_the_gate_refuses_a_profile_approval_that_was_not_the_owners(reg, rs, monkeypatch, out_dir):
+    """Review (G2): an officer's approval of a game-data proposal from before the owner-only rule went through the
+    approved → applying gate. The bot re-checks the approver there: not the owner → failed, with a clear note."""
+    add_news(reg)
+    bot, c, job, site = clients(reg, rs, monkeypatch, officer=True)
+    ps = ProposalStore(reg.store, reg.key)
+    old = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    ps.move(old.id, "approved", "Offi", officer=True, job=False, by_id=4242, owner=True)  # recorded as it was, before the rule
+    r = c.post(f"/api/proposals/{old.id}/resolve", json={"state": "applying"}, headers=job)
+    assert r.status_code == 403 and news.PROFILE_OWNER_ONLY in r.json()["error"] and "approved by Offi" in r.json()["error"], r.text
+    held = ps.get(old.id)
+    assert held.state == "failed" and "the owner approves it again" in held.note
+    ok = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT, title="another"))
+    ps.move(ok.id, "approved", "the owner", officer=True, job=False, by_id=OWNER, owner=True)
+    assert c.post(f"/api/proposals/{ok.id}/resolve", json={"state": "applying"}, headers=job).status_code == 200
+    assert ps.get(ok.id).state == "applying"
+
+
+def test_apply_reports_an_officer_approved_profile_as_refused(job):
+    apply, state, claude = job
+    why = f"not applied: {news.PROFILE_OWNER_ONLY} (approved by Offi) — the owner approves it again to apply it"
+    w = world(lists={(GUILD2, "approved"): [PROFILE]}, states={PROFILE["id"]: "failed"},
+              refuse={(f"/api/proposals/{PROFILE['id']}/resolve", "applying"): why})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 0
+    assert state.claude == 0 and state.restarts == 0
+    res = agents.read_status("apply")["result"]
+    assert f"{PROFILE['id']}: refused, not applied — {why}" in res and "before the job started" not in res
+
+
+def test_a_pending_restart_is_kept_when_its_guild_is_no_longer_listed(job):
+    """Review (G2): the restart belongs to the game version — the commit is on main and changes every guild on it — so
+    a proposing guild that was parked or removed never drops it."""
+    apply, state, claude = job
+    agents.write_status("apply", restart_pending={**PENDING, "guild": "gone"})
+    w = world(guilds=[GUILDS[0]], lists={})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 0
+    assert state.restarts == 1, "restarted at the quiet poll"
+    st = agents.read_status("apply")
+    assert not st.get("restart_pending") and "dropped" not in st["result"]
+    # while a served guild raids it waits, still owed
+    state.restarts = 0
+    agents.write_status("apply", restart_pending={**PENDING, "guild": "gone"})
+    w = world(guilds=BUSY, lists={})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 0
+    assert state.restarts == 0 and agents.read_status("apply")["restart_pending"]["guild"] == "gone"
+
+
+def test_a_held_restart_is_shown_and_cleared_at_the_next_idle_tick(job, reg, rs, monkeypatch, out_dir):
+    """Review (G2): `restart_pending{auto: False}` (the proposal was moved while it was applied) was never shown nor
+    cleared, and recovery skipped its id for good. The Agents page shows it to the owner; the next quiet poll — or the
+    owner's Apply now, which starts the same poll — restarts for the commit without moving the proposal."""
+    apply, state, claude = job
+    held = {**PENDING, "auto": False, "why": "the proposal became dismissed while it was applied"}
+    agents.write_status("apply", restart_pending=held)
+    bot, c, _, _ = clients(reg, rs, monkeypatch, officer=True)
+    owner_cookie(c)
+    ov = c.get("/api/agents").json()
+    assert ov["restart_pending"]["commit"] == "c0ffee1" and "or press Apply now" in ov["restart_pending"]["text"]
+    page = (__import__("pathlib").Path(__file__).resolve().parents[1] / "frontend/src/pages/Agents.tsx").read_text()
+    assert "data.restart_pending &&" in page and "data.approved > 0 || data.restart_pending" in page
+    w = world(lists={}, states={PROFILE["id"]: "dismissed"})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 0
+    assert state.restarts == 1 and not agents.read_status("apply").get("restart_pending")
+    assert not [p for p in w["posts"] if p[2] in ("applied", "failed", "reverted")], "the proposal is not moved"
+    assert "restarted for c0ffee1" in agents.read_status("apply")["result"]
+    assert "restart_pending" not in c.get("/api/agents").json()
