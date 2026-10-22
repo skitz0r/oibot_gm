@@ -555,9 +555,9 @@ def test_roster_absences_rechecks_officer_standing_on_every_press(reg, monkeypat
 
 
 def test_config_show_is_words_not_yaml(reg):
-    lines = configops.config_summary(reg)
-    text = "\n".join(lines)
-    assert text.startswith(f"**{reg.config.name}**") and "now " in lines[0] and f"<@{OWNER}>" in text
+    sections = configops.config_summary(reg)  # phase 3: sections (one embed field each on /gm config show)
+    text = configops.summary_text(sections)
+    assert sections[0].lines[0].startswith(reg.config.name) and "now " in sections[0].lines[1] and (f"<@{OWNER}>" in text or "Owner: " in text)
     assert "Barrow Deeps" in text and "locks" in text and "Recruitment:" in text and "Plain text:" in text
     assert not MILITARY.search(text) and not ISO_DAY.search(text) and "discord_guild_id" not in text and "rosters:" not in text
     assert len(text) < 2000

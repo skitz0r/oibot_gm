@@ -247,7 +247,7 @@ def test_config_schedules_add_edit_and_save_in_one_commit(reg, store, owner):
         assert "locks 12 hours before" in h.text and "confirm by 6 hours before (the raid's)" in h.text
         await h.pick("Change this schedule", "rosters")
         await h.pick("Rosters per run", "2")
-        assert "2 rosters" in h.text and "20 seats" in h.text
+        assert "2 rosters" in h.text and "the sheet advertises 2 × 10 seats" in h.text  # rc.rosters_copy (phase 3)
         await h.press("All schedules")
         assert "Raid nights" in h.text and "Alt run" in h.text and h.selects() == ["Pick a schedule"]
         await h.press("Add a schedule")

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLive } from "../hooks/useLive";
 import { Badge, Box, Button, Card, Group, MultiSelect, Select, Table, Text } from "@mantine/core";
 import { IconPencil } from "@tabler/icons-react";
 import { api, type RoleRef } from "../api";
@@ -26,6 +27,9 @@ export function PlainPermissions() {
   const [busy, setBusy] = useState(false);
   const load = () => api.get<PlainPermissionsData>("/api/plain-permissions").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  const editingRef = useRef(false);
+  editingRef.current = d !== null;
+  useLive(() => { if (!editingRef.current) load(); }, ["config"]);  // a change made elsewhere shows — never under the grid's edit mode
   if (!data) return null;
   const editing = d !== null;
   const roleName = (id: string) => data.guild_roles.find((r) => r.id === id)?.name;

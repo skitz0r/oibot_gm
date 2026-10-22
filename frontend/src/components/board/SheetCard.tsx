@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Switch, Text, Textarea, Tooltip } from "@mantine/core";
-import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { api, type Meta, type Person, type Sheet, type Signup } from "../../api";
 import { MemberMenu, RepostSheetModal, SomeoneElse } from "./MemberMenu";
@@ -11,6 +11,7 @@ import { useConfirm } from "../ConfirmModal";
 import { BoardPreview } from "./BoardPreview";
 import { BoardView } from "./BoardView";
 import { FillModal } from "./FillModal";
+import { TellTheBot } from "../TellTheBot";
 import { Aura, RoleCounts, SeatLine, runName, type Act, type OnBoard } from "./shared";
 import type { LockPreview, NightSheet } from "./types";
 
@@ -43,6 +44,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   // the row ⋮ menu (design B5): the member's filtered on-behalf list from the server — the same one /raid set offers
   const menu = (s: Signup) => <MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload} />;
   const [repostOpen, setRepostOpen] = useState(false);
+  const [tellOpen, setTellOpen] = useState(false);  // the officers' Tell the bot box, about this run (design §3.4 OFF-20)
 
   async function remind() {
     if (!(await ask({ title: `Remind the unconfirmed on ${name}?`, message: `Everyone rostered who hasn't answered gets their Confirm / Can't DM again — the same card, the same deadline. Once an hour per run.`, confirmLabel: "Remind" }))) return;
@@ -79,6 +81,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
             </Text>
           )}
           <RunLinks e={e} />
+          {e.live && <Button size="compact-xs" variant="subtle" mt={2} leftSection={<IconMessageCircle size={12} />} onClick={() => setTellOpen((x) => !x)}>Tell the bot about this run</Button>}
         </Box>
         <Group gap={4}>
           {e.live && people && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
@@ -86,6 +89,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
         </Group>
       </Group>
 
+      {tellOpen && <Box mt="sm"><TellTheBot scope={`run:${e.key}`} guild={meta.guild_key} prefill={`${name}: `} placeholder={`Ask or tell the bot about ${name}…`} autoFocus /></Box>}
       {e.lock_error && <Alert color="red" variant="light" mt="sm" p="xs"><Text size="sm">{e.lock_error}</Text></Alert>}
 
       <Group gap="xs" mt="sm" align="baseline">

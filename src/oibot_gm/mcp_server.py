@@ -260,8 +260,13 @@ def guild_overview(guild: Guild = None) -> dict:
     news keywords, the channels the bot uses ({id, name, missing}: missing = set but no longer a channel the bot can
     see), the policy documents (compiled or not, summary, the text up to 1500 characters), each raid's cadence and
     live-run count, the live runs (key, when, state, counts), and the test bench (puppets, test runs). `guild` says
-    which guild answered (key, name, Discord id). Start here."""
+    which guild answered (key, name, Discord id), and `summary`: the effective configuration in words, by section (the
+    same sections config_summary, /gm config show and the site's Config Overview print). Start here."""
     cfg = api(guild).get("/api/config")
+    try:  # officers' words for the config; a bot from before the route answers 404 and the overview still stands
+        summary = api(guild).get("/api/config/summary")
+    except ToolError:
+        summary = {}
     raids = api(guild).get("/api/raids")
     rosters = api(guild).get("/api/rosters")
     live = [run_summary(e) for r in rosters.get("raids", []) for e in r.get("open", []) + r.get("locked", [])] + [run_summary(e) for e in rosters.get("orphans", [])]
@@ -277,6 +282,7 @@ def guild_overview(guild: Guild = None) -> dict:
                    "schedules": [{"id": s["id"], "name": s["name"], "label": s["label"], "class": s.get("class"), "regulars": s.get("regulars", 0), "next": s.get("next", [])} for s in r.get("schedules", [])]} for r in raids.get("raids", [])],
         "live_runs": live,
         "test_bench": cfg.get("test_bench"),
+        "summary": summary.get("sections", []) if isinstance(summary, dict) else [],
     }
 
 
@@ -331,6 +337,49 @@ def raid_readiness(raid: str | None = None, guild: Guild = None) -> dict:
     the desired comp lines (want/min/max, have, level, why, the officer's note and whether it is derived or officer-set),
     what is short or over, and the pool plan. `raid` = a raid id for one raid; default every raid. Read-only."""
     return api(guild).get("/api/readiness", raid=raid)
+
+
+@mcp.tool()
+def config_summary(guild: Guild = None) -> dict:
+    """The guild's effective configuration in words, by section (guild, channels, raids and schedules, recruitment and
+    the invite, plain text, test bench, and — as the owner — Host: superusers by name, Claude spend against the shared
+    cap, MCP local-only, a .env changed since the bot started). The same sections /gm config show and the site's Config
+    Overview print. Read-only."""
+    return api(guild).get("/api/config/summary")
+
+
+@mcp.tool()
+def list_regulars(raid: str, schedule: str | None = None, guild: Guild = None) -> dict:
+    """The REGULARS of a raid's recurring schedules: per series (raid:schedule) its name, words label, whether it is
+    active, rosters per run, each regular (display name, character, class, spec, role), the role counts against the
+    tank/healer minimums (level green / amber / red, who could cover, whom to recruit) and the 4-week forecast.
+    `raid` = id or name; `schedule` = one schedule id (default: every recurring schedule of the raid). Read-only."""
+    rid = get_raid(raid, guild)["id"]
+    data = api(guild).get("/api/readiness", raid=rid)
+    rows = [s for r in data.get("raids", []) for s in r.get("series", [])]
+    if schedule:
+        rows = [s for s in rows if s.get("id") == schedule.strip().lower()]
+        if not rows:
+            raise ToolError(f"{raid} has no recurring schedule {schedule} (get_raid lists them; pickup templates have no regulars)")
+    return {"raid": rid, "series": rows}
+
+
+@mcp.tool()
+def set_comp_target(raid: str, slot: str, min: int | None = None, max: int | None = None, note: str | None = None, clear: bool = False,
+                    preview: bool = False, guild: Guild = None) -> str | dict:
+    """An officers' comp TARGET for a raid ("we aim for" — what readiness measures; the analytics card and the Readiness
+    page show it): `slot` = a role (tank, healer, melee, ranged), a class (Paladin) or Class:Spec (Paladin:Holy); `min`
+    = at least, `max` = at most (optional), `note` = why (shown on the card). `clear` = drop the target so the derived
+    value applies again. The owner's BOUNDS (raid_set tank_min…) are what the solver seats; a target outside them is
+    refused ('change the bounds first'). `raid` = id or name (or a live run's key for one run). `preview=True`: current →
+    new, nothing saved. Same write as the Readiness page and /roster comp."""
+    key = raid
+    try:
+        key = get_raid(raid, guild)["id"]
+    except ToolError:
+        pass  # a run key: the bot says if it isn't one
+    entry = None if clear else {"min": int(min or 0), "max": max, "note": note}
+    return ops_change(guild, [{"kind": "comp", "target": key, "fields": {slot: entry}}], preview)
 
 
 @mcp.tool()
@@ -747,6 +796,9 @@ def set_config(field: str | None = None, value: Any = None, fields: dict[str, An
     """Guild settings (owner): timezone (IANA name), ask_audience, about (text), news_keywords (a list of words or
     phrases that make a news item relevant), loot_log (bool: the public award log), officer_roles (the WHOLE list of role
     ids or names the bot knows, always a list: ["123456789", "Officer"]; [] for none — a bare string is refused), channel:<kind> (as set_channel) — one `field` + `value` or several as `fields`.
+    A timezone change while runs are open or locked: preview first (it names each run whose clock reading changes), then
+    send `timezone_runs` with it — "keep" (they stay at their real moment; needed while a run is LOCKED) or "move" (the
+    open runs keep their wall-clock time on the new zone, signups kept; locked runs stay).
     `preview=True`: current → new and the consequences, nothing saved."""
     want = dict(fields or {})
     if field:

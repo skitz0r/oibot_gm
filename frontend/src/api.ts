@@ -68,6 +68,10 @@ export interface Meta {
   durations?: { days: number; label: string }[]; max_absence_days?: number; absence_reason_max?: number; ranks?: string[];
   /** the DM toggle's one sentence each way (inbox.DM_ON_SENTENCE / DM_OFF_SENTENCE) */
   dm_sentences?: { on: string; off: string };
+  /** Settings edit mode: every timezone grouped by region (Mantine grouped Select data — picked, never typed) and the about text's cap */
+  timezones?: { group: string; items: { value: string; label: string }[] }[]; about_max?: number;
+  /** the raid wizard's cadence presets (presets.PRESETS): the schedule editor's quick picks */
+  cadence_presets?: { key: string; name: string; signup_lead_hours: number; nudge_hours_before: number; lock_hours_before: number; confirm_hours_before: number }[];
 }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[] }
@@ -147,7 +151,8 @@ export interface RaidRuns {
 }
 export interface Regular { uid: string; display_name: string; character: string; cls: string; spec: string; role: string }
 /** One upcoming start of a recurring series: its regulars minus recorded absences, against the minimums. */
-export interface ForecastRow { start: string; day: string; when: string; expected: number; seats: number; short: Record<string, number>; away: string[] }
+/** `open_key`: the run already open (or locked) at that start — the Readiness page shows it instead of "Open this run early" (GET /api/readiness only). */
+export interface ForecastRow { start: string; day: string; when: string; expected: number; seats: number; short: Record<string, number>; away: string[]; open_key?: string | null }
 /** `level`: green = regular mains cover the tank/healer minimums with a spare, amber = no spare (`no_spare`) or only with offspecs / flex / alts (`cover`), red = not even then (`recruit`); null = no regulars yet. */
 export interface Series { key: string; id: string; name: string; label: string; active: boolean; seats: number; regulars: Regular[]; counts: Record<string, number>; need: Record<string, number>;
   level?: "green" | "amber" | "red" | null; no_spare?: string[]; cover?: string[]; recruit?: string[]; forecast?: ForecastRow[] }
@@ -163,14 +168,20 @@ export interface Schedule {
   source?: Record<string, string | Record<string, string>>; own_weights?: Record<string, number>; weights?: Record<string, number>;
   slots: string[]; slot_labels: string[]; days: number[]; time: string; time_label: string; label: string;
   /** cadence the schedule sets itself; anything missing inherits the raid's (`effective` = what applies) */
-  own: Record<string, number | boolean | string>; effective: Record<string, number | boolean | string>; next: string[];
+  own: Record<string, number | boolean | string>; effective: Record<string, number | boolean | string>;
+  /** `next` = the runs that WILL open (empty while paused); `next_if_active` = the runs it would open (design RD-10) */
+  next: string[]; next_if_active?: string[];
+  /** the server's sentences: the Pause / Resume confirm, the removal confirm (Registry.schedule_removal_effects), the rosters-per-run copy per n */
+  pause_sentence?: string; resume_sentence?: string; removal_sentence?: string; rosters_copy?: Record<string, string>;
 }
 export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; people?: Person[]; tz: string }
 export interface RaidRule {
   id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; comp: Record<string, { min?: number; max?: number }>;
   slots: string[]; slot_labels?: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number; autofill: boolean; open_dm: boolean; confirm?: boolean;
-  overridden: string[]; comp_targets: Record<string, unknown>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; live: number;
+  overridden: string[]; comp_targets: Record<string, CompTarget>; comp_groups: string[]; first_open_local: string; opened: boolean; window: [string, string]; live: number;
   schedules: Schedule[];
+  /** the raid section rev an edit-mode Save sends back as revs["config:raids:<id>"] */
+  rev?: string;
 }
 export interface Raids { raids: RaidRule[]; tz: string; owner: boolean; weight_keys: string[]; split_policies: string[]; schedule_kinds: string[]; schedule_cadence: string[]; max_rosters: number }
 export interface SplitPreview { strategy: string; layout: string[][]; board: Board; synergy: number[]; total: number; gap: number; reason?: SplitReason | null; reason_text?: string | null }
@@ -284,7 +295,7 @@ export interface ItemGrid extends ItemBrief {
 /** A typed draft: `kind` names what it edits, `target` which one, `fields` typed values (never the plain-text grammar).
  *  kinds: settings · raid · raid_reset · schedule (target "<raid>:<schedule>") · schedule_remove · buff · family (target null + name = new) ·
  *  aura_reset (target null = everything) · recruitment · plain. The server builds the ops (configops.ops_from_fields). */
-export interface OpsChange { kind: "settings" | "raid" | "raid_reset" | "schedule" | "schedule_remove" | "buff" | "family" | "aura_reset" | "recruitment" | "plain"; target?: string | null; fields?: Record<string, unknown> }
+export interface OpsChange { kind: "settings" | "raid" | "raid_reset" | "schedule" | "schedule_remove" | "buff" | "family" | "aura_reset" | "recruitment" | "plain" | "comp"; target?: string | null; fields?: Record<string, unknown> }
 /** One setting of a write, current → new, in words (mentions already rendered as #channel / @Role). `before` null = a new thing. */
 export interface DescribedPart { label: string; before: string | null; after: string | null }
 /** One WRITE (a buff, a family, a raid, a schedule, the guild settings): its parts, the refusal its apply would give, warn, consequences. */
@@ -307,3 +318,26 @@ export const opsApi = {
   /** Apply a reviewed preview. With `changes` + `seen` (the fingerprint shown) an expired token re-previews and applies when nothing moved. */
   apply: (token: string, changes?: OpsChange[], seen?: string, revs?: Record<string, string>) => api.post<OpsReply>("/api/ops/change", { token, apply: true, changes, seen, revs }),
 };
+
+// ---- phase 3: comp targets, readiness, the effective configuration, the Tell the bot box
+/** An officers' comp target (Registry.set_comp_targets): at least, at most (optional), why (optional). */
+export interface CompTarget { min: number; max?: number | null; note?: string | null }
+/** One desired-comp line as readiness measures it (comp.readiness): `source` officer | derived; `why` = the reason in words. */
+export interface CompLine { key: string; want: number; min: number; max: number | null; have: number; level: string; why: string; note: string | null; source: string; flex?: number; flex_who?: string[] }
+export interface ReadinessRole { role: string; have: number; need: number; level: string; hint: string | null; cover: Record<string, string[]> }
+export interface ReadinessRaid {
+  raid: string; name: string; size: number; level: "green" | "amber" | "red";
+  headcount: { mains: number; size: number; alts: number; on_roster: number; unnamed: number; level: string };
+  roles: ReadinessRole[]; missing_buffs: { id: string; name: string; abbr: string; colour: string; art: string | null }[];
+  comp: CompLine[]; short: { key: string; have: number; want: number; why: string }[]; over: { key: string; have: number; max: number; why: string }[]; notes: string[];
+  series: Series[]; targets: Record<string, CompTarget>; bounds: Record<string, { min: number; max: number }>; rev: string; comp_groups: string[];
+}
+/** A target slot: a role, a class or Class:Spec, with its words (`label`) for selects and tooltips. */
+export interface CompSlot { value: string; label: string; kind: "role" | "class" | "spec" }
+export interface Readiness { raids: ReadinessRaid[]; slots: CompSlot[]; note_max: number }
+/** configops.config_summary(audience) as the site gets it (mentions rendered as names). */
+export interface ConfigSummary { audience: "owner" | "officer"; sections: { key: string; title: string; lines: string[] }[] }
+/** POST /api/ask: the answer, `act` (an officer's request to do something: preview it on /api/ops/change {text}), or `guide` (outside the ask audience). */
+export interface AskReply { answer: string | null; act?: boolean; guide?: boolean; message?: string; officer_view?: boolean }
+/** POST /api/ops/change {text}: Claude's reading as ops, the Discord diff's lines (`described`), refusals with who may and where, a token. */
+export interface TextPreview extends OpsReply { reply?: string; questions?: string[]; ops?: Record<string, unknown>[] }

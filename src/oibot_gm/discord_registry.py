@@ -243,6 +243,32 @@ def is_owner(interaction: discord.Interaction, reg: Registry) -> bool:
 
 from .constants import ROLES, TEAL  # noqa: E402
 ROLE_CHOICES = [app_commands.Choice(name=r, value=r) for r in ROLES]
+FIELD_MAX = 1024  # Discord's embed field value cap
+
+
+def config_show_embed(reg: Registry, sections) -> discord.Embed:
+    """/gm config show: one embed field per configops.config_summary section; a section past a field's 1024 characters
+    keeps the lines that fit and ends "+N more on the site" (the Config page's Overview has them all)."""
+    import os
+
+    web = os.environ.get("OIBOT_WEB_URL", "")
+    e = discord.Embed(title=f"{reg.config.name} · configuration", colour=TEAL, url=f"{web}/app/config?g={reg.key}" if web.startswith("https") else None)
+    left = 5600 - len(e.title or "") - 120  # Discord's 6000-character embed total (the footer and the titles counted in)
+    for n, s in enumerate(sections[:25]):
+        cap = min(FIELD_MAX, max(120, left // max(1, len(sections) - n))) - 40  # room kept for the "+N more" line
+        shown: list[str] = []
+        for i, line in enumerate(s.lines):
+            if len("\n".join([*shown, line[:cap]])) > cap:
+                shown.append(f"-# +{len(s.lines) - i} more on the site")
+                break
+            shown.append(line[:cap])
+        value = "\n".join(shown)[:FIELD_MAX] or "—"
+        left -= len(value) + len(s.title)
+        e.add_field(name=s.title, value=value, inline=False)
+    e.set_footer(text="Everything here is on the site's Config page (Overview); /gm config … changes it.")
+    return e
+
+
 CHAR_ACTION_CHOICES = [app_commands.Choice(name=n, value=v) for v, n in (("spec", "Spec"), ("main", "Main"), ("flex", "Flex (extra roles)"), ("retire", "Retire"),
                                                                           ("delete", "Delete"), ("name", "Name a planned character"), ("add", "Add an alt"))]
 ROSTER_CHAR_CHOICES = [app_commands.Choice(name=n, value=v) for v, n in (("spec", "Spec"), ("main", "Main"), ("flex", "Flex (extra roles)"), ("rank", "Rank"),
@@ -894,6 +920,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         view = overview_post_view(reg, ico) if officer_view and reg.config.roster_channel_id else None
         await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
 
+    @roster.command(name="comp", description="Desired comp: what readiness aims for per role, class or spec (bounds stay the owner's)")
+    async def roster_comp(interaction: discord.Interaction):
+        reg, interaction = await officer(interaction)
+        if reg:  # flows_config.CompTargetsWizard: only the targets block of the Group make-up screen → configops (authorize_ops + apply_ops)
+            await FLOWS["roster_comp"](interaction, reg)
+
     @roster.command(name="char", description="A member's characters on their behalf: spec, main, extra roles, rank, retire, delete")
     @app_commands.describe(member="whose characters", action="what to change (leave empty to see their characters and pick)")
     @app_commands.choices(action=ROSTER_CHAR_CHOICES)
@@ -1213,7 +1245,9 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         from .configops import config_summary  # words, mentions and 12-hour times — never the raw YAML (the clock rule)
 
-        await interaction.response.send_message("\n".join(config_summary(reg))[:1950], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        audience = "owner" if is_owner(interaction, reg) else "officer"
+        await interaction.response.send_message(embed=config_show_embed(reg, config_summary(reg, interaction.client, audience)), ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
 
     async def roster_regcard(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)

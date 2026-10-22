@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { Badge, Box, Button, Group, Modal, MultiSelect, NumberInput, SegmentedControl, Select, Stack, Switch, Text, TextInput } from "@mantine/core";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Badge, Box, Button, Group, Modal, MultiSelect, NumberInput, SegmentedControl, Select, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { TimePicker } from "@mantine/dates";
-import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
-import { api, type RaidRule, type Schedule } from "../api";
+import { IconPencil, IconPlayerPause, IconPlayerPlay, IconPlus, IconTrash } from "@tabler/icons-react";
+import { api, opsApi, type Meta, type OpsReply, type RaidRule, type Schedule } from "../api";
 import { useConfirm } from "./ConfirmModal";
 import { Eyebrow, fail, ok } from "./Page";
 import { SlotEditor } from "./SlotEditor";
@@ -26,13 +26,27 @@ function ownWords(s: Schedule): string {
 
 /** A raid's schedules: WHEN it runs. Each is weekly nights, day N of each lockout, or a pickup template officers open on
  *  demand, with the rosters a run expects and any cadence of its own (the rest follows the raid's rules above). */
-export function Schedules({ r, owner, policies, maxRosters, onSaved }: { r: RaidRule; owner: boolean; policies: string[]; maxRosters: number; onSaved: () => void }) {
-  const [edit, setEdit] = useState<Schedule | "new" | null>(null);
+/** The raid section rev the page loaded: every schedule write carries it, so a write against settings someone changed
+ *  meanwhile is refused (409) instead of landing on top of theirs (design §2.4). */
+export function raidRevs(r: RaidRule): { revs?: Record<string, string> } {
+  return r.rev ? { revs: { [`config:raids:${r.id}`]: r.rev } } : {};
+}
+
+export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEditing }: { r: RaidRule; meta?: Meta; owner: boolean; policies: string[]; maxRosters: number; onSaved: () => void; onEditing?: (on: boolean) => void }) {
+  const [edit, setEditState] = useState<Schedule | "new" | null>(null);
+  const setEdit = (v: Schedule | "new" | null) => { if ((v === null) !== (edit === null)) onEditing?.(v !== null); setEditState(v); };
   const [ask, confirmDialog] = useConfirm();
   async function remove(s: Schedule) {
+    // the sentence is the server's (Registry.schedule_removal_effects): its regulars by name (a notice, no DM) and the runs already open
     const extra = s.is_default ? " These are the raid's own run times, so it is left with none." : "";
-    if (!(await ask({ title: `Remove ${s.name}?`, message: `${s.label}.${extra} Runs already open keep their times.`, confirmLabel: "Remove", color: "red" }))) return;
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule/remove", { instance: r.id, id: s.id }); ok(x.message); onSaved(); } catch (e) { fail(e); }
+    if (!(await ask({ title: `Remove ${s.name}?`, message: `${s.removal_sentence || `${s.label}. Runs already open keep their times.`}${extra}`, confirmLabel: "Remove", color: "red" }))) return;
+    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule/remove", { instance: r.id, id: s.id, ...raidRevs(r) }); ok(x.message); onSaved(); } catch (e) { fail(e); onSaved(); }
+  }
+  /** Pause / Resume beside Edit (design RD-10): one field, confirmed with the server's sentence — never hidden behind the editor's Save. */
+  async function pause(s: Schedule, on: boolean) {
+    const message = on ? s.pause_sentence : s.resume_sentence;
+    if (!(await ask({ title: `${on ? "Pause" : "Resume"} ${s.name}?`, message: message || (on ? "Nothing new opens from it." : "It opens sheets again."), confirmLabel: on ? "Pause" : "Resume", color: on ? "yellow" : undefined }))) return;
+    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id: s.id, fields: { active: !on }, ...raidRevs(r) }); ok(x.message); onSaved(); } catch (e) { fail(e); onSaved(); }
   }
   return (
     <Box px="md" pb="md">
@@ -53,11 +67,16 @@ export function Schedules({ r, owner, policies, maxRosters, onSaved }: { r: Raid
                 {s.class === "recurring" && <Text size="xs" c="dimmed">{s.regulars || 0} regular{s.regulars === 1 ? "" : "s"}</Text>}
               </Group>
               <Text size="sm">{s.label}</Text>
-              {s.kind !== "pickup" && <Text size="xs" c="dimmed">{s.next.length ? `next: ${s.next.join(" · ")}` : "no run coming up"}</Text>}
+              {s.kind !== "pickup" && (s.active
+                ? <Text size="xs" c="dimmed">{s.next.length ? `next: ${s.next.join(" · ")}` : "no run coming up"}</Text>
+                : <Text size="xs" c="yellow">{(s.next_if_active || []).length ? `Paused — would next run ${s.next_if_active![0]} · nothing opens` : "Paused · nothing opens"}</Text>)}
               <Text size="xs" c={Object.keys(s.own).length ? "yellow" : "dimmed"}>{Object.keys(s.own).length ? `own cadence: ${ownWords(s)}` : s.class === "adhoc" ? "the ad hoc defaults: first come, no reminder, no confirmations, locks 2 h before" : "the raid's cadence"}</Text>
             </Box>
             {owner && (
               <Group gap={4} wrap="nowrap">
+                {s.kind !== "pickup" && (s.active
+                  ? <Button size="xs" variant="subtle" color="yellow" leftSection={<IconPlayerPause size={14} />} onClick={() => pause(s, true)}>Pause</Button>
+                  : <Button size="xs" variant="subtle" color="teal" leftSection={<IconPlayerPlay size={14} />} onClick={() => pause(s, false)}>Resume</Button>)}
                 <Button size="xs" variant="subtle" leftSection={<IconPencil size={14} />} onClick={() => setEdit(s)}>Edit</Button>
                 <Button size="xs" variant="subtle" color="red" onClick={() => remove(s)} aria-label={`remove ${s.name}`}><IconTrash size={14} /></Button>
               </Group>
@@ -65,7 +84,7 @@ export function Schedules({ r, owner, policies, maxRosters, onSaved }: { r: Raid
           </Group>
         ))}
       </Stack>
-      {edit && <ScheduleEditor r={r} s={edit === "new" ? null : edit} policies={policies} maxRosters={maxRosters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} />}
+      {edit && <ScheduleEditor r={r} meta={meta} s={edit === "new" ? null : edit} policies={policies} maxRosters={maxRosters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} onStale={onSaved} />}
       {confirmDialog}
     </Box>
   );
@@ -95,9 +114,10 @@ function slug(name: string, kind: string, taken: string[]): string {
 
 /** Add or edit one schedule. Every time is picked (weekday + 12-hour time picker, lockout day selects); cadence fields
  *  left empty follow the raid's. One POST, one registry write: a refusal comes back as a toast and nothing is saved. */
-function ScheduleEditor({ r, s, policies, maxRosters, onClose, onSaved }: { r: RaidRule; s: Schedule | null; policies: string[]; maxRosters: number; onClose: () => void; onSaved: () => void }) {
+function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, onStale }: { r: RaidRule; meta?: Meta; s: Schedule | null; policies: string[]; maxRosters: number; onClose: () => void; onSaved: () => void; onStale?: () => void }) {
   const [d, setD] = useState<Draft>(() => toDraft(s));
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<OpsReply | null>(null);
   const adhoc = d.kind === "pickup";
   const raidVal = (k: string) => (r as unknown as Record<string, unknown>)[k];
   /** what an empty field inherits, and from where: the raid's rules, or (ad hoc) the ad hoc defaults */
@@ -110,20 +130,61 @@ function ScheduleEditor({ r, s, policies, maxRosters, onClose, onSaved }: { r: R
   const setC = (k: string, v: string) => setD({ ...d, cadence: { ...d.cadence, [k]: v } });
   const setW = (k: string, v: string) => setD({ ...d, weights: { ...d.weights, [k]: v } });
 
+  const id = s ? s.id : slug(d.name, d.kind, r.schedules.map((x) => x.id));
+  /** The draft as schedule fields — for an existing schedule ONLY the fields that differ from what was loaded (design RD-10:
+   *  a Save never re-sends `active: true` over a pause made elsewhere a moment ago, nor any setting nobody touched). */
+  function fieldsOf(dd: Draft): Record<string, unknown> {
+    const all = (x: Draft): Record<string, unknown> => {
+      const f: Record<string, unknown> = { name: x.name.trim() || null, active: x.active, rosters: Number(x.rosters) };
+      if (!s) f.kind = x.kind;
+      if (x.kind === "weekly") f.slots = x.slots;
+      if (x.kind === "lockout") { f.days = x.days.map(Number); f.time = x.time; }
+      for (const [k] of HOURS) f[k] = x.cadence[k] === undefined || x.cadence[k] === "" ? null : Number(x.cadence[k]);
+      for (const [k] of BOOLS) f[k] = x.cadence[k] ? x.cadence[k] === "on" : null;
+      f.split_policy = x.cadence.split_policy || null;
+      f.weights = Object.fromEntries(WEIGHTS.map(([k]) => [k, x.weights[k] === undefined || x.weights[k] === "" ? null : Number(x.weights[k])]));
+      if (x.kind === "pickup") for (const k of ADHOC_HIDDEN) delete f[k];
+      if (s?.is_default) delete f.kind;
+      return f;
+    };
+    const want = all(dd);
+    if (!s) return want;
+    const base = all(toDraft(s));
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(want)) {
+      if (k === "weights") {  // per key: only the weights that changed
+        const bw = (base.weights || {}) as Record<string, unknown>, ww = v as Record<string, unknown>;
+        const diff = Object.fromEntries(Object.entries(ww).filter(([wk, wv]) => JSON.stringify(wv) !== JSON.stringify(bw[wk])));
+        if (Object.keys(diff).length) out.weights = diff;
+      } else if (JSON.stringify(v) !== JSON.stringify(base[k])) out[k] = v;
+    }
+    return out;
+  }
+
+  // "the next three runs with these rules" (design RD-01): the server's own preview of the draft (rc.next_runs_preview on a
+  // shadow, plus the refusal its Save would give) — the browser computes no schedule
+  const seq = useRef(0);
+  useEffect(() => {
+    const f = fieldsOf(d);
+    if (!Object.keys(f).length || (!s && !f.slots && !f.days && d.kind !== "pickup")) { setPreview(null); return; }
+    const n = ++seq.current;
+    const t = setTimeout(() => {
+      opsApi.preview([{ kind: "schedule", target: `${r.id}:${id}`, fields: f }]).then((x) => { if (n === seq.current) setPreview(x); }).catch(() => { if (n === seq.current) setPreview(null); });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [JSON.stringify(d)]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const pv = preview?.described;
+  const pvNotes = pv ? [...new Set(pv.lines.flatMap((l) => l.notes))] : [];
+  const pvError = pv?.lines.find((l) => l.error)?.error || null;
+
   async function save() {
-    const fields: Record<string, unknown> = { name: d.name.trim() || null, active: d.active, rosters: Number(d.rosters) };
-    if (!s) fields.kind = d.kind;
-    if (d.kind === "weekly") fields.slots = d.slots;
-    if (d.kind === "lockout") { fields.days = d.days.map(Number); fields.time = d.time; }
-    for (const [k] of HOURS) fields[k] = d.cadence[k] === undefined || d.cadence[k] === "" ? null : Number(d.cadence[k]);
-    for (const [k] of BOOLS) fields[k] = d.cadence[k] ? d.cadence[k] === "on" : null;
-    fields.split_policy = d.cadence.split_policy || null;
-    fields.weights = Object.fromEntries(WEIGHTS.map(([k]) => [k, d.weights[k] === undefined || d.weights[k] === "" ? null : Number(d.weights[k])]));
-    if (adhoc) for (const k of ADHOC_HIDDEN) delete fields[k];
-    if (s?.is_default) delete fields.kind;
-    const id = s ? s.id : slug(d.name, d.kind, r.schedules.map((x) => x.id));
+    const fields = fieldsOf(d);
+    if (!Object.keys(fields).length) { ok("nothing changed"); onClose(); return; }
     setBusy(true);
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id, fields }); ok(x.message); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
+    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id, fields, ...raidRevs(r) }); ok(x.message); onSaved(); }
+    // a 409 (changed meanwhile): the page reloads under the open editor, the draft stays, the next Save carries the new rev
+    catch (e) { fail(e); onStale?.(); }
+    finally { setBusy(false); }
   }
 
   const hm = /^(\d{1,2}):(\d{2})/.exec(d.time || "");
@@ -132,9 +193,10 @@ function ScheduleEditor({ r, s, policies, maxRosters, onClose, onSaved }: { r: R
       <Stack gap="sm">
         <Group gap="md" align="flex-end" wrap="wrap">
           <TextInput label="name" placeholder={d.kind === "pickup" ? "Pickup" : "Main night, Alt run…"} value={d.name} onChange={(e) => setD({ ...d, name: e.currentTarget.value })} maxLength={40} w={220} />
-          <Select label="rosters per run" description={`the sheet advertises this × ${r.size} seats`} data={Array.from({ length: maxRosters }, (_, i) => ({ value: String(i + 1), label: `${i + 1} roster${i ? "s" : ""}` }))}
-            value={d.rosters} onChange={(v) => setD({ ...d, rosters: v || "1" })} allowDeselect={false} w={200} />
-          <Switch label="active" description="paused: nothing opens from it" checked={d.active} onChange={(e) => setD({ ...d, active: e.currentTarget.checked })} />
+          <Select label="rosters per run" description={(s?.rosters_copy && s.rosters_copy[d.rosters]) || `the sheet advertises ${d.rosters} × ${r.size} seats`} data={Array.from({ length: maxRosters }, (_, i) => ({ value: String(i + 1), label: `${i + 1} roster${i ? "s" : ""}` }))}
+            value={d.rosters} onChange={(v) => setD({ ...d, rosters: v || "1" })} allowDeselect={false} w={260} />
+          {!s && <Switch label="active" description="paused: nothing opens from it" checked={d.active} onChange={(e) => setD({ ...d, active: e.currentTarget.checked })} />}
+          {s && <Text size="xs" c="dimmed" maw={200}>{s.active ? "Active — pause it from the schedule row." : "Paused — resume it from the schedule row."}</Text>}
         </Group>
         {!s && <SegmentedControl data={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))} value={d.kind} onChange={(v) => setD({ ...d, kind: v })} />}
         {d.kind === "weekly" && <SlotEditor label="run times" description="one sheet per run time per week, guild time" value={d.slots} onChange={(v) => setD({ ...d, slots: v })} />}
@@ -147,6 +209,14 @@ function ScheduleEditor({ r, s, policies, maxRosters, onClose, onSaved }: { r: R
         )}
         {d.kind === "pickup" && <Text size="sm" c="dimmed">A template never opens by itself: the Rosters page and /raid open offer it, and the run starts at the day and time picked there.</Text>}
         <Text size="sm" fw={500} mt="xs">{adhoc ? "Ad hoc" : "Recurring"} cadence <Text span size="xs" c="dimmed">— empty follows {adhoc ? "the ad hoc defaults (it takes only the raid's size, comp and lockout)" : "the raid's rules"}</Text></Text>
+        {!adhoc && (meta?.cadence_presets || []).length > 0 && (
+          <Group gap={6} wrap="wrap">
+            <Text size="xs" c="dimmed">Presets:</Text>
+            {meta!.cadence_presets!.map((p) => (
+              <Button key={p.key} size="compact-xs" variant="default" onClick={() => setD({ ...d, cadence: { ...d.cadence, signup_lead_hours: String(p.signup_lead_hours), nudge_hours_before: String(p.nudge_hours_before), lock_hours_before: String(p.lock_hours_before), confirm_hours_before: String(p.confirm_hours_before) } })}>{p.name}</Button>
+            ))}
+          </Group>
+        )}
         <Group gap="md" align="flex-end" wrap="wrap">
           {HOURS.filter(([k]) => !adhoc || !ADHOC_HIDDEN.has(k)).map(([k, label]) => {
             const [v, from] = inherited(k);
@@ -169,6 +239,12 @@ function ScheduleEditor({ r, s, policies, maxRosters, onClose, onSaved }: { r: R
               value={d.weights[k] ?? ""} onChange={(x) => setW(k, x === "" ? "" : String(x))} />
           ))}
         </Group>
+        {(pvNotes.length > 0 || pvError) && (
+          <Alert variant="light" color={pvError ? "red" : "teal"} p="xs" title={pvError ? "This Save would be refused" : "With these rules"}>
+            {pvError && <Text size="sm">{pvError}</Text>}
+            {pvNotes.map((n, i) => <Text key={i} size="sm">{n}</Text>)}
+          </Alert>
+        )}
         <Group gap="sm" justify="flex-end" mt="sm">
           <Button variant="default" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" loading={busy} onClick={save}>{s ? "Save schedule" : "Add schedule"}</Button>
