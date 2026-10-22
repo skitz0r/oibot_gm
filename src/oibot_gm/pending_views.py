@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / "out" / "pending_views.jsonl"
 TOKEN_LIFE_S = 15 * 60 - 30  # an interaction token edits its reply for 15 minutes
 RESTARTED = "The bot restarted; nothing was changed. Run the command again."
+RESTARTED_SAVED = "The bot restarted — what you saved stays; run the command again to continue."  # a hub that already wrote
 
 _live: dict[str, dict] = {}
 _lock = threading.Lock()
@@ -56,14 +57,27 @@ def track(key: str, *, app_id: int | None = None, token: str | None = None, chan
         _write()
 
 
+def mark_saved(key: str) -> None:
+    """A tracked screen whose flow already wrote something (a draft hub saves and stays open): after a restart it is
+    told that what was saved stays, never "nothing was changed"."""
+    with _lock:
+        e = _live.get(key)
+        if e is not None and not e.get("saved"):
+            e["saved"] = True
+            _write()
+
+
 def untrack(key: str) -> None:
     with _lock:
         if _live.pop(key, None) is not None:
             _write()
 
 
-def live_count() -> int:
-    return len(_live)
+def live_count(now: float | None = None) -> int:
+    """Screens still open — an entry older than an interaction token's life is not counted (Discord can't take a press
+    on it any more), so a screen that was never untracked can't hold a restart back for good."""
+    now = now or time.time()
+    return sum(1 for e in list(_live.values()) if now - float(e.get("at") or 0) < TOKEN_LIFE_S)
 
 
 def track_interaction(key: str, interaction, title: str = "") -> None:
@@ -90,14 +104,15 @@ async def restore_pending_views(bot, now: float | None = None) -> int:
     done = 0
     for e in old:
         try:
+            words = RESTARTED_SAVED if e.get("saved") else RESTARTED
             if e.get("channel_id") and e.get("message_id"):
                 ch = bot.get_channel(int(e["channel_id"]))
                 if ch is None:
                     continue
-                await ch.get_partial_message(int(e["message_id"])).edit(content=RESTARTED, embed=None, view=None)
+                await ch.get_partial_message(int(e["message_id"])).edit(content=words, embed=None, view=None)
             elif e.get("app_id") and e.get("token") and now - float(e.get("at") or 0) < TOKEN_LIFE_S:
                 hook = discord.Webhook.partial(int(e["app_id"]), str(e["token"]), client=bot)
-                await hook.edit_message("@original", content=(f"**{e['title']}**\n" if e.get("title") else "") + RESTARTED, embed=None, view=None)
+                await hook.edit_message("@original", content=(f"**{e['title']}**\n" if e.get("title") else "") + words, embed=None, view=None)
             else:
                 continue
             done += 1

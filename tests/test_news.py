@@ -30,8 +30,9 @@ def add_news(reg, url=URL, title="Barrow Deeps lockout is now 7 days on WoW: For
 
 
 def proposal_data(**kw):
-    return {"title": "Barrow Deeps resets weekly", "news": [URL], "affects": "raid barrow_deeps lockout_days", "kind": "guild_setting",
-            "change": "Barrow Deeps lockout 3 → 7 days", "edit": {"op": "raid_set", "target": "barrow_deeps", "field": "lockout_days", "value": "7"},
+    # an officer-level guild setting (comp_target): raid_set / aura_* are the owner's to approve (news.owner_setting)
+    return {"title": "Barrow Deeps resets weekly", "news": [URL], "affects": "raid barrow_deeps comp healer", "kind": "guild_setting",
+            "change": "Barrow Deeps wants 2–3 healers", "edit": {"op": "comp_target", "target": "barrow_deeps", "field": "healer", "value": "2-3"},
             "evidence": "The 10-player raid resets weekly.", "confidence": "high", **kw}
 
 

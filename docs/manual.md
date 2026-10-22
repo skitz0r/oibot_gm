@@ -774,13 +774,16 @@ channel: the change in words, what it touches, the sentence from the news it res
 confidence (low / medium / high). Most days there is no card: nothing new, or nothing that contradicts anything.
 
 - **Approve** first shows what approving does, then *Approve* / *Approve with a note…* / *Back* — the press itself never
-  writes. A **guild setting** (a raid's lockout, what the guild knows about a buff; officers approve) reads "the apply
+  writes. A **guild setting** (a raid's lockout, what the guild knows about a buff, a comp target) reads "the apply
   job carries it out at its next run (the time), no restart:" and the change as a diff line; it is applied like the same
   change on the Raids or Auras page. A **game data** change reads "Claude edits the game data for <version>, the tests
   run, and the bot restarts for every server it serves (every name) for about two minutes", plus "⚠ <server> has a run
   right now — the job will wait" for each server that is raiding. **Only the owner approves a game-data change** (it
   restarts the whole bot, for every server), even when the bot serves one guild; an officer's press is refused at once
-  and says so. Approving records who approved it and when; the apply job on the host (every 15 minutes) carries it out.
+  and says so. The same holds for a guild setting that only the owner may change on any surface — a raid's lockout or
+  run times, a buff, a stacking family, an aura reset: **the owner approves it** (an officer's press is refused, an
+  officer can't post one on the site either, and the apply job checks again who approved it before it applies);
+  officers approve the rest (comp targets). Approving records who approved it and when; the apply job on the host (every 15 minutes) carries it out.
 - **Dismiss** (officers) gets the same screen (D34): nothing changes, and the review is told not to propose it again
   unless newer news says more. For a game-data change that is a rule, not only a request: a new game-data proposal
   that cites nothing but news a dismissed one cited (in your server or another on the same game version) is refused. Once approved, the button reads **Withdraw approval** — it can still be withdrawn until
@@ -793,7 +796,10 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   serves is busy: a locked run from 4 hours before its start until it closes, an open run within the hour, or a live
   loot council (however late it runs — a council still open past the run's scheduled end counts until it ends). It waits, and writes why on the proposal ("waiting: Barrow Deeps raids until 11:30 PM") — the card's
   Status and the Agents page show it. If a raid begins while the edit and the tests run, the change is committed and
-  the restart waits for the next quiet poll. Guild settings never wait: they need no restart.
+  the restart waits for the next quiet poll ("committed c0ffee1; the restart waits: …"). It also waits while the host's
+  checkout has uncommitted changes or is on another branch (the bot runs from it), saying so on the proposal. If the
+  bot doesn't come back healthy, exactly that commit is undone (never whatever landed since); if it can't be undone
+  cleanly the proposal reads **Failed** and says to revert it by hand. Guild settings never wait: they need no restart.
 - The card updates in place: **Applying now**, then **Applied** (with the commit for a game data change),
   **Failed — nothing changed** (the setting was refused, or the tests failed and the edit was undone; a failed one can
   be approved again), or **Reverted — the change was rolled back** (the bot did not come back healthy after a game
@@ -805,7 +811,9 @@ confidence (low / medium / high). Most days there is no card: nothing new, or no
   month's Claude spend per server under the one shared cap (D45). A job that is busy with another server's proposal
   says just that. If an apply run died part-way (a proposal stuck on **Applying now** while the job isn't running), the
   owner can **Mark as interrupted**: it becomes **Failed** with "the apply run was interrupted; approve again to retry"
-  — the job does the same by itself at its next poll. Without an ops channel the page says the cards aren't posted. Plain text does it too: "approve
+  — the job does the same by itself at its next poll. A proposal whose change is already committed and only waits for
+  its restart is not interrupted: it isn't offered, and the page says "Committed c0ffee1; only the restart waits". A run
+  that stopped after its commit (a push that hung, say) leaves the restart owed the same way. Without an ops channel the page says the cards aren't posted. Plain text does it too: "approve
   proposal 260927-a1b2", "dismiss 260927-a1b2: handled by hand" (officers by default; the note is kept on the card).
 - **Several servers.** Each server's news is reviewed on its own (its own news channel and keywords, its own cards and
   Agents page — you see your server's review runs only). A **game data** change is shared by every server on that game

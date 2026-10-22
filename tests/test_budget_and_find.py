@@ -46,8 +46,10 @@ def test_spend_survives_a_restart_and_help_has_a_share(tmp_path, monkeypatch):
     monkeypatch.setenv("OIBOT_BUDGET_USD_HELP", "3")
     again.complete("help", "s", "u", object)  # help: $2 of its own $3 cap
     again.complete("help", "s", "u", object)  # $4 now: the check runs before a call
-    with pytest.raises(pv.BudgetExceeded, match="share"):
+    with pytest.raises(pv.BudgetExceeded, match="share") as e:
         again.complete("help", "s", "u", object)
+    # the words reach a guild's members and officers (/ask, plain text, the site): the host raises it, no env variable (§3.5)
+    assert "OIBOT_BUDGET_USD" not in str(e.value) and "the host raises it" in str(e.value) and "help" not in str(e.value)
     rows = [json.loads(ln) for ln in (tmp_path / "usage.jsonl").read_text().splitlines()]
     assert len(rows) == 3 and all(r["month"] == pv.AnthropicProvider._month() for r in rows)
 

@@ -286,7 +286,16 @@ def job(out_dir, monkeypatch):
     apply = load_script("apply")
     state = SimpleNamespace(edited=False, claude=0, restarts=0)
     git = {("rev-parse", "--abbrev-ref", "HEAD"): "main", ("rev-parse", "HEAD"): "abc", ("rev-parse", "--short", "HEAD"): "c0ffee1"}
-    monkeypatch.setattr(apply, "sh", lambda *a, **k: SimpleNamespace(stdout=git.get(a[1:], ""), stderr="", returncode=0))
+    state.git = git
+
+    def sh(*a, **k):
+        if a[1:2] == ("commit",):
+            state.edited = False  # committed: the tree is clean again
+        state.calls.append(a[1:])
+        out = state.sh_override(a[1:]) if state.sh_override else None
+        return out or SimpleNamespace(stdout=git.get(a[1:], ""), stderr="", returncode=0)
+    state.calls, state.sh_override = [], None
+    monkeypatch.setattr(apply, "sh", sh)
     monkeypatch.setattr(apply, "dirty_paths", lambda: ["profiles/forever/raids.yaml"] if state.edited else [])
     monkeypatch.setattr(apply, "revert_worktree", lambda: None)
     monkeypatch.setattr(apply, "restart_bot", lambda: setattr(state, "restarts", state.restarts + 1) or 1)
@@ -916,3 +925,240 @@ def test_gm_policy_show_runs_through_the_guild_resolver(reg):
     stranger.guild_id = 999
     run(show.callback(stranger.command(), loot))
     assert len(stranger.screens) == 1 and "set up" in stranger.screens[0]["text"]
+
+
+# ---------------------------------------------------------------- final review fixes
+
+def test_an_officer_cannot_run_an_owner_op_through_a_proposal(reg, rs, monkeypatch, out_dir):
+    """Regression (final review): an officer POSTed a guild_setting proposal with an owner op (aura_reset, raid_set …),
+    approved it and the apply job ran it as the owner. Now: an officer can't post one, can't approve one the review
+    posted, and the apply route re-checks the approver (an approval from before the check is refused at the apply)."""
+    from test_agents import OWNER_PROP, seed
+
+    seed(reg)
+    reg.set_buff_override("blood_pact", "scope", "raid", "t")
+    bot, c, job, site = clients(reg, rs, monkeypatch, officer=True)
+    review = {**job, "X-Oibot-Job": "review"}
+    reset = {**OWNER_PROP, "title": "Every aura back to the defaults", "edit": {"op": "aura_reset"}}
+    r = c.post("/api/proposals", json=reset, headers=site)
+    assert r.status_code == 403 and "only the owner approves this change" in r.json()["error"].lower(), r.text
+    pid = c.post("/api/proposals", json=reset, headers=review).json()["id"]
+    shown = next(x for x in c.get("/api/proposals").json()["proposals"] if x["id"] == pid)
+    assert shown["owner_only"] is True
+    r = c.post(f"/api/proposals/{pid}/resolve", json={"state": "approved"}, headers=site)
+    assert r.status_code == 403 and "only the owner approves this change" in r.json()["error"].lower(), r.text
+    assert news.decision_refusal(reg.store, reg, pid, "approved", 42) == news.SETTING_OWNER_ONLY
+    # an approval written before this check (an officer's): the apply job's route refuses it and marks it failed
+    ProposalStore(reg.store, reg.key).move(pid, "approved", "Ana", officer=True, job=False, by_id=42, owner=True)
+    r = c.post(f"/api/proposals/{pid}/apply", headers=job)
+    assert r.status_code == 403 and "approved by Ana" in r.json()["error"], r.text
+    assert ProposalStore(reg.store, reg.key).get(pid).state == "failed" and reg.config.buffs.get("blood_pact"), "nothing was wiped"
+    # the owner's approval goes through
+    owner_cookie(c)
+    pid2 = c.post("/api/proposals", json={**reset, "title": "Auras back to the defaults (owner)"}, headers=review).json()["id"]
+    assert c.post(f"/api/proposals/{pid2}/resolve", json={"state": "approved"}, headers=site).status_code == 200
+    r = c.post(f"/api/proposals/{pid2}/apply", headers=job)
+    assert r.status_code == 200, r.text
+    assert not reg.config.buffs.get("blood_pact")
+
+
+def test_mark_as_interrupted_is_refused_while_its_commit_waits_for_a_restart(reg, rs, monkeypatch, out_dir):
+    """Regression (final review): a committed profile edit whose restart the raid guard held read `applying` with no
+    job running, so Mark as interrupted was offered and accepted — the proposal read failed while the commit went live
+    at the next unrelated restart."""
+    add_news(reg)
+    bot, c, job, site = clients(reg, rs, monkeypatch, officer=True)
+    ps = ProposalStore(reg.store, reg.key)
+    p = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    ps.move(p.id, "approved", "the owner", officer=True, job=False, by_id=OWNER, owner=True)
+    ps.move(p.id, "applying", "the apply job", officer=False, job=True)
+    agents.write_status("apply", out_dir, state="idle", pid=None,
+                        restart_pending={"guild": reg.key, "id": p.id, "commit": "c0ffee1", "since": "x", "auto": True})
+    shown = next(x for x in c.get("/api/proposals").json()["proposals"] if x["id"] == p.id)
+    assert "interrupted" not in shown["consequence"], "not offered"
+    owner_cookie(c)
+    r = c.post(f"/api/proposals/{p.id}/interrupted", json={}, headers=site)
+    assert r.status_code == 409 and "Committed c0ffee1" in r.json()["error"] and "next quiet poll" in r.json()["error"], r.text
+    assert ps.get(p.id).state == "applying"
+    agents.write_status("apply", out_dir, restart_pending={"guild": reg.key, "id": p.id, "commit": "c0ffee1", "auto": False, "why": "held"})
+    assert "restart it when convenient" in c.post(f"/api/proposals/{p.id}/interrupted", json={}, headers=site).json()["error"]
+    agents.write_status("apply", out_dir, restart_pending=None)
+    shown = next(x for x in c.get("/api/proposals").json()["proposals"] if x["id"] == p.id)
+    assert shown["consequence"]["interrupted"], "offered again once nothing waits for it"
+    page = (__import__("pathlib").Path(__file__).resolve().parents[1] / "frontend/src/pages/Agents.tsx").read_text()
+    assert 'p.state === "applying" && p.consequence?.interrupted' in page, "the page offers it only when the server does"
+
+
+PENDING = {"guild": GUILD2, "id": PROFILE["id"], "title": PROFILE["title"], "commit": "c0ffee1", "since": "x", "auto": True}
+
+
+def test_a_failed_deferred_restart_reverts_the_recorded_commit_never_head(job):
+    """Regression (final review): restart_and_check ran `git revert HEAD` — hours after a deferred restart HEAD is
+    someone else's commit — and pushed it, then reported the profile commit reverted while it stayed live."""
+    apply, state, claude = job
+    agents.write_status("apply", restart_pending=PENDING)
+    apply.wait_healthy = lambda old, timeout_s=0: False
+    w = world(lists={(GUILD2, "applying"): [PROFILE]}, states={PROFILE["id"]: "applying"})
+    apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude)
+    reverts = [c for c in state.calls if c[:1] == ("revert",)]
+    assert reverts == [("revert", "--no-edit", "c0ffee1")], reverts
+    assert any(p[2] == "reverted" for p in w["posts"])
+    # the commit is no longer on the branch (or the tree is dirty): no revert, no push, the proposal reads failed
+    state.calls.clear()
+    state.sh_override = lambda a: SimpleNamespace(stdout="", stderr="", returncode=1) if a[:1] == ("merge-base",) else None
+    agents.write_status("apply", state="idle", pid=None, restart_pending=PENDING)
+    w = world(lists={(GUILD2, "applying"): [PROFILE]}, states={PROFILE["id"]: "applying"})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 1
+    assert not [c for c in state.calls if c[:1] in (("revert",), ("push",))]
+    failed = [p for p in w["posts"] if p[2] == "failed"]
+    assert failed and "could not be reverted" in failed[0][3] and not any(p[2] == "reverted" for p in w["posts"])
+
+
+def test_a_pending_restart_waits_for_a_clean_checkout_on_main(job, monkeypatch):
+    """Regression (final review): the deferred restart skipped the preflight and deployed whatever the checkout held
+    (an owner mid-edit in src/, a feature branch)."""
+    apply, state, claude = job
+    agents.write_status("apply", restart_pending=PENDING)
+    monkeypatch.setattr(apply, "dirty_paths", lambda: ["src/oibot_gm/registry.py"])
+    w = world(lists={(GUILD2, "applying"): [PROFILE]}, states={PROFILE["id"]: "applying"})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 1, "the owner must act"
+    assert state.restarts == 0
+    notes = [p[3] for p in w["posts"] if p[2] is None]
+    assert notes and "the restart waits: the working tree has uncommitted changes (src/oibot_gm/registry.py)" in notes[0]
+    assert agents.read_status("apply")["restart_pending"]["auto"] is True, "still owed"
+    assert not any(p[2] == "failed" for p in w["posts"])
+
+
+def test_a_run_that_dies_after_its_commit_leaves_the_restart_owed(job):
+    """Regression (final review): restart_pending was written only on the deferral paths, so a push that hung past the
+    timeout killed the run and the next poll 'recovered' the committed proposal as interrupted ('approve again')."""
+    import subprocess
+
+    apply, state, claude = job
+    # 1. the push hangs: caught, the commit stays, the run goes on to restart
+    state.sh_override = lambda a: (_ for _ in ()).throw(subprocess.TimeoutExpired("git push", 900)) if a[:1] == ("push",) else None
+    w = world(lists={(GUILD2, "approved"): [PROFILE]}, states={PROFILE["id"]: "applying"})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 0
+    assert state.restarts == 1 and any(p[2] == "applied" for p in w["posts"])
+    # 2. a run that died after the commit: the next poll finds the commit in git log and restarts, never 'interrupted'
+    state.sh_override = None
+    agents.write_status("apply", state="idle", pid=None, restart_pending=None)
+    state.git[("log", "-n", "50", "--format=%h%x09%s")] = f"c0ffee1\tprofile: {PROFILE['title']} (news proposal {PROFILE['id']} from Duo Guild ({GUILD2}))"
+    w = world(lists={(GUILD2, "applying"): [PROFILE]}, states={PROFILE["id"]: "applying"})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 0
+    assert state.restarts == 2 and not any(p[2] == "failed" for p in w["posts"])
+    assert (GUILD2, f"/api/proposals/{PROFILE['id']}/resolve", "applied", "checks passed, bot restarted healthy") in w["posts"]
+    # 3. a check that times out: the edit is reverted and the proposal failed, the script doesn't die
+    del state.git[("log", "-n", "50", "--format=%h%x09%s")]
+    reverted = []
+    apply.revert_worktree = lambda: reverted.append(1)
+    state.sh_override = lambda a: (_ for _ in ()).throw(subprocess.TimeoutExpired("pytest", 1800)) if a[:1] == ("run",) else None
+    w = world(lists={(GUILD2, "approved"): [PROFILE]}, states={PROFILE["id"]: "applying"})
+    assert apply.main([], api_factory=lambda guild=None: JobApi(w, guild), run_claude=claude) == 1
+    failed = [p for p in w["posts"] if p[2] == "failed"]
+    assert reverted and failed and "timed out; edit reverted" in failed[0][3]
+
+
+def test_a_saved_hub_is_told_its_save_stays_after_a_restart(tmp_path, monkeypatch):
+    """Regression (final review): a draft hub that saved and stayed open was edited to 'nothing was changed'."""
+    monkeypatch.setattr(pending_views, "PATH", tmp_path / "pending_views.jsonl")
+    monkeypatch.setattr(pending_views, "_live", {})
+    monkeypatch.setattr(pending_views, "ENABLED", True)
+    pending_views.track("wiz:1", channel_id=7, message_id=8)
+    pending_views.track("wiz:2", channel_id=7, message_id=9)
+    pending_views.mark_saved("wiz:2")
+    pending_views._live.clear()
+    edits = {}
+
+    class Msg:
+        def __init__(self, mid):
+            self.mid = mid
+
+        async def edit(self, **kw):
+            edits[self.mid] = kw["content"]
+    bot = SimpleNamespace(get_channel=lambda cid: SimpleNamespace(get_partial_message=lambda mid: Msg(mid)))
+    assert run(pending_views.restore_pending_views(bot)) == 2
+    assert edits == {8: pending_views.RESTARTED, 9: pending_views.RESTARTED_SAVED}
+
+
+def test_wizard_show_with_a_tick_marks_the_screen_saved(reg, monkeypatch):
+    from oibot_gm.wizard import Wizard
+
+    monkeypatch.setattr(pending_views, "_live", {})
+    w = Wizard(reg, 1, title="t")
+    pending_views.track(f"wiz:{id(w)}", app_id=1, token="t")
+    w.mark_saved()
+    assert pending_views._live[f"wiz:{id(w)}"]["saved"] is True
+    w.stop()
+    assert pending_views.live_count() == 0, "stop() untracks: every way a wizard ends"
+
+
+def test_a_screen_never_untracked_stops_holding_a_restart(monkeypatch):
+    monkeypatch.setattr(pending_views, "_live", {})
+    pending_views.track("wiz:old", app_id=1, token="t")
+    assert pending_views.live_count() == 1
+    assert pending_views.live_count(now=time.time() + pending_views.TOKEN_LIFE_S + 1) == 0
+
+
+def test_restoring_cards_reposts_a_deleted_one_and_never_floods_the_ops_channel(reg):
+    """Regression (final review): every ready / resume edited every open proposal card; a deleted one raised NotFound and
+    emitted 'card not updated' to the ops channel each time, and nothing reposted it."""
+    import discord
+
+    from oibot_gm.discord_news import NewsMixin
+
+    add_news(reg)
+    reg.config.ops_channel_id = 555
+    ps = ProposalStore(reg.store, reg.key)
+    p = ps.create(reg, proposal_data())
+    ps.set_card(p, 444, 1)
+    q = ps.create(reg, proposal_data(title="Forbidden card"))
+    ps.set_card(q, 333, 2)
+    resp = SimpleNamespace(status=404, reason="Not Found")
+    sent, emitted = [], []
+
+    class Gone:
+        async def edit(self, **kw):
+            raise discord.NotFound(resp, "Unknown Message")
+
+    class Denied:
+        async def edit(self, **kw):
+            raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Missing Access")
+
+    class Ops:
+        id = 555
+
+        async def send(self, **kw):
+            sent.append(kw)
+            return SimpleNamespace(id=99)
+
+    class B(NewsMixin):
+        registries = SimpleNamespace(store=reg.store, ordered=lambda: [reg], by_key={reg.key: reg})
+
+        def get_channel(self, cid):
+            return {444: SimpleNamespace(get_partial_message=lambda mid: Gone()), 333: SimpleNamespace(get_partial_message=lambda mid: Denied()),
+                    555: Ops()}.get(cid)
+    b = B()
+    b.ops = SimpleNamespace(emit=lambda *a, **k: emitted.append(a) or asyncio.sleep(0))
+    run(b.proposal_cards_restore())
+    assert len(sent) == 1 and ps.get(p.id).message_id == 99 and ps.get(p.id).channel_id == 555, "the deleted card is posted again"
+    assert emitted == [], "a restore logs, it never posts an ops line"
+
+
+def test_the_plain_grid_saves_as_one_structured_change_with_its_rev(reg, rs, monkeypatch, out_dir):
+    """Regression (final review): PlainPermissions built its own consequence sentences in the browser and posted the old
+    admin body without a rev. Now: one {kind: plain} change on /api/ops/change — the server's consequence, a 409 when stale."""
+    from pathlib import Path
+
+    page = (Path(__file__).resolve().parents[1] / "frontend/src/components/PlainPermissions.tsx").read_text()
+    assert "/api/admin/plain-permissions" not in page and "useConfirm" not in page and "would stop working" not in page
+    assert 'kind: "plain"' in page and '"config:plain": data.rev' in page
+    reg.config.ops_channel_id = 777
+    bot, c, job, site = clients(reg, rs, monkeypatch, officer=True)
+    owner_cookie(c)
+    rev = reg.config_rev("plain")  # what GET /api/plain-permissions hands the page
+    change = [{"kind": "plain", "fields": {"channels": {"777": "ignore"}}}]
+    d = c.post("/api/ops/change", json={"changes": change, "apply": True, "revs": {"config:plain": rev}}, headers=site).json()
+    assert d["needs_review"] and any("goes from act to ignore" in x for x in d["described"]["consequences"]), d
+    r = c.post("/api/ops/change", json={"changes": change, "apply": True, "confirmed": True, "revs": {"config:plain": "stale"}}, headers=site)
+    assert r.status_code == 409, r.text  # another owner's edit (MCP, a second tab) is never overwritten silently

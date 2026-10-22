@@ -93,7 +93,7 @@ export function AgentsPage() {
   }
   const botUp = !!data.bot.pid;
   const apply = data.jobs.find((j) => j.job === "apply");
-  const recover = data.owner && apply?.state !== "running";  // Mark as interrupted: the owner, while the apply job isn't running
+  const recover = data.owner && apply?.state !== "running";  // Mark as interrupted: the owner, while the apply job isn't running (and the server offers it: never for a commit whose restart waits)
 
   return (
     <Stack gap="lg">
@@ -256,7 +256,7 @@ function Decide({ p, owner, recover, onDecide }: DecideProps) {
         : <Button size="xs" onClick={() => onDecide(p, "approved")}>Approve</Button>)}
       {["proposed", "approved", "failed"].includes(p.state) && <Button size="xs" variant="default" color={p.state === "approved" ? "red" : undefined} onClick={() => onDecide(p, "dismissed")}>{p.state === "approved" ? "Withdraw approval" : "Dismiss"}</Button>}
       {p.kind === "needs_developer" && p.state === "proposed" && <Text size="xs" c="dimmed">needs a developer: dismiss it once handled</Text>}
-      {recover && p.state === "applying" && <Button size="xs" variant="default" color="red" onClick={() => onDecide(p, "interrupted")}>Mark as interrupted</Button>}
+      {recover && p.state === "applying" && p.consequence?.interrupted && <Button size="xs" variant="default" color="red" onClick={() => onDecide(p, "interrupted")}>Mark as interrupted</Button>}
     </Group>
   );
 }

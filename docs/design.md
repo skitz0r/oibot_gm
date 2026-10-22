@@ -2377,6 +2377,29 @@ server's proposal | failed: <result>". `out/pending_views.jsonl` (new
 previous process's leftovers to "The bot restarted; nothing was changed. Run the command again." (a channel message by
 id, an ephemeral reply through its interaction webhook within 15 minutes); the file is written only by the running bot.
 
+**Final review fixes.** (1) Owner ops through a proposal: `news.owner_setting(p)` = a guild_setting whose op is in
+`configops.OWNER_OPS` (raid_set, raid_reset, aura_set, family_set, aura_reset); `ProposalStore.move` and
+`decision_refusal` require the owner to approve it (`SETTING_OWNER_ONLY`), POST /api/proposals refuses one from anyone
+but the review job or the owner, and POST /api/proposals/{pid}/apply re-checks `Registry.is_owner_id(p.decided_by_id)`
+(refused → failed, 403) — an approval from before the check can't run an owner op. `proposal_json.owner_only =
+news.needs_owner(p)`. (2) `news.restart_waiting(status, key, pid)`: while the apply status file's `restart_pending`
+names the proposal, `consequence["interrupted"]` is not offered (Agents.tsx shows the button only when it is) and POST
+/interrupted answers 409 "Committed <sha>; only the restart waits …". (3) apply.py: `restart_pending{auto: True}` is
+written right after the commit (before the push); the checks, the commit and the push catch `TimeoutExpired`/`OSError`
+(checks → edit reverted, failed; push → a warning, the run goes on); `recover()` adopts an `applying` profile proposal
+whose commit is in the last 50 commits (`committed_for`, by commit_message's subject, unless a Revert follows) as the
+pending restart instead of INTERRUPTED; `pending_restart` runs `preflight()` before restarting (dirty / not main →
+annotated "the restart waits: …", still owed, the job reads failed); the rollback is `revert_commit(<recorded commit>)`
+— only when it is an ancestor of HEAD and the tree is clean, return code checked, otherwise the proposal is failed
+"could not be reverted", nothing pushed. (4) `Wizard.stop()` untracks (every way a wizard ends — RaidOpen.to_run_times
+handed off without finish and leaked a pending view forever); `pending_views.live_count()` ignores entries older than
+`TOKEN_LIFE_S`; `Wizard.mark_saved()` (called by `show()` for a "✅ …" screen) → `pending_views.mark_saved` → after a
+restart the screen reads `RESTARTED_SAVED` "what you saved stays". (5) `proposal_card_update(…, quiet=)`: a deleted card
+(NotFound) is forgotten (`ProposalStore.clear_card`) and posted again; `proposal_cards_restore` passes `quiet=True`
+(process log, never an ops line on every resume). (6) PlainPermissions saves one `{kind: "plain"}` change through
+`useOpsSave` with `revs {"config:plain"}` (the server's `op_consequences`, a 409 when stale) — no browser-side wording.
+(7) A workload's budget-share refusal reads "the host raises it"; the variable name is only in the log.
+
 **The Agents page.** Proposals as stacked cards below `sm` (a table above), the confirm = `useConfirm` with the
 server's `consequence[state]` and the optional note, the `history` timeline (annotations marked), `status_note`,
 **Apply now** (owner, `approved > 0`): POST /api/agents/run {job:"apply"} answers `before` and the page polls GET

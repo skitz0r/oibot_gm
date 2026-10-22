@@ -263,9 +263,11 @@ class NewsMixin:
                     await self.ops.emit(other.config, "info", f"profile change from {reg.config.name}'s news {p.state}: {p.title}" + (f" @ {p.commit}" if p.commit else ""))
         return p, card_ok
 
-    async def proposal_card_update(self, reg, p: Proposal) -> bool:
-        """Post the card in the ops channel the first time; edit it in place afterwards. Never raises (a missing
-        channel or a deleted card is an ops line; the proposal itself is already saved). True when Discord took it."""
+    async def proposal_card_update(self, reg, p: Proposal, *, quiet: bool = False) -> bool:
+        """Post the card in the ops channel the first time; edit it in place afterwards. A card someone deleted is
+        forgotten and posted again in the ops channel. Never raises (a missing channel is an ops line — `quiet`, the
+        restore on ready / resume: the process log only, so the same line never comes back after every resume; the
+        proposal itself is already saved). True when Discord took it."""
         rows = self.news_rows(reg)
         shared = news.shared_profile_others(self.registries, reg) if p.kind == "profile" else []
         try:
@@ -273,8 +275,11 @@ class NewsMixin:
                 ch = self.get_channel(p.channel_id)
                 if ch is not None:
                     msg = ch.get_partial_message(p.message_id)
-                    await msg.edit(embed=proposal_embed(p, rows, shared), view=proposal_view(p, reg.key))
-                    return True
+                    try:
+                        await msg.edit(embed=proposal_embed(p, rows, shared), view=proposal_view(p, reg.key))
+                        return True
+                    except discord.NotFound:  # deleted: forget it and post a fresh card below
+                        await asyncio.to_thread(ProposalStore(self.registries.store, reg.key).clear_card, p)
             ch = self.get_channel(reg.config.ops_channel_id) if reg.config.ops_channel_id else None
             if ch is None:
                 return False
@@ -282,7 +287,10 @@ class NewsMixin:
             await asyncio.to_thread(ProposalStore(self.registries.store, reg.key).set_card, p, ch.id, msg.id)
             return True
         except discord.HTTPException as e:
-            await self.ops.emit(reg.config, "warn", f"news proposal {p.id}: card not updated ({e})")
+            if quiet:
+                log.warning("news proposal %s/%s: card not redrawn (%s)", reg.key, p.id, e)
+            else:
+                await self.ops.emit(reg.config, "warn", f"news proposal {p.id}: card not updated ({e})")
             return False
 
     async def proposal_cards_restore(self) -> int:
@@ -296,6 +304,6 @@ class NewsMixin:
                 log.exception("proposal cards: could not list %s", reg.key)
                 continue
             for p in rows:
-                if p.message_id and await self.proposal_card_update(reg, p):
+                if p.message_id and await self.proposal_card_update(reg, p, quiet=True):
                     n += 1
         return n

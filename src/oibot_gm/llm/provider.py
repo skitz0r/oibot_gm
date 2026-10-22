@@ -153,9 +153,11 @@ class AnthropicProvider:
     def complete(self, workload: str, system: str, user: str, schema: type[T]) -> T:
         if self.cost_usd >= self.budget_usd:  # the words a guild's people read: the host raises it, never "set an env var" (§3.5)
             raise BudgetExceeded("The bot's monthly budget for Claude is used up; the host raises it. Slash commands, the sheets and the site keep working.")
-        if self.spent(workload) >= self.cap_for(workload):
-            raise BudgetExceeded(f"{workload} has used its share of this month's LLM budget (${self.spent(workload):.2f} of ${self.cap_for(workload):.2f}); "
-                                 f"set OIBOT_BUDGET_USD_{workload.upper()} to raise")
+        if self.spent(workload) >= self.cap_for(workload):  # the variable is for the host's log, never a guild's reply
+            log.warning("LLM workload %s used its share ($%.2f of $%.2f); the host raises OIBOT_BUDGET_USD_%s",
+                        workload, self.spent(workload), self.cap_for(workload), workload.upper())
+            raise BudgetExceeded("This kind of request has used its share of the bot's monthly Claude budget; the host raises it. "
+                                 "Slash commands, the sheets and the site keep working.")
         model, effort = self.route(workload)
         resp = self.client.messages.parse(
             model=model,

@@ -41,6 +41,8 @@ JOB_MOVES = {("approved", "applying"), ("approved", "failed"), ("applying", "app
 # a guild setting is one of these config ops (configops.ConfigOp fields); anything else is a profile edit or a developer's job
 PROFILE_OWNER_ONLY = ("only the owner approves a game-data change: it edits the shared game files, and the bot restarts for every "
                       "server it serves")
+SETTING_OWNER_ONLY = ("only the owner approves this change: raids and buffs are the owner's settings on every surface, and a "
+                      "proposal does not widen that")
 JOB_NOT_OFFICER = "the apply job only reports its own steps; an officer decides whether a proposal goes ahead"
 INTERRUPTED = "the apply run was interrupted; approve again to retry"  # the job's recovery note and the owner's Mark as interrupted
 RECOVER_MOVE = ("applying", "failed")  # the owner's "Mark as interrupted" (Agents page) while the apply job is not running
@@ -325,6 +327,8 @@ class ProposalStore:
                     raise PermissionError(why)
                 if not (owner if owner is not None else owner_of(self.store, self.key, by_id)):
                     raise PermissionError(PROFILE_OWNER_ONLY)
+            if state == "approved" and owner_setting(p) and not (owner if owner is not None else owner_of(self.store, self.key, by_id)):
+                raise PermissionError(SETTING_OWNER_ONLY)
             p.state = state
             p.status_note = None
             if state in ("approved", "dismissed"):
@@ -350,12 +354,50 @@ class ProposalStore:
             p.history.append({"state": None, "by": by, "at": now(), "note": text})
             return self.save(p, f"note: {(text or 'cleared')[:70]}"), True
 
+    def clear_card(self, p: Proposal) -> None:
+        """The card was deleted in Discord: forget its ids so the next update posts a fresh one."""
+        with self.store.lock:
+            cur = self.get(p.id)
+            cur.channel_id = cur.message_id = None
+            p.channel_id = p.message_id = None
+            self.save(cur, "card gone")
+
     def set_card(self, p: Proposal, channel_id: int, message_id: int) -> None:
         with self.store.lock:
             cur = self.get(p.id)  # the state may have moved while the card was being sent
             cur.channel_id, cur.message_id = channel_id, message_id
             p.channel_id, p.message_id = channel_id, message_id
             self.save(cur, "card posted")
+
+
+def restart_waiting(status: dict, key: str, pid: str) -> str | None:
+    """The apply job's committed-but-not-restarted profile edit for proposal `pid` of guild `key` (its status file's
+    `restart_pending`), in words — None when nothing waits for it. While it waits the proposal reads `applying` with no
+    job running, but it is NOT interrupted: the commit is on main and goes live at the next restart, so Mark as
+    interrupted is neither offered nor accepted for it."""
+    pending = (status or {}).get("restart_pending") or None
+    if not pending or str(pending.get("id") or "") != pid or (pending.get("guild") or key) != key:
+        return None
+    commit = pending.get("commit") or "?"
+    if pending.get("auto"):
+        return f"Committed {commit}; only the restart waits (raid guard or a busy bot) — it restarts at the next quiet poll."
+    return f"Committed {commit}; the bot was not restarted ({pending.get('why') or 'held'}) — restart it when convenient."
+
+
+def owner_setting(p) -> bool:
+    """A guild-setting proposal whose config op is the owner's (configops.OWNER_OPS: raid_set, aura_reset, …) — an
+    officer may not approve it, exactly as they may not write it on any other surface; the apply job re-checks the
+    approver before it applies (an officer could otherwise write one and approve it themselves)."""
+    if getattr(p, "kind", None) != "guild_setting":
+        return False
+    from .configops import OWNER_OPS
+
+    return str((getattr(p, "edit", None) or {}).get("op") or "") in OWNER_OPS
+
+
+def needs_owner(p) -> bool:
+    """Approving `p` is the owner's: a game-data (profile) edit or an owner-only guild setting."""
+    return getattr(p, "kind", None) == "profile" or owner_setting(p)
 
 
 def owner_of(store: GitStore, key: str, by_id: int | None) -> bool:
@@ -464,6 +506,8 @@ def decision_refusal(store: GitStore, reg, pid: str, state: str, by_id: int | No
             return why
         if not (owner if owner is not None else (by_id is not None and reg.is_owner_id(by_id))):
             return PROFILE_OWNER_ONLY
+    if state == "approved" and owner_setting(p) and not (owner if owner is not None else (by_id is not None and reg.is_owner_id(by_id))):
+        return SETTING_OWNER_ONLY
     return None
 
 

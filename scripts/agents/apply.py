@@ -34,6 +34,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
@@ -209,9 +210,25 @@ def annotate(api, prop: dict, note: str) -> None:
         pass
 
 
-def recover(apis: dict, skip: tuple[str, str] | None) -> list[str]:
+def committed_for(key: str, pid: str, named: bool) -> str | None:
+    """The short hash of this job's commit for proposal `pid` among the last commits on HEAD (commit_message's subject
+    names it; a revert's subject starts 'Revert'), or None — also None when that commit was reverted since."""
+    log_ = sh("git", "log", "-n", "50", "--format=%h%x09%s").stdout
+    mark = f"(news proposal {pid}"
+    for row in log_.splitlines():
+        h, _, subject = row.partition("\t")
+        if subject.startswith("Revert ") and mark in subject:
+            return None  # reverted after it landed: nothing is owed
+        if subject.startswith("profile: ") and mark in subject and (not named or not key or f"({key}))" in subject):
+            return h.strip() or None
+    return None
+
+
+def recover(apis: dict, skip: tuple[str, str] | None, named: bool = False) -> list[str]:
     """(5) Every proposal still `applying` while this job isn't running was left by a run that died → failed with
-    INTERRUPTED (the officer approves again to retry). `skip`: (guild key, id) of the one whose restart is pending."""
+    INTERRUPTED (the officer approves again to retry) — unless its commit is already on main (the run died after the
+    commit: a push that hung, say): then the restart is owed, recorded as `restart_pending` like a deferred one.
+    `skip`: (guild key, id) of the one whose restart is pending."""
     from oibot_gm.mcp_server import ToolError
 
     out = []
@@ -223,12 +240,36 @@ def recover(apis: dict, skip: tuple[str, str] | None) -> list[str]:
         for p in rows:
             if skip and (key, p["id"]) == skip:
                 continue
+            commit = committed_for(key, p["id"], named) if p.get("kind", "profile") == "profile" and skip is None else None
+            if commit:
+                skip = (key, p["id"])
+                agents.write_status(JOB, restart_pending={"guild": key, "id": p["id"], "title": (p.get("title") or p["id"])[:120], "commit": commit,
+                                                          "since": agents.iso(), "auto": True})
+                out.append(f"{p['id']}: committed {commit} by a run that stopped — the restart is owed")
+                continue
             try:
                 api.post(f"/api/proposals/{p['id']}/resolve", {"state": "failed", "note": INTERRUPTED})
                 out.append(f"{p['id']}: {INTERRUPTED}")
             except ToolError as e:
                 out.append(f"{p['id']}: still applying, could not mark it failed ({e})")
     return out
+
+
+def revert_commit(commit: str) -> str | None:
+    """`git revert` THE recorded commit (not HEAD: hours after a deferred restart HEAD is whatever landed since), only
+    when it is on the current branch and the tree is clean. None = reverted; else why not."""
+    if not commit:
+        return "no commit recorded"
+    if sh("git", "merge-base", "--is-ancestor", commit, "HEAD").returncode != 0:
+        return f"{commit} is not on the checked-out branch"
+    dirty = dirty_paths()
+    if dirty:
+        return f"the working tree has uncommitted changes ({', '.join(dirty[:5])})"
+    r = sh("git", "revert", "--no-edit", commit)
+    if r.returncode != 0:
+        sh("git", "revert", "--abort")
+        return (r.stderr or r.stdout).strip()[-200:] or f"git revert exited {r.returncode}"
+    return None
 
 
 def restart_and_check(run: Run, commit: str) -> tuple[str, bool]:
@@ -241,7 +282,12 @@ def restart_and_check(run: Run, commit: str) -> tuple[str, bool]:
         run.resolve("applied", commit, "checks passed, bot restarted healthy")
         return f"{pid}: applied @ {commit}, bot healthy", True
     run.line(f"The bot did not come back within {HEALTH_TIMEOUT_S} s — reverting {commit}", "error")
-    sh("git", "revert", "--no-edit", "HEAD")
+    why = revert_commit(commit)
+    if why:  # HEAD may be someone else's commit by now (a deferred restart): never revert blind, never push a guess
+        run.line(f"could not revert {commit}: {why}", "error")
+        run.resolve("failed", commit, f"the bot did not come back healthy after the change and {commit} could not be reverted ({why}) — "
+                                      "revert it by hand and restart (out/launchd.log)")
+        return f"{pid}: could not revert {commit} ({why}); the bot is not healthy", False
     sh("git", "push", "--quiet")
     old = restart_bot()
     back = wait_healthy(old)
@@ -264,6 +310,10 @@ def pending_restart(make, apis: dict, guilds: list[dict], pending: dict, named: 
     if why:
         annotate(api, prop, f"committed {pending.get('commit')}; the restart waits: {why}")
         return (f"{g['key']}/" if named and g["key"] else "") + f"{prop['id']}: committed {pending.get('commit')}, restart waits — {why}", True
+    tree = preflight()  # the bot runs from this checkout: a restart deploys whatever is in it
+    if tree:
+        annotate(api, prop, f"committed {pending.get('commit')}; the restart waits: {tree}")
+        return (f"{g['key']}/" if named and g["key"] else "") + f"{prop['id']}: committed {pending.get('commit')}, restart waits — {tree}", False
     run = Run(g, prop, api, named)
     agents.write_status(JOB, state="running", run_id=run.rid, pid=os.getpid(), step=f"Restarting for {prop['id']}", guild=g["key"] or None)
     run.line(f"The raid guard is clear: restarting for {prop['id']} (committed {pending.get('commit')})")
@@ -325,7 +375,13 @@ def apply_profile(g: dict, prop: dict, api, make, a, run_claude, named: bool) ->
     for check in agents.CHECKS:
         agents.write_status(JOB, step="Running " + " ".join(check[2:]))
         run.line("Running " + shlex.join(check))
-        r = sh(*check, timeout=1800)
+        try:
+            r = sh(*check, timeout=1800)
+        except (subprocess.TimeoutExpired, OSError) as e:  # never die with unchecked edits in the tree the bot runs from
+            revert_worktree()
+            what = "timed out" if isinstance(e, subprocess.TimeoutExpired) else f"could not run ({e})"
+            run.resolve("failed", note=f"{' '.join(check[2:])} {what}; edit reverted")
+            return run.done(f"{pid}: {' '.join(check[2:])} {what} — edit reverted", False), False
         if r.returncode != 0:
             revert_worktree()
             run.line((r.stdout + r.stderr).strip()[-600:], "error")
@@ -344,14 +400,25 @@ def apply_profile(g: dict, prop: dict, api, make, a, run_claude, named: bool) ->
         url = pr.stdout.strip().splitlines()[-1] if pr.returncode == 0 and pr.stdout.strip() else None
         run.resolve("applied", commit, f"pull request {url}" if url else "branch committed; push or PR failed")
         return run.done(f"{pid}: PR {url or '(not opened)'} @ {commit}", bool(url)), bool(url)
-    sh("git", "add", "--", "profiles")
-    sh("git", "commit", "-q", "-m", msg)
+    try:
+        sh("git", "add", "--", "profiles")
+        made = sh("git", "commit", "-q", "-m", msg)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        made = SimpleNamespace(returncode=1, stderr=str(e), stdout="")
+    if made.returncode != 0:
+        revert_worktree()
+        run.resolve("failed", note="the commit failed; edit reverted")
+        return run.done(f"{pid}: the commit failed ({(made.stderr or '').strip()[-200:]}) — edit reverted", False), False
     commit = sh("git", "rev-parse", "--short", "HEAD").stdout.strip()
     run.line(f"Committed {commit}")
-    push = sh("git", "push", "--quiet")
+    pending = {"guild": g["key"], "id": pid, "title": prop["title"][:120], "commit": commit, "since": agents.iso()}
+    agents.write_status(JOB, restart_pending={**pending, "auto": True})  # from here on a restart is owed, whatever happens to this run
+    try:
+        push = sh("git", "push", "--quiet")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        push = SimpleNamespace(returncode=1, stderr=str(e), stdout="")
     if push.returncode != 0:
         run.line("push failed (the commit is local; the bot runs from this checkout): " + push.stderr.strip()[-200:], "warn")
-    pending = {"guild": g["key"], "id": pid, "title": prop["title"][:120], "commit": commit, "since": agents.iso()}
     state = run.state_now()  # (2) re-read right before restarting: someone may have moved it while Claude and the checks ran
     if state not in (None, "applying"):
         agents.write_status(JOB, restart_pending={**pending, "auto": False, "why": f"the proposal became {state} while it was applied"})
@@ -399,7 +466,8 @@ def main(argv: list[str] | None = None, api_factory=None, run_claude=None) -> in
         return 1
     named = len(apis) > 1
     pending = st.get("restart_pending") or None
-    lines = recover(apis, (pending["guild"], pending["id"]) if pending else None)
+    lines = recover(apis, (pending["guild"], pending["id"]) if pending else None, named)
+    pending = agents.read_status(JOB).get("restart_pending") or None  # recovery may have found a commit that is owed its restart
     for err in errors:  # another guild's list failed: the others go ahead; the failure goes to the job's log, not a guild's transcript
         print(f"apply: could not list approvals for {err}", file=sys.stderr)
     all_ok = True

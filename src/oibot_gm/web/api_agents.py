@@ -200,8 +200,8 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
                 out[state] = fn(reg, p, state)
             else:
                 out[state] = news.consequence(p, reg, state, guilds=bot.registries, busy={r.key: busy_json(bot, r) for r in bot.registries.ordered()})
-        if p.state == news.RECOVER_MOVE[0]:  # the owner's Mark as interrupted (offered while the apply job isn't running)
-            out["interrupted"] = news.consequence(p, reg, "interrupted")
+        if p.state == news.RECOVER_MOVE[0] and not news.restart_waiting(agents.read_status("apply", agents.OUT), reg.key, p.id):
+            out["interrupted"] = news.consequence(p, reg, "interrupted")  # the owner's Mark as interrupted (offered while the apply job isn't running)
         return out
 
     def proposal_json(reg, p) -> dict:
@@ -210,7 +210,7 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         d["decided_label"] = reg.local12(p.decided_at) if p.decided_at else ""
         d["history"] = [{**h, "at_label": reg.local12(h["at"]) if h.get("at") else "", "annotation": h.get("state") is None} for h in p.history]
         d["consequence"] = consequence_of(reg, p)
-        d["owner_only"] = p.kind == "profile"
+        d["owner_only"] = news.needs_owner(p)
         d["shared_with"] = news.shared_profile_others(bot.registries, reg) if p.kind == "profile" else []
         return d
 
@@ -270,6 +270,9 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
             other = bot.registries.by_key.get(dup.split("/", 1)[0])
             return {"message": f"already proposed by {other.config.name if other else 'another guild'} on this game version — nothing to do",
                     "duplicate": True}
+        if job != "review" and not v.owner and str(d.get("kind") or "") == "guild_setting" \
+                and news.owner_setting(news.Proposal.model_construct(kind="guild_setting", edit=d.get("edit") or {})):
+            raise HTTPException(403, news.SETTING_OWNER_ONLY[:1].upper() + news.SETTING_OWNER_ONLY[1:] + ".")  # no owner write by proposal
         try:
             p = await asyncio.to_thread(ProposalStore(store(), v.reg.key).create, v.reg, d, job or v.name)
         except (ProposalError, ValueError) as e:
@@ -313,8 +316,12 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
         v, _ = await body(request, officer=True)
         if is_bearer(v) or not v.owner:
             raise HTTPException(403, "Only the owner marks an apply run as interrupted, on the Agents page.")
-        if agents.read_status("apply", agents.OUT).get("state") == "running":
+        st = agents.read_status("apply", agents.OUT)
+        if st.get("state") == "running":
             raise HTTPException(409, "The apply job is running — it reports its own proposal; wait for it to finish.")
+        waiting = news.restart_waiting(st, v.reg.key, pid)
+        if waiting:  # committed: only the restart is owed — failing it would leave the commit to go live unannounced
+            raise HTTPException(409, waiting)
         try:
             p, card_ok = await decide(v.reg, pid, news.RECOVER_MOVE[1], by=v.name, by_id=v.uid, officer=True, owner=True, recover=True,
                                       note=news.INTERRUPTED, via=v.via)
@@ -338,6 +345,12 @@ def install_agents_api(app: FastAPI, bot, *, who, body, publish) -> None:
             raise HTTPException(404, str(e))
         if p.kind != "guild_setting":
             raise HTTPException(400, f"{p.id} is a {p.kind} proposal: only guild settings are applied here")
+        if news.owner_setting(p) and not (p.decided_by_id is not None and v.reg.is_owner_id(p.decided_by_id)):
+            # re-authorized by privilege at the apply, whoever approved it and however (an approval from before this check)
+            why = f"not applied: {news.SETTING_OWNER_ONLY} (approved by {p.decided_by or '?'})"
+            if p.state == "approved":
+                p, _ = await move(request, v, pid, "failed", note=why)
+            return JSONResponse({"error": why, "proposal": proposal_json(v.reg, p)}, status_code=403)
         p, _ = await move(request, v, pid, "applying")
         try:
             op = configops.ConfigOp.model_validate(p.edit)
