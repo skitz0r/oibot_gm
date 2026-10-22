@@ -3442,11 +3442,30 @@ def aura_reset_one_sentence(reg: Registry, target: str) -> str:
     return f"The {name} family goes back to the game's name, status, note and beneficiaries; the buffs in it keep their own changes."
 
 
-def op_consequences(reg: Registry, op: ConfigOp) -> list[str]:
+def officer_roles_after(reg: Registry, ops) -> list[int]:
+    """The officer role list after EVERY role_add / role_remove in a batch (in order) — a whole-list edit becomes one
+    role op per role, so a consequence about the list ('no officer roles now') is computed over the batch, not per op."""
+    left = list(reg.config.officer_role_ids)
+    for o in ops:
+        for p in (o.parts if isinstance(o, MergedOp) else [o]):
+            if p.op not in ("role_add", "role_remove"):
+                continue
+            rid = reg.role_id_for(p.value)
+            if rid is None:
+                continue
+            if p.op == "role_remove":
+                left = [r for r in left if r != rid]
+            elif rid not in left:
+                left.append(rid)
+    return left
+
+
+def op_consequences(reg: Registry, op: ConfigOp, roles_after: list[int] | None = None) -> list[str]:
     """What a write does beyond the setting itself, in sentences from code (seats, regulars, members, where things post) —
-    the same words on every surface. Empty for a routine reversible edit."""
+    the same words on every surface. Empty for a routine reversible edit. `roles_after`: the officer role list once the
+    whole batch has landed (officer_roles_after), so removing every role in one batch says so; None = this op alone."""
     if isinstance(op, MergedOp):
-        return list(dict.fromkeys(s for p in op.parts for s in op_consequences(reg, p)))
+        return list(dict.fromkeys(s for p in op.parts for s in op_consequences(reg, p, roles_after)))
     out: list[str] = []
     try:
         if op.op == "schedule_remove" and op.target in reg.profile.raids:
@@ -3465,8 +3484,8 @@ def op_consequences(reg: Registry, op: ConfigOp) -> list[str]:
             out.append(aura_reset_one_sentence(reg, (op.target or "").strip()))
         elif op.op == "role_remove":
             rid = reg.role_id_for(op.value)
-            left = [r for r in reg.config.officer_role_ids if r != rid]
-            if not left:
+            left = roles_after if roles_after is not None else [r for r in reg.config.officer_role_ids if r != rid]
+            if reg.config.officer_role_ids and not left:
                 out.append("No officer roles now: only the server owner and Manage Server count.")
         elif op.op == "recruit" and is_warn(reg, op):
             out.append("/apply and the Apply button say applications are closed; open applications stay open.")
@@ -3757,7 +3776,9 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
     d = Described(refused=list(refused or []))
     with reg.config_lock:  # a consistent copy: the config verbs write under this lock (previews may run in a worker thread)
         sh = reg.shadow()
-    for op in coalesce(list(ops)):
+    merged = coalesce(list(ops))
+    roles_after = officer_roles_after(reg, merged)
+    for op in merged:
         parts_ops = op.parts if isinstance(op, MergedOp) else [op]
         label, parts, notes = None, [], []
         for p in parts_ops:
@@ -3776,7 +3797,7 @@ def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None =
                 warning = ""
             if warning and warning not in notes:
                 notes.append(_cap(warning) + ".")
-        cons = op_consequences(reg, op)
+        cons = op_consequences(reg, op, roles_after)
         line = DescribedLine(op=op.op, target=op.target, label=label or op.op, parts=parts, notes=notes, text=text, error=_op_error(sh, op),
                              warn=is_warn(reg, op), consequences=cons, ops=[p.model_dump(exclude_none=True) for p in parts_ops])
         d.lines.append(line)
