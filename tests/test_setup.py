@@ -560,8 +560,12 @@ def test_second_error_inside_the_window_edits_the_first_dm(reg):
     run(o.emit(reg.config, "error", "/raid lock by Bo: KeyError: 789"))
     assert len(c.sent) == 1 and c.sent[0][0] == OWNER
     first = c.sent[0][1]
-    assert first.edits and "and 2 more like this since" in first.edits[-1]["content"] and "details in the bot's log" in first.edits[-1]["content"]
+    assert len(first.edits) == 1 and "and 1 more like this since" in first.edits[-1]["content"] and "details in the bot's log" in first.edits[-1]["content"]
     assert o.suppressed_for(GUILD) == 2
+    for k in o._alerts:  # a minute later the next repeat edits again, with the count caught up
+        o._alerts[k]["edited"] -= ops_mod.EDIT_EVERY_S
+    run(o.emit(reg.config, "error", "/raid lock by Di: KeyError: 9"))
+    assert len(first.edits) == 2 and "and 3 more like this since" in first.edits[-1]["content"]
     run(o.emit(reg.config, "error", "a different failure"))
     assert len(c.sent) == 2, "another signature: its own DM"
     run(o.emit(reg.config, "warn", "just a warning"))
@@ -570,6 +574,42 @@ def test_second_error_inside_the_window_edits_the_first_dm(reg):
         o._alerts[k]["at"] -= ops_mod.ERROR_WINDOW_S + 1
     run(o.emit(reg.config, "error", "/raid lock by Cy: KeyError: 1"))
     assert len(c.sent) == 3
+
+
+def test_the_alert_window_opens_only_on_a_delivered_dm_and_a_burst_edits_once(reg):
+    """G3 review: the throttle opened its 30-minute window even when the DM failed (closed DMs: no alert for half an
+    hour, though nobody was told) and edited the DM on every repeat (a burst of 50 errors = 50 edits). The window opens
+    only on a delivered DM; a burst edits at most once per EDIT_EVERY_S; the ops line still goes every time."""
+    c = AlertClient()
+    o = ops_mod.Ops(c)
+    reg.config.ops_channel_id = 50
+    c.chan = Chan(50, "ops", FakeGuild())
+    sent_ops = []
+    c.chan.send = lambda text, **kw: _async(sent_ops.append(text))
+    closed = {"on": True}
+    real_user = c.get_user
+
+    def get_user(uid):
+        if closed["on"]:
+            class Closed:
+                async def send(self, text):
+                    raise RuntimeError("Cannot send messages to this user")
+            return Closed()
+        return real_user(uid)
+    c.get_user = get_user
+    run(o.emit(reg.config, "error", "boom: KeyError 1"))
+    assert c.sent == [] and not o._alerts, "nothing delivered: no window"
+    closed["on"] = False
+    run(o.emit(reg.config, "error", "boom: KeyError 2"))
+    assert len(c.sent) == 1, "the next one is DMed: the earlier failure didn't hold it back"
+    for i in range(20):
+        run(o.emit(reg.config, "error", f"boom: KeyError {i + 3}"))
+    assert len(c.sent) == 1 and len(c.sent[0][1].edits) == 1, "one edit for the burst"
+    assert len(sent_ops) == 22, "the ops line goes every time"
+
+
+async def _async(x=None):
+    return x
 
 
 def test_error_dm_ids_route_the_alert(reg):

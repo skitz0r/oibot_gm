@@ -51,6 +51,7 @@ async def audited(ops, reg, by: str, line: str, via: str = "discord", level: str
 
 
 ERROR_WINDOW_S = 30 * 60  # one error alert per (guild, error signature) per window (D46)
+EDIT_EVERY_S = 60  # a repeat burst edits the alert DM at most this often (its count catches up at the next repeat after it)
 OPS_FAIL_ALERT = 3  # consecutive failed posts to the ops channel before the error alert says so (design §3.4 X3)
 OPS_CHANNEL_SIG = "ops-channel"  # the throttle signature of "I can't post in the ops channel" (and the hourly check's report of it)
 
@@ -168,13 +169,16 @@ class Ops:
         if held is not None and now - held["at"] < ERROR_WINDOW_S:
             held["more"] += 1
             return
-        self._alerts[k] = {"at": now, "since": "", "more": 0, "msgs": []}
+        delivered = False
         for uid in ids:
             try:
                 user = self.client.get_user(uid) or await self.client.fetch_user(uid)
                 await user.send(text[:1990])
+                delivered = True
             except Exception as e:  # noqa: BLE001 — closed DMs: the log line stays
                 log.warning("host alert DM to %s failed: %s", uid, e)
+        if delivered:  # the window opens only on a delivered DM (as _alert)
+            self._alerts[k] = {"at": now, "since": "", "more": 0, "msgs": []}
 
     def _guild_prefix(self, cfg, key: str) -> str:
         many = bool(getattr(getattr(self.client, "registries", None), "many", False))
@@ -198,8 +202,10 @@ class Ops:
     async def _alert(self, cfg, key: str, stamp: str, line: str, text: str, exc: BaseException | None, sig: str | None = None,
                      only: set[int] | None = None) -> None:
         """The throttled error alert (D46): the first of its signature in ERROR_WINDOW_S is DMed with the traceback tail;
-        the next ones edit that DM's last line ('and 4 more like this since 7:12 PM — details in #ops'). `sig`: a fixed
-        signature instead of the one computed from the text (the ops-channel alert)."""
+        the next ones edit that DM's last line ('and 4 more like this since 7:12 PM — details in #ops') at most once per
+        EDIT_EVERY_S (a burst of repeats is one edit, not one each). The window opens only on a DELIVERED DM: when every
+        DM failed (closed DMs, no target reachable) the next error tries again. The ops line goes every time (emit).
+        `sig`: a fixed signature instead of the one computed from the text (the ops-channel alert)."""
         sig = (key, sig or error_signature(text, exc))
         now = time.monotonic()
         for k in [k for k, a in self._alerts.items() if now - a["at"] >= ERROR_WINDOW_S]:
@@ -208,6 +214,9 @@ class Ops:
         if held is not None:
             held["more"] += 1
             self._suppressed[key] = self._suppressed.get(key, 0) + 1
+            if now - held.get("edited", float("-inf")) < EDIT_EVERY_S:
+                return  # edited a moment ago: the count catches up at the next repeat after EDIT_EVERY_S
+            held["edited"] = now
             where = "details in the ops channel" if cfg.ops_channel_id else "details in the bot's log"
             tail = f"\n-# and {held['more']} more like this since {held['since']} — {where}"
             for msg, body in held["msgs"]:
@@ -221,4 +230,5 @@ class Ops:
             return
         detail = ("\n```" + "".join(traceback.format_exception(exc))[-900:] + "```") if exc else ""
         msgs = await self._dm_all(cfg, key, line + detail, only)
-        self._alerts[sig] = {"at": now, "since": stamp, "more": 0, "msgs": msgs}
+        if msgs:  # delivered: the window opens; nothing delivered → no window, the next one tries again
+            self._alerts[sig] = {"at": now, "since": stamp, "more": 0, "msgs": msgs}

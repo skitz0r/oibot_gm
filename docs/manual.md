@@ -50,8 +50,9 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   text by @mentioning the bot. The character bank is the **Members** page; building groups is the **Rosters** board.
 - **Ops channel (officers)** — every action the bot takes, one line each. The same lines go to a rotating log file on
   the host (`out/oibot.log`). **Errors** also DM the owner — once per kind of error per 30 minutes: the same error again
-  inside that half hour edits the first DM (*"and 4 more like this since 7:12 PM — details in #ops"*) instead of sending
-  another, and the Ops page shows how many were folded in. `/gm config errors-to member: [remove:] [reset:]` (or
+  inside that half hour edits the first DM (*"and 4 more like this since 7:12 PM — details in #ops"*, at most once a
+  minute) instead of sending another, and the Ops page shows how many were folded in. If the DM couldn't be delivered
+  (closed DMs), the next error tries again rather than waiting out the half hour. `/gm config errors-to member: [remove:] [reset:]` (or
   **Change who** on the Config page's Setup card: the owner, these people, or nobody) picks who
   gets them (the owner by default; several people, or nobody — then errors stay in the ops channel); errors only, never
   info or warnings. If the bot can't post in the ops channel three times in a row, that is itself an error alert — once

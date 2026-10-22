@@ -2681,8 +2681,10 @@ superusers' security DM stays). The web's server switch stays a full reload: `ho
 
 **Error alerts (OPS-01, D46).** `Ops.emit` → `_alert`: per (guild key, `error_signature` — the exception type and the line
 with numbers, quotes and "by <name>:" blanked) ONE DM per `ERROR_WINDOW_S` (30 min) to `error_targets(cfg)` =
-`GuildConfig.error_dm_ids` (None = the owner, the default; [] = nobody); the next ones edit that DM in place ("and 4 more
-like this since 7:12 PM — details in the ops channel") and count in `suppressed_for(key)` (the Ops page badge, `GET
+`GuildConfig.error_dm_ids` (None = the owner, the default; [] = nobody) — the window opens only on a DELIVERED DM (every
+DM failed → the next error tries again; `host_alert` the same); the next ones edit that DM in place ("and 4 more like
+this since 7:12 PM — details in the ops channel") at most once per `EDIT_EVERY_S` (60 s: a burst is one edit, the count
+catches up at the next repeat after it), the ops line going every time, and count in `suppressed_for(key)` (the Ops page badge, `GET
 /api/ops.suppressed`). `_post`: three failed posts in a row to the ops channel alert once per streak (`ops_channel_failing`).
 `Registry.set_error_dms(ids, by)` / `error_dm_targets()` / `error_dm_words()`; configops `set error_dms` (`owner` | `none` |
 mentions), structured settings field `error_dm_ids` (a list or null — G1b's Settings edit mode renders `GET
