@@ -1,4 +1,4 @@
-"""Dual interfaces phase 3 — setup (design §5.44; out/dual_interface_design.md §3.4 X3, §3.5 O-01/O-12/O-13/OPS-01/S-01/
+"""Dual interfaces phase 3 — setup (design §5.46; out/dual_interface_design.md §3.4 X3, §3.5 O-01/O-12/O-13/OPS-01/S-01/
 S-05/S-06/M-01, §3.3 cluster D; owner decisions D29, D31, D32, D39, D44, D46).
 
 perms.missing_for (the matrix); SetupMixin.set_channel (permission refusal, "Discord is unreachable", post first then

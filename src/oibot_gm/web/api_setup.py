@@ -1,4 +1,4 @@
-"""Setup on the web (dual interfaces phase 3 — design §5.44; out/dual_interface_design.md §3.4 X3, §3.5 O-01/O-12/O-13/
+"""Setup on the web (dual interfaces phase 3 — design §5.46; out/dual_interface_design.md §3.4 X3, §3.5 O-01/O-12/O-13/
 OPS-01/S-01/S-05/S-06, §3.3 D).
 
 - `GET /api/admin/channels`: every bot channel — what it is for, the channel set, and `missing` (deleted, or the

@@ -1,4 +1,4 @@
-// Shapes of the setup routes (mirror src/oibot_gm/web/api_setup.py and the applications routes in web/api.py; design §5.44).
+// Shapes of the setup routes (mirror src/oibot_gm/web/api_setup.py and the applications routes in web/api.py; design §5.46).
 // Every sentence a person reads arrives as words from the server (consequences, the checklist's text, the prior-decision line).
 
 /** One bot channel on the Config page: `missing` = the permissions the bot lacks there (perms.missing_for, Discord's own

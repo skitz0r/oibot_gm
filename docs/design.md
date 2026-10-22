@@ -2302,7 +2302,7 @@ Plain-permissions edit modes on `useOpsSave` (their pages still use the admin tr
 the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
 AuraWizard hub in tests/test_flows_config.py.
 
-### 5.44 Dual interfaces, phase 3 — setup: channels, officer roles, servers, error alerts, applications (built 2026-10-20)
+### 5.46 Dual interfaces, phase 3 — setup: channels, officer roles, servers, error alerts, applications (built 2026-10-20)
 
 Out of `out/dual_interface_design.md` §3.4 X3, §3.5 O-01/O-04/O-06/O-07/O-10/O-12/O-13, OPS-01, S-01/S-04/S-05/S-06,
 M-01/M-02, the applications part of §3.3 cluster D, and §6 Phase 3 rows 5, 11 and 13, with the owner's decisions D29 (no

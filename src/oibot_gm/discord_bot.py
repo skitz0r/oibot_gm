@@ -415,7 +415,7 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
                 log.warning("claim DM to owner %s failed: %s", oid, e)
         return reg
 
-    # ---- the bot added to / removed from servers (design §3.5 O-01 / S-05 / S-06; §5.44)
+    # ---- the bot added to / removed from servers (design §3.5 O-01 / S-05 / S-06; §5.46)
     def host_ids(self) -> list[int]:
         """Who the host-facing DMs go to: the superusers (OIBOT_SUPERUSERS — they run the bot). With none configured, the
         owner of the ONE guild the process serves (effectively the host); with several and no superusers, nobody — a

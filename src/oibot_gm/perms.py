@@ -1,4 +1,4 @@
-"""The Discord permissions the bot needs, in ONE place (dual interfaces §3.4 X3, §3.5 O-01; design §5.44).
+"""The Discord permissions the bot needs, in ONE place (dual interfaces §3.4 X3, §3.5 O-01; design §5.46).
 
 - `missing_for(channel, kind)`: what the bot lacks in one channel for one of its jobs — View Channel, Send Messages and
   Embed Links everywhere; + Manage Messages where it pins its card (registration, absences); + Create Public Threads

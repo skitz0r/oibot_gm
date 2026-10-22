@@ -1798,7 +1798,7 @@ async def open_owner_transfer(interaction: discord.Interaction, reg: Registry, *
     await OwnerTransferWizard(reg, interaction.user.id).start(interaction, user)
 
 
-# ---------------------------------------------------------------- channels and officer roles (design §3.4 X3, §3.5 O-12 / O-13; §5.44)
+# ---------------------------------------------------------------- channels and officer roles (design §3.4 X3, §3.5 O-12 / O-13; §5.46)
 
 def _text_channel_select(placeholder: str, on_pick) -> discord.ui.ChannelSelect:
     """Discord's own channel picker, text channels only: searchable, no 25-option ceiling, nothing to spell."""

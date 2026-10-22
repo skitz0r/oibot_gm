@@ -2144,7 +2144,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     install_ops_api(app, bot, who=who, body=body, live_officer=live_officer, plain_json=plain_json, recruitment_json=recruitment_json,
                     guild_role_refs=guild_role_refs, need_owner=need_owner, parse=parse, InstanceBody=InstanceBody, IdBody=IdBody)
 
-    from .api_setup import install_setup_api  # channels, the Setup / Host cards, Remove record (design §5.44)
+    from .api_setup import install_setup_api  # channels, the Setup / Host cards, Remove record (design §5.46)
 
     install_setup_api(app, bot, who=who, body=body, need_owner=need_owner, as_int=as_int)
 

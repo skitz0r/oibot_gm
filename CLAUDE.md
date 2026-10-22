@@ -41,7 +41,7 @@ src/oibot_gm/
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
                        THE pin write (every surface; re-renders the sheet's pin footer). Never a DM from here
-  perms.py             THE Discord permission test (design §5.44): required(kind) (+ Manage Messages for the pinned cards, + threads for roster,
+  perms.py             THE Discord permission test (design §5.46): required(kind) (+ Manage Messages for the pinned cards, + threads for roster,
                        + history for news), missing_for(channel, kind) / missing_for(guild), cant_post() = the one sentence; permissions_value() /
                        invite_link() (scripts/move_guild.py imports them; Manage Webhooks in — D39; Manage Roles / Channels OPTIONAL); CLIENT = the
                        running client for configops' consequence hook. set_channel's refusal, the hourly check and the Setup card all read it
@@ -101,7 +101,7 @@ src/oibot_gm/
                        remove_schedule takes its regulars off (D30, no DM); owner_refusal / owner_consequence / set_owner (D50).
                        Auras (§5.43): set_buff_overrides / set_family_overrides = one validated write per buff / family, restored on refusal (the
                        single-field verbs call them); family_slug(name) (ids never typed; taken → -2); aura_override_counts / aura_reset_sentence.
-                       Setup (§5.44): GuildConfig.error_dm_ids (None = the owner, [] = nobody; set_error_dms / error_dm_targets / error_dm_words) and
+                       Setup (§5.46): GuildConfig.error_dm_ids (None = the owner, [] = nobody; set_error_dms / error_dm_targets / error_dm_words) and
                        detached_at (set_detached; Guilds parks it); Member.left_at (member_left) + remove_record (officers only, someone who left, no
                        live seat — D29: no self-service delete); applications: decide adds the character FIRST, caps the note (DECISION_NOTE_MAX),
                        decided_refusal ("Already declined by X"), Applicant.history → prior_decision_line, role_note (D31), application_state (own first)
@@ -122,7 +122,7 @@ src/oibot_gm/
                        /roster remove-record (decide screen → remove_record). Applications: settle_application(…, by_id, via) = THE verdict (one audit line,
                        assign_member_role D31, the DM they wait on), application_decide (card + /roster applicant), application_consequence, client_decide
                        `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only; detach(key) /
-                       attach_server(gid) / detached_list() — a parked guild is out of every index, §5.44), by_key, ordered(),
+                       attach_server(gid) / detached_list() — a parked guild is out of every index, §5.46), by_key, ordered(),
                        get(key|name), for_guild (strict), only(), many, cfg_for, load_errors; `/gm config owner` in an UNCONFIGURED server is the bootstrap
                        (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; any number of servers — Guilds.ALLOW_SECOND is on since S3)
   guild_routing.py     THE resolver: need(interaction, reply=True) → (reg, interaction) — every command rebinds both (and sync_name: a Member's
@@ -274,7 +274,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        unless Described.review, then needs_review + token; `confirmed`; `revs` config:<section> → 409; BOOT-prefixed tokens: expired → silent
                        re-preview when the fingerprint matches, restarted → shown again); the admin setup routes (/api/admin/config|aura|family|aura/reset|raid|
                        raid/reset|raid/schedule|raid/schedule/remove|recruitment|plain-permissions) are TRANSLATORS into changes through apply_ops
-  web/api_setup.py     install_setup_api (called from api.py; design §5.44): GET/POST /api/admin/channels (rows with `missing`/`problem`, never while Discord is
+  web/api_setup.py     install_setup_api (called from api.py; design §5.46): GET/POST /api/admin/channels (rows with `missing`/`problem`, never while Discord is
                        unreachable; POST = a translator through app.state.ops_translate), POST /api/admin/news-webhook (owner; the URL never in an ops line),
                        GET /api/admin/setup (checklist, invite, error alerts + the owner's choices and the settings rev; Host card for a superuser / the
                        bearer), GET /api/admin/left + POST
