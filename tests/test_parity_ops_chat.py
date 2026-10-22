@@ -200,12 +200,12 @@ def test_apply_first_refusal_carries_the_apply_button(reg):
         req = ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="character", field="add", character="Nyx Starfall", value="Priest Holy", text="main")])
         await discord_policy.handle_change(it, reg, None, None, Feed(), "add my main Nyx", bot=it.client, channel=GENERAL_CH, req=req)
         kind, content, kw = log[-1]
-        assert content == "⛔ " + configops.APPLY_FIRST
+        assert content == configops.plain_footer("⛔ " + configops.APPLY_FIRST), "every plain-text refusal ends with where the policy is read"
         assert [getattr(c, "custom_id", None) for c in kw["view"].children] == [f"reg.{reg.key}:apply"]
         # applications closed: the refusal alone, no button
         reg.set_recruitment("t", open=False)
         await discord_policy.handle_change(it, reg, None, None, Feed(), "add my main Nyx", bot=it.client, channel=GENERAL_CH, req=req)
-        assert log[-1] == ("followup", "⛔ " + configops.APPLY_FIRST, {"ephemeral": True})
+        assert log[-1] == ("followup", configops.plain_footer("⛔ " + configops.APPLY_FIRST), {"ephemeral": True})
 
     asyncio.run(go())
 

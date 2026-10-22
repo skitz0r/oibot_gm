@@ -1125,6 +1125,31 @@ def test_a_request_to_act_follows_the_parent_channels_plain_text_mode(night, mon
     assert isinstance(view, LootChatConfirmView) and view.channel == n.ch.id
 
 
+def test_the_chat_parse_is_attributed_to_the_councils_guild(night, monkeypatch):
+    """D45: the loot thread's plain-text parse (nl.parse_loot_feedback, in a worker thread) records the council's guild,
+    never '' (unattributed); the context is restored afterwards."""
+    from oibot_gm import nl
+    from oibot_gm.llm import provider as pv
+
+    n = night
+    tick(n)
+    run(n.bot.distribute(n.reg, n.s, by="Mira", by_id=OFFICER))
+    seen = []
+    from oibot_gm.discord_help import ACT
+
+    n.bot.help_reply = ACT
+    act_here(n, "act")
+    monkeypatch.setattr(n.bot, "loot_ctx", lambda s: types.SimpleNamespace(provider=object(), policy_for_llm=lambda: "policy"))
+
+    def parse(*a):
+        seen.append(pv.CURRENT_GUILD.get())
+        return nl.LootFeedback(kind="ignore", reply="")
+    monkeypatch.setattr(nl, "parse_loot_feedback", parse)
+    run(n.bot.loot_chat(Msg(n, "? do it"), n.s))
+    assert seen == [n.reg.key]
+    assert pv.CURRENT_GUILD.get() == ""
+
+
 def test_the_loot_group_gates_a_chat_write(night, monkeypatch):
     """Who may change loot by plain text is the owner's PLAIN_GROUPS choice: closed to officers → refused, even in an act channel."""
     from oibot_gm import nl

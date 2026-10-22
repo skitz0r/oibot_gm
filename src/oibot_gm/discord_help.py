@@ -50,6 +50,24 @@ def chunk_text(text: str, limit: int = 1900) -> list[str]:
     return out
 
 
+HELP_PARTS = 5  # a /help topic answers in at most this many messages; the rest is on the site's Help page
+CONTINUED = "continued on the site"
+
+
+def topic_parts(reg, marker: str, text: str) -> list[str]:
+    """A manual section as /help's messages: whole paragraphs, at most HELP_PARTS; the last one links the section on the
+    site (help.site_url: ?g= before the #anchor) and, when the section is longer, says it is continued there."""
+    sid = marker.removeprefix("## ").strip()
+    url = help_mod.site_url(reg, "/app/help", sid) if reg is not None else None
+    parts = chunk_text(text, 1850)
+    if len(parts) > HELP_PARTS:
+        parts = parts[:HELP_PARTS]
+        parts[-1] += f"\n\n-# … {CONTINUED}" + (f": {url}" if url else " (the Help page)")
+    elif url:
+        parts[-1] += f"\n-# [This section on the site]({url})"
+    return parts
+
+
 def manual_section(marker: str) -> str:
     text = help_mod.MANUAL.read_text() if help_mod.MANUAL.exists() else ""
     parts = text.split("\n## ")
@@ -213,7 +231,7 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             if not text:
                 await interaction.response.send_message("That section is missing from the manual. `/ask` can still answer.", ephemeral=True)
                 return
-            parts = chunk_text(text)[:5]  # the whole section, in as many messages as it takes (Discord caps a message at 2000)
+            parts = topic_parts(reg, TOPICS[topic.value][0], text)
             await interaction.response.send_message(parts[0], ephemeral=True)
             for p in parts[1:]:
                 await interaction.followup.send(p, ephemeral=True)
@@ -231,6 +249,9 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             e.add_field(name="Owner", value="\n".join(tiers["owner"])[:1024], inline=False)
         if reg is None and interaction.guild_id:  # an unconfigured server: one response, with the way to set it up
             e.add_field(name="Not set up here", value=guild_routing.NOT_SET_UP, inline=False)
+        url = help_mod.site_url(reg, "/app/help") if reg is not None else None
+        if url:  # the whole manual, every section, on the site (officer sections tagged, D38)
+            e.add_field(name="The manual", value=f"[Read every section on the site]({url})", inline=False)
         e.set_footer(text="Buttons: #register card (Register / Add an alt / My status) · sheets (Join / Bench / No thanks; locked: Can't make it) · DMs (Confirm / Can't make it, fill: Confirm / Can't make it)")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -405,8 +426,11 @@ class HelpMixin:
         if data and officer and not public:
             extras = extras or help_mod.HelpExtras()
             extras.data = data
+        from .llm.provider import for_guild
+
         try:
-            ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public)
+            with for_guild(reg.key):  # D45: the usage row is this guild's (the cap is shared)
+                ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public)
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             return "Something went wrong answering that; the officers have been told. `/help` lists what I do."

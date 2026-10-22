@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from ..models import DropResult, LootAward, Player, RosterResult
 from ..profiles import Item
+from ..llm.provider import for_guild
 from ..registry import RegistryError, item_key
 from . import recommend as rec_mod, scoring
 
@@ -572,7 +573,8 @@ def run_distribution(ctx, snap: LootSession, roster: list[Player], drop_ids: lis
                            result=DropResult(item_id=item.id, item_name=item.name, boss=d.boss, candidates=cands, recommendation=old.result.recommendation,
                                              source=old.result.source.replace(" (unchanged)", "") + " (unchanged)"))
         else:
-            res = rec_mod.recommend(ctx.profile, item, cands, policy, provider, cfg=ctx.loot_cfg)
+            with for_guild(getattr(ctx, "guild_key", None)):  # D45: the judge's calls are the council's guild's (worker threads don't inherit it)
+                res = rec_mod.recommend(ctx.profile, item, cands, policy, provider, cfg=ctx.loot_cfg)
             res.boss = d.boss
             out = Proposal(drop_id=did, item_id=item.id, item_name=item.name, boss=d.boss, award_to=res.recommendation.primary, result=res, tiered=bool(item.tiers))
             if provider is None and snap.scores_only:

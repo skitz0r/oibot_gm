@@ -497,9 +497,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if request.headers.get("authorization"):
             if not mcp_authorized(request, _os.environ.get(MCP_TOKEN_ENV) or None):
                 raise HTTPException(401, "login required")
+            from .api_agents import busy_json
+
+            # `busy`: D33's raid guard per guild, computed here — the apply job defers a restart while any guild is busy
             return {"guilds": [{"key": r.key, "name": r.config.name, "discord_guild_id": str(r.config.discord_guild_id),
                                 "owner_discord_id": str(r.config.owner_discord_id) if r.config.owner_discord_id else None,
-                                "game_profile": r.config.game_profile} for r in bot.registries.ordered()]}
+                                "game_profile": r.config.game_profile, "busy": busy_json(bot, r)} for r in bot.registries.ordered()]}
         v = await who(request)
         return {"guilds": await guild_choices(v)}
 
@@ -1168,7 +1171,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     subscribers: dict[asyncio.Queue, tuple[str, bool]] = {}  # queue -> (guild key, the page's viewer is an officer)
 
     def publish(topic: str, guild: str | None = None, *, officers: bool = False) -> None:
-        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents`. `guild` None = every
+        """topic: `run:<key>` | `loot:<run key>` | `test:<run key>` | `member` | `config` | `ops` | `agents` | `policy`. `guild` None = every
         page (process-wide news: the agents' job status); otherwise only that guild's pages. `officers`: only pages an
         officer opened (the test feed: what it names is officers' business). Safe from worker threads."""
         def fan_out():
@@ -2070,92 +2073,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "guild": {"key": reg.key, "name": cfg.name, "discord_guild_id": str(cfg.discord_guild_id)},  # which guild answered (MCP guild_overview)
                 "revs": {s: reg.config_rev(s) for s in ("settings", "recruitment", "plain")}}  # what an edit-mode Save sends back as revs["config:<section>"]
 
-    # ---- policy documents (loot, comp, persona): edit → compile → confirm | discard, what /gm policy edit does
-    def policy_store(reg):
-        from ..policy import PolicyStore
-
-        return PolicyStore(bot.registries.store, reg.key)
-
-    def policy_doc(doc: str) -> str:
-        from ..policy import DOCS
-
-        if doc not in DOCS:
-            raise HTTPException(400, f"doc is one of {', '.join(DOCS)}")
-        return doc
-
-    def policy_json(reg, doc: str) -> dict:
-        from .. import policy as pol
-
-        ps = policy_store(reg)
-        c = ps.compiled(doc)
-        p = pol.pending(ps, doc)
-        return {"doc": doc, "text": ps.read(doc), "compiled": bool(c), "summary": c.get("summary") if isinstance(c, dict) else None,
-                "pending": bool(p), "pending_compiled": bool(p and p.get("compiled") is not None)}
-
-    @app.get("/api/policy/{doc}")
-    async def policy_get(request: Request, doc: str):
-        """One policy document: its text, whether a compiled reading is live (and its summary), and whether an edit is pending."""
-        v = await who(request, officer=True)
-        return policy_json(v.reg, policy_doc(doc))
-
-    @app.put("/api/policy/{doc}")
-    async def policy_put(request: Request, doc: str):
-        """Officers: {text} replaces the document as a DRAFT (the live compiled reading is unchanged until confirmed;
-        the persona is live as written). Next: compile, then confirm or discard (policy.begin_edit)."""
-        from .. import policy as pol
-
-        v, d = await body(request, officer=True)
-        doc = policy_doc(doc)
-        try:
-            line = await asyncio.to_thread(pol.begin_edit, policy_store(v.reg), doc, str(d.get("text") or ""), v.name)
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
-        return {"message": line, **policy_json(v.reg, doc)}
-
-    @app.post("/api/policy/{doc}/compile")
-    async def policy_compile(request: Request, doc: str):
-        """Officers: the bot's reading of the document as it is now (an LLM call; nothing goes live). `reading` is the
-        rules/constraints in words plus the questions it could not settle; confirm makes it live, discard reverts."""
-        from .. import policy as pol
-
-        v, _ = await body(request, officer=True)
-        doc = policy_doc(doc)
-        provider = getattr(getattr(bot, "ctx", None), "provider", None)
-        try:
-            compiled, reading = await asyncio.to_thread(pol.compile_pending, policy_store(v.reg), doc, provider)
-        except pol.PolicyPendingError as e:
-            return JSONResponse({"error": str(e)}, status_code=400 if doc == "persona" or provider is not None else 503)
-        except Exception as e:  # noqa: BLE001 — provider/schema errors: the caller can retry
-            return JSONResponse({"error": f"could not compile the {doc} policy: {e}"}, status_code=502)
-        return {"doc": doc, "reading": reading, "compiled": compiled.model_dump() if compiled is not None else None,
-                "message": "confirm to make this reading live, or discard the edit" if compiled is not None else reading}
-
-    @app.post("/api/policy/{doc}/confirm")
-    async def policy_confirm(request: Request, doc: str):
-        from .. import policy as pol
-
-        v, _ = await body(request, officer=True)
-        doc = policy_doc(doc)
-        try:
-            line = await asyncio.to_thread(pol.confirm_pending, policy_store(v.reg), doc, v.name)
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        await ops_mod.audited(bot.ops, v.reg, v.name, f"confirmed the compiled {doc} policy: {line}", via=v.via, by_id=v.uid)
-        return {"message": line, **policy_json(v.reg, doc)}
-
-    @app.post("/api/policy/{doc}/discard")
-    async def policy_discard(request: Request, doc: str):
-        from .. import policy as pol
-
-        v, _ = await body(request, officer=True)
-        doc = policy_doc(doc)
-        try:
-            line = await asyncio.to_thread(pol.discard_pending, policy_store(v.reg), doc, v.name)
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
-        return {"message": line, **policy_json(v.reg, doc)}
+    # ---- policy documents and the manual: web/api_policy.py (install_policy_api, below)
 
     # ---- plain-text permissions (design §5.25): officers read, the owner edits
     def plain_json(reg) -> dict:
@@ -2248,6 +2166,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     install_ops_api(app, bot, who=who, body=body, live_officer=live_officer, plain_json=plain_json, recruitment_json=recruitment_json,
                     guild_role_refs=guild_role_refs, need_owner=need_owner, parse=parse, InstanceBody=InstanceBody, IdBody=IdBody)
 
+    from .api_policy import install_policy_api  # the Policy page and the manual (design §5.45)
+
+    install_policy_api(app, bot, who=who, body=body, publish=publish)
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
 
     install_agents_api(app, bot, who=who, body=body, publish=publish)

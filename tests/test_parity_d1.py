@@ -347,7 +347,7 @@ def test_discord_policy_edit_is_the_one_pending_edit_and_a_stale_view_does_nothi
         modal.text._value = "# Loot\n\n1. A rule"
         await modal.on_submit(press(log, "Officer A"))
         view_a = log[-1][2]["view"]
-        assert isinstance(view_a, discord_policy.CompileConfirmView) and policy_mod.pending(ps, "loot")["compiled"] is view_a.compiled
+        assert isinstance(view_a, discord_policy.CompileConfirmView) and policy_mod.pending(ps, "loot")["compiled"] == view_a.compiled  # held on disk
         # officer B edits on the site / MCP / chat meanwhile: A's reading is now of old text
         policy_mod.begin_edit(ps, "loot", "# Loot\n\n1. B rule", "Officer B")
         await view_a.confirm.callback(press(log, "Officer A"))

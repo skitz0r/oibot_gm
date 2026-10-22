@@ -771,3 +771,27 @@ def test_fill_before_lock_shows_suggestions(reg, rs, officer, channel):
     h, bot = harness(reg, rs)
     asyncio.run(FLOWS["raid_fill"](h.command(), reg))
     assert "before lock" in h.text and not bot.calls
+
+
+def test_handing_off_to_run_times_leaves_no_open_screen(reg, rs, officer, channel, monkeypatch):
+    """Regression (G2 review): to_run_times stopped the wizard without finish(), so its pending_views entry stayed for
+    the life of the process and GET /api/agents/quiet never read quiet again — every profile restart waited forever."""
+    from oibot_gm import pending_views
+
+    monkeypatch.setattr(pending_views, "_live", {})
+    monkeypatch.setattr(pending_views, "track_interaction",
+                        lambda key, interaction, title="": pending_views.track(key, app_id=1, token="t", title=title))
+    with_slots(reg, first_open=(reg.now_local() + timedelta(days=60)).replace(microsecond=0).isoformat())
+
+    async def raid_config(interaction, reg_, **seed):
+        pass
+    monkeypatch.setitem(FLOWS, "raid_config", raid_config)
+    h, bot = harness(reg, rs)
+
+    async def go():
+        await FLOWS["raid_open"](h.command(), reg)
+        assert pending_views.live_count() == 1
+        await h.pick("Pick the raid", "barrow_deeps")
+        await h.press("Set this raid's run times →")
+    asyncio.run(go())
+    assert pending_views.live_count() == 0

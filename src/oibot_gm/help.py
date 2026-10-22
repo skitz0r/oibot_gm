@@ -64,7 +64,7 @@ def gate_of(path: str) -> str:
     """Who may run a command — mirrors the checks in discord_registry/discord_raid/discord_policy."""
     if path in MEMBER_PATHS or path.startswith("/me ") or path == "/gm change":  # /gm change: the plain-text permissions decide per op
         return "member"
-    if path.startswith("/gm config") and path != "/gm config show":
+    if path.startswith("/gm config") and path not in ("/gm config show", "/gm config plain"):  # plain: officers read it (D37)
         return "owner"
     return "officer"
 
@@ -85,6 +85,68 @@ def command_lines(tree) -> str:
     for c in tree.get_commands():
         walk(c)
     return "\n".join(sorted(out))
+
+
+def command_rows(tree, tier: str = "owner") -> list[dict]:
+    """The live command tree as {path, description, who}, filtered to what `tier` (member | officer | owner) may run —
+    the site's Help page and /help draw the same list."""
+    allowed = {"member": ("member",), "officer": ("member", "officer"), "owner": ("member", "officer", "owner")}.get(tier, ("member",))
+    out = []
+    for line in command_lines(tree).splitlines() if tree is not None else []:
+        path, _, rest = line.partition(" — ")
+        desc, _, who = rest.rpartition(" — ")
+        if who in allowed:
+            out.append({"path": path, "description": desc, "who": who})
+    return out
+
+
+# ---------------------------------------------------------------- the manual on the site (design §3.4 M35, D38)
+
+_MANUAL_CACHE: dict = {"key": None, "sections": []}
+
+
+def section_tier(title: str) -> str | None:
+    """'owner' | 'officers' | None from a manual heading's own words ('8. Owner: setup', '6. Analytics (officers)'). The
+    tag is shown, never used to hide (D38: the manual isn't secret, the data is)."""
+    t = title.lower()
+    if "owner" in t:
+        return "owner"
+    if "officer" in t:
+        return "officers"
+    return None
+
+
+def manual_sections(path: Path | None = None) -> list[dict]:
+    """docs/manual.md split by its own `## ` headings (every section, in file order — not /help's TOPICS list), cached
+    until the file's mtime changes: [{id ('4', '7a'), title, tier, body}]. `id` is the heading's number, the anchor the
+    Help page and the Discord links use."""
+    path = path or MANUAL
+    try:
+        st = path.stat()
+    except OSError:
+        return []
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if _MANUAL_CACHE["key"] == key:
+        return _MANUAL_CACHE["sections"]
+    out = []
+    for chunk in path.read_text().split("\n## ")[1:]:
+        head, _, body = chunk.partition("\n")
+        m = re.match(r"([0-9]+[a-z]?)\.?\s+(.*)", head.strip())
+        sid, title = (m.group(1), m.group(2)) if m else (re.sub(r"[^a-z0-9]+", "-", head.lower()).strip("-"), head.strip())
+        out.append({"id": sid, "title": title, "tier": section_tier(title), "body": body.strip()})
+    _MANUAL_CACHE.update(key=key, sections=out)
+    return out
+
+
+def site_url(reg, path: str, anchor: str | None = None) -> str | None:
+    """A page of the site for this guild: `?g=<key>` selects the guild and comes BEFORE the fragment (a hand-written
+    '#cycle?g=' put the guild inside the anchor and lost it). None when OIBOT_WEB_URL isn't an http(s) address."""
+    import os
+
+    web = (os.environ.get("OIBOT_WEB_URL") or "").rstrip("/")
+    if not web.startswith("http"):
+        return None
+    return f"{web}{path}?g={reg.key}" + (f"#{anchor}" if anchor else "")
 
 
 def system_prompt(tree) -> str:
@@ -1101,5 +1163,8 @@ def guild_state(reg: Registry, rs, user_id: int, is_officer: bool, question: str
 
 def answer(provider, tree, reg: Registry, rs, user_id: int, is_officer: bool, question: str, extras: HelpExtras | None = None,
            public: bool = False) -> HelpAnswer:
+    from .llm.provider import for_guild
+
     # the asker line above comes from the registry (code); the question itself is delimited data
-    return provider.complete("help", system_prompt(tree), guild_state(reg, rs, user_id, is_officer, question, extras, public=public) + "\n\n## Question\n<question>\n" + question.strip()[:1500] + "\n</question>", HelpAnswer)
+    with for_guild(reg.key):  # D45: every answer is its guild's spend (/ask, plain text, the loot thread, the site)
+        return provider.complete("help", system_prompt(tree), guild_state(reg, rs, user_id, is_officer, question, extras, public=public) + "\n\n## Question\n<question>\n" + question.strip()[:1500] + "\n</question>", HelpAnswer)

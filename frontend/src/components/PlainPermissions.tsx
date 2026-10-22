@@ -3,14 +3,15 @@ import { useLive } from "../hooks/useLive";
 import { Badge, Box, Button, Card, Group, MultiSelect, Select, Table, Text } from "@mantine/core";
 import { IconPencil } from "@tabler/icons-react";
 import { api, type RoleRef } from "../api";
-import { CardHeader, fail, ok } from "./Page";
+import { CardHeader, fail } from "./Page";
+import { useOpsSave } from "./ReviewModal";
 
 // ---- shapes (mirror plain_json in src/oibot_gm/web/api.py)
 interface PlainGroup { id: string; label: string; example: string; who: string[]; default: string[]; who_text: string; ops: string[] }
 interface PlainChannel { id: string; name: string; category: string | null; mode: string; listed: boolean; role: "ops" | "analytics" | null }
 export interface PlainPermissionsData {
   groups: PlainGroup[]; channels: PlainChannel[]; listed: Record<string, string>; dm: string; default: string;
-  tiers: string[]; modes: string[]; guild_roles: RoleRef[]; owner: boolean;
+  tiers: string[]; modes: string[]; guild_roles: RoleRef[]; owner: boolean; rev?: string;
 }
 
 const TIER: Record<string, string> = { everyone: "Everyone", registered: "Registered members", officers: "Officers", owner: "Owner only" };
@@ -25,6 +26,7 @@ export function PlainPermissions() {
   const [data, setData] = useState<PlainPermissionsData | null>(null);
   const [d, setD] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saveOps, reviewDialog] = useOpsSave();
   const load = () => api.get<PlainPermissionsData>("/api/plain-permissions").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   const editingRef = useRef(false);
@@ -39,12 +41,18 @@ export function PlainPermissions() {
   const modeOptions = data.modes.map((m) => ({ value: m, label: MODE[m] || m }));
   const start = () => setD({ who: Object.fromEntries(data.groups.map((g) => [g.id, g.who])), listed: { ...data.listed }, dm: data.dm, default: data.default });
 
+  /** One structured change on the ops path: a cut that locks people out (plain text off in the ops channel or in DMs) is
+   *  warn-class, so the Review shows the server's own consequence sentence (configops.op_consequences); a stale grid is a 409. */
   async function save() {
-    if (!d) return;
+    if (!d || !data) return;
     setBusy(true);
     try {
-      const r = await api.post<{ message: string } & PlainPermissionsData>("/api/admin/plain-permissions", { groups: d.who, channels: d.listed, dm: d.dm, default: d.default });
-      ok(r.message); setData(r); setD(null);
+      const r = await saveOps([{ kind: "plain", fields: { groups: d.who, channels: d.listed, dm: d.dm, default: d.default } }],
+        { revs: data.rev ? { "config:plain": data.rev } : undefined, title: "Review the plain-text permissions" });
+      if (r === null) return;  // Back to edits: the draft stays
+      if (r.changed?.length) { fail(new Error("Someone else changed the plain-text permissions since you opened them — reload to see their change, your edits are kept.")); return; }
+      setData(await api.get<PlainPermissionsData>("/api/plain-permissions"));
+      if (!(r.results || []).some((x) => !x.ok)) setD(null);
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
 
@@ -57,7 +65,8 @@ export function PlainPermissions() {
   );
 
   return (
-    <Card>
+    <Card id="plain">
+      {reviewDialog}
       <CardHeader title="Plain-text permissions" hint="what a sentence to the bot may change, for whom, and where"
         action={data.owner && !editing ? <Button variant="default" size="sm" leftSection={<IconPencil size={15} />} onClick={start}>Edit permissions</Button> : null} />
       <Box p="md">
@@ -111,6 +120,10 @@ export function PlainPermissions() {
                 </Table.Tr>
               ))}
               {data.channels.length === 0 && <Table.Tr><Table.Td colSpan={2}><Text size="xs" c="dimmed">The bot can't see the server's channels right now.</Text></Table.Td></Table.Tr>}
+              <Table.Tr style={{ opacity: 0.55 }}>
+                <Table.Td><Text size="sm" fw={600}>The site and MCP</Text><Text size="xs" c="dimmed">the Ops page's box and MCP plain_change; what they may do is the person's own rights</Text></Table.Td>
+                <Table.Td><Group gap={6}>{modeBadge("act")}<Text size="xs" c="dimmed">not configurable</Text></Group></Table.Td>
+              </Table.Tr>
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>

@@ -2436,6 +2436,163 @@ embed, /api/meta, /api/config/summary, /api/readiness + a comp Save with a stale
 a member / an officer / outside the audience / the LLM off, the /roster comp, Group make-up, paused-schedule and timezone
 wizard screens through the harness, the MCP tools end to end, the D40 and typed-field lints); the parity matrix rows for
 comp_target / comp_target_clear / comp_groups.
+
+### 5.45 Dual interfaces, phase 3 — governance: proposals, the apply job, policy, help, plain-text reading (built 2026-10-20)
+
+Out of out/dual_interface_design.md §3.4 (X2, X5, OFF-13/14/N-05, OFF-16–19/PL-*/S13, OFF-21/P-01/P-02, M35, N-01/03/04/06,
+S4) and §6 Phase 3 rows 1, 2, 7, 9, 10; owner decisions D33–D38, D41, D45 (and D40: no box on Me; D44: no DM to an owner
+about a superuser's change — the DM rule). Nothing in this part DMs anyone.
+
+**One proposal verb (X2).** `NewsMixin.decide_proposal(reg, pid, state, *, by, by_id, officer, job, owner, note, commit,
+via) -> (Proposal, card_ok)` = `ProposalStore.move` (or, `state=None`, `ProposalStore.annotate`: the apply job's
+"waiting: …" line as `status_note` + a history row, written only when it changes, cleared by any move) →
+`proposal_card_update` (returns whether Discord took it) → `ops.audited` → for a profile edit that landed or was rolled
+back, an ops line in every other guild on the game version. Callers: the card (through the decide flow), POST
+/api/proposals/{pid}/resolve (MCP `resolve_proposal` through it), the `proposal` op (configops `_apply_with_bot`;
+`self_audited`). Every proposal save publishes `agents` through `news.PROPOSAL_LISTENERS` (web/api_agents registers it),
+whichever surface moved it. `move` rules: approving a **profile** proposal needs the OWNER (`owner=`, else
+`Registry.is_owner_id(by_id)` through the store's Guilds index) even in a lone guild — `shared_profile_refusal` (K3) is
+checked first so a shared version still names the other guilds; a JOB move needs `job=True`, and `job=True` refuses an
+officer move (`JOB_NOT_OFFICER`); moving to the state it already has raises `AlreadyDecided` → `already_text(p, when)`
+"already approved by Jonny <t:…:f> — nothing to do" (Discord's stamp; the site formats with `Registry.local12`, 409).
+`decision_refusal(…, owner=, when=)` reads the same rules without writing.
+
+**The decide screen (X5, D34, D35).** `ProposalButton` never writes: it opens `FLOWS["proposal_decide"]` (new
+`flows_news.py`) → `Wizard.decide` with `NewsMixin.proposal_consequence` (= `news.consequence(p, reg, state, guilds,
+busy=busy_map(), next_run=apply_next_label())`): approve/guild setting "the apply job carries it out at its next run
+(<time>), no restart: <describe() of the edit>"; approve/profile "Claude edits the game data for <version>, the tests
+run, and the bot restarts for every server it serves (<every name>) for about two minutes" + "⚠ <server> has a run right
+now … the job will wait" per busy guild; dismiss "nothing changes, and the review is told not to propose it again".
+`[Approve] [Approve with a note…] [Back]`; the guard re-checks officer standing and, for a profile approval, the owner on
+every press; a refusal finishes the screen AND redraws the card. The card: no Approve on a needs-developer proposal
+(Status says so), **Withdraw approval** once approved, "Game data shared with: …" in Affects, `status_note` in Status.
+No edit-before-approve (D35). A game-data proposal citing ONLY news a dismissed game-data proposal cited (this guild's, or another guild's on the same
+game profile) is refused in `ProposalStore.create` (`news.dismissed_cover`: "every news item it cites was cited by <id>,
+which an officer dismissed …"), so the profile dismiss sentence says so; newer news cited alongside passes.
+`proposal_cards_restore` redraws every non-terminal card on ready and on resume
+(`OibotGM.on_resumed` calls LootMixin's then this).
+
+**The job header and the raid guard (D33).** `mcp_server.Api(job=)` (env `OIBOT_MCP_JOB`) sends `X-Oibot-Job`; the job
+scripts set it (`apply`, `review`), a Claude session never does. web/api_agents `job_of(request, v)` = the bearer AND the
+header; job moves, annotations and POST /api/proposals/{pid}/apply need it. `news.guild_busy(reg, runs, loot_runs, now)`
+= {raiding, until, until_label, why}: a LOCKED run from 4 h before its start until `rc.run_close_at`, an OPEN run from 1 h
+before, and EVERY live loot council on its own (`loot_runs` = the live sessions or their run keys) — whatever its run's
+state and however far past the scheduled close it runs (D10 ends one only past close + 30 min idle; counted from the run's 4-hour window, so one opened days early is not; `until` ≥ now +
+`BUSY_LOOT_MIN`); test runs and their councils never count. `NewsMixin.guild_busy` / `busy_map` feed it from the bot;
+GET /api/guilds (bearer) carries `busy` per guild (`api_agents.busy_json`). GET /api/agents/quiet → `quiet_state`:
+{quiet, why[]} from live runs within ±2 h of lock or start, a held solver / board / plan lock, open wizard or confirm
+screens (`pending_views.live_count`), unexpired preview tokens and every live (non-test) loot council.
+
+**D8 on proposals.** Approve / dismiss from MCP is a NAMED officer's: POST /api/proposals/{pid}/resolve refuses the bare
+bearer (no X-Oibot-Actor, no job header) with `news.MCP_ACTOR_NEEDED`, and `/api/ops/change`'s `mcp_actor_rule` drops a
+`proposal` op the same way — the token is the owner, so the owner-only profile rule alone would have let it approve a
+restart of every guild. `resolve_proposal` sends OIBOT_MCP_ACTOR on approved / dismissed only; with it, `mcp_actor`
+validates the officer and a game-data approval still needs that person to be the owner.
+
+**The apply job (scripts/agents/apply.py).** Each poll: (5) recovery — every proposal still `applying` while the job
+isn't running → failed "the apply run was interrupted; approve again to retry" (except the pending restart's); (2/3) a
+pending restart (`restart_pending` in the status file, `auto`) restarts when `restart_block` (a fresh /api/guilds `busy`
+across EVERY guild, then /api/agents/quiet) is clear, else annotates; (4) every guild setting and needs-developer refusal
+this poll, oldest first, each its own tagged run; then the FIRST profile proposal whose preflight and guard pass —
+`resolve("applying")` is the gate (refused → "<id> was <state> before the job started — nothing done", Claude never
+starts); after the checks and the commit the proposal is re-read (no longer applying → commit kept, no restart,
+`restart_pending{auto: False}` for the owner) and the guard re-checked (busy → `restart_pending{auto: True}`, the
+proposal annotated, the restart on a later poll); the other profile proposals are listed "waiting (<why>): <gk>/<id>".
+A busy guild annotates every waiting profile proposal "waiting: <server> raids until <time> (<why>)". The status file
+carries `guild` (the Agents page says "busy with another server's proposal"). **Mark as interrupted** (owner, Agents
+page, while the apply job is not running): POST /api/proposals/{pid}/interrupted → `decide_proposal(…, recover=True)` →
+`ProposalStore.move(recover=True)`, the ONE job move a person makes (`news.RECOVER_MOVE`, applying → failed, owner only),
+with `news.INTERRUPTED` — the job's own recovery words (apply.py imports them); refused from MCP and while the job runs
+(409); `consequence["interrupted"]` is the confirm's sentence; web-only by design (`BY_DESIGN_ONLY["proposal_interrupted"]`).
+`/gm status` gains an **Agents** field (`discord_news.agents_status_lines` via `NewsMixin.governance_status`): "News
+review: last <t:f> · <result> · next <t:R> · N proposals waiting" and "Apply: idle | running: <step> | busy with another
+server's proposal | failed: <result>". `out/pending_views.jsonl` (new
+`pending_views.py`): every open wizard (`Wizard.show` / `finish` / `on_timeout`) and plain-text diff / policy reading
+(`PendingView.bind` / `expire` / `press`) is mirrored while it waits; `on_ready` → `restore_pending_views` edits the
+previous process's leftovers to "The bot restarted; nothing was changed. Run the command again." (a channel message by
+id, an ephemeral reply through its interaction webhook within 15 minutes); the file is written only by the running bot.
+
+**Final review fixes.** (1) Owner ops through a proposal: `news.owner_setting(p)` = a guild_setting whose op is in
+`configops.OWNER_OPS` (raid_set, raid_reset, aura_set, family_set, aura_reset); `ProposalStore.move` and
+`decision_refusal` require the owner to approve it (`SETTING_OWNER_ONLY`), POST /api/proposals refuses one from anyone
+but the review job or the owner, and POST /api/proposals/{pid}/apply re-checks `Registry.is_owner_id(p.decided_by_id)`
+(refused → failed, 403) — an approval from before the check can't run an owner op. `proposal_json.owner_only =
+news.needs_owner(p)`. (2) `news.restart_waiting(status, key, pid)`: while the apply status file's `restart_pending`
+names the proposal, `consequence["interrupted"]` is not offered (Agents.tsx shows the button only when it is) and POST
+/interrupted answers 409 "Committed <sha>; only the restart waits …". (3) apply.py: `restart_pending{auto: True}` is
+written right after the commit (before the push); the checks, the commit and the push catch `TimeoutExpired`/`OSError`
+(checks → edit reverted, failed; push → a warning, the run goes on); `recover()` adopts an `applying` profile proposal
+whose commit is in the last 50 commits (`committed_for`, by commit_message's subject, unless a Revert follows) as the
+pending restart instead of INTERRUPTED; `pending_restart` runs `preflight()` before restarting (dirty / not main →
+annotated "the restart waits: …", still owed, the job reads failed); the rollback is `revert_commit(<recorded commit>)`
+— only when it is an ancestor of HEAD and the tree is clean, return code checked, otherwise the proposal is failed
+"could not be reverted", nothing pushed. (4) `Wizard.stop()` untracks (every way a wizard ends — RaidOpen.to_run_times
+handed off without finish and leaked a pending view forever); `pending_views.live_count()` ignores entries older than
+`TOKEN_LIFE_S`; `Wizard.mark_saved()` (called by `show()` for a "✅ …" screen) → `pending_views.mark_saved` → after a
+restart the screen reads `RESTARTED_SAVED` "what you saved stays". (5) `proposal_card_update(…, quiet=)`: a deleted card
+(NotFound) is forgotten (`ProposalStore.clear_card`) and posted again; `proposal_cards_restore` passes `quiet=True`
+(process log, never an ops line on every resume). (6) PlainPermissions saves one `{kind: "plain"}` change through
+`useOpsSave` with `revs {"config:plain"}` (the server's `op_consequences`, a 409 when stale) — no browser-side wording.
+(7) A workload's budget-share refusal reads "the host raises it"; the variable name is only in the log.
+
+**The Agents page.** Proposals as stacked cards below `sm` (a table above), the confirm = `useConfirm` with the
+server's `consequence[state]` and the optional note, the `history` timeline (annotations marked), `status_note`,
+**Apply now** (owner, `approved > 0`): POST /api/agents/run {job:"apply"} answers `before` and the page polls GET
+/api/agents every second until the job runs or its `finished` moves, at most 10 s, then toasts its result verbatim; per
+job `elsewhere` and `install` (the exact `sh scripts/agents/install.sh <job>` line); `apply_mode` from the plist's
+OIBOT_APPLY_MODE (installed copy, else the repo's); owner-only host facts: the MCP card (`mcp_card`: configured,
+local-only, last write from the request log's `via=mcp` lines) and `llm` (D45: `provider.usage_by_guild()` under the one
+cap); a red "No ops channel" banner; a raid-time banner from the viewer's guild's `busy`.
+
+**Policy (D36; OFF-16–19, S13).** policy.py keeps the waiting edit on DISK — `<guild>/policy/<doc>.pending.json`
+{previous, compiled, text, by, by_id, at, rev, compiled_at}, written in the draft's own commit under store.lock;
+`PENDING` is only a per-process cache of `rev` (the compile race check). The compiled file carries `compiled_at`,
+`text_sha`, `confirmed_by`; `policy_state(ps, doc, when)` = Written vs Applied (`differs` = the document's sha isn't the
+reading's), the pending edit (`pending_by`, its reading), `items` — what the Policy page, /gm policy show, GET
+/api/policy and MCP `policy_get` print. The persona gets the same two steps (`PersonaReading`: its reading is its own
+text, no model call; `live_text("persona")` = the confirmed text — lootctx reads it). `append_rule(…, bullet=True)` = THE
+policy_append verb and `appended(current, text, bullet=)` / `rule_bullet` THE text it writes: /gm rule (RuleWizard),
+the policy_append op (configops: describe shows `appended`, apply calls `append_rule`), POST /api/policy/{doc}/append,
+MCP `policy_append` and the /gm policy edit box past 4,000 characters (`bullet=False`, a paragraph) all call it; the read
+and the write hold the store lock; `begin_edit(append=True)` refuses while ANOTHER officer's draft waits, naming them
+(`waiting_words`). Every committed policy write calls `policy.POLICY_LISTENERS` (web/api_policy registers one that
+publishes the officers-only `policy` topic; Policy.tsx listens), so a second officer's page reloads (S4). Discord: /gm policy show =
+`policy_show_messages` (the text in ≤3 messages + "continued on the site", ONE Compiled reading embed with ≤15 numbered
+rules + "+N more on the site", a state footer) then `pending_reading` with Confirm / Discard; /gm policy edit's modal is
+append-only past 4,000 characters (never prefilled truncated); a stale reading names whose draft waits. The web routes
+moved to the new `web/api_policy.py` (GET /api/policy, /api/policy/{doc}, PUT, POST append | compile | confirm |
+discard); `frontend/src/pages/Policy.tsx` (officers' rail); the three policy cards left Config.
+
+**Help (M35, D38).** `help.manual_sections()` splits docs/manual.md by its own `## ` headings (mtime-cached; id = the
+heading's number, tier officers | owner from its words, shown never hidden), `help.command_rows(tree, tier)`,
+`help.site_url(reg, path, anchor)` (`?g=` BEFORE the `#anchor`). GET /api/manual (any logged-in viewer);
+`frontend/src/pages/Help.tsx` (sections in a rail, a Select on phones, a small markdown renderer, the commands by tier).
+/help's embed links the page; `/help topic:` = `discord_help.topic_parts` (≤5 messages, the last linking the section or
+saying "continued on the site").
+
+**Plain text (D37, D41, §2.7).** `SetupMixin.plain_table(reg)` + `discord_pool.plain_read_text(reg, table, here)` →
+`/gm config plain` (owner and officers, registered from discord_policy; no editor): "Here (#x): <mode> — <why: listed | the
+ops / analytics channel acts unless listed | the default for other channels | the DMs setting>", the groups, the other
+listed channels, "The site and MCP: Acts (not configurable)". `configops.plain_footer` / `PLAIN_POLICY_FOOTER` = the
+one footer on every plain-text refusal (handle_change's refusals and diff, ConfigConfirmView's result, /gm change in an
+ignored channel). The diff embed and the Apply result carry the guild's name when the bot serves several. The DM picker
+(`OibotGM.dm_guild`, `guild_picker.choose_guild(marks=)`) lists EVERY guild the person belongs to, an ignore-DM one
+marked "(plain text off here)"; picking it answers once "DMs are off for <server> — ask in one of its channels instead (/gm change works there)". PlainPermissions
+gains the greyed site/MCP row and asks before saving `ignore` on the ops channel or DMs.
+
+**LLM budget (D45).** `provider.CURRENT_GUILD` (a context variable; `for_guild(key)`) tags each usage row with its guild —
+set where the guild is known: `help.answer`, `configops.parse` (Discord, the site's text box, MCP plain_change),
+policy compiles, and the loot council's judge (`loot/session.run_distribution`, inside each worker thread — a thread
+pool doesn't inherit the context) and the council thread's request parse (`discord_loot_surface.loot_chat` →
+`nl.parse_loot_feedback`; `asyncio.to_thread` copies the context); `usage_by_guild()`; the cap stays one, and the refusal reads
+"The bot's monthly budget for Claude is used up; the host raises it. …" (never an env-var name to a guild owner).
+
+Not in this part: the Config page's news status / backfill / always-matched chips (row 6, the settings builder); the
+retired /mock flow's and the CLI's LLM calls stay unattributed. Tests: tests/test_governance.py (+ the updated news /
+agents / parity / DM tests), including the review fixes: the bare MCP bearer never decides a proposal, a council past
+its close holds a restart, the status lines, Mark as interrupted, the dismissed-news refusal, policy SSE, one append
+text, per-guild attribution, and /gm policy show driven through guild_routing.need.
+
 ### 5.47 Dual interfaces, phase 3 — loot and attendance follow-through (built 2026-10-20)
 
 Rows 14 and 15 of phase 3 (out/dual_interface_design.md §3.5 L12/L35/M43, §3.1 decision 10's data part and the Items

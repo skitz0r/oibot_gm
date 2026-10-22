@@ -540,7 +540,7 @@ def test_gm_change_in_a_dm_uses_the_dm_entry(reg, monkeypatch):
                                      response=types.SimpleNamespace(send_message=send_message, defer=defer))
 
     asyncio.run(cmd.callback(itx(None, 123_456), "I'll be away Friday"))
-    assert said == ["Plain text is switched off in DMs."] and not seen, "DMs set to ignore: the DM entry, not the default"
+    assert said == ["Plain text is switched off in DMs.\n-# `/gm config plain` shows the whole policy."] and not seen, "DMs set to ignore: the DM entry, not the default"
     reg.config.plain.dm = "self"
     asyncio.run(cmd.callback(itx(None, 123_456), "I'll be away Friday"))
     assert seen == [None], "handle_change gets channel None (DMs)"

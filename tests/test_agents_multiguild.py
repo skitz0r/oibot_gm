@@ -50,8 +50,8 @@ class FakeApi:
         self.world["calls"].append((self.guild, "GET", path, params.get("since"), params.get("state")))
         if path == "/api/news":
             return {"items": self.world["news"].get(self.guild, [])}
-        if path == "/api/proposals":
-            return {"proposals": self.world["approved"].get(self.guild, [])}
+        if path == "/api/proposals":  # the approvals; nothing is left `applying` unless a test says so
+            return {"proposals": self.world["approved"].get(self.guild, []) if params.get("state") == "approved" else self.world.get("applying", {}).get(self.guild, [])}
         raise AssertionError(path)
 
 
@@ -117,9 +117,9 @@ def test_apply_takes_the_oldest_approval_across_guilds_and_resolves_it_there(out
             resolved.append((self.guild, path, (body or {}).get("state")))
             return {}
     assert apply.main([], api_factory=lambda guild=None: Api(world, guild)) == 0
-    assert resolved == [(GUILD2, "/api/proposals/260101-bbbb/resolve", "failed")], "duo's is older: resolved in duo"
-    run = agents.list_runs("apply")[0]
-    assert run["guild"] == GUILD2
+    assert resolved == [(GUILD2, "/api/proposals/260101-bbbb/resolve", "failed"), (GUILD, "/api/proposals/260102-aaaa/resolve", "failed")], \
+        "every cheap one this poll, oldest first, each resolved in its own guild"
+    assert sorted(r["guild"] for r in agents.list_runs("apply")) == [GUILD, GUILD2], "one run per proposal, tagged with its guild"
     assert "from Duo Guild (duo)" in apply.commit_message({"id": "x", "title": "t", "change": "c"}, {"key": GUILD2, "name": "Duo Guild"})
 
 
@@ -314,7 +314,9 @@ def test_approving_a_shared_profile_edit_needs_every_owner(duo):
     with pytest.raises(PermissionError, match=r"that Duo Guild also uses: the owner"):  # never names the proposing guild itself
         ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5)
     assert ps.move(p.id, "dismissed", "an officer", officer=True, job=False, by_id=5).state == "dismissed", "dismissing stays open"
-    q = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT))
+    newer = "https://example.com/news/newer"  # a dismissed game-data proposal's news alone is refused (design §3.4 OFF-14)
+    add_news(duo.a, url=newer, title="Barrow Deeps hotfix: 10-player lockout clarified on WoW: Forever")
+    q = ps.create(duo.a, proposal_data(kind="profile", edit=PROFILE_EDIT, news=[newer]))
     duo.b.config.owner_discord_id = OWNER  # one person owns both
     assert ps.move(q.id, "approved", "owner", officer=True, job=False, by_id=OWNER).state == "approved"
     duo.b.config.game_profile = "tbc"
@@ -369,7 +371,9 @@ def test_the_discord_approve_button_goes_through_the_same_shared_profile_rule(du
     assert itx.response.sent and "Duo Guild also uses" in itx.response.sent[0] and ps.get(p.id).state == "proposed"
 
 
-def test_a_single_guild_approves_profile_proposals_as_before(reg):
+def test_a_single_guild_approves_profile_proposals_owner_only(reg):
+    """Design §3.4: a game-data approval restarts the whole process, so even a lone guild's officer can't approve it —
+    the owner does (before phase 3 `shared_profile_refusal` returned None with no sharers and any officer could)."""
     from oibot_gm.discord_registry import Guilds
 
     from conftest import ROOT
@@ -378,7 +382,9 @@ def test_a_single_guild_approves_profile_proposals_as_before(reg):
     add_news(reg)
     ps = ProposalStore(reg.store, GUILD)
     p = ps.create(reg, proposal_data(kind="profile", edit=PROFILE_EDIT))
-    assert ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5).state == "approved"
+    with pytest.raises(PermissionError, match="only the owner approves a game-data change"):
+        ps.move(p.id, "approved", "an officer", officer=True, job=False, by_id=5)
+    assert ps.move(p.id, "approved", "the owner", officer=True, job=False, by_id=OWNER).state == "approved"
 
 
 def test_the_site_refuses_a_shared_profile_approval_and_tells_every_guild_when_it_lands(duo, monkeypatch):
@@ -391,7 +397,7 @@ def test_the_site_refuses_a_shared_profile_approval_and_tells_every_guild_when_i
     assert r.status_code == 403 and "Duo Guild also uses" in r.json()["error"] and "Demo Guild" not in r.json()["error"]
     duo.b.config.owner_discord_id = OWNER
     ps.move(p.id, "approved", "owner", officer=True, job=False, by_id=OWNER)
-    job = {"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot", "X-Oibot-Guild": GUILD}
+    job = {"Authorization": f"Bearer {TOKEN}", "X-Requested-With": "oibot", "X-Oibot-Guild": GUILD, "X-Oibot-Job": "apply"}
     for state in ("applying", "applied"):
         assert c.post(f"/api/proposals/{p.id}/resolve", json={"state": state, "commit": "abc1234"}, headers=job).status_code == 200
     assert any(k == GUILD2 and "profile change from Demo Guild's news applied" in t for k, t in bot.lines), bot.lines

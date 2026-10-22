@@ -125,6 +125,7 @@ class Wizard(discord.ui.View):
         self.message_id: int | None = None
         self._last: discord.Interaction | None = None  # the newest interaction, so an expired wizard can say so
         self._closed = False
+        self._saved = False
 
     # ---- permissions
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -146,6 +147,8 @@ class Wizard(discord.ui.View):
             self.add_item(it)
         body = f"**{self.title}**\n{text}"[:2000]
         self._last = interaction
+        if text.lstrip().startswith("✅"):  # a write landed and the wizard stays open (a draft hub): a restart says it stays
+            self.mark_saved()
         if interaction.response.is_done():
             await interaction.edit_original_response(content=body, embed=embed, view=self)
             return
@@ -158,6 +161,27 @@ class Wizard(discord.ui.View):
             self.message_id = (await interaction.original_response()).id
         except discord.HTTPException:
             self.message_id = None
+        from .pending_views import track_interaction
+
+        track_interaction(f"wiz:{id(self)}", interaction, self.title)  # a restart edits it to "The bot restarted …" (§2.9)
+        if self._saved:
+            self.mark_saved()
+
+    def mark_saved(self) -> None:
+        """Something this wizard wrote has landed: if the bot restarts while the screen is still open, it reads "what
+        you saved stays", never "nothing was changed" (pending_views.mark_saved)."""
+        from . import pending_views
+
+        self._saved = True
+        pending_views.mark_saved(f"wiz:{id(self)}")
+
+    def stop(self) -> None:
+        """Every way a wizard ends goes through here (finish, a hand-off to another wizard, discord.py itself): the
+        screen stops counting as open, so GET /api/agents/quiet can read quiet again."""
+        from .pending_views import untrack
+
+        untrack(f"wiz:{id(self)}")
+        super().stop()
 
     async def working(self, interaction: discord.Interaction, text: str = "Working…") -> None:
         """Acknowledge within Discord's 3 seconds before something slow (a solver, a DM fan-out, a git commit)."""
@@ -177,6 +201,9 @@ class Wizard(discord.ui.View):
         """The last screen: the outcome, no buttons. Safe after `working` (edits the original response)."""
         self._closed = True
         self.stop()
+        from .pending_views import untrack
+
+        untrack(f"wiz:{id(self)}")
         body = f"**{self.title}**\n{text}"[:2000]
         if interaction.response.is_done():
             await interaction.edit_original_response(content=body, embed=None, view=None)
@@ -195,6 +222,9 @@ class Wizard(discord.ui.View):
         await self.finish(interaction, "Cancelled — nothing was changed.")
 
     async def on_timeout(self) -> None:
+        from .pending_views import untrack
+
+        untrack(f"wiz:{id(self)}")
         if self._closed or not self._last:
             return
         try:

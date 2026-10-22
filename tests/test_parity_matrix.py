@@ -58,7 +58,7 @@ SURFACES: dict[str, dict[str, str]] = {
     "comp_target_clear": {"discord": "flow:roster_comp", "web": "POST /api/ops/change", "mcp": "set_comp_target"},
     "comp_groups": {"discord": "slash:gm change", "web": "POST /api/ops/change", "mcp": "plain_change"},
     "pin": {"discord": "flow:raid_set", "web": "POST /api/run/{key}/pin", "mcp": "pin"},
-    "policy_append": {"discord": "flow:rule", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},
+    "policy_append": {"discord": "flow:rule", "web": "POST /api/policy/{doc}/append", "mcp": "policy_append"},  # the one append verb (design §5.45)
     "raid_set": {"discord": "flow:raid_config", "web": "POST /api/admin/raid", "mcp": "raid_set"},
     "raid_reset": {"discord": "flow:raid_config", "web": "POST /api/admin/raid/reset", "mcp": "raid_reset"},
     "schedule_set": {"discord": "flow:raid_config", "web": "POST /api/admin/raid/schedule", "mcp": "schedule_set"},
@@ -73,7 +73,7 @@ SURFACES: dict[str, dict[str, str]] = {
     "job": {"web": "POST /api/agents/run", "mcp": "run_job"},
     "plain": {"web": "POST /api/admin/plain-permissions", "mcp": "set_plain_permissions"},
     "application": {"discord": "button:oibot_gm.discord_registry.ApplicationButton", "web": "POST /api/admin/application/decide", "mcp": "decide_application"},
-    "proposal": {"discord": "button:oibot_gm.discord_news.ProposalButton", "web": "POST /api/proposals/{pid}/resolve", "mcp": "resolve_proposal"},
+    "proposal": {"discord": "flow:proposal_decide", "web": "POST /api/proposals/{pid}/resolve", "mcp": "resolve_proposal"},  # the card opens the decide flow
     "policy": {"discord": "slash:gm policy edit", "web": "PUT /api/policy/{doc}", "mcp": "policy_edit"},
     "regular": {"discord": "flow:roster_add", "web": "POST /api/admin/raid/regulars", "mcp": "set_regular"},
     "test": {"discord": "slash:gm test seed", "web": "POST /api/test/seed", "mcp": "test_bench"},  # every action: TEST_BENCH below

@@ -30,8 +30,9 @@ def add_news(reg, url=URL, title="Barrow Deeps lockout is now 7 days on WoW: For
 
 
 def proposal_data(**kw):
-    return {"title": "Barrow Deeps resets weekly", "news": [URL], "affects": "raid barrow_deeps lockout_days", "kind": "guild_setting",
-            "change": "Barrow Deeps lockout 3 → 7 days", "edit": {"op": "raid_set", "target": "barrow_deeps", "field": "lockout_days", "value": "7"},
+    # an officer-level guild setting (comp_target): raid_set / aura_* are the owner's to approve (news.owner_setting)
+    return {"title": "Barrow Deeps resets weekly", "news": [URL], "affects": "raid barrow_deeps comp healer", "kind": "guild_setting",
+            "change": "Barrow Deeps wants 2–3 healers", "edit": {"op": "comp_target", "target": "barrow_deeps", "field": "healer", "value": "2-3"},
             "evidence": "The 10-player raid resets weekly.", "confidence": "high", **kw}
 
 
@@ -176,15 +177,17 @@ def test_card_renders_state_sources_and_buttons(reg):
         v = proposal_view(p, reg.key)
         assert [(b.item.label, b.item.disabled) for b in v.children] == [("Approve", False), ("Dismiss", False)]
         q = ps.move(p.id, "approved", "Kessa", officer=True, job=False)
-        q = ps.move(q.id, "applying", "mcp", officer=True, job=True)
-        q = ps.move(q.id, "applied", "mcp", officer=True, job=True, commit="abc1234def")
+        assert [b.item.label for b in proposal_view(q, reg.key).children] == ["Approve", "Withdraw approval"], "§2.7: one name per act"
+        q = ps.move(q.id, "applying", "mcp", officer=False, job=True)
+        q = ps.move(q.id, "applied", "mcp", officer=False, job=True, commit="abc1234def")
         e2 = proposal_embed(q, rows)
         status = next(f.value for f in e2.fields if f.name == "Status")
         assert "Applied" in status and "Kessa" in status and "abc1234def" in status
         assert all(b.item.disabled for b in proposal_view(q, reg.key).children)
         dev = ps.create(reg, proposal_data(kind="needs_developer", edit={}))
         labels = [(b.item.label, b.item.disabled) for b in proposal_view(dev, reg.key).children]
-        assert labels == [("Needs a developer", True), ("Dismiss", False)]
+        assert labels == [("Dismiss", False)], "a needs-developer proposal has no Approve at all"
+        assert "Needs a developer" in next(f.value for f in proposal_embed(dev).fields if f.name == "Status")
         assert all(len(b.item.custom_id) <= 100 for b in v.children)
         assert "<t:" in next(f.value for f in proposal_embed(ps.move(dev.id, "dismissed", "Kessa", officer=True, job=False)).fields if f.name == "Status"), "a Discord timestamp, never a typed clock"
 
@@ -202,17 +205,34 @@ class FakeResp:
         self.edited.append(kw)
 
 
-def fake_client(reg, officer: bool):
+def fake_client(reg, officer: bool, registries=None):
+    """A client with the real NewsMixin (decide_proposal, the consequence, the card update) over fakes for Discord: the
+    card edits land in `client.card_edits`, ops lines in the returned list."""
+    from oibot_gm.discord_news import NewsMixin
+
     lines = []
+
+    class Client(NewsMixin):
+        pass
 
     async def is_officer(_reg, uid):
         return officer
 
-    async def emit(cfg, level, text, exc=None):
+    async def emit(cfg, level, text, exc=None, dm=True):
         lines.append(text)
 
-    client = SimpleNamespace(registries=SimpleNamespace(for_interaction=lambda i: reg, for_guild=lambda gid: reg if gid == reg.config.discord_guild_id else None, store=reg.store), is_officer_anywhere=is_officer,
-                             news_rows=lambda r: {}, ops=SimpleNamespace(emit=emit))
+    client = Client()
+    client.registries = registries or SimpleNamespace(for_interaction=lambda i: reg, for_guild=lambda gid: reg if gid == reg.config.discord_guild_id else None,
+                                                      store=reg.store, ordered=lambda: [reg], by_key={reg.key: reg})
+    client.is_officer_anywhere = is_officer
+    client.news_rows = lambda r: {}
+    client.ops = SimpleNamespace(emit=emit)
+    client.card_edits = []
+
+    async def card(r, p):
+        client.card_edits.append((p.id, p.state))
+        return True
+    client.proposal_card_update = card
     return client, lines
 
 
@@ -232,27 +252,23 @@ def test_buttons_are_officer_only_and_flip_the_state(reg):
         from wizard_harness import Harness
 
         client, lines = fake_client(reg, officer=True)
-        edits = []
-
-        async def card_edit(**kw):
-            edits.append(kw)
         h = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)
         press = h.card_press()
-        press.message.edit = card_edit
         await ProposalButton(reg.key, p.id, "approve").callback(press)
         assert "apply job" in h.text and h.buttons() == ["Approve", "Approve with a note…", "Back"] and ps.get(p.id).state == "proposed"
         await h.press("Approve with a note…")
         await h.submit(note="checked the patch notes")
         q = ps.get(p.id)
         assert q.state == "approved" and q.decided_by == "Kessa" and q.decided_by_id == 5 and q.note == "checked the patch notes"
-        assert edits and "embed" in edits[0] and any("approved by Kessa" in x for x in lines) and "the card is updated" in h.text
-        itx2 = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=5, display_name="Kessa"), response=FakeResp())
+        assert client.card_edits == [(p.id, "approved")] and any("Kessa" in x and "→ approved" in x for x in lines) and "the card is updated" in h.text
+        itx2 = SimpleNamespace(client=client, guild_id=1, user=SimpleNamespace(id=6, display_name="Jonny"), response=FakeResp())
         await ProposalButton(reg.key, p.id, "approve").callback(itx2)  # a second press: refused before any screen, nothing changes
-        assert itx2.response.sent and "can't become approved" in itx2.response.sent[0]
+        assert itx2.response.sent and itx2.response.sent[0].startswith("already approved by Kessa <t:"), "the first decider is named, never a silent success"
+        assert client.card_edits[-1] == (p.id, "approved"), "a refused press redraws the card"
         # D34: Dismiss gets the same screen (an approved proposal can still be dismissed until the job picks it up)
         h2 = Harness(reg, user=SimpleNamespace(id=5, display_name="Kessa"), client=client)
         await ProposalButton(reg.key, p.id, "dismiss").callback(h2.card_press())
-        assert "withdraws the approval" in h2.text and h2.buttons()[0] == "Dismiss"
+        assert "withdraws the approval" in h2.text and h2.buttons()[0] == "Withdraw approval", "§2.7: Withdraw approval, not Dismiss, once approved"
         await h2.press("Back")
         assert ps.get(p.id).state == "approved" and "Nothing was changed" in h2.text
 

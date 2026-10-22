@@ -59,7 +59,8 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
 
     def mcp_actor_rule(v, allowed, refused):
         """D8: from MCP without X-Oibot-Actor, the loot decisions (an award, a confirm, a reason, a correction, a retired
-        precedent, tiers, someone else's wishlist) are refused — the owner's token is not the officer who decided."""
+        precedent, tiers, someone else's wishlist), a rank or a confirmation, and a news proposal's approve / dismiss are
+        refused — the owner's token is not the officer who decided."""
         if v.via != "mcp" or getattr(v, "actor", None):
             return allowed, refused
         from ..configops import people_needs_actor
@@ -72,7 +73,12 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         people = [op for op in keep if not people_needs_actor(op)]
         if len(people) != len(keep):  # D8: a rank or a character's confirmation is a decision about a person
             refused = [*refused, "A rank or a confirmation from MCP needs the X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
-        return people, refused
+        decided = [op for op in people if op.op != "proposal"]
+        if len(decided) != len(people):  # D8: approving or dismissing a news proposal is an officer's (a game-data one, the owner's)
+            from ..news import MCP_ACTOR_NEEDED
+
+            refused = [*refused, MCP_ACTOR_NEEDED.format(guild=v.reg.config.name)]
+        return decided, refused
 
     def warm_roles(reg) -> None:
         """Role names → ids against the live guild before a change names a role (the name cache; no write)."""

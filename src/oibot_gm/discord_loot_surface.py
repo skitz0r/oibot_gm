@@ -613,6 +613,7 @@ class LootSurfaceMixin:
         with Apply (nothing is written before Apply; the batch the officer saw is what Apply checks)."""
         from . import configops, guild_routing, nl
         from .discord_help import ACT
+        from .llm.provider import for_guild
 
         text = text if text is not None else self.loot_addressed(message, session)
         if not text:
@@ -652,7 +653,8 @@ class LootSurfaceMixin:
                 await message.reply("Nothing is proposed yet — tick the drops and press Distribute; then tell me who should get what.")
                 return
             try:
-                fb = await asyncio.to_thread(nl.parse_loot_feedback, provider, ctx.policy_for_llm(), "<data>\n" + loot_digest(session, numbered=True) + "\n</data>", text, by)
+                with for_guild(reg.key):  # D45: the parse is the council's guild's spend (to_thread copies the context)
+                    fb = await asyncio.to_thread(nl.parse_loot_feedback, provider, ctx.policy_for_llm(), "<data>\n" + loot_digest(session, numbered=True) + "\n</data>", text, by)
             except Exception as e:  # noqa: BLE001
                 await message.reply(await configops.report_error(self.ops, reg.config, e, "loot chat"))
                 return

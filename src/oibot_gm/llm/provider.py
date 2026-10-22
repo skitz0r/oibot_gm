@@ -5,6 +5,8 @@ exists today; the routing table maps workloads to models so a cheaper model
 can be substituted per workload without touching callers."""
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -41,6 +43,21 @@ PRICES: dict[str, tuple[float, float, float, float]] = {
 SHARES: dict[str, float] = {"help": 0.5, "config_change": 0.5}
 
 log = logging.getLogger(__name__)
+
+# D45: ONE shared monthly cap, spend shown PER GUILD. The guild a call is for travels in a context variable (asyncio and
+# asyncio.to_thread copy it), set by the surfaces that know it (help answers, plain-text parsing, policy compiles); a
+# call made outside any guild's context is recorded with guild "" (unattributed).
+CURRENT_GUILD: contextvars.ContextVar[str] = contextvars.ContextVar("oibot_llm_guild", default="")
+
+
+@contextlib.contextmanager
+def for_guild(key: str | None):
+    """`with for_guild(reg.key): provider.complete(...)` — the usage row is that guild's (nesting restores the outer one)."""
+    token = CURRENT_GUILD.set(key or "")
+    try:
+        yield
+    finally:
+        CURRENT_GUILD.reset(token)
 
 
 def price_of(model: str) -> tuple[float, float, float, float]:
@@ -117,6 +134,16 @@ class AnthropicProvider:
         month = self._month()
         return sum(r["cost"] for r in self.log if r["workload"] == workload and r.get("month") == month)
 
+    def usage_by_guild(self) -> dict[str, float]:
+        """This month's spend per guild key ('' = unattributed: calls made outside a guild's context, and rows from
+        before rows carried a guild). The cap stays shared (D45); this is what the Agents page shows the owner."""
+        month = self._month()
+        out: dict[str, float] = {}
+        for r in self.log:
+            if r.get("month") == month:
+                out[r.get("guild") or ""] = out.get(r.get("guild") or "", 0.0) + float(r.get("cost") or 0.0)
+        return out
+
     def summary(self) -> str:
         by: dict[str, list[dict]] = {}
         for r in self.log:
@@ -125,11 +152,13 @@ class AnthropicProvider:
         return f"LLM spend this month ${self.cost_usd:.2f} of ${self.budget_usd:.0f} · " + " · ".join(parts) if parts else "no LLM calls this month"
 
     def complete(self, workload: str, system: str, user: str, schema: type[T]) -> T:
-        if self.cost_usd >= self.budget_usd:
-            raise BudgetExceeded(f"This month's LLM budget ${self.budget_usd:.2f} is spent (${self.cost_usd:.2f}); set OIBOT_BUDGET_USD to raise")
-        if self.spent(workload) >= self.cap_for(workload):
-            raise BudgetExceeded(f"{workload} has used its share of this month's LLM budget (${self.spent(workload):.2f} of ${self.cap_for(workload):.2f}); "
-                                 f"set OIBOT_BUDGET_USD_{workload.upper()} to raise")
+        if self.cost_usd >= self.budget_usd:  # the words a guild's people read: the host raises it, never "set an env var" (§3.5)
+            raise BudgetExceeded("The bot's monthly budget for Claude is used up; the host raises it. Slash commands, the sheets and the site keep working.")
+        if self.spent(workload) >= self.cap_for(workload):  # the variable is for the host's log, never a guild's reply
+            log.warning("LLM workload %s used its share ($%.2f of $%.2f); the host raises OIBOT_BUDGET_USD_%s",
+                        workload, self.spent(workload), self.cap_for(workload), workload.upper())
+            raise BudgetExceeded("This kind of request has used its share of the bot's monthly Claude budget; the host raises it. "
+                                 "Slash commands, the sheets and the site keep working.")
         model, effort = self.route(workload)
         resp = self.client.messages.parse(
             model=model,
@@ -144,6 +173,7 @@ class AnthropicProvider:
         u = resp.usage
         row = {
             "month": self._month(),
+            "guild": CURRENT_GUILD.get(),
             "workload": workload,
             "model": model,
             "input": u.input_tokens,

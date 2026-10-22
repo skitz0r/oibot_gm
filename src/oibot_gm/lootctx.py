@@ -246,7 +246,7 @@ class RegistryLootContext:
 
     @property
     def persona(self) -> str:
-        return self.policy_store.read("persona")
+        return self.policy_store.live_text("persona")  # the CONFIRMED persona: a draft waits for its Confirm (design §5.45)
 
     def policy_version(self) -> str:
         """The loot policy an award was judged under: a short hash of its text (stamped on ledger and precedent rows)."""

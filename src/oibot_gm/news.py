@@ -9,12 +9,19 @@ local apply job carries out approved ones. A proposal is data in `<guild>/propos
 every state change a commit (git log = the audit trail).
 
 States: proposed → approved | dismissed → applying → applied | failed | reverted. Approving only flips the state
-and records who; nothing is applied by the bot on a button press."""
+and records who; nothing is applied by the bot on a button press.
+
+Governance (dual interfaces phase 3, design §5.45): approving a `profile` proposal is the OWNER's (it edits shared game
+files and restarts the whole process, every served guild with it); the apply job's steps need the job's own header
+(`X-Oibot-Job`, so `job=True`) and a job never makes an officer's decision; a repeated decision is an informational
+refusal naming the first decider (`AlreadyDecided`); `annotate` writes the job's "waiting: …" line onto the proposal
+without moving it; `guild_busy` is D33's raid guard (a locked run within 4 h of its start until it closes, an open run
+within the hour, a live loot council)."""
 from __future__ import annotations
 
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -32,8 +39,23 @@ CONFIDENCE = ("low", "medium", "high")
 OFFICER_MOVES = {("proposed", "approved"), ("proposed", "dismissed"), ("approved", "dismissed"), ("failed", "approved"), ("failed", "dismissed")}
 JOB_MOVES = {("approved", "applying"), ("approved", "failed"), ("applying", "applied"), ("applying", "failed"), ("applying", "reverted"), ("applied", "reverted")}
 # a guild setting is one of these config ops (configops.ConfigOp fields); anything else is a profile edit or a developer's job
+PROFILE_OWNER_ONLY = ("only the owner approves a game-data change: it edits the shared game files, and the bot restarts for every "
+                      "server it serves")
+SETTING_OWNER_ONLY = ("only the owner approves this change: raids and buffs are the owner's settings on every surface, and a "
+                      "proposal does not widen that")
+JOB_NOT_OFFICER = "the apply job only reports its own steps; an officer decides whether a proposal goes ahead"
+INTERRUPTED = "the apply run was interrupted; approve again to retry"  # the job's recovery note and the owner's Mark as interrupted
+RECOVER_MOVE = ("applying", "failed")  # the owner's "Mark as interrupted" (Agents page) while the apply job is not running
+DECISIONS = ("approved", "dismissed")  # an officer's verdict (OFFICER_MOVES' targets); from MCP it needs X-Oibot-Actor (D8)
+MCP_ACTOR_NEEDED = ("Approving or dismissing a proposal is a decision a person makes: from MCP it needs the X-Oibot-Actor header "
+                    "naming an officer of {guild} (set OIBOT_MCP_ACTOR to their Discord id; a game-data change, the owner's) — "
+                    "the owner's token alone can read proposals, post them and run the jobs.")
+BUSY_LOCKED_HOURS = 4  # D33: a locked run counts as raid time from 4 h before its start until it closes
+BUSY_OPEN_HOURS = 1  # D33: an open run counts from 1 h before its start
+BUSY_LOOT_MIN = 30  # D33: a live loot council holds a restart however late it runs; `until` is at least this far out (D10's idle end)
 SETTING_OPS = ("raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "comp_target", "comp_target_clear", "comp_groups")
 MAX_ITEMS_PER_CALL = 200
+PROPOSAL_LISTENERS: list = []  # fn(guild key, proposal id) after every proposal save (web/api_agents publishes `agents`)
 
 
 def now() -> str:
@@ -174,13 +196,40 @@ class Proposal(BaseModel):
     decided_at: Optional[str] = None
     commit: Optional[str] = None
     note: Optional[str] = None
-    history: list[dict] = Field(default_factory=list)  # {state, by, at, note}
+    status_note: Optional[str] = None  # the apply job's annotation ("waiting: … raids until …"); cleared by any state move
+    history: list[dict] = Field(default_factory=list)  # {state, by, at, note}; an annotation is {state: None, by, at, note}
     channel_id: Optional[int] = None  # where the card is
     message_id: Optional[int] = None
 
 
 class ProposalError(ValueError):
     pass
+
+
+def stamp(value: str | None) -> str:
+    """Discord renders `<t:unix:f>` in each reader's own locale and clock (never a typed or 24-hour time)."""
+    if not value:
+        return ""
+    try:
+        return f"<t:{int(datetime.fromisoformat(str(value)).timestamp())}:f>"
+    except ValueError:
+        return ""
+
+
+def already_text(p: "Proposal", when=None) -> str:
+    """'already approved by Jonny <t:…:f> — nothing to do': a repeated decision is told who decided first, never a silent
+    success (design §3.4 X2). `when` formats the time per surface (Discord: `stamp`; the site: Registry.local12)."""
+    verb = "approved" if p.state == "approved" else "dismissed"
+    at = (when or stamp)(p.decided_at) if p.decided_at else ""
+    return f"already {verb} by {p.decided_by or 'someone'}" + (f" {at}" if at else "") + " — nothing to do"
+
+
+class AlreadyDecided(ProposalError):
+    """The proposal already is where the press would put it (two officers within a second; a stale card)."""
+
+    def __init__(self, p: "Proposal"):
+        self.p = p
+        super().__init__(already_text(p))
 
 
 def new_id() -> str:
@@ -211,6 +260,11 @@ class ProposalStore:
     def save(self, p: Proposal, message: str) -> Proposal:
         self.store.write_text(self.path(p.id), yaml.safe_dump(p.model_dump(), sort_keys=False, allow_unicode=True))
         self.store.commit(f"{self.key}: proposal {p.id}: {message}")
+        for fn in list(PROPOSAL_LISTENERS):  # the web's `agents` topic: every save publishes, whichever surface moved it (§2.4)
+            try:
+                fn(self.key, p.id)
+            except Exception:  # noqa: BLE001 — a listener must never break a save
+                pass
         return p
 
     def create(self, reg, data: dict, by: str = "review") -> Proposal:
@@ -227,36 +281,56 @@ class ProposalStore:
         if unknown:
             raise ProposalError(f"not in the news list: {', '.join(unknown[:3])}")
         validate_edit(reg, p)
+        if p.kind == "profile":
+            hit = dismissed_cover(self.store, reg, p.news)
+            if hit:
+                raise ProposalError(f"every news item it cites was cited by {hit}, which an officer dismissed — propose it again only "
+                                    "when newer news says more (cite that item)")
         p.history.append({"state": "proposed", "by": by, "at": p.created_at, "note": None})
         return self.save(p, f"proposed: {p.title[:70]}")
 
     def move(self, pid: str, state: str, by: str, *, officer: bool, job: bool, by_id: int | None = None, commit: str | None = None,
-             note: str | None = None) -> Proposal:
-        """One state change — the one path for the card's buttons, the site, MCP and plain text (configops).
-        `officer`: approve/dismiss allowed; `job`: the apply job's steps (the owner's token). When several served guilds
-        run this guild's game version (`store.guilds`, the index discord_registry.Guilds attaches), approving a `profile`
-        proposal (an edit of the shared profiles/<version>/*.yaml, and a restart for everyone) needs the owner of every
-        one of them (design §14 K3); dismissing stays with the proposing guild's officers."""
+             note: str | None = None, owner: bool | None = None, recover: bool = False) -> Proposal:
+        """One state change — the one path for the card's buttons, the site, MCP and plain text (configops), all through
+        NewsMixin.decide_proposal. `officer`: approve/dismiss allowed; `job`: the apply job's steps (the bearer WITH the
+        X-Oibot-Job header) — a job never makes an officer's decision. Approving a `profile` proposal needs the OWNER
+        (`owner`, else `Registry.is_owner_id(by_id)` through the Guilds index the store carries), even of a lone guild
+        (design §3.4: it restarts the whole process); when several served guilds run this guild's game version, the
+        owner of every one of them (K3). Dismissing stays with the proposing guild's officers. Moving to the state it
+        already has raises AlreadyDecided (who decided, when). `recover`: the owner's "Mark as interrupted" — the one
+        job move a person makes (RECOVER_MOVE, applying → failed), only as the owner; the route checks the job isn't running."""
         if state not in STATES:
             raise ProposalError(f"state is one of {', '.join(STATES)}")
         with self.store.lock:
             p = self.get(pid)
             move = (p.state, state)
+            if p.state == state and state in ("approved", "dismissed"):
+                raise AlreadyDecided(p)
             if move in OFFICER_MOVES:
+                if job:
+                    raise PermissionError(JOB_NOT_OFFICER)
                 if not officer:
                     raise PermissionError("officers only")
             elif move in JOB_MOVES:
-                if not job:
+                if recover and move == RECOVER_MOVE:
+                    if not (owner if owner is not None else owner_of(self.store, self.key, by_id)):
+                        raise PermissionError("only the owner marks an apply run as interrupted")
+                elif not job:
                     raise PermissionError("only the apply job reports that")
             else:
                 raise ProposalError(f"{p.id} is {p.state}: it can't become {state}")
             if state == "approved" and p.kind == "needs_developer":
                 raise ProposalError("this one needs a developer: the apply job can't do it (dismiss it once it's handled)")
             if state == "approved" and p.kind == "profile":
-                why = shared_profile_refusal(getattr(self.store, "guilds", None), self.key, by_id)
+                why = shared_profile_refusal(getattr(self.store, "guilds", None), self.key, by_id)  # names the other guilds (K3)
                 if why:
                     raise PermissionError(why)
+                if not (owner if owner is not None else owner_of(self.store, self.key, by_id)):
+                    raise PermissionError(PROFILE_OWNER_ONLY)
+            if state == "approved" and owner_setting(p) and not (owner if owner is not None else owner_of(self.store, self.key, by_id)):
+                raise PermissionError(SETTING_OWNER_ONLY)
             p.state = state
+            p.status_note = None
             if state in ("approved", "dismissed"):
                 p.decided_by, p.decided_by_id, p.decided_at = by, by_id, now()
             if commit:
@@ -266,12 +340,72 @@ class ProposalStore:
             p.history.append({"state": state, "by": by, "at": now(), "note": (note or None) and note[:500]})
             return self.save(p, f"{state} (by {by})" + (f" @ {commit}" if commit else ""))
 
+    def annotate(self, pid: str, note: str | None, by: str) -> tuple[Proposal, bool]:
+        """The apply job's "waiting: Barrow Deeps raids until …" on the proposal, without moving it (design §3.4 X2's
+        annotate verb): one history row and `status_note`, so the card and the Agents page stop promising "within 15
+        minutes" for hours. The same note again writes nothing (the job polls every 15 minutes). None clears it.
+        Returns (proposal, written)."""
+        text = (note or "").strip()[:300] or None
+        with self.store.lock:
+            p = self.get(pid)
+            if p.status_note == text:
+                return p, False
+            p.status_note = text
+            p.history.append({"state": None, "by": by, "at": now(), "note": text})
+            return self.save(p, f"note: {(text or 'cleared')[:70]}"), True
+
+    def clear_card(self, p: Proposal) -> None:
+        """The card was deleted in Discord: forget its ids so the next update posts a fresh one."""
+        with self.store.lock:
+            cur = self.get(p.id)
+            cur.channel_id = cur.message_id = None
+            p.channel_id = p.message_id = None
+            self.save(cur, "card gone")
+
     def set_card(self, p: Proposal, channel_id: int, message_id: int) -> None:
         with self.store.lock:
             cur = self.get(p.id)  # the state may have moved while the card was being sent
             cur.channel_id, cur.message_id = channel_id, message_id
             p.channel_id, p.message_id = channel_id, message_id
             self.save(cur, "card posted")
+
+
+def restart_waiting(status: dict, key: str, pid: str) -> str | None:
+    """The apply job's committed-but-not-restarted profile edit for proposal `pid` of guild `key` (its status file's
+    `restart_pending`), in words — None when nothing waits for it. While it waits the proposal reads `applying` with no
+    job running, but it is NOT interrupted: the commit is on main and goes live at the next restart, so Mark as
+    interrupted is neither offered nor accepted for it."""
+    pending = (status or {}).get("restart_pending") or None
+    if not pending or str(pending.get("id") or "") != pid or (pending.get("guild") or key) != key:
+        return None
+    commit = pending.get("commit") or "?"
+    if pending.get("auto"):
+        return f"Committed {commit}; only the restart waits (raid guard or a busy bot) — it restarts at the next quiet poll."
+    return f"Committed {commit}; the bot was not restarted ({pending.get('why') or 'held'}) — restart it when convenient."
+
+
+def owner_setting(p) -> bool:
+    """A guild-setting proposal whose config op is the owner's (configops.OWNER_OPS: raid_set, aura_reset, …) — an
+    officer may not approve it, exactly as they may not write it on any other surface; the apply job re-checks the
+    approver before it applies (an officer could otherwise write one and approve it themselves)."""
+    if getattr(p, "kind", None) != "guild_setting":
+        return False
+    from .configops import OWNER_OPS
+
+    return str((getattr(p, "edit", None) or {}).get("op") or "") in OWNER_OPS
+
+
+def needs_owner(p) -> bool:
+    """Approving `p` is the owner's: a game-data (profile) edit or an owner-only guild setting."""
+    return getattr(p, "kind", None) == "profile" or owner_setting(p)
+
+
+def owner_of(store: GitStore, key: str, by_id: int | None) -> bool:
+    """Whether `by_id` owns guild `key` (its owner or a host superuser), through the Guilds index attached to the store;
+    False without one (an offline store: the caller passes `owner=` itself)."""
+    guilds = getattr(store, "guilds", None)
+    reg = getattr(guilds, "by_key", {}).get(key) if guilds is not None else None
+    return bool(reg is not None and by_id is not None and reg.is_owner_id(by_id))
 
 
 def same_profile_guilds(guilds, reg) -> list:
@@ -310,6 +444,31 @@ def shared_profile_refusal(guilds, key: str, by_id: int | None) -> str | None:
             "the owner of every guild on this game version approves it")
 
 
+def dismissed_cover(store: GitStore, reg, urls) -> str | None:
+    """The dismissed game-data proposal(s) whose cited news covers ALL of `urls` ("<id>" here, "<guild name>'s <id>"
+    for another guild on the same game profile — a profile edit is shared), or None. A new profile proposal citing only
+    news an officer already said no to is refused in code (design §3.4 OFF-14), not only by the review's prompt."""
+    want = {NewsStore.ident({"url": u}) for u in (urls or [])}
+    if not want:
+        return None
+    guilds = getattr(store, "guilds", None)
+    ordered = getattr(guilds, "ordered", None)
+    regs = [reg] + [o for o in (ordered() if ordered else []) if o.key != reg.key and o.config.game_profile == reg.config.game_profile]
+    seen: set[str] = set()
+    ids: list[str] = []
+    for r in regs:
+        for d in ProposalStore(store, r.key).all("dismissed"):
+            if d.kind != "profile":
+                continue
+            cited = {NewsStore.ident({"url": u}) for u in d.news} & want
+            if cited:
+                ids.append(d.id if r.key == reg.key else f"{r.config.name}'s {d.id}")
+                seen |= cited
+    if want <= seen:
+        return ", ".join(ids[:3])
+    return None
+
+
 def duplicate_profile_proposal(guilds, reg, data: dict) -> str | None:
     """`<guild key>/<proposal id>` of another guild's open (proposed/approved) profile proposal citing one of the same
     news items, when that guild runs the same game profile: a profile edit is shared, so one proposal is enough."""
@@ -326,7 +485,7 @@ def duplicate_profile_proposal(guilds, reg, data: dict) -> str | None:
     return None
 
 
-def decision_refusal(store: GitStore, reg, pid: str, state: str, by_id: int | None) -> str | None:
+def decision_refusal(store: GitStore, reg, pid: str, state: str, by_id: int | None, *, owner: bool | None = None, when=None) -> str | None:
     """Why an officer's Approve / Dismiss of `pid` would be refused right now, or None — the same checks `move` makes
     for an officer, read without writing, so the confirm screen refuses at once instead of after a press. `move` runs
     them again at the write (the state may move in between)."""
@@ -335,32 +494,120 @@ def decision_refusal(store: GitStore, reg, pid: str, state: str, by_id: int | No
         p = ps.get(pid)
     except ProposalError as e:
         return str(e)
+    if p.state == state and state in ("approved", "dismissed"):
+        return already_text(p, when)
     if (p.state, state) not in OFFICER_MOVES:
         return f"{p.id} is {p.state}: it can't become {state}"
     if state == "approved" and p.kind == "needs_developer":
         return "this one needs a developer: the apply job can't do it (dismiss it once it's handled)"
     if state == "approved" and p.kind == "profile":
-        return shared_profile_refusal(getattr(store, "guilds", None), reg.key, by_id)
+        why = shared_profile_refusal(getattr(store, "guilds", None), reg.key, by_id)
+        if why:
+            return why
+        if not (owner if owner is not None else (by_id is not None and reg.is_owner_id(by_id))):
+            return PROFILE_OWNER_ONLY
+    if state == "approved" and owner_setting(p) and not (owner if owner is not None else (by_id is not None and reg.is_owner_id(by_id))):
+        return SETTING_OWNER_ONLY
     return None
 
 
-def consequence(p: Proposal, reg, state: str, guilds=None) -> list[str]:
+def served_names(guilds, reg) -> list[str]:
+    """Every server the process serves (a profile approval restarts them all — one LaunchAgent), `reg`'s first."""
+    ordered = getattr(guilds, "ordered", None)
+    regs = list(ordered()) if ordered else []
+    return [str(reg.config.name)] + [str(r.config.name) for r in regs if r.key != reg.key]
+
+
+def edit_words(reg, p: Proposal) -> str:
+    """A guild-setting proposal's typed edit as the diff line (configops.describe), else the change in words."""
+    if p.kind == "guild_setting":
+        try:
+            from .configops import ConfigOp, describe
+
+            return describe(reg, ConfigOp.model_validate(p.edit))
+        except Exception:  # noqa: BLE001 — an edit the config no longer reads: the words the review wrote
+            pass
+    return p.change
+
+
+def consequence(p: Proposal, reg, state: str, guilds=None, *, busy: dict[str, dict] | None = None, next_run: str | None = None) -> list[str]:
     """What Approve / Dismiss does, in words, from the proposal's kind and state (dual interfaces §2.3; D34: Dismiss
-    gets the same screen). The Discord `decide` screen and the site print these lines; neither composes its own."""
+    gets the same screen). The Discord `decide` screen, the site's confirm and GET /api/proposals print these lines;
+    none composes its own. `busy`: {guild key: guild_busy(...)} for every served guild (a profile approval names each
+    one raiding: the job waits, D33); `next_run`: the apply job's next poll in words ('Tue 7:45 PM')."""
+    when = f"at its next run ({next_run})" if next_run else "at its next run (it polls every 15 minutes)"
     if state == "approved":
         if p.kind == "guild_setting":
-            return ["Approved: the apply job makes this guild setting within 15 minutes — no restart."]
+            return [f"Approved: the apply job carries it out {when}, no restart: {edit_words(reg, p)}."]
         if p.kind == "profile":
-            others = shared_profile_others(guilds, reg) if guilds is not None else []
-            who = f" for every server on this game version ({', '.join(others)} too)" if others else ""
-            return [f"Approved: within 15 minutes the apply job edits the game data file, runs the tests, commits and restarts the bot{who} — about two minutes."]
+            version = getattr(reg.base_profile, "name", None) or reg.config.game_profile
+            lines = [f"Claude edits the game data for {version}, the tests run, and the bot restarts for every server it serves "
+                     f"({', '.join(served_names(guilds, reg))}) for about two minutes — {when}."]
+            ordered = getattr(guilds, "ordered", None)
+            for r in (list(ordered()) if ordered else [reg]):
+                b = (busy or {}).get(r.key) or {}
+                if b.get("raiding"):
+                    lines.append(f"⚠ {r.config.name} has a run right now ({b.get('why') or 'raid time'}) — the job will wait until it is over.")
+            return lines
         return ["This one needs a developer: the apply job can't do it."]
+    if state == "interrupted":
+        return ["Marks it failed: the apply run that held it is gone (nothing is committed, restarted or reverted by this); "
+                "approve it again to retry."]
     if state == "dismissed":
-        lines = ["Dismissed: nothing changes, and the review won't propose it again unless newer news says more."]
+        lines = ["Dismissed: nothing changes, and the review is told not to propose it again unless newer news says more."]
+        if p.kind == "profile":
+            lines[0] = "Dismissed: nothing changes, and a game-data proposal citing only this news is refused from now on (newer news can say more)."
         if p.state == "approved":
             lines.insert(0, "This withdraws the approval before the job picks it up.")
         return lines
     return []
+
+
+def guild_busy(reg, runs, loot_runs=(), now: datetime | None = None) -> dict:
+    """D33's raid guard for one guild: {raiding, until (ISO or None), until_label, why} from its live runs (test runs
+    never count) — a LOCKED run from BUSY_LOCKED_HOURS before its start until it closes (rc.run_close_at), an OPEN run
+    from BUSY_OPEN_HOURS before its start — and every live loot council on its own (`loot_runs`: the live sessions, or
+    their run keys): from its run's 4-hour window on, a council counts whatever its run's state and however far past
+    the scheduled close it runs (D10
+    ends one only past close + 30 min idle), so a restart never cuts into one; a test run's council never counts.
+    Computed on demand by the bot (GET /api/guilds carries it per guild); the apply job defers a restart while any
+    guild is busy."""
+    from . import raidcycle as rc
+
+    now = now or datetime.now(timezone.utc)
+    by_key = {ev.key: ev for ev in runs}
+    hits: list[tuple[datetime, str]] = []
+    councils: set[str] = set()
+    for s in loot_runs or ():
+        key = s if isinstance(s, str) else getattr(s, "run_key", None)
+        if not key or key in councils:
+            continue
+        ev = by_key.get(key)
+        if getattr(s, "test", False) or getattr(ev, "test", False):
+            continue
+        if ev is not None and now < ev.start - timedelta(hours=BUSY_LOCKED_HOURS):
+            continue  # a council opened days early is not raid time yet (the run's own window starts 4 h before)
+        councils.add(key)
+        inst = getattr(ev, "instance", None) or getattr(s, "instance", None)
+        name = reg.raid_def(inst).get("name", inst) if inst else (getattr(ev, "team", None) or key)
+        until = now + timedelta(minutes=BUSY_LOOT_MIN)
+        if ev is not None:
+            until = max(until, rc.run_close_at(reg, ev))
+        hits.append((until, f"{name}: the loot council is open"))
+    for ev in runs:
+        if getattr(ev, "test", False) or ev.state not in ("open", "locked") or ev.key in councils:
+            continue
+        start, end = ev.start, rc.run_close_at(reg, ev)
+        name = reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else ev.team
+        if ev.state == "locked" and start - timedelta(hours=BUSY_LOCKED_HOURS) <= now <= end:
+            hits.append((end, f"{name} {reg.local12(start)} is locked"))
+        elif ev.state == "open" and start - timedelta(hours=BUSY_OPEN_HOURS) <= now <= end:
+            hits.append((end, f"{name} {reg.local12(start)} starts within the hour"))
+    if not hits:
+        return {"raiding": False, "until": None, "until_label": "", "why": ""}
+    until = max(t for t, _ in hits)
+    return {"raiding": True, "until": until.astimezone(timezone.utc).isoformat(timespec="seconds"), "until_label": reg.local12(until),
+            "why": "; ".join(w for _, w in hits)}
 
 
 def validate_edit(reg, p: Proposal) -> None:
