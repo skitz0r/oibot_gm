@@ -744,6 +744,10 @@ class SetupMixin:
             if ops is not None:
                 level = "error" if any(k in REQUIRED_KINDS for k in fresh) else "warn"
                 await ops.emit(reg.config, level, "Channel check: " + " · ".join(fresh.values()) + " — /gm config channels or the Config page fixes it.")
+                if "ops" in fresh and getattr(ops, "known", None) is not None:  # the posts that fail next say the same thing: no second DM
+                    from .ops import OPS_CHANNEL_SIG
+
+                    ops.known(reg.key, OPS_CHANNEL_SIG)
         return problems
 
     async def setup_tick(self, now: float | None = None) -> None:

@@ -1035,3 +1035,40 @@ def test_dm_routing_reads_a_fresh_membership_and_evidence_beats_the_cache(duo, m
     assert keys() == [GUILD2], "inside the routing window the 404 still stands…"
     stub.saw_member(1, types.SimpleNamespace(id=42))  # …until they post or press something in that server
     assert keys() == [GUILD, GUILD2]
+
+
+def test_a_process_wide_failure_dms_each_guilds_own_error_targets_once(duo):
+    """Regression (final review): the dedupe was on owner_discord_id while alerts go to error_dm_ids — two guilds with one
+    owner but different errors-to lists left the second list unalerted; two owners routing errors to one superuser DMed
+    that superuser twice."""
+    dms = []
+
+    class Client:
+        registries = duo.guilds
+
+        def get_channel(self, cid):
+            return None
+
+        def get_user(self, uid):
+            class U:
+                async def send(self, text):
+                    dms.append(uid)
+            return U()
+
+    async def broken():
+        raise RuntimeError("feed gone")
+    duo.b.config.owner_discord_id = OWNER
+    duo.a.config.error_dm_ids, duo.b.config.error_dm_ids = [11], [22]
+    bot = TickBot(duo.guilds)
+    bot.ops = ops_mod.Ops(Client())
+    bot.companion_check = broken
+    run(bot.scheduler_tick())
+    assert sorted(dms) == [11, 22], "same owner, different error targets: each list hears it"
+    dms.clear()
+    duo.b.config.owner_discord_id = OWNER + 1
+    duo.a.config.error_dm_ids, duo.b.config.error_dm_ids = [33, 11], [33, 22]
+    bot = TickBot(duo.guilds)
+    bot.ops = ops_mod.Ops(Client())
+    bot.companion_check = broken
+    run(bot.scheduler_tick())
+    assert sorted(dms) == [11, 22, 33], "the shared target once"

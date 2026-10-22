@@ -364,3 +364,32 @@ def test_no_free_typed_date_or_time_field_on_the_site():
     assert not typed, f"free-typed date / time fields: {typed}"
     absences = (src / "components" / "AbsencesModal.tsx").read_text()
     assert "DatePickerInput" in absences and "withinPortal: false" in absences, "picked in the modal, its popover kept inside it"
+
+
+def test_mcp_application_decisions_need_the_actor_header(w):
+    """Regression (final review, D8): the bare MCP token accepted or declined an application — the applicant's DM and
+    the audit line read as the owner, who never decided. Now POST /api/admin/application/decide and the `application`
+    op through /api/ops/change refuse it without X-Oibot-Actor; MCP decide_application sends the actor."""
+    import inspect
+
+    from oibot_gm import mcp_server as ms
+
+    decided = []
+
+    async def decide_application(reg, uid, accept, by, note=None, by_id=None, via="discord"):
+        decided.append((uid, accept, by, via))
+        reg.decide(uid, accept, by, note)
+        return f"application {'accepted' if accept else 'declined'}"
+    w.bot.decide_application = decide_application
+    spec = next(iter(w.reg.profile.classes["Priest"]))
+    w.reg.apply(500_000_000_000_000_011, "discAna", "Ana", "Priest", spec, None, None, None, None)
+    r = w.c.post("/api/admin/application/decide", json={"uid": "500000000000000011", "accept": False}, headers=H)
+    assert r.status_code == 403 and "X-Oibot-Actor" in r.json()["error"] and not decided
+    r = w.c.post("/api/ops/change", json={"ops": [{"op": "application", "target": "500000000000000011", "value": "decline"}], "apply": True,
+                                          "confirmed": True}, headers=H)
+    assert not r.json().get("applied") and any("application decision" in x for x in r.json().get("refused", [])), r.text
+    assert not decided and w.reg.applicants[500_000_000_000_000_011].status == "open"
+    r = w.c.post("/api/admin/application/decide", json={"uid": "500000000000000011", "accept": False}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
+    assert r.status_code == 200, r.text
+    assert decided and decided[0][3] == "mcp"
+    assert "actor=True" in inspect.getsource(ms.decide_application)

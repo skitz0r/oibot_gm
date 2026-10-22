@@ -54,7 +54,9 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
   another, and the Ops page shows how many were folded in. `/gm config errors-to member: [remove:] [reset:]` (or
   **Change who** on the Config page's Setup card: the owner, these people, or nobody) picks who
   gets them (the owner by default; several people, or nobody — then errors stay in the ops channel); errors only, never
-  info or warnings. If the bot can't post in the ops channel three times in a row, that is itself an error alert.
+  info or warnings. If the bot can't post in the ops channel three times in a row, that is itself an error alert — once
+  per 30 minutes however often it flaps, never while Discord has the server in an outage, and not again when the hourly
+  channel check already reported that channel.
 - **Applications channel** — one review card per application (§3a) with Accept / Decline… buttons (they keep
   working after a bot restart).
 - **Loot channel (the public loot log)** — one line per recorded award (item → character · boss), with an **Add to my
@@ -629,7 +631,7 @@ run: *"Joining was the commitment — nobody is asked to confirm."* — then **D
 very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would
 not send. Tables (Me, Members, Raids, Auras)
 share one edit mode: an Edit button in the header, then a footer with any reset far left and *Cancel* / *Save changes*
-on the right. Config saves each field as you change it and marks it *✓ saved*. **How much a Save asks depends on what it
+on the right. Config's **Channels** card is an edit mode too (**Edit**, then one Save, reviewed like any other); the other Config fields save as you change them and mark it *✓ saved*. **How much a Save asks depends on what it
 does** (the same rule on every surface): a routine, reversible edit (a note, a status, a strength, an hour) saves at once
 and the toast says what happened — *"2 saved"*, or *"1 saved, 1 refused"*, never a bare "saved". A change that moves
 where things post or who counts — a channel, the timezone, an officer role, a schedule removed or paused, a buff's scope
@@ -829,7 +831,7 @@ someone with Manage Server) runs `/gm config owner`: a short screen shows the se
 picked from it (it never changes; the site and MCP use it), the game version (WoW: Forever unless you pick another) and
 the owner (you, or pick someone). Nothing is saved until **Confirm**; then the server is a guild of its own — empty:
 its own members, raids, schedules, policy and settings — and you continue with the channels below. When the bot is
-**added** to a server that isn't a guild yet, the host's superusers (or, with none configured, every guild owner) get
+**added** to a server that isn't a guild yet, the host's superusers (or, with none configured, the owner of the one guild it serves — with several guilds and no superusers nobody is DMed: the process log and the Host card carry it) get
 one DM: *"I was added to X. It isn't a guild yet — `/gm config owner` there claims it. Missing permissions: …"*. When
 the bot is **removed** from a guild's server, that guild is **parked**: nothing opens, no DMs go out, the site and the
 DM server picker no longer list it (the host still sees it on the Config page's **Host** card, in `/gm status` and in
@@ -1284,7 +1286,8 @@ Members can be named by display name, character name or Discord id; runs by key,
 name when it has one live run. An ambiguous name comes back with the candidates instead of a guess.
 
 **Decisions are a named officer's (D8).** A decision about an award — confirming, overriding, a reason, a correction,
-retiring a precedent, tiers, someone's wishlist — or about a person — a member's rank, confirming a character — is never
+retiring a precedent, tiers, someone's wishlist — or about a person — a member's rank, confirming a character, accepting
+or declining an application — is never
 "the owner's token": those tools send `X-Oibot-Actor` with
 `OIBOT_MCP_ACTOR` from `.env` (the Discord id of the officer at the keyboard), the bot checks that id is an officer (or
 the owner) of the chosen server right then, and acts as that person: the record and the ops line read *"Mira via MCP"*.
@@ -1296,8 +1299,9 @@ change is logged under the owner's own display name with an `[mcp]` prefix (`[mc
 the word "mcp" is never the name on a record. Keep `OIBOT_MCP_TOKEN` private — it is as sensitive as the bot token — and never
 put it in `.mcp.json` or a commit. **Local only** (on by default): the bot accepts the token only from a call made on
 the machine it runs on, which is where the MCP server runs. The same token arriving from anywhere else, through the
-public site's tunnel included, is refused as if it were wrong, and the bot writes an **error** to the ops channel —
-which DMs the owner (once per 30 minutes) — never the token itself, because it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (then restart the bot) lets it work
+public site's tunnel included, is refused as if it were wrong, and the bot DMs the **host** (the superusers in
+`OIBOT_SUPERUSERS`, or the owner when it serves one guild; once per 30 minutes) and writes it to its log — never the
+token itself, and never a guild's ops channel — because it means the token has leaked: rotate it. `OIBOT_MCP_LOCAL_ONLY=0` in `.env` (then restart the bot) lets it work
 remotely too; leave it on unless you run the MCP server on another machine. Browser logins are unaffected. Ask for a preview first (`propose_split`, `fill_seats` without send,
 `plain_change` without apply) and read the returned line back: it says what actually happened. There is no tool
 for handing the guild to a new owner, by design: the token *is* the owner, so a transfer through it would give the

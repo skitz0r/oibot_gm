@@ -559,8 +559,13 @@ async def assign_member_role(client, reg: Registry, discord_id: int) -> str | No
         return f"they already have @{role.name}"
     try:
         await member.add_roles(role, reason=f"oibot_GM: application accepted ({reg.config.name})")
-    except Exception as e:  # noqa: BLE001
-        return f"couldn't give them @{role.name}: {type(e).__name__}"
+    except discord.Forbidden:  # a role-hierarchy race, or Manage Roles taken away meanwhile
+        return f"couldn't give them @{role.name}: the bot isn't allowed to give that role (add it by hand)"
+    except Exception as e:  # noqa: BLE001 — words for the officer (§2.7: never a type name); the error to the ops channel / log
+        from .configops import report_error
+
+        await report_error(getattr(client, "ops", None), reg.config, e, "giving the member role")
+        return f"couldn't give them @{role.name}: something went wrong (add it by hand)"
     return f"gave them @{role.name}"
 
 

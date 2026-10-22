@@ -2369,7 +2369,7 @@ restarts: the loader puts a stamped guild in `Guilds.detached`, not `by_discord`
 serves it again; `detached_list()` for the host; `claim_refusal` refuses a parked server. `RaidMixin.send_member_card`
 sends nothing for a detached guild, so its runs' pending asks stop. `OibotGM.on_guild_remove` (guarded by
 `guild.unavailable`: an outage parks nothing) detaches + one ops ERROR line; `on_guild_join` re-attaches a parked guild or
-DMs the host ONE line (`host_ids`: the superusers, else every guild owner — the host must act; the only DM here):
+DMs the host ONE line (`host_ids`: the superusers, else the owner of a LONE served guild, else nobody — only the host can act; the only DM here):
 "I was added to X. It isn't a guild yet — `/gm config owner` there claims it. Missing permissions: …"; `on_guild_available`
 re-attaches (startup included). `claim_guild` adds an ops line to every OTHER guild's ops channel (D44: no owner DM; the
 superusers' security DM stays). The web's server switch stays a full reload: `hooks/useDirty.ts` (`useDirty(key, on)`,
@@ -2456,6 +2456,19 @@ which adds `host_summary` (who gets the error alerts, the superusers by mention,
 Not in this part: the Settings edit mode's own `error_dm_ids` field (G1b — the Setup card edits it meanwhile), the Agents
 page's MCP card data (G2; the Host card renders what `/api/agents.mcp` holds), the Discord recruitment hub's channel pick
 for an invite (the hub keeps the typed link).
+
+**Final review fixes.** (1) D8: `configops.people_needs_actor` covers the `application` op, so `mcp_actor_rule` drops
+it without X-Oibot-Actor; POST /api/admin/application/decide answers 403 (`api_loot.ACTOR_NEEDED`) for a bare bearer;
+MCP `decide_application` sends the actor. (2) `OibotGM.host_ids()`: the superusers, else the owner of a LONE served
+guild, else nobody — `on_guild_join` never DMs another guild's owner about a server they can't act on (the log and the
+Host card carry it). (3) `report_leak` → `Ops.host_alert(host_ids, "mcp-leak", text)`: the host only, once per
+ERROR_WINDOW_S, the process log; no guild ops line, and the request's X-Oibot-Guild picks nobody. (4) The ops-channel
+failure DM goes through `_alert(…, sig=OPS_CHANNEL_SIG)` (one per 30 min per guild however it flaps); a post to a channel
+whose server is `unavailable` is not counted; `check_channel_perms` reporting the ops channel calls `Ops.known(key,
+OPS_CHANNEL_SIG)` so the failing posts that follow are folded. (5) `_tick_failed` dedupes on each guild's
+`error_targets` (`Ops.emit(dm_only=)` DMs only the targets not yet told). (6) `assign_member_role`: Forbidden → "the bot
+isn't allowed to give that role (add it by hand)", anything else → `report_error` + "something went wrong" — never a
+type name in the verdict.
 
 ## 6. Architecture
 

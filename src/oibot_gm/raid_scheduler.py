@@ -34,8 +34,9 @@ class RaidSchedulerMixin:
         return self.__dict__.setdefault("_tick_error_by_guild", {})
 
     async def _tick_failed(self, reg, e: BaseException) -> None:
-        """A guild's tick failed: report it to THAT guild (ops line + its owner's DM), once per distinct text. A failure
-        outside the guild loop (reg None) goes to every guild's ops channel; each distinct owner is DMed once."""
+        """A guild's tick failed: report it to THAT guild (ops line + its error targets' DM), once per distinct text. A
+        failure outside the guild loop (reg None) goes to every guild's ops channel; each distinct error target (each
+        guild's error_dm_ids, default its owner) is DMed once."""
         text = f"scheduler tick failed: {type(e).__name__}: {e}"
         log.exception("scheduler tick failed for %s", reg.key if reg is not None else "the process", exc_info=e)
         errors = self._tick_errors()
@@ -43,16 +44,21 @@ class RaidSchedulerMixin:
         if errors.get(slot) == text:
             return
         errors[slot] = text
+        from .ops import error_targets
+
         targets = [reg] if reg is not None else self.registries.ordered()
         dmed: set[int] = set()
-        for r in targets:
-            owner = r.config.owner_discord_id
+        for r in targets:  # each guild's OWN error targets (error_dm_ids), each person DMed once for one failure
+            mine = set(error_targets(r.config))
+            new = mine - dmed
             try:
-                if owner in dmed:
+                if not new:
                     await self.ops.emit(r.config, "error", text, e, dm=False)
-                else:
+                elif new == mine:
                     await self.ops.emit(r.config, "error", text, e)
-                dmed.add(owner)
+                else:
+                    await self.ops.emit(r.config, "error", text, e, dm_only=new)
+                dmed |= new
             except Exception:  # noqa: BLE001
                 log.warning("ops emit failed for the scheduler error (%s)", r.key)
 

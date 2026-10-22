@@ -417,18 +417,23 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
 
     # ---- the bot added to / removed from servers (design §3.5 O-01 / S-05 / S-06; §5.44)
     def host_ids(self) -> list[int]:
-        """Who the host-facing DMs go to: the superusers (OIBOT_SUPERUSERS — they run the bot), else, with none configured,
-        every served guild's owner (someone must learn the bot was added somewhere)."""
+        """Who the host-facing DMs go to: the superusers (OIBOT_SUPERUSERS — they run the bot). With none configured, the
+        owner of the ONE guild the process serves (effectively the host); with several and no superusers, nobody — a
+        guild's owner can't act on another server, its .env or its invite (the DM rule): the process log carries it."""
         ids = sorted(superusers())
         if ids:
             return ids
-        return sorted({int(r.config.owner_discord_id) for r in self.registries.ordered() if r.config.owner_discord_id})
+        regs = list(self.registries.ordered())
+        if len(regs) == 1 and regs[0].config.owner_discord_id:
+            return [int(regs[0].config.owner_discord_id)]
+        return []
 
     async def on_guild_join(self, guild) -> None:
         """Added to a server. A server whose guild was parked (the bot was removed, now back) is served again at once.
         Otherwise ONE DM to the host (host_ids): it isn't a guild yet — `/gm config owner` there claims it — and the
         server-wide permissions the invite should have given and didn't (perms.missing_for). The host must act (claim it
-        or remove the bot), so the DM rule allows it; nobody else is told."""
+        or remove the bot), so the DM rule allows it; nobody else is told (no superusers and several guilds: the process
+        log and the Host card's list of servers that aren't guilds only)."""
         from . import perms
 
         perms.CLIENT = self
@@ -440,7 +445,10 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         name = discord.utils.escape_markdown(str(getattr(guild, "name", guild.id)))
         text = (f"🆕 I was added to **{name}**. It isn't a guild yet — `/gm config owner` there claims it."
                 + (f" Missing permissions: {perms.words(missing)} — re-invite me with the link on the Config page's Host card." if missing else " Permissions: all there."))
-        for uid in self.host_ids():
+        hosts = self.host_ids()
+        if not hosts:
+            log.warning("added to server %s (%s), not a guild yet; no OIBOT_SUPERUSERS to tell", getattr(guild, "name", "?"), guild.id)
+        for uid in hosts:
             try:
                 user = self.get_user(uid) or await self.fetch_user(uid)
                 await user.send(text[:1990])

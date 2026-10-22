@@ -936,7 +936,8 @@ def list_applications(guild: Guild = None) -> dict:
 def decide_application(member: str, accept: bool, note: str | None = None, guild: Guild = None) -> str:
     """Accept or decline an OPEN application (officer verdict, same as the Discord card's buttons: the applicant is
     DMed and, on accept, their character is added). `member`: the applicant's Discord name, character name or id.
-    `note` goes to the applicant with the verdict. Look at list_applications first."""
+    `note` goes to the applicant with the verdict. Look at list_applications first. Needs OIBOT_MCP_ACTOR (the officer
+    deciding, D8): the owner's token alone is refused."""
     opens = api(guild).get("/api/applications").get("open", [])
     raw = str(member).strip().strip("<@!>")
     n = raw.lower()
@@ -950,7 +951,7 @@ def decide_application(member: str, accept: bool, note: str | None = None, guild
     body: dict[str, Any] = {"uid": hit[0]["uid"], "accept": bool(accept)}
     if note:
         body["note"] = note
-    return msg(api(guild).post("/api/admin/application/decide", body))
+    return msg(api(guild).post("/api/admin/application/decide", body, actor=True))  # D8: a named officer's verdict
 
 
 # ---------------------------------------------------------------- news review (design §5.26)

@@ -478,7 +478,11 @@ def test_on_guild_join_dms_the_host_once_with_missing_permissions(duo, monkeypat
     monkeypatch.setenv("OIBOT_SUPERUSERS", "")
     bot.dms.clear()
     run(bot.on_guild_join(FakeGuild(10, "Other")))
-    assert sorted(u for u, _ in bot.dms) == sorted({duo.a.config.owner_discord_id, duo.b.config.owner_discord_id}), "no superusers: every guild owner"
+    # regression (final review): no superusers used to DM EVERY guild's owner about a server they can't act on (DM rule)
+    assert bot.dms == [], "no superusers and several guilds: nobody is DMed (the log and the Host card carry it)"
+    lone = EventsBot(Guilds.of(duo.a.store, duo.a))
+    run(lone.on_guild_join(FakeGuild(11, "Third")))
+    assert [u for u, _ in lone.dms] == [duo.a.config.owner_discord_id], "one guild: its owner is effectively the host"
 
 
 def test_on_guild_remove_detaches_but_an_outage_does_not(duo):
@@ -593,6 +597,36 @@ def test_an_ops_channel_the_bot_cant_post_in_alerts_after_three_tries(reg):
     assert o.ops_channel_failing(GUILD) == 0
 
 
+def test_a_flapping_ops_channel_is_one_dm_per_window(reg):
+    """Regression (final review): one good post reset the guard, so fail ×3 / ok / fail ×3 DMed again and again; an
+    outage counted as a permissions problem; the hourly check's report and the post failures were two DMs."""
+    c = AlertClient()
+    o = ops_mod.Ops(c)
+    reg.config.ops_channel_id = 50
+    for _ in range(2):
+        c.chan = None
+        for i in range(3):
+            run(o.emit(reg.config, "info", f"line {i}"))
+        c.chan = Chan(50, "ops", FakeGuild())
+        run(o.emit(reg.config, "info", "back"))
+    assert len(c.sent) == 1, "the second streak inside 30 minutes edits the first DM"
+    # an outage: the server is unavailable — not counted, no DM
+    o2 = ops_mod.Ops(AlertClient())
+    c2 = o2.client
+    down = FakeGuild()
+    down.unavailable = True
+    c2.chan = Chan(50, "ops", down)
+    for i in range(5):
+        run(o2.emit(reg.config, "info", f"line {i}"))
+    assert c2.sent == [] and o2.ops_channel_failing(GUILD) == 0
+    # the hourly check already reported the ops channel: the failing posts that follow are folded into it
+    o3 = ops_mod.Ops(AlertClient())
+    o3.known(GUILD, ops_mod.OPS_CHANNEL_SIG)
+    for i in range(4):
+        run(o3.emit(reg.config, "info", f"line {i}"))
+    assert o3.client.sent == []
+
+
 def test_error_dms_through_configops(reg):
     ops = configops.ops_from_fields(reg, "settings", None, {"error_dm_ids": ["11", 22]})
     assert ops[0].path == "error_dms" and ops[0].value == "<@11>, <@22>"
@@ -609,15 +643,36 @@ def test_error_dms_through_configops(reg):
         configops.ops_from_fields(reg, "settings", None, {"error_dm_ids": "11"})
 
 
-def test_leaked_mcp_token_is_an_ops_error(reg, rs, monkeypatch):
+def test_leaked_mcp_token_alerts_the_host_only(reg, rs, monkeypatch):
+    """Regression (final review): the leak alert went to the guild named by the request's own X-Oibot-Guild header (or
+    every guild) — its owner DMed to rotate a .env they can't touch, its officers reading the caller's IP in the ops
+    channel, the host maybe never told. Now: the host (host_ids), throttled, and no guild ops line."""
     from test_mcp import FakeBot
 
     monkeypatch.setenv(web.MCP_TOKEN_ENV, TOKEN)
     bot = FakeBot(reg, rs)
+    alerts = []
+
+    async def host_alert(ids, sig, text):
+        alerts.append((list(ids), sig, text))
+    bot.ops.host_alert = host_alert
+    bot.host_ids = lambda: [SUPER]
     c = TestClient(web.create_app(bot), client=("203.0.113.9", 4000))
-    r = c.get("/api/meta", headers={"Authorization": f"Bearer {TOKEN}", "cf-connecting-ip": "203.0.113.9"})
+    r = c.get("/api/meta", headers={"Authorization": f"Bearer {TOKEN}", "cf-connecting-ip": "203.0.113.9", "X-Oibot-Guild": reg.key})
     assert r.status_code == 401
-    assert any(lvl == "error" and "the token has leaked" in t for lvl, t in bot.ops.lines) and TOKEN not in str(bot.ops.lines)
+    assert [(a[0], a[1]) for a in alerts] == [([SUPER], "mcp-leak")] and "the token has leaked" in alerts[0][2] and TOKEN not in alerts[0][2]
+    assert bot.ops.lines == [], "no guild's ops channel (its officers) and no guild error targets"
+
+
+def test_host_alert_is_one_dm_per_window(reg):
+    c = AlertClient()
+    o = ops_mod.Ops(c)
+    run(o.host_alert([SUPER], "mcp-leak", "leak 1"))
+    run(o.host_alert([SUPER], "mcp-leak", "leak 2"))
+    assert [u for u, _ in c.sent] == [SUPER]
+    o._alerts[("", "host|mcp-leak")]["at"] -= ops_mod.ERROR_WINDOW_S + 1
+    run(o.host_alert([SUPER], "mcp-leak", "leak 3"))
+    assert len(c.sent) == 2
 
 
 # ---------------------------------------------------------------- applications
@@ -712,6 +767,37 @@ def test_accept_gives_the_member_role_when_the_bot_can(reg):
     line = run(settle_application(RoleBot(FakeGuild()), reg, b.discord_id, True, "Jon", None))
     assert "the bot needs Manage Roles" in line, "without Manage Roles it says so; the acceptance stands"
     assert reg.applicants[b.discord_id].status == "accepted"
+
+
+def test_a_failed_role_grant_says_words_never_a_type_name(reg):
+    """Regression (final review, §2.7): add_roles failing put 'Forbidden' / 'HTTPException' in the Accept verdict."""
+    import discord as d
+
+    from oibot_gm.discord_registry import assign_member_role
+
+    g = FakeGuild(**{**ALL, "manage_roles": True})
+    resp = types.SimpleNamespace(status=403, reason="Forbidden")
+
+    class Denied:
+        roles: list = []
+
+        async def add_roles(self, role, reason=None):
+            raise d.Forbidden(resp, "Missing Permissions")
+
+    class Broken(Denied):
+        async def add_roles(self, role, reason=None):
+            raise d.HTTPException(types.SimpleNamespace(status=500, reason="Server Error"), "oops")
+    reg.set_recruitment("t", member_role_ids=[66])
+    g.members[1] = Denied()
+    g.members[2] = Broken()
+    bot = RoleBot(g)
+    a = run(assign_member_role(bot, reg, 1))
+    b = run(assign_member_role(bot, reg, 2))
+    assert a == "couldn't give them @Member: the bot isn't allowed to give that role (add it by hand)"
+    assert b == "couldn't give them @Member: something went wrong (add it by hand)"
+    for text in (a, b):
+        assert "Forbidden" not in text and "HTTPException" not in text
+    assert any(lvl == "error" for _k, lvl, *_ in bot.ops.lines), "the unexpected one is an ops error for the owner"
 
 
 def test_the_application_verdict_is_one_audit_line(reg):

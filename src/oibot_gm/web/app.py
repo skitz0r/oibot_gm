@@ -290,24 +290,30 @@ def mcp_authorized(request, token: str | None, bot=None) -> bool:
 
 
 def report_leak(bot, request, where: str) -> None:
-    """The right MCP token arrived from outside this host: the token is out. An ops ERROR line in the guild the request
-    named (X-Oibot-Guild), else every served guild — each guild's error alert DMs its error_dm_ids once per 30 min
-    (ops.Ops.emit's throttle). Never the token itself."""
+    """The right MCP token arrived from outside this host: the token is out. The token is the HOST's and only the host
+    can rotate it in .env, so the alert DMs the host (`bot.host_ids()`: the superusers, else a lone guild's owner) —
+    throttled per 30 min (Ops.host_alert) — and the process log. Never a guild's ops channel or its error targets, and
+    nothing from the request (X-Oibot-Guild comes from the untrusted caller) picks who hears it. Never the token."""
     ops = getattr(bot, "ops", None)
-    guilds = getattr(bot, "registries", None)
-    if ops is None or guilds is None:
+    if ops is None or getattr(ops, "host_alert", None) is None:
+        log.error("MCP token used from outside this machine (%s) and refused", where)
         return
-    ref = (request.headers.get(GUILD_HEADER) or "").strip()
-    named = guilds.get(ref) if ref and hasattr(guilds, "get") else None
-    targets = [named] if named is not None else list(guilds.ordered())
-    text = (f"the MCP owner token was used from outside this machine ({where}) and refused — the token has leaked: rotate OIBOT_MCP_TOKEN in "
-            ".env on the host and restart the bot")
+    hosts = getattr(bot, "host_ids", None)
+    ids = list(hosts()) if hosts is not None else sorted(superusers_of())
+    text = (f"✖ The MCP owner token was used from outside this machine ({where}) and refused — the token has leaked: rotate "
+            "OIBOT_MCP_TOKEN in .env on the host and restart the bot.")
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
+        log.error("%s", text)
         return
-    for reg in targets:
-        loop.create_task(ops.emit(reg.config, "error", text))
+    loop.create_task(ops.host_alert(ids, "mcp-leak", text))
+
+
+def superusers_of() -> set[int]:
+    from ..registry import superusers
+
+    return set(superusers())
 
 
 def guild_list_words(bot) -> str:

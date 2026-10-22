@@ -71,7 +71,8 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
                                  "X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
         people = [op for op in keep if not people_needs_actor(op)]
         if len(people) != len(keep):  # D8: a rank or a character's confirmation is a decision about a person
-            refused = [*refused, "A rank or a confirmation from MCP needs the X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
+            refused = [*refused, "A rank, a confirmation or an application decision from MCP needs the X-Oibot-Actor header naming an officer of "
+                                 "this guild (OIBOT_MCP_ACTOR)."]
         return people, refused
 
     def warm_roles(reg) -> None:

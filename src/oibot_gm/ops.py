@@ -52,6 +52,7 @@ async def audited(ops, reg, by: str, line: str, via: str = "discord", level: str
 
 ERROR_WINDOW_S = 30 * 60  # one error alert per (guild, error signature) per window (D46)
 OPS_FAIL_ALERT = 3  # consecutive failed posts to the ops channel before the error alert says so (design §3.4 X3)
+OPS_CHANNEL_SIG = "ops-channel"  # the throttle signature of "I can't post in the ops channel" (and the hourly check's report of it)
 
 
 def error_signature(text: str, exc: BaseException | None = None) -> str:
@@ -104,10 +105,10 @@ class Ops:
         """The audit line of an action a person took, to the guild's ops channel, ring and log (the module's `audited`)."""
         return await audited(self, reg, by, line, via=via, level=level, by_id=by_id)
 
-    async def emit(self, cfg, level: str, text: str, exc: BaseException | None = None, dm: bool = True) -> None:
+    async def emit(self, cfg, level: str, text: str, exc: BaseException | None = None, dm: bool = True, dm_only: set[int] | None = None) -> None:
         """One ops line: the guild's ops channel, its ring, the process log; an error also alerts the guild's error_dm_ids
-        (default the owner) — throttled per error signature (`dm` False: not this time — a process-wide failure DMs each
-        distinct owner once)."""
+        (default the owner) — throttled per error signature (`dm` False: not this time; `dm_only`: only these of the
+        guild's error targets — a process-wide failure DMs each distinct error target once)."""
         key = getattr(cfg, "key", None) or "?"
         stamp = datetime.now(ZoneInfo(getattr(cfg, "timezone", "UTC"))).strftime("%I:%M %p").lstrip("0")  # guild time
         line = f"{LEVEL_ICON.get(level, '•')} `{stamp}` {text}"
@@ -121,7 +122,7 @@ class Ops:
         if cfg.ops_channel_id:
             await self._post(cfg, key, line)
         if level == "error" and dm:
-            await self._alert(cfg, key, stamp, line, text, exc)
+            await self._alert(cfg, key, stamp, line, text, exc, only=dm_only)
 
     async def _post(self, cfg, key: str, line: str) -> None:
         """The line in the ops channel; the third failure in a row alerts the error_dm_ids once per streak (an ops channel
@@ -132,6 +133,8 @@ class Ops:
             return  # the gateway isn't up yet (startup): not a failure of the channel
         if ch is None:
             err = "the bot can't see that channel (deleted, or no View Channel)"
+        elif getattr(getattr(ch, "guild", None), "unavailable", False):
+            return  # the server is in an outage: nothing is wrong with the channel's permissions, and nothing to count
         else:
             try:
                 await ch.send(line[:1900])
@@ -147,17 +150,43 @@ class Ops:
             self._fail_alerted.add(key)
             text = (f"✖ I can't post in the ops channel <#{cfg.ops_channel_id}> ({n} tries in a row: {err[:200]}). Give the bot View Channel, "
                     "Send Messages and Embed Links there, or pick another with `/gm config ops-channel`.")
-            await self._dm_all(cfg, key, text)
+            stamp = datetime.now(ZoneInfo(getattr(cfg, "timezone", "UTC"))).strftime("%I:%M %p").lstrip("0")
+            await self._alert(cfg, key, stamp, text, text, None, sig=OPS_CHANNEL_SIG)  # one per 30 min however it flaps (D46)
+
+    def known(self, key: str, sig: str) -> None:
+        """An alert already sent another way (the hourly channel check reported the ops channel): the same problem under
+        `sig` inside the window is folded, never a second DM."""
+        self._alerts.setdefault((key, sig), {"at": time.monotonic(), "since": "", "more": 0, "msgs": []})
+
+    async def host_alert(self, ids, sig: str, text: str) -> None:
+        """A host-level error (the MCP token leaked): DMed to `ids` (the superusers — only they can act on .env) at most
+        once per ERROR_WINDOW_S per signature; never a guild's ops channel or its error targets."""
+        log.error("[host] %s", text)
+        k = ("", f"host|{sig}")
+        now = time.monotonic()
+        held = self._alerts.get(k)
+        if held is not None and now - held["at"] < ERROR_WINDOW_S:
+            held["more"] += 1
+            return
+        self._alerts[k] = {"at": now, "since": "", "more": 0, "msgs": []}
+        for uid in ids:
+            try:
+                user = self.client.get_user(uid) or await self.client.fetch_user(uid)
+                await user.send(text[:1990])
+            except Exception as e:  # noqa: BLE001 — closed DMs: the log line stays
+                log.warning("host alert DM to %s failed: %s", uid, e)
 
     def _guild_prefix(self, cfg, key: str) -> str:
         many = bool(getattr(getattr(self.client, "registries", None), "many", False))
         return f"**{discord.utils.escape_markdown(str(getattr(cfg, 'name', key)))}** · " if many else ""  # which guild, once there are several
 
-    async def _dm_all(self, cfg, key: str, text: str) -> list[tuple[object, str]]:
-        """DM every error target once; returns the sent messages (for the throttle's later edits)."""
+    async def _dm_all(self, cfg, key: str, text: str, only: set[int] | None = None) -> list[tuple[object, str]]:
+        """DM every error target once (`only`: those of them); returns the sent messages (for the throttle's later edits)."""
         sent = []
         body = (self._guild_prefix(cfg, key) + text)[:1990]
         for uid in error_targets(cfg):
+            if only is not None and uid not in only:
+                continue
             try:
                 user = self.client.get_user(uid) or await self.client.fetch_user(uid)
                 msg = await user.send(body)
@@ -166,10 +195,12 @@ class Ops:
                 log.warning("error alert DM to %s failed: %s", uid, e)
         return sent
 
-    async def _alert(self, cfg, key: str, stamp: str, line: str, text: str, exc: BaseException | None) -> None:
+    async def _alert(self, cfg, key: str, stamp: str, line: str, text: str, exc: BaseException | None, sig: str | None = None,
+                     only: set[int] | None = None) -> None:
         """The throttled error alert (D46): the first of its signature in ERROR_WINDOW_S is DMed with the traceback tail;
-        the next ones edit that DM's last line ('and 4 more like this since 7:12 PM — details in #ops')."""
-        sig = (key, error_signature(text, exc))
+        the next ones edit that DM's last line ('and 4 more like this since 7:12 PM — details in #ops'). `sig`: a fixed
+        signature instead of the one computed from the text (the ops-channel alert)."""
+        sig = (key, sig or error_signature(text, exc))
         now = time.monotonic()
         for k in [k for k, a in self._alerts.items() if now - a["at"] >= ERROR_WINDOW_S]:
             self._alerts.pop(k, None)
@@ -189,5 +220,5 @@ class Ops:
                     log.warning("error alert edit failed: %s", e)
             return
         detail = ("\n```" + "".join(traceback.format_exception(exc))[-900:] + "```") if exc else ""
-        msgs = await self._dm_all(cfg, key, line + detail)
+        msgs = await self._dm_all(cfg, key, line + detail, only)
         self._alerts[sig] = {"at": now, "since": stamp, "more": 0, "msgs": msgs}

@@ -654,9 +654,10 @@ def _people_verb(reg: Registry, op: ConfigOp) -> bool:
 
 
 def people_needs_actor(op: ConfigOp) -> bool:
-    """D8: a decision about a person — a rank, a character's confirmation — from MCP needs X-Oibot-Actor naming an
-    officer (web/api.py's mcp_actor_rule refuses it without; the owner's token alone may read and preview)."""
-    return op.op in ("rank", "confirm") or (op.op == "character" and (op.field or "").strip().lower() == "rank")
+    """D8: a decision about a person — a rank, a character's confirmation, accepting or declining an application — from
+    MCP needs X-Oibot-Actor naming an officer (web/api.py's mcp_actor_rule refuses it without; the owner's token alone
+    may read and preview)."""
+    return op.op in ("rank", "confirm", "application") or (op.op == "character" and (op.field or "").strip().lower() == "rank")
 
 
 def _need_member(reg: Registry, ref: str | None):

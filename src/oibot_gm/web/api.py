@@ -2115,6 +2115,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """Officers: {uid, accept, note} → the bot's decide_application (the same verdict as the Discord card: the
         applicant is DMed, the card updated, a character added on accept). Answers with the verdict line."""
         v, d = await body(request, officer=True)
+        if v.via == "mcp" and not getattr(v, "actor", None):  # D8: the owner's token is not the officer who decided
+            from .api_loot import ACTOR_NEEDED
+
+            raise HTTPException(403, ACTOR_NEEDED.format(what="Accepting or declining an application", guild=v.reg.config.name))
         uid = as_int(d.get("uid"), "uid")
         if "accept" not in d:
             return JSONResponse({"error": "accept: true or false"}, status_code=400)
