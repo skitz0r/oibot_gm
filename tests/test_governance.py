@@ -1,4 +1,4 @@
-"""Dual interfaces phase 3 — governance (design §5.44; out/dual_interface_design.md §3.4, owner decisions D33–D41, D45):
+"""Dual interfaces phase 3 — governance (design §5.45; out/dual_interface_design.md §3.4, owner decisions D33–D41, D45):
 the proposal verb (owner-only game-data approval, the job header, a repeat names the first decider, the annotate verb),
 D33's raid guard per guild, the apply job driven with a fake Api (the gate, the re-read before restart, the guard, the
 pending restart, recovery), policy drafts on disk (a restart loses nothing; the persona's two steps; an append never

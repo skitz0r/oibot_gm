@@ -4,7 +4,7 @@ Officers write prose; Claude compiles it into rules/constraints; an officer
 confirms the reading before it goes live. The solver and loot prompts consume
 the compiled form, never the prose directly.
 
-Dual interfaces phase 3 (design §5.44): the edit waiting for its Confirm lives on DISK
+Dual interfaces phase 3 (design §5.45): the edit waiting for its Confirm lives on DISK
 (`<guild>/policy/<doc>.pending.json`: previous, compiled, text, by, by_id, at, rev — written in the same commit as the
 draft, under store.lock), so a restart (the apply job restarts the bot) never leaves a draft live with no way back. The
 compiled file carries `compiled_at`, `text_sha` (the text it was read from) and `confirmed_by`: "Written" and "Applied"

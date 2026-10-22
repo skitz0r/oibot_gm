@@ -1,4 +1,4 @@
-"""The news review's API (design.md §5.26; dual interfaces phase 3, design §5.44): news kept from the #news channel,
+"""The news review's API (design.md §5.26; dual interfaces phase 3, design §5.45): news kept from the #news channel,
 proposals and their states, the effective profile slice the review compares against, and the local jobs' status for
 the Agents page.
 

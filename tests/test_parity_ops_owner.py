@@ -174,7 +174,7 @@ def test_policy_replace_compiles_and_the_view_confirms(reg):
 
 
 def test_policy_persona_is_shown_back_and_waits_for_confirm(reg):
-    """Design §5.44: the persona is the system prompt of every LLM workload, so it gets the same two steps — its draft
+    """Design §5.45: the persona is the system prompt of every LLM workload, so it gets the same two steps — its draft
     is shown back (no model call: its reading is its own text) and the bot keeps speaking with the old one until Confirm."""
     ps, prov = PolicyStore(reg.store, reg.key), FakeProvider()
     before = ps.live_text("persona")

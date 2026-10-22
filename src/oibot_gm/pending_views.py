@@ -1,4 +1,4 @@
-"""Leftover screens after a restart (dual interfaces §2.9, design §5.44): every open wizard (wizard.Wizard) and every
+"""Leftover screens after a restart (dual interfaces §2.9, design §5.45): every open wizard (wizard.Wizard) and every
 plain-text diff / policy reading (discord_policy.PendingView) is written to `out/pending_views.jsonl` while it waits, and
 removed when it finishes, expires or is pressed. On the next `on_ready` the bot edits each one left over to "The bot
 restarted; nothing was changed. Run the command again." — a channel message by its id, an ephemeral reply through its

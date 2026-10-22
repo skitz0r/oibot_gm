@@ -1,4 +1,4 @@
-"""The apply poller (design.md §5.26, dual interfaces phase 3 §5.44; launchd: gg.earlyandoften.oibot.apply, every 15 min).
+"""The apply poller (design.md §5.26, dual interfaces phase 3 §5.45; launchd: gg.earlyandoften.oibot.apply, every 15 min).
 
 Cheap by default: one API call per guild (design §5.32: one job serves every guild). Every call carries the job header
 (`X-Oibot-Job: apply`): the bot lets only the job report its steps, and never lets the job make an officer's decision.

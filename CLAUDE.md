@@ -162,7 +162,7 @@ src/oibot_gm/
                        the waiting edit ON DISK (<doc>.pending.json, one commit with the draft; PENDING = a rev cache only); policy_state = Written vs
                        Applied (differs) + the pending edit; persona two-step (PersonaReading, live_text); append_rule = THE policy_append verb
                        and appended/rule_bullet THE text it writes (every surface; refused while another officer's draft waits);
-                       POLICY_LISTENERS on every committed write → the web's officers-only `policy` topic — design §5.44
+                       POLICY_LISTENERS on every committed write → the web's officers-only `policy` topic — design §5.45
   discord_pool.py      dedicated channels the bot keeps current: registration card (public, read-only); analytics channel with one native
                        card per raid (pool_layout: readiness + comp shortfalls, edited in place, no images) + change log (Registry.listeners, debounced);
                        absences channel (AbsencesMixin: card with I'll be away · I'm back · My absences → AbsenceButton `abs.<gk>:new|back|mine` and a Clear

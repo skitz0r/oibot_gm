@@ -384,7 +384,7 @@ class RuleWizard(Wizard):
         await self.working(interaction, "Reading the rule…")
         client = interaction.client
         # the one pending edit per doc (policy.begin_edit, as the site, MCP and plain text): Discard restores the text before it;
-        # an appended rule never rides on ANOTHER officer's waiting draft (refused, naming them — design §5.44)
+        # an appended rule never rides on ANOTHER officer's waiting draft (refused, naming them — design §5.45)
         try:
             policy_mod.append_rule(self.ps, self.doc, text, interaction.user.display_name, by_id=interaction.user.id, when=self.reg.local12)
         except policy_mod.PolicyPendingError as e:

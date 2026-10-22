@@ -2302,7 +2302,7 @@ Plain-permissions edit modes on `useOpsSave` (their pages still use the admin tr
 the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
 AuraWizard hub in tests/test_flows_config.py.
 
-### 5.44 Dual interfaces, phase 3 — governance: proposals, the apply job, policy, help, plain-text reading (built 2026-10-20)
+### 5.45 Dual interfaces, phase 3 — governance: proposals, the apply job, policy, help, plain-text reading (built 2026-10-20)
 
 Out of out/dual_interface_design.md §3.4 (X2, X5, OFF-13/14/N-05, OFF-16–19/PL-*/S13, OFF-21/P-01/P-02, M35, N-01/03/04/06,
 S4) and §6 Phase 3 rows 1, 2, 7, 9, 10; owner decisions D33–D38, D41, D45 (and D40: no box on Me; D44: no DM to an owner

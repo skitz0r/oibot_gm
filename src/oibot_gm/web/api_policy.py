@@ -1,4 +1,4 @@
-"""The Policy page and the Help page on the web (dual interfaces phase 3, design §5.44; D36 Policy gets its own page, D38
+"""The Policy page and the Help page on the web (dual interfaces phase 3, design §5.45; D36 Policy gets its own page, D38
 the manual shows officer sections to members, tagged).
 
 Policy (officers, as in Discord): GET /api/policy = every document's state (policy.policy_state: Written vs Applied with

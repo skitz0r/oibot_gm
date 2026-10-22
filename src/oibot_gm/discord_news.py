@@ -1,4 +1,4 @@
-"""NewsMixin: the #news channel and the proposal cards (design.md §5.26; dual interfaces phase 3, design §5.44).
+"""NewsMixin: the #news channel and the proposal cards (design.md §5.26; dual interfaces phase 3, design §5.45).
 
 - `news_message`: the one hook at the top of `OibotGM.on_message`. A message in the configured news channel is
   keyword-filtered (news.ingest) and the relevant items are kept in `<guild>/news.jsonl`. Webhook posts count as

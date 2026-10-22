@@ -215,7 +215,7 @@ def test_policy_edit_compile_confirm_and_discard(c, bot, reg):
     assert c.post("/api/policy/loot/discard", headers=H).status_code == 400
     assert before != "# Loot\n1. Mainspec first."
     r = c.put("/api/policy/persona", json={"text": "Be brief."}, headers=H)
-    assert r.status_code == 200 and "draft" in r.json()["message"] and r.json()["pending"], "the persona waits for its Confirm too (design §5.44)"
+    assert r.status_code == 200 and "draft" in r.json()["message"] and r.json()["pending"], "the persona waits for its Confirm too (design §5.45)"
     assert c.put("/api/policy/nope", json={"text": "x"}, headers=H).status_code == 400
     assert c.put("/api/policy/comp", json={"text": "   "}, headers=H).status_code == 400
 

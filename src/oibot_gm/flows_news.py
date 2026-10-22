@@ -1,4 +1,4 @@
-"""The decide flow for news proposals (dual interfaces phase 3, design §3.4 X5 / §5.44): the card's Approve, Dismiss and
+"""The decide flow for news proposals (dual interfaces phase 3, design §3.4 X5 / §5.45): the card's Approve, Dismiss and
 Withdraw approval never write — each opens THE confirm screen (wizard.Wizard.decide) with the kind-specific consequence
 from code (NewsMixin.proposal_consequence → news.consequence):
 

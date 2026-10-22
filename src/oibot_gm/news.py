@@ -11,7 +11,7 @@ every state change a commit (git log = the audit trail).
 States: proposed → approved | dismissed → applying → applied | failed | reverted. Approving only flips the state
 and records who; nothing is applied by the bot on a button press.
 
-Governance (dual interfaces phase 3, design §5.44): approving a `profile` proposal is the OWNER's (it edits shared game
+Governance (dual interfaces phase 3, design §5.45): approving a `profile` proposal is the OWNER's (it edits shared game
 files and restarts the whole process, every served guild with it); the apply job's steps need the job's own header
 (`X-Oibot-Job`, so `job=True`) and a job never makes an officer's decision; a repeated decision is an informational
 refusal naming the first decider (`AlreadyDecided`); `annotate` writes the job's "waiting: …" line onto the proposal

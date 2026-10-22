@@ -721,7 +721,7 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         else:
             await self.loot_threads_pending()  # a later ready (a full reconnect): a council opened while Discord was down gets its thread
         self._pool_booted = True
-        await self.proposal_cards_restore()  # a decision made on the site while Discord was down reaches the card (design §5.44)
+        await self.proposal_cards_restore()  # a decision made on the site while Discord was down reaches the card (design §5.45)
         from .pending_views import restore_pending_views
 
         await restore_pending_views(self)  # wizards / diffs a restart left behind say so (out/pending_views.jsonl)

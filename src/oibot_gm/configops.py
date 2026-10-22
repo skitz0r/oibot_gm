@@ -2755,7 +2755,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
 
         ps, p, state = _proposal(reg, op)
         note = (op.reason or "").strip() or None
-        owner = by_id is not None and reg.is_owner_id(by_id)  # a game-data approval is the owner's (design §5.44)
+        owner = by_id is not None and reg.is_owner_id(by_id)  # a game-data approval is the owner's (design §5.45)
         decide = getattr(bot, "decide_proposal", None)
         if decide is not None:
             try:

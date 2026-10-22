@@ -2035,7 +2035,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     install_ops_api(app, bot, who=who, body=body, live_officer=live_officer, plain_json=plain_json, recruitment_json=recruitment_json,
                     guild_role_refs=guild_role_refs, need_owner=need_owner, parse=parse, InstanceBody=InstanceBody, IdBody=IdBody)
 
-    from .api_policy import install_policy_api  # the Policy page and the manual (design §5.44)
+    from .api_policy import install_policy_api  # the Policy page and the manual (design §5.45)
 
     install_policy_api(app, bot, who=who, body=body, publish=publish)
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
