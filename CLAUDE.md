@@ -51,7 +51,7 @@ src/oibot_gm/
                        session.py (LootSession keyed (guild, run), Drop/drop_id, Proposal + pending Override, batch_rev/drops_rev, LootChanged/LootBusy,
                        run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS; undistributed() =
                        killed bosses first; raid_bosses / boss_progress / run_boss_progress = "Bosses 3 / 6" from the session files) — design §5.35;
-                       tierdraft.py (design §5.44): draft = Claude's tier PROPOSAL for one item (route tier_draft, validated, nothing written —
+                       tierdraft.py (design §5.47): draft = Claude's tier PROPOSAL for one item (route tier_draft, validated, nothing written —
                        the officer's tiers Save is the write), export_csv / parse_csv / apply_csv = the tier grid's CSV (preview, dedupe, rev)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
@@ -99,7 +99,7 @@ src/oibot_gm/
                        remove_schedule takes its regulars off (D30, no DM); owner_refusal / owner_consequence / set_owner (D50).
                        Auras (§5.43): set_buff_overrides / set_family_overrides = one validated write per buff / family, restored on refusal (the
                        single-field verbs call them); family_slug(name) (ids never typed; taken → -2); aura_override_counts / aura_reset_sentence.
-                       Attendance (§5.44, D49): done_runs (cached), attendance(member, window_days, bench=) → (attended, total) = rostered (+ confirmed on
+                       Attendance (§5.47, D49): done_runs (cached), attendance(member, window_days, bench=) → (attended, total) = rostered (+ confirmed on
                        recurring) of the runs they were a regular of / joined and not away; attendance_runs (rows), attendance_tracked, attendance_known
                        (None until ATTENDANCE_MIN_RUNS real runs: neutral), attendance_text = THE sentence; window = loot_cfg attendance.window_days
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
@@ -268,7 +268,7 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        discard|reason|correct|end|… (the LootMixin verbs; LootChanged/LootBusy → 409 + `state`), history, precedents (+ retire), items
                        (+ tiers with the D12 re-weight ask), wishlists (+ TMB import), /api/me/loot, /api/me/wishlist, /api/members/wishlist, /api/loot/log
                        (members logged in; officers' `scores` filtered server-side, D2). D8: decisions from MCP need X-Oibot-Actor (app.py mcp_actor).
-                       Phase 3 (§5.44): /api/loot/items/{key}/draft (DRAFTS in memory), /api/loot/items/export|import (CSV), /api/loot/companions,
+                       Phase 3 (§5.47): /api/loot/items/{key}/draft (DRAFTS in memory), /api/loot/items/export|import (CSV), /api/loot/companions,
                        /api/me/attendance, /api/members/attendance; councils carry bosses_progress
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`

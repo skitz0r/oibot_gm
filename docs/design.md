@@ -2302,7 +2302,7 @@ Plain-permissions edit modes on `useOpsSave` (their pages still use the admin tr
 the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
 AuraWizard hub in tests/test_flows_config.py.
 
-### 5.44 Dual interfaces, phase 3 — loot and attendance follow-through (built 2026-10-20)
+### 5.47 Dual interfaces, phase 3 — loot and attendance follow-through (built 2026-10-20)
 
 Rows 14 and 15 of phase 3 (out/dual_interface_design.md §3.5 L12/L35/M43, §3.1 decision 10's data part and the Items
 page remainder; owner decisions D12, D49, D53). Code computes; Claude only drafts; officers decide.
