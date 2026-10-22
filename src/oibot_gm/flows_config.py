@@ -2052,5 +2052,377 @@ async def open_owner_transfer(interaction: discord.Interaction, reg: Registry, *
     await OwnerTransferWizard(reg, interaction.user.id).start(interaction, user)
 
 
+# ---------------------------------------------------------------- channels and officer roles (design §3.4 X3, §3.5 O-12 / O-13; §5.46)
+
+def _text_channel_select(placeholder: str, on_pick) -> discord.ui.ChannelSelect:
+    """Discord's own channel picker, text channels only: searchable, no 25-option ceiling, nothing to spell."""
+    s = discord.ui.ChannelSelect(placeholder=placeholder[:150], channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
+
+    async def cb(interaction: discord.Interaction) -> None:
+        await on_pick(interaction, list(s.values))
+    s.callback = cb  # type: ignore[method-assign]
+    return s
+
+
+def _role_select(placeholder: str, on_pick, *, current: Sequence[int] = (), max_values: int = 10, min_values: int = 0) -> discord.ui.RoleSelect:
+    """Discord's own role picker (the current roles preselected)."""
+    defaults = [discord.SelectDefaultValue(id=int(r), type=discord.SelectDefaultValueType.role) for r in list(current)[:max_values]]
+    s = discord.ui.RoleSelect(placeholder=placeholder[:150], min_values=min_values, max_values=max_values, default_values=defaults)
+
+    async def cb(interaction: discord.Interaction) -> None:
+        await on_pick(interaction, list(s.values))
+    s.callback = cb  # type: ignore[method-assign]
+    return s
+
+
+def _results_text(res: dict) -> str:
+    """apply_ops' result as the person reads it: one ✅ / ⛔ line per write, then '3 saved, 1 refused'."""
+    from .configops import result_summary
+
+    lines = [("✅ " if r["ok"] else "⛔ ") + (f"{r['label']}: " if r.get("label") and r["label"] != "Guild settings" else "") + str(r["line"]) for r in res.get("results", [])]
+    return "\n".join(lines + [f"-# {result_summary(res)}"])
+
+
+async def _news_webhook_line(client, reg: Registry) -> str:
+    """After the news channel is set (D39): the webhook for the owner's news source (ephemeral, spoilered — a secret), or
+    what to add so the bot can create it."""
+    hook = getattr(client, "news_webhook", None)
+    if hook is None:
+        return ""
+    try:
+        w = await hook(reg)
+    except Exception:  # noqa: BLE001 — the channel is set either way
+        return ""
+    return (f"\nWebhook for your news source: ||{w['url']}||\n-# {w['note']}" if w.get("url") else f"\n-# {w['note']}")
+
+
+SAME = "same"  # ChannelSetWizard: the channel stays as it is (loot-channel log: alone)
+
+
+class ChannelSetWizard(OwnerWizard):
+    """THE one-screen confirm of `/gm config <kind>-channel channel: | clear:` (the eight shortcuts and `/gm config
+    loot-channel`): the consequence from code (discord_pool.channel_consequences — what is posted, pinned, forgotten, falls
+    back; 'I can't post in #x: missing …'), then [Save] [Back]. Save → SetupMixin.set_channel (its permission check, post
+    first, its own ops line) under the settings rev the screen was drawn from (a change meanwhile refuses it). `log` (the
+    loot channel only): the public loot log on/off, said on the same screen and saved with it (configops `set loot_log`)."""
+
+    def __init__(self, reg: Registry, owner_id: int, kind: str, channel_id: int | None, *, log: bool | None = None):
+        from .discord_pool import CHANNEL_LABELS
+
+        super().__init__(reg, owner_id, title=f"{CHANNEL_LABELS.get(kind, (kind,))[0]} channel", guard=_owner_guard(reg))
+        self.kind, self.cid, self.log = kind, channel_id, log
+        self.rev = reg.config_rev("settings")
+
+    def log_op(self):
+        from .configops import ConfigOp
+
+        if self.log is None or bool(self.reg.config.loot_log) == bool(self.log):
+            return None
+        return ConfigOp(op="set", path="loot_log", value="true" if self.log else "false")
+
+    async def start(self, i: discord.Interaction) -> None:
+        from . import perms
+        from .configops import describe
+        from .discord_pool import channel_consequences
+
+        self.rev = self.reg.config_rev("settings")
+        log_op = self.log_op()
+        lines: list[str] = []
+        if self.cid != SAME:
+            lines = channel_consequences(self.reg, self.kind, self.cid, i.client)
+        if self.cid not in (None, SAME):
+            ch = i.client.get_channel(self.cid) if getattr(i.client, "get_channel", None) else None
+            missing = perms.missing_for(ch, self.kind) if ch is not None else []
+            if missing:  # set_channel would refuse it: say so now, nothing to confirm
+                await self.finish(i, f"❌ {perms.cant_post(ch.name, missing)} Nothing was changed.")
+                return
+            if self.cid == getattr(self.reg.config, f"{self.kind}_channel_id", None):
+                if log_op is None:
+                    await self.finish(i, lines[0] if lines else "Nothing changes.")
+                    return
+                self.cid, lines = SAME, []  # the channel stays: only the log changes
+        if self.cid == SAME and log_op is None:
+            from .loot_ops import loot_log_state
+
+            await self.finish(i, "Nothing changes. " + loot_log_state(self.reg)["text"])
+            return
+        head = ("Change the public loot log?" if self.cid == SAME else f"Use <#{self.cid}> for this?" if self.cid else "Stop using a channel for this?")
+        if log_op is not None:
+            lines = lines + [describe(self.reg, log_op)]
+        clearing = self.cid is None
+        await self.decide(i, "\n".join([head] + [f"• {x}" for x in lines]), do=self.save,
+                          do_label="Clear it" if clearing else "Save", danger=clearing)
+
+    async def save(self, i: discord.Interaction, _note: str | None) -> None:
+        from .configops import apply_async
+
+        out = []
+        try:
+            if self.cid != SAME:
+                out.append(await i.client.set_channel(self.reg, self.kind, self.cid, i.user.display_name, by_id=i.user.id, rev=self.rev))
+                self.rev = self.reg.config_rev("settings")  # this screen's own write: the log below goes on from it
+            log_op = self.log_op()
+            if log_op is not None:
+                out.append(await apply_async(self.reg, log_op, i.user.display_name, True, bot=i.client, by_id=i.user.id, rev=self.rev, via="discord"))
+        except (ValueError, RegistryError) as e:
+            await self.finish(i, ("✅ " + " · ".join(out) + "\n" if out else "") + f"❌ {e}")
+            return
+        extra = await _news_webhook_line(i.client, self.reg) if self.kind == "news" and self.cid not in (None, SAME) else ""
+        if self.kind == "loot":
+            from .loot_ops import loot_log_state
+
+            extra += "\n" + loot_log_state(self.reg)["text"]
+        await self.finish(i, f"✅ {' · '.join(out)}{extra}")
+
+
+@flow("channel_set")
+async def open_channel_set(interaction: discord.Interaction, reg: Registry, *, kind: str, channel=None, clear: bool = False,
+                           log: bool | None = None, **_seed) -> None:
+    """The `/gm config <kind>-channel` commands: `channel` (Discord's picker) or `clear` — neither or both is refused with
+    what to do; then the one-screen confirm. `log` (loot-channel): the public loot log on/off, alone or with a channel."""
+    if not await _owner_or_refuse(interaction, reg):
+        return
+    if channel is not None and clear:
+        await interaction.response.send_message("Pick a channel or tick clear — not both.", ephemeral=True)
+        return
+    if channel is None and not clear:
+        if kind == "loot" and log is not None:
+            await ChannelSetWizard(reg, interaction.user.id, kind, SAME, log=log).start(interaction)
+            return
+        if kind == "loot":
+            from .loot_ops import loot_log_state
+
+            await interaction.response.send_message(f"{loot_log_state(reg)['text']}\nPick a channel, tick clear, or set log. `/gm config channels` shows them all.",
+                                                    ephemeral=True)
+            return
+        await interaction.response.send_message("Pick a channel or tick clear. `/gm config channels` shows them all.", ephemeral=True)
+        return
+    await ChannelSetWizard(reg, interaction.user.id, kind, None if clear else int(channel.id), log=log).start(interaction)
+
+
+class ChannelsWizard(OwnerWizard):
+    """`/gm config channels`: a hub listing every bot channel (mentions; a ⚠ line for one the bot can't post in), 'Change
+    which?' → Discord's channel picker or '— not set —' → a DRAFT (nothing written) → Review (describe_ops as Discord
+    text + the channel consequences) → Save (configops.apply_ops: set_channel per channel — its permission check, its card
+    posted first, its one ops line — under the settings rev the hub opened with; a change meanwhile refuses that line)."""
+
+    def __init__(self, reg: Registry, owner_id: int):
+        super().__init__(reg, owner_id, title="Bot channels", guard=_owner_guard(reg))
+        self.draft: dict[str, int | None] = {}
+        self.rev = reg.config_rev("settings")
+
+    def current(self, kind: str) -> int | None:
+        from .discord_pool import CHANNEL_KINDS
+
+        return getattr(self.reg.config, CHANNEL_KINDS[kind], None)
+
+    def ops(self) -> list:
+        from .configops import ops_from_fields
+
+        return ops_from_fields(self.reg, "settings", None, {f"channel:{k}": v for k, v in self.draft.items()})
+
+    async def start(self, i: discord.Interaction, note: str = "") -> None:
+        from .discord_pool import CHANNEL_KINDS, CHANNEL_LABELS
+
+        probs = i.client.channel_problems(self.reg) if getattr(i.client, "channel_problems", None) else {}
+        rows = []
+        for kind in CHANNEL_LABELS:
+            cur = self.current(kind)
+            label = CHANNEL_LABELS[kind][0]
+            shown = f"<#{cur}>" if cur else "— not set —"
+            if kind in self.draft:
+                new = self.draft[kind]
+                shown += f" → ✏️ **{f'<#{new}>' if new else '— not set —'}**"
+            rows.append(f"**{label}** · {shown}" + (f"\n-# ⚠ {probs[kind]}" if kind in probs and kind not in self.draft else ""))
+        n = len(self.draft)
+        opts = [Opt(k, CHANNEL_LABELS[k][0], CHANNEL_LABELS[k][1][:100]) for k in CHANNEL_KINDS if k in CHANNEL_LABELS]
+        items = [self.select("Change which?", opts, self.kind_picked)]
+        items.append(self.button(f"Review {n} change{'s' if n != 1 else ''}", self.review, discord.ButtonStyle.primary, disabled=not n))
+        if n:
+            items.append(self.button("Discard edits", self.discard))
+        items.append(self.button("Done" if not n else "Cancel", self.cancel))
+        await self.show(i, "\n".join(rows) + (f"\n\n{note}" if note else "") + ("\n-# Not saved yet — Review shows what each change does." if n else ""), *items)
+
+    async def discard(self, i: discord.Interaction) -> None:
+        self.draft = {}
+        await self.start(i, "Edits discarded.")
+
+    async def kind_picked(self, i: discord.Interaction, values: list[str]) -> None:
+        await self.pick(i, values[0])
+
+    async def pick(self, i: discord.Interaction, kind: str) -> None:
+        from .discord_pool import CHANNEL_LABELS
+
+        label, hint = CHANNEL_LABELS[kind]
+        cur = self.current(kind)
+
+        async def picked(it: discord.Interaction, chans: list) -> None:
+            await self.put(it, kind, int(chans[0].id) if chans else None)
+
+        async def unset(it: discord.Interaction) -> None:
+            await self.put(it, kind, None)
+
+        await self.show(i, f"**{label}** — {hint}.\nNow: {f'<#{cur}>' if cur else '— not set —'}. Pick a text channel:",
+                        _text_channel_select(f"{label} channel", picked), self.button("— not set —", unset, disabled=cur is None and kind not in self.draft),
+                        self.button("Back", self.start))
+
+    async def put(self, i: discord.Interaction, kind: str, cid: int | None) -> None:
+        from . import perms
+        from .discord_pool import CHANNEL_LABELS
+
+        if cid == self.current(kind):
+            self.draft.pop(kind, None)
+        else:
+            self.draft[kind] = cid
+        note = ""
+        if cid is not None:
+            ch = i.client.get_channel(cid) if getattr(i.client, "get_channel", None) else None
+            missing = perms.missing_for(ch, kind) if ch is not None else []
+            if missing:
+                note = f"⚠ {perms.cant_post(ch.name, missing)} Save would refuse it — fix the permission first, or pick another channel."
+        await self.start(i, note or f"{CHANNEL_LABELS[kind][0]} drafted.")
+
+    async def review(self, i: discord.Interaction) -> None:
+        from .configops import describe_ops
+        from .discord_pool import channel_consequences
+
+        if not self.draft:
+            await self.start(i)
+            return
+        try:
+            described = describe_ops(self.reg, self.ops())
+        except RegistryError as e:
+            await self.refuse(i, str(e), self.start, "Back to edits")
+            return
+        cons: list[str] = []
+        for kind, cid in self.draft.items():
+            cons += [c for c in channel_consequences(self.reg, kind, cid, i.client) if c not in cons]
+        body = described.model_copy(update={"consequences": []}).as_discord()  # the consequences are said below, per channel
+        await self.show(i, body + ("\n" + "\n".join(f"⚠ {c}" for c in cons) if cons else ""),
+                        self.button("Save", self.save, discord.ButtonStyle.success), self.button("Back to edits", self.start), self.button("Cancel", self.cancel))
+
+    async def save(self, i: discord.Interaction) -> None:
+        from .configops import apply_ops
+
+        await self.working(i, "Saving… (cards are posted where a channel holds one)")
+        res = await apply_ops(self.reg, self.ops(), by=i.user.display_name, by_id=i.user.id, bot=i.client, via="discord",
+                              revs={"config:settings": self.rev})
+        text = _results_text(res)
+        if self.draft.get("news") and self.current("news") == self.draft["news"]:
+            text += await _news_webhook_line(i.client, self.reg)
+        self.draft = {k: v for k, v in self.draft.items() if v != self.current(k)}  # what didn't land stays drafted
+        if res.get("refused"):
+            self.rev = self.reg.config_rev("settings")
+            await self.show(i, text, self.button("Back to edits", self.start, discord.ButtonStyle.primary), self.button("Done", self.cancel))
+            return
+        await self.finish(i, text)
+
+
+@flow("channels")
+async def open_channels(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    if not await _owner_or_refuse(interaction, reg):
+        return
+    await ChannelsWizard(reg, interaction.user.id).start(interaction)
+
+
+class OfficersWizard(OwnerWizard):
+    """`/gm config officers`: the officer roles by mention, legacy names that never resolved (from an older config) each
+    with "Map <name>…"; Discord's role picker (the current roles preselected) → a draft → Review (describe_ops +
+    op_consequences: "No officer roles now: only the server owner and Manage Server count.") → Save (apply_ops; @everyone,
+    a bot's or integration's managed role refused — SetupMixin.role_refusal)."""
+
+    def __init__(self, reg: Registry, owner_id: int):
+        super().__init__(reg, owner_id, title="Officer roles", guard=_owner_guard(reg))
+        self.want: list[int] | None = None  # the drafted whole list (None = untouched)
+        self.mapped: dict[str, int] = {}  # legacy name -> the role it becomes
+        self.rev = reg.config_rev("settings")
+
+    def ids(self) -> list[int]:
+        base = list(self.want) if self.want is not None else list(self.reg.config.officer_role_ids)
+        return list(dict.fromkeys(base + list(self.mapped.values())))
+
+    def ops(self) -> list:
+        from .configops import ConfigOp, ops_from_fields
+
+        ops = ops_from_fields(self.reg, "settings", None, {"officer_roles": self.ids()}) if (self.want is not None or self.mapped) else []
+        return ops + [ConfigOp(op="role_remove", value=name) for name in self.mapped]  # the legacy name goes once it is mapped
+
+    async def start(self, i: discord.Interaction, note: str = "") -> None:
+        cur = self.reg.config.officer_role_ids
+        pending = [n for n in self.reg.config.officer_roles_pending() if n not in self.mapped]
+        lines = ["Now: " + (", ".join(f"<@&{r}>" for r in cur) if cur else "none — only the server owner and Manage Server count.")]
+        if self.want is not None or self.mapped:
+            lines.append("✏️ Drafted: " + (", ".join(f"<@&{r}>" for r in self.ids()) or "none"))
+        if pending:
+            lines.append("From an older config, by name (not found in the server): " + ", ".join(f"**{discord.utils.escape_markdown(n)}**" for n in pending)
+                         + " — map each to a role.")
+        items: list = [_role_select("Officer roles (pick every role that counts)", self.picked, current=self.ids())]
+        for name in pending[:3]:
+            items.append(self.button(f"Map {name[:40]}…", self._mapper(name)))
+        dirty = self.want is not None or bool(self.mapped)
+        items.append(self.button("Review", self.review, discord.ButtonStyle.primary, disabled=not dirty))
+        items.append(self.button("Cancel" if dirty else "Done", self.cancel))
+        await self.show(i, "\n".join(lines) + (f"\n\n{note}" if note else ""), *items)
+
+    async def picked(self, i: discord.Interaction, roles: list) -> None:
+        refusal = getattr(i.client, "role_refusal", None)
+        for r in roles:
+            why = refusal(self.reg, int(r.id)) if refusal is not None else None
+            if why:
+                await self.start(i, f"⚠ {why}")
+                return
+        self.want = [int(r.id) for r in roles]
+        await self.start(i, "Drafted — Review shows what changes.")
+
+    def _mapper(self, name: str):
+        async def go(i: discord.Interaction) -> None:
+            async def picked(it: discord.Interaction, roles: list) -> None:
+                refusal = getattr(it.client, "role_refusal", None)
+                why = refusal(self.reg, int(roles[0].id)) if roles and refusal is not None else None
+                if why:
+                    await self.start(it, f"⚠ {why}")
+                    return
+                if roles:
+                    self.mapped[name] = int(roles[0].id)
+                await self.start(it, f"{name} → <@&{roles[0].id}> drafted." if roles else "")
+            await self.show(i, f"Which role is **{discord.utils.escape_markdown(name)}** now?", _role_select(f"The role for {name}"[:150], picked, max_values=1, min_values=1),
+                            self.button("Back", self.start))
+        return go
+
+    async def review(self, i: discord.Interaction) -> None:
+        from .configops import describe_ops
+
+        ops = self.ops()
+        if not ops:
+            await self.start(i, "Nothing to change.")
+            return
+        described = describe_ops(self.reg, ops)
+        await self.show(i, described.as_discord(), self.button("Save", self.save, discord.ButtonStyle.success), self.button("Back to edits", self.start),
+                        self.button("Cancel", self.cancel))
+
+    async def save(self, i: discord.Interaction) -> None:
+        from .configops import apply_ops
+
+        await self.working(i, "Saving…")
+        res = await apply_ops(self.reg, self.ops(), by=i.user.display_name, by_id=i.user.id, bot=i.client, via="discord", revs={"config:settings": self.rev})
+        text = _results_text(res)
+        if res.get("refused"):
+            self.rev = self.reg.config_rev("settings")
+            await self.show(i, text, self.button("Back to edits", self.start, discord.ButtonStyle.primary), self.button("Done", self.cancel))
+            return
+        await self.finish(i, text)
+
+
+@flow("officers")
+async def open_officers(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    if not await _owner_or_refuse(interaction, reg):
+        return
+    if interaction.guild is not None:
+        import asyncio as _asyncio
+
+        await _asyncio.to_thread(reg.resolve_officer_roles, interaction.guild)  # legacy names → ids first (and the name cache)
+    await OfficersWizard(reg, interaction.user.id).start(interaction)
+
+
 __all__ = ["MultiForm", "RaidConfigWizard", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "OwnerTransferWizard", "open_raid_config", "open_aura",
-           "open_timezone", "open_about", "open_guild_claim", "open_owner_transfer", "claim_refusal", "next_runs", "hours_words", "tz_cities"]
+           "open_timezone", "open_about", "open_guild_claim", "open_owner_transfer", "ChannelsWizard", "ChannelSetWizard", "OfficersWizard", "open_channels", "open_channel_set", "open_officers", "claim_refusal", "next_runs", "hours_words", "tz_cities"]

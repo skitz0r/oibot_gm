@@ -41,7 +41,8 @@ class SetupBot(SetupMixin, Bot):
     async def plain_identity(self, reg, user, **_):
         return user.id == OWNER, []
 
-    async def set_channel(self, reg, kind, channel_id, by, via="discord", by_id=None):
+    async def set_channel(self, reg, kind, channel_id, by, via="discord", by_id=None, rev=None):
+        reg.check_rev("settings", rev)
         self.set_channels.append((kind, channel_id))
         setattr(reg.config, f"{kind}_channel_id", channel_id)
         reg.save_config(f"{kind} channel (by {by})")

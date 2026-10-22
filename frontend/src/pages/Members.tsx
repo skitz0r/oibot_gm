@@ -11,6 +11,7 @@ import { useConfirm } from "../components/ConfirmModal";
 import { TestBench } from "../components/TestBench";
 import { AbsencesModal } from "../components/AbsencesModal";
 import { AbsencesTable } from "../components/AbsencesTable";
+import { LeftServer } from "../components/LeftServer";
 import { useImBack } from "../components/AbsencesCard";
 import { FlexIcons, flexChoices } from "../components/CharacterTable";
 import { classColour } from "../theme";
@@ -212,6 +213,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
         </Card>
       )}
       {meta.viewer.officer && !editing && <AbsencesTable reloadKey={absKey} />}
+      {meta.viewer.officer && !editing && <LeftServer />}
       {meta.viewer.officer && !editing && <TestBench meta={meta} rows={data.rows} onChanged={load} />}
       <AbsencesModal meta={meta} opened={!!absFor} who={absFor ? { uid: absFor.uid, display_name: absFor.display_name } : null} onClose={() => setAbsFor(null)} onSaved={() => { setAbsFor(null); changed(); }} />
       {confirmDialog}

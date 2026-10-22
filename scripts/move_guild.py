@@ -34,7 +34,6 @@ import re
 import socket
 import sys
 from pathlib import Path
-from urllib.parse import urlencode
 
 import yaml
 
@@ -49,21 +48,16 @@ CLEARED_LISTS = ("officer_role_ids", "officer_roles", "member_role_ids")
 
 
 def permissions_value() -> int:
-    """What the bot's code uses (checked against the source): post and edit cards and sheets, pin cards, threads under
-    officer cards, its own app emojis, invites for the homepage's Join button. No Manage Roles: the registration
-    channel's read-only overwrite is optional (the bot says so; deny Send Messages for @everyone there yourself)."""
-    import discord
+    """The invite's permissions — oibot_gm.perms.permissions_value (one definition: the bot's own checks read it too)."""
+    from oibot_gm.perms import permissions_value as value
 
-    return discord.Permissions(view_channel=True, send_messages=True, embed_links=True, attach_files=True, read_message_history=True,
-                               manage_messages=True, create_public_threads=True, send_messages_in_threads=True,
-                               use_external_emojis=True, create_instant_invite=True).value
+    return value()
 
 
 def invite_link(client_id: str, guild: str | None = None) -> str:
-    q = {"client_id": client_id, "scope": "bot applications.commands", "permissions": str(permissions_value())}
-    if guild:
-        q.update(guild_id=guild, disable_guild_select="true")
-    return "https://discord.com/oauth2/authorize?" + urlencode(q)
+    from oibot_gm.perms import invite_link as link
+
+    return link(client_id, guild)
 
 
 def env_value(env: Path, key: str) -> str | None:
@@ -278,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"committed; {a.env.name}: DISCORD_TEST_GUILD_ID left alone ({'not set' if not test_id else 'it is another server'})")
     print("next: start the bot, then in the new server set the channels, officer role(s), member roles, news channel and invite "
           "(Config page or /gm config); members join the new server to log in and get DMs")
+    print("checklist: the Config page's Setup card ticks each channel, role and permission the bot needs (perms.missing_for — "
+          "the same test the bot runs before posting)")
     return 0
 
 

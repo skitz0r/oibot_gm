@@ -19,15 +19,14 @@ export function Recruitment({ channels }: { channels: { id: string; name: string
   const [d, setD] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [inviteChannel, setInviteChannel] = useState<string | null>(null);
-  const [inviting, setInviting] = useState(false);
+  const [inviteChannel, setInviteChannel] = useState<string | null>(null);  // R-06: the invite is created AT Save, never before
   const load = () => api.get<RecruitmentData>("/api/recruitment").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   if (!data) return null;
   const editing = d !== null;
   const roleName = (id: string) => data.guild_roles.find((r) => r.id === id)?.name;
   const known = new Set(data.guild_roles.map((r) => r.id));
-  const start = () => { setError(null); setD({ open: data.open, note: data.note, invite_url: data.invite_url, member_role_ids: [...data.member_role_ids], questions: data.questions.map((q) => ({ ...q, hint: q.hint ?? "" })) }); };
+  const start = () => { setError(null); setInviteChannel(null); setD({ open: data.open, note: data.note, invite_url: data.invite_url, member_role_ids: [...data.member_role_ids], questions: data.questions.map((q) => ({ ...q, hint: q.hint ?? "" })) }); };
   const setQ = (i: number, patch: Partial<Question>) => setD({ ...d!, questions: d!.questions.map((q, j) => (j === i ? { ...q, ...patch } : q)) });
   const move = (i: number, by: number) => {
     const qs = [...d!.questions]; const j = i + by;
@@ -39,21 +38,17 @@ export function Recruitment({ channels }: { channels: { id: string; name: string
     if (!d) return;
     setBusy(true); setError(null);
     try {
-      const r = await api.post<{ message: string } & RecruitmentData>("/api/admin/recruitment", {
-        open: d.open, note: d.note, invite_url: d.invite_url, member_role_ids: d.member_role_ids,
+      const r = await api.post<{ message: string; invite_error: string | null } & RecruitmentData>("/api/admin/recruitment", {
+        open: d.open, note: d.note, member_role_ids: d.member_role_ids,
+        ...(inviteChannel ? { invite_create: inviteChannel } : { invite_url: d.invite_url }),
         questions: d.questions.map((q) => ({ ...(q.id ? { id: q.id } : {}), label: q.label, hint: q.hint || null, required: q.required })),
       });
-      ok(r.message); setData(r); setD(null);
+      setData(r);
+      if (r.invite_error) {  // "Saved. Invite not created: …" — the rest landed; only the channel stays in the draft
+        setError(r.message);
+        setD({ open: r.open, note: r.note, invite_url: r.invite_url, member_role_ids: [...r.member_role_ids], questions: r.questions.map((q) => ({ ...q, hint: q.hint ?? "" })) });
+      } else { ok(r.message); setD(null); setInviteChannel(null); }
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
-  }
-
-  async function createInvite() {
-    if (!inviteChannel || !d) return;
-    setInviting(true); setError(null);
-    try {
-      const r = await api.post<{ invite_url: string; message: string }>("/api/admin/invite", { channel_id: inviteChannel });
-      setD((cur) => (cur ? { ...cur, invite_url: r.invite_url } : cur)); ok("Invite created; Save to use it.");
-    } catch (e) { setError((e as Error).message); } finally { setInviting(false); }
   }
 
   const channelOptions = channels.map((c) => ({ value: c.id, label: `#${c.name}${c.category ? ` · ${c.category}` : ""}` }));
@@ -94,11 +89,10 @@ export function Recruitment({ channels }: { channels: { id: string; name: string
             rightSection={counter(d!.note.length, NOTE_MAX)} rightSectionWidth={64} maw={620} />
           <Stack gap={6}>
             <TextInput label="Discord invite" description="the homepage's Join our Discord button; anyone can join, members apply inside" placeholder="https://discord.gg/…" value={d!.invite_url}
-              onChange={(e) => setD({ ...d!, invite_url: e.currentTarget.value })} leftSection={<IconLink size={15} />} maw={620} />
+              onChange={(e) => setD({ ...d!, invite_url: e.currentTarget.value })} leftSection={<IconLink size={15} />} maw={620} disabled={!!inviteChannel} />
             <Group gap="sm" align="flex-end" wrap="wrap">
-              <Select size="xs" placeholder="pick a channel" data={channelOptions} value={inviteChannel} onChange={setInviteChannel} searchable w={260} aria-label="Invite channel" />
-              <Button size="xs" variant="default" disabled={!inviteChannel} loading={inviting} onClick={createInvite}>Create invite</Button>
-              <Text size="xs" c="dimmed">a permanent, unlimited-use invite to that channel (the bot needs Create Invite there)</Text>
+              <Select size="xs" placeholder="or create one: pick a channel" data={channelOptions} value={inviteChannel} onChange={setInviteChannel} searchable clearable w={260} aria-label="Invite channel" />
+              <Text size="xs" c="dimmed">{inviteChannel ? "Save creates a permanent, unlimited-use invite to that channel and uses it (the bot needs Create Invite there)" : "a permanent, unlimited-use invite, created when you save"}</Text>
             </Group>
           </Stack>
           <MultiSelect label="Member roles" description="people with these roles register without applying (existing members); officers always can"

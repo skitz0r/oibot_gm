@@ -41,6 +41,10 @@ src/oibot_gm/
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
                        THE pin write (every surface; re-renders the sheet's pin footer). Never a DM from here
+  perms.py             THE Discord permission test (design §5.46): required(kind) (+ Manage Messages for the pinned cards, + threads for roster,
+                       + history for news), missing_for(channel, kind) / missing_for(guild), cant_post() = the one sentence; permissions_value() /
+                       invite_link() (scripts/move_guild.py imports them; Manage Webhooks in — D39; Manage Roles / Channels OPTIONAL); CLIENT = the
+                       running client for configops' consequence hook. set_channel's refusal, the hourly check and the Setup card all read it
   presets.py           shared presets: raid cadence PRESETS (standard/short/same_week), test-run TEMPOS, absence DURATIONS (the wizard's For how long
                        and /api/meta.durations); used by the wizards, plain text and the web
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
@@ -56,6 +60,9 @@ src/oibot_gm/
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
+                       on_guild_join (re-attach a parked guild, else ONE DM to host_ids: "I was added to X … Missing permissions: …"), on_guild_remove
+                       (Guilds.detach unless guild.unavailable; one ops error), on_guild_available (re-attach), on_member_remove/join (Member.left_at);
+                       claim_guild adds an ops line to every other guild (D44: no owner DM); cached_member keeps _member_last_yes (the web's 6 h "stale" read);
                        bot.events[(gk, session id)]; GuildContext = the start directory's key, profile and the LLM provider (rehearse loot with a
                        test run — its council is session.test, D11)
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
@@ -108,6 +115,10 @@ src/oibot_gm/
                        schedule_runs_open; timezone_runs(zone, rs) = THE rows (old/new/moved, locked, movable) behind timezone_change_effects(zone, rs,
                        mode) and timezone_refusal (a locked run + no mode → refused); set timezone carries field keep|move (ops_from_fields
                        timezone_runs), rc.move_runs_with_clock moves only starts_at (same key/sheet/signups), on the loop via _apply_async
+                       Setup (§5.46): GuildConfig.error_dm_ids (None = the owner, [] = nobody; set_error_dms / error_dm_targets / error_dm_words) and
+                       detached_at (set_detached; Guilds parks it); Member.left_at (member_left) + remove_record (officers only, someone who left, no
+                       live seat — D29: no self-service delete); applications: decide adds the character FIRST, caps the note (DECISION_NOTE_MAX),
+                       decided_refusal ("Already declined by X"), Applicant.history → prior_decision_line, role_note (D31), application_state (own first)
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
@@ -120,8 +131,13 @@ src/oibot_gm/
                        or AD HOC (pickup templates, ADHOC_SCHEDULE one-offs) — rc.run_kind; ad hoc = first come (Signup.joined_at), no confirmations, lighter
                        timing. Regulars are never pre-filled; officers see who hasn't answered. Officer posts go to `roster_channel_id`. Internal helpers still
                        say "team" (aliases) — don't rename them casually.
-                       /gm status|config …(owner: ops/applications/registration/analytics/roster/signup/absences/news/loot channels, recruitment, raid, aura, officer-role, timezone, ask-audience, about; no standing rosters)|change|policy …|rule loot|comp|precedents|test …; /raid … (discord_raid.py)
-                       `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only), by_key, ordered(),
+                       /gm status|config …(owner: the eight <kind>-channel shortcuts = CHANNEL_SHORTCUTS → ONE helper (channel: | clear:) → FLOWS["channel_set"]
+                       (the one-screen confirm), channels (the hub), officers (the role hub), officer-role (apply_async), errors-to, loot-channel, recruitment, raid,
+                       aura, timezone, ask-audience, about; no command writes reg.config — set_channel / Registry verbs do; no standing rosters)|change|policy …|rule loot|comp|precedents|test …; /raid … (discord_raid.py);
+                       /roster remove-record (decide screen → remove_record). Applications: settle_application(…, by_id, via) = THE verdict (one audit line,
+                       assign_member_role D31, the DM they wait on), application_decide (card + /roster applicant), application_consequence, client_decide
+                       `Guilds` = the one index of the process's guilds (design §5.32): by_discord (copy-on-write `add`, loop thread only; detach(key) /
+                       attach_server(gid) / detached_list() — a parked guild is out of every index, §5.46), by_key, ordered(),
                        get(key|name), for_guild (strict), only(), many, cfg_for, load_errors; `/gm config owner` in an UNCONFIGURED server is the bootstrap
                        (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; any number of servers — Guilds.ALLOW_SECOND is on since S3)
   guild_routing.py     THE resolver: need(interaction, reply=True) → (reg, interaction) — every command rebinds both (and sync_name: a Member's
@@ -185,7 +201,12 @@ src/oibot_gm/
                        absences channel (AbsencesMixin: card with I'll be away · I'm back · My absences → AbsenceButton `abs.<gk>:new|back|mine` and a Clear
                        `abs.<gk>:clear:<uid>:<start>`; announce_absence → sheets updated; puppets never on the card or the channel; AbsencesMixin inherits
                        discord_people.PeopleMixin);
-                       SetupMixin: set_channel (web Config page + plain-text `set …_channel` via configops.apply_async), guild_channels/roles, test_bench_clear,
+                       SetupMixin: set_channel(…, rev=) = THE channel write (perms.missing_for refusal, "Discord is unreachable" apart, the settings rev
+                       checked before posting and at the save → ConfigChanged, the card posted FIRST then the old dropped, ONE ops.audited line — callers
+                       write none; the eight shortcuts AND /gm config loot-channel open flows_config.ChannelSetWizard), channel_consequences (+ configops CONSEQUENCE_HOOKS entry), CHANNEL_LABELS,
+                       news_webhook (D39), role_refusal, invite_status, discord_links, channel_problems / check_channel_perms (an error for ops/signup,
+                       else a warn) / setup_tick (hourly, from raid_scheduler.scheduler_tick), note_membership + sweep_left (Member.left_at from Discord's
+                       own 404s and sightings — the bot has no members intent, so on_member_remove never arrives), setup_checklist (the Setup card / /gm status), guild_channels/roles, test_bench_clear,
                        plain_table (the plain-text policy in words; plain_read_text / plain_why render /gm config plain).
                        LootLogMixin: the public loot log (LEDGER_LISTENERS → one line per award in the loot channel, else the run's updates thread; never
                        the signup channel; loot_log off = nothing) with LootWishButton (`lootwish.<gk>:<item key>` → /me wishlist on that item)
@@ -216,7 +237,9 @@ src/oibot_gm/
   wizard_opts.py       registry data as select options (raids, live runs, a member's characters, classes, specs, ranks)
   wizard_flows.py      imports every flows_*.py so FLOWS is complete; flows_absence (the reference flow + AbsenceClearWizard = I'm back) · flows_raid ·
                        flows_config (+ OwnerTransferWizard; AuraWizard = a draft hub per buff, one Save this buff through configops.apply_ops; CompTargetsBlock = the
-                       Group make-up screen's targets block, in RaidConfigWizard and in CompTargetsWizard = /roster comp) · flows_roster (MemberWizard/CharWizard: /me char, /roster char|rank|set-main) · flows_register (incl. the Discord application: picks → names → schedules → the guild's
+                       Group make-up screen's targets block, in RaidConfigWizard and in CompTargetsWizard = /roster comp; ChannelsWizard
+                       (/gm config channels: ChannelSelect / — not set — → draft → Review → apply_ops), ChannelSetWizard (the eight shortcuts' one confirm),
+                       OfficersWizard (/gm config officers: RoleSelect, Map <legacy name>…)) · flows_roster (MemberWizard/CharWizard: /me char, /roster char|rank|set-main) · flows_register (incl. the Discord application: picks → names → schedules → the guild's
                        questions five per modal → review) · flows_recruit (/gm config recruitment) · flows_wishlist (/me wishlist) · flows_misc · flows_test (/gm test compose|comp, the digest's TestAnswerButton). Commands and card buttons call FLOWS[name].
                        tests/wizard_harness.py drives a flow end to end with fake interactions and lints every screen
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id; schedule_set field = <schedule id>.<setting>), describe() diff,
@@ -275,7 +298,8 @@ src/oibot_gm/
                        conflict; kill. loot_route(comp): the token's guild → one live council (test only from a puppet/tester companion; several → by
                        seated character; else refused; a council past its run's close never competes with tonight's); no live run → held 10 min
                        (persisted); feed_presence(bot, reg) rows, feed_status the line
-  ops.py               ops feed (channel line per action; errors DM the owner); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key.
+  ops.py               ops feed (channel line per action; errors DM error_targets(cfg) = error_dm_ids, default the owner — ONE DM per (guild, error_signature)
+                       per 30 min, later ones EDIT it and count in suppressed_for; 3 failed ops-channel posts alert once); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key.
                        ONE audit format: audit_line / audited(ops, reg, by, line, via, level, by_id) → "[web] Jon (host): …" — `by` is a display name,
                        the surface is the prefix from via (web|mcp|chat; none for Discord), " (host)" = a superuser in a guild they don't own, no DM.
                        set_channel, apply_async(via=) and the web's mutation helpers write through it
@@ -298,6 +322,13 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        unless Described.review, then needs_review + token; `confirmed`; `revs` config:<section> → 409; BOOT-prefixed tokens: expired → silent
                        re-preview when the fingerprint matches, restarted → shown again); the admin setup routes (/api/admin/config|aura|family|aura/reset|raid|
                        raid/reset|raid/schedule|raid/schedule/remove|recruitment|plain-permissions) are TRANSLATORS into changes through apply_ops
+  web/api_setup.py     install_setup_api (called from api.py; design §5.46): GET/POST /api/admin/channels (rows with `missing`/`problem`, never while Discord is
+                       unreachable; POST = a translator through app.state.ops_translate), POST /api/admin/news-webhook (owner; the URL never in an ops line),
+                       GET /api/admin/setup (checklist, invite, error alerts + the owner's choices and the settings rev; Host card for a superuser / the
+                       bearer), GET /api/admin/left + POST
+                       /api/admin/member/remove (officers' Remove record); discord_ready(bot, reg) → /api/meta.discord. No /api/admin/invite: the invite
+                       is created AT the recruitment Save (invite_create). A stale membership (§2.9): web/app.viewer drops v.officer for any write
+                       (v.stale_write → api.who 503 STALE_OFFICER)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras
@@ -317,7 +348,10 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        components/CharacterTable.tsx (the Me page's characters), AbsencesModal/AbsencesCard/AbsencesTable.tsx (From picked on a calendar + For how long, I'm back),
                        components/ConfirmModal.tsx (useConfirm), components/ReviewModal.tsx (THE edit-mode review: ReviewModal + useOpsSave = the tiered Save over
                        /api/ops/change, the result sheet, stale-token / restart handling; api.ts opsApi + OpsChange / Described / OpsReply), components/PlainPermissions.tsx (Ops page: who may do what, where), components/ScheduleCard.tsx (Raids page schedules + editor: Pause/Resume, diff-only Save, presets, the server's preview), components/TellTheBot.tsx (the officers' box: /api/ask → or the plain-text preview + Apply; officer pages' rail + each SheetCard; NEVER on Me — D40), components/CompTargets.tsx (the Desired comp table + Edit targets, a `comp` change; Readiness + Raids), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Companions) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now) · Ops · Config (Overview from config_summary · Settings edit mode · Channels + News · Recruitment and more; Mantine, left rail,
+                       components/ChannelsCard.tsx + SetupCard.tsx (Config: channels edit mode via useOpsSave; Setup / Host cards), LeftServer.tsx (Members: Remove record),
+                       MyApplication.tsx (Me: own application), setupApi.ts (their shapes), hooks/useDirty.ts (an edit mode holds the server selector: "Save or discard
+                       your edits first");
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Companions) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more; Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            raid thumbnails and generated class / role / buff badges (the emoji fallback; no roster or analytics images any more);  report_html.py → out/coverage.html

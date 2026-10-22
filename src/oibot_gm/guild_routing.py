@@ -35,11 +35,24 @@ LOOKUP_TIMEOUT_S = 1.5  # per guild, run concurrently: `need` stays inside Disco
 ROUTING_MAX_AGE_S = 10
 
 
-async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S, max_age: float | None = None) -> tuple[str, object | None]:
+STALE_YES_S = 6 * 3600  # design §2.9: a last-known "yes" keeps a person's READS going this long while Discord can't answer
+
+
+def stale_yes(bot, guild_id: int, uid: int, within: float = STALE_YES_S):
+    """The member object of the last time Discord said "yes" for (server, uid), when within `within` seconds — else None.
+    For reads only (the web's membership while Discord is unsure); writes re-resolve live (PRIV_LIVE) and refuse."""
+    import time as _time
+
+    hit = getattr(bot, "__dict__", {}).get("_member_last_yes", {}).get((guild_id, uid))
+    return hit[1] if hit and _time.time() - hit[0] < within else None
+
+
+async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S, max_age: float | None = None, stale_ok: bool = False) -> tuple[str, object | None]:
     """(answer, member): `membership`'s answer plus the Discord member when it is 'yes' (the web needs the member for
     the officer check and the display name). `timeout` None = wait as long as the lookup takes (the web; Discord's
     3-second window is the reason for the default). `max_age`: how old a cached answer may be (None: cached_member's own
-    default; DM routing passes ROUTING_MAX_AGE_S)."""
+    default; DM routing passes ROUTING_MAX_AGE_S). `stale_ok` (the web's reads, §2.9): an answer Discord couldn't give
+    ('unknown') falls back to the last-known "yes" of the past STALE_YES_S — answered "stale"; anything else is unchanged."""
     get_guild = getattr(bot, "get_guild", None)
     guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
     if guild is None:
@@ -51,11 +64,16 @@ async def member_of(bot, reg, uid: int, timeout: float | None = LOOKUP_TIMEOUT_S
         look = cached_member(guild, uid) if max_age is None else cached_member(guild, uid, max_age=max_age)
         m = await (asyncio.wait_for(look, timeout) if timeout else look)
     except Exception:  # noqa: BLE001 — a timeout or a transient error is not a departure
-        return "unknown", None
+        m = None
+        if not stale_ok:
+            return "unknown", None
     if m is not None:
         return "yes", m
     gone = getattr(bot, "__dict__", {}).get("_member_gone", set())
-    return ("no" if (guild.id, uid) in gone else "unknown"), None
+    if (guild.id, uid) in gone:
+        return "no", None
+    last = stale_yes(bot, guild.id, uid) if stale_ok else None
+    return ("stale", last) if last is not None else ("unknown", None)
 
 
 async def membership(bot, reg, uid: int, max_age: float | None = None) -> str:

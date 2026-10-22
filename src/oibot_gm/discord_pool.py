@@ -11,11 +11,13 @@ import asyncio
 import logging
 import os
 import re
+import time
 
 import discord
 
 from . import comp as comp_mod
 from . import ops as ops_mod
+from . import perms
 from . import raid_views as views
 from .discord_people import PeopleMixin
 from .discord_registry import registration_card, registration_view
@@ -168,16 +170,12 @@ class PoolMixin:
             return out
 
     async def post_registration_card(self, reg: Registry, ch: discord.TextChannel, by: str) -> str:
-        """Post (or move) the persistent card and try to make the channel read-only for members. Returns a status note."""
+        """Post (or move) the persistent card and try to make the channel read-only for members. Returns a status note.
+        The new card is posted FIRST; the old one is deleted only once the new one exists (a refused send loses nothing)."""
         notes = []
-        if reg.config.registration_channel_id and reg.config.registration_message_id:
-            old = self.get_channel(reg.config.registration_channel_id)
-            if old:
-                try:
-                    await (await old.fetch_message(reg.config.registration_message_id)).delete()
-                except Exception:  # noqa: BLE001
-                    pass
+        old_ch, old_id = reg.config.registration_channel_id, reg.config.registration_message_id
         msg = await ch.send(embed=registration_card(reg), view=registration_view(reg))
+        await self._drop_old_card(old_ch, old_id, msg.id)
         try:
             await msg.pin()
         except Exception:  # noqa: BLE001
@@ -192,9 +190,21 @@ class PoolMixin:
             notes.append("couldn't set read-only (give the bot Manage Channels, or deny Send Messages for @everyone yourself)")
         except Exception as e:  # noqa: BLE001
             notes.append(f"read-only not set: {e}")
-        reg.config.registration_channel_id, reg.config.registration_message_id = ch.id, msg.id
-        reg.save_config(f"registration channel → #{ch.name}", notify=False)
+        with reg.config_lock:
+            reg.config.registration_channel_id, reg.config.registration_message_id = ch.id, msg.id
+            reg.save_config(f"registration channel → #{ch.name}", notify=False)
         return " · ".join(notes)
+
+    async def _drop_old_card(self, ch_id, msg_id, keep_id) -> None:
+        """Delete a card the bot replaced (after the new one was posted); a card already gone is fine."""
+        if not (ch_id and msg_id) or msg_id == keep_id:
+            return
+        old = self.get_channel(ch_id)
+        if old:
+            try:
+                await (await old.fetch_message(msg_id)).delete()
+            except Exception:  # noqa: BLE001 — deleted by hand already
+                pass
 
 
 # ---------------------------------------------------------------- absences channel
@@ -304,20 +314,19 @@ class AbsencesMixin(PeopleMixin):
     record_absence, transfer_owner), so the client's class list stays as it is."""
 
     async def post_absences_card(self, reg: Registry, ch: discord.TextChannel, by: str) -> None:
-        if reg.config.absences_channel_id and reg.config.absences_message_id:
-            old = self.get_channel(reg.config.absences_channel_id)
-            if old:
-                try:
-                    await (await old.fetch_message(reg.config.absences_message_id)).delete()
-                except Exception:  # noqa: BLE001
-                    pass
+        """Post (or move) the absences card: the new card FIRST, then the old one is deleted (a refused send loses nothing)."""
+        old_ch, old_id = reg.config.absences_channel_id, reg.config.absences_message_id
         msg = await ch.send(embed=absences_card(reg), view=absences_view(reg))
+        drop = getattr(self, "_drop_old_card", None)
+        if drop is not None:
+            await drop(old_ch, old_id, msg.id)
         try:
             await msg.pin()
         except Exception:  # noqa: BLE001
             pass
-        reg.config.absences_channel_id, reg.config.absences_message_id = ch.id, msg.id
-        reg.save_config(f"absences channel → #{ch.name} (by {by})", notify=False)
+        with reg.config_lock:
+            reg.config.absences_channel_id, reg.config.absences_message_id = ch.id, msg.id
+            reg.save_config(f"absences channel → #{ch.name} (by {by})", notify=False)
 
     async def refresh_absences_card(self, reg: Registry) -> None:
         if not (reg.config.absences_channel_id and reg.config.absences_message_id):
@@ -362,6 +371,122 @@ class AbsencesMixin(PeopleMixin):
 CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_id", "signup": "signup_channel_id", "roster": "roster_channel_id",
                  "registration": "registration_channel_id", "analytics": "analytics_channel_id", "absences": "absences_channel_id", "news": "news_channel_id",
                  "loot": "loot_channel_id"}  # loot: the public award log (one line per confirmed award; LootLogMixin)
+# what each channel is for — the channels hub, the Config page's Channels card (GET /api/admin/channels) and the Setup card read these
+CHANNEL_LABELS: dict[str, tuple[str, str]] = {
+    "registration": ("Registration", "public, read-only: the registration card with its buttons"),
+    "signup": ("Signups", "public: one sheet per run (Join / Bench / No thanks)"),
+    "absences": ("Absences", "public: the I'll be away card; one line per absence"),
+    "roster": ("Roster (officers)", "health, lock and fill cards; the loot council's thread"),
+    "analytics": ("Analytics (officers)", "one readiness card per raid + the change log"),
+    "applications": ("Applications (officers)", "review cards for /apply (defaults to ops)"),
+    "ops": ("Ops (officers)", "one line per action the bot takes; plain-text config by @mention"),
+    "news": ("News", "where the news webhook posts; the bot keeps the items about our game"),
+    "loot": ("Loot log", "public: one line per confirmed award; empty = each run's updates thread"),
+}
+REQUIRED_KINDS = ("ops", "signup")  # without these the bot can't tell anyone anything / can't open a run (the Setup card's red rows)
+CARD_KINDS = ("registration", "absences", "analytics")  # a card the bot posts there (set_channel posts first, then drops the old one)
+NEWS_WEBHOOK_NAME = "oibot news"  # D39: the webhook the bot creates in the news channel
+PERM_CHECK_S = 3600  # the hourly permission check (design §3.4 X3)
+LEFT_SWEEP_N = 20  # members looked up per guild per hourly sweep (Member.left_at without the members intent)
+LEFT_SWEEP_AGE_S = 6 * 3600  # … each at most one REST fetch per 6 h (cached_member's max_age)
+INVITE_CHECK_S = 86400  # Registry invite validity, checked daily (design §3.3 R-06)
+UNREACHABLE = "Discord is unreachable right now — try again in a minute; nothing was changed."
+
+
+def channel_name(bot, cid) -> str:
+    """'#raids' for a channel the bot can see, else its mention (each surface renders <#id>)."""
+    ch = bot.get_channel(int(cid)) if bot is not None and cid and getattr(bot, "get_channel", None) else None
+    return f"#{ch.name}" if ch is not None and getattr(ch, "name", None) else f"<#{cid}>"
+
+
+def channel_consequences(reg: Registry, kind: str, channel_id: int | None, bot=None, *, include_clear: bool = True) -> list[str]:
+    """THE consequence sentences of pointing a bot channel somewhere (design §3.4 X3, §3.5 O-12): what is posted, pinned,
+    forgotten or falls back — and 'I can't post in #x: missing …' when the bot lacks a permission there (perms.missing_for,
+    the test set_channel runs before saving). The Discord commands' confirm, the channels hub's Review, the web's
+    ReviewModal (configops.CONSEQUENCE_HOOKS) and MCP's preview print these. `include_clear=False`: leave out the generic
+    clear sentences configops.op_consequences already says."""
+    attr = CHANNEL_KINDS.get(kind)
+    if not attr:
+        return []
+    cfg = reg.config
+    cur = getattr(cfg, attr, None)
+    cid = int(channel_id) if channel_id else None
+    out: list[str] = []
+    if cid is not None and cur == cid:
+        return [f"{CHANNEL_LABELS.get(kind, (kind,))[0]} is already {channel_name(bot, cid)} — nothing changes."]
+    if cid is None:
+        if not cur:
+            return []
+        old = channel_name(bot, cur)
+        if kind == "signup":
+            if include_clear:
+                out.append("Sheets will have nowhere to post until a signup channel is set.")
+        elif kind == "applications":
+            out.append(f"Applications fall back to the ops channel {channel_name(bot, cfg.ops_channel_id)}." if cfg.ops_channel_id
+                       else "Application cards have nowhere to go; officers find them under /roster applicants.")
+        elif kind == "roster":
+            out.append(f"Officer cards and the loot council's thread fall back to the ops channel {channel_name(bot, cfg.ops_channel_id)}." if cfg.ops_channel_id
+                       else "Officer cards and the loot council have nowhere to go until a roster or ops channel is set.")
+        elif kind == "ops":
+            out.append("The ops feed stops: actions and warnings go to the bot's log only (error alerts still DM).")
+        elif kind in ("registration", "absences"):
+            out.append(f"The {kind} card in {old} is forgotten (not deleted).")
+        elif kind == "analytics":
+            out.append(f"The analytics cards in {old} are forgotten (not deleted); the change log stops.")
+        elif kind == "news":
+            out.append(f"News posts in {old} are no longer read.")
+        elif kind == "loot":
+            out.append("Award lines go to each run's updates thread instead.")
+        return out
+    new = channel_name(bot, cid)
+    old = channel_name(bot, cur) if cur else None
+    if kind in ("registration", "absences"):
+        had = getattr(cfg, f"{kind}_message_id", None)
+        out.append(f"Posts and pins the {kind} card in {new}" + (f" and removes the old one from {old}." if had and old else "."))
+        if kind == "registration":
+            out.append("@everyone is made read-only there when the bot has Manage Channels (the buttons still work).")
+    elif kind == "analytics":
+        out.append(f"Posts one readiness card per raid in {new}" + (f"; the cards in {old} are forgotten (not deleted)." if old else "."))
+    elif kind == "signup":
+        out.append(f"New sheets post in {new}" + ("; sheets already open stay where they are." if old else "."))
+    elif kind == "news":
+        ch = bot.get_channel(cid) if bot is not None and getattr(bot, "get_channel", None) else None
+        can = bool(ch is not None and getattr(getattr(ch, "guild", None), "me", None) is not None and ch.permissions_for(ch.guild.me).manage_webhooks)
+        out.append(f"The bot reads the news posts in {new}; " + ("it creates a webhook there for your news source." if can
+                   else "give it Manage Webhooks there and it creates the webhook for your news source (or create one yourself)."))
+    elif kind == "applications":
+        out.append(f"New application cards post in {new}; cards already posted stay where they are.")
+    elif kind == "roster":
+        out.append(f"Officer cards and the loot council's thread post in {new}.")
+    if bot is not None and getattr(bot, "get_channel", None):
+        ch = bot.get_channel(cid)
+        if ch is not None:
+            missing = perms.missing_for(ch, kind)
+            if missing:
+                out.append(perms.cant_post(getattr(ch, "name", str(cid)), missing))
+    return out
+
+
+def _channel_hook(reg: Registry, op) -> list[str]:
+    """configops.CONSEQUENCE_HOOKS: a `set <kind>_channel` op's sentences on every surface's review (the web's ReviewModal,
+    MCP's preview, the plain-text diff) — the client the process runs (perms.CLIENT) answers the permission check."""
+    from . import configops
+
+    if op.op != "set" or op.path not in configops.CHANNEL_PATHS:
+        return []
+    kind = op.path.removesuffix("_channel")
+    cid = None if configops._clear_word(op.value) else configops._channel_id(op.value)
+    return channel_consequences(reg, kind, cid, perms.CLIENT, include_clear=False)
+
+
+def _install_hook() -> None:
+    from . import configops
+
+    if _channel_hook not in configops.CONSEQUENCE_HOOKS:
+        configops.CONSEQUENCE_HOOKS.append(_channel_hook)
+
+
+_install_hook()
 
 
 PLAIN_MODE_WORDS = {"act": "Acts", "self": "Own record only", "answer": "Answers only", "ignore": "Ignored"}
@@ -402,34 +527,58 @@ def plain_read_text(reg: Registry, table: dict, here) -> str:
 
 
 class SetupMixin:
-    async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, *, via: str = "discord", by_id: int | None = None) -> str:
-        """THE channel-setting verb (/gm config <kind>-channel, the Config page, plain text, MCP): sets the id and does what
-        the command does (post the registration or absences card, refresh the analytics cards), then writes the one
-        audit line (ops.audited: `by` is the person, `via` the surface, `by_id` marks a host superuser)."""
-        line = await self._set_channel(reg, kind, channel_id, by)
+    async def set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, *, via: str = "discord", by_id: int | None = None,
+                          rev: str | None = None) -> str:
+        """THE channel-setting verb (/gm config <kind>-channel and the channels hub, the Config page, plain text, MCP):
+        refuses a channel the bot can't post in (perms.missing_for) and says so apart from "Discord is unreachable right
+        now"; posts the card FIRST (registration, absences, analytics) and only then saves and drops the old one — a
+        refused send loses nothing; then writes the ONE audit line (ops.audited: `by` is the person, `via` the surface,
+        `by_id` marks a host superuser). No caller writes its own line. `rev`: the settings rev the author saw (the channels
+        hub, a confirm screen, a structured batch) — a settings change since raises ConfigChanged before anything is posted
+        and again at the save, so a stale draft never overwrites someone else's change."""
+        line = await self._set_channel(reg, kind, channel_id, by, rev)
         ops = getattr(self, "ops", None)
         if ops is not None:
             await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
+        self.__dict__.setdefault("_perm_warned", {}).pop((reg.key, kind), None)  # the hourly check looks at the new channel afresh
         return line
 
-    async def _set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str) -> str:
+    def _channel_or_refuse(self, reg: Registry, kind: str, channel_id: int):
+        """The channel object for a set, or the refusal in words: Discord unreachable (the gateway isn't up, or the
+        server is unavailable) vs. a channel that really isn't a text channel of this server the bot can post in."""
+        ch = self.get_channel(channel_id)
+        if ch is None:
+            ready = getattr(self, "is_ready", None)
+            guild = self.get_guild(reg.config.discord_guild_id) if getattr(self, "get_guild", None) else None
+            if (ready is not None and not ready()) or (getattr(self, "get_guild", None) and (guild is None or getattr(guild, "unavailable", False))):
+                raise ValueError(UNREACHABLE)
+            raise ValueError("that channel isn't a text channel I can see")
+        if not isinstance(ch, discord.TextChannel):
+            raise ValueError(f"#{getattr(ch, 'name', channel_id)} isn't a text channel — pick a text channel")
+        if getattr(getattr(ch, "guild", None), "id", None) != reg.config.discord_guild_id:
+            raise ValueError("That channel is in another server.")  # the site, MCP and plain text all come through here
+        missing = perms.missing_for(ch, kind)
+        if missing:
+            raise ValueError(perms.cant_post(ch.name, missing))
+        return ch
+
+    async def _set_channel(self, reg: Registry, kind: str, channel_id: int | None, by: str, rev: str | None = None) -> str:
         attr = CHANNEL_KINDS.get(kind)
         if not attr:
             raise ValueError(f"unknown channel kind {kind}")
-        ch = self.get_channel(channel_id) if channel_id else None
-        if channel_id and (ch is None or not isinstance(ch, discord.TextChannel)):
-            raise ValueError("that channel isn't a text channel I can see")
-        if ch is not None and getattr(getattr(ch, "guild", None), "id", None) != reg.config.discord_guild_id:
-            raise ValueError("That channel is in another server.")  # the site, MCP and plain text all come through here
+        ch = self._channel_or_refuse(reg, kind, channel_id) if channel_id else None
+        reg.check_rev("settings", rev)  # before any card is posted: a stale draft posts nothing
         if not ch:
-            setattr(reg.config, attr, None)
-            if kind == "registration":
-                reg.config.registration_message_id = None
-            if kind == "absences":
-                reg.config.absences_message_id = None
-            if kind == "analytics":
-                reg.config.analytics_message_ids = {}
-            reg.save_config(f"{kind} channel cleared (by {by})")
+            with reg.config_lock:
+                reg.check_rev("settings", rev)
+                setattr(reg.config, attr, None)
+                if kind == "registration":
+                    reg.config.registration_message_id = None
+                if kind == "absences":
+                    reg.config.absences_message_id = None
+                if kind == "analytics":
+                    reg.config.analytics_message_ids = {}
+                reg.save_config(f"{kind} channel cleared (by {by})")
             return f"{kind} channel cleared"
         if kind == "registration":
             note = await self.post_registration_card(reg, ch, by)
@@ -439,13 +588,46 @@ class SetupMixin:
             return f"absence card posted in #{ch.name}"
         if kind == "analytics":
             if reg.config.analytics_channel_id != ch.id:
-                reg.config.analytics_channel_id, reg.config.analytics_message_ids = ch.id, {}
-                reg.save_config(f"analytics channel → #{ch.name} (by {by})", notify=False)
+                with reg.config_lock:
+                    reg.check_rev("settings", rev)
+                    reg.config.analytics_channel_id, reg.config.analytics_message_ids = ch.id, {}
+                    reg.save_config(f"analytics channel → #{ch.name} (by {by})", notify=False)
             msgs = await self.refresh_pool(reg)
             return f"{len(msgs)} analytics card(s) posted in #{ch.name}"
-        setattr(reg.config, attr, ch.id)
-        reg.save_config(f"{kind} channel → #{ch.name} (by {by})")
+        with reg.config_lock:
+            reg.check_rev("settings", rev)
+            setattr(reg.config, attr, ch.id)
+            reg.save_config(f"{kind} channel → #{ch.name} (by {by})")
         return f"{kind} channel → #{ch.name}"
+
+    # ---- D39: the bot creates the news webhook
+    async def news_webhook(self, reg: Registry, *, create: bool = True) -> dict:
+        """The news channel's webhook for the owner's news source: the bot's own (created when missing and `create`) when it
+        has Manage Webhooks there, else what to add. {url (a secret: the owner's eyes only — never an ops line), note,
+        created}. url None = no webhook the bot can hand out."""
+        cid = reg.config.news_channel_id
+        ch = self.get_channel(cid) if cid else None
+        if ch is None:
+            return {"url": None, "created": False, "note": "No news channel is set (or I can't see it)."}
+        me = getattr(getattr(ch, "guild", None), "me", None)
+        if me is None or not ch.permissions_for(me).manage_webhooks:
+            return {"url": None, "created": False,
+                    "note": f"I can't create the news webhook: give the bot Manage Webhooks in #{ch.name} (or create one yourself: Edit Channel → "
+                            "Integrations → Webhooks) and point your news source at it."}
+        try:
+            hooks = await ch.webhooks()
+            own = getattr(self, "user", None)
+            mine = next((h for h in hooks if h.name == NEWS_WEBHOOK_NAME and (own is None or getattr(h.user, "id", None) == own.id)), None)
+            created = False
+            if mine is None and create:
+                mine = await ch.create_webhook(name=NEWS_WEBHOOK_NAME, reason=f"oibot_GM: the news source posts here ({reg.config.name})")
+                created = True
+        except discord.HTTPException as e:
+            return {"url": None, "created": False, "note": f"Discord refused the webhook: {e.text or e}"}
+        if mine is None:
+            return {"url": None, "created": False, "note": f"No webhook of mine in #{ch.name} yet."}
+        return {"url": mine.url, "created": created,
+                "note": f"Point your news source at this webhook; posts in #{ch.name} are filtered by our game version, raids and the news keywords."}
 
     async def create_invite(self, reg: Registry, channel_id: int) -> str:
         """A permanent, unlimited-use invite to one of the guild's text channels (the homepage's Join button). Needs
@@ -462,7 +644,33 @@ class SetupMixin:
             raise ValueError(f"Discord refused: I don't have the Create Invite permission in #{ch.name}") from None
         except discord.HTTPException as e:
             raise ValueError(f"Discord refused the invite: {e.text or e}") from None
+        self.__dict__.setdefault("_invite_status", {}).pop(reg.key, None)
         return inv.url
+
+    async def invite_status(self, reg: Registry, *, max_age: float = INVITE_CHECK_S) -> dict:
+        """Is the homepage's invite still good? {state none | ok | dead | unknown, text, checked} — one fetch_invite per
+        guild per `max_age` (cached; a new invite clears it). 'dead' = Discord's own Unknown Invite; anything else Discord
+        didn't answer is 'unknown', never dead."""
+        url = reg.config.invite_url
+        if not url:
+            return {"state": "none", "text": "No invite link — the homepage has no Join button.", "checked": None}
+        cache: dict = self.__dict__.setdefault("_invite_status", {})
+        hit = cache.get(reg.key)
+        now = time.time()
+        if hit and hit["url"] == url and now - hit["at"] < max_age:
+            return hit["status"]
+        fetch = getattr(self, "fetch_invite", None)
+        if fetch is None:
+            return {"state": "unknown", "text": "Couldn't check the invite.", "checked": None}
+        try:
+            await fetch(url)
+            status = {"state": "ok", "text": "The invite works.", "checked": now}
+        except discord.NotFound:
+            status = {"state": "dead", "text": "The invite is dead (expired or deleted) — the homepage's Join button fails. Create a new one.", "checked": now}
+        except Exception as e:  # noqa: BLE001 — a blip isn't a dead invite
+            return {"state": "unknown", "text": f"Couldn't check the invite ({type(e).__name__}).", "checked": None}
+        cache[reg.key] = {"url": url, "at": now, "status": status}
+        return status
 
     def guild_channels(self, reg: Registry) -> list[dict]:
         g = self.get_guild(reg.config.discord_guild_id)
@@ -490,6 +698,169 @@ class SetupMixin:
         ids = list(cfg.plain.channels) + [str(c) for c in (cfg.ops_channel_id, cfg.analytics_channel_id) if c and str(c) not in cfg.plain.channels]
         channels = [{"id": cid, "name": names.get(cid), "mode": reg.plain_mode(cid), "why": plain_why(reg, cid)} for cid in dict.fromkeys(ids)]
         return {"groups": groups, "channels": channels, "dm": cfg.plain.dm, "default": cfg.plain.default, "names": names}
+
+    def role_refusal(self, reg: Registry, rid: int | None) -> str | None:
+        """Why a role can't be an officer (or member) role: @everyone, a bot's or an integration's managed role, a role this
+        server doesn't have. None = fine, or the server can't be seen (no gateway: the id is kept, resolved on ready)."""
+        g = self.get_guild(reg.config.discord_guild_id) if getattr(self, "get_guild", None) else None
+        if g is None or rid is None:
+            return None
+        role = g.get_role(int(rid)) if hasattr(g, "get_role") else None
+        if role is None:
+            return f"This server has no role with id {rid}."
+        if role.is_default():
+            return "@everyone can't be an officer role — everyone would be an officer."
+        if role.managed:
+            return f"@{role.name} belongs to a bot or an integration — pick a role people hold."
+        return None
+
+    def discord_links(self, reg: Registry) -> dict:
+        """'Open in Discord' links: the server and each configured channel (discord.com/channels/<server>/<channel>)."""
+        gid = reg.config.discord_guild_id
+        base = f"https://discord.com/channels/{gid}"
+        return {"server": base, "channels": {k: f"{base}/{getattr(reg.config, a)}" for k, a in CHANNEL_KINDS.items() if getattr(reg.config, a, None)}}
+
+    # ---- who left the server (design §3.3 cluster D): without the privileged members intent on_member_remove never
+    # arrives, so Member.left_at follows Discord's own answers: a 404 from fetch_member marks it, any sighting clears it
+    def note_membership(self, guild_id: int | None, uid: int, present: bool) -> None:
+        """Discord answered for (guild, uid): `present` False = its own 404 (not a timeout — cached_member never calls this
+        for a lookup Discord didn't answer). A registered, non-test member's `left_at` is set or cleared to match (off the
+        loop: a git commit). No notice, no DM."""
+        regs = getattr(self, "registries", None)
+        reg = regs.for_guild(guild_id) if regs is not None and guild_id else None
+        m = reg.members.get(int(uid)) if reg is not None else None
+        if m is None or m.test or bool(m.left_at) != present:  # nothing to change: already as Discord says
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            reg.member_left(m.discord_id, not present)
+            return
+        tasks: set = self.__dict__.setdefault("_left_tasks", set())
+        t = loop.create_task(asyncio.to_thread(reg.member_left, m.discord_id, not present))
+        tasks.add(t)
+        t.add_done_callback(tasks.discard)
+
+    async def sweep_left(self, reg: Registry, limit: int = LEFT_SWEEP_N) -> int:
+        """The hourly sweep: up to `limit` registered members not marked as left, longest unchecked first, looked up through
+        `cached_member` (at most one REST fetch each per LEFT_SWEEP_AGE_S) — its 404s mark `left_at` (note_membership). A
+        guild of a few hundred is covered every few hours without the members intent. Returns how many were looked up."""
+        look = getattr(self, "cached_member", None)
+        guild = self.get_guild(reg.config.discord_guild_id) if getattr(self, "get_guild", None) else None
+        if look is None or guild is None or getattr(guild, "unavailable", False):
+            return 0
+        seen: dict = self.__dict__.setdefault("_left_swept", {})
+        todo = sorted((m for m in reg.members.values() if not m.test and not m.left_at), key=lambda m: seen.get((reg.key, m.discord_id), 0.0))[:limit]
+        for m in todo:
+            seen[(reg.key, m.discord_id)] = time.time()
+            try:
+                await look(guild, m.discord_id, max_age=LEFT_SWEEP_AGE_S)
+            except Exception:  # noqa: BLE001 — a lookup Discord didn't answer is no answer; the next sweep tries again
+                continue
+        return len(todo)
+
+    # ---- the permission check (hourly) and the Setup card
+    def channel_problems(self, reg: Registry) -> dict[str, str]:
+        """kind → what is wrong with that configured channel now: gone (deleted / invisible) or 'I can't post in #x:
+        missing …' (perms.missing_for). {} when the server itself isn't visible (an outage is not a problem to report)."""
+        g = self.get_guild(reg.config.discord_guild_id) if getattr(self, "get_guild", None) else None
+        if g is None or getattr(g, "unavailable", False):
+            return {}
+        out = {}
+        for kind, attr in CHANNEL_KINDS.items():
+            cid = getattr(reg.config, attr, None)
+            if not cid:
+                continue
+            ch = self.get_channel(cid)
+            if ch is None:
+                out[kind] = f"the {CHANNEL_LABELS[kind][0].lower()} channel <#{cid}> is gone (deleted, or I can't see it)"
+                continue
+            missing = perms.missing_for(ch, kind)
+            if missing:
+                out[kind] = perms.cant_post(getattr(ch, "name", str(cid)), missing)
+        return out
+
+    async def check_channel_perms(self, reg: Registry) -> dict[str, str]:
+        """One pass of the permission check: ONE ops line listing what newly went wrong (a problem already reported is not
+        repeated; a fixed one is forgotten, so a relapse is reported again) — an ERROR when a REQUIRED_KINDS channel (ops,
+        signups) is among them: without it the bot can't tell anyone anything or open a run, so the owner must act and gets
+        the error alert (error_dm_ids, throttled by Ops.emit — the DM rule's one exception); a warn otherwise. Returns the
+        current problems."""
+        problems = self.channel_problems(reg)
+        warned: dict = self.__dict__.setdefault("_perm_warned", {})
+        for k in [k for k in warned if k[0] == reg.key and k[1] not in problems]:
+            warned.pop(k, None)
+        fresh = {kind: text for kind, text in problems.items() if warned.get((reg.key, kind)) != text}
+        if fresh:
+            for kind, text in fresh.items():
+                warned[(reg.key, kind)] = text
+            ops = getattr(self, "ops", None)
+            if ops is not None:
+                level = "error" if any(k in REQUIRED_KINDS for k in fresh) else "warn"
+                await ops.emit(reg.config, level, "Channel check: " + " · ".join(fresh.values()) + " — /gm config channels or the Config page fixes it.")
+                if "ops" in fresh and getattr(ops, "known", None) is not None:  # the posts that fail next say the same thing: no second DM
+                    from .ops import OPS_CHANNEL_SIG
+
+                    ops.known(reg.key, OPS_CHANNEL_SIG)
+        return problems
+
+    async def setup_tick(self, now: float | None = None) -> None:
+        """The scheduler's hook (raid_scheduler.scheduler_tick): the permission check hourly and the invite daily, per guild;
+        a dead invite warns once."""
+        now = time.time() if now is None else now
+        perms.CLIENT = self  # configops' channel consequence hook checks permissions with the running client
+        last: dict = self.__dict__.setdefault("_setup_checked", {})
+        regs = getattr(self, "registries", None)
+        for reg in (regs.ordered() if regs is not None else []):
+            if reg.key in last and now - last[reg.key] < PERM_CHECK_S:
+                continue
+            last[reg.key] = now
+            try:
+                await self.check_channel_perms(reg)
+                await self.sweep_left(reg)
+                st = await self.invite_status(reg)
+                dead: set = self.__dict__.setdefault("_invite_dead_warned", set())
+                if st["state"] == "dead" and (reg.key, reg.config.invite_url) not in dead:
+                    dead.add((reg.key, reg.config.invite_url))
+                    await self.ops.emit(reg.config, "warn", st["text"] + " (/gm config recruitment or the Config page)")
+            except Exception:  # noqa: BLE001 — a check never stops the scheduler
+                log.exception("setup check failed for %s", reg.key)
+
+    def setup_checklist(self, reg: Registry) -> list[dict]:
+        """The Setup card / `/gm status` checklist: rows {key, label, state ok | warn | bad, text, test} — every ✓ computed
+        by the same test the runtime uses (perms.missing_for for channels and the server, the role list, the owner)."""
+        cfg = reg.config
+        g = self.get_guild(cfg.discord_guild_id) if getattr(self, "get_guild", None) else None
+        rows = []
+        rows.append({"key": "owner", "label": "Owner", "state": "ok" if cfg.owner_discord_id else "bad",
+                     "text": f"<@{cfg.owner_discord_id}>" if cfg.owner_discord_id else "nobody — /gm config owner", "test": "config.owner_discord_id"})
+        if cfg.detached_at:
+            rows.append({"key": "detached", "label": "Server", "state": "bad", "text": "the bot is no longer in this guild's Discord server — invite it back",
+                         "test": "config.detached_at (on_guild_remove)"})
+        problems = self.channel_problems(reg)
+        for kind, attr in CHANNEL_KINDS.items():
+            cid = getattr(cfg, attr, None)
+            label = CHANNEL_LABELS[kind][0]
+            if not cid:
+                rows.append({"key": f"channel:{kind}", "label": label, "state": "bad" if kind in REQUIRED_KINDS else "warn", "text": "not set",
+                             "test": f"config.{attr}"})
+            elif kind in problems:
+                rows.append({"key": f"channel:{kind}", "label": label, "state": "bad", "text": problems[kind], "test": f"perms.missing_for(<#{cid}>, {kind!r})"})
+            else:
+                rows.append({"key": f"channel:{kind}", "label": label, "state": "ok", "text": f"<#{cid}>", "test": f"perms.missing_for(<#{cid}>, {kind!r})"})
+        roles = reg.officer_role_names()
+        rows.append({"key": "officer_roles", "label": "Officer roles", "state": "ok" if cfg.officer_role_ids else "warn",
+                     "text": ", ".join(roles) if cfg.officer_role_ids else "none — Manage Server only", "test": "config.officer_role_ids"})
+        if g is not None:
+            missing = perms.missing_for(g)
+            rows.append({"key": "permissions", "label": "Server permissions", "state": "bad" if missing else "ok",
+                         "text": ("missing " + perms.words(missing)) if missing else "everything the invite asks for", "test": "perms.missing_for(guild)"})
+            for p in perms.optional_missing(g):
+                rows.append({"key": f"optional:{p}", "label": perms.WORDS.get(p, p), "state": "warn", "text": f"optional — with it, {perms.OPTIONAL[p]}",
+                             "test": f"guild.me.guild_permissions.{p}"})
+        targets = reg.error_dm_targets()
+        rows.append({"key": "error_dms", "label": "Error alerts", "state": "ok" if targets else "warn", "text": reg.error_dm_words(), "test": "config.error_dm_ids"})
+        return rows
 
     # ---- the test bench (dual interfaces phase 2, B9): the verbs every surface calls — /gm test seed|run|answer|compose|
     # comp|clear (flows_misc, flows_test), plain text's `test …` (configops.apply_async), the site's Test bench

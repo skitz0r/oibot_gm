@@ -204,8 +204,8 @@ def test_the_review_card_stays_within_discords_limits(reg, monkeypatch):
     assert f"{reg.raid_def(RID)['name']} · " in can.value and "no longer scheduled" in can.value  # human labels, never '<raid>:<id>'
     answers = [f for f in e.fields if f.name.startswith("Question number")]
     assert len(answers) == 15 and all(f.value.endswith("…") for f in answers)
-    assert not any("site" in f.value for f in e.fields)  # the site has no applications page: never pointed at
-    assert any("Full answers: ask me (“show Kessa's application”) or MCP list_applications." in f.value for f in e.fields)
+    # D32: the officers' Applications page holds the full answers — the overflow field points there
+    assert any("Full answers: the site's Applications page (officers), or ask me (“show Kessa's application”)." in f.value for f in e.fields)
 
 
 def test_a_short_application_card_is_whole(reg, monkeypatch):
@@ -426,7 +426,7 @@ def test_decide_application_returns_the_line_and_never_removes_anyone(reg):
     assert "welcome to stay" in dms[0][1] and "not this time" in dms[0][1]
     assert msg.edits and msg.edits[0]["view"] is None and "declined" in msg.edits[0]["embed"].footer.text
     assert any("Declined" in t for _, t in client.ops.lines)
-    with pytest.raises(RegistryError, match="No open application"):
+    with pytest.raises(RegistryError, match=r"Already declined by Officer \("):  # a second decision names the first (design §3.3 D)
         run(settle_application(client, reg, NEW_ID, True, "Officer", None))
     # accept: registered as a confirmed trial, surname carried
     b = reg.apply(NEW_ID + 1, "Other", "Borin", "Warrior", "Arms", None, None, None, None, surname="Stone")
@@ -441,7 +441,7 @@ def test_the_card_buttons_use_the_clients_decide_path(reg, monkeypatch):
     h = person(reg, uid=1, name="Officer")
     calls = []
 
-    async def decide(r, uid, accept, by, note):
+    async def decide(r, uid, accept, by, note, by_id=None, via="discord"):
         calls.append((uid, accept, by, note))
         return "✅ line from the client"
     h.client.decide_application = decide

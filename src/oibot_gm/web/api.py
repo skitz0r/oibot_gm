@@ -24,10 +24,11 @@ from pydantic import BaseModel, ValidationError
 from .. import comp as comp_mod, inbox, ops as ops_mod, raid_views as dr, raidcycle as rc, render
 from ..consequences import consequence as consequence_lines, consequences_json
 from ..presets import DURATIONS, PRESETS
-from ..registry import ABSENCE_REASON_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged
+from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged, is_superuser
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, series_key, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
 from ..roster import coverage as cov_mod
 from .api_me import sheet_row_extras
+from .api_setup import discord_ready
 from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
 
 HERE = Path(__file__).parent
@@ -137,13 +138,28 @@ def recruitment_json(reg) -> dict:
 
 
 def application_json(reg, a) -> dict:
-    return {"uid": str(a.discord_id), "display_name": a.display_name, "label": a.label, "cls": a.cls, "spec": a.spec, "offspec": a.offspec,
-            "schedules": [schedule_choice_label(reg, s) for s in a.schedules], "answers": list(a.answers), "availability": a.availability,
-            "about": a.about, "logs_url": a.logs_url, "source": a.source, "status": a.status,
-            "created": reg.local12(a.created_at), "decided": reg.local12(a.decided_at) if a.decided_at else None,
-            "decided_by": a.decided_by, "note": a.decision_note}
+    """One application for the officers' Applications page / MCP: full answers, `prior` ("Applied before: declined 12 Mar
+    by Jonny — full on healers"), every earlier verdict (`history`), what Accept did about the member role (`role_note`,
+    D31) and, while open, THE consequence sentences of each verdict (discord_registry.application_consequence — the
+    Discord decide screen prints the same)."""
+    from ..discord_registry import application_consequence
+
+    out = {"uid": str(a.discord_id), "display_name": a.display_name, "label": a.label, "cls": a.cls, "spec": a.spec, "offspec": a.offspec,
+           "schedules": [schedule_choice_label(reg, s) for s in a.schedules], "answers": list(a.answers), "availability": a.availability,
+           "about": a.about, "logs_url": a.logs_url, "source": a.source, "status": a.status,
+           "created": reg.local12(a.created_at), "decided": reg.local12(a.decided_at) if a.decided_at else None,
+           "decided_by": a.decided_by, "note": a.decision_note, "prior": reg.prior_decision_line(a), "role_note": a.role_note,
+           "history": [{"label": h.get("label"), "status": h.get("status"), "by": h.get("by"), "note": h.get("note"),
+                        "when": reg.local12(h["at"]) if h.get("at") else None} for h in a.history]}
+    if a.status == "open":
+        from ..configops import render
+
+        out["consequence"] = {k: [render(x, reg, "web").removeprefix("-# ") for x in application_consequence(reg, a, k == "accept")] for k in ("accept", "decline")}
+    return out
 
 
+# §2.9: an officer write while Discord can't confirm the roles (the last-known "yes" of the past 6 h keeps reads going)
+STALE_OFFICER = "Discord can't confirm your officer role right now — reading works, changes wait. Try again in a moment."
 HISTORY_PAGE = 8  # past runs per raid on the Rosters page; GET /api/runs pages the rest
 from .api_ops import PREVIEW_TTL  # noqa: E402,F401 — the preview tokens live in api_ops (the structured ops path)
 
@@ -189,6 +205,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if v is None:
             raise HTTPException(401, "login required")
         if officer and not v.officer:
+            if getattr(v, "stale_write", False):  # §2.9: the roles are the last-known ones — reads go on, officer writes wait
+                raise HTTPException(503, STALE_OFFICER, headers={"Retry-After": "5"})
             raise HTTPException(403, "Officers only.")
         request.state.reg, request.state.via = v.reg, v.via  # the guild and surface an unexpected error's ops line goes to (_api_errors)
         return v
@@ -474,6 +492,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # the cadence presets the raid wizard offers (presets.PRESETS), for the schedule editor's quick picks
             "cadence_presets": [{"key": k, "name": n, "signup_lead_hours": o, "nudge_hours_before": nu, "lock_hours_before": lo, "confirm_hours_before": c}
                                 for k, n, o, nu, lo, c in PRESETS],
+            # §2.9: Discord reachable for this guild (Config disables channel / role editing while not); `stale` = this
+            # viewer's membership is the last-known "yes" (reads go on, officer writes refuse)
+            "discord": {"ready": discord_ready(bot, reg), "stale": bool(getattr(v, "stale", False))},
         }
 
     @app.get("/api/meta")
@@ -495,16 +516,23 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         from .app import MCP_TOKEN_ENV, mcp_authorized
 
         if request.headers.get("authorization"):
-            if not mcp_authorized(request, _os.environ.get(MCP_TOKEN_ENV) or None):
+            if not mcp_authorized(request, _os.environ.get(MCP_TOKEN_ENV) or None, bot):
                 raise HTTPException(401, "login required")
             from .api_agents import busy_json
 
-            # `busy`: D33's raid guard per guild, computed here — the apply job defers a restart while any guild is busy
-            return {"guilds": [{"key": r.key, "name": r.config.name, "discord_guild_id": str(r.config.discord_guild_id),
-                                "owner_discord_id": str(r.config.owner_discord_id) if r.config.owner_discord_id else None,
-                                "game_profile": r.config.game_profile, "busy": busy_json(bot, r)} for r in bot.registries.ordered()]}
+            # `busy`: D33's raid guard per served guild, computed here — the apply job defers a restart while any guild is busy;
+            # the host's token also sees parked guilds, marked `detached` (never a job's target: mcp_server.Api.guilds drops them)
+            row = lambda r, parked: {"key": r.key, "name": r.config.name, "discord_guild_id": str(r.config.discord_guild_id),  # noqa: E731
+                                     "owner_discord_id": str(r.config.owner_discord_id) if r.config.owner_discord_id else None,
+                                     "game_profile": r.config.game_profile,
+                                     **({"detached": True, "detached_at": r.config.detached_at} if parked else {"busy": busy_json(bot, r)})}
+            parked = bot.registries.detached_list() if hasattr(bot.registries, "detached_list") else []
+            return {"guilds": [row(r, False) for r in bot.registries.ordered()] + [row(r, True) for r in parked]}
         v = await who(request)
-        return {"guilds": await guild_choices(v)}
+        out = {"guilds": await guild_choices(v)}
+        if is_superuser(v.uid) and hasattr(bot.registries, "detached_list"):  # a host superuser also sees the parked guilds (never anyone else)
+            out["detached"] = [{"key": r.key, "name": r.config.name, "detached_at": r.config.detached_at} for r in bot.registries.detached_list()]
+        return out
 
     @app.post("/api/guild")
     async def choose_guild(request: Request):
@@ -595,6 +623,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # the notices (D26: outcomes that are never a DM) — the Me page's AskCards and its inbox
             "asks": inbox.asks_of(reg, rs, v.uid),
             "notices": inbox.notices_of(reg, v.uid),
+            # their OWN application (design §3.3 D): open → waiting, decided → the decision; components/MyApplication.tsx
+            "application": reg.application_state(v.uid),
         }
 
     # ---- member self-service
@@ -2039,6 +2069,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 # several guilds: data repo, LLM and uptime are the whole bot's, not this guild's (K17: absent for one)
                 **({"scope": "bot"} if getattr(bot.registries, "many", False) else {}),
                 "rows": [{"time": t, "level": lvl, "text": text} for t, lvl, text in reversed(bot.ops.recent_for(v.reg.key))],
+                # OPS-01: errors folded into an earlier alert (no DM of their own) — the page's badge; failed ops-channel posts in a row
+                "suppressed": bot.ops.suppressed_for(v.reg.key) if hasattr(bot.ops, "suppressed_for") else 0,
+                "ops_failing": bot.ops.ops_channel_failing(v.reg.key) if hasattr(bot.ops, "ops_channel_failing") else 0,
                 "changes": [{**c, "time_label": v.reg.local12(c["time"])} for c in recent_changes(v.reg.key, max(0, min(int(changes_limit), 200)))]}
 
     @app.get("/api/config")
@@ -2068,7 +2101,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles, "news_keywords": list(cfg.news_keywords),
                              "loot_log": bool(cfg.loot_log), "loot_log_state": loot_log_state(reg),
                              "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None,
-                             "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids]},
+                             "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids],
+                             # OPS-01: who gets the error alerts — null = the owner (the default), [] = nobody; saved as settings field error_dm_ids
+                             "error_dm_ids": None if cfg.error_dm_ids is None else [str(u) for u in cfg.error_dm_ids],
+                             "error_dms": [{"id": str(u), "name": reg.members[u].display_name if u in reg.members else str(u)} for u in reg.error_dm_targets()]},
                 "test_bench": {"members": len(reg.test_members()), "runs": [e.key for e in bot.raids.store(reg).live() if (cfg.roster(e.team) or {}).get("test")]}, "owner": v.owner,
                 "guild": {"key": reg.key, "name": cfg.name, "discord_guild_id": str(cfg.discord_guild_id)},  # which guild answered (MCP guild_overview)
                 "revs": {s: reg.config_rev(s) for s in ("settings", "recruitment", "plain")}}  # what an edit-mode Save sends back as revs["config:<section>"]
@@ -2123,43 +2159,36 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         reg = v.reg
         decided = sorted([a for a in reg.applicants.values() if a.status != "open"], key=lambda a: a.decided_at or a.created_at, reverse=True)[:20]
         return {"open": [application_json(reg, a) for a in reg.open_applicants()], "decided": [application_json(reg, a) for a in decided],
-                "recruiting": reg.config.recruitment.open}
+                "recruiting": reg.config.recruitment.open, "note_max": DECISION_NOTE_MAX}
 
     @app.post("/api/admin/application/decide")
     async def application_decide(request: Request):
         """Officers: {uid, accept, note} → the bot's decide_application (the same verdict as the Discord card: the
         applicant is DMed, the card updated, a character added on accept). Answers with the verdict line."""
         v, d = await body(request, officer=True)
+        if v.via == "mcp" and not getattr(v, "actor", None):  # D8: the owner's token is not the officer who decided
+            from .api_loot import ACTOR_NEEDED
+
+            raise HTTPException(403, ACTOR_NEEDED.format(what="Accepting or declining an application", guild=v.reg.config.name))
         uid = as_int(d.get("uid"), "uid")
         if "accept" not in d:
             return JSONResponse({"error": "accept: true or false"}, status_code=400)
         note = str(d.get("note") or "").strip() or None
         a = v.reg.applicants.get(uid)
         if not a or a.status != "open":
-            return JSONResponse({"error": "No open application for that member."}, status_code=400)
-        try:
-            line = await maybe_await(bot.decide_application(v.reg, uid, bool(d["accept"]), v.name, note))
+            return JSONResponse({"error": v.reg.decided_refusal(a)}, status_code=400)  # "Already declined by Jonny (…)"
+        if note and len(note) > DECISION_NOTE_MAX:
+            return JSONResponse({"error": f"The note is limited to {DECISION_NOTE_MAX} characters (it goes to the applicant)."}, status_code=400)
+        try:  # the verb writes the one ops line itself (settle_application → ops.audited with this surface)
+            line = await maybe_await(bot.decide_application(v.reg, uid, bool(d["accept"]), v.name, note, by_id=v.uid, via=v.via))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         line = str(line or f"application from {a.display_name} {'accepted' if d['accept'] else 'declined'}")
-        await ops_mod.audited(bot.ops, v.reg, v.name, line, via=v.via, by_id=v.uid)
-        return {"message": line}
+        done = v.reg.applicants.get(uid)
+        return {"message": line, "application": application_json(v.reg, done) if done else None}
 
-    @app.post("/api/admin/invite")
-    async def create_invite(request: Request):
-        """Owner: {channel_id} → a permanent, unlimited-use invite to that channel. Returned, not saved: the Config page
-        puts it in the invite field and the owner saves the section."""
-        v, d = await body(request, officer=True)
-        need_owner(v)
-        cid = channel_ref(v.reg, d.get("channel_id") or d.get("channel"))  # an id, <#id> or a name (MCP names channels)
-        if cid is None:
-            return JSONResponse({"error": "channel_id: which channel should the invite open?"}, status_code=400)
-        try:
-            url = await maybe_await(bot.create_invite(v.reg, cid))
-        except (RegistryError, ValueError) as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-        await ops_mod.audited(bot.ops, v.reg, v.name, f"created invite {url}", via=v.via, by_id=v.uid)
-        return {"invite_url": url, "message": f"invite created: {url} (save the section to use it)"}
+    # R-06: there is no separate Create invite route any more — the invite is created at the recruitment Save
+    # (POST /api/admin/recruitment {invite_create: channel} → the `recruit invite_create` op), so none is ever orphaned.
 
     from .api_ops import install_ops_api  # the structured ops path + the admin routes as its translators (design §5.43)
 
@@ -2169,6 +2198,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_policy import install_policy_api  # the Policy page and the manual (design §5.45)
 
     install_policy_api(app, bot, who=who, body=body, publish=publish)
+
+    from .api_setup import install_setup_api  # channels, the Setup / Host cards, Remove record (design §5.46)
+
+    install_setup_api(app, bot, who=who, body=body, need_owner=need_owner, as_int=as_int)
+
     from .api_agents import install_agents_api  # news, proposals, the local jobs (design §5.26)
 
     install_agents_api(app, bot, who=who, body=body, publish=publish)

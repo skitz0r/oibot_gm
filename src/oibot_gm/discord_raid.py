@@ -87,7 +87,10 @@ class RaidMixin:
     async def send_member_card(self, reg, m, text: str | None = None, view=None, ev=None) -> tuple[bool, object]:
         """send_member_dm, also handing back the message sent (or None when the client returns none) — an ask's DM card
         is stored by id on the ask (FillAsk.dm_*, a placement ask's `dm`) so it can be EDITED to its final state when the
-        ask closes (answered elsewhere, expired, withdrawn, the run cancelled), never followed by another DM."""
+        ask closes (answered elsewhere, expired, withdrawn, the run cancelled), never followed by another DM. A DETACHED
+        guild (the bot was removed from its server: Guilds.detach) sends nothing — its runs' pending asks stop here."""
+        if getattr(getattr(reg, "config", None), "detached_at", None):
+            return False, None
         if text and not str(text).startswith(str(reg.config.name)):
             text = guild_prefix(reg) + text
         target, prefix = m.discord_id, None

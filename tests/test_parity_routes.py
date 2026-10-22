@@ -106,7 +106,7 @@ def test_sheet_repost_route(c, bot, reg, rs):
     assert c.post(f"/api/run/{ev.key}/sheet", json={"channel": "#nowhere"}, headers=H).status_code == 400
 
 
-def test_channel_names_resolve_on_the_sheet_and_invite_routes(c, bot, reg, rs):
+def test_channel_names_resolve_on_the_sheet_and_invite_create(c, bot, reg, rs):
     """channel_ref: '#name', a bare name, an id and <#id> resolve; unknown and ambiguous names are 400s that say so."""
     ev = open_test_run(reg, rs)
     bot.channels[81] = Chan(81, "welcome")
@@ -120,16 +120,16 @@ def test_channel_names_resolve_on_the_sheet_and_invite_routes(c, bot, reg, rs):
         return f"https://discord.gg/x{cid}"
 
     bot.create_invite = create_invite
-    r = c.post("/api/admin/invite", json={"channel": "#welcome"}, headers=H)
-    assert r.status_code == 200 and r.json()["invite_url"] == "https://discord.gg/x81", r.text
-    assert c.post("/api/admin/invite", json={"channel": "Welcome"}, headers=H).status_code == 200
-    assert c.post("/api/admin/invite", json={"channel_id": "<#82>"}, headers=H).status_code == 200
+    r = c.post("/api/admin/recruitment", json={"invite_create": "#welcome"}, headers=H)
+    assert r.status_code == 200 and reg.config.invite_url == "https://discord.gg/x81", r.text
+    assert c.post("/api/admin/recruitment", json={"invite_create": "Welcome"}, headers=H).status_code == 200
+    assert c.post("/api/admin/recruitment", json={"invite_create": "<#82>"}, headers=H).status_code == 200
     assert made == [81, 81, 82]
-    r = c.post("/api/admin/invite", json={"channel": "#nowhere"}, headers=H)
+    r = c.post("/api/admin/recruitment", json={"invite_create": "#nowhere"}, headers=H)
     assert r.status_code == 400 and "no channel named #nowhere" in r.text
-    r = c.post("/api/admin/invite", json={"channel": "#general"}, headers=H)
+    r = c.post("/api/admin/recruitment", json={"invite_create": "#general"}, headers=H)
     assert r.status_code == 400 and "several channels match" in r.text
-    assert c.post("/api/admin/invite", json={}, headers=H).status_code == 400 and made == [81, 81, 82]
+    assert made == [81, 81, 82]
     r = c.post(f"/api/run/{ev.key}/sheet", json={"channel": "#welcome"}, headers=H)
     assert r.status_code == 200 and ev.channel_id == 81, r.text
     r = c.post(f"/api/run/{ev.key}/sheet", json={"channel": "#general"}, headers=H)
@@ -252,8 +252,6 @@ def mocked():
         p = request.url.path
         if p == "/api/raids":
             return httpx.Response(200, json={"raids": [{"id": "barrow_deeps", "name": "Barrow Deeps"}]})
-        if p == "/api/admin/invite":
-            return httpx.Response(200, json={"invite_url": "https://discord.gg/new", "message": "invite created"})
         return httpx.Response(200, json={"message": f"ok {p}", "reading": "R1", "steps": []})
 
     ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
@@ -270,10 +268,8 @@ def test_new_tools_hit_their_routes(mocked):
     assert mocked[-1][:2] == ("GET", "/api/agents/run/review-20260928")
     ms.run_job("apply")
     assert mocked[-1] == ("POST", "/api/agents/run", {"job": "apply"})
-    out = ms.create_invite("#welcome")
-    assert out["invite_url"] == "https://discord.gg/new" and mocked[-1][1] == "/api/admin/invite" and "saved" not in out
-    out = ms.create_invite("#welcome", save=True)
-    assert out["saved"] and mocked[-1] == ("POST", "/api/admin/recruitment", {"invite_url": "https://discord.gg/new"})
+    ms.create_invite("#welcome")  # R-06: created AT the recruitment save — the structured path, never a separate route
+    assert mocked[-1] == ("POST", "/api/ops/change", {"changes": [{"kind": "recruitment", "fields": {"invite_create": "#welcome"}}], "apply": True, "confirmed": True})
     ms.policy_get("loot")
     assert mocked[-1][:2] == ("GET", "/api/policy/loot")
     ms.policy_edit("loot", "text")

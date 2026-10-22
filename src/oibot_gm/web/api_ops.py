@@ -72,7 +72,8 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
                                  "X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
         people = [op for op in keep if not people_needs_actor(op)]
         if len(people) != len(keep):  # D8: a rank or a character's confirmation is a decision about a person
-            refused = [*refused, "A rank or a confirmation from MCP needs the X-Oibot-Actor header naming an officer of this guild (OIBOT_MCP_ACTOR)."]
+            refused = [*refused, "A rank, a confirmation or an application decision from MCP needs the X-Oibot-Actor header naming an officer of "
+                                 "this guild (OIBOT_MCP_ACTOR)."]
         decided = [op for op in people if op.op != "proposal"]
         if len(decided) != len(people):  # D8: approving or dismissing a news proposal is an officer's (a game-data one, the owner's)
             from ..news import MCP_ACTOR_NEEDED
@@ -299,10 +300,11 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
 
     # ---- the admin routes: translators into ops (one core; their answers are what they always were)
 
-    async def translate(v, changes: list[dict], d: dict | None = None) -> dict | JSONResponse:
+    async def translate(v, changes: list[dict], d: dict | None = None, *, partial: bool = False) -> dict | JSONResponse:
         """The old body's changes through the one core, applied as the route always did (no review step: the page or
         tool asked already). {applied, refused, results, error, changed} or the refusal as JSON (400; 409 when a section
-        changed since the caller's `revs`)."""
+        changed since the caller's `revs`). `partial`: a batch where something landed answers the result dict with its
+        refusals instead of a 400 (the recruitment Save: "Saved. Invite not created: …")."""
         reg = v.reg
         warm_roles(reg)
         ops = await typed_ops(v, changes)
@@ -316,10 +318,12 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         if refused:
             return JSONResponse({"error": refused[0], "refused": refused}, status_code=403)
         res = await apply_now(v, allowed, [], crevs)
-        if res["refused"]:
+        if res["refused"] and not (partial and res["applied"]):
             return JSONResponse({"error": res["error"], "applied": res["applied"], "refused": res["refused"], "changed": res["changed"]},
                                 status_code=409 if res["changed"] and not res["applied"] else 400)
         return res
+
+    app.state.ops_translate = translate  # the other translators (web/api_setup.py's channels) reach the one core through here
 
     @app.post("/api/admin/raid/schedule")
     async def admin_raid_schedule(request: Request):
@@ -431,13 +435,22 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
     @app.post("/api/admin/recruitment")
     async def recruitment_set(request: Request):
         """Owner: any of {open, note, questions: [{id?, label, hint, required}], invite_url, member_role_ids} in one
-        validated write (Registry.set_recruitment); a refusal names the part and nothing is saved."""
+        validated write (Registry.set_recruitment); a refusal names the part and nothing is saved. `invite_create`: a
+        channel (id or name) — a permanent invite to it is created AT this Save, after the rest (R-06: no orphan invite
+        made before Save); Discord refusing it reports "Saved. Invite not created: …" and the rest stays saved."""
         v, d = await body(request, officer=True)
         need_owner(v)
         if "questions" in d and (not isinstance(d["questions"], list) or not all(isinstance(q, dict) for q in d["questions"])):
             return JSONResponse({"error": "questions must be a list of {label, hint, required}"}, status_code=400)
-        fields = {k: d[k] for k in ("open", "note", "invite_url", "questions", "member_role_ids") if k in d}
-        res = await translate(v, [{"kind": "recruitment", "fields": fields}], d)
+        fields = {k: d[k] for k in ("open", "note", "invite_url", "invite_create", "questions", "member_role_ids") if k in d}
+        res = await translate(v, [{"kind": "recruitment", "fields": fields}], d, partial=True)
         if isinstance(res, JSONResponse):
             return res
-        return {"message": "; ".join(res["applied"]) or "recruitment: no change", **recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": True}
+        other = [r["line"] for r in res["results"] if not r["ok"] and not r["line"].startswith(configops.INVITE_NOT_CREATED)]
+        if other:  # a refused setting is a refusal as before (what did land is listed)
+            return JSONResponse({"error": other[0], "applied": res["applied"], "refused": res["refused"]}, status_code=400)
+        invite_error = next((r["line"] for r in res["results"] if not r["ok"]), None)
+        msg = "; ".join(res["applied"]) or "recruitment: no change"
+        if invite_error:
+            msg = f"Saved. {invite_error}"
+        return {"message": msg, "invite_error": invite_error, **recruitment_json(v.reg), "guild_roles": guild_role_refs(v.reg), "owner": True}

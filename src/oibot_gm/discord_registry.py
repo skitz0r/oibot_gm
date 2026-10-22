@@ -15,7 +15,7 @@ from discord import app_commands
 
 from . import guild_routing, inbox, ops as ops_mod
 from .profiles import GameProfile
-from .registry import is_superuser, GUILD_KEY_RE, RANKS, Registry, RegistryError
+from .registry import DECISION_NOTE_MAX, is_superuser, GUILD_KEY_RE, RANKS, Registry, RegistryError
 from .store import GitStore
 from .wizard_flows import FLOWS
 
@@ -77,7 +77,10 @@ class Guilds:
         for gid, keys in seen.items():
             if len(keys) > 1:  # routing a server to the wrong guild is worse than refusing it
                 self.load_errors.append(f"{' and '.join(keys)}: the same discord_guild_id {gid} — neither loaded")
-        self.by_discord = {int(r.config.discord_guild_id): r for _, r in found if len(seen[int(r.config.discord_guild_id)]) == 1}
+        kept = [r for _, r in found if len(seen[int(r.config.discord_guild_id)]) == 1]
+        # a guild whose server removed the bot stays parked (design §3.5 S-06) until on_guild_join / on_guild_available sees it
+        self.detached: dict[str, Registry] = {r.key: r for r in kept if r.config.detached_at}
+        self.by_discord = {int(r.config.discord_guild_id): r for r in kept if not r.config.detached_at}
         self._mark()
 
     @classmethod
@@ -90,6 +93,7 @@ class Guilds:
         if getattr(store, "guilds", None) is None:  # the real loader's index (the bot's) stays the store's; this one only fills a gap
             store.guilds = g
         g._lock, g._claiming = threading.Lock(), set()
+        g.detached = {}
         g.by_discord = {int(r.config.discord_guild_id): r for r in regs}
         g._mark()
         return g
@@ -163,6 +167,8 @@ class Guilds:
         """Why a claim of this server can't go ahead now (None = it can)."""
         if self.for_guild(guild_id) is not None or guild_id in self._claiming:
             return "This server is already set up."
+        if any(int(r.config.discord_guild_id) == int(guild_id) for r in getattr(self, "detached", {}).values()):
+            return "This server already has a guild (parked while the bot was away); it is served again as soon as the bot sees the server."
         if (self.by_discord or self._claiming) and not self.ALLOW_SECOND:  # a first claim still in flight counts too
             return "Serving a second server needs the next update of the bot; nothing was set up."
         return None
@@ -191,6 +197,40 @@ class Guilds:
                 self._claiming.discard(gid)
             raise
         # on success the id stays in _claiming until add() serves it, so a second press in between still refuses
+
+    # ---- detach / attach (design §3.5 S-05/S-06): the bot removed from a server, and back
+    def detach(self, key: str, by: str = "on_guild_remove") -> Registry | None:
+        """Park a guild whose server removed the bot: `config.detached_at` stamped (kept across restarts), out of
+        `by_discord` — hence out of ordered(), the scheduler's tick, the feed's routing, the DM picker, the homepage and
+        MCP's list_guilds (superusers still see it there, marked) — and into `detached`. Copy-on-write like `add`; on the
+        loop thread only. Nothing is archived or deleted: the files stay, and attach() serves it again."""
+        reg = self.by_key.get(key)
+        if reg is None:
+            return self.detached.get(key)
+        from .registry import now as _now
+
+        reg.set_detached(_now(), by)
+        self.by_discord = {gid: r for gid, r in self.by_discord.items() if r is not reg}
+        self.detached = {**self.detached, reg.key: reg}
+        self._mark()
+        return reg
+
+    def attach_server(self, guild_id: int, by: str = "on_guild_available") -> Registry | None:
+        """The bot is in a parked guild's server again: served once more (detached_at cleared). None = no parked guild has
+        that server (or one already serves it)."""
+        gid = int(guild_id)
+        reg = next((r for r in self.detached.values() if int(r.config.discord_guild_id) == gid), None)
+        if reg is None or gid in self.by_discord:
+            return None
+        reg.set_detached(None, by)
+        self.detached = {k: r for k, r in self.detached.items() if r is not reg}
+        self.by_discord = {**self.by_discord, gid: reg}
+        self._mark()
+        return reg
+
+    def detached_list(self) -> list[Registry]:
+        """The parked guilds, by name (the Host card, /gm status for superusers, MCP list_guilds for superusers)."""
+        return sorted(self.detached.values(), key=lambda r: (str(r.config.name).casefold(), r.key))
 
     def add(self, reg: Registry) -> None:
         """Serve a newly created guild. On the event-loop thread only: builds a new dict and swaps it in (copy-on-write),
@@ -446,6 +486,18 @@ def registration_view(reg: Registry) -> discord.ui.View:
 
 # ---------------- applications: the officers' review card and the ONE decide path (buttons, /roster applicant, web, MCP)
 EMBED_TOTAL, FIELD_VALUE_MAX, FIELDS_MAX = 6000, 1024, 25  # Discord's embed limits
+# the eight `/gm config <kind>-channel` shortcuts (kind, command, description) → one helper, one confirm (flows_config.ChannelSetWizard)
+CHANNEL_SHORTCUTS = (
+    ("ops", "ops-channel", "Owner: where the bot mirrors every action"),
+    ("applications", "applications-channel", "Owner: where application review cards are posted (defaults to the ops channel)"),
+    ("roster", "roster-channel", "Owner: private channel for roster overviews, proposals, officer cards and the loot council"),
+    ("registration", "registration-channel", "Owner: public read-only channel with the registration card (buttons open to everyone)"),
+    ("analytics", "analytics-channel", "Owner: officer channel with live pool-readiness cards per raid and a change log"),
+    ("absences", "absences-channel", "Owner: public channel with the 'I'll be away' card; one line per absence"),
+    ("signup", "signup-channel", "Owner: where raid sheets are posted"),
+    ("news", "news-channel", "Owner: where the news webhook posts; the bot keeps the items about our game"),
+)
+APPLICANTS_SHOWN = 10  # /roster applicants: one message holds 10 embeds; the rest are on the Applications page
 
 
 def _clip(text: str, n: int) -> str:
@@ -456,15 +508,20 @@ def _clip(text: str, n: int) -> str:
 def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
     """The review card: full name, class/spec icons, logs, the schedules they can make (in words) and every answer as a
     field. Within Discord's limits (25 fields, 1024 per value, 6000 in all): long answers share what is left, each cut
-    with '…', and a last field says where the full answers are (the bot's own answer, MCP): the site has no
-    applications page."""
+    with '…', and a last field says where the full answers are (the site's Applications page). An earlier verdict on the
+    same person leads the description ("Applied before: declined 12 Mar by Jonny — full on healers")."""
     from .wizard_opts import schedule_names
 
     ico = ico or (lambda kind, key: "")
     title = _clip(f"Application · {a.label}", 256)
     desc = (f"{ico('class', a.cls)}{ico('spec', f'{a.cls}:{a.spec}')} **{a.cls} {a.spec}**{' / ' + a.offspec if a.offspec else ''}"
             f" · from **{a.display_name}** (<@{a.discord_id}>)")
+    prior = reg.prior_decision_line(a)
+    if prior:
+        desc += f"\n-# {_clip(prior, 300)}"
     footer = f"status: {a.status}" + (f" · {a.decided_by}: {a.decision_note or ''}" if a.decided_by else " · officers: Accept / Decline below, or /roster applicant")
+    if a.role_note:
+        footer += f" · {a.role_note}"
     fixed: list[tuple[str, str]] = []
     if a.logs_url:
         fixed.append(("Logs", _clip(a.logs_url, 300)))
@@ -494,19 +551,117 @@ def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
         e.add_field(name=n, value=_clip(v, caps[i]) or "…", inline=False)
     if cut:
         more = f"{len(hidden)} more answer(s) not shown. " if hidden else ""
-        e.add_field(name="…", value=f"{more}Full answers: ask me (“show {_clip(a.name, 40)}'s application”) or MCP list_applications.", inline=False)
+        e.add_field(name="…", value=f"{more}Full answers: the site's Applications page (officers), or ask me (“show {_clip(a.name, 40)}'s application”).", inline=False)
     e.set_footer(text=footer)
     return e
 
 
-async def settle_application(client, reg: Registry, discord_id: int, accept: bool, by: str, note: str | None) -> str:
+async def assign_member_role(client, reg: Registry, discord_id: int) -> str | None:
+    """D31: Accept gives the applicant the guild's member role (the first of `member_role_ids`) when the bot can — Manage
+    Roles, a role below the bot's own, the person in the server. Returns what happened in words, or None when no member
+    role is configured (nothing to say). Never raises: the acceptance stands either way."""
+    rids = list(reg.config.member_role_ids or [])
+    if not rids:
+        return None
+    guild = client.get_guild(reg.config.discord_guild_id) if getattr(client, "get_guild", None) else None
+    if guild is None:
+        return "couldn't give the member role (Discord unreachable) — add it by hand"
+    role = guild.get_role(int(rids[0])) if hasattr(guild, "get_role") else None
+    if role is None:
+        return "the member role is gone from the server — set it again in the recruitment settings"
+    me = getattr(guild, "me", None)
+    if me is None or not me.guild_permissions.manage_roles:
+        return f"couldn't give them @{role.name}: the bot needs Manage Roles (add it by hand)"
+    top = getattr(me, "top_role", None)
+    if top is not None and role >= top:
+        return f"couldn't give them @{role.name}: it sits above the bot's own role (add it by hand)"
+    member = guild.get_member(int(discord_id)) if hasattr(guild, "get_member") else None
+    if member is None:
+        try:
+            member = await guild.fetch_member(int(discord_id))
+        except Exception:  # noqa: BLE001 — left the server, or Discord didn't answer
+            return f"couldn't give them @{role.name}: they're not in the server"
+    if role in getattr(member, "roles", []):
+        return f"they already have @{role.name}"
+    try:
+        await member.add_roles(role, reason=f"oibot_GM: application accepted ({reg.config.name})")
+    except discord.Forbidden:  # a role-hierarchy race, or Manage Roles taken away meanwhile
+        return f"couldn't give them @{role.name}: the bot isn't allowed to give that role (add it by hand)"
+    except Exception as e:  # noqa: BLE001 — words for the officer (§2.7: never a type name); the error to the ops channel / log
+        from .configops import report_error
+
+        await report_error(getattr(client, "ops", None), reg.config, e, "giving the member role")
+        return f"couldn't give them @{role.name}: something went wrong (add it by hand)"
+    return f"gave them @{role.name}"
+
+
+def remove_record_consequence(reg: Registry, m) -> str:
+    """THE sentence of an officer's Remove record (the decide screen, the Members page's confirm)."""
+    chars = ", ".join(c.label for c in m.characters) or "no characters"
+    return (f"{m.display_name}'s record goes: {chars}, their absences, wishlists and notices. Loot already awarded stays in the ledger; the data repo's "
+            "history keeps the file. They registered again from scratch if they come back. Nobody is DMed.")
+
+
+async def remove_record(client, reg: Registry, discord_id: int, by: str, *, by_id: int | None = None, via: str = "discord") -> str:
+    """THE officers' Remove record (design §3.3 D; D29: never self-service): only for someone who left the server
+    (Member.left_at, set by on_member_remove), never while they hold a seat on a live run (the run files say), one ops
+    line. The Discord command, the Members page and MCP call it."""
+    m = reg.members.get(int(discord_id))
+    from .raid_views import run_title
+
+    seats = [run_title(reg, ev) for ev, _c in rostered_on(client, reg, m)] if m else []
+    line = await asyncio.to_thread(reg.remove_record, int(discord_id), by, seats=seats)
+    ops = getattr(client, "ops", None)
+    if ops is not None:
+        await ops_mod.audited(ops, reg, by, line, via=via, by_id=by_id)
+    return line
+
+
+async def remove_record_decide(interaction: discord.Interaction, reg: Registry, discord_id: int) -> None:
+    """`/roster remove-record member:` — refused at once unless they left the server; else the decide screen."""
+    from .wizard import Wizard
+
+    m = reg.members.get(int(discord_id))
+    if m is None:
+        await interaction.response.send_message("No record for that member.", ephemeral=True)
+        return
+    if not m.left_at:
+        await interaction.response.send_message(f"{m.display_name} is still in the server — retire their characters instead (`/roster char`).", ephemeral=True)
+        return
+
+    async def guard(i: discord.Interaction) -> str | None:
+        return None if is_officer(i, reg) else "Officers only."
+
+    wiz = Wizard(reg, interaction.user.id, title=f"Remove {m.display_name}'s record", guard=guard)
+
+    async def do(i: discord.Interaction, _note: str | None) -> None:
+        try:
+            line = await remove_record(i.client, reg, discord_id, i.user.display_name, by_id=i.user.id)
+        except RegistryError as e:
+            await wiz.finish(i, f"❌ {e}")
+            return
+        await wiz.finish(i, f"✅ {line}.")
+
+    await wiz.decide(interaction, remove_record_consequence(reg, m), do=do, do_label="Remove record", danger=True)
+
+
+async def settle_application(client, reg: Registry, discord_id: int, accept: bool, by: str, note: str | None, *, by_id: int | None = None,
+                             via: str = "discord") -> str:
     """Accept or decline an open application — the one path for the card's buttons, /roster applicant, the web and MCP
-    (`OibotGM.decide_application`). Registry decide (accept registers the main as a confirmed trial), DM the applicant,
-    update the review card, one ops line. Returns the verdict line; raises RegistryError when there is nothing to decide.
+    (`OibotGM.decide_application`). Registry decide (accept registers the main as a confirmed trial; the applicant's
+    notice — D26), the member role when the bot can (D31), DM the applicant (a decision they wait on: the DM rule),
+    update the review card, ONE ops line (ops.audited: `via` the surface, `by_id` marks a host superuser — callers write
+    none). Returns the verdict line; raises RegistryError when there is nothing to decide ("Already declined by X").
     Declining never removes anyone from the server: they keep the invite's access and can apply again later."""
     a, _char = reg.decide(discord_id, accept, by, note)
     note = (note or "").strip() or None
     verdict = f"✅ Accepted {a.display_name} as {a.label} (trial, confirmed)" if accept else f"⛔ Declined {a.display_name} ({a.label})"
+    if accept:
+        role_note = await assign_member_role(client, reg, a.discord_id)
+        if role_note:
+            a.role_note = role_note
+            await asyncio.to_thread(reg.save_applicant, a, f"application of {a.display_name}: {role_note}")
+            verdict += f" · {role_note}"
     try:
         user = await client.fetch_user(a.discord_id)
         if accept:
@@ -527,45 +682,42 @@ async def settle_application(client, reg: Registry, discord_id: int, accept: boo
             pass
     ops = getattr(client, "ops", None)
     if ops is not None:
-        await ops.emit(reg.config, "info", f"{by}: {verdict}" + (f" — {note}" if note else ""))
+        await ops_mod.audited(ops, reg, by, verdict.lstrip("✅⛔ ") + (f" — {note}" if note else ""), via=via, by_id=by_id)
     return verdict
 
 
-async def decide_application(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None):
-    """A Discord press or command → the client's decide_application; the verdict comes back ephemerally."""
-    if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True, thinking=True)
-    client = interaction.client
-    try:
-        if hasattr(client, "decide_application"):
-            verdict = await client.decide_application(reg, discord_id, accept, interaction.user.display_name, note)
-        else:
-            verdict = await settle_application(client, reg, discord_id, accept, interaction.user.display_name, note)
-    except RegistryError as e:
-        await interaction.followup.send(f"❌ {e}", ephemeral=True)
-        return
-    await interaction.followup.send(verdict, ephemeral=True)
+async def client_decide(client, reg: Registry, discord_id: int, accept: bool, by: str, note: str | None, *, by_id: int | None = None, via: str = "discord") -> str:
+    """The client's decide_application when it has one (OibotGM), else settle_application (bare test clients)."""
+    if hasattr(client, "decide_application"):
+        return await client.decide_application(reg, discord_id, accept, by, note, by_id=by_id, via=via)
+    return await settle_application(client, reg, discord_id, accept, by, note, by_id=by_id, via=via)
 
 
 def application_consequence(reg: Registry, a, accept: bool) -> list[str]:
-    """What Accept / Decline does to the applicant, from code (dual interfaces §2.3) — the `decide` screen's text. The
-    DM is one they are waiting on (the DM rule); a note typed on the screen rides along with it."""
+    """What Accept / Decline does to the applicant, from code (dual interfaces §2.3) — the `decide` screen's text and the
+    Applications page's confirm (GET /api/applications `consequence`). The DM is one they are waiting on (the DM rule);
+    a note typed on the screen rides along with it; the decision also lands on their Me page (a notice)."""
+    prior = reg.prior_decision_line(a)
+    lead = [f"-# {prior}"] if prior else []
     if accept:
-        return [f"{a.display_name} is registered as **{a.label}** ({a.cls} {a.spec}), rank trial, confirmed, and gets a DM with the decision (your note included).",
-                "The review card shows it decided."]
-    return [f"{a.display_name} gets a DM that the application for **{a.label}** wasn't accepted this time (your note included); they keep the server and can apply again.",
-            "The review card shows it decided."]
+        rids = list(reg.config.member_role_ids or [])
+        role = (f" They get the member role <@&{rids[0]}> when the bot has Manage Roles (it says so if it can't)." if rids else "")
+        return lead + [f"{a.display_name} is registered as **{a.label}** ({a.cls} {a.spec}), rank trial, confirmed, and gets a DM with the decision (your note included).{role}",
+                       "The review card shows it decided."]
+    return lead + [f"{a.display_name} gets a DM that the application for **{a.label}** wasn't accepted this time (your note included); they keep the server and can apply again.",
+                   "The review card shows it decided."]
 
 
-async def application_decide(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool) -> None:
+async def application_decide(interaction: discord.Interaction, reg: Registry, discord_id: int, accept: bool, note: str | None = None) -> None:
     """The ONE confirm screen for an application decision (wizard.Wizard.decide): the consequence, then Accept /
     Accept with a note… / Back (Decline likewise — the note is the old DeclineModal's box, now on both verdicts). The
-    write is `decide_application` → the client's decide path; the officer check is re-run at every press."""
+    card's buttons and /roster applicant both open it (`note`: the command's typed note, used by the plain press). The
+    write is `client_decide` → the client's decide path; the officer check is re-run at every press."""
     from .wizard import Wizard
 
     a = reg.applicants.get(discord_id)
     if not a or a.status != "open":
-        await interaction.response.send_message("That application is already decided." if a else "No open application for them.", ephemeral=True)
+        await interaction.response.send_message(reg.decided_refusal(a), ephemeral=True)
         return
     verb = "Accept" if accept else "Decline"
 
@@ -574,20 +726,17 @@ async def application_decide(interaction: discord.Interaction, reg: Registry, di
 
     wiz = Wizard(reg, interaction.user.id, title=f"{verb} {a.display_name}'s application", guard=guard)
 
-    async def do(i: discord.Interaction, note: str | None) -> None:
-        client = i.client
+    async def do(i: discord.Interaction, typed: str | None) -> None:
         try:
-            if hasattr(client, "decide_application"):
-                verdict = await client.decide_application(reg, discord_id, accept, i.user.display_name, note)
-            else:
-                verdict = await settle_application(client, reg, discord_id, accept, i.user.display_name, note)
+            verdict = await client_decide(i.client, reg, discord_id, accept, i.user.display_name, typed or note, by_id=i.user.id)
         except RegistryError as e:
             await wiz.finish(i, f"❌ {e}")
             return
         await wiz.finish(i, verdict)
 
-    await wiz.decide(interaction, "\n".join(application_consequence(reg, a, accept)), do=do,
-                     note={"label": "Note to the applicant (optional)", "max_length": 400, "placeholder": "goes into their DM"}, do_label=verb, danger=not accept)
+    text = "\n".join(application_consequence(reg, a, accept)) + (f"\nYour note: {_clip(note, 400)}" if note else "")
+    await wiz.decide(interaction, text, do=do,
+                     note={"label": "Note to the applicant (optional)", "max_length": DECISION_NOTE_MAX, "placeholder": "goes into their DM"}, do_label=verb, danger=not accept)
 
 
 class ApplicationButton(discord.ui.DynamicItem[discord.ui.Button], template=r"app(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<action>accept|decline):(?P<uid>[0-9]{1,20})"):
@@ -785,11 +934,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not reg:
             return
         m = reg.members.get(interaction.user.id)
+        own = reg.application_state(interaction.user.id)  # their own application first (design §3.3 D)
         if not m:
-            await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
+            await interaction.response.send_message((own["text"] + "\n") if own else "Nothing registered yet — /register to start.", ephemeral=True)
             return
         today = reg.now_local().date().isoformat()
         e = discord.Embed(title=f"{m.display_name} · {reg.config.name}", colour=TEAL)
+        if own and own["state"] == "open":
+            e.description = own["text"]
         e.add_field(name="Characters", value="\n".join(char_line(ico, c) for c in m.active()) or "none", inline=False)
         held = rostered_on(interaction.client, reg, m)
         if held:
@@ -978,24 +1130,34 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         await FLOWS["absence"](interaction, reg, member=member)
 
+    @roster.command(name="remove-record", description="Remove the record of someone who left the server (one confirm screen)")
+    @app_commands.describe(member="who left the Discord server")
+    async def roster_remove_record(interaction: discord.Interaction, member: discord.User):
+        reg, interaction = await officer(interaction)
+        if reg:
+            await remove_record_decide(interaction, reg, member.id)
+
     @roster.command(name="applicants", description="Open applications")
     async def roster_applicants(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if not reg:
             return
-        opens = reg.open_applicants()
+        opens = reg.open_applicants()  # oldest first: the longest wait is decided first
         if not opens:
             await interaction.response.send_message("No open applications.", ephemeral=True)
             return
-        await interaction.response.send_message(embeds=[application_embed(reg, a, ico) for a in opens[:10]], ephemeral=True)
+        shown = opens[:APPLICANTS_SHOWN]
+        more = f"{len(opens) - len(shown)} more on the site's Applications page." if len(opens) > len(shown) else None
+        await interaction.response.send_message(content=more, embeds=[application_embed(reg, a, ico) for a in shown], ephemeral=True)
 
-    @roster.command(name="applicant", description="Accept or decline an application by member")
+    @roster.command(name="applicant", description="Accept or decline an application by member (one confirm screen)")
     @app_commands.choices(decision=[app_commands.Choice(name="accept", value="accept"), app_commands.Choice(name="decline", value="decline")])
+    @app_commands.describe(note="optional: goes to the applicant with the verdict")
     async def roster_applicant(interaction: discord.Interaction, member: discord.User, decision: app_commands.Choice[str], note: str | None = None):
         reg, interaction = await officer(interaction)
         if not reg:
             return
-        await decide_application(interaction, reg, member.id, decision.value == "accept", note)
+        await application_decide(interaction, reg, member.id, decision.value == "accept", note)
 
     tree.add_command(roster)
 
@@ -1027,35 +1189,44 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
                 await interaction.response.send_message("Nobody owns this guild yet; the Discord server owner (or someone with Manage Server) claims it first.", ephemeral=True)
                 return
         target = user or interaction.user
-        reg.config.owner_discord_id = target.id
-        reg.save_config(f"owner → {target.display_name}")
+        try:  # THE owner verb (refusals: a bot, someone not in the server); claiming it yourself is no "that's you"
+            line = await asyncio.to_thread(reg.set_owner, target.id, interaction.user.display_name, by_id=None if target.id == interaction.user.id else interaction.user.id,
+                                           bot=bool(getattr(target, "bot", False)), membership="yes" if isinstance(target, discord.Member) or target.id == interaction.user.id else "unknown",
+                                           name=target.display_name)
+        except RegistryError as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
         await interaction.response.send_message(f"✅ Owner: {target.mention}", ephemeral=True)
-        await ops.emit(reg.config, "warn", f"owner set to {target.display_name} by {interaction.user.display_name}")
+        await ops_mod.audited(ops, reg, interaction.user.display_name, line, level="warn", by_id=interaction.user.id)
 
-    @config.command(name="ops-channel", description="Owner: where the bot mirrors every action")
-    async def cfg_ops(interaction: discord.Interaction, channel: discord.TextChannel):
+    # ---- channels (design §3.4 X3): eight shortcuts → ONE helper and the one-screen confirm (flows_config.ChannelSetWizard);
+    # the hub /gm config channels drafts several at once. None of them writes reg.config: SetupMixin.set_channel does,
+    # with its permission check, the card posted first and its ONE ops line.
+    async def channel_command(interaction: discord.Interaction, kind: str, channel: discord.TextChannel | None, clear: bool) -> None:
         reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        reg.config.ops_channel_id = channel.id
-        reg.save_config(f"ops channel → #{channel.name}")
-        await interaction.response.send_message(f"✅ Ops feed → {channel.mention}", ephemeral=True)
-        await ops.emit(reg.config, "info", f"ops feed connected by {interaction.user.display_name}")
+        if reg:
+            await FLOWS["channel_set"](interaction, reg, kind=kind, channel=channel, clear=clear)
 
-    @config.command(name="applications-channel", description="Owner: where application review cards are posted (defaults to the ops channel)")
-    async def cfg_apps(interaction: discord.Interaction, channel: discord.TextChannel):
+    def channel_shortcut(kind: str, name: str, desc: str) -> None:
+        @config.command(name=name, description=desc)
+        @app_commands.describe(channel="the text channel (Discord's picker)", clear="tick to stop using a channel for this")
+        async def cmd(interaction: discord.Interaction, channel: discord.TextChannel | None = None, clear: bool = False):
+            await channel_command(interaction, kind, channel, clear)
+
+    for _kind, _name, _desc in CHANNEL_SHORTCUTS:
+        channel_shortcut(_kind, _name, _desc)
+
+    @config.command(name="channels", description="Owner: every bot channel at once — pick, review what each change does, save")
+    async def cfg_channels(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        reg.config.applications_channel_id = channel.id
-        reg.save_config(f"applications channel → #{channel.name}")
-        await interaction.response.send_message(f"✅ Applications → {channel.mention}", ephemeral=True)
+        if reg:
+            await FLOWS["channels"](interaction, reg)
+
+    @config.command(name="officers", description="Owner: the officer roles — Discord's role picker, review, save")
+    async def cfg_officers(interaction: discord.Interaction):
+        reg, interaction = await need(interaction)
+        if reg:
+            await FLOWS["officers"](interaction, reg)
 
     @config.command(name="officer-role", description="Owner: add or remove a Discord role that counts as officer")
     async def cfg_role(interaction: discord.Interaction, role: discord.Role, remove: bool = False):
@@ -1065,62 +1236,54 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if not is_owner(interaction, reg):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
-        # stored by role id: a rename keeps the officers, a same-named role someone else creates grants nothing
-        if interaction.guild:
-            await asyncio.to_thread(reg.resolve_officer_roles, interaction.guild)  # legacy names → ids first, and the name cache for the reply
-        await asyncio.to_thread(reg.set_officer_role, role.id, not remove, interaction.user.display_name)
-        names = ", ".join(reg.officer_role_names()) or "(none; Manage Server only)"
-        await interaction.response.send_message(f"✅ Officer roles: {names}", ephemeral=True)
-        await ops.emit(reg.config, "warn", f"officer roles now {names} (by {interaction.user.display_name})")
+        # one widget, reversible, immediate — through the op path (configops.apply_async: role refusal, one audit line), so the
+        # empty-list consequence comes from configops.op_consequences once, never composed here
+        from . import configops
 
-    @config.command(name="roster-channel", description="Owner: private channel for roster overviews, proposals and officer health cards")
-    async def cfg_roster_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        reg.config.roster_channel_id = channel.id
-        reg.save_config(f"roster channel → #{channel.name}")
-        await interaction.response.send_message(f"✅ Roster management → {channel.mention}", ephemeral=True)
-
-    @config.command(name="registration-channel", description="Owner: public read-only channel where the bot keeps the registration card (buttons open to everyone)")
-    async def cfg_registration_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
+        op = configops.ConfigOp(op="role_remove" if remove else "role_add", value=str(role.id))
+        cons = configops.op_consequences(reg, op)
         try:
-            note = await interaction.client.post_registration_card(reg, channel, interaction.user.display_name)
-        except discord.Forbidden:
-            await interaction.followup.send(f"❌ I can't post in {channel.mention} (need View Channel, Send Messages, Embed Links there).", ephemeral=True)
+            await configops.apply_async(reg, op, interaction.user.display_name, True, bot=interaction.client, by_id=interaction.user.id, via="discord")
+        except (RegistryError, ValueError) as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        await interaction.followup.send(f"✅ Registration card posted and pinned in {channel.mention}" + (f"\n{note}" if note else ""), ephemeral=True)
-        await ops.emit(reg.config, "info", f"registration channel → #{channel.name} (by {interaction.user.display_name})")
+        names = ", ".join(f"<@&{r}>" for r in reg.config.officer_role_ids) or "none"
+        await interaction.response.send_message(f"✅ Officer roles: {names}" + "".join(f"\n⚠ {c}" for c in cons), ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
 
-    @config.command(name="analytics-channel", description="Owner: officer channel with live pool-readiness cards per roster and a change log")
-    async def cfg_analytics_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    @config.command(name="errors-to", description="Owner: who gets the bot's error alerts (one DM per distinct error per 30 min)")
+    @app_commands.describe(member="who gets them (or stops getting them, with remove)", remove="tick to take them off the list",
+                           reset="tick to go back to the default: the owner")
+    async def cfg_errors_to(interaction: discord.Interaction, member: discord.User | None = None, remove: bool = False, reset: bool = False):
         reg, interaction = await need(interaction)
         if not reg:
             return
         if not is_owner(interaction, reg):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True)
-        if reg.config.analytics_channel_id != channel.id:
-            reg.config.analytics_channel_id, reg.config.analytics_message_ids = channel.id, {}
-            reg.save_config(f"analytics channel → #{channel.name}", notify=False)
-        try:
-            msgs = await interaction.client.refresh_pool(reg)
-        except discord.Forbidden:
-            await interaction.followup.send(f"❌ I can't post in {channel.mention} (need Send Messages, Embed Links, Attach Files, Manage Messages to pin).", ephemeral=True)
+        from . import configops
+
+        if reset:
+            value = "owner"
+        elif member is None:
+            await interaction.response.send_message(f"Error alerts go to {reg.error_dm_words()}. Pick a member (tick remove to take them off), or tick reset.",
+                                                    ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
             return
-        await interaction.followup.send(f"✅ {len(msgs)} analytics card(s) posted in {channel.mention}; they re-post at the bottom after every registry change, with a change-log line above.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"analytics channel → #{channel.name} (by {interaction.user.display_name})")
+        elif getattr(member, "bot", False):
+            await interaction.response.send_message("A bot can't read alerts — pick a person.", ephemeral=True)
+            return
+        else:
+            have = reg.error_dm_targets()
+            want = [u for u in have if u != member.id] if remove else list(dict.fromkeys(have + [member.id]))
+            value = ", ".join(f"<@{u}>" for u in want) or "none"
+        try:
+            line = await configops.apply_async(reg, configops.ConfigOp(op="set", path="error_dms", value=value), interaction.user.display_name, True,
+                                               bot=interaction.client, by_id=interaction.user.id, via="discord")
+        except (RegistryError, ValueError) as e:
+            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.response.send_message(f"✅ {line[:1:].upper() + line[1:]}. Errors only — info and warnings stay in the ops channel.", ephemeral=True,
+                                                allowed_mentions=discord.AllowedMentions.none())
 
     @config.command(name="aura", description="Owner: what we know about a buff — scope, stacking family, strength, status, who benefits")
     async def cfg_aura(interaction: discord.Interaction):
@@ -1128,75 +1291,15 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["aura"](interaction, reg)
 
-    @config.command(name="absences-channel", description="Owner: public channel with the 'I'll be away' card; the bot posts one line per absence there")
-    async def cfg_absences_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await interaction.client.post_absences_card(reg, channel, interaction.user.display_name)
-        except discord.Forbidden:
-            await interaction.followup.send(f"❌ I can't post in {channel.mention} (need View Channel, Send Messages, Embed Links there).", ephemeral=True)
-            return
-        await interaction.followup.send(f"✅ Absence card posted and pinned in {channel.mention}. Members press *I'll be away*; each absence is announced there (reasons stay officer-only) and pre-fills Out on the sheets it overlaps.", ephemeral=True)
-        await ops.emit(reg.config, "info", f"absences channel → #{channel.name} (by {interaction.user.display_name})")
-
-    @config.command(name="signup-channel", description="Owner: where raid sheets are posted")
-    async def cfg_signup(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        reg.config.signup_channel_id = channel.id
-        reg.save_config(f"signup channel → #{channel.name}")
-        await interaction.response.send_message(f"✅ Sheets → {channel.mention}", ephemeral=True)
-
-    @config.command(name="news-channel", description="Owner: where the news webhook posts; the bot keeps the items about our game version")
-    async def cfg_news_channel(interaction: discord.Interaction, channel: discord.TextChannel):
-        reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        try:
-            msg = await interaction.client.set_channel(reg, "news", channel.id, interaction.user.display_name, by_id=interaction.user.id)
-        except ValueError as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        await interaction.response.send_message(f"✅ {msg}. New posts there are filtered by our game version, raids and the news keywords; "
-                                                "the daily review turns contradictions into proposal cards in the ops channel.", ephemeral=True)
-
     @config.command(name="loot-channel", description="Owner: the public loot log — one line per confirmed award (log off: awards stay on the site)")
-    @app_commands.describe(channel="where award lines go (empty: each run's updates thread)", log="the public loot log on or off")
-    async def cfg_loot_channel(interaction: discord.Interaction, channel: discord.TextChannel | None = None, log: bool | None = None):
+    @app_commands.describe(channel="where award lines go (Discord's picker)", clear="tick to stop using a channel: award lines go to each run's updates thread",
+                           log="the public loot log on or off")
+    async def cfg_loot_channel(interaction: discord.Interaction, channel: discord.TextChannel | None = None, clear: bool = False, log: bool | None = None):
+        # the ninth channel kind: the same helper and one-screen confirm as the eight shortcuts (flows_config.ChannelSetWizard),
+        # with the log toggle said and saved on that screen
         reg, interaction = await need(interaction)
-        if not reg:
-            return
-        if not is_owner(interaction, reg):
-            await interaction.response.send_message("Owner only.", ephemeral=True)
-            return
-        lines = []
-        try:
-            if channel is not None:
-                lines.append(await interaction.client.set_channel(reg, "loot", channel.id, interaction.user.display_name, by_id=interaction.user.id))
-            if log is not None:
-                from . import configops
-
-                lines.append(await configops.apply_async(reg, configops.ConfigOp(op="set", path="loot_log", value="true" if log else "false"),
-                                                         interaction.user.display_name, True, bot=interaction.client, by_id=interaction.user.id, via="discord"))
-        except (ValueError, RegistryError) as e:
-            await interaction.response.send_message(f"❌ {e}", ephemeral=True)
-            return
-        from .loot_ops import loot_log_state
-
-        await interaction.response.send_message(("✅ " + " · ".join(lines) + "\n" if lines else "") + loot_log_state(reg)["text"], ephemeral=True)
+        if reg:
+            await FLOWS["channel_set"](interaction, reg, kind="loot", channel=channel, clear=clear, log=log)
 
     @config.command(name="ask-audience", description="Owner: who may ask the bot free-form questions (/ask, DMs, @mentions); others get the static guide")
     @app_commands.choices(audience=[app_commands.Choice(name=a, value=a) for a in ("officers", "confirmed", "registered", "everyone")])
@@ -1245,7 +1348,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
             return
         from .configops import config_summary  # words, mentions and 12-hour times — never the raw YAML (the clock rule)
 
-        audience = "owner" if is_owner(interaction, reg) else "officer"
+        audience = "owner" if reg.is_owner_id(interaction.user.id) else "officer"  # the Host section: the owner (and the host) only
         await interaction.response.send_message(embed=config_show_embed(reg, config_summary(reg, interaction.client, audience)), ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
 
@@ -1283,6 +1386,14 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         gov = getattr(interaction.client, "governance_status", None)  # NewsMixin: the news review and the apply job (design §3.4)
         if gov is not None:
             e.add_field(name="Agents", value="\n".join(gov(reg))[:1000], inline=False)
+        checklist = getattr(interaction.client, "setup_checklist", None)
+        if checklist is not None:  # the Setup card's rows the runtime marks red (perms.missing_for, a required channel unset …)
+            bad = [r for r in checklist(reg) if r["state"] == "bad"]
+            e.add_field(name="Setup", value=("\n".join(f"✗ {r['label']}: {r['text']}" for r in bad)[:1000] + "\n-# /gm config channels · the Config page's Setup card")
+                        if bad else "✓ ready — every channel the bot uses passes its permission check", inline=False)
+        parked = guilds.detached_list() if is_superuser(interaction.user.id) and hasattr(guilds, "detached_list") else []
+        if parked:  # the host only: guilds whose server removed the bot (nothing runs; nothing deleted)
+            e.add_field(name="Parked (host)", value=", ".join(r.config.name for r in parked)[:500], inline=False)
         recent = ops.recent_for(reg.key)
         if recent:
             e.add_field(name="Recent ops", value="\n".join(f"`{t}` {LEVEL[l]} {x}"[:120] for t, l, x in recent[-8:])[:1000], inline=False)

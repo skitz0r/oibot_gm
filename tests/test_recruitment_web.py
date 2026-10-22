@@ -54,12 +54,15 @@ class RecruitBot(FakeBot):
         return self.guild
 
     async def cached_member(self, guild, uid, max_age=300):
-        return self.people.get(int(uid))
+        m = self.people.get(int(uid))
+        if m is None:  # Discord's own 404: "not a member" (an unanswered lookup would be a 503 now — design §2.9)
+            self.__dict__.setdefault("_member_gone", set()).add((guild.id, int(uid)))
+        return m
 
     def officiates(self, member, guild):
         return member.id == OFFICER_UID
 
-    async def decide_application(self, reg, discord_id, accept, by, note=None):
+    async def decide_application(self, reg, discord_id, accept, by, note=None, by_id=None, via="discord"):
         self.decided.append((discord_id, accept, by, note))
         a, _ = reg.decide(discord_id, accept, by, note)
         return f"{a.label}: {a.status} by {by}"
@@ -193,19 +196,28 @@ def test_applications_list_shape_and_decide(client, bot, reg):
     assert r.status_code == 200, r.text
     assert bot.decided == [(a.discord_id, True, "Offi", "welcome")] and "accepted" in r.json()["message"]
     r = client.post("/api/admin/application/decide", json={"uid": str(a.discord_id), "accept": False}, headers=h)
-    assert r.status_code == 400 and "No open application" in r.json()["error"]
+    assert r.status_code == 400 and "Already accepted by Offi" in r.json()["error"]
     as_user(client, MEMBER_UID)
     assert client.post("/api/admin/application/decide", json={"uid": "1", "accept": True}, headers=h).status_code == 403
 
 
-def test_create_invite_owner_only_with_a_clear_refusal(client, bot):
+def test_invite_is_created_at_the_recruitment_save(client, bot, reg):
+    """R-06: no separate Create invite route (nothing made before Save, so nothing orphaned) — the recruitment Save's
+    `invite_create` makes it after the rest; Discord refusing it answers "Saved. Invite not created: …" with the rest saved."""
     h = as_user(client, OFFICER_UID)
-    assert client.post("/api/admin/invite", json={"channel_id": "55"}, headers=h).status_code == 403
+    assert client.post("/api/admin/recruitment", json={"invite_create": "55"}, headers=h).status_code == 403
     client.cookies.clear()
-    r = client.post("/api/admin/invite", json={"channel_id": "55"}, headers=bearer())
-    assert r.status_code == 200 and r.json()["invite_url"] == "https://discord.gg/newcode" and bot.invites == [55]
-    r = client.post("/api/admin/invite", json={"channel_id": "1"}, headers=bearer())
-    assert r.status_code == 400 and "Create Invite" in r.json()["error"]
+    assert client.post("/api/admin/invite", json={"channel_id": "55"}, headers=bearer()).status_code in (404, 405), "the route is gone"
+    assert bot.invites == []
+    r = client.post("/api/admin/recruitment", json={"invite_create": "55", "invite_url": "https://discord.gg/typed", "note": "healers"}, headers=bearer())
+    assert r.status_code == 200, r.text
+    assert bot.invites == [55] and reg.config.invite_url == "https://discord.gg/newcode", "the created invite wins over a typed one"
+    assert r.json()["invite_url"] == "https://discord.gg/newcode" and r.json()["invite_error"] is None and reg.config.recruitment.note == "healers"
+    r = client.post("/api/admin/recruitment", json={"invite_create": "1", "note": "tanks"}, headers=bearer())
+    assert r.status_code == 200 and r.json()["message"].startswith("Saved. Invite not created: I can't create invites in #lobby"), r.text
+    assert reg.config.recruitment.note == "tanks" and reg.config.invite_url == "https://discord.gg/newcode", "the rest saved, the old invite kept"
+    r = client.post("/api/admin/recruitment", json={"invite_create": "1"}, headers=bearer())
+    assert r.status_code == 400 and r.json()["error"].startswith("Invite not created:")
 
 
 def test_setup_mixin_create_invite_needs_the_permission(reg):

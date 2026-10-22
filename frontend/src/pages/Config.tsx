@@ -9,6 +9,8 @@ import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { useOpsSave } from "../components/ReviewModal";
 import { Recruitment } from "../components/Recruitment";
+import { ChannelsCard } from "../components/ChannelsCard";
+import { SetupCard } from "../components/SetupCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -23,17 +25,6 @@ interface ConfigData {
 interface NewsData { items: { ingested_label: string; title?: string }[]; keywords: Record<string, string[]>; channel_id: string | null }
 interface PublicInfo { name: string; about: string | null; invite_url: string | null; recruiting: boolean; icon: string | null; key?: string }
 
-const CHANNELS: { kind: string; label: string; hint: string }[] = [
-  { kind: "registration", label: "Registration", hint: "public, read-only: the registration card with its buttons" },
-  { kind: "signup", label: "Signups", hint: "public: one sheet per run (Join / Bench / No thanks)" },
-  { kind: "absences", label: "Absences", hint: "public: the I'll be away card; one line per absence" },
-  { kind: "roster", label: "Roster (officers)", hint: "health cards, lock cards, fill progress" },
-  { kind: "analytics", label: "Analytics (officers)", hint: "character bank, readiness, groups and desired comp cards + change log" },
-  { kind: "applications", label: "Applications (officers)", hint: "review cards for /apply (defaults to ops)" },
-  { kind: "ops", label: "Ops (officers)", hint: "one line per action the bot takes; plain-text config by @mention" },
-  { kind: "news", label: "News", hint: "where the news webhook posts; the bot keeps the items about our game and raids (Agents page)" },
-  { kind: "loot", label: "Loot log", hint: "public: one line per confirmed award (no reasons, no scores); empty = each run's updates thread" },
-];
 /** who may ask, narrowest first: moving right widens the audience (and the share of the model budget) */
 const AUDIENCES = ["officers", "confirmed", "registered", "everyone"];
 
@@ -65,9 +56,8 @@ export function ConfigPage({ meta }: { meta: Meta }) {
     setBusy(field);
     try { const r = await api.post<{ message: string }>("/api/admin/config", { field, value }); ok(r.message); await load(); setSaved(field); setTimeout(() => setSaved((f) => (f === field ? null : f)), 3000); } catch (e) { fail(e); } finally { setBusy(null); }
   }
-  /** Channel fields save as you change them; the mark beside the label says which one was just written. */
+  /** The loot-log switch saves as you change it; the mark beside the label says it was just written. */
   const lab = (field: string, text: string) => <>{text}{saved === field && <Text span size="xs" c="teal" ml={8}>✓ saved</Text>}</>;
-  const channelOptions = [{ value: "", label: "— not set —" }, ...data.guild_channels.map((c) => ({ value: c.id, label: `#${c.name}${c.category ? ` · ${c.category}` : ""}` }))];
   return (
     <Stack gap="lg">
       <PageTitle title={meta.guilds.length > 1 ? `Configuration · ${meta.guild}` : "Configuration"} intro={ro ? "Read-only for officers; the owner edits here, with /gm config, or in plain text via /gm change or an @mention in the ops channel." : "Each function of the bot lives in a channel. Changing a channel does what the slash command does: the registration and absence cards are posted, the analytics cards re-post."} />
@@ -80,7 +70,10 @@ export function ConfigPage({ meta }: { meta: Meta }) {
         </Tabs.List>
 
         <Tabs.Panel value="overview" pt="md">
-          <Overview s={summary} />
+          <Stack gap="lg">
+            <SetupCard />
+            <Overview s={summary} />
+          </Stack>
         </Tabs.Panel>
 
         <Tabs.Panel value="settings" pt="md">
@@ -90,17 +83,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
 
         <Tabs.Panel value="channels" pt="md">
           <Stack gap="lg">
-            <Card>
-              <CardHeader title="Channels" hint="which channel each function of the bot uses" />
-              <Stack gap="sm" p="md">
-                {CHANNELS.map(({ kind, label, hint }) => (
-                  <Group key={kind} gap="md" wrap="wrap" align="flex-end">
-                    <Select label={lab(`channel:${kind}`, label)} description={hint} data={channelOptions} value={data.channels[kind]?.id || ""} onChange={(v) => v !== null && v !== (data.channels[kind]?.id || "") && set(`channel:${kind}`, v || null)} disabled={ro || busy === `channel:${kind}`} searchable w={360} />
-                    {data.channels[kind]?.id && !data.channels[kind]?.name && <Badge color="red" variant="light">channel not found</Badge>}
-                  </Group>
-                ))}
-              </Stack>
-            </Card>
+            <ChannelsCard />
             <NewsCard data={data} ro={ro} onSaved={load} />
           </Stack>
         </Tabs.Panel>
