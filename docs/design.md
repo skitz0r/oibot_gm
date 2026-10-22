@@ -2250,7 +2250,7 @@ themselves — `self_audited` — left out); the registration card refreshed onc
 policy) and adds `{changes: [{kind, target, fields}], ops?: [ConfigOp], revs?}` for any member: stale `revs` → 409
 `{error, changed, revs}`; preview → `{described, describe, ops, refused, review, warn, fingerprint, token, expires_in, revs}`;
 `apply: true` = a Save (applied at once unless `review` — then `needs_review` + token, nothing written); `confirmed: true`
-applies regardless (MCP after its own preview, the translators); `{token, apply: true}` applies a reviewed preview; with
+applies regardless (MCP after its own preview); `{token, apply: true}` applies a reviewed preview; with
 `changes` + `seen` an expired token re-previews and applies silently when the fingerprint matches, else answers `updated: true`;
 tokens carry the process's `BOOT` prefix, so one from before a restart answers `restarted: true` (never applied without a
 press) or, alone, the 400 "apply needs the token" with `restarted`. Apply answers `{applied, refused, results, error,
@@ -2259,7 +2259,12 @@ the route answers them correctly — their own record applies, anything else is 
 The admin routes — /api/admin/config, aura, family, aura/reset, raid, raid/reset, raid/schedule, raid/schedule/remove,
 recruitment, plain-permissions — moved here as TRANSLATORS: the old body becomes changes, `translate()` runs the core with
 the old answers (`{message}`, the plain/recruitment extras, 400 with the reason, 403 for non-owners); none calls a Registry
-verb (tests/test_structured_ops.py asserts it). GET /api/auras, /api/raids (per raid), /api/config, /api/recruitment and
+verb (tests/test_structured_ops.py asserts it). They keep the SAME tier as the route (D51): a warn-class or
+consequence-bearing batch is written only with `confirmed: true` and the `revs` of every config section it touches;
+otherwise it answers the Described preview with `review_required` (+ `needs_review`, the section `revs`) and writes
+nothing (a batch whose every write would be refused applies, to give the old 400). web/api_setup.py's /api/admin/channels
+translates the same way. No page posts to a translator: every config edit is `useOpsSave` (lint:
+tests/test_frontend_source.py). GET /api/auras, /api/raids (per raid), /api/config, /api/recruitment and
 /api/plain-permissions return the section rev(s) for an edit-mode Save to send back.
 
 **MCP.** The setup tools (raid_set, schedule_set, schedule_remove, raid_reset, aura_set, family_set, aura_reset,
@@ -2298,7 +2303,8 @@ meanwhile refuses with "Look again" / "Edit", the text kept).
 
 Not in this part (other phase 3 builders): the channel / timezone consequence sentences (`channel_consequences`,
 `timezone_change_effects`, appended through `CONSEQUENCE_HOOKS` — rows 5 and 6 of phase 3), Settings / Raids / Recruitment /
-Plain-permissions edit modes on `useOpsSave` (their pages still use the admin translators, which apply as before), TellTheBot. Tests: tests/test_structured_ops.py (verbs, slugs, coalesce, Described, warn, privilege,
+Plain-permissions edit modes on `useOpsSave` (since the review fixes every page is — the Config page's loot-log switch,
+the Raids page's rules and reset, the schedule editor / Pause / Remove, the Recruitment Save), TellTheBot. Tests: tests/test_structured_ops.py (verbs, slugs, coalesce, Described, warn, privilege,
 the route's tiers / revs / tokens, every admin route against the old verbs on a shadow, MCP shapes and end to end) and the
 AuraWizard hub in tests/test_flows_config.py.
 
@@ -2349,8 +2355,9 @@ run store's live runs). `configops.schedule_pause_sentence(reg, raid, sid, pause
 open keeps its 1 × 10."* — shared by the wizard's rosters screen, the editor (schedule_json `rosters_copy` {n: sentence})
 and describe() (`_describe_schedule` appends it as the line's note). `schedule_json` adds `next_if_active` and empties `next`
 while paused, plus `pause_sentence`, `resume_sentence`, `removal_sentence`. The wizard's schedule screen prints *"⏸ Paused
-— would next run <t12> · nothing opens"*, never "Next runs". The Raids page: **Pause / Resume** beside Edit (useConfirm with
-the server's sentence, one field `active` through the schedule translator); the editor sends ONLY the fields that differ
+— would next run <t12> · nothing opens"*, never "Next runs". The Raids page: **Pause / Resume** beside Edit (one field `active` through
+useOpsSave: a pause is warn-class, so the ReviewModal is its confirm with the server's pause sentence; a resume asks with
+useConfirm and the resume sentence, then saves); the editor sends ONLY the fields that differ
 from the loaded schedule (weights per key) — a Save never re-sends `active: true` over a pause made in Discord; the
 active switch is on new schedules only; the cadence presets (`/api/meta.cadence_presets` = presets.PRESETS) fill the four
 hours; *With these rules* shows the server's preview of the draft (opsApi.preview of the schedule change: describe's

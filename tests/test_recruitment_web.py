@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from itsdangerous import URLSafeSerializer
 from mcp.server.fastmcp.exceptions import ToolError
 from test_mcp import TOKEN, FakeBot, bearer
+from web_helpers import post_confirmed
 
 from oibot_gm import mcp_server as ms
 from oibot_gm.web import app as web
@@ -156,7 +157,7 @@ def test_owner_saves_everything_in_one_write_and_sees_refusals(client, reg):
     client.cookies.clear()
     body = {"open": False, "note": "healers please", "invite_url": INVITE, "member_role_ids": ["400000000000000001"],
             "questions": [{"label": "Why us?", "hint": "a sentence is fine", "required": True}, {"label": "Warcraft Logs link", "hint": None, "required": False}]}
-    r = client.post("/api/admin/recruitment", json=body, headers=bearer())
+    r = post_confirmed(client, "/api/admin/recruitment", body, headers=bearer())
     assert r.status_code == 200, r.text
     d = r.json()
     assert "applications closed" in d["message"] and d["open"] is False and d["invite_url"] == INVITE and d["member_role_ids"] == ["400000000000000001"]

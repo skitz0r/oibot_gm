@@ -6,11 +6,13 @@ Preview = configops.describe_ops → `described` (STRUCTURE, mentions rendered f
 PRIVILEGE (role_of, decided live for a write) → coalesce → apply_ops (one write per raid / schedule / buff / family, one
 commit, one audit line). Tiered review (D51): `apply: true` without a token saves directly unless the batch has a warn-class
 op or a consequence line — then it answers `needs_review` + a token and writes nothing; `confirmed: true` (MCP after its own
-preview, the admin translators) skips that. Section revs ride in `revs` as 'config:<section>' and a stale one is a 409.
+preview) skips that. Section revs ride in `revs` as 'config:<section>' and a stale one is a 409.
 
 The admin routes (/api/admin/config|aura|family|aura/reset|raid|raid/reset|raid/schedule|raid/schedule/remove|recruitment|
 plain-permissions) are TRANSLATORS: their old bodies become changes through ops_from_fields and go through the one core —
-same answers, same state, one code path with plain text and MCP."""
+same answers, same state, one code path with plain text and MCP — under the same tier: a batch that must be reviewed is
+written only with `confirmed: true` and the section revs it touches, else it answers `review_required` with the preview.
+No page posts to them (every config edit on the site is useOpsSave)."""
 from __future__ import annotations
 
 import asyncio
@@ -301,27 +303,47 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
     # ---- the admin routes: translators into ops (one core; their answers are what they always were)
 
     async def translate(v, changes: list[dict], d: dict | None = None, *, partial: bool = False) -> dict | JSONResponse:
-        """The old body's changes through the one core, applied as the route always did (no review step: the page or
-        tool asked already). {applied, refused, results, error, changed} or the refusal as JSON (400; 409 when a section
-        changed since the caller's `revs`). `partial`: a batch where something landed answers the result dict with its
-        refusals instead of a 400 (the recruitment Save: "Saved. Invite not created: …")."""
+        """The old body's changes through the one core, under the SAME tier as POST /api/ops/change (D51): a routine
+        batch applies at once; a warn-class or consequence-bearing one is written only with `confirmed: true` AND the
+        `revs` of every config section it touches (what the preview returned) — otherwise it answers the Described
+        preview with `review_required` (and `needs_review`) and writes nothing. {applied, refused, results, error,
+        changed} or the refusal as JSON (400; 409 when a section changed since the caller's `revs`). `partial`: a batch
+        where something landed answers the result dict with its refusals instead of a 400 (the recruitment Save:
+        "Saved. Invite not created: …")."""
         reg = v.reg
+        d = d or {}
         warm_roles(reg)
         ops = await typed_ops(v, changes)
         if isinstance(ops, JSONResponse):
             return ops
-        crevs = config_revs(d or {})
+        crevs = config_revs(d)
         stale = stale_sections(reg, crevs)
         if stale:
             return changed_response(reg, stale)
-        allowed, refused = configops.authorize_ops(reg, ops, v.uid, role=await live_role(v), raids=raids_of(reg))
+        raids = raids_of(reg)
+        allowed, refused = configops.authorize_ops(reg, ops, v.uid, role=await live_role(v), raids=raids)
         if refused:
             return JSONResponse({"error": refused[0], "refused": refused}, status_code=403)
+        if allowed:
+            described = await asyncio.to_thread(configops.describe_ops, reg, allowed, [])
+            if described.review and not (described.lines and all(ln.error for ln in described.lines)):  # every write refused: nothing to review, the apply says why
+                want = {k: x for k, x in configops.board_revs(reg, allowed, raids).items() if k.startswith(configops.CONFIG_REV)}
+                if not (d.get("confirmed") and all(crevs.get(k) == x for k, x in want.items())):
+                    return JSONResponse(review_required(v, described, allowed, want))
         res = await apply_now(v, allowed, [], crevs)
         if res["refused"] and not (partial and res["applied"]):
             return JSONResponse({"error": res["error"], "applied": res["applied"], "refused": res["refused"], "changed": res["changed"]},
                                 status_code=409 if res["changed"] and not res["applied"] else 400)
         return res
+
+    def review_required(v, described, allowed: list, want: dict) -> dict:
+        """A translator's answer for a batch that must be reviewed first (D51): the Described preview, the section revs to
+        send back with `confirmed: true`, and nothing written."""
+        return {"review_required": True, "needs_review": True, "kind": "change",
+                "described": described.json_for(v.reg, surface(v), channels_of(v.reg)), "describe": [ln.text for ln in described.lines],
+                "ops": [op.model_dump(exclude_none=True) for op in allowed], "warn": described.warn, "review": True,
+                "fingerprint": described.fingerprint, "revs": want, "applied": [], "results": [],
+                "message": "Not saved: this change is reviewed first — send it again with confirmed: true and these revs (or save it from the page)."}
 
     app.state.ops_translate = translate  # the other translators (web/api_setup.py's channels) reach the one core through here
 
@@ -353,7 +375,7 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         v, d = await body(request, officer=True)
         need_owner(v)
         inst = parse(d, InstanceBody).instance
-        res = await translate(v, [{"kind": "raid", "target": inst, "fields": {k: x for k, x in d.items() if k not in ("instance", "revs")}}], d)
+        res = await translate(v, [{"kind": "raid", "target": inst, "fields": {k: x for k, x in d.items() if k not in ("instance", "revs", "confirmed")}}], d)
         return res if isinstance(res, JSONResponse) else {"message": "; ".join(res["applied"]) or f"{inst}: no changes"}
 
     @app.post("/api/admin/raid/reset")

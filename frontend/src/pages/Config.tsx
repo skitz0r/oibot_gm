@@ -8,6 +8,7 @@ import { api, opsApi, type ConfigSummary, type LootLogState, type Meta, type Ops
 import { CardHeader, PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { useOpsSave } from "../components/ReviewModal";
+import { useDirty } from "../hooks/useDirty";
 import { Recruitment } from "../components/Recruitment";
 import { ChannelsCard } from "../components/ChannelsCard";
 import { SetupCard } from "../components/SetupCard";
@@ -42,6 +43,8 @@ export function ConfigPage({ meta }: { meta: Meta }) {
   const [stale, setStale] = useState(false);  // someone else changed the settings while the draft was open
   const draftRef = useRef(false);
   draftRef.current = draft !== null;
+  const [saveSetting, settingReview] = useOpsSave();
+  useDirty("settings", draft !== null);
   const load = () => Promise.all([
     api.get<ConfigData>("/api/config").then(setData),
     api.get<ConfigSummary>("/api/config/summary").then(setSummary),
@@ -52,9 +55,14 @@ export function ConfigPage({ meta }: { meta: Meta }) {
   useLive(() => { if (draftRef.current) setStale(true); else load(); }, ["config"]);
   if (!data) return <Text c="dimmed">Loading…</Text>;
   const ro = !data.owner;
+  /** One setting through the structured path (useOpsSave → the ReviewModal when it is reviewed, D51). */
   async function set(field: string, value: unknown) {
     setBusy(field);
-    try { const r = await api.post<{ message: string }>("/api/admin/config", { field, value }); ok(r.message); await load(); setSaved(field); setTimeout(() => setSaved((f) => (f === field ? null : f)), 3000); } catch (e) { fail(e); } finally { setBusy(null); }
+    try {
+      const r = await saveSetting([{ kind: "settings", fields: { [field]: value } }], { revs: data?.revs?.settings ? { "config:settings": data.revs.settings } : undefined });
+      await load();
+      if (r && r.applied?.length && !r.refused?.length) { setSaved(field); setTimeout(() => setSaved((f) => (f === field ? null : f)), 3000); }
+    } catch (e) { fail(e); } finally { setBusy(null); }
   }
   /** The loot-log switch saves as you change it; the mark beside the label says it was just written. */
   const lab = (field: string, text: string) => <>{text}{saved === field && <Text span size="xs" c="teal" ml={8}>✓ saved</Text>}</>;
@@ -118,6 +126,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
           </Stack>
         </Tabs.Panel>
       </Tabs>
+      {settingReview}
     </Stack>
   );
 }

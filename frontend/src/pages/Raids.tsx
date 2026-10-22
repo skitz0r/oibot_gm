@@ -6,9 +6,11 @@ import { DateTimePicker } from "@mantine/dates";
 import { IconPencil } from "@tabler/icons-react";
 import { api, type CompSlot, type Meta, type RaidRule, type Raids, type Readiness } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
-import { Eyebrow, PageTitle, fail, ok } from "../components/Page";
+import { Eyebrow, PageTitle, fail } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
-import { Schedules } from "../components/ScheduleCard";
+import { Schedules, raidRevs } from "../components/ScheduleCard";
+import { useOpsSave } from "../components/ReviewModal";
+import { useDirty } from "../hooks/useDirty";
 import { CompTargets } from "../components/CompTargets";
 
 export function RaidsPage({ meta }: { meta: Meta }) {
@@ -37,19 +39,28 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
   const [d, setD] = useState<Draft>(() => toDraft(r));
   const [busy, setBusy] = useState(false);
   const [ask, confirmDialog] = useConfirm();
+  const [saveOps, review] = useOpsSave();
+  useDirty(`raid-rules:${r.id}`, editing);
   useEffect(() => setD(toDraft(r)), [r]);
   const over = (k: string) => r.overridden.includes(k);
   const oc = (k: string) => (over(k) ? "yellow" : undefined);
 
   async function save() {
     setBusy(true);
-    try { const x = await api.post<{ message: string }>("/api/admin/raid", { instance: r.id, ...d }); ok(x.message); setEditing(false); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
+    try {
+      const x = await saveOps([{ kind: "raid", target: r.id, fields: d }], { ...raidRevs(r), title: `${r.name} rules` });
+      if (x?.changed?.length) onSaved();  // changed meanwhile: reload under the draft, the next Save carries the new rev
+      else if (x && !x.refused?.length) { setEditing(false); onSaved(); }
+    } catch (e) { fail(e); } finally { setBusy(false); }
   }
   async function reset() {
     const what = r.overridden.map((k) => k.replace(/^weight_/, "weight ").replace(/_/g, " ")).join(", ");
     if (!(await ask({ title: `Reset ${r.name} to the game defaults?`, message: `${r.overridden.length} override${r.overridden.length === 1 ? "" : "s"} go: ${what}.${r.overridden.includes("slots") || r.overridden.includes("schedules") ? " Its schedules go too: no sheet opens for this raid until you add one again." : ""}${r.live ? ` The ${r.live} live sheet${r.live === 1 ? "" : "s"} keep their times.` : ""}`, confirmLabel: "Reset", color: "red" }))) return;
     setBusy(true);
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/reset", { instance: r.id }); ok(x.message); setEditing(false); onSaved(); } catch (e) { fail(e); } finally { setBusy(false); }
+    try {
+      const x = await saveOps([{ kind: "raid_reset", target: r.id }], { ...raidRevs(r), title: `Reset ${r.name}` });
+      if (x?.applied?.length) { setEditing(false); onSaved(); }
+    } catch (e) { fail(e); } finally { setBusy(false); }
   }
   const metaLine = [`${r.size}-player`, r.schedules.length ? `${r.schedules.length} schedule${r.schedules.length === 1 ? "" : "s"}` : "no schedules", r.live ? `${r.live} live` : null, r.opened ? `window ${r.window[0]} → ${r.window[1]}` : r.first_open_local ? `opens ${r.window[0]}` : "no opening date set"].filter(Boolean).join(" · ");
 
@@ -132,6 +143,7 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
       </Box>
       <Schedules r={r} meta={meta} owner={owner} policies={policies} maxRosters={maxRosters} onSaved={onSaved} onEditing={onEditing} />
       {confirmDialog}
+      {review}
     </Card>
   );
 }

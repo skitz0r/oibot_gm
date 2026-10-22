@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { ActionIcon, Alert, Anchor, Badge, Box, Button, Card, Group, MultiSelect, Paper, Select, Stack, Switch, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconArrowDown, IconArrowUp, IconLink, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { api, type Question, type Recruitment as RecruitmentData } from "../api";
-import { CardHeader, fail, ok } from "./Page";
+import { CardHeader, fail } from "./Page";
+import { useOpsSave } from "./ReviewModal";
+import { useDirty } from "../hooks/useDirty";
 
 const LABEL_MAX = 45, HINT_MAX = 100, NOTE_MAX = 200;
 
@@ -13,15 +15,17 @@ const counter = (n: number, max: number) => <Text size="xs" c={n > max ? "red" :
 
 /** Config page · Recruitment. Applications happen in Discord (/apply and the registration card); this is what they ask,
  *  whether they are open, the homepage's invite and who registers without applying. Officers read; the owner edits
- *  (one Save → POST /api/admin/recruitment, refusals shown here). */
+ *  (one Save → useOpsSave: the structured ops path and its review step, refusals shown here). */
 export function Recruitment({ channels }: { channels: { id: string; name: string; category: string | null }[] }) {
   const [data, setData] = useState<RecruitmentData | null>(null);
   const [d, setD] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteChannel, setInviteChannel] = useState<string | null>(null);  // R-06: the invite is created AT Save, never before
+  const [saveOps, review] = useOpsSave();
   const load = () => api.get<RecruitmentData>("/api/recruitment").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
+  useDirty("recruitment", d !== null);
   if (!data) return null;
   const editing = d !== null;
   const roleName = (id: string) => data.guild_roles.find((r) => r.id === id)?.name;
@@ -38,16 +42,22 @@ export function Recruitment({ channels }: { channels: { id: string; name: string
     if (!d) return;
     setBusy(true); setError(null);
     try {
-      const r = await api.post<{ message: string; invite_error: string | null } & RecruitmentData>("/api/admin/recruitment", {
+      // ONE structured batch through the review step (D51): closing applications is reviewed with its consequence first
+      const r = await saveOps([{ kind: "recruitment", fields: {
         open: d.open, note: d.note, member_role_ids: d.member_role_ids,
         ...(inviteChannel ? { invite_create: inviteChannel } : { invite_url: d.invite_url }),
         questions: d.questions.map((q) => ({ ...(q.id ? { id: q.id } : {}), label: q.label, hint: q.hint || null, required: q.required })),
-      });
-      setData(r);
-      if (r.invite_error) {  // "Saved. Invite not created: …" — the rest landed; only the channel stays in the draft
-        setError(r.message);
-        setD({ open: r.open, note: r.note, invite_url: r.invite_url, member_role_ids: [...r.member_role_ids], questions: r.questions.map((q) => ({ ...q, hint: q.hint ?? "" })) });
-      } else { ok(r.message); setD(null); setInviteChannel(null); }
+      } }], { title: "Recruitment" });
+      if (!r) return;  // Back to edits: the draft stays
+      const fresh = await api.get<RecruitmentData>("/api/recruitment");
+      setData(fresh);
+      const inviteError = (r.results || []).find((x) => !x.ok && /Invite not created/.test(x.line))?.line ?? null;
+      const other = (r.results || []).filter((x) => !x.ok && x.line !== inviteError);
+      if (other.length || (r.error && !r.applied?.length)) setError(other[0]?.line || r.error || "not saved");
+      else if (inviteError) {  // "Saved. Invite not created: …" — the rest landed; only the channel stays in the draft
+        setError(`Saved. ${inviteError}`);
+        setD({ open: fresh.open, note: fresh.note, invite_url: fresh.invite_url, member_role_ids: [...fresh.member_role_ids], questions: fresh.questions.map((q) => ({ ...q, hint: q.hint ?? "" })) });
+      } else { setD(null); setInviteChannel(null); }
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
 
@@ -56,6 +66,7 @@ export function Recruitment({ channels }: { channels: { id: string; name: string
 
   return (
     <Card>
+      {review}
       <CardHeader title="Recruitment" hint="applications happen in Discord: /apply and the registration card's Apply button"
         action={data.owner && !editing ? <Button variant="default" size="sm" leftSection={<IconPencil size={15} />} onClick={start}>Edit recruitment</Button> : null} />
       {!editing ? (

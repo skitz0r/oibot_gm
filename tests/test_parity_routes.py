@@ -15,6 +15,7 @@ from conftest import join, lock_with_board, open_test_run
 from fastapi.testclient import TestClient
 from test_mcp import TOKEN, bearer
 from test_parity_verbs import Bot, Chan, fill_ask
+from web_helpers import post_confirmed
 
 from oibot_gm import agents, policy as pol
 from oibot_gm import mcp_server as ms
@@ -151,7 +152,7 @@ def test_members_absence_says_which_sheets(c, reg, rs):
 # ---------------------------------------------------------------- setup and ops
 
 def test_recruitment_save_refreshes_the_registration_card(c, bot):
-    r = c.post("/api/admin/recruitment", json={"open": False, "note": "full for now"}, headers=H)
+    r = post_confirmed(c, "/api/admin/recruitment", {"open": False, "note": "full for now"}, headers=H)
     assert r.status_code == 200, r.text
     assert bot.card_refreshes == 1
 

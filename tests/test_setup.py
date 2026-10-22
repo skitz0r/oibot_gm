@@ -23,6 +23,7 @@ from conftest import GUILD, OFFICER_ROLE, OWNER, open_test_run
 from fastapi.testclient import TestClient
 from itsdangerous import URLSafeSerializer
 from wizard_harness import Harness
+from web_helpers import post_confirmed
 
 from oibot_gm import configops, discord_registry, ops as ops_mod, perms
 from oibot_gm.configops import ConfigOp
@@ -1056,13 +1057,16 @@ def test_channels_translator_applies_through_the_core(wc, web_bot, reg, monkeypa
     web_bot.add(50, "raids")
     web_bot.people[OWNER] = types.SimpleNamespace(id=OWNER, display_name="Own", roles=[])
     h = as_user(wc, OWNER)
-    r = wc.post("/api/admin/channels", json={"channels": {"signup": "50"}}, headers=h)
+    first = wc.post("/api/admin/channels", json={"channels": {"signup": "50"}}, headers=h)
+    assert first.status_code == 200 and first.json()["review_required"] and reg.config.signup_channel_id is None, "D51: a channel is reviewed first"
+    assert web_bot.ops.lines == []
+    r = post_confirmed(wc, "/api/admin/channels", {"channels": {"signup": "50"}}, headers=h)
     assert r.status_code == 200, r.text
     assert reg.config.signup_channel_id == 50 and r.json()["message"] == "signup channel → #raids"
     assert web_bot.ops.lines == [(GUILD, "info", "[web] Own: signup channel → #raids")]
     assert wc.post("/api/admin/channels", json={"channels": {"bogus": "50"}}, headers=h).status_code == 400
     web_bot.add(51, "mute", view_channel=True)
-    r = wc.post("/api/admin/channels", json={"channels": {"ops": "51"}}, headers=h)
+    r = post_confirmed(wc, "/api/admin/channels", {"channels": {"ops": "51"}}, headers=h)
     assert r.status_code == 400 and "I can't post in #mute" in r.json()["error"]
 
 

@@ -12,6 +12,7 @@ import types
 
 import pytest
 from conftest import OFFICER_ROLE, OWNER, join, lock_with_board, open_test_run
+from web_helpers import post_confirmed
 
 from oibot_gm import configops
 from oibot_gm.configops import ConfigOp, ConfigRequest
@@ -335,7 +336,7 @@ def test_api_officers_read_owner_writes(web_client, g):
     assert w.c.post("/api/admin/plain-permissions", json=body, headers=w.as_(w.member)).status_code == 403
     assert w.c.post("/api/admin/plain-permissions", json=body, headers=w.as_(w.officer)).status_code == 403
     assert w.c.post("/api/admin/plain-permissions", json=body, headers={"Authorization": f"Bearer {w.token}"}).status_code == 403  # CSRF marker
-    r = w.c.post("/api/admin/plain-permissions", json=body, headers={"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"})
+    r = post_confirmed(w.c, "/api/admin/plain-permissions", body, headers={"Authorization": f"Bearer {w.token}", "X-Requested-With": "oibot"})
     assert r.status_code == 200, r.text
     assert g.reg.plain_who("runs") == ["officers", f"role:{RAID_LEAD}"] and g.reg.plain_mode(GENERAL_CH) == "answer" and g.reg.plain_mode(None) == "act"
     assert "Runs → officers or @Raid Lead" in r.json()["message"]

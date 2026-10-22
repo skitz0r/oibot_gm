@@ -13,6 +13,7 @@ from conftest import OFFICER_ROLE, OWNER
 from fastapi.testclient import TestClient
 from test_mcp import TOKEN, FakeBot, bearer
 from test_people import real
+from web_helpers import post_confirmed
 
 from oibot_gm import configops
 from oibot_gm.configops import ConfigOp, MergedOp
@@ -339,7 +340,7 @@ def _route_vs_shadow(c, reg, path, body, old):
     write) and returns its message. Same message, same resulting config section."""
     sh = reg.shadow()
     want_msg = old(sh)
-    r = c.post(path, json=body, headers=bearer())
+    r = post_confirmed(c, path, body, headers=bearer())
     assert r.status_code == 200, r.text
     assert r.json()["message"] == want_msg
     return sh
@@ -407,11 +408,11 @@ def test_admin_config_translator(owner_client, reg):
     assert reg.config.timezone == "America/New_York"
     r = owner_client.post("/api/admin/config", json={"field": "news_keywords", "value": ["phase 2", "hotfix"]}, headers=bearer())
     assert r.json()["message"] == "news_keywords = phase 2, hotfix" and reg.config.news_keywords == ["phase 2", "hotfix"]
-    r = owner_client.post("/api/admin/config", json={"field": "officer_roles", "value": [str(OFFICER_ROLE), "777"]}, headers=bearer())
+    r = post_confirmed(owner_client, "/api/admin/config", {"field": "officer_roles", "value": [str(OFFICER_ROLE), "777"]}, headers=bearer())
     assert r.status_code == 200 and r.json()["message"].startswith("officer roles: ") and reg.config.officer_role_ids == [OFFICER_ROLE, 777]
-    r = owner_client.post("/api/admin/config", json={"field": "officer_roles", "value": [str(OFFICER_ROLE), "777"]}, headers=bearer())
+    r = post_confirmed(owner_client, "/api/admin/config", {"field": "officer_roles", "value": [str(OFFICER_ROLE), "777"]}, headers=bearer())
     assert r.json()["message"].startswith("officer roles unchanged: ")
-    r = owner_client.post("/api/admin/config", json={"field": "channel:signup", "value": "12345"}, headers=bearer())
+    r = post_confirmed(owner_client, "/api/admin/config", {"field": "channel:signup", "value": "12345"}, headers=bearer())
     assert r.status_code == 200 and reg.config.signup_channel_id == 12345
     assert owner_client.post("/api/admin/config", json={"field": "galaxy", "value": 1}, headers=bearer()).json()["error"] == "unknown setting galaxy"
 
@@ -420,17 +421,57 @@ def test_admin_plain_and_recruitment_translators(owner_client, reg):
     patch = {"groups": {"runs": ["everyone"], "test": []}, "channels": {"555": "answer"}, "dm": "answer"}
     sh = reg.shadow()
     want = sh.set_plain_policy(sh.merge_plain_policy(patch), "x")
-    r = owner_client.post("/api/admin/plain-permissions", json=patch, headers=bearer())
+    r = post_confirmed(owner_client, "/api/admin/plain-permissions", patch, headers=bearer())
     assert r.status_code == 200 and r.json()["message"] == want and reg.config.plain == sh.config.plain
     qs = [{"label": "Main spec?", "hint": "the one you raid as", "required": True}, {"label": "Logs?", "hint": None, "required": False}]
     body = {"open": False, "note": "Healers wanted", "questions": qs, "member_role_ids": ["9001"]}
     sh = reg.shadow()
     want = sh.set_recruitment("x", open=False, note="Healers wanted", questions=qs, member_role_ids=[9001])
-    r = owner_client.post("/api/admin/recruitment", json=body, headers=bearer())
+    r = post_confirmed(owner_client, "/api/admin/recruitment", body, headers=bearer())
     assert r.status_code == 200 and r.json()["message"] == want
     assert reg.config.recruitment == sh.config.recruitment and reg.config.member_role_ids == [9001]
     r = owner_client.post("/api/admin/recruitment", json={"note": "x" * 300}, headers=bearer())
     assert r.status_code == 400 and "limited to 200" in r.json()["error"]
+
+
+def test_admin_translators_review_a_warn_class_batch_before_writing(owner_client, reg, store):
+    """D51 on the translators: a warn-class or consequence-bearing batch without `confirmed` (and the section revs the
+    preview returned) answers `review_required` with the Described preview and writes NOTHING; confirmed + matching revs
+    applies; a routine one still saves at once."""
+    c = owner_client
+    reg.set_schedule("barrow_deeps", "alt", {"kind": "weekly", "slots": ["Sat 20:00"], "name": "Alt run"}, "Jon")
+    cases = [
+        ("/api/admin/config", {"field": "timezone", "value": "America/New_York"}),
+        ("/api/admin/config", {"field": "channel:signup", "value": "12345"}),
+        ("/api/admin/config", {"field": "officer_roles", "value": []}) if reg.config.officer_role_ids else None,
+        ("/api/admin/aura", {"id": "blood_pact", "scope": "raid"}),
+        ("/api/admin/aura/reset", {}),
+        ("/api/admin/raid/schedule", {"instance": "barrow_deeps", "id": "alt", "fields": {"active": False}}),
+        ("/api/admin/raid/schedule/remove", {"instance": "barrow_deeps", "id": "alt"}),
+        ("/api/admin/recruitment", {"open": False}),
+        ("/api/admin/plain-permissions", {"dm": "ignore"}),
+    ]
+    reg.set_buff_overrides("blood_pact", {"note": "x"}, "Jon")
+    for path, body in filter(None, cases):
+        before, n0 = reg.config.model_dump(), commits(store)
+        r = c.post(path, json=body, headers=bearer())
+        assert r.status_code == 200, (path, r.text)
+        d = r.json()
+        assert d["review_required"] and d["needs_review"] and d["described"]["lines"] and d["revs"], (path, d)
+        assert reg.config.model_dump() == before and commits(store) == n0, f"{path} wrote without a review"
+        r = c.post(path, json={**body, "confirmed": True}, headers=bearer())  # confirmed without the revs it was shown: still a review
+        assert r.json().get("review_required") and reg.config.model_dump() == before, path
+        r = c.post(path, json={**body, "confirmed": True, "revs": d["revs"]}, headers=bearer())
+        assert r.status_code == 200 and not r.json().get("review_required"), (path, r.text)
+        assert reg.config.model_dump() != before, f"{path}: confirmed + revs applies"
+    r = c.post("/api/admin/aura", json={"id": "blood_pact", "note": "routine"}, headers=bearer())
+    assert r.status_code == 200 and not r.json().get("review_required") and reg.buff("blood_pact").note == "routine"
+    scope = reg.buff("blood_pact").scope
+    other = "raid" if scope != "raid" else "party"
+    stale = c.post("/api/admin/aura", json={"id": "blood_pact", "scope": other}, headers=bearer()).json()["revs"]
+    reg.set_buff_overrides("blood_pact", {"note": "someone else"}, "Jon")
+    r = c.post("/api/admin/aura", json={"id": "blood_pact", "scope": other, "confirmed": True, "revs": stale}, headers=bearer())
+    assert r.status_code == 409 and reg.buff("blood_pact").scope == scope
 
 
 def test_admin_routes_are_translators_not_verb_callers():

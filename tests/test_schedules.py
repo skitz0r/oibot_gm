@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from test_flows_config import open_raid, submit_multi
 from test_mcp import TOKEN, FakeBot, bearer
 from wizard_harness import Harness
+from web_helpers import post_confirmed
 
 from oibot_gm import configops
 from oibot_gm import flows_config  # noqa: F401 — registers the flows
@@ -379,7 +380,7 @@ def test_web_routes_list_set_remove_and_open_by_schedule(api, reg, rs):
     when = (reg.now_local() + timedelta(days=1)).strftime("%Y-%m-%d 21:00")
     c.post(f"/api/raid/{RID}/open", json={"schedule": "pug", "when": when}, headers=bearer())
     assert bot.opened[-1][2] == "pug"
-    gone = c.post("/api/admin/raid/schedule/remove", json={"instance": RID, "id": "pug"}, headers=bearer())
+    gone = post_confirmed(c, "/api/admin/raid/schedule/remove", {"instance": RID, "id": "pug"}, headers=bearer())
     assert gone.status_code == 200 and "removed" in gone.json()["message"]
 
 

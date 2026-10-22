@@ -448,8 +448,8 @@ def test_schedule_writes_from_the_raids_page_carry_the_raid_rev(owner_client, re
         assert r.status_code == 409 and r.json()["changed"] == ["raids:barrow_deeps"], r.text
     assert any(x["id"] == "alt" and x["active"] for x in reg.schedules("barrow_deeps"))
     src = (FRONT / "components" / "ScheduleCard.tsx").read_text()
-    posts = [ln for ln in src.splitlines() if re.search(r'api\.post<[^>]*>\("/api/admin/raid/schedule(?:/remove)?"', ln)]
-    assert len(posts) == 3 and all("...raidRevs(r) })" in p for p in posts), posts
+    saves = [ln for ln in src.splitlines() if re.search(r'saveOps\(\[\{ kind: "schedule(?:_remove)?"', ln)]  # useOpsSave (D51)
+    assert len(saves) == 3 and all("...raidRevs(r)" in p for p in saves), saves
 
 
 def test_mcp_guild_overview_carries_the_summary(owner_client, reg, monkeypatch):

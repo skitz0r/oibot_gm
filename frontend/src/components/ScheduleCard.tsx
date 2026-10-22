@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Badge, Box, Button, Group, Modal, MultiSelect, NumberInput, SegmentedControl, Select, Stack, Switch, Text, TextInput } from "@mantine/core";
 import { TimePicker } from "@mantine/dates";
 import { IconPencil, IconPlayerPause, IconPlayerPlay, IconPlus, IconTrash } from "@tabler/icons-react";
-import { api, opsApi, type Meta, type OpsReply, type RaidRule, type Schedule } from "../api";
+import { opsApi, type Meta, type OpsReply, type RaidRule, type Schedule } from "../api";
 import { useConfirm } from "./ConfirmModal";
+import { useOpsSave } from "./ReviewModal";
+import { useDirty } from "../hooks/useDirty";
 import { Eyebrow, fail, ok } from "./Page";
 import { SlotEditor } from "./SlotEditor";
 
@@ -36,17 +38,19 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
   const [edit, setEditState] = useState<Schedule | "new" | null>(null);
   const setEdit = (v: Schedule | "new" | null) => { if ((v === null) !== (edit === null)) onEditing?.(v !== null); setEditState(v); };
   const [ask, confirmDialog] = useConfirm();
+  const [saveOps, review] = useOpsSave();
+  /** Remove and Pause are warn-class (D51): the ReviewModal is their confirm, with the server's sentences (the regulars by
+   *  name, the runs already open; what pausing stops) — one review step, never a second dialog before it. */
   async function remove(s: Schedule) {
-    // the sentence is the server's (Registry.schedule_removal_effects): its regulars by name (a notice, no DM) and the runs already open
-    const extra = s.is_default ? " These are the raid's own run times, so it is left with none." : "";
-    if (!(await ask({ title: `Remove ${s.name}?`, message: `${s.removal_sentence || `${s.label}. Runs already open keep their times.`}${extra}`, confirmLabel: "Remove", color: "red" }))) return;
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule/remove", { instance: r.id, id: s.id, ...raidRevs(r) }); ok(x.message); onSaved(); } catch (e) { fail(e); onSaved(); }
+    try { await saveOps([{ kind: "schedule_remove", target: `${r.id}:${s.id}` }], { ...raidRevs(r), title: `Remove ${s.name}?` }); } catch (e) { fail(e); }
+    onSaved();
   }
-  /** Pause / Resume beside Edit (design RD-10): one field, confirmed with the server's sentence — never hidden behind the editor's Save. */
+  /** Pause / Resume beside Edit (design RD-10): one field — never hidden behind the editor's Save. Pausing is reviewed;
+   *  resuming is routine, asked here with the server's sentence. */
   async function pause(s: Schedule, on: boolean) {
-    const message = on ? s.pause_sentence : s.resume_sentence;
-    if (!(await ask({ title: `${on ? "Pause" : "Resume"} ${s.name}?`, message: message || (on ? "Nothing new opens from it." : "It opens sheets again."), confirmLabel: on ? "Pause" : "Resume", color: on ? "yellow" : undefined }))) return;
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id: s.id, fields: { active: !on }, ...raidRevs(r) }); ok(x.message); onSaved(); } catch (e) { fail(e); onSaved(); }
+    if (!on && !(await ask({ title: `Resume ${s.name}?`, message: s.resume_sentence || "It opens sheets again.", confirmLabel: "Resume" }))) return;
+    try { await saveOps([{ kind: "schedule", target: `${r.id}:${s.id}`, fields: { active: !on } }], { ...raidRevs(r), title: `${on ? "Pause" : "Resume"} ${s.name}?` }); } catch (e) { fail(e); }
+    onSaved();
   }
   return (
     <Box px="md" pb="md">
@@ -86,6 +90,7 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
       </Stack>
       {edit && <ScheduleEditor r={r} meta={meta} s={edit === "new" ? null : edit} policies={policies} maxRosters={maxRosters} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onSaved(); }} onStale={onSaved} />}
       {confirmDialog}
+      {review}
     </Box>
   );
 }
@@ -118,6 +123,8 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
   const [d, setD] = useState<Draft>(() => toDraft(s));
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<OpsReply | null>(null);
+  const [saveOps, review] = useOpsSave();
+  useDirty(`schedule:${r.id}:${s?.id ?? "new"}`, true);  // an open editor holds a draft
   const adhoc = d.kind === "pickup";
   const raidVal = (k: string) => (r as unknown as Record<string, unknown>)[k];
   /** what an empty field inherits, and from where: the raid's rules, or (ad hoc) the ad hoc defaults */
@@ -181,9 +188,13 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
     const fields = fieldsOf(d);
     if (!Object.keys(fields).length) { ok("nothing changed"); onClose(); return; }
     setBusy(true);
-    try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id, fields, ...raidRevs(r) }); ok(x.message); onSaved(); }
-    // a 409 (changed meanwhile): the page reloads under the open editor, the draft stays, the next Save carries the new rev
-    catch (e) { fail(e); onStale?.(); }
+    try {
+      const x = await saveOps([{ kind: "schedule", target: `${r.id}:${id}`, fields }], { ...raidRevs(r), title: s ? `Edit ${s.name}` : `Add ${d.name || "a schedule"}` });
+      if (!x) return;  // Back to edits: the draft stays
+      // a 409 (changed meanwhile): the page reloads under the open editor, the draft stays, the next Save carries the new rev
+      if (x.changed?.length) onStale?.();
+      else if (x.applied?.length) onSaved();
+    } catch (e) { fail(e); }
     finally { setBusy(false); }
   }
 
@@ -191,6 +202,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
   return (
     <Modal opened onClose={onClose} title={s ? `Edit ${s.name}` : `Add a schedule to ${r.name}`} size="lg">
       <Stack gap="sm">
+        {review}
         <Group gap="md" align="flex-end" wrap="wrap">
           <TextInput label="name" placeholder={d.kind === "pickup" ? "Pickup" : "Main night, Alt run…"} value={d.name} onChange={(e) => setD({ ...d, name: e.currentTarget.value })} maxLength={40} w={220} />
           <Select label="rosters per run" description={(s?.rosters_copy && s.rosters_copy[d.rosters]) || `the sheet advertises ${d.rosters} × ${r.size} seats`} data={Array.from({ length: maxRosters }, (_, i) => ({ value: String(i + 1), label: `${i + 1} roster${i ? "s" : ""}` }))}
