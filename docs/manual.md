@@ -620,7 +620,7 @@ run: *"Joining was the commitment — nobody is asked to confirm."* — then **D
 very same sentence (it comes from the bot, the page never writes its own), so no surface promises a DM the bot would
 not send. Tables (Me, Members, Raids, Auras)
 share one edit mode: an Edit button in the header, then a footer with any reset far left and *Cancel* / *Save changes*
-on the right. Config saves each field as you change it and marks it *✓ saved*. **How much a Save asks depends on what it
+on the right. Config's **Settings** is an edit mode too (**Edit settings**, then one Save, reviewed like any other); the channel pickers, the loot-log switch and the news keywords still save as you change them and mark it *✓ saved*. **How much a Save asks depends on what it
 does** (the same rule on every surface): a routine, reversible edit (a note, a status, a strength, an hour) saves at once
 and the toast says what happened — *"2 saved"*, or *"1 saved, 1 refused"*, never a bare "saved". A change that moves
 where things post or who counts — a channel, the timezone, an officer role, a schedule removed or paused, a buff's scope

@@ -182,7 +182,9 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
     if (!Object.keys(fields).length) { ok("nothing changed"); onClose(); return; }
     setBusy(true);
     try { const x = await api.post<{ message: string }>("/api/admin/raid/schedule", { instance: r.id, id, fields, ...raidRevs(r) }); ok(x.message); onSaved(); }
-    catch (e) { fail(e); onStale?.(); }  // a 409 (changed meanwhile): the page reloads under the open editor, the draft stays, the next Save carries the new rev finally { setBusy(false); }
+    // a 409 (changed meanwhile): the page reloads under the open editor, the draft stays, the next Save carries the new rev
+    catch (e) { fail(e); onStale?.(); }
+    finally { setBusy(false); }
   }
 
   const hm = /^(\d{1,2}):(\d{2})/.exec(d.time || "");
