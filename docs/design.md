@@ -2383,8 +2383,8 @@ shows the same choice (a SegmentedControl under the ⚠ lines, previewed with th
 about), channels (each kind; one the bot can't see any more is marked — only when the gateway answered), raids and
 schedules in words, recruitment (open/closed, questions, `invite_words`: a Discord invite or not, and what the homepage
 does with it; member roles), plain text, test bench (analytics cards paused while puppets exist), and `host`: for the owner
-`host_facts` (OIBOT_SUPERUSERS by name, the provider's spend line against the shared cap, MCP local-only from
-OIBOT_MCP_LOCAL_ONLY / no token, "Settings on disk (.env) changed since the bot started — restart to apply" from the
+`host_facts` (who gets the error alerts, OIBOT_SUPERUSERS by name, the provider's spend line against the shared cap, MCP
+local-only from `web.app.mcp_local_only` / no token, a parked guild (§5.46), "Settings on disk (.env) changed since the bot started — restart to apply" from the
 .env mtime against `bot.started_at`), for officers "Host facts: owner only.". Mentions stay ids; the web renders names
 (`render`). `summary_text(sections)` flattens it. Surfaces: `/gm config show` = `discord_registry.config_show_embed` (one
 embed field per section, "+N more on the site" past 1024 characters, a link to the Config page), GET `/api/config/summary`
@@ -2740,9 +2740,10 @@ recruitment rev before Discord makes it; a refusal reads `INVITE_NOT_CREATED` ("
 answers 200 "Saved. Invite not created: …" with the rest saved (`translate(…, partial=True)`), the channel left in the
 draft. MCP `create_invite(channel, preview=)` sends the same structured change.
 
-**Host facts.** `configops.config_summary(reg, audience)`: `/gm config show` passes "owner" for the owner and a superuser,
-which adds `host_summary` (who gets the error alerts, the superusers by mention, MCP local-only from
-`web.app.mcp_local_only`, a parked guild); officers read "Host facts (error alerts, superusers): owner only."
+**Host facts.** One `configops.config_summary(reg, bot, audience)` (§5.44's sections): `/gm config show` passes "owner"
+for the owner and a superuser, and the Host section (`host_facts`) carries this part's facts beside §5.44's — who gets the
+error alerts, a parked guild, MCP local-only from `web.app.mcp_local_only` (the one reader of OIBOT_MCP_LOCAL_ONLY);
+officers read "Host facts: owner only." (`host_summary` was folded into `host_facts` at the merge.)
 
 Not in this part: the Settings edit mode's own `error_dm_ids` field (G1b — the Setup card edits it meanwhile), the Agents
 page's MCP card data (G2; the Host card renders what `/api/agents.mcp` holds), the Discord recruitment hub's channel pick
@@ -2854,6 +2855,14 @@ companion_tokens (web; MCP reads beside them). The companion tokens are still `.
 the card is not built). Tests: tests/test_attendance.py (D49 cases), tests/test_loot_followthrough.py (kill order, the
 prompt once, the lock card and its harness press, stamps and the one warn on a real FeedServer, the draft never writes,
 CSV round trip / dedupe / rev / re-weight ask, the tokens card, attendance routes, MCP).
+
+**Merged with §5.44–§5.46 (final fixer).** The four phase-3 parts merged in the order §5.44 → §5.45 → §5.46 → §5.47.
+One `config_summary(reg, bot, audience)` (sections) with §5.46's host facts in `host_facts`. The Config page: Overview =
+SetupCard + the summary; Settings = §5.44's edit mode (timezone, who may ask, about, officer roles); Channels = §5.46's
+ChannelsCard (edit mode through useOpsSave) + §5.44's NewsCard (the one keywords editor); only the loot-log switch still
+saves on change (tests/test_frontend_source.py pins it). The tier draft (`loot/tierdraft.draft`) runs inside
+`llm.provider.for_guild(reg.key)`, so its usage row is the guild's (§5.45, D45). Parked guilds in GET /api/guilds carry
+`detached` and no `busy`; served ones carry `busy` (the apply job's raid guard).
 
 ## 6. Architecture
 

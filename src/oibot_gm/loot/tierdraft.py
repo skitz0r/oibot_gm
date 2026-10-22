@@ -130,9 +130,12 @@ def draft(reg, item, provider, policy: str) -> dict:
     with LLM_DOWN (or the budget's words) when the model can't be asked."""
     if provider is None:
         raise RegistryError(LLM_DOWN)
+    from ..llm.provider import for_guild
+
     system, user = prompt(reg, item, policy)
     try:
-        raw = provider.complete("tier_draft", system, user, TierDraft)
+        with for_guild(reg.key):  # the usage row is this guild's spend (D45; the Agents page's per-guild split)
+            raw = provider.complete("tier_draft", system, user, TierDraft)
     except Exception as e:  # noqa: BLE001 — API / billing / network: the grid still works by hand
         if type(e).__name__ == "BudgetExceeded":
             raise RegistryError(f"{e} — tier this item by hand on the grid.") from e

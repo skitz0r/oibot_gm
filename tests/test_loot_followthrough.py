@@ -304,7 +304,10 @@ class DraftProvider:
         self.rows, self.calls = rows, []
 
     def complete(self, workload, system, user, schema):
+        from oibot_gm.llm.provider import CURRENT_GUILD
+
         self.calls.append((workload, system, user))
+        self.guilds = [*getattr(self, "guilds", []), CURRENT_GUILD.get()]  # whose spend the usage row would carry (D45)
         return schema(tiers=[tierdraft.SpecTier(**r) for r in self.rows], summary="for casters", warnings=["known only by name"])
 
 
@@ -325,6 +328,7 @@ def test_claude_draft_never_writes_without_a_confirm(w):
     assert len(dr["dropped"]) == 3 and any("not a spec" in x or "no spec" in x for x in dr["dropped"]) and any("single specs" in x for x in dr["dropped"])
     assert "unverified" in dr["provenance"] and dr["summary"] == "for casters"
     assert prov.calls[0][0] == "tier_draft" and "<item>" in prov.calls[0][2] and "Shard of Doom" in prov.calls[0][2]
+    assert prov.guilds == [w.reg.key], "the draft is this guild's spend, never unattributed (merge fix: G2's per-guild usage)"
     assert (w.reg.store.root / GUILD / "items" / f"{key}.yaml").read_text() == before, "nothing written"
     assert not w.reg.items()[key].tiers
     assert w.c.get(f"/api/loot/items/{key}", headers=H).json()["draft"]["tiers"] == {good: "S"}, "the grid shows the draft until saved"
