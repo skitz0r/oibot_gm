@@ -2425,7 +2425,8 @@ gains the greyed site/MCP row and asks before saving `ignore` on the ops channel
 **LLM budget (D45).** `provider.CURRENT_GUILD` (a context variable; `for_guild(key)`) tags each usage row with its guild —
 set where the guild is known: `help.answer`, `configops.parse` (Discord, the site's text box, MCP plain_change),
 policy compiles, and the loot council's judge (`loot/session.run_distribution`, inside each worker thread — a thread
-pool doesn't inherit the context); `usage_by_guild()`; the cap stays one, and the refusal reads
+pool doesn't inherit the context) and the council thread's request parse (`discord_loot_surface.loot_chat` →
+`nl.parse_loot_feedback`; `asyncio.to_thread` copies the context); `usage_by_guild()`; the cap stays one, and the refusal reads
 "The bot's monthly budget for Claude is used up; the host raises it. …" (never an env-var name to a guild owner).
 
 Not in this part: the Config page's news status / backfill / always-matched chips (row 6, the settings builder); the

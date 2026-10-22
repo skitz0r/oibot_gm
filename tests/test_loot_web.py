@@ -138,7 +138,10 @@ def test_open_tick_distribute_confirm_end_through_the_routes(w):
     r = w.c.post(f"/api/loot/{w.ev.key}/override", json={"drop_id": "d1", "to": w.ms[1].main.label, "reason": "tank progression"}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
     assert r.status_code == 200, r.text
     r = w.c.post(f"/api/loot/{w.ev.key}/confirm", json={"batch_rev": c["batch_rev"]}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
-    assert r.status_code == 409 and r.json()["changed"] and "overrode" in r.json()["error"] and r.json()["state"]["councils"], r.text
+    # the latest change is the override, or — when the re-judge it spawned (discord_loot._rejudge) finished inside the
+    # override request's loop — that re-judge's "distributed": a race in the test client, both name what changed
+    err = r.json()["error"]
+    assert r.status_code == 409 and r.json()["changed"] and ("overrode" in err or "distributed 1" in err) and r.json()["state"]["councils"], r.text
     fresh = r.json()["state"]["councils"][0]["batch_rev"]
     pv = w.c.post(f"/api/loot/{w.ev.key}/confirm", json={"preview": True}, headers=H).json()
     assert "Shard of Doom → " + w.ms[1].main.label + " (override)" in pv["preview"], "a preview needs no actor and writes nothing"
