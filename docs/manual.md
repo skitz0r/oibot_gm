@@ -242,7 +242,8 @@ at a time; *My status* on the card tells you it is waiting.
 **Your own application comes first.** While it is open, `/register`, *Apply to join*, `/me view` and the Me page say
 *"Your application for Kessa Dawnfire is waiting for an officer"* — even if applications have closed since (you are
 never told "isn't taking applications" about one you already sent). Once decided, the Me page and `/me view` show the
-decision (and the note, if any); you also get the decision by DM, since you were waiting on it.
+decision, its date (and the note, if any) — never which officer decided; you also get the decision by DM, since you
+were waiting on it. Officers see who decided on the Applications page.
 
 **Officers** get a review card in the applications channel: the full character name, class and spec icons, the logs
 link, the schedules the applicant can make in words, and every answer as its own line. When the same person applied

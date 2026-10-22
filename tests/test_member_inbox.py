@@ -254,7 +254,7 @@ def test_application_decision_has_a_member_copy(reg):
     reg.apply(5551, "Newbie", "Kessa", "Mage", "Frost", None, None, None, None, surname="Dawn", answers=[])
     reg.decide(5551, True, "Jon")
     (t,) = texts(reg, reg.members[5551])
-    assert "accepted by Jon" in t
+    assert "was accepted" in t and "Jon" not in t, "the applicant reads the decision, never the officer's name"
 
 
 def test_loot_award_line_is_copied_to_the_recipient(reg):

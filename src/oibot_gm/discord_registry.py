@@ -665,7 +665,7 @@ async def settle_application(client, reg: Registry, discord_id: int, accept: boo
     try:
         user = await client.fetch_user(a.discord_id)
         if accept:
-            await user.send(f"✅ Your application for **{a.label}** to {reg.config.name} was accepted by {by}. You're registered as a trial; `/me view` shows your status."
+            await user.send(f"✅ Your application for **{a.label}** to {reg.config.name} was accepted. You're registered as a trial; `/me view` shows your status."
                             + (f"\n\n{note}" if note else ""))
         else:
             await user.send(f"Your application for **{a.label}** to {reg.config.name} wasn't accepted this time." + (f"\n\n{note}" if note else "")

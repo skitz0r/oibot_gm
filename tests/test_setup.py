@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import re
 import time
 import types
@@ -1144,6 +1145,22 @@ def test_me_carries_the_own_application(wc, web_bot, reg):
     apply_one(reg, uid=8200)
     d = wc.get("/api/me", headers=as_user(wc, 8200)).json()
     assert d["application"]["state"] == "open" and "waiting for an officer" in d["application"]["text"]
+
+
+@pytest.mark.parametrize("accept", [True, False])
+def test_the_applicant_never_reads_the_officers_name(wc, web_bot, reg, accept):
+    """G3 review: the applicant's own view (GET /api/me.application, /me view, the Me notice) named the officer who
+    decided. They read the decision and its date; officers see who on the Applications page."""
+    web_bot.people[8300] = types.SimpleNamespace(id=8300, display_name="New", roles=[])
+    apply_one(reg, uid=8300)
+    reg.decide(8300, accept, "Officerella", "see you soon")
+    st = reg.application_state(8300)
+    assert "Officerella" not in json.dumps(st) and st["when"] and "by" not in st
+    d = wc.get("/api/me", headers=as_user(wc, 8300)).json()
+    assert d["application"]["state"] == ("accepted" if accept else "declined") and "Officerella" not in json.dumps(d["application"])
+    assert bool(reg.notices(8300)) is accept and not any("Officerella" in json.dumps(n) for n in reg.notices(8300)), "nor on the Me page's notice"
+    rows = wc.get("/api/applications", headers=as_user(wc, OFFICER_UID)).json()["decided"]
+    assert any(r["decided_by"] == "Officerella" for r in rows), "officers still see who decided"
 
 
 def test_meta_discord_ready_and_unsure_with_one_guild(wc, web_bot, reg):

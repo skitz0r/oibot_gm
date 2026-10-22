@@ -1659,8 +1659,9 @@ class Registry:
     def application_state(self, discord_id: int) -> dict | None:
         """A person's OWN application as they read it (GET /api/me.application, the Me page's card, /me view, and the
         registration paths, which check it BEFORE whether applications are open — a pending applicant is never told
-        "isn't taking applications"): {state open | accepted | declined | withdrawn, label, when, note, by, text}. None =
-        never applied."""
+        "isn't taking applications"): {state open | accepted | declined | withdrawn, label, when, note, text}. None =
+        never applied. The applicant reads the decision and its date, never the officer who made it (officers see that
+        on the Applications page)."""
         a = self.applicants.get(int(discord_id))
         if a is None:
             return None
@@ -1669,14 +1670,13 @@ class Registry:
         if a.status == "open":
             text = f"Your application for {a.label} is waiting for an officer (sent {sent}). You'll get a DM with the decision."
         elif a.status == "accepted":
-            text = f"Your application for {a.label} was accepted" + (f" by {a.decided_by}" if a.decided_by else "") + (f" ({when})." if when else ".")
+            text = f"Your application for {a.label} was accepted" + (f" ({when})." if when else ".")
         elif a.status == "declined":
             text = (f"Your application for {a.label} wasn't accepted this time" + (f" ({when})" if when else "") + "."
                     + (f" Note: {a.decision_note}" if a.decision_note else "") + " You can apply again" + (" later." if not self.config.recruitment.open else "."))
         else:
             text = f"Your application for {a.label} was withdrawn."
-        return {"state": a.status, "label": a.label, "sent": sent, "when": when, "note": a.decision_note if a.status != "open" else None,
-                "by": a.decided_by, "text": text}
+        return {"state": a.status, "label": a.label, "sent": sent, "when": when, "note": a.decision_note if a.status != "open" else None, "text": text}
 
     def prior_decision_line(self, a: Applicant) -> str | None:
         """'Applied before: declined 12 Mar by Jonny — full on healers' (the newest earlier verdict; '(+1 earlier)' when
@@ -1712,9 +1712,10 @@ class Registry:
         a.status = "accepted" if accept else "declined"
         a.decided_by, a.decided_at, a.decision_note = by, now(), note
         self.save_applicant(a, f"{by} {a.status} application from {a.display_name} ({a.name})")
-        # the decision's copy on the Me page (D26; the decision DM itself is one they wait on, the bot's to send)
-        self.notify(a.discord_id, "application", (f"Your application for {a.label} was accepted by {by} — welcome." if accept
-                                                  else f"Your application for {a.label} wasn't accepted this time ({by}).")
+        # the decision's copy on the Me page (D26; the decision DM itself is one they wait on, the bot's to send) — the
+        # decision and its date, never the officer's name (application_state)
+        self.notify(a.discord_id, "application", (f"Your application for {a.label} was accepted — welcome." if accept
+                                                  else f"Your application for {a.label} wasn't accepted this time.")
                     + (f" Note: {a.decision_note}" if a.decision_note else ""))
         return a, char
 
