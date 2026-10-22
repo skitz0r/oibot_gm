@@ -687,7 +687,8 @@ def test_ask_in_a_dm_never_offers_apply_to_a_member_role_holder(reg):
     assert view is not None and not any(getattr(i, "custom_id", "") == "reg:apply" for i in view.children), "the guide only, no Apply to join"
 
 
-def test_help_in_a_dm_shows_an_officer_the_officer_tiers(reg):
+def test_help_in_a_dm_shows_an_officer_the_officer_tiers(reg, monkeypatch):
+    monkeypatch.delenv("OIBOT_WEB_URL", raising=False)  # importing mcp_server / cli loads the checkout's .env: no site link here
     cmds, dm, said = _help_tree(reg, (True, []))
     asyncio.run(cmds["help"].callback(dm(555_000_000_000_000_779)))
     (_content, kw), = said
