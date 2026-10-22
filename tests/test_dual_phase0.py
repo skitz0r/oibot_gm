@@ -129,7 +129,7 @@ def test_news_consequence_and_decision_refusal(reg):
     ps = news.ProposalStore(reg.store, reg.key)
     p = ps.create(reg, proposal_data())
     line = news.consequence(p, reg, "approved")[0]
-    assert line.startswith("Approved: the apply job carries it out at its next run") and "no restart: " in line and "3 → 7" in line, line
+    assert line.startswith("Approved: the apply job carries it out at its next run") and "no restart: " in line and "derived → 2–3" in line, line
     assert news.consequence(p, reg, "dismissed")[0].startswith("Dismissed: nothing changes")
     assert news.decision_refusal(reg.store, reg, p.id, "approved", 5) is None
     assert "no proposal" in news.decision_refusal(reg.store, reg, "000000-dead", "approved", 5)

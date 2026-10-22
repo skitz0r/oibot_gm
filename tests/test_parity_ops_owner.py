@@ -99,8 +99,8 @@ def test_job_starts_through_start_job(reg, monkeypatch):
 def a_proposal(reg, **kw):
     NewsStore(reg.store, reg.key).add({"url": URL, "title": "Barrow Deeps lockout is now 7 days on WoW: Forever realms", "description": "Weekly."},
                                       ["WoW: Forever", "Barrow Deeps"], news.now())
-    data = {"title": "Barrow Deeps resets weekly", "news": [URL], "affects": "raid barrow_deeps lockout_days", "kind": "guild_setting",
-            "change": "Barrow Deeps lockout 3 → 7 days", "edit": {"op": "raid_set", "target": "barrow_deeps", "field": "lockout_days", "value": "7"},
+    data = {"title": "Barrow Deeps resets weekly", "news": [URL], "affects": "raid barrow_deeps comp healer", "kind": "guild_setting",
+            "change": "Barrow Deeps wants 2–3 healers", "edit": {"op": "comp_target", "target": "barrow_deeps", "field": "healer", "value": "2-3"},
             "evidence": "Weekly.", "confidence": "high", **kw}
     return ProposalStore(reg.store, reg.key).create(reg, data)
 
@@ -120,6 +120,10 @@ def test_proposal_approve_then_dismiss(reg):
     assert bot.cards == [(p.id, "approved")] and bot.ops.lines[-1][1] == f"news proposal {p.id} approved by Officer: Barrow Deeps resets weekly"
     asyncio.run(configops.apply_async(reg, ConfigOp(op="proposal", target=p.id, value="dismiss"), "Officer", False, bot=bot))
     assert ProposalStore(reg.store, reg.key).get(p.id).state == "dismissed"
+    # an owner-only setting (raid_set) through a proposal stays the owner's in plain text too
+    o = a_proposal(reg, title="Barrow Deeps resets weekly (lockout)", edit={"op": "raid_set", "target": "barrow_deeps", "field": "lockout_days", "value": "7"})
+    with pytest.raises(RegistryError, match="only the owner approves this change"):
+        asyncio.run(configops.apply_async(reg, ConfigOp(op="proposal", target=o.id, value="approve"), "Officer", False, bot=bot, by_id=42))
     assert "dismissed: it can't become dismissed" in configops.describe(reg, ConfigOp(op="proposal", target=p.id, value="dismiss"))
 
 
