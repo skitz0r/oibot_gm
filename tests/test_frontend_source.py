@@ -68,3 +68,29 @@ def test_no_page_posts_to_an_admin_translator_route_directly():
                 if m.group(1) in routes:
                     hits.append(f"{f.relative_to(SRC)}:{n}: {m.group(1)}")
     assert not hits, "save config edits through useOpsSave (the review step), not the admin translators:\n" + "\n".join(hits)
+
+
+# a file whose edit state only mirrors a child's edit mode (the child registers it) — and why
+DIRTY_MIRRORS = {"pages/Me.tsx": "its `editing` mirrors CharacterTable's edit mode (onEditing={setEditing}); CharacterTable registers it"}
+EDIT_MODE = re.compile(r"useOpsSave\(\)|const \[(?:editing|edit|draft|drafts), set")
+
+
+def test_every_edit_mode_registers_with_the_guild_switchers_guard():
+    """G3 review: the guild switcher's "Save or discard your edits first" (hooks/useDirty) only knew the Channels card,
+    so switching servers dropped a draft in Settings, Raids rules, the schedule editor, Auras, Recruitment, Plain
+    permissions or the character tables. Every component with an edit mode (useOpsSave, or editing / draft state)
+    calls useDirty."""
+    missing = []
+    for f in sorted(SRC.rglob("*.tsx")):
+        rel = str(f.relative_to(SRC))
+        if rel in DIRTY_MIRRORS or rel == "components/ReviewModal.tsx":  # ReviewModal defines useOpsSave
+            continue
+        text = f.read_text()
+        if EDIT_MODE.search(text) and "useDirty(" not in text:
+            missing.append(rel)
+    assert not missing, "edit modes that don't call useDirty (the server switch would drop their draft):\n" + "\n".join(missing)
+    for rel in ("pages/Config.tsx", "components/ChannelsCard.tsx", "pages/Raids.tsx", "components/ScheduleCard.tsx", "pages/Auras.tsx",
+                "components/Recruitment.tsx", "components/PlainPermissions.tsx", "pages/Members.tsx", "components/CharacterTable.tsx"):
+        assert "useDirty(" in (SRC / rel).read_text(), rel
+    me = (SRC / "pages" / "Me.tsx").read_text()
+    assert "onEditing={setEditing}" in me and "setEditing(true)" not in me, DIRTY_MIRRORS["pages/Me.tsx"]

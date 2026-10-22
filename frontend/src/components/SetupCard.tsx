@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useDirty } from "../hooks/useDirty";
 import { Anchor, Badge, Box, Button, Card, Code, Group, MultiSelect, SegmentedControl, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { api } from "../api";
 import { useLive } from "../hooks/useLive";
@@ -25,6 +26,7 @@ export function SetupCard() {
   const [alerts, setAlerts] = useState<{ mode: AlertMode; ids: string[] } | null>(null);
   const [saving, setSaving] = useState(false);
   const [save, review] = useOpsSave();
+  useDirty("error-alerts", alerts !== null);
   const load = () => api.get<SetupData>("/api/admin/setup").then((d) => {
     setData(d);
     if (d.host) api.get<{ mcp?: McpStatus }>("/api/agents").then((a) => setMcp(a.mcp ?? null)).catch(() => setMcp(null));

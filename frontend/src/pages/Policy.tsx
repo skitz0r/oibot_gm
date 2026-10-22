@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useDirty } from "../hooks/useDirty";
 import { Alert, Badge, Box, Button, Card, Group, SimpleGrid, Stack, Text, TextInput, Textarea } from "@mantine/core";
 import { IconPencil, IconPlus } from "@tabler/icons-react";
 import { api, type PolicyDoc } from "../api";
@@ -33,6 +34,7 @@ export function PolicyPage() {
 
 function DocCard({ d, onChange, reload }: { d: PolicyDoc; onChange: (d: PolicyDoc) => void; reload: () => void }) {
   const [draft, setDraft] = useState<string | null>(null);
+  useDirty(`policy:${d.doc}`, draft !== null);
   const [rule, setRule] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [reading, setReading] = useState<string | null>(null);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useDirty } from "../hooks/useDirty";
 import { ActionIcon, Badge, Button, Card, Group, Menu, MultiSelect, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconCrown, IconDots, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { api, ApiError, type Character, type Me, type Meta, type TableSaved } from "../api";
@@ -29,6 +30,7 @@ export function FlexIcons({ meta, flex }: { meta: Meta; flex?: string[] }) {
  *  with no ripple it just saves. `onEditing` tells the page not to reload under an edit. */
 export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta; me: Me; onChanged: () => void; onEditing?: (editing: boolean) => void }) {
   const [editing, setEditing] = useState(false);
+  useDirty("characters", editing);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [ask, dialog] = useConfirm();

@@ -1,4 +1,5 @@
 import { useRefresh } from "../hooks/usePoll";
+import { useDirty } from "../hooks/useDirty";
 import { useLive } from "../hooks/useLive";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionIcon, Badge, Box, Button, Card, Group, NumberInput, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
@@ -27,6 +28,7 @@ export function AurasPage({ meta }: { meta: Meta }) {
   useEffect(() => { load(); }, []);
   useRefresh(load);
   const [drafts, setDrafts] = useState<Record<string, BuffDraft> | null>(null);  // the Buffs table's edit mode: one Save for the whole table
+  useDirty("auras", drafts !== null || editing !== null);
   const editingRef = useRef(false);
   editingRef.current = drafts !== null || editing !== null;
   useLive(() => { if (!editingRef.current) load(); }, ["config"]);  // a change made elsewhere shows — never under an edit in progress

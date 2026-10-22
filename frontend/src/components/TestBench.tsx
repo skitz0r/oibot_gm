@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDirty } from "../hooks/useDirty";
 import { ActionIcon, Alert, Box, Button, Card, Group, SegmentedControl, Select, Stack, Switch, Text, Tooltip } from "@mantine/core";
 import { IconFlask, IconMinus, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useNavigate } from "react-router-dom";
@@ -45,6 +46,7 @@ export function TestBench({ meta, rows, onChanged }: { meta: Meta; rows: MemberR
   }, []);
   const MAX = state?.max ?? 80;  // Registry.TEST_MAX, from the server
   const [draft, setDraft] = useState<Record<Key, number> | null>(null);
+  useDirty("test-bench", draft !== null);
   const [cls, setCls] = useState<string | null>(null);
   const [spec, setSpec] = useState<string | null>(null);
   const [raid, setRaid] = useState<string | null>(() => (meta.raids.find((r) => r.size === 20) || meta.raids[0])?.id ?? null);

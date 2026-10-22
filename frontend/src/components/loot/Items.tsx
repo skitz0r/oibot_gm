@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useDirty } from "../../hooks/useDirty";
 import { Alert, Badge, Box, Button, Card, FileButton, Group, Modal, SegmentedControl, Stack, Table, Text, TextInput, Textarea, Tooltip } from "@mantine/core";
 import { api, guildQuery, type ItemBrief, type ItemGrid, type Meta } from "../../api";
 import { CardHeader, fail, ok } from "../Page";
@@ -87,6 +88,7 @@ function ReweightAsk({ ask, onAnswer }: { ask: string | null; onAnswer: (reweigh
 function TierGrid({ meta, itemKey, onClose, onSaved }: { meta: Meta; itemKey: string; onClose: () => void; onSaved: () => void }) {
   const [item, setItem] = useState<Grid | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
+  useDirty(`tiers:${itemKey}`, Object.keys(draft).length > 0);
   const [drafted, setDrafted] = useState<TierDraft | null>(null);  // Claude's proposal, shown until saved or discarded
   const [busy, setBusy] = useState(false);
   const [drafting, setDrafting] = useState(false);

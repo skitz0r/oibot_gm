@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useDirty } from "../hooks/useDirty";
 import { ActionIcon, Badge, Box, Button, Group, NumberInput, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import type { CompSlot, CompTarget, Meta } from "../api";
@@ -30,6 +31,7 @@ export function CompTargets({ meta, rid, size, targets, bounds, slots, rev, edit
   const [adding, setAdding] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [save, review] = useOpsSave();
+  useDirty(`comp-targets:${rid}`, rows !== null);  // the guild switcher asks before dropping the draft
   const words = (slot: string) => slots?.find((x) => x.value === slot)?.label || slot;
   const toRows = (): Row[] => Object.entries(targets).map(([slot, t]) => ({ slot, min: t.min ?? 0, max: t.max ?? "", note: t.note || "" }));
   const start = () => { setRows(toRows()); onEditing?.(true); };

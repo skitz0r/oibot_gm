@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useDirty } from "../../hooks/useDirty";
 import { ActionIcon, Autocomplete, Badge, Button, Card, Group, SegmentedControl, Stack, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconArrowDown, IconArrowUp, IconPencil, IconTrash } from "@tabler/icons-react";
 import { api, ApiError, type LogRow, type Meta, type WishCharacter, type WishEntry } from "../../api";
@@ -43,6 +44,7 @@ export function WishlistCard({ meta }: { meta: Meta }) {
   const [chars, setChars] = useState<WishCharacter[] | null>(null);
   const [max, setMax] = useState(10);
   const [edit, setEdit] = useState<{ label: string; rev: string; rows: Row[] } | null>(null);
+  useDirty("wishlist", edit !== null);
   const [q, setQ] = useState("");
   const [found, setFound] = useState<{ key: string; id: number; name: string; boss: string | null }[]>([]);
   const editing = useRef(false);

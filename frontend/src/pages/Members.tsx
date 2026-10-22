@@ -1,4 +1,5 @@
 import { useRefresh } from "../hooks/usePoll";
+import { useDirty } from "../hooks/useDirty";
 import { useRef, Fragment, useEffect, useState } from "react";
 import { ActionIcon, Badge, Button, Card, Collapse, Group, Menu, MultiSelect, Radio, Select, Stack, Switch, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconCrown, IconDots, IconMessage, IconMessageOff, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
@@ -32,6 +33,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<MembersData | null>(null);
   const [absFor, setAbsFor] = useState<MemberRow | null>(null);
   const [drafts, setDrafts] = useState<Record<string, MemberDraft> | null>(null);
+  useDirty("members", drafts !== null);
   const [busy, setBusy] = useState<string | null>(null);
   const [showTest, setShowTest] = useState(false);
   const [showBare, setShowBare] = useState(false);

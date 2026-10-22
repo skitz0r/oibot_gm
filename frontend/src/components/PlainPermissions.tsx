@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useDirty } from "../hooks/useDirty";
 import { useLive } from "../hooks/useLive";
 import { Badge, Box, Button, Card, Group, MultiSelect, Select, Table, Text } from "@mantine/core";
 import { IconPencil } from "@tabler/icons-react";
@@ -27,6 +28,7 @@ export function PlainPermissions() {
   const [d, setD] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [saveOps, reviewDialog] = useOpsSave();
+  useDirty("plain-permissions", d !== null);
   const load = () => api.get<PlainPermissionsData>("/api/plain-permissions").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   const editingRef = useRef(false);
