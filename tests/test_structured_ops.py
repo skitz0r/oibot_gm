@@ -611,3 +611,17 @@ def test_plain_text_diff_prints_the_described_structure(reg):
     reg.config.plain.channels["4242"] = "act"
     text = run(diff_text(reg, [ConfigOp(op="plain", target="<#4242>", value="ignore")], [], 4242))
     assert "-# In this channel the bot would ignore @mentions" in text
+
+
+def test_removing_every_officer_role_in_one_batch_says_no_officer_roles(reg):
+    """Regression: a whole-list edit becomes one role_remove per role and each op's consequence looked at its own role
+    only, so emptying two of two roles showed two plain removals and no 'No officer roles now' line."""
+    reg.config.officer_role_ids = [111, 222]
+    ops = configops.ops_from_fields(reg, "settings", None, {"officer_roles": []})
+    assert [o.op for o in ops] == ["role_remove", "role_remove"]
+    d = configops.describe_ops(reg, ops)
+    assert any(c.startswith("No officer roles now") for c in d.consequences)
+    keep_one = configops.describe_ops(reg, configops.ops_from_fields(reg, "settings", None, {"officer_roles": ["222"]}))
+    assert not any(c.startswith("No officer roles now") for c in keep_one.consequences)
+    swap = configops.describe_ops(reg, configops.ops_from_fields(reg, "settings", None, {"officer_roles": ["333"]}))
+    assert not any(c.startswith("No officer roles now") for c in swap.consequences)  # one comes in as the others go
