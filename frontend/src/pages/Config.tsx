@@ -12,6 +12,7 @@ import { useDirty } from "../hooks/useDirty";
 import { Recruitment } from "../components/Recruitment";
 import { ChannelsCard } from "../components/ChannelsCard";
 import { SetupCard } from "../components/SetupCard";
+import { LootWeightsCard } from "../components/LootWeightsCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -116,6 +117,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
                   : "Unlisted: the homepage, the public schedule and the not-a-member page don't name this guild. Members still log in and find it in their own list."}</Text>
               </Box>
             </Card>
+            <LootWeightsCard />
 
             <Recruitment channels={data.guild_channels} />
 

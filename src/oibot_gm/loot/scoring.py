@@ -216,3 +216,27 @@ def candidates(
         )
     out.sort(key=lambda c: -c.base_score)
     return out
+
+
+def rescore(profile: GameProfile, run: dict, old_cfg: dict, new_cfg: dict, *, wishlists: dict[str, list[dict]],
+            items: dict | None = None, attendance: Callable[[Player], Optional[tuple[int, int]]] | None = None, top: int = 3) -> dict:
+    """"Re-score last run" (Config › Loot scoring, dual interfaces phase 4 — design §5.48): every drop of a past council
+    scored again by the numbers alone, under the weights as they are (`old_cfg`) and as drafted (`new_cfg`). No model
+    call, nothing written: a preview of what a weight change would have done. `run` = {date, drops: [{drop_id, item
+    (Item), boss, to (who got it, or None)}], roster: [Player], awards: [LootAward] (the ledger BEFORE that night)} —
+    each drop is scored against those same awards (the night's earlier picks don't count: the table compares weights,
+    it does not replay the night). Returns {rows: [{drop_id, item, boss, awarded, old: [{character, cls, spec, score}],
+    new: […], old_pick, new_pick, moved}], moved: N, drops: N}."""
+    rows = []
+    for d in run.get("drops") or []:
+        item = d["item"]
+        tables = {}
+        for which, cfg in (("old", old_cfg), ("new", new_cfg)):
+            cands = candidates(profile, item, run.get("roster") or [], run.get("awards") or [], wishlists, run["date"], cfg=cfg, items=items,
+                               attendance=attendance)
+            pick = next((c.character for c in cands if not c.already_has), None)
+            tables[which] = ([{"character": c.character, "cls": c.cls, "spec": c.spec, "score": c.base_score} for c in cands[:top]], pick)
+        (old, old_pick), (new, new_pick) = tables["old"], tables["new"]
+        rows.append({"drop_id": d.get("drop_id"), "item": item.name, "boss": d.get("boss") or item.boss, "awarded": d.get("to"), "old": old, "new": new,
+                     "old_pick": old_pick, "new_pick": new_pick, "moved": old_pick != new_pick})
+    return {"rows": rows, "moved": sum(1 for r in rows if r["moved"]), "drops": len(rows)}

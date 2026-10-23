@@ -2879,6 +2879,120 @@ saves on change (tests/test_frontend_source.py pins it). The tier draft (`loot/t
 `llm.provider.for_guild(reg.key)`, so its usage row is the guild's (§5.45, D45). Parked guilds in GET /api/guilds carry
 `detached` and no `busy`; served ones carry `busy` (the apply job's raid guard).
 
+### 5.48 Dual interfaces, phase 4 — the loot data on-ramp: history import, weights, re-score, distil (built 2026-10-22)
+
+Phase 4's first row (out/dual_interface_design.md §3.1 "Data on-ramp" L06/L07, "Members" wishlists, "Policy and
+precedents" L29; §6 Phase 4). Owner decisions: D4 (unknown items by name), D5 (native wishlists shaped for a TMB import;
+an import never deletes a native entry), D8 (MCP decisions need X-Oibot-Actor), D13 OPEN (which addon — so the
+Gargul / RCLootCouncil formats are NOT built), D45 (one shared LLM cap, spend per guild). Code computes; Claude only
+drafts; officers decide.
+
+**Loot history import (L07).** `importers/ledger_csv.py`: `parse(text, kind)` → `Parsed(kind, rows: [ImportRow], errors
+['line 7: …'], skipped)` for `biscouncil` (reuses `importers/biscouncil.py`: `split_text` / `row_award`; the file's own
+tier and weight per row are kept), `tmb` (a ThatsMyBIS export's `received` rows — character_name, item_name / item_id,
+received_at, is_offspec, note; wishlist / prio rows skipped and counted) and `generic` — the documented fallback
+`character,item,received,boss,ms_os,note` (item = digits → an id, else a name; received = YYYY-MM-DD, a time after it
+ignored, nothing else guessed; headers matched case-insensitively with aliases). `kind="auto"` → `detect()` by headers.
+A row that can't be read is listed with its line and skipped; a file in no format, over 2 MB or 5000 awards, or a
+`gargul` / `rclc` kind is refused in words (the generic columns named). Cells are whitespace-collapsed and capped —
+member-made text is data. `Registry.import_awards(rows, by, by_id, *, preview, kind, rev)`: under `config_lock`, reads the
+ledger (`lootctx.fold_ledger`, every award row incl. a voided one) and, for IMPORTS only, treats a row as a duplicate
+when (character — the file's name and the registered label —, item — by id and by name and the item the tables
+resolve either to —, day) is already in the ledger or on an earlier line of the file (`_award_keys`; the council's own
+awards keep deduping by import_id). New rows are APPENDED to `ledger.jsonl` (`source: import`, `by`, `imported: <kind>`,
+`imported_at`, the note, `by_id`) in one commit — never an edit, never a delete. Weight: the file's tier and weight
+(BisCouncil), else `scoring.weight_for` for the registered character's spec, else (an item the tables don't know)
+recorded by name, `tier ?`, `untiered_weight`, `tiered False` (D4); a character nobody registered is recorded by name
+(no discord_id). D4's "tiered later on Loot › Items": in the same commit (`GitStore.batch`) an apply LEARNS every item of
+the new rows that has no tiers — unknown, or on the tables untiered — through `learn_item(..., source="import",
+times=<its rows>)`, once per item, so it is on GET `/api/loot/items` Untiered (`item_brief.source` = import → the badge
+"learned from an import") with its awards, and tiering it asks the D12 re-weight question like any learned drop; the
+report carries `learned`, the route's line adds it and publishes `items`. A preview learns nothing. Each shown row has
+`received` (ISO, machines) and `received_label` (`Registry.day_label(..., with_year=True)` — the clock rule: what the
+preview tables print). The report: rows / new / duplicates / unknown_items / unknown_characters, the groups (new · duplicates
+with why · unknown items with counts; ≤300 each), `rev` (a hash of the rows that would be added) and THE line *"N
+row(s), M duplicate(s), K unknown item(s) (recorded by name)"*. `preview` writes nothing; an apply carrying a `rev` that
+no longer matches (the ledger moved) writes nothing and says `changed`. POST `/api/loot/import` {csv, kind, preview
+(default true), rev}: officers; the apply needs the preview's rev (400 without, 409 + the fresh preview when it moved)
+and, from MCP, the actor (D8 — awards in people's names); after it `lootctx` reloads (`RegistryLootContext.reload`, on the
+loop: the council reads the rows at its next judgement), one `ops.audited` line, `publish("loot:ledger")`. MCP
+`import_ledger(csv | path, kind, preview=True, rev)` (a local path is read by the tool; the apply refuses without a rev).
+Loot › Items › **Import loot history…** (`components/loot/LedgerImport.tsx`): pick a file or paste, a kind select (Tell
+from the file · BisCouncil · ThatsMyBIS · Generic), Preview → the server's line + three tabs (New · Duplicates · Unknown
+items) → **Confirm — import N rows**. BY_DESIGN_ONLY `ledger_import` (web; MCP beside it).
+
+**Undo an import (fixer, 2026-10-22).** Every applied row carries a stable `import_id` = `<batch>-<n>` and `import_batch` =
+`imp-<UTC stamp>-<rev[:6]>` (the report's `batch`; the audit line names it), so a wrongly applied file (the export date in the
+received column, the wrong character column) is correctable: `Registry.undo_import(batch, by, reason, by_id)` appends one
+`kind: void` row per still-live award of the batch — `lootctx.void_row`, the same row the council's corrections write
+(`RegistryLootContext.void`) — under `config_lock`, one commit, idempotent; nothing is edited or deleted. The dedupe skips
+voided awards, so the fixed file imports afterwards. `Registry.import_batches()` lists the imports newest first (who, when as
+`local12`, rows, live, and the Undo confirm's `consequence` sentence composed in code). GET `/api/loot/imports`, POST
+`/api/loot/import/undo` {batch, reason} (officers; from MCP the actor, D8; the council's context reloads, one audit line,
+`publish("loot:ledger")`); MCP `import_batches`, `undo_import`; the Import modal's **Earlier imports** list with **Undo this
+import** (useConfirm with the server's sentence and an optional why). BY_DESIGN_ONLY `ledger_import_undo` (web; MCP beside it).
+Rows imported before this change have no import_id and stay uncorrectable from the surfaces.
+
+**Weights (L06).** `Registry.loot_cfg()` now merges the guild's `loot:` overrides at EVERY depth with keys matched by their
+text (`_merge_loot`: 'wishlist.rank_bonus.1' alone keeps #2–#5; the int key stays an int — scoring reads `rank_bonus[1]`).
+`loot_weight_defaults()` = every numeric leaf of the profile's loot defaults (+ `untiered_weight`; `distribution` is not a
+number) by dotted path; `loot_weights()` the effective values; `loot_overridden()` the paths the guild set;
+`loot_weight_check(path, value)` (None / '' / 'default' → back to the default; a `*window_days` is a whole number 1–365,
+anything else 0–100). `set_loot_weights(fields, by, rev=)` is a `_config_verb("loot")`: validated as a whole, a value equal
+to the default drops the override, ONE `save_config` under `config_lock`; returns the change lines ([] = nothing written).
+A new config section **`loot`** (`config_rev('loot')` = guild.yaml `loot:`; `settings` no longer covers it — a weights
+change never trips a settings save). The op: **`loot_weights`** (field = a path, value = a number or 'default') in OP_GROUP
+`setup`, OWNER_OPS, WARN_OPS (always reviewed), PURE_OPS, `_SECTION_OF → loot`, coalesced into ONE write
+(`_merge_key`, `_apply_merged` → `loot_ops.apply_weights`), plain-text schema line (loot_ops.SCHEMA: "make S items worth
+0.8"); `ops_from_fields(kind="loot_weights", fields={path: number | null})` leaves out unchanged ones; `_part` →
+"Loot scoring" with `loot_ops.weight_part` (the weight's name in words, current → new with "(the default)" named, the note
+*"Scores change from the next judgement on; no ledger row changes"*). `loot_ops.weight_rows / WEIGHT_GROUPS /
+weight_label`. GET `/api/loot/weights` (officers read: rows with value, default, overridden; groups in words; the
+`config:loot` rev; `owner`), POST `/api/loot/weights` = a translator through `app.state.ops_translate` (the D51 tier:
+`review_required` until `confirmed` + revs; officers refused — the owner's). Config › Recruitment and more › **Loot
+scoring** (`components/LootWeightsCard.tsx`): each weight with the default beside it; Edit → NumberInputs + reset; Save =
+`useOpsSave([{kind: "loot_weights"}], {revs: {"config:loot"}})` → the ReviewModal; `useDirty("loot-weights")`; a change
+elsewhere while editing shows "Reload — keep my edits". MCP `loot_weights()` and `set_loot_weights(fields, preview)`
+(`ops_change`). Parity row: discord `slash:gm change` (plain text), web POST /api/loot/weights, MCP set_loot_weights. No
+ledger row ever changes (tests assert the file byte for byte).
+
+**Re-score last run.** `scoring.rescore(profile, run, old_cfg, new_cfg, *, wishlists, items, attendance, top=3)` — each drop
+of a past council scored by the numbers alone under both weight sets against the same awards (the ledger before that
+night: a comparison of weights, not a replay) → rows {item, awarded, old/new top three with scores, old/new pick, moved}.
+`loot_ops.last_council(bot, reg, ctx)` = the newest non-test council with drops (a live session, else the newest archive;
+its roster from the run's seats — `rs.events`, else `Registry.done_runs()`). POST `/api/loot/rescore` {fields} (officers):
+the draft is validated by `set_loot_weights` on `Registry.shadow()` (never written), the work in a worker thread, no model
+call, nothing written; "No council has recorded a drop yet" when there is none.
+
+**Distil (L29).** `loot/distil.py`: `distil(guild_key, ctx, provider)` — the ACTIVE precedents (`active_precedents`: retired
+and superseded never read; the newest 60) and the compiled loot policy go to the `distil` route (llm/provider.py ROUTES:
+sonnet, medium) inside `for_guild` (D45) as `<policy>` / `<rules>` / `<precedents>` data blocks → `DistilDraft`
+(structured output); `validate` keeps ≤5 sentences that rest on refs the model was shown, drops a repeat, one the policy
+already holds and an empty one (listed in `dropped`); provenance *"drafted from N precedent(s) by Claude, unverified"*.
+Errors in words: NONE_YET (no active precedents, 400), LLM_DOWN (503), the budget's own sentence. POST `/api/loot/distil`
+(officers; MCP needs no actor — a draft decides nothing) writes nothing. The pick: POST `/api/loot/distil/append`
+{sentences, doc, token?} — without a token, the review: a `configops.Described` (one line per sentence, the refusal while
+another officer's draft waits) + `token` = `batch_token(doc, sentences)`; with it, each sentence through THE policy_append
+verb (`policy.append_rule`) in one store batch → one commit, one audit line; a token for other sentences (an edit after the
+review) is 409. The policy stays a draft until compile + confirm (Policy page). Loot › Precedents › **Distil…**
+(`components/loot/Distil.tsx`): the proposals with the precedents each rests on, a checkbox and an editable sentence;
+Review → the ReviewModal (one confirm for the batch) → result sheet; `useDirty("distil")`. MCP `distil()` returns the draft;
+the person's picks go through `policy_append`. BY_DESIGN_ONLY `policy_distil` (web; MCP beside it).
+
+**Wishlists.** `Registry.import_tmb_wishlists`'s report gains `per_character` [{character, added, kept, replaced,
+duplicates, over_cap}] (item names); Loot › Wishlists' TMB import previews it per character ("Nothing is deleted") then
+**Confirm — import N**. The `/me wishlist` wizard (flows_wishlist): the first line under the title links the Me page for
+long lists; a received entry renders as small text with its day (`-# 3. Robe of Tests · MS · received <t:…:d>`) from
+`loot_ops.received_map` (shared with the Me page — moved out of web/api_loot.py), still on the list until removed; the
+place select defaults to the next free one; Remove one… unchanged. Tests: tests/test_loot_import.py (each parser on a
+fixture under tests/ — ledger_generic.csv, ledger_tmb.csv, ledger_biscouncil.csv; preview writes nothing; dedupe never
+edits; unknown item by name; apply appends exactly the new rows and reloads the context; an imported unknown item is
+learned, listed Untiered and tiered with its awards re-weighted (a preview learns nothing); preview days are labels, not
+ISO; a moved rev; member 403; the MCP
+actor; weights re-score but the ledger file is byte-identical; the weights route is the owner's and reviewed; rescore
+writes nothing; distil writes nothing, drops unshown refs and retired precedents, member 403; the appended sentences are
+exactly the confirmed ones; the TMB preview per character keeps native entries; the wizard's harness run).
+
 ### 5.49 Dual interfaces, phase 4 — members and the public: appeals, the public schedule, unlisted guilds (built 2026-10-22)
 
 Phase 4's members-and-public part (out/dual_interface_design.md §3.1 *Members* L32, §3.2 B10, PUB-01 / PUB-05; owner

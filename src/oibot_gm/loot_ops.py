@@ -10,6 +10,10 @@ configops owns the pipeline (parse → authorize → describe → Apply → appl
   text = ms | os, reason = a note — Registry.wish_add / wish_remove.
 - `tier` (group `loot`): target = the item, field = a spec key ('Priest:Holy', 'Priest:*', 'role:healer'), value =
   S+ | S | A | B | '-' (clear), text = 'reweight' to re-weight past awards (D12: default no) — Registry.set_item_tiers.
+- `loot_weights` (group `setup`, the OWNER's — design §5.48): field = a weight's dotted path ('tier_weight.S',
+  'attendance.weight', 'wishlist.rank_bonus.1'), value = a number or '' (the profile's default) — Registry.set_loot_weights,
+  consecutive ones coalesced into ONE write (Config › Loot scoring's Save, MCP set_loot_weights). Warn class: reviewed first.
+  The weights change scores from the next judgement on; no ledger row ever changes.
 
 D8: from MCP (`via` mcp without X-Oibot-Actor) the decisions about an award or a person (award, confirm, reason, correct,
 retire, tier, someone else's wishlist) are refused (`needs_actor`); the site and Discord decide by the person's role."""
@@ -40,6 +44,10 @@ Wishlists (op=wishlist; a member's own list: member EMPTY): field=add|remove, va
 Item tiers (officer, op=tier): target=<the item's name or id>, field=<a spec 'Priest:Holy', a whole class 'Priest:*' or a role 'role:healer'>,
   value=S+|S|A|B|- (- clears a tier the guild set); text=reweight to re-weight the item's past awards to the new tier (default: they
   keep their weight). Several specs = several tier ops.
+Loot scoring weights (OWNER, op=loot_weights): field=<the weight's path: tier_weight.S+|S|A|B, untiered_weight, attendance.weight,
+  attendance.window_days, rank_factor.<rank>, loot_divisor.k|p|window_days|free_allowance_power, wishlist.rank_bonus.<1-5>,
+  wishlist.offspec_multiplier, slot_repeat.multiplier|window_days, slot_weight.<slot>>, value=<a number, or "default" to go back
+  to the game's>. "make S items worth 0.8" = field tier_weight.S, value 0.8. Several weights = several ops.
 """
 
 
@@ -194,6 +202,9 @@ def describe(reg: Registry, op, *, why: str | None = None) -> str:
         return _describe_wish(reg, op)
     if op.op == "tier":
         return _describe_tier(reg, op)
+    if op.op == "loot_weights":
+        label, before, after, _notes = weight_part(reg, op)
+        return f"loot scoring · {label}: {before} → {after}"
     from .raid_views import run_title
 
     f = (op.field or "").strip().lower()
@@ -514,5 +525,171 @@ def guild_ctx(bot, reg):
         if bot is not None:
             contexts[reg.key] = c
     return c
+
+
+def received_map(reg: Registry, ctx, m) -> dict[tuple[str, str], str]:
+    """(character label lower, item key) → the day it was received (ISO): an awarded wish shows as received, greyed —
+    never deleted (the next Save would undo it). The Me page's wishlist (web/api_loot.py) and the /me wishlist wizard."""
+    from .registry import item_key
+
+    out: dict[tuple[str, str], str] = {}
+    labels = {c.label.lower() for c in m.characters} if m else set()
+    for a in ctx.ledger:
+        if a.raider.lower() in labels and (a.discord_id in (None, m.discord_id)):
+            it = reg.item(a.item_id or None, a.item_name)
+            keys = {item_key(a.item_id, a.item_name or "")} | ({item_key(it.id, it.name)} if it is not None else set()) | {"n:" + (a.item_name or "").lower()}
+            for k in keys:
+                prev = out.get((a.raider.lower(), k))
+                if prev is None or a.received.isoformat() > prev:
+                    out[(a.raider.lower(), k)] = a.received.isoformat()
+    return out
+
+
+# ---------------------------------------------------------------- the scoring weights (design §3.1 L06, §5.48)
+
+WEIGHT_GROUPS = (  # (key, title, path prefix, what it does) — Config › Loot scoring's sections, in this order
+    ("tiers", "Item tiers", "tier_weight.", "how much an upgrade of each tier is worth (× the slot's weight)"),
+    ("untiered", "Untiered items", "untiered_weight", "what an item without tier data is worth to everyone (D4)"),
+    ("attendance", "Attendance", "attendance.", "factor = 1 − weight × 0.5 × (1 − attended / runs); unknown attendance is neutral"),
+    ("rank", "Rank", "rank_factor.", "a multiplier per guild rank"),
+    ("recent", "Recent loot", "loot_divisor.", "divisor = 1 + k × (loot power in the window − the free allowance) ^ p"),
+    ("wishlist", "Wishlist", "wishlist.", "a bonus by place on the list; offspec wishes count less"),
+    ("same_slot", "Same slot twice", "slot_repeat.", "a second item for the same slot within the window is discounted"),
+    ("slots", "Slots", "slot_weight.", "how much each slot weighs against the others"),
+)
+WEIGHT_WORDS = {
+    "untiered_weight": "Untiered item", "attendance.weight": "Attendance weight", "attendance.window_days": "Attendance window (days)",
+    "loot_divisor.k": "Strength (k)", "loot_divisor.p": "Curve (p)", "loot_divisor.window_days": "Window (days)",
+    "loot_divisor.free_allowance_power": "Free allowance", "wishlist.offspec_multiplier": "Offspec ×",
+    "slot_repeat.multiplier": "Second item ×", "slot_repeat.window_days": "Window (days)",
+}
+WEIGHT_NOTE = "Scores change from the next judgement on; no ledger row changes (who got what, and what it weighed, stay as recorded)."
+
+
+def weight_group(path: str) -> str:
+    return next((k for k, _t, pre, _h in WEIGHT_GROUPS if path == pre or path.startswith(pre)), "other")
+
+
+def weight_label(path: str) -> str:
+    """A weight's name in words: 'tier_weight.S' → 'Tier S', 'wishlist.rank_bonus.1' → 'Wishlist #1', 'rank_factor.core' → 'Core'."""
+    if path in WEIGHT_WORDS:
+        return WEIGHT_WORDS[path]
+    head, _, rest = path.partition(".")
+    if head == "tier_weight":
+        return f"Tier {rest}"
+    if head == "rank_factor":
+        return rest.capitalize()
+    if path.startswith("wishlist.rank_bonus."):
+        return f"Wishlist #{path.rsplit('.', 1)[1]}"
+    if head == "slot_weight":
+        return rest.replace("_", " ").capitalize()
+    return path
+
+
+def weight_rows(reg: Registry) -> list[dict]:
+    """Config › Loot scoring's table: every weight with its value now, the profile's default beside it, whether the guild
+    set it, its group and name in words."""
+    defaults, cur, own = reg.loot_weight_defaults(), reg.loot_weights(), reg.loot_overridden()
+    return [{"path": p, "label": weight_label(p), "group": weight_group(p), "value": cur[p], "default": d, "overridden": p in own,
+             "whole": p.endswith("window_days")} for p, d in defaults.items()]
+
+
+def _num(x) -> str:
+    return f"{float(x):g}"
+
+
+def weight_part(reg: Registry, op) -> tuple[str, str, str, list[str]]:
+    """(the weight's name, its value now, the value after, notes) for one loot_weights op — the review's part and the diff
+    line. RegistryError for a path or number the verb would refuse."""
+    path = (op.field or "").strip()
+    defaults = reg.loot_weight_defaults()
+    if path not in defaults:
+        raise RegistryError(f"{path or '?'}: not a loot weight")
+    new = reg.loot_weight_check(path, op.value)
+    now = reg.loot_weights()[path]
+    after = f"{_num(defaults[path])} (the default)" if new is None else _num(new)
+    before = _num(now) + ("" if path in reg.loot_overridden() else " (the default)")
+    return weight_label(path), before, after, [WEIGHT_NOTE]
+
+
+def weight_fields(ops) -> dict:
+    """loot_weights ops → Registry.set_loot_weights fields ({path: value | None})."""
+    return {(o.field or "").strip(): (None if str(o.value or "").strip().lower() in ("", "default", "reset", "none") else o.value) for o in ops}
+
+
+def apply_weights(reg: Registry, ops, by: str, rev: str | None = None) -> str:
+    """One Save of the loot weights (a coalesced batch of loot_weights ops) — THE verb Registry.set_loot_weights."""
+    lines = reg.set_loot_weights(weight_fields(ops), by, rev=rev)
+    if not lines:
+        return "loot scoring: unchanged"
+    return "loot scoring: " + "; ".join(lines)
+
+
+def last_council(bot, reg: Registry, ctx) -> dict | None:
+    """The newest council with drops (a live one, else the newest archived one; never a test run's) as scoring.rescore
+    reads it: {label, date, drops [{drop_id, item, boss, to}], roster [Player], awards (the ledger before that night)} —
+    None when no council ever recorded a drop. The roster is the run's seats as they ended (a live council: as they are)."""
+    import json as _json
+    from datetime import date as _date
+
+    from . import raidcycle as rc
+    from .loot.session import DISENCHANT, Drop, drop_item
+    from .models import LootAward
+    from .raid_views import run_title
+
+    found = []  # (date, opened_at, kind, payload)
+    for s in list(getattr(bot, "events", {}).values()) if bot is not None else []:
+        if s.guild == reg.key and s.origin == "raid" and not s.test and s.drop_list:
+            found.append((s.date, s.opened_at, "live", s))
+    d = reg.store.root / reg.key / "events" / "archive"
+    for f in sorted(d.glob("*.json")) if d.is_dir() else []:
+        try:
+            body = _json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if body.get("origin") == "raid" and not body.get("test") and body.get("drop_list"):
+            found.append((str(body.get("date") or ""), str(body.get("opened_at") or ""), "archive", body))
+    if not found:
+        return None
+    day, _opened, kind, s = max(found, key=lambda t: (t[0], t[1]))
+    rs = bot.raids.store(reg) if bot is not None and getattr(bot, "raids", None) is not None else rc.RaidStore(reg.store, reg.key)
+    if kind == "live":
+        drops = list(s.drop_list)
+        awards = {a.drop_id: a for a in s.awards if not a.void}
+        roster = list(bot.loot_roster(s)) if hasattr(bot, "loot_roster") else []
+        run_key, idx, label = s.run_key, s.roster_index, s.label
+    else:
+        drops = [Drop(**x) for x in s.get("drop_list") or []]
+        awards = {}
+        for x in s.get("awards") or []:
+            if not x.get("void"):
+                try:
+                    a = LootAward(**{k: v for k, v in x.items() if k in LootAward.model_fields})
+                except Exception:  # noqa: BLE001 — an unreadable award row: the drop shows unawarded
+                    continue
+                awards[a.drop_id] = a
+        run_key, idx, label = s.get("run_key"), s.get("roster_index"), s.get("label")
+        roster = []
+        ev = rs.events.get(run_key or "")
+        if ev is None:
+            ev = next((e for e in reg.done_runs() if e.key == run_key), None)
+        if ev is not None:
+            rosters = ev.all_rosters if idx is None else ev.all_rosters[idx:idx + 1]
+            roster = [p for r in rosters for p in r.selected]
+    when = _date.fromisoformat(day[:10])
+    title = label or run_key or "the last council"
+    try:
+        ev = rs.events.get(run_key or "") or next((e for e in reg.done_runs() if e.key == run_key), None)
+        if ev is not None:
+            title = run_title(reg, ev) + (f" · {label}" if label else "")
+    except Exception:  # noqa: BLE001 — a title is a courtesy
+        pass
+    rows = []
+    for dr in drops:
+        a = awards.get(dr.drop_id)
+        rows.append({"drop_id": dr.drop_id, "item": drop_item(ctx, dr), "boss": dr.boss,
+                     "to": (None if a is None else ("disenchant" if a.raider == DISENCHANT else a.raider))})
+    return {"label": title, "date": when, "day_label": reg.day_label(when.isoformat(), with_year=False), "drops": rows, "roster": roster,
+            "awards": [a for a in ctx.ledger if a.received < when]}
 
 

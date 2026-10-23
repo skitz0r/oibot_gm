@@ -201,11 +201,11 @@ class ConfigOp(BaseModel):
     _sheet_copy: bool | None = PrivateAttr(default=None)
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain), item name or id (tier)")
-    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none)")
+    field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none; loot_weights: a number or default)")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
@@ -400,7 +400,8 @@ def parse(provider: Provider, reg: Registry, text: str, by: str | None = None, *
         return provider.complete("config_change", SYSTEM.format(schema=SCHEMA_TEXT), current_config_text(reg, officer=officer) + asker + "\n\n## Request\n<request>\n" + text.strip()[:2000] + "\n</request>", ConfigRequest)
 
 
-OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove", "job", "plain"}
+OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "raid_set", "raid_reset", "aura_set", "family_set", "aura_reset", "schedule_set", "schedule_remove", "job", "plain",
+             "loot_weights"}
 # never opened to anyone else, whatever the plain-text policy says (authorize checks the owner's id): an officer must not
 # widen their own rights, and the local jobs run Claude on the host
 HARD_OWNER_OPS = {"plain": "Only the owner can change the plain-text permissions.", "job": "Only the owner can start the bot's local jobs."}
@@ -428,6 +429,7 @@ OP_GROUP = {
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "policy_append": "comp",
     "raid_set": "raids", "raid_reset": "raids", "schedule_set": "raids", "schedule_remove": "raids", "aura_set": "raids", "family_set": "raids", "aura_reset": "raids",
     "set": "setup", "role_add": "setup", "role_remove": "setup", "recruit": "setup", "job": "setup", "plain": "setup",
+    "loot_weights": "setup",  # the loot scoring weights (Config › Loot scoring, the owner's — phase 4, design §5.48)
     "application": "members", "proposal": "comp", "policy": "comp", "regular": "members",
     "test": "test",
     "loot": "loot", "tier": "loot", "wishlist": "members",  # the loot council and item tiers (officers); a wishlist: one's own is "self"
@@ -494,6 +496,10 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "items_csv": {"surface": "web", "path": "POST /api/loot/items/import", "reason": "a CSV of the item × spec grid is a file to export, edit and import with a preview (MCP export_tiers reads it); Discord has no file editor"},
     "tier_draft": {"surface": "web", "path": "POST /api/loot/items/{key}/draft", "reason": "Claude's tier draft is reviewed ON the grid it fills and saved per item there (MCP draft_tiers + tier_item); Discord has no grid"},
     "companion_tokens": {"surface": "web", "path": "GET /api/loot/companions", "reason": "which feed-token variables are set and each companion's presence is an owner's host card; Discord shows presence on the council card"},
+    # phase 4 (§5.48): a loot history file and Claude's distilled policy sentences are reviewed in tables; MCP reaches both
+    "ledger_import": {"surface": "web", "path": "POST /api/loot/import", "reason": "a loot history CSV is a file with a preview of new rows, duplicates and unknown items (MCP import_ledger reads the same route); Discord has no file editor"},
+    "ledger_import_undo": {"surface": "web", "path": "POST /api/loot/import/undo", "reason": "undoing an import is picked from the list of earlier imports beside the import itself (MCP undo_import reads the same route); Discord has no file editor"},
+    "policy_distil": {"surface": "web", "path": "POST /api/loot/distil", "reason": "Claude's drafted policy sentences are picked from a list beside the precedents each rests on (MCP distil); the pick appends through policy_append, which every surface has"},
 }
 
 
@@ -912,6 +918,8 @@ def _merge_key(op: ConfigOp):
         return (op.op, op.target.strip().lower())
     if op.op == "plain":
         return ("plain",)
+    if op.op == "loot_weights":
+        return ("loot_weights",)  # every weight of a Save: one write
     if op.op in ("comp_target", "comp_target_clear") and op.target:
         return ("comp", op.target.strip())  # one raid's (or run's) targets: one Registry.set_comp_targets write
     if op.op == "recruit" and (op.field or "").strip().lower() in RECRUIT_MERGE:
@@ -937,6 +945,10 @@ def coalesce(ops: list[ConfigOp]) -> list[ConfigOp]:
 
 
 def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) -> str:
+    if op.op == "loot_weights":  # several weights of one Save: ONE Registry.set_loot_weights write
+        from . import loot_ops
+
+        return loot_ops.apply_weights(reg, op.parts, by, rev=rev)
     if op.op == "raid_set":
         fields: dict = {}
         for p in op.parts:
@@ -1299,7 +1311,7 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
 PLAN_REV = "plan:"  # board_revs key prefix for a run's plan fingerprint (never a run key: those hold no ':')
 CONFIG_REV = "config:"  # … and for a config section's fingerprint (Registry.config_rev; design §2.4)
 _SECTION_OF = {"set": "settings", "role_add": "settings", "role_remove": "settings", "recruit": "recruitment", "plain": "plain",
-               "aura_set": "buffs", "family_set": "buffs", "aura_reset": "buffs"}
+               "aura_set": "buffs", "family_set": "buffs", "aura_reset": "buffs", "loot_weights": "loot"}
 _RAID_SECTION_OPS = {"raid_set", "raid_reset", "schedule_set", "schedule_remove", "comp_target", "comp_target_clear"}
 
 
@@ -1890,7 +1902,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
     cfg = reg.config
     if isinstance(op, MergedOp):
         return "; ".join(describe(reg, p, channel) for p in op.parts) + " (saved together)"
-    if op.op in ("loot", "wishlist", "tier"):  # the loot council, wishlists, item tiers (loot_ops)
+    if op.op in ("loot", "wishlist", "tier", "loot_weights"):  # the loot council, wishlists, item tiers, the scoring weights (loot_ops)
         from . import loot_ops
 
         try:
@@ -2331,6 +2343,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         raise RegistryError(f"{op.op} needs the owner")
     if isinstance(op, MergedOp):
         return _apply_merged(reg, op, by, rev=rev)
+    if op.op == "loot_weights":  # THE weights verb (Registry.set_loot_weights): one validated write of guild.yaml loot:
+        from . import loot_ops
+
+        return loot_ops.apply_weights(reg, [op], by, rev=rev)
     if op.op in ("loot", "wishlist", "tier"):  # wishlist / tier are registry writes; loot needs the bot's live council
         from . import loot_ops
 
@@ -2675,6 +2691,8 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
         return f"{ev.team}: {PIN_TEXT[want].format(name=m.display_name)}"
     if op.op in ("run_autofill", "run_fill"):  # the solver / candidate search: off the event loop
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store, raids)
+    if op.op == "loot_weights":  # (a MergedOp of them too) a git commit: off the event loop
+        return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store, None, rev)
     return apply(reg, op, by, is_owner, policy_store, raids=raids, rev=rev, by_id=by_id)
 
 
@@ -3267,7 +3285,8 @@ def _hours_words(h) -> str:
 # coalesce → apply_ops (one write per raid / schedule / buff / family, a batch in one commit, one audit line). Ceremony
 # follows consequence: a batch with a WARN_OPS op or a consequence line is reviewed first; anything else saves directly.
 
-STRUCTURED_KINDS = ("settings", "raid", "raid_reset", "schedule", "schedule_remove", "buff", "family", "aura_reset", "recruitment", "plain", "comp")
+STRUCTURED_KINDS = ("settings", "raid", "raid_reset", "schedule", "schedule_remove", "buff", "family", "aura_reset", "recruitment", "plain", "comp",
+                    "loot_weights")
 SETTINGS_FIELDS = ("timezone", "ask_audience", "about", "news_keywords", "loot_log", "public")  # + officer_roles (whole list) + channel:<kind> + error_dm_ids
 RAID_FORM_FIELDS = ("lockout_days", "duration_hours", "notes", "split_policy")
 AURA_VALUE_WORDS = {"all": "Everyone", "physical": "Physical damage", "spell": "Spell damage", "mana": "Mana users", "melee": "Melee",
@@ -3516,6 +3535,19 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
                 continue  # unchanged: no write
             ops.append(ConfigOp(op="comp_target", target=key, field=slot, value=_json(entry), reason=entry["note"]))
         return ops
+    if k == "loot_weights":  # Config › Loot scoring (owner): fields = {weight path: number | null (back to the default)}
+        defaults, cur, own = reg.loot_weight_defaults(), reg.loot_weights(), reg.loot_overridden()
+        for path, v in fields.items():
+            path = str(path).strip()
+            if path not in defaults:
+                raise RegistryError(f"{path}: not a loot weight (one of {', '.join(list(defaults)[:6])} …)")
+            new = reg.loot_weight_check(path, v)
+            if new is not None and float(new) == defaults[path]:
+                new = None  # the default itself: no override kept (the profile's number stands)
+            if (new is None and path not in own) or (new is not None and float(new) == cur[path]):
+                continue  # unchanged: no write
+            ops.append(ConfigOp(op="loot_weights", field=path, value="default" if new is None else _num(new)))
+        return ops
     raise RegistryError(f"unknown kind {kind!r} (one of {', '.join(STRUCTURED_KINDS)})")
 
 
@@ -3706,6 +3738,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "plain": _warn_plain,  # plain text on the ops channel or in DMs
     "run_lock": _always, "run_cancel": _always, "proposal": _always,
     "test": lambda reg, op: (op.value or "").strip().lower().startswith("clear"),
+    "loot_weights": _always,  # every future award's score (phase 4, §5.48): reviewed with the profile default beside each number
 }
 
 
@@ -4071,6 +4104,11 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
             new = _comp_entry(reg, op)
             return f"{name} · Desired comp", DescribedPart(label=reg.comp_slot_words(slot), before=_target_words(_comp_current(reg, key).get(slot)),
                                                            after=_target_words(new)), ([f"Why: {new['note']}"] if new and new.get("note") else [])
+        if op.op == "loot_weights":
+            from . import loot_ops
+
+            name, before, after, notes = loot_ops.weight_part(reg, op)
+            return "Loot scoring", DescribedPart(label=name, before=before, after=after), notes
         if op.op in ("recruit", "plain"):
             text = describe(reg, op, PLAIN_WEB)
             label, before, after, notes = _split_line(text)
@@ -4105,7 +4143,7 @@ def _op_error(sh: Registry, op: ConfigOp) -> str | None:
 # the registry-only config writes: applied in a worker thread, in one commit, under config_lock (no Discord side effect;
 # a channel setting with a bot goes through SetupMixin.set_channel on the loop instead)
 PURE_OPS = {"set", "role_add", "role_remove", "raid_set", "raid_reset", "schedule_set", "schedule_remove", "aura_set", "family_set", "aura_reset", "plain", "recruit",
-            "comp_target", "comp_target_clear"}
+            "comp_target", "comp_target_clear", "loot_weights"}
 
 
 def describe_ops(reg: Registry, ops: list[ConfigOp], refused: list[str] | None = None, channel=PLAIN_WEB) -> Described:

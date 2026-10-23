@@ -82,6 +82,9 @@ SURFACES: dict[str, dict[str, str]] = {
     "loot": {"discord": "slash:raid loot", "web": "POST /api/loot/{run}/confirm", "mcp": "loot_confirm"},
     "wishlist": {"discord": "flow:me_wishlist", "web": "POST /api/me/wishlist", "mcp": "set_wishlist"},
     "tier": {"web": "POST /api/loot/items/{key}/tiers", "mcp": "tier_item"},
+    # the scoring weights (phase 4, §5.48): Config › Loot scoring (useOpsSave → /api/ops/change; POST /api/loot/weights is the
+    # translator), MCP set_loot_weights; in Discord the owner says it in plain text (/gm change) — a table of numbers has no wizard
+    "loot_weights": {"discord": "slash:gm change", "web": "POST /api/loot/weights", "mcp": "set_loot_weights"},
 }
 SURFACE_NAMES = ("discord", "web", "mcp")
 # the `test` op's actions, one row each (dual interfaces phase 2, B9: both halves of the test bench on both surfaces):

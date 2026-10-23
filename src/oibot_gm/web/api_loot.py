@@ -734,19 +734,11 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
 
     # ------------------------------------------------------------ wishlists (D5)
     def received_map(reg, ctx, m) -> dict[tuple[str, str], str]:
-        """(character label lower, item key) → the day it was received: an awarded wish shows as received, greyed —
-        never deleted (the next Save would undo it)."""
-        out = {}
-        labels = {c.label.lower() for c in m.characters} if m else set()
-        for a in ctx.ledger:
-            if a.raider.lower() in labels and (a.discord_id in (None, m.discord_id)):
-                it = reg.item(a.item_id or None, a.item_name)
-                keys = {item_key(a.item_id, a.item_name or "")} | ({item_key(it.id, it.name)} if it is not None else set()) | {"n:" + (a.item_name or "").lower()}
-                for k in keys:
-                    prev = out.get((a.raider.lower(), k))
-                    if prev is None or a.received.isoformat() > prev:
-                        out[(a.raider.lower(), k)] = a.received.isoformat()
-        return out
+        """(character label lower, item key) → the day it was received (loot_ops.received_map: the /me wishlist wizard
+        greys the same entries)."""
+        from ..loot_ops import received_map as rm
+
+        return rm(reg, ctx, m)
 
     def wishlist_json(reg, m, ctx=None) -> list[dict]:
         ctx = ctx or ctx_of(reg)
@@ -844,13 +836,237 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             await ops_mod.audited(bot.ops, v.reg, by_of(v), line, via=v.via, by_id=v.uid)
         return {"message": line, "report": report}
 
+    # ------------------------------------------------------------ phase 4 (design §5.48): the data on-ramp
+    @app.post("/api/loot/import")
+    async def loot_import(request: Request):
+        """Loot › Items › Import (L07; MCP import_ledger): a loot history CSV into the ledger. {csv, kind: auto |
+        biscouncil | tmb | generic (character,item,received,boss,ms_os,note), preview (default true), rev}. Preview
+        writes nothing and answers the groups — new rows · duplicates · unknown items — with 'N rows, M duplicates, K
+        unknown items (recorded by name)' and a `rev`; the apply (`preview: false`) needs that rev (none → 400; the rows
+        that would be added changed since → 409 with the fresh preview) and APPENDS exactly the new rows (Registry.
+        import_awards: dedupe on (character, item, day) for imports only — never an edit, never a delete; an untiered
+        or unknown item is learned onto Loot › Items › Untiered so it can be tiered there), then the council's context reloads. Officers; from MCP the apply records awards in someone's name: X-Oibot-Actor (D8)."""
+        from ..importers import ledger_csv
+
+        v, d = await writer(request)  # officers; the apply below is the decision that needs the actor from MCP (D8)
+        reg = v.reg
+        text = d.get("csv")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(400, f"csv is the file's text (a BisCouncil or ThatsMyBIS export, or {ledger_csv.GENERIC_HEADER})")
+        preview = d.get("preview", True) is not False  # a preview writes nothing
+        if not preview:
+            need_actor(v, "Importing loot history")
+        if not preview and not (isinstance(d.get("rev"), str) and d["rev"]):
+            return JSONResponse({"error": "Preview the file first — an import applies the preview it was shown (send its rev)."}, status_code=400)
+        try:
+            parsed = await asyncio.to_thread(ledger_csv.parse, text, str(d.get("kind") or "auto"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        report = await asyncio.to_thread(reg.import_awards, parsed.rows, by_of(v), v.uid, preview=preview, kind=parsed.kind,
+                                         rev=None if preview else d.get("rev"))
+        report.update(errors=parsed.errors[:100], skipped=parsed.skipped, kind_words=ledger_csv.KIND_WORDS[parsed.kind])
+        if preview:
+            return {"preview": report, "message": report["line"]}
+        if report.get("changed"):
+            return JSONResponse({"error": "The ledger changed since you looked — here is the file against it now; import again if it still reads right.",
+                                 "preview": report}, status_code=409)
+        line = (f"loot history imported from a {ledger_csv.KIND_WORDS[parsed.kind]}: {report['new']} award(s) added — {report['line']}"
+                + (f" (import {report['batch']}: Undo on Loot › Items › Import)" if report.get("batch") else ""))
+        if report.get("learned"):
+            line += f"; {report['learned']} untiered item(s) now on Loot › Items › Untiered to tier"
+        if report["new"]:
+            ctx_of(reg).reload()  # the council reads the new rows at its next judgement (recent loot, already-has)
+            await ops_mod.audited(bot.ops, reg, by_of(v), line, via=v.via, by_id=v.uid)
+            publish("loot:ledger", reg.key)
+            if report.get("learned"):
+                publish("items", reg.key)  # Loot › Items lists the items the import learned
+        else:
+            line = "Nothing to import — " + report["line"]
+        return {"message": line, "report": report}
+
+    @app.get("/api/loot/imports")
+    async def loot_imports(request: Request):
+        """Loot › Items › Import's 'Earlier imports' (MCP import_batches): the ledger's imports, newest first, each with
+        its batch id, who, when (a time a person reads), how many rows are still live and the Undo confirm's sentence."""
+        v = await who(request, officer=True)
+        return {"batches": await asyncio.to_thread(v.reg.import_batches)}
+
+    @app.post("/api/loot/import/undo")
+    async def loot_import_undo(request: Request):
+        """Undo one loot history import (MCP undo_import): {batch, reason} — a void row for every award of that import
+        still live (Registry.undo_import, the council's void row), never an edit or a delete; idempotent. Officers; from
+        MCP the awards are in people's names, so it needs X-Oibot-Actor (D8). The council's context reloads."""
+        v, d = await writer(request, actor="Undoing a loot import")
+        batch = str(d.get("batch") or "").strip()
+        if not batch:
+            raise HTTPException(400, "batch required (an import's id from /api/loot/imports)")
+        try:
+            out = await asyncio.to_thread(v.reg.undo_import, batch, by_of(v), str(d.get("reason") or ""), v.uid)
+        except RegistryError as e:
+            from ..configops import user_error
+
+            return JSONResponse({"error": user_error(e)}, status_code=400)
+        if out["voided"]:
+            ctx_of(v.reg).reload()  # the council stops counting the rows at its next judgement
+            await ops_mod.audited(bot.ops, v.reg, by_of(v), out["line"], via=v.via, by_id=v.uid)
+            publish("loot:ledger", v.reg.key)
+        return {"message": out["line"], "voided": out["voided"]}
+
+    @app.get("/api/loot/weights")
+    async def loot_weights(request: Request):
+        """Config › Loot scoring (L06): every weight with its value now and the game profile's default beside it, the
+        groups in words, the `config:loot` rev a Save carries, and whether this viewer may edit (the owner)."""
+        from ..loot_ops import WEIGHT_GROUPS, WEIGHT_NOTE, weight_rows
+
+        v = await who(request, officer=True)
+        reg = v.reg
+        return {"rows": weight_rows(reg), "groups": [{"key": k, "title": t, "hint": h} for k, t, _p, h in WEIGHT_GROUPS],
+                "rev": reg.config_rev("loot"), "owner": bool(v.owner), "note": WEIGHT_NOTE}
+
+    @app.post("/api/loot/weights")
+    async def loot_weights_save(request: Request):
+        """The weights through the ONE structured core (a translator, like /api/admin/*): {fields: {path: number | null},
+        revs?, confirmed?}. Weights are warn class (every future score): the first call answers `review_required` with
+        the Described preview (each weight current → new, the default named) and writes nothing; send it again with
+        `confirmed: true` and the revs it returned. The owner's; officers get the refusal. The site's card saves through
+        POST /api/ops/change (useOpsSave → the ReviewModal); MCP set_loot_weights too."""
+        v, d = await body(request, officer=True)
+        fields = d.get("fields")
+        if not isinstance(fields, dict) or not fields:
+            raise HTTPException(400, "fields: {weight path: number | null}, e.g. {'tier_weight.S': 0.8}")
+        res = await request.app.state.ops_translate(v, [{"kind": "loot_weights", "fields": fields}], d)
+        if isinstance(res, JSONResponse) or res.get("review_required"):
+            return res
+        from ..loot_ops import weight_rows
+
+        return {"message": "; ".join(res["applied"]) or "loot scoring: unchanged", "rows": weight_rows(v.reg), "rev": v.reg.config_rev("loot")}
+
+    @app.post("/api/loot/rescore")
+    async def loot_rescore(request: Request):
+        """"Re-score last run" (Config › Loot scoring): the newest council with drops scored again by the numbers alone
+        — the weights now vs the draft `fields` ({path: number | null}, validated by the weights verb on a shadow copy).
+        No model call, nothing written. Officers (the card is read-only for them; the owner edits)."""
+        from ..loot import scoring
+        from ..loot_ops import last_council
+
+        v, d = await body(request, officer=True)
+        reg = v.reg
+        fields = d.get("fields") or {}
+        if not isinstance(fields, dict):
+            raise HTTPException(400, "fields: {weight path: number | null}")
+        ctx = ctx_of(reg)
+
+        def work():
+            old = reg.loot_cfg()
+            if fields:
+                sh = reg.shadow()  # the verb validates the draft; the shadow never writes
+                sh.set_loot_weights(fields, "preview")
+                new = sh.loot_cfg()
+            else:
+                new = old
+            last = last_council(bot, reg, ctx)
+            if last is None:
+                return None
+            out = scoring.rescore(reg.profile, last, old, new, wishlists=ctx.wishlists, items=reg.items(), attendance=scoring.attendance_lookup(reg))
+            out["run"] = {"label": last["label"], "day_label": last["day_label"], "roster": len(last["roster"])}
+            return out
+
+        try:
+            out = await asyncio.to_thread(work)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        if out is None:
+            return {"run": None, "rows": [], "moved": 0, "drops": 0, "message": "No council has recorded a drop yet — nothing to re-score."}
+        if not out["run"]["roster"]:
+            out["message"] = f"{out['run']['label']}: its roster isn't on file any more — nobody to score."
+        else:
+            out["message"] = (f"{out['run']['label']} ({out['run']['day_label']}): {out['moved']} of {out['drops']} top pick(s) would change"
+                              if fields else f"{out['run']['label']} ({out['run']['day_label']}): the weights as they are")
+        return out
+
+    @app.post("/api/loot/distil")
+    async def loot_distil(request: Request):
+        """Loot › Precedents › Distil (L29; MCP distil): Claude reads the ACTIVE precedents and the compiled loot policy and
+        DRAFTS at most five clarification sentences, each with the precedents it rests on (code drops a sentence that rests
+        on none it was shown). Nothing is written — an officer picks sentences and appends them through
+        POST /api/loot/distil/append (the policy_append verb). Officers; a draft decides nothing (no MCP actor needed)."""
+        from ..loot import distil
+
+        v, _d = await writer(request)
+        reg = v.reg
+        ctx = ctx_of(reg)
+        try:
+            out = await asyncio.to_thread(distil.distil, reg.key, ctx, ctx.provider)
+        except RegistryError as e:
+            return JSONResponse({"error": str(e)}, status_code=503 if str(e) == distil.LLM_DOWN else 400)
+        for p in out["proposals"]:
+            for r in p["rests_on"]:
+                r["date_label"] = day(reg, r.get("date"))
+        return {"draft": out}
+
+    @app.post("/api/loot/distil/append")
+    async def loot_distil_append(request: Request):
+        """The officer's pick from a distil: {sentences: [the exact text], doc: loot, token?}. Without `token`: the review —
+        a Described preview (one line per sentence, the refusal its append would give) and the `token` of exactly those
+        sentences; nothing written. With the token: each sentence appended through THE policy_append verb
+        (policy.append_rule: '- <text>' as a draft the officers then compile and confirm), one commit, one audit line —
+        a sentence changed after the review (another token) is refused (409), so the policy gets exactly what was
+        confirmed. Officers."""
+        from .. import policy as pol
+        from ..configops import Described, DescribedLine, DescribedPart, result_summary
+        from ..loot.distil import SENTENCE_MAX, batch_token
+
+        v, d = await writer(request)
+        reg = v.reg
+        doc = str(d.get("doc") or "loot").strip().lower()
+        if doc not in ("loot", "comp"):
+            raise HTTPException(400, "doc is loot or comp")
+        raw = d.get("sentences")
+        if not isinstance(raw, list) or not raw or not all(isinstance(x, str) for x in raw):
+            raise HTTPException(400, "sentences: the list of sentences you picked")
+        sentences = [re.sub(r"\s+", " ", x).strip().lstrip("-*• ").strip()[:SENTENCE_MAX] for x in raw]
+        sentences = [s for s in dict.fromkeys(sentences) if s]
+        if not sentences or len(sentences) > 5:
+            raise HTTPException(400, "pick one to five sentences")
+        ps = ctx_of(reg).policy_store
+        token = batch_token(doc, sentences)
+        held = ps.load_pending(doc)
+        blocked = (pol.waiting_words(held, reg.local12) + " — confirm or discard it first") if pol.held_by_other(held, by_of(v), v.uid) else None
+        if not d.get("token"):
+            lines = [DescribedLine(op="policy_append", target=doc, label=f"{doc.capitalize()} policy", parts=[DescribedPart(label="Add", after=f"- {s}")],
+                                   text=f"append to the {doc} policy: “{s}”", error=blocked[:1].upper() + blocked[1:] if blocked else None) for s in sentences]
+            desc = Described(lines=lines, consequences=[f"Added as a draft: the officers compile and confirm the {doc} policy (Policy page) before the bot reads it."])
+            return {"kind": "change", "described": {**desc.json_for(reg, "mcp" if v.via == "mcp" else "web"), "fingerprint": token}, "token": token,
+                    "refused": [], "review": True, "fingerprint": token}
+        if str(d.get("token")) != token:
+            return JSONResponse({"error": "These sentences changed since you reviewed them — review them again.", "changed": ["policy"]}, status_code=409)
+        if blocked:
+            return JSONResponse({"error": blocked[:1].upper() + blocked[1:], "refused": [blocked]}, status_code=400)
+
+        def work() -> list[str]:
+            out = []
+            with reg.store.batch(f"{reg.key}: {len(sentences)} clarification(s) from a distil added to the {doc} policy by {by_of(v)}"):
+                for s in sentences:
+                    _new, line = pol.append_rule(ps, doc, s, by_of(v), by_id=v.uid, when=reg.local12)
+                    out.append(line)
+            return out
+
+        try:
+            applied = await asyncio.to_thread(work)
+        except (pol.PolicyPendingError, ValueError) as e:
+            return JSONResponse({"error": str(e), "refused": [str(e)]}, status_code=400)
+        await ops_mod.audited(bot.ops, reg, by_of(v), f"{doc} policy: {len(applied)} clarification(s) from the distil added as a draft — "
+                              + "; ".join(f"“{s}”" for s in sentences), via=v.via, by_id=v.uid)
+        res = {"applied": applied, "refused": [], "results": [{"label": f"{doc.capitalize()} policy", "ok": True, "line": ln} for ln in applied]}
+        return {"kind": "change", **res, "summary": result_summary(res), "note": "Compile and confirm it on the Policy page to make it live."}
+
     # ------------------------------------------------------------ items and tiers (D4, D12)
     def item_brief(reg, key: str, it, ctx=None) -> dict:
         meta = reg.item_meta(key)
         out = {"key": key, "id": it.id, "name": it.name, "boss": it.boss, "slot": it.slot, "type": it.type, "tiered": bool(it.tiers), "learned": bool(meta)}
         if meta:
             out.update(first_seen_label=reg.local12(meta["first_seen"]) if meta.get("first_seen") else "", times_dropped=int(meta.get("times_dropped") or 0),
-                       first_run=meta.get("first_run"))
+                       first_run=meta.get("first_run"), source=meta.get("source") or "companion")
         if ctx is not None:
             out["awards"] = len(ctx.awards_of_item(it))
         return out

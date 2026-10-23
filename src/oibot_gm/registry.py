@@ -405,7 +405,8 @@ class WishlistChanged(RegistryError):
 def section_words(section: str) -> str:
     if section.startswith("raids:"):
         return f"{section[6:]} raid settings"
-    return {"settings": "guild settings", "buffs": "aura settings", "recruitment": "recruitment settings", "plain": "plain-text permissions"}.get(section, section)
+    return {"settings": "guild settings", "buffs": "aura settings", "recruitment": "recruitment settings", "plain": "plain-text permissions",
+            "loot": "loot scoring weights"}.get(section, section)
 
 
 def _config_verb(section):
@@ -442,6 +443,76 @@ def _member_write(fn):
 
 def _raid_section(self, instance, *a, **k) -> str:
     return f"raids:{instance}"
+
+
+# ---- guild.yaml `loot:` (the scoring weights' overrides): nested maps addressed by dotted paths ('wishlist.rank_bonus.1')
+def _loot_key(d: dict, seg: str):
+    """The key of `d` whose text is `seg` (rank_bonus keys are ints in the profile, text in a path), else `seg` itself."""
+    return next((k for k in d if str(k) == seg), seg) if isinstance(d, dict) else seg
+
+
+def _merge_loot(base: dict, over: dict) -> None:
+    """Merge the guild's overrides into the profile's settings at every depth, matching keys by their text."""
+    for k, v in (over or {}).items():
+        bk = _loot_key(base, str(k))
+        if isinstance(v, dict) and isinstance(base.get(bk), dict):
+            _merge_loot(base[bk], v)
+        else:
+            base[bk] = v
+
+
+def _loot_dig(d: dict, path: str):
+    """The value at a dotted path, or None."""
+    cur = d
+    for seg in path.split("."):
+        if not isinstance(cur, dict):
+            return None
+        k = _loot_key(cur, seg)
+        if k not in cur:
+            return None
+        cur = cur[k]
+    return cur
+
+
+def _loot_keys(profile_loot: dict, path: str) -> list:
+    """A dotted path as the profile's own keys (an int stays an int, so the stored override lands where scoring reads)."""
+    keys, cur = [], profile_loot
+    for seg in path.split("."):
+        k = _loot_key(cur, seg)
+        keys.append(k)
+        cur = cur.get(k) if isinstance(cur, dict) else None
+    return keys
+
+
+def _loot_put(over: dict, keys: list, value) -> None:
+    """Set (value) or remove (None) one override, creating / leaving nested maps as needed (an override's own key that
+    reads the same as the profile's — '1' for 1 — is replaced, never kept beside it)."""
+    cur = over
+    for k in keys[:-1]:
+        hit = _loot_key(cur, str(k))
+        if hit != k and hit in cur:
+            cur[k] = cur.pop(hit)
+        cur = cur.setdefault(k, {})
+        if not isinstance(cur, dict):
+            return
+    last = keys[-1]
+    hit = _loot_key(cur, str(last))
+    if hit in cur:
+        cur.pop(hit)
+    if value is not None:
+        cur[last] = value
+
+
+def _loot_prune(d: dict) -> dict:
+    """Overrides without the empty maps a removal leaves."""
+    out = {}
+    for k, v in (d or {}).items():
+        if isinstance(v, dict):
+            v = _loot_prune(v)
+            if not v:
+                continue
+        out[k] = v
+    return out
 
 
 # ---- guild identity (design §5.32): the folder name IS the key; it never changes after creation. 1–16 characters of
@@ -1434,14 +1505,14 @@ class Registry:
             self._notify("config", [message])
 
     # ---- section revs (design §2.4): computed on demand from the stored shape, never a stored field bumped by hand
-    REV_SECTIONS = ("settings", "buffs", "recruitment", "plain")  # plus raids:<instance id>
+    REV_SECTIONS = ("settings", "buffs", "recruitment", "plain", "loot")  # plus raids:<instance id>; loot = the scoring weights (guild.yaml loot:)
     # what no rev covers: the scheduler's own bookkeeping (run rosters, card and sheet message ids) — an owner's edit during a
     # raid week must never be refused because a card was re-posted
     REV_SKIP = ("rosters",)
 
     def _section_blob(self, section: str):
         cfg = self.config.model_dump()
-        own = {"raids", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain"}
+        own = {"raids", "buffs", "families", "recruitment", "invite_url", "member_role_ids", "plain", "loot"}
         if section.startswith("raids:"):
             rid = section[6:]
             if rid not in self.profile.raids and self.config.roster(rid) is not None:
@@ -1455,13 +1526,15 @@ class Registry:
             return {"recruitment": cfg.get("recruitment"), "invite_url": cfg.get("invite_url"), "member_role_ids": cfg.get("member_role_ids")}
         if section == "plain":
             return cfg.get("plain")
+        if section == "loot":
+            return cfg.get("loot") or {}
         if section == "settings":
             return {k: v for k, v in cfg.items() if k not in own and k not in self.REV_SKIP and "_message_id" not in k}
         raise RegistryError(f"unknown config section {section} (one of {', '.join(self.REV_SECTIONS)}, raids:<id>)")
 
     def config_rev(self, section: str) -> str:
         """A fingerprint of one config section as stored: `settings` (channels, timezone, roles, owner, about…),
-        `raids:<id>`, `buffs` (auras and families), `recruitment`, `plain`. A write carrying an older one is stale."""
+        `raids:<id>`, `buffs` (auras and families), `recruitment`, `plain`, `loot` (the scoring weights). A write carrying an older one is stale."""
         blob = yaml.safe_dump(self._section_blob(section), sort_keys=True, default_flow_style=False)
         return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
@@ -1938,11 +2011,12 @@ class Registry:
         return it.tier_for(spec)
 
     def learn_item(self, item_id: int | None, name: str | None, *, boss: str | None = None, instance: str | None = None,
-                   run: str | None = None, source: str = "companion"):
+                   run: str | None = None, source: str = "companion", times: int = 1):
         """A drop the item tables don't know (or know untiered): remember it in <guild>/items/<key>.yaml as learned
         (first seen, times dropped, boss, the run) so it can be tiered later on Loot › Items. Returns the Item
         (untiered until someone tiers it). An item the profile knows WITH tiers is returned as is and nothing is
-        written. Commits (inside the caller's GitStore.batch, one commit with the drop)."""
+        written. Commits (inside the caller's GitStore.batch, one commit with the drop). `times`: how many drops this
+        call records (a loot history import learns an item once for all its rows; source 'import')."""
         known = self.item(item_id, name)
         if known is not None and known.tiers:
             return known
@@ -1963,23 +2037,300 @@ class Registry:
         learned.setdefault("first_run", run)
         learned.setdefault("source", source)
         learned["last_seen"] = stamp
-        learned["times_dropped"] = int(learned.get("times_dropped") or 0) + 1
+        learned["times_dropped"] = int(learned.get("times_dropped") or 0) + max(1, int(times))
         self.store.write_text(rel, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
         self.store.commit(f"{self.key}: learned item {nm}" + (f" ({iid})" if iid else ""))
         self.__dict__.pop("_items_cache", None)
         return self.item(iid, nm)
 
     def loot_cfg(self) -> dict:
-        """The loot scoring settings: profiles/<game>/loot_defaults.yaml with the guild's `loot:` overrides merged (one
-        level deep: a dict value merges per key), plus `untiered_weight` (default UNTIERED_WEIGHT) — the upgrade an
-        item without tier data scores for everyone."""
+        """The loot scoring settings: profiles/<game>/loot_defaults.yaml with the guild's `loot:` overrides merged (at
+        every depth: a dict value merges per key, so 'wishlist.rank_bonus.1' alone keeps #2–#5), plus `untiered_weight`
+        (default UNTIERED_WEIGHT) — the upgrade an item without tier data scores for everyone. A key is matched by its
+        text (an override's '1' lands on the profile's 1: scoring reads `rank_bonus[1]`)."""
         import copy
 
         out = copy.deepcopy(self.profile.loot or {})
-        for k, v in (self.config.loot or {}).items():
-            out[k] = {**out[k], **v} if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+        _merge_loot(out, copy.deepcopy(self.config.loot or {}))
         out.setdefault("untiered_weight", UNTIERED_WEIGHT)
         return out
+
+    # ---- loot scoring weights (design §3.1 "Weights" L06; dual interfaces phase 4, design §5.48): Config › Loot scoring,
+    # the `loot_weights` op (plain text, MCP set_loot_weights) — one validated write of guild.yaml `loot:` per Save
+    LOOT_WEIGHT_SKIP = ("distribution",)  # not a number (the judging order) — set in the profile, not on the card
+
+    def loot_weight_defaults(self) -> dict[str, float]:
+        """Every number Config › Loot scoring may set, by dotted path ('tier_weight.S+', 'wishlist.rank_bonus.1',
+        'untiered_weight'), with the game profile's value (profiles/<game>/loot_defaults.yaml) — the default shown beside
+        each weight, and what clearing an override goes back to."""
+        base = {k: v for k, v in (self.profile.loot or {}).items() if k not in self.LOOT_WEIGHT_SKIP}
+        base.setdefault("untiered_weight", UNTIERED_WEIGHT)
+        out: dict[str, float] = {}
+
+        def walk(d: dict, prefix: str) -> None:
+            for k, v in d.items():
+                if isinstance(v, dict):
+                    walk(v, f"{prefix}{k}.")
+                elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                    out[f"{prefix}{k}"] = float(v)
+
+        walk(base, "")
+        return out
+
+    def loot_weights(self) -> dict[str, float]:
+        """The effective number per path (loot_cfg: the guild's override, else the profile's)."""
+        cfg = self.loot_cfg()
+        out = {}
+        for path, default in self.loot_weight_defaults().items():
+            cur = _loot_dig(cfg, path)
+            out[path] = float(cur) if isinstance(cur, (int, float)) and not isinstance(cur, bool) else default
+        return out
+
+    def loot_overridden(self) -> set[str]:
+        """The paths the guild set itself (guild.yaml `loot:`) — the card marks them and offers 'back to the default'."""
+        own = self.config.loot or {}
+        return {p for p in self.loot_weight_defaults() if _loot_dig(own, p) is not None}
+
+    @staticmethod
+    def loot_weight_check(path: str, value) -> float | None:
+        """A weight as stored: None (back to the default) for '' / None / 'default'; else a number — a window in whole
+        days 1–365, anything else 0–100. RegistryError in words otherwise."""
+        if value is None or (isinstance(value, str) and value.strip().lower() in ("", "default", "reset")):
+            return None
+        try:
+            n = float(str(value).strip()) if not isinstance(value, (int, float)) or isinstance(value, bool) else float(value)
+        except ValueError:
+            raise RegistryError(f"{path}: '{value}' isn't a number") from None
+        if isinstance(value, bool) or n != n:  # NaN
+            raise RegistryError(f"{path}: '{value}' isn't a number")
+        if path.endswith("window_days"):
+            if n != int(n) or not 1 <= n <= 365:
+                raise RegistryError(f"{path}: a window is a whole number of days from 1 to 365")
+            return int(n)
+        if not 0 <= n <= 100:
+            raise RegistryError(f"{path}: a weight is from 0 to 100")
+        return round(n, 4)
+
+    @_config_verb("loot")
+    def set_loot_weights(self, fields: dict, by: str) -> list[str]:
+        """Config › Loot scoring's one Save (and the `loot_weights` op): {path: number | None} — None / '' puts the
+        profile's default back. Validated as a whole (an unknown path or a bad number refuses the Save and nothing is
+        written), then ONE save of guild.yaml `loot:` under config_lock (the decorator; `rev=` = config_rev('loot')).
+        Changes scores from the next judgement on — never a ledger row (who got what, and what it weighed, stay as
+        recorded). Returns the change lines ([] = nothing changed, nothing written)."""
+        import copy
+
+        defaults = self.loot_weight_defaults()
+        cur = self.loot_weights()
+        over = copy.deepcopy(self.config.loot or {})
+        lines: list[str] = []
+        for path, value in (fields or {}).items():
+            p = str(path).strip()
+            if p not in defaults:
+                raise RegistryError(f"{p}: not a loot weight (Config › Loot scoring lists them: tier_weight.S, attendance.weight, …)")
+            new = self.loot_weight_check(p, value)
+            if new is not None and float(new) == defaults[p]:
+                new = None  # the default itself: no override kept (the profile's number stands)
+            keys = _loot_keys(self.profile.loot or {}, p)
+            _loot_put(over, keys, new)
+            after = defaults[p] if new is None else float(new)
+            if after != cur[p] or (new is None and _loot_dig(self.config.loot or {}, p) is not None):
+                lines.append(f"{p} {cur[p]:g} → {after:g}" + (" (the default)" if new is None else ""))
+        over = _loot_prune(over)
+        if over == (self.config.loot or {}):
+            return []
+        self.config.loot = over
+        self.save_config(f"loot weights: {'; '.join(lines) or 'overrides tidied'} ({by})"[:200])
+        return lines or ["loot weights: overrides tidied (no number changed)"]
+
+    # ---- loot history imports (design §3.1 "Data on-ramp" L07; dual interfaces phase 4, design §5.48)
+    def _award_keys(self, names, item_id, item_name, received) -> set[tuple[str, str, str]]:
+        """What makes two awards the same for an IMPORT: (character, item — by id and by name, and the item the tables
+        resolve either to —, the day). A row recorded by id and a file naming the item match each other."""
+        items = set()
+        if item_id:
+            items.add(f"i:{int(item_id)}")
+        if item_name:
+            items.add(f"n:{str(item_name).strip().lower()}")
+        it = self.item(int(item_id or 0) or None, item_name)
+        if it is not None:
+            if it.id:
+                items.add(f"i:{int(it.id)}")
+            items.add(f"n:{it.name.strip().lower()}")
+        day = received.isoformat() if hasattr(received, "isoformat") else str(received)[:10]
+        return {(str(n).strip().lower(), i, day) for n in names if str(n or "").strip() for i in items}
+
+    def import_awards(self, rows, by: str, by_id: int | None = None, *, preview: bool = False, kind: str = "generic", rev: str | None = None) -> dict:
+        """A loot history file's rows (importers/ledger_csv.ImportRow) into the guild's ledger — Loot › Items › Import,
+        MCP import_ledger. For IMPORTS only, a row is a duplicate when the ledger (any award row, a corrected one too) or
+        an earlier row of the same file already holds (character, item by id or name, day) — the council's own awards
+        dedupe by their import_id as before. New rows are APPENDED (source 'import', `by`, the file's kind, its note);
+        nothing in the ledger is ever edited or deleted. An item the tables don't know is recorded by name (D4: untiered,
+        `untiered_weight`) and, on an apply, learned (learn_item, source 'import', once per item for all its rows) so it is
+        listed on Loot › Items › Untiered and can be tiered there — its awards then re-weight on the D12 question like
+        any learned drop's (an untiered item the tables know is learned the same way); a known item is weighed tier × slot for the character's spec (the file's own tier and weight
+        when it carries them — BisCouncil); a character nobody registered is recorded by name. `preview`: nothing written.
+        One commit. `rev` (an apply): the preview's rev — when the rows that would be added differ now (the ledger moved
+        since the preview), nothing is written and the report says `changed`. Returns {rows, new, duplicates,
+        unknown_items, unknown_characters, groups{new, duplicates, unknown_items} (each row with `received` ISO and
+        `received_label` — the day a person reads), rev, changed, learned (an apply: items learned), line: 'N rows, M
+        duplicates, K unknown items (recorded by name)'}."""
+        from .loot import scoring
+        from .lootctx import fold_ledger
+        from .models import LootAward
+
+        rows = list(rows or [])
+        rel = Path(self.key) / "ledger.jsonl"
+        cfg = self.loot_cfg()
+        untiered = float(cfg.get("untiered_weight", UNTIERED_WEIGHT))
+        with self.config_lock:  # two imports at once never both pass the dedupe; the read, the check and the append are one step
+            awards, _ = fold_ledger(self.store.read_jsonl(rel))
+            seen: dict[tuple, str] = {}
+            for a in awards:
+                if a.void:
+                    continue  # a voided award (an undone import, a corrected one) no longer holds the row: the fixed file imports
+                for k in self._award_keys([a.raider], a.item_id, a.item_name, a.received):
+                    seen.setdefault(k, "already in the ledger")
+            new: list[tuple] = []
+            dups: list[dict] = []
+            unknown_items: dict[str, int] = {}
+            unknown_chars: list[str] = []
+            for r in rows:
+                try:
+                    hit = self.find(r.raider)
+                except RegistryError:
+                    hit = None
+                m, c = hit if hit else (None, None)
+                names = [r.raider] + ([c.label] if c is not None else [])
+                keys = self._award_keys(names, r.item_id, r.item_name, r.received)
+                it = self.item(int(r.item_id or 0) or None, r.item_name)
+                label = it.name if it is not None else (r.item_name or f"item {r.item_id}")
+                shown = {"line": r.line, "character": c.label if c is not None else r.raider, "item": label, "received": r.received.isoformat(),
+                         "received_label": self.day_label(r.received.isoformat(), with_year=True),  # what a person reads (ISO stays for machines)
+                         "boss": r.boss or None, "offspec": r.offspec, "known_item": it is not None, "known_character": hit is not None}
+                why = next((seen[k] for k in keys if k in seen), None)
+                if why is not None:
+                    dups.append({**shown, "why": why})
+                    continue
+                for k in keys:
+                    seen[k] = f"line {r.line} of this file"
+                if it is None:
+                    unknown_items[label] = unknown_items.get(label, 0) + 1
+                if hit is None and r.raider not in unknown_chars:
+                    unknown_chars.append(r.raider)
+                spec = None
+                if c is not None:
+                    try:
+                        spec = self.profile.spec(c.cls, c.spec)
+                    except KeyError:
+                        spec = None
+                if r.tier and r.total_weight is not None:
+                    tier, weight, tiered = r.tier, float(r.total_weight), True  # the guild's earlier council tiered it (BisCouncil)
+                elif it is not None:
+                    tier, weight = scoring.weight_for(self.profile, it, spec, cfg)
+                    tiered = bool(it.tiers)
+                else:
+                    tier, weight, tiered = "?", untiered, False
+                award = LootAward(raider=c.label if c is not None else r.raider, item_id=int(it.id or 0) if it is not None else int(r.item_id or 0),
+                                  item_name=it.name if it is not None else r.item_name, tier=tier, total_weight=weight, offspec=r.offspec,
+                                  received=r.received, instance=r.instance or "", boss=r.boss or "", discord_id=m.discord_id if m is not None else None,
+                                  tiered=tiered, by=by, source="import")
+                new.append((award, r, {**shown, "tier": tier, "weight": round(weight, 3)}))
+            new_rev = hashlib.sha1(json.dumps([[a.raider, a.item_id, a.item_name, a.received.isoformat()] for a, _, _ in new],
+                                          sort_keys=True).encode()).hexdigest()[:12]
+            report = {"kind": kind, "rows": len(rows), "new": len(new), "duplicates": len(dups), "unknown_items": len(unknown_items),
+                      "unknown_characters": unknown_chars[:50],
+                      "groups": {"new": [s for _, _, s in new][:300], "duplicates": dups[:300],
+                                 "unknown_items": [{"item": k, "rows": n} for k, n in sorted(unknown_items.items(), key=lambda kv: (-kv[1], kv[0].lower()))][:300]},
+                      "rev": new_rev}
+            report["line"] = (f"{len(rows)} row(s), {len(dups)} duplicate(s), {len(unknown_items)} unknown item(s) (recorded by name)"
+                              + (f", {len(unknown_chars)} character(s) nobody registered (recorded by name)" if unknown_chars else ""))
+            report["changed"] = bool(rev) and rev != report["rev"]
+            if preview or not new or report["changed"]:
+                return report
+            stamp = now()
+            # every imported row gets a stable import_id ('<batch>-<n>') and the batch id, so the import can be undone
+            # (undo_import: one void row per award, the shape the council's corrections write — lootctx.void_row)
+            batch = f"imp-{datetime.now(timezone.utc):%Y%m%d%H%M%S}-{new_rev[:6]}"
+            learn: dict[str, list] = {}  # item key → [item_id, name, boss, instance, rows]: untiered items land on Loot › Items › Untiered
+            for a, r, _ in new:
+                it = self.item(a.item_id or None, a.item_name)
+                if it is not None and it.tiers:
+                    continue
+                k = item_key(a.item_id or (it.id if it is not None else 0), a.item_name or (it.name if it is not None else None))
+                hold = learn.setdefault(k, [a.item_id or None, a.item_name, a.boss or None, a.instance or None, 0])
+                hold[4] += 1
+            with self.store.batch(f"{self.key}: {len(new)} award(s) imported from a {kind} file by {by}"):
+                for n, (a, r, _) in enumerate(new, 1):
+                    a.import_id = f"{batch}-{n}"
+                    row = a.model_dump(mode="json", exclude_none=True)
+                    row.update(imported=kind, imported_at=stamp, import_batch=batch, **({"note": r.note} if r.note else {}),
+                               **({"by_id": by_id} if by_id else {}))
+                    self.store.append_jsonl(rel, row)
+                for iid, nm, boss, inst, n in learn.values():
+                    self.learn_item(iid, nm, boss=boss, instance=inst, source="import", times=n)
+                self.store.commit(f"{self.key}: {len(new)} award(s) imported from a {kind} file by {by}")
+            report["learned"] = len(learn)
+            report["batch"] = batch
+        return report
+
+    def import_batches(self, limit: int = 20) -> list[dict]:
+        """The ledger's imports, newest first (Loot › Items › Import's 'Earlier imports', MCP import_ledger_batches):
+        {batch, kind, at (ISO), at_label (what a person reads), by, rows, live (rows not voided), consequence (the Undo
+        confirm's sentence, composed here)}. Only rows written since imports carry an import_id (imp-<stamp>-<rev>-<n>)."""
+        from .lootctx import fold_ledger
+
+        rows = self.store.read_jsonl(Path(self.key) / "ledger.jsonl")
+        awards, _ = fold_ledger(rows)
+        live = {a.import_id for a in awards if a.import_id and not a.void}
+        out: dict[str, dict] = {}
+        for r in rows:
+            b = r.get("import_batch")
+            if r.get("kind") or not b:
+                continue
+            o = out.setdefault(b, {"batch": b, "kind": r.get("imported"), "at": r.get("imported_at"), "by": r.get("by"), "rows": 0, "live": 0})
+            o["rows"] += 1
+            o["live"] += 1 if r.get("import_id") in live else 0
+        res = sorted(out.values(), key=lambda o: str(o["at"] or ""), reverse=True)[:limit]
+        for o in res:
+            o["at_label"] = self.local12(o["at"]) if o["at"] else ""
+            o["consequence"] = self.undo_consequence(o)
+        return res
+
+    @staticmethod
+    def undo_consequence(o: dict) -> str:
+        if not o.get("live"):
+            return "Every award this import added is already voided; nothing to undo."
+        return (f"Voids the {o['live']} award(s) this import added: they stop counting in recent loot and in 'already has'. "
+                "The rows stay in the ledger with a void row beside each (the audit trail); importing a fixed file afterwards adds them again.")
+
+    def undo_import(self, batch: str, by: str, reason: str = "", by_id: int | None = None) -> dict:
+        """Undo one import: a `kind: void` row (lootctx.void_row — the council's correction path) for every award of the
+        batch that is still live; nothing is edited or deleted. One commit; idempotent (an undone import voids nothing).
+        Returns {batch, voided, line}. RegistryError for a batch the ledger doesn't hold. The caller reloads the council's
+        context (RegistryLootContext.reload)."""
+        from .lootctx import fold_ledger, void_row
+
+        batch = str(batch or "").strip()
+        rel = Path(self.key) / "ledger.jsonl"
+        why = (str(reason or "").strip() or "import undone")[:200]
+        with self.config_lock:
+            rows = self.store.read_jsonl(rel)
+            ids = [r["import_id"] for r in rows if not r.get("kind") and r.get("import_batch") == batch and r.get("import_id")]
+            if not batch or not ids:
+                raise RegistryError(f"{batch or '?'}: no import with that id in the ledger")
+            awards, _ = fold_ledger(rows)
+            live = {a.import_id for a in awards if a.import_id and not a.void}
+            todo = [i for i in ids if i in live]
+            if todo:
+                at = now()
+                msg = f"{self.key}: import {batch} undone by {by} ({len(todo)} award(s) voided)"
+                with self.store.batch(msg):
+                    for i in todo:
+                        self.store.append_jsonl(rel, {**void_row(i, why, by, at), **({"by_id": by_id} if by_id else {})})
+                    self.store.commit(msg)
+        line = (f"import {batch} undone: {len(todo)} award(s) voided — {why}" if todo else f"import {batch}: already undone, nothing voided")
+        return {"batch": batch, "voided": len(todo), "line": line}
 
     # ---- attendance (design §3.5 L35/M43, D49): from DONE runs, keyed by the member (every character rolls up)
     def attendance_window(self, window_days: int | None = None) -> int:
@@ -2363,13 +2714,16 @@ class Registry:
         in TMB's order, deduped (first wins), received rows skipped; an item already on the native list is a duplicate
         (the native entry stays); the character's earlier TMB rows are replaced; a native entry is never deleted; past
         WISHLIST_MAX the rest is skipped and counted. Unknown characters are named, not created. `preview`: nothing
-        written. One commit. Returns {rows, characters, added, replaced, duplicates, received, over_cap, unknown, lines}."""
+        written. One commit. Returns {rows, characters, added, replaced, duplicates, received, over_cap, unknown, lines,
+        per_character: [{character, added, kept, replaced, duplicates, over_cap} — item names: what the preview shows per
+        character, "nothing deleted" made visible]}."""
         import csv
         import io
 
         reader = csv.DictReader(io.StringIO(text.lstrip("﻿")))
         norm = [{str(k or "").strip().lower(): (v or "").strip() for k, v in row.items()} for row in reader]
-        report = {"rows": len(norm), "characters": 0, "added": 0, "replaced": 0, "duplicates": 0, "received": 0, "over_cap": 0, "unknown": [], "lines": []}
+        report = {"rows": len(norm), "characters": 0, "added": 0, "replaced": 0, "duplicates": 0, "received": 0, "over_cap": 0, "unknown": [], "lines": [],
+                  "per_character": []}
         per: dict[tuple[int, str], list[tuple[float, int, dict]]] = {}
         for i, r in enumerate(norm):
             if r.get("type") and r["type"].lower() not in ("wishlist", "wish"):
@@ -2402,6 +2756,8 @@ class Registry:
             natives = [e.model_copy() for e in c.wishlist if e.source != "tmb"]
             report["replaced"] += sum(1 for e in c.wishlist if e.source == "tmb")
             imported: list[WishlistEntry] = []
+            dup_names: list[str] = []
+            cap_names: list[str] = []
             for _, _, r in sorted(got, key=lambda t: (t[0], t[1])):
                 try:
                     iid, nm = self.wish_item(r.get("item_id"), r.get("item_name") or r.get("name"))
@@ -2409,9 +2765,11 @@ class Registry:
                     continue
                 if any(_same_wish(e.item_id, e.name, iid, nm) for e in natives + imported):
                     report["duplicates"] += 1
+                    dup_names.append(nm)
                     continue
                 if len(natives) + len(imported) >= WISHLIST_MAX:
                     report["over_cap"] += 1
+                    cap_names.append(nm)
                     continue
                 off = r.get("is_offspec", "").lower() in TRUE_WORDS
                 note = re.sub(r"\s+", " ", r.get("note") or "").strip()[:WISH_NOTE_MAX] or None
@@ -2422,6 +2780,8 @@ class Registry:
             report["added"] += len(imported)
             report["characters"] += 1
             report["lines"].append(f"{label}: {len(imported)} from TMB" + (f", {len(natives)} kept from the site" if natives else ""))
+            report["per_character"].append({"character": label, "added": [e.name for e in imported], "kept": [e.name for e in natives],
+                                            "replaced": [e.name for e in c.wishlist if e.source == "tmb"], "duplicates": dup_names, "over_cap": cap_names})
             writes.append((m, c, new))
         if not preview and writes:
             with self.config_lock, self.store.batch(f"{self.key}: TMB wishlists imported by {by} ({report['characters']} character(s))"):
