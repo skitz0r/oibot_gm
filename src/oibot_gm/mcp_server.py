@@ -1361,7 +1361,9 @@ def import_ledger(csv: str | None = None, path: str | None = None, kind: str = "
     the generic columns. `preview=true` (default) writes nothing: it answers 'N rows, M duplicates, K unknown items
     (recorded by name)', the groups and a `rev` — show the person, then call again with preview=false and that rev
     (needs OIBOT_MCP_ACTOR: the rows are awards in people's names). An import only appends new rows; it never edits or
-    deletes one, and a row the ledger already holds (same character, item and day) is a duplicate. An item the tables
+    deletes one, and a row the ledger already holds (same character, item and guild day — a day either side when the file
+    gives no zone; matched one for one, so two real copies both import) is a duplicate; an apply is refused while a
+    loot council of the guild is live. An item the tables
     don't know is recorded by name and lands on Loot › Items › Untiered (tier_item tiers it, and may re-weight its awards)."""
     if bool(csv) == bool(path):
         raise ToolError("give the file's text as csv, or a path to the file — one of the two")

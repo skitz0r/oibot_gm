@@ -115,11 +115,9 @@ def test_preview_writes_nothing_and_counts_the_groups(reg):
     before, h0 = ledger_bytes(reg), head(reg)
     rep = reg.import_awards(ledger_csv.parse(fixture("ledger_generic.csv", a, b)).rows, "Officer", 1, preview=True)
     assert ledger_bytes(reg) == before and head(reg) == h0, "a preview writes nothing"
-    assert (rep["rows"], rep["new"], rep["duplicates"], rep["unknown_items"]) == (5, 3, 2, 2)
-    assert rep["line"].startswith("5 row(s), 2 duplicate(s), 2 unknown item(s) (recorded by name)")
-    dup = {(d["line"], d["why"]) for d in rep["groups"]["duplicates"]}
-    assert dup == {(3, "line 2 of this file"), (5, "line 4 of this file")}, "the same item by id and by name, and a name in another case"
-    assert {u["item"] for u in rep["groups"]["unknown_items"]} == {"Sunfire Pauldrons", "Shard of Doom"}
+    assert (rep["rows"], rep["new"], rep["duplicates"], rep["unknown_items"]) == (5, 5, 0, 2), "rows of one file never cancel each other (two real copies)"
+    assert rep["line"].startswith("5 row(s), 0 duplicate(s), 2 unknown item(s) (recorded by name)")
+    assert {(u["item"], u["rows"]) for u in rep["groups"]["unknown_items"]} == {("Sunfire Pauldrons", 2), ("Shard of Doom", 1)}, "one unknown item whatever its case"
     assert rep["unknown_characters"] == ["Strangerfoo"]
 
 
@@ -137,7 +135,8 @@ def test_apply_appends_exactly_the_new_rows_and_never_edits_one(reg):
     after = ledger_bytes(reg)
     assert after.startswith(before), "the rows already there are byte for byte what they were"
     added = [r for r in ledger(reg)][1:]
-    assert rep["new"] == len(added) == 2 and rep["duplicates"] == 3, "the council's award of the Robe is the same award"
+    assert rep["new"] == len(added) == 4 and rep["duplicates"] == 1, "the council's award of the Robe is the file's first Robe; its second is a second copy"
+    assert [d["line"] for d in rep["groups"]["duplicates"]] == [2] and rep["groups"]["duplicates"][0]["why"] == "already in the ledger"
     pauldrons = next(r for r in added if r["item_name"] == "Sunfire Pauldrons")
     assert pauldrons["item_id"] == 0 and pauldrons["tiered"] is False and pauldrons["total_weight"] == reg.loot_cfg()["untiered_weight"], "D4: by name"
     assert pauldrons["source"] == "import" and pauldrons["by"] == "Officer" and pauldrons["imported"] == "generic" and pauldrons["offspec"] is True
@@ -197,6 +196,106 @@ def test_imported_rows_carry_an_import_id_and_an_undo_voids_them(reg):
     assert again["new"] == 2 and again["duplicates"] == 0, "a voided row no longer makes the fixed file's row a duplicate"
 
 
+def seed_award(reg, raider, item="Robe of Tests", received="2026-12-09", iid="r1-d1"):
+    """One council award row (what a confirm writes)."""
+    reg.store.append_jsonl(Path(reg.key) / "ledger.jsonl", {"raider": raider, "item_id": 0, "item_name": item, "tier": "S", "total_weight": 0.75, "offspec": False,
+                                                            "received": received, "instance": "x", "boss": "Gatekeeper", "import_id": iid, "source": "bot"})
+    reg.store.commit("seed one award")
+
+
+def test_a_utc_export_of_a_late_evening_award_is_the_councils_own_row(reg):
+    """Regression (review item 2): the dedupe keyed on the calendar day exactly as the file wrote it, so a UTC export
+    (TMB, BisCouncil) of a 9 PM Pacific award — the next day in UTC — imported the council's own award a second time."""
+    a = reg.test_members()[0].main.label
+    seed_award(reg, a)  # the council's row: Wed 9 Dec, guild time (America/Los_Angeles)
+    zoned = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-10T05:15:00Z\n").rows
+    assert zoned[0].received.isoformat() == "2026-12-10" and zoned[0].received_at is not None
+    rep = reg.import_awards(zoned, "Officer", preview=True)
+    assert (rep["new"], rep["duplicates"]) == (0, 1), "05:15 UTC on the 10th is 9:15 PM on the 9th in the guild's zone"
+    assert rep["groups"]["duplicates"][0]["why"] == "already in the ledger" and rep["groups"]["duplicates"][0]["received"] == "2026-12-09"
+    plain = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-10 05:15:00\n").rows  # TMB style: a time, no zone
+    rep = reg.import_awards(plain, "Officer", preview=True)
+    assert (rep["new"], rep["duplicates"]) == (0, 1), "no zone: a day either side matches"
+    assert "Wed 09 Dec 2026" in rep["groups"]["duplicates"][0]["why"], "the row it matched, by the day a person reads"
+    far = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-11T20:00:00-08:00\n").rows
+    assert reg.import_awards(far, "Officer", preview=True)["new"] == 1, "a zoned moment is exact: two days later is another award"
+
+
+def test_two_real_copies_on_one_day_both_survive_by_occurrence(reg):
+    """Regression (review item 2): two awards of the same item to the same character on one day collapsed into one —
+    the N-th (character, item, day) row of the file now matches the N-th of the ledger."""
+    a = reg.test_members()[0].main.label
+    seed_award(reg, a)
+    two = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-09\n{a},Robe of Tests,2026-12-09\n").rows
+    rep = reg.import_awards(two, "Officer", 7)
+    assert (rep["new"], rep["duplicates"]) == (1, 1), "the first copy is the council's, the second is new"
+    assert [r["item_name"] for r in ledger(reg) if r.get("source") == "import"] == ["Robe of Tests"]
+    again = reg.import_awards(two, "Officer", 7)
+    assert (again["new"], again["duplicates"]) == (0, 2), "re-importing the same file adds nothing"
+    three = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-09\n" * 3).rows
+    assert reg.import_awards(three, "Officer", preview=True)["new"] == 1, "a third copy is a third award"
+
+
+def test_an_import_apply_waits_while_a_council_is_live(w):
+    """Regression (review item 1): an import applied while tonight's council was live could double-record its awards
+    (the council writes rows as it confirms; the file's dedupe had read the ledger before). The apply is refused,
+    naming the run; the preview still works and says why."""
+    a, _b = names(w)
+    opened(w)
+    officer = as_user(w.c, OFFICER)
+    text = f"character,item,received\n{a},Shard of Doom,2026-12-01\n"
+    r = w.c.post("/api/loot/import", json={"csv": text}, headers=officer)
+    assert r.status_code == 200, r.text
+    pv = r.json()["preview"]
+    from oibot_gm.raid_views import run_title
+    title = run_title(w.reg, w.ev)
+    assert title in pv["live_council"] and "council is live" in r.json()["message"]
+    before = ledger_bytes(w.reg)
+    r = w.c.post("/api/loot/import", json={"csv": text, "preview": False, "rev": pv["rev"]}, headers=officer)
+    assert r.status_code == 400 and title in r.json()["error"] and "after the council ends" in r.json()["error"]
+    assert ledger_bytes(w.reg) == before, "nothing written"
+    with pytest.raises(RegistryError, match="council is live"):
+        w.reg.import_awards(ledger_csv.parse(text).rows, "Officer", live_councils=[title])
+    assert w.reg.import_awards(ledger_csv.parse(text).rows, "Officer", live_councils=[title], preview=True)["new"] == 1
+
+
+def test_the_dedupe_runs_outside_the_lock_and_a_moved_ledger_still_refuses(reg, monkeypatch):
+    """Regression (review item 8): import_awards held config_lock for the whole parse + dedupe. The dedupe now runs on
+    a snapshot without the lock; under the lock the ledger is compared with that snapshot, and a ledger that moved
+    meanwhile is deduped again — a moved rev is still refused (the route's 409)."""
+    import threading
+
+    a = reg.test_members()[0].main.label
+    rows = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-09\n").rows
+    pv = reg.import_awards(rows, "Officer", preview=True)
+    orig = type(reg)._import_plan
+    held: list[bool] = []
+
+    def probe(self, got):  # another thread: can it take the lock now? (it can't while this thread holds it)
+        ok = self.config_lock.acquire(blocking=False)
+        got.append(ok)
+        if ok:
+            self.config_lock.release()
+
+    def spy(self, *args, **kw):
+        got: list[bool] = []
+        t = threading.Thread(target=probe, args=(self, got))
+        t.start()
+        t.join()
+        held.append(not got[0])
+        out = orig(self, *args, **kw)
+        if len(held) == 1:  # the council confirms the same award between the snapshot and the lock
+            seed_award(self, a)
+        return out
+
+    monkeypatch.setattr(type(reg), "_import_plan", spy)
+    before = ledger_bytes(reg)
+    rep = reg.import_awards(rows, "Officer", rev=pv["rev"])
+    assert held[0] is False, "the first dedupe ran without config_lock"
+    assert len(held) == 2 and rep["changed"] and rep["new"] == 0, "the ledger moved: deduped again, the rev moved → refused"
+    assert [r.get("source") for r in ledger(reg)] == ["bot"] and ledger_bytes(reg) != before
+
+
 def test_undo_import_route_and_mcp_tool(w, monkeypatch):
     a, b = names(w)
     officer = as_user(w.c, OFFICER)
@@ -245,14 +344,14 @@ def test_import_route_previews_then_applies_and_reloads_the_council_context(w):
     r = w.c.post("/api/loot/import", json={"csv": text}, headers=officer)
     assert r.status_code == 200, r.text
     pv = r.json()["preview"]
-    assert pv["new"] == 3 and pv["errors"] and r.json()["message"].startswith("5 row(s), 2 duplicate(s), 2 unknown item(s)")
+    assert pv["new"] == 5 and pv["errors"] and r.json()["message"].startswith("5 row(s), 0 duplicate(s), 2 unknown item(s)")
     assert ledger_bytes(w.reg) == before and head(w.reg) == h0
     bad = w.c.post("/api/loot/import", json={"csv": text, "preview": False}, headers=officer)
     assert bad.status_code == 400 and "Preview the file first" in bad.json()["error"]
     r = w.c.post("/api/loot/import", json={"csv": text, "preview": False, "rev": pv["rev"]}, headers=officer)
-    assert r.status_code == 200 and r.json()["report"]["new"] == 3, r.text
-    assert ledger_bytes(w.reg).startswith(before) and len(ledger(w.reg)) == len(before.splitlines()) + 3
-    assert len(loot_ops.guild_ctx(w.bot, w.reg).ledger) == n0 + 3, "the council's context read the new rows"
+    assert r.status_code == 200 and r.json()["report"]["new"] == 5, r.text
+    assert ledger_bytes(w.reg).startswith(before) and len(ledger(w.reg)) == len(before.splitlines()) + 5
+    assert len(loot_ops.guild_ctx(w.bot, w.reg).ledger) == n0 + 5, "the council's context read the new rows"
     assert any("loot history imported" in line for _k, _l, line in w.bot.ops.lines), "one audit line"
     stale = w.c.post("/api/loot/import", json={"csv": text, "preview": False, "rev": pv["rev"]}, headers=officer)
     assert stale.status_code == 409 and stale.json()["preview"]["new"] == 0, "the ledger moved since that preview"
@@ -284,15 +383,15 @@ def test_an_imported_unknown_item_is_learned_and_tiered_on_loot_items(w):
     key = item_key(0, "Sunfire Pauldrons")
     assert key in w.reg.items() and not w.reg.items()[key].tiers
     meta = w.reg.item_meta(key)
-    assert meta["source"] == "import" and meta["times_dropped"] == 1 and w.reg.items()[key].boss == "Gatekeeper"
+    assert meta["source"] == "import" and meta["times_dropped"] == 2 and w.reg.items()[key].boss == "Gatekeeper", "two copies in the file, whatever the case"
     listed = w.c.get("/api/loot/items", headers=H).json()["untiered"]
     row = next(i for i in listed if i["key"] == key)
-    assert row["learned"] and row["source"] == "import" and row["awards"] == 1, "listed on Loot › Items › Untiered with its award"
+    assert row["learned"] and row["source"] == "import" and row["awards"] == 2, "listed on Loot › Items › Untiered with its awards"
     assert any(i["key"] == item_key(0, "Shard of Doom") for i in listed)
     win = w.ms[1]
     spec_key = f"{win.main.cls}:{win.main.spec}"
     t = w.c.post(f"/api/loot/items/{key}/tiers", json={"tiers": {spec_key: "S"}, "reweight": True}, headers=officer | ACTOR).json()
-    assert t.get("reweighted") == 1, t
+    assert t.get("reweighted") == 2, t
     rows = ledger(w.reg)
     assert rows[-1]["kind"] == "reweight" and w.reg.items()[key].tiers == {spec_key: "S"}
     ctx = loot_ops.guild_ctx(w.bot, w.reg)

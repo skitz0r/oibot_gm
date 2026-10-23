@@ -1736,14 +1736,22 @@ make, one award per row:
 `character`, `item` (an item id, or the item's name) and `received` (the day: `2026-12-09`) are required; `boss`,
 `ms_os` (`ms` or `os`) and `note` may be left empty. *Tell from the file* recognises the three by their headers.
 **Preview** says *"N rows, M duplicates, K unknown items (recorded by name)"* and shows three groups: the **new** rows
-(with the weight each will carry), the **duplicates** (the ledger already holds that character, item and day — or an
-earlier line of the same file does) and the **unknown items** (not on the tables: recorded by name and scored the same
-for everyone until tiered). Each row shows the day it was received. After **Confirm** every unknown item — and any item on
+(with the weight each will carry), the **duplicates** and the **unknown items** (not on the tables: recorded by name and
+scored the same for everyone until tiered). **What counts as a duplicate:** a row the ledger already holds — the same
+character, the same item (by id or by name, any case) and the same day in the server's time zone. A time written *with
+its zone* (`2026-12-10T05:15:00Z`, `… UTC`, `…+01:00`) is moved to the server's zone first, so a UTC export of a 9 PM
+award lands on the right evening; a day with no zone (a plain date, or a time without one — most exports) also matches
+a row on the day before or after, because the file may have used another zone's day. Rows are matched **one for one**:
+two awards of the same item to the same character on one day are two awards — the second copy in the file is new
+unless the ledger holds two as well — and lines of the same file never cancel each other. Each row shows the day it was received. After **Confirm** every unknown item — and any item on
 the tables without tiers — is listed under **Untiered** on Loot › Items (marked *learned from an import*), where you tier
 it like a learned drop; saving its tiers asks whether to re-weight the awards it already has (default no). A line that can't be read (no character, no item, no date) is listed with its
 line number and skipped. **Confirm** adds exactly the new rows — an import only ever adds: it never changes or removes a
 row already in the ledger — and the council reads them at its next judgement (recent loot, "already has it"). If the
-ledger changed since your preview the import is refused and the fresh preview shown. A character nobody registered is
+ledger changed since your preview the import is refused and the fresh preview shown. **While a loot council is live**
+(its run is locked and the council open) Confirm is refused, naming the run — the council records tonight's awards as
+they are confirmed, and an import then could count them twice; import after the council ends (the preview still works
+and says so). A character nobody registered is
 recorded by name. Gargul and RCLootCouncil exports aren't read yet (which addon the council will run is still open):
 export them to the generic columns. Officers; over MCP `import_ledger` (preview, then apply with its `rev` — the apply
 needs the actor, §8b).

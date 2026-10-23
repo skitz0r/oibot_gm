@@ -11,7 +11,8 @@ tool → rows Registry.import_awards appends to the guild's ledger (deduped, nev
       character,item,received,boss,ms_os,note
 
   `character` (required), `item` (required: an item id — digits — or the item's name), `received` (required: the day,
-  YYYY-MM-DD; a time after it is ignored), `boss`, `ms_os` (ms | os; empty = ms), `note` — the last three optional.
+  YYYY-MM-DD; a time after it counts only with its zone — `Z`, `UTC` or `+01:00` — see `stamp`), `boss`, `ms_os` (ms |
+  os; empty = ms), `note` — the last three optional.
   Header names are matched case-insensitively (aliases: raider / name, item_id / item_name, date / received_at,
   offspec / kind).
 
@@ -23,7 +24,7 @@ from __future__ import annotations
 import csv
 import io
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from pydantic import BaseModel, Field
 
@@ -55,7 +56,8 @@ class ImportRow(BaseModel):
     raider: str
     item_id: int = 0
     item_name: str | None = None
-    received: date
+    received: date  # the day as the file writes it
+    received_at: datetime | None = None  # aware: the file stated a time WITH its zone (Registry.import_awards moves it to guild time)
     boss: str = ""
     instance: str = ""
     offspec: bool = False
@@ -78,13 +80,44 @@ def clean(value, cap: int) -> str:
 
 def day(value) -> date | None:
     """'2026-12-09' or '2026-12-09 20:15:00' / '2026-12-09T20:15' → the day; anything else None (never guessed)."""
-    m = re.match(r"\s*(\d{4}-\d{2}-\d{2})", str(value or ""))
+    return stamp(value)[0]
+
+
+STAMP = re.compile(r"\s*(\d{4}-\d{2}-\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|UTC|GMT|[+-]\d{2}:?\d{2})?)?\s*$", re.I)
+
+
+def stamp(value) -> tuple[date | None, datetime | None]:
+    """A received cell → (the day as written, the moment when the file states a time WITH its zone, else None).
+    '2026-12-10T04:15:00Z' / '2026-12-10 04:15 UTC' / '…+01:00' carry a zone: the import moves that moment to the guild's
+    day (a UTC export of a late-evening award is the evening before). A time without a zone (TMB's and most exports)
+    says nothing reliable about the zone, so only its day is read and the dedupe allows a day either side. Anything
+    that isn't a YYYY-MM-DD day → (None, None): a date is never guessed."""
+    text = str(value or "")
+    m = STAMP.match(text)
     if not m:
-        return None
+        d = re.match(r"\s*(\d{4}-\d{2}-\d{2})", text)  # a day with something unreadable after it: the day alone
+        try:
+            return (date.fromisoformat(d.group(1)) if d else None), None
+        except ValueError:
+            return None, None
     try:
-        return date.fromisoformat(m.group(1))
+        d = date.fromisoformat(m.group(1))
     except ValueError:
-        return None
+        return None, None
+    hh, mm, ss, zone = m.group(2), m.group(3), m.group(4), m.group(5)
+    if hh is None or not zone:
+        return d, None
+    z = zone.upper()
+    if z in ("Z", "UTC", "GMT"):
+        tz = timezone.utc
+    else:
+        sign = -1 if z[0] == "-" else 1
+        digits = z[1:].replace(":", "")
+        tz = timezone(sign * timedelta(hours=int(digits[:2]), minutes=int(digits[2:])))
+    try:
+        return d, datetime(d.year, d.month, d.day, int(hh), int(mm), int(ss or 0), tzinfo=tz)
+    except ValueError:
+        return d, None
 
 
 def _header(text: str) -> list[str]:
@@ -205,12 +238,12 @@ def _row(out: Parsed, n: int, who, item_id, item_name, received, boss, offspec, 
     if not iid and not nm:
         out.errors.append(f"line {n}: no item (an id or a name)")
         return
-    when = day(received)
+    when, at = stamp(received)
     if when is None:
         out.errors.append(f"line {n}: no received date (YYYY-MM-DD)")
         return
-    out.rows.append(ImportRow(line=n, raider=raider, item_id=iid, item_name=nm, received=when, boss=clean(boss, ITEM_MAX),
+    out.rows.append(ImportRow(line=n, raider=raider, item_id=iid, item_name=nm, received=when, received_at=at, boss=clean(boss, ITEM_MAX),
                               offspec=clean(offspec, 20).lower() in TRUE_WORDS, note=clean(note, NOTE_MAX) or None))
 
 
-__all__ = ["KINDS", "KIND_WORDS", "GENERIC_HEADER", "ImportRow", "Parsed", "detect", "parse"]
+__all__ = ["KINDS", "KIND_WORDS", "GENERIC_HEADER", "ImportRow", "Parsed", "detect", "parse", "stamp"]

@@ -2304,9 +2304,9 @@ class Registry:
         return lines or ["loot weights: overrides tidied (no number changed)"]
 
     # ---- loot history imports (design §3.1 "Data on-ramp" L07; dual interfaces phase 4, design §5.48)
-    def _award_keys(self, names, item_id, item_name, received) -> set[tuple[str, str, str]]:
-        """What makes two awards the same for an IMPORT: (character, item — by id and by name, and the item the tables
-        resolve either to —, the day). A row recorded by id and a file naming the item match each other."""
+    def _award_pairs(self, names, item_id, item_name) -> set[tuple[str, str]]:
+        """What makes two awards the same award for an IMPORT, the day aside: (character, item — by id and by name, and
+        the item the tables resolve either to). A row recorded by id and a file naming the item match each other."""
         items = set()
         if item_id:
             items.add(f"i:{int(item_id)}")
@@ -2317,97 +2317,163 @@ class Registry:
             if it.id:
                 items.add(f"i:{int(it.id)}")
             items.add(f"n:{it.name.strip().lower()}")
-        day = received.isoformat() if hasattr(received, "isoformat") else str(received)[:10]
-        return {(str(n).strip().lower(), i, day) for n in names if str(n or "").strip() for i in items}
+        return {(str(n).strip().lower(), i) for n in names if str(n or "").strip() for i in items}
 
-    def import_awards(self, rows, by: str, by_id: int | None = None, *, preview: bool = False, kind: str = "generic", rev: str | None = None) -> dict:
+    def import_day(self, row):
+        """The guild day an import row was received on: a moment the file stated with its zone, moved to the guild's
+        timezone (a UTC export of a 10 PM Pacific award is the evening before); else the day as written."""
+        at = getattr(row, "received_at", None)
+        return at.astimezone(self.tz).date() if at is not None else row.received
+
+    def _import_plan(self, rows, ledger_rows, cfg: dict, kind: str, by: str = "") -> tuple[dict, list]:
+        """The dedupe and the weights of an import (no lock, no write): (report, new [(award, row, shown)]).
+
+        A file row is a DUPLICATE when it matches a live (not voided) award row of the ledger: the same character, the
+        same item (by id or by name) and the same guild day — or, when the file gave no zone for its time (or no time),
+        the day before or after (the export may have written another zone's day). Matching is BY OCCURRENCE: each
+        ledger row answers for one file row only, so the N-th copy of (character, item, day) in the file matches the
+        N-th in the ledger and two real copies both survive. Same-day matches are taken first (in file order), then
+        the ±1 ones; rows of the same file never cancel each other."""
+        from .loot import scoring
+        from .lootctx import fold_ledger
+        from .models import LootAward
+
+        untiered = float(cfg.get("untiered_weight", UNTIERED_WEIGHT))
+        awards, _ = fold_ledger(ledger_rows)
+        index: dict[tuple[str, str], list[int]] = {}
+        held_day: dict[int, object] = {}
+        for i, a in enumerate(awards):
+            if a.void:
+                continue  # a voided award (an undone import, a corrected one) no longer holds the row: the fixed file imports
+            held_day[i] = a.received
+            for p in self._award_pairs([a.raider], a.item_id, a.item_name):
+                index.setdefault(p, []).append(i)
+        prepared = []
+        for r in rows:
+            try:
+                hit = self.find(r.raider)
+            except RegistryError:
+                hit = None
+            m, c = hit if hit else (None, None)
+            names = [r.raider] + ([c.label] if c is not None else [])
+            prepared.append((r, hit, m, c, self._award_pairs(names, r.item_id, r.item_name), self.import_day(r), getattr(r, "received_at", None) is not None))
+        used: set[int] = set()
+        matched: dict[int, int] = {}  # file row position → ledger award position
+
+        def take(n: int, pairs, days) -> None:
+            cands = sorted({i for p in pairs for i in index.get(p, ()) if i not in used and held_day[i] in days})
+            if cands:
+                used.add(cands[0])
+                matched[n] = cands[0]
+
+        for n, (_r, _h, _m, _c, pairs, d, _exact) in enumerate(prepared):  # the same day first, in file order
+            take(n, pairs, {d})
+        for n, (_r, _h, _m, _c, pairs, d, exact) in enumerate(prepared):  # then a day either side, for a day of unknown zone
+            if n not in matched and not exact:
+                take(n, pairs, {d - timedelta(days=1), d + timedelta(days=1)})
+        new: list[tuple] = []
+        dups: list[dict] = []
+        unknown_items: dict[str, tuple[str, int]] = {}  # lower-cased name → (as first written, rows)
+        unknown_chars: list[str] = []
+        for n, (r, hit, m, c, _pairs, d, _exact) in enumerate(prepared):
+            it = self.item(int(r.item_id or 0) or None, r.item_name)
+            label = it.name if it is not None else (r.item_name or f"item {r.item_id}")
+            shown = {"line": r.line, "character": c.label if c is not None else r.raider, "item": label, "received": d.isoformat(),
+                     "received_label": self.day_label(d.isoformat(), with_year=True),  # what a person reads (ISO stays for machines)
+                     "boss": r.boss or None, "offspec": r.offspec, "known_item": it is not None, "known_character": hit is not None}
+            if n in matched:
+                on = held_day[matched[n]]
+                why = "already in the ledger" if on == d else (f"already in the ledger on {self.day_label(on.isoformat(), with_year=True)} "
+                                                               "(the file's day can be another time zone's)")
+                dups.append({**shown, "why": why})
+                continue
+            if it is None:  # grouped regardless of case ('Sunfire Pauldrons' and 'sunfire pauldrons' are one unknown item)
+                shown_as, count = unknown_items.get(label.lower(), (label, 0))
+                unknown_items[label.lower()] = (shown_as, count + 1)
+            if hit is None and r.raider not in unknown_chars:
+                unknown_chars.append(r.raider)
+            spec = None
+            if c is not None:
+                try:
+                    spec = self.profile.spec(c.cls, c.spec)
+                except KeyError:
+                    spec = None
+            if r.tier and r.total_weight is not None:
+                tier, weight, tiered = r.tier, float(r.total_weight), True  # the guild's earlier council tiered it (BisCouncil)
+            elif it is not None:
+                tier, weight = scoring.weight_for(self.profile, it, spec, cfg)
+                tiered = bool(it.tiers)
+            else:
+                tier, weight, tiered = "?", untiered, False
+            award = LootAward(raider=c.label if c is not None else r.raider, item_id=int(it.id or 0) if it is not None else int(r.item_id or 0),
+                              item_name=it.name if it is not None else r.item_name, tier=tier, total_weight=weight, offspec=r.offspec,
+                              received=d, instance=r.instance or "", boss=r.boss or "", discord_id=m.discord_id if m is not None else None,
+                              tiered=tiered, by=by, source="import")
+            new.append((award, r, {**shown, "tier": tier, "weight": round(weight, 3)}))
+        new_rev = hashlib.sha1(json.dumps([[a.raider, a.item_id, a.item_name, a.received.isoformat()] for a, _, _ in new],
+                                          sort_keys=True).encode()).hexdigest()[:12]
+        report = {"kind": kind, "rows": len(rows), "new": len(new), "duplicates": len(dups), "unknown_items": len(unknown_items),
+                  "unknown_characters": unknown_chars[:50],
+                  "groups": {"new": [s for _, _, s in new][:300], "duplicates": dups[:300],
+                             "unknown_items": [{"item": k, "rows": v} for k, v in sorted(unknown_items.values(), key=lambda kv: (-kv[1], kv[0].lower()))][:300]},
+                  "rev": new_rev}
+        report["line"] = (f"{len(rows)} row(s), {len(dups)} duplicate(s), {len(unknown_items)} unknown item(s) (recorded by name)"
+                          + (f", {len(unknown_chars)} character(s) nobody registered (recorded by name)" if unknown_chars else ""))
+        return report, new
+
+    @staticmethod
+    def live_council_refusal(live_councils) -> str | None:
+        """THE refusal of an import apply while a council of the guild is live (its run is locked): the council writes
+        award rows as they're confirmed, so the file's dedupe could have read the ledger before tonight's rows — and
+        count them twice. None when no council is live. `live_councils`: the runs' names as a person reads them."""
+        names = [str(n) for n in dict.fromkeys(live_councils or []) if str(n or "").strip()]
+        if not names:
+            return None
+        return (f"A loot council is live ({', '.join(names)}): it records awards as they're confirmed, so an import now could count "
+                "tonight's awards twice. Import after the council ends — the preview works meanwhile.")
+
+    def import_awards(self, rows, by: str, by_id: int | None = None, *, preview: bool = False, kind: str = "generic", rev: str | None = None,
+                      live_councils=()) -> dict:
         """A loot history file's rows (importers/ledger_csv.ImportRow) into the guild's ledger — Loot › Items › Import,
-        MCP import_ledger. For IMPORTS only, a row is a duplicate when the ledger (any award row, a corrected one too) or
-        an earlier row of the same file already holds (character, item by id or name, day) — the council's own awards
-        dedupe by their import_id as before. New rows are APPENDED (source 'import', `by`, the file's kind, its note);
+        MCP import_ledger. For IMPORTS only, a row is a duplicate when it matches a live award row of the ledger
+        (_import_plan: same character, item by id or name, and guild day — a day either side when the file gave no zone;
+        by occurrence, so two real copies both import) — the council's own awards dedupe by their import_id as before.
+        New rows are APPENDED (source 'import', `by`, the file's kind, its note);
         nothing in the ledger is ever edited or deleted. An item the tables don't know is recorded by name (D4: untiered,
         `untiered_weight`) and, on an apply, learned (learn_item, source 'import', once per item for all its rows) so it is
         listed on Loot › Items › Untiered and can be tiered there — its awards then re-weight on the D12 question like
         any learned drop's (an untiered item the tables know is learned the same way); a known item is weighed tier × slot for the character's spec (the file's own tier and weight
         when it carries them — BisCouncil); a character nobody registered is recorded by name. `preview`: nothing written.
         One commit. `rev` (an apply): the preview's rev — when the rows that would be added differ now (the ledger moved
-        since the preview), nothing is written and the report says `changed`. Returns {rows, new, duplicates,
+        since the preview), nothing is written and the report says `changed`. `live_councils` (the caller's live,
+        non-test councils of this guild, by run name): an apply is refused while any is live (live_council_refusal);
+        a preview is not. The dedupe runs on a snapshot of the ledger outside `config_lock`; the lock is held only to
+        check the ledger is still that snapshot (else the dedupe runs again on what is there) and append. Returns
+        {rows, new, duplicates,
         unknown_items, unknown_characters, groups{new, duplicates, unknown_items} (each row with `received` ISO and
         `received_label` — the day a person reads), rev, changed, learned (an apply: items learned), line: 'N rows, M
         duplicates, K unknown items (recorded by name)'}."""
-        from .loot import scoring
-        from .lootctx import fold_ledger
-        from .models import LootAward
-
         rows = list(rows or [])
         rel = Path(self.key) / "ledger.jsonl"
         cfg = self.loot_cfg()
-        untiered = float(cfg.get("untiered_weight", UNTIERED_WEIGHT))
-        with self.config_lock:  # two imports at once never both pass the dedupe; the read, the check and the append are one step
-            awards, _ = fold_ledger(self.store.read_jsonl(rel))
-            seen: dict[tuple, str] = {}
-            for a in awards:
-                if a.void:
-                    continue  # a voided award (an undone import, a corrected one) no longer holds the row: the fixed file imports
-                for k in self._award_keys([a.raider], a.item_id, a.item_name, a.received):
-                    seen.setdefault(k, "already in the ledger")
-            new: list[tuple] = []
-            dups: list[dict] = []
-            unknown_items: dict[str, int] = {}
-            unknown_chars: list[str] = []
-            for r in rows:
-                try:
-                    hit = self.find(r.raider)
-                except RegistryError:
-                    hit = None
-                m, c = hit if hit else (None, None)
-                names = [r.raider] + ([c.label] if c is not None else [])
-                keys = self._award_keys(names, r.item_id, r.item_name, r.received)
-                it = self.item(int(r.item_id or 0) or None, r.item_name)
-                label = it.name if it is not None else (r.item_name or f"item {r.item_id}")
-                shown = {"line": r.line, "character": c.label if c is not None else r.raider, "item": label, "received": r.received.isoformat(),
-                         "received_label": self.day_label(r.received.isoformat(), with_year=True),  # what a person reads (ISO stays for machines)
-                         "boss": r.boss or None, "offspec": r.offspec, "known_item": it is not None, "known_character": hit is not None}
-                why = next((seen[k] for k in keys if k in seen), None)
-                if why is not None:
-                    dups.append({**shown, "why": why})
-                    continue
-                for k in keys:
-                    seen[k] = f"line {r.line} of this file"
-                if it is None:
-                    unknown_items[label] = unknown_items.get(label, 0) + 1
-                if hit is None and r.raider not in unknown_chars:
-                    unknown_chars.append(r.raider)
-                spec = None
-                if c is not None:
-                    try:
-                        spec = self.profile.spec(c.cls, c.spec)
-                    except KeyError:
-                        spec = None
-                if r.tier and r.total_weight is not None:
-                    tier, weight, tiered = r.tier, float(r.total_weight), True  # the guild's earlier council tiered it (BisCouncil)
-                elif it is not None:
-                    tier, weight = scoring.weight_for(self.profile, it, spec, cfg)
-                    tiered = bool(it.tiers)
-                else:
-                    tier, weight, tiered = "?", untiered, False
-                award = LootAward(raider=c.label if c is not None else r.raider, item_id=int(it.id or 0) if it is not None else int(r.item_id or 0),
-                                  item_name=it.name if it is not None else r.item_name, tier=tier, total_weight=weight, offspec=r.offspec,
-                                  received=r.received, instance=r.instance or "", boss=r.boss or "", discord_id=m.discord_id if m is not None else None,
-                                  tiered=tiered, by=by, source="import")
-                new.append((award, r, {**shown, "tier": tier, "weight": round(weight, 3)}))
-            new_rev = hashlib.sha1(json.dumps([[a.raider, a.item_id, a.item_name, a.received.isoformat()] for a, _, _ in new],
-                                          sort_keys=True).encode()).hexdigest()[:12]
-            report = {"kind": kind, "rows": len(rows), "new": len(new), "duplicates": len(dups), "unknown_items": len(unknown_items),
-                      "unknown_characters": unknown_chars[:50],
-                      "groups": {"new": [s for _, _, s in new][:300], "duplicates": dups[:300],
-                                 "unknown_items": [{"item": k, "rows": n} for k, n in sorted(unknown_items.items(), key=lambda kv: (-kv[1], kv[0].lower()))][:300]},
-                      "rev": new_rev}
-            report["line"] = (f"{len(rows)} row(s), {len(dups)} duplicate(s), {len(unknown_items)} unknown item(s) (recorded by name)"
-                              + (f", {len(unknown_chars)} character(s) nobody registered (recorded by name)" if unknown_chars else ""))
-            report["changed"] = bool(rev) and rev != report["rev"]
-            if preview or not new or report["changed"]:
-                return report
+        refusal = self.live_council_refusal(live_councils)
+        if refusal and not preview:
+            raise RegistryError(refusal)
+        snap = self.store.read_jsonl(rel)
+        report, new = self._import_plan(rows, snap, cfg, kind, by)
+        report["changed"] = bool(rev) and rev != report["rev"]
+        if refusal:
+            report["live_council"] = refusal  # the preview says why Confirm will wait
+        if preview or not new or report["changed"]:
+            return report
+        with self.config_lock:  # two imports at once never both pass the dedupe: the check that the ledger is the snapshot and the append are one step
+            now_rows = self.store.read_jsonl(rel)
+            if now_rows != snap:  # the ledger moved since the snapshot: the dedupe again, on what is there now
+                report, new = self._import_plan(rows, now_rows, cfg, kind, by)
+                report["changed"] = bool(rev) and rev != report["rev"]
+                if not new or report["changed"]:
+                    return report
+            new_rev = report["rev"]
             stamp = now()
             # every imported row gets a stable import_id ('<batch>-<n>') and the batch id, so the import can be undone
             # (undo_import: one void row per award, the shape the council's corrections write — lootctx.void_row)

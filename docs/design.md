@@ -2891,15 +2891,23 @@ drafts; officers decide.
 ['line 7: …'], skipped)` for `biscouncil` (reuses `importers/biscouncil.py`: `split_text` / `row_award`; the file's own
 tier and weight per row are kept), `tmb` (a ThatsMyBIS export's `received` rows — character_name, item_name / item_id,
 received_at, is_offspec, note; wishlist / prio rows skipped and counted) and `generic` — the documented fallback
-`character,item,received,boss,ms_os,note` (item = digits → an id, else a name; received = YYYY-MM-DD, a time after it
-ignored, nothing else guessed; headers matched case-insensitively with aliases). `kind="auto"` → `detect()` by headers.
+`character,item,received,boss,ms_os,note` (item = digits → an id, else a name; received = YYYY-MM-DD — `ledger_csv.stamp`:
+a time after it WITH a zone (Z / UTC / ±hh:mm) is kept as `ImportRow.received_at`, a time without one is ignored,
+nothing else guessed; headers matched case-insensitively with aliases). `kind="auto"` → `detect()` by headers.
 A row that can't be read is listed with its line and skipped; a file in no format, over 2 MB or 5000 awards, or a
 `gargul` / `rclc` kind is refused in words (the generic columns named). Cells are whitespace-collapsed and capped —
-member-made text is data. `Registry.import_awards(rows, by, by_id, *, preview, kind, rev)`: under `config_lock`, reads the
-ledger (`lootctx.fold_ledger`, every award row incl. a voided one) and, for IMPORTS only, treats a row as a duplicate
-when (character — the file's name and the registered label —, item — by id and by name and the item the tables
-resolve either to —, day) is already in the ledger or on an earlier line of the file (`_award_keys`; the council's own
-awards keep deduping by import_id). New rows are APPENDED to `ledger.jsonl` (`source: import`, `by`, `imported: <kind>`,
+member-made text is data. `Registry.import_awards(rows, by, by_id, *, preview, kind, rev, live_councils)`: an apply is
+refused (`live_council_refusal`, a RegistryError naming the runs; the route passes the guild's live non-test councils
+by `run_title`) while a council of the guild is live — it writes tonight's rows as it confirms, so the file's dedupe
+could count them twice; a preview carries the same sentence as `live_council`. `_import_plan` reads a SNAPSHOT of the
+ledger (`lootctx.fold_ledger`, live award rows; a voided one holds nothing) WITHOUT the lock and, for IMPORTS only,
+treats a row as a duplicate when it matches a ledger row on (character — the file's name and the registered label —,
+item — by id and by name and the item the tables resolve either to — `_award_pairs`, guild day — `import_day`: a
+zoned moment moved to the guild's timezone, else the day as written): same-day matches first, then — for a row whose
+file gave no zone — the day before or after; ONE FOR ONE (each ledger row answers for one file row, so the N-th copy of
+(character, item, day) in the file matches the N-th in the ledger; lines of one file never cancel each other). The
+council's own awards keep deduping by import_id. `config_lock` is taken only to check the ledger is still the snapshot
+(else the plan runs again on what is there, and a moved `rev` still refuses) and to append. New rows are APPENDED to `ledger.jsonl` (`source: import`, `by`, `imported: <kind>`,
 `imported_at`, the note, `by_id`) in one commit — never an edit, never a delete. Weight: the file's tier and weight
 (BisCouncil), else `scoring.weight_for` for the registered character's spec, else (an item the tables don't know)
 recorded by name, `tier ?`, `untiered_weight`, `tiered False` (D4); a character nobody registered is recorded by name

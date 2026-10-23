@@ -837,6 +837,19 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         return {"message": line, "report": report}
 
     # ------------------------------------------------------------ phase 4 (design §5.48): the data on-ramp
+    def live_councils(reg) -> list[str]:
+        """The guild's live, non-test loot councils by run name (what Registry.import_awards refuses an apply over)."""
+        sessions = getattr(bot, "loot_sessions", None)
+        if sessions is None:
+            return []
+        out = []
+        for s in sessions(reg):  # live only (LootMixin.loot_live: the run is locked)
+            if s.test:
+                continue  # a rehearsal writes no ledger rows
+            _rs, ev = bot.loot_run(s)
+            out.append(run_title(reg, ev) if ev is not None else str(s.run_key or s.id))
+        return out
+
     @app.post("/api/loot/import")
     async def loot_import(request: Request):
         """Loot › Items › Import (L07; MCP import_ledger): a loot history CSV into the ledger. {csv, kind: auto |
@@ -844,7 +857,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         writes nothing and answers the groups — new rows · duplicates · unknown items — with 'N rows, M duplicates, K
         unknown items (recorded by name)' and a `rev`; the apply (`preview: false`) needs that rev (none → 400; the rows
         that would be added changed since → 409 with the fresh preview) and APPENDS exactly the new rows (Registry.
-        import_awards: dedupe on (character, item, day) for imports only — never an edit, never a delete; an untiered
+        import_awards: dedupe on (character, item, guild day ±1 when the file gives no zone), one for one, for imports only —
+        never an edit, never a delete; refused while a council of the guild is live (the preview says so); an untiered
         or unknown item is learned onto Loot › Items › Untiered so it can be tiered there), then the council's context reloads. Officers; from MCP the apply records awards in someone's name: X-Oibot-Actor (D8)."""
         from ..importers import ledger_csv
 
@@ -862,11 +876,16 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             parsed = await asyncio.to_thread(ledger_csv.parse, text, str(d.get("kind") or "auto"))
         except ValueError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
-        report = await asyncio.to_thread(reg.import_awards, parsed.rows, by_of(v), v.uid, preview=preview, kind=parsed.kind,
-                                         rev=None if preview else d.get("rev"))
+        try:  # an apply while a council of this guild is live is refused (it writes tonight's rows as it confirms them)
+            report = await asyncio.to_thread(reg.import_awards, parsed.rows, by_of(v), v.uid, preview=preview, kind=parsed.kind,
+                                             rev=None if preview else d.get("rev"), live_councils=live_councils(reg))
+        except (RegistryError, ValueError) as e:
+            from ..configops import user_error
+
+            return JSONResponse({"error": user_error(e)}, status_code=400)
         report.update(errors=parsed.errors[:100], skipped=parsed.skipped, kind_words=ledger_csv.KIND_WORDS[parsed.kind])
-        if preview:
-            return {"preview": report, "message": report["line"]}
+        if preview:  # a live council: the preview says Confirm waits until it ends
+            return {"preview": report, "message": report["line"] + (f" — {report['live_council']}" if report.get("live_council") else "")}
         if report.get("changed"):
             return JSONResponse({"error": "The ledger changed since you looked — here is the file against it now; import again if it still reads right.",
                                  "preview": report}, status_code=409)
