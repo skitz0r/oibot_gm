@@ -2908,7 +2908,9 @@ needs no restart: `FeedServer` re-checks an issued token at EVERY frame after th
 `revoke_companion` also closes any live socket with it at once (`FeedServer.close_token`). A bad token at hello gets the
 same `auth: true` error. `auth: true` (which ends the companion) is kept for a genuine no-match or revoke: when the bot
 can't tell for now — the token's guild is parked with the token unrevoked (`Guilds.detached`), an issued-looking token
-(`oibot-feed-…`) matches nothing while a guild failed to load (`Guilds.load_errors`), or the check itself raised —
+(`oibot-feed-…`) matches nothing while a guild failed to load (`Guilds.load_errors`), a guild's own `.env` token
+(`OIBOT_FEED_TOKEN_<KEY>`) arrives while that guild isn't served (parked, or its guild.yaml failed to load — `authorize_any`
+answers ok None; fixer 2026-10-22), or the check itself raised —
 `feed_issued` raises `feed.TokenUnverifiable` / `still_valid` answers None / `FeedServer.authorize` catches, and the reply
 is a plain `{"type": "error", "message": UNAVAILABLE}` (no idem, no auth) and the socket closes: nothing is applied, the
 event stays in the companion's flight and it reconnects with its backoff (fail-closed for data, not fatal mid-raid). `on_seen` = `feed_seen` (touch off the loop). `presence()` rows carry

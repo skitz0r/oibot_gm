@@ -324,14 +324,16 @@ def authorize_any(token: str, shared: str | None, per_guild: dict[str, str], key
                   issued: Callable[[str], tuple[str, str, str] | None] | None = None) -> tuple[bool, str | None, str | None, str | None]:
     """A hello's token → (ok, guild key, issued token id, label): a guild's .env token first (as `authorize`), then an
     issued token by hash (`issued(token)` → (guild key, token id, label) or None — Registry.match_feed_token over the
-    guilds served), then the shared one. ok None: no match, but `issued` raised TokenUnverifiable (a guild that might
-    hold it isn't served now) — refused without auth:true, so the companion retries."""
+    guilds served), then the shared one. ok None: no match, but a guild that holds it isn't served now — a guild's .env
+    token (OIBOT_FEED_TOKEN_<KEY>) whose guild is detached or failed to load, or `issued` raised TokenUnverifiable —
+    refused without auth:true, so the companion retries and comes back when the guild does."""
+    unsure = False
     for suffix, t in per_guild.items():
         if same(token, t):
             key = next((k for k in keys() if token_suffix(k) == suffix), None)
             if key:
                 return True, key, None, None
-    unsure = False
+            unsure = True  # the token is that guild's own: the guild isn't served right now, the token isn't dead
     if token and issued is not None:
         try:
             hit = issued(str(token))

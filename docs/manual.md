@@ -967,7 +967,8 @@ the bot, below — an issued token always feeds its own server only.)
 A token feeds this server's raids only, whatever the companion's `--guild` says. **Revoking** cuts the companion off at
 its very next message, no restart; it stops with *"the bot refused this companion's token"* and needs a new token. (If
 the bot only can't check a token for a moment — say it just restarted and the server isn't back yet — the companion says
-so and keeps reconnecting; it doesn't stop.) Token records (labels, who they went to) show only on the Companions hub,
+so and keeps reconnecting; it doesn't stop. The same holds for a server's `.env` token while that server is briefly not
+looked after.) Token records (labels, who they went to) show only on the Companions hub,
 never in the Config page's "As stored" view or anything the bot's assistant reads. At
 most 10 active tokens per server; labels must be different. The bot keeps only a fingerprint (hash) of each token —
 nobody can read a token back, not even the owner — and token values never appear in the ops channel, logs or the data

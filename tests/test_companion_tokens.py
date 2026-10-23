@@ -311,6 +311,27 @@ def test_authorize_any_unsure():
     assert authorize_any("shared", "shared", {}, lambda: [], unsure) == (True, None, None, None), "the shared token still holds"
 
 
+def test_a_detached_guilds_env_token_is_unverifiable_not_dead(reg):
+    """Regression: an OIBOT_FEED_TOKEN_<KEY> whose guild isn't served now (parked, or its guild.yaml failed to load after a
+    restart) fell through to `return False` → {"auth": true} → the companion exited for good mid-raid. It is the guild's
+    own token: 'can't check now' (ok None, a plain error), and it works again once the guild is served."""
+    from oibot_gm.feed import UNAVAILABLE, token_suffix
+
+    env = {token_suffix(reg.key): "guild-env-token"}
+    assert authorize_any("guild-env-token", "shared", env, lambda: [], None) == (None, None, None, None)
+    assert authorize_any("guild-env-token", "shared", env, lambda: [reg.key], None) == (True, reg.key, None, None)
+    assert authorize_any("guild-env-token", "guild-env-token", env, lambda: [], None) == (True, None, None, None), "the shared value still holds"
+    assert authorize_any("wrong", "shared", env, lambda: [], None) == (False, None, None, None), "a token nobody holds is still dead"
+    served: list = []
+    seen: list = []
+    fs = feed_server(reg, seen)
+    fs.auth = lambda t: authorize_any(t, None, env, lambda: list(served), None)
+    out = run(session(fs, [{"type": "hello", "token": "guild-env-token", "character": "Rhozy"}]))
+    assert out[0] == {"type": "error", "message": UNAVAILABLE} and "auth" not in out[0] and seen == []
+    served.append(reg.key)
+    assert run(session(fs, [{"type": "hello", "token": "guild-env-token", "character": "Rhozy"}]))[0]["type"] == "welcome"
+
+
 def test_an_unverifiable_hello_or_frame_is_a_plain_error_and_the_socket_closes(reg):
     """The wire: a hello the bot can't check now, and a frame whose guild went away, get {type:error} WITHOUT auth (the
     companion reconnects and re-sends) and nothing reaches the handler; a genuinely unknown token still gets auth:true."""
