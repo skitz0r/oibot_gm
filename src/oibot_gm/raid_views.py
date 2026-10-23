@@ -215,11 +215,28 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     return e, v
 
 
+def raid_thumb_sig(key: str, rid: str) -> str | None:
+    """The `s=` an UNLISTED guild's emblem URL carries (B10): an HMAC of (guild key, raid) under OIBOT_WEB_SECRET, so
+    Discord's cookieless fetch of a card's thumbnail still gets the guild's own emblem while a guessed ?g=<key> gets the
+    profile's defaults (never a tell that the key exists). None without a secret (then the defaults, for everyone)."""
+    import hashlib
+    import hmac
+
+    secret = os.environ.get("OIBOT_WEB_SECRET") or ""
+    if not secret:
+        return None
+    return hmac.new(secret.encode(), f"raid-thumb:{key}:{rid}".encode(), hashlib.sha256).hexdigest()[:20]
+
+
 def raid_thumb_url(reg: Registry, rid: str | None) -> str | None:
     """The site's raid emblem for this guild (?g=: Discord fetches without cookies, and the URL — cached by browsers and
-    Discord's media proxy — must differ per guild, whose size / lockout / name may differ). None off https."""
+    Discord's media proxy — must differ per guild, whose size / lockout / name may differ). None off https. An unlisted
+    guild's URL adds its signature (raid_thumb_sig): /img/raid honours an unlisted ?g= only with it, or for its members."""
     web = os.environ.get("OIBOT_WEB_URL", "")
-    return f"{web}/img/raid/{rid}.png?g={reg.key}" if web.startswith("https") and rid else None
+    if not (web.startswith("https") and rid):
+        return None
+    sig = None if getattr(reg.config, "public", True) else raid_thumb_sig(reg.key, rid)
+    return f"{web}/img/raid/{rid}.png?g={reg.key}" + (f"&s={sig}" if sig else "")
 
 
 def board_url(reg: Registry, ev: rc.RaidEvent) -> str | None:

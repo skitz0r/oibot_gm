@@ -26,6 +26,8 @@ log = logging.getLogger(__name__)
 NOT_SET_UP = ("This server isn't set up for oibot_GM yet. The server owner (or someone with Manage Server) sets it up with "
               "`/gm config owner`.")
 NO_GUILDS = "I'm not set up for any server yet. Run `/gm config owner` in the server you want me to look after."
+# someone in none of the servers when no served guild is listed (B10): no guild named, no invite — ask whoever invited you
+NOT_IN_ANY_UNLISTED = "You're not in any server I look after. If someone invited you, ask them for the server's invite."
 GONE = "This button's server isn't served by the bot any more."
 OTHER_SERVER = "This button belongs to another server."
 LOOKUP_TIMEOUT_S = 1.5  # per guild, run concurrently: `need` stays inside Discord's 3-second window
@@ -215,10 +217,17 @@ async def identity(bot, reg, who, *, max_age: float = PRIV_ROUTING) -> Resolved:
     return await resolve_role(bot, reg, who, max_age=max_age)
 
 
+def listed(regs) -> list:
+    """The LISTED guilds of `regs` (GuildConfig.public, B10 — the same predicate as web/app.listed): the only ones a
+    refusal to someone outside every guild may name."""
+    return [r for r in regs if getattr(r.config, "public", True)]
+
+
 def join_lines(regs) -> str:
-    """Each server's name and its Join link (when it has one) — for someone who is in none of them."""
+    """Each LISTED server's name and its Join link (when it has one) — for someone who is in none of them. An unlisted
+    guild is never named, nor its invite handed out (B10)."""
     out = []
-    for r in regs:
+    for r in listed(regs):
         name = discord.utils.escape_markdown(str(r.config.name))
         out.append(f"• **{name}**" + (f" — {r.config.invite_url}" if r.config.invite_url else ""))
     return "\n".join(out)
@@ -296,6 +305,10 @@ async def need(interaction: discord.Interaction, reply: bool = True, guilds=None
 
 
 def not_in_any(regs) -> str:
+    """The reply to someone in none of the servers: the LISTED ones with their Join links; none listed → NO_GUILDS'
+    wording (an unlisted guild is never named to someone outside it, B10)."""
+    if not listed(regs):
+        return NOT_IN_ANY_UNLISTED
     return "You're not in any server I look after yet. Join one first:\n" + join_lines(regs)
 
 

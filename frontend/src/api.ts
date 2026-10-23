@@ -324,10 +324,22 @@ export interface Precedent { ref: string; item: string; bot: string; human: stri
 export interface LogRow {
   item: string; item_id: number; key: string; character: string; disenchant: boolean; cls: string | null; spec: string | null; boss: string; instance: string; received: string; date_label: string; offspec: boolean; mine: boolean;
   tier?: string; weight?: number; source?: string; bot?: string | null; by?: string | null; import_id?: string | null; candidates?: { character: string; spec?: string; tier?: string; base?: number }[]; reason?: string | null;
+  /** My loot only: the award's id (what a question is asked about) and my question about it, if any (L32) */
+  award?: string; appeal?: MyAppeal | null;
+}
+/** A member's own question about one of their awards (L32) — as THEY see it: never the officer's note or who resolved it. */
+export interface MyAppeal { id: string; item: string; character: string; award: string; text: string; state: "open" | "resolved"; outcome: string | null; outcome_label: string | null; state_text: string }
+/** Loot › Appeals (officers): the question plus the council's record of the award and the card / thread link. */
+export interface OfficerAppeal extends MyAppeal {
+  member: string; member_id: string; cls: string | null; spec: string | null; item_id: number; boss: string | null; date_label: string; offspec: boolean; asked_label: string; via: string;
+  note: string | null; resolved_by: string | null; resolved_label: string | null; link: string | null;
+  details: { found: boolean; void?: boolean; source?: string | null; bot?: string | null; by?: string | null; tier?: string; weight?: number; confirmed_label?: string; candidates?: { character: string; spec?: string; tier?: string; base?: number }[]; reason?: string | null };
+  /** open only: THE consequence sentence per outcome (the server's words) */
+  consequences?: Record<string, string>;
 }
 export interface WishEntry { item_id: number; name: string; key: string; rank: number; offspec: boolean; note: string | null; source: string; known: boolean; tiered: boolean; boss: string | null; received: string | null; received_label: string | null }
 export interface WishCharacter { label: string; cls: string; spec: string; is_main: boolean; rev: string; entries: WishEntry[] }
-export interface ItemBrief { key: string; id: number; name: string; boss: string | null; slot: string; type: string; tiered: boolean; learned: boolean; first_seen_label?: string; times_dropped?: number; first_run?: string; awards?: number }
+export interface ItemBrief { key: string; id: number; name: string; boss: string | null; slot: string; type: string; tiered: boolean; learned: boolean; first_seen_label?: string; times_dropped?: number; first_run?: string; source?: string; awards?: number }
 export interface ItemGrid extends ItemBrief {
   rows: { key: string; cls: string; spec: string; role: string; tier: string; own: string | null; profile: string | null; equippable: boolean; why: string | null }[];
   wide: Record<string, string>; own: Record<string, string>; tiers: string[]; roles: string[]; awards: number;
@@ -337,7 +349,7 @@ export interface ItemGrid extends ItemBrief {
 /** A typed draft: `kind` names what it edits, `target` which one, `fields` typed values (never the plain-text grammar).
  *  kinds: settings · raid · raid_reset · schedule (target "<raid>:<schedule>") · schedule_remove · buff · family (target null + name = new) ·
  *  aura_reset (target null = everything) · recruitment · plain. The server builds the ops (configops.ops_from_fields). */
-export interface OpsChange { kind: "settings" | "raid" | "raid_reset" | "schedule" | "schedule_remove" | "buff" | "family" | "aura_reset" | "recruitment" | "plain" | "comp"; target?: string | null; fields?: Record<string, unknown> }
+export interface OpsChange { kind: "settings" | "raid" | "raid_reset" | "schedule" | "schedule_remove" | "buff" | "family" | "aura_reset" | "recruitment" | "plain" | "comp" | "loot_weights"; target?: string | null; fields?: Record<string, unknown> }
 /** One setting of a write, current → new, in words (mentions already rendered as #channel / @Role). `before` null = a new thing. */
 export interface DescribedPart { label: string; before: string | null; after: string | null }
 /** One WRITE (a buff, a family, a raid, a schedule, the guild settings): its parts, the refusal its apply would give, warn, consequences. */

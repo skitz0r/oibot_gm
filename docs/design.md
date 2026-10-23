@@ -1009,7 +1009,7 @@ thread check matches `s.guild`. `SetupMixin.set_channel` refuses a channel from 
 Pool listeners per guild (`attach_pool_listener`, idempotent). `OIBOT_COMMAND_SCOPE=guild` syncs the test server plus
 every configured server (`sync_servers`, deduplicated). `/gm status`, `help_extras` and `/api/ops` show this guild's ops lines and
 companions; "(whole bot)" labels appear only with several guilds (K17). `/healthz` adds `per_guild` (does the bot see
-each server) and `guilds_failed`. `check_emoji_conflicts` warns when two loaded profiles map one icon name to
+each server; to this machine or the MCP bearer only, §5.49) and `guilds_failed`. `check_emoji_conflicts` warns when two loaded profiles map one icon name to
 different art. **Shared on purpose:** the LLM budget (one monthly cap for the whole bot), the feed token and listener.
 Tests: `tests/test_multiguild_core.py` on the two-guild fixture (`conftest.duo`: demo on server 1, duo on server 2
 with its own owner and members; `same_run` opens one run key in both, also via a shared schedule id).
@@ -2878,6 +2878,223 @@ ChannelsCard (edit mode through useOpsSave) + §5.44's NewsCard (the one keyword
 saves on change (tests/test_frontend_source.py pins it). The tier draft (`loot/tierdraft.draft`) runs inside
 `llm.provider.for_guild(reg.key)`, so its usage row is the guild's (§5.45, D45). Parked guilds in GET /api/guilds carry
 `detached` and no `busy`; served ones carry `busy` (the apply job's raid guard).
+
+### 5.48 Dual interfaces, phase 4 — the loot data on-ramp: history import, weights, re-score, distil (built 2026-10-22)
+
+Phase 4's first row (out/dual_interface_design.md §3.1 "Data on-ramp" L06/L07, "Members" wishlists, "Policy and
+precedents" L29; §6 Phase 4). Owner decisions: D4 (unknown items by name), D5 (native wishlists shaped for a TMB import;
+an import never deletes a native entry), D8 (MCP decisions need X-Oibot-Actor), D13 OPEN (which addon — so the
+Gargul / RCLootCouncil formats are NOT built), D45 (one shared LLM cap, spend per guild). Code computes; Claude only
+drafts; officers decide.
+
+**Loot history import (L07).** `importers/ledger_csv.py`: `parse(text, kind)` → `Parsed(kind, rows: [ImportRow], errors
+['line 7: …'], skipped)` for `biscouncil` (reuses `importers/biscouncil.py`: `split_text` / `row_award`; the file's own
+tier and weight per row are kept), `tmb` (a ThatsMyBIS export's `received` rows — character_name, item_name / item_id,
+received_at, is_offspec, note; wishlist / prio rows skipped and counted) and `generic` — the documented fallback
+`character,item,received,boss,ms_os,note` (item = digits → an id, else a name; received = YYYY-MM-DD, a time after it
+ignored, nothing else guessed; headers matched case-insensitively with aliases). `kind="auto"` → `detect()` by headers.
+A row that can't be read is listed with its line and skipped; a file in no format, over 2 MB or 5000 awards, or a
+`gargul` / `rclc` kind is refused in words (the generic columns named). Cells are whitespace-collapsed and capped —
+member-made text is data. `Registry.import_awards(rows, by, by_id, *, preview, kind, rev)`: under `config_lock`, reads the
+ledger (`lootctx.fold_ledger`, every award row incl. a voided one) and, for IMPORTS only, treats a row as a duplicate
+when (character — the file's name and the registered label —, item — by id and by name and the item the tables
+resolve either to —, day) is already in the ledger or on an earlier line of the file (`_award_keys`; the council's own
+awards keep deduping by import_id). New rows are APPENDED to `ledger.jsonl` (`source: import`, `by`, `imported: <kind>`,
+`imported_at`, the note, `by_id`) in one commit — never an edit, never a delete. Weight: the file's tier and weight
+(BisCouncil), else `scoring.weight_for` for the registered character's spec, else (an item the tables don't know)
+recorded by name, `tier ?`, `untiered_weight`, `tiered False` (D4); a character nobody registered is recorded by name
+(no discord_id). D4's "tiered later on Loot › Items": in the same commit (`GitStore.batch`) an apply LEARNS every item of
+the new rows that has no tiers — unknown, or on the tables untiered — through `learn_item(..., source="import",
+times=<its rows>)`, once per item, so it is on GET `/api/loot/items` Untiered (`item_brief.source` = import → the badge
+"learned from an import") with its awards, and tiering it asks the D12 re-weight question like any learned drop; the
+report carries `learned`, the route's line adds it and publishes `items`. A preview learns nothing. Each shown row has
+`received` (ISO, machines) and `received_label` (`Registry.day_label(..., with_year=True)` — the clock rule: what the
+preview tables print). The report: rows / new / duplicates / unknown_items / unknown_characters, the groups (new · duplicates
+with why · unknown items with counts; ≤300 each), `rev` (a hash of the rows that would be added) and THE line *"N
+row(s), M duplicate(s), K unknown item(s) (recorded by name)"*. `preview` writes nothing; an apply carrying a `rev` that
+no longer matches (the ledger moved) writes nothing and says `changed`. POST `/api/loot/import` {csv, kind, preview
+(default true), rev}: officers; the apply needs the preview's rev (400 without, 409 + the fresh preview when it moved)
+and, from MCP, the actor (D8 — awards in people's names); after it `lootctx` reloads (`RegistryLootContext.reload`, on the
+loop: the council reads the rows at its next judgement), one `ops.audited` line, `publish("loot:ledger")`. MCP
+`import_ledger(csv | path, kind, preview=True, rev)` (a local path is read by the tool; the apply refuses without a rev).
+Loot › Items › **Import loot history…** (`components/loot/LedgerImport.tsx`): pick a file or paste, a kind select (Tell
+from the file · BisCouncil · ThatsMyBIS · Generic), Preview → the server's line + three tabs (New · Duplicates · Unknown
+items) → **Confirm — import N rows**. BY_DESIGN_ONLY `ledger_import` (web; MCP beside it).
+
+**Undo an import (fixer, 2026-10-22).** Every applied row carries a stable `import_id` = `<batch>-<n>` and `import_batch` =
+`imp-<UTC stamp>-<rev[:6]>` (the report's `batch`; the audit line names it), so a wrongly applied file (the export date in the
+received column, the wrong character column) is correctable: `Registry.undo_import(batch, by, reason, by_id)` appends one
+`kind: void` row per still-live award of the batch — `lootctx.void_row`, the same row the council's corrections write
+(`RegistryLootContext.void`) — under `config_lock`, one commit, idempotent; nothing is edited or deleted. The dedupe skips
+voided awards, so the fixed file imports afterwards. `Registry.import_batches()` lists the imports newest first (who, when as
+`local12`, rows, live, and the Undo confirm's `consequence` sentence composed in code). GET `/api/loot/imports`, POST
+`/api/loot/import/undo` {batch, reason} (officers; from MCP the actor, D8; the council's context reloads, one audit line,
+`publish("loot:ledger")`); MCP `import_batches`, `undo_import`; the Import modal's **Earlier imports** list with **Undo this
+import** (useConfirm with the server's sentence and an optional why). BY_DESIGN_ONLY `ledger_import_undo` (web; MCP beside it).
+Rows imported before this change have no import_id and stay uncorrectable from the surfaces.
+
+**Weights (L06).** `Registry.loot_cfg()` now merges the guild's `loot:` overrides at EVERY depth with keys matched by their
+text (`_merge_loot`: 'wishlist.rank_bonus.1' alone keeps #2–#5; the int key stays an int — scoring reads `rank_bonus[1]`).
+`loot_weight_defaults()` = every numeric leaf of the profile's loot defaults (+ `untiered_weight`; `distribution` is not a
+number) by dotted path; `loot_weights()` the effective values; `loot_overridden()` the paths the guild set;
+`loot_weight_check(path, value)` (None / '' / 'default' → back to the default; a `*window_days` is a whole number 1–365,
+anything else 0–100). `set_loot_weights(fields, by, rev=)` is a `_config_verb("loot")`: validated as a whole, a value equal
+to the default drops the override, ONE `save_config` under `config_lock`; returns the change lines ([] = nothing written).
+A new config section **`loot`** (`config_rev('loot')` = guild.yaml `loot:`; `settings` no longer covers it — a weights
+change never trips a settings save). The op: **`loot_weights`** (field = a path, value = a number or 'default') in OP_GROUP
+`setup`, OWNER_OPS, WARN_OPS (always reviewed), PURE_OPS, `_SECTION_OF → loot`, coalesced into ONE write
+(`_merge_key`, `_apply_merged` → `loot_ops.apply_weights`), plain-text schema line (loot_ops.SCHEMA: "make S items worth
+0.8"); `ops_from_fields(kind="loot_weights", fields={path: number | null})` leaves out unchanged ones; `_part` →
+"Loot scoring" with `loot_ops.weight_part` (the weight's name in words, current → new with "(the default)" named, the note
+*"Scores change from the next judgement on; no ledger row changes"*). `loot_ops.weight_rows / WEIGHT_GROUPS /
+weight_label`. GET `/api/loot/weights` (officers read: rows with value, default, overridden; groups in words; the
+`config:loot` rev; `owner`), POST `/api/loot/weights` = a translator through `app.state.ops_translate` (the D51 tier:
+`review_required` until `confirmed` + revs; officers refused — the owner's). Config › Recruitment and more › **Loot
+scoring** (`components/LootWeightsCard.tsx`): each weight with the default beside it; Edit → NumberInputs + reset; Save =
+`useOpsSave([{kind: "loot_weights"}], {revs: {"config:loot"}})` → the ReviewModal; `useDirty("loot-weights")`; a change
+elsewhere while editing shows "Reload — keep my edits". MCP `loot_weights()` and `set_loot_weights(fields, preview)`
+(`ops_change`). Parity row: discord `slash:gm change` (plain text), web POST /api/loot/weights, MCP set_loot_weights. No
+ledger row ever changes (tests assert the file byte for byte).
+
+**Re-score last run.** `scoring.rescore(profile, run, old_cfg, new_cfg, *, wishlists, items, attendance, top=3)` — each drop
+of a past council scored by the numbers alone under both weight sets against the same awards (the ledger before that
+night: a comparison of weights, not a replay) → rows {item, awarded, old/new top three with scores, old/new pick, moved}.
+`loot_ops.last_council(bot, reg, ctx)` = the newest non-test council with drops (a live session, else the newest archive;
+its roster from the run's seats — `rs.events`, else `Registry.done_runs()`). POST `/api/loot/rescore` {fields} (officers):
+the draft is validated by `set_loot_weights` on `Registry.shadow()` (never written), the work in a worker thread, no model
+call, nothing written; "No council has recorded a drop yet" when there is none.
+
+**Distil (L29).** `loot/distil.py`: `distil(guild_key, ctx, provider)` — the ACTIVE precedents (`active_precedents`: retired
+and superseded never read; the newest 60) and the compiled loot policy go to the `distil` route (llm/provider.py ROUTES:
+sonnet, medium) inside `for_guild` (D45) as `<policy>` / `<rules>` / `<precedents>` data blocks → `DistilDraft`
+(structured output); `validate` keeps ≤5 sentences that rest on refs the model was shown, drops a repeat, one the policy
+already holds and an empty one (listed in `dropped`); provenance *"drafted from N precedent(s) by Claude, unverified"*.
+Errors in words: NONE_YET (no active precedents, 400), LLM_DOWN (503), the budget's own sentence. POST `/api/loot/distil`
+(officers; MCP needs no actor — a draft decides nothing) writes nothing. The pick: POST `/api/loot/distil/append`
+{sentences, doc, token?} — without a token, the review: a `configops.Described` (one line per sentence, the refusal while
+another officer's draft waits) + `token` = `batch_token(doc, sentences)`; with it, each sentence through THE policy_append
+verb (`policy.append_rule`) in one store batch → one commit, one audit line; a token for other sentences (an edit after the
+review) is 409. The policy stays a draft until compile + confirm (Policy page). Loot › Precedents › **Distil…**
+(`components/loot/Distil.tsx`): the proposals with the precedents each rests on, a checkbox and an editable sentence;
+Review → the ReviewModal (one confirm for the batch) → result sheet; `useDirty("distil")`. MCP `distil()` returns the draft;
+the person's picks go through `policy_append`. BY_DESIGN_ONLY `policy_distil` (web; MCP beside it).
+
+**Wishlists.** `Registry.import_tmb_wishlists`'s report gains `per_character` [{character, added, kept, replaced,
+duplicates, over_cap}] (item names); Loot › Wishlists' TMB import previews it per character ("Nothing is deleted") then
+**Confirm — import N**. The `/me wishlist` wizard (flows_wishlist): the first line under the title links the Me page for
+long lists; a received entry renders as small text with its day (`-# 3. Robe of Tests · MS · received <t:…:d>`) from
+`loot_ops.received_map` (shared with the Me page — moved out of web/api_loot.py), still on the list until removed; the
+place select defaults to the next free one; Remove one… unchanged. Tests: tests/test_loot_import.py (each parser on a
+fixture under tests/ — ledger_generic.csv, ledger_tmb.csv, ledger_biscouncil.csv; preview writes nothing; dedupe never
+edits; unknown item by name; apply appends exactly the new rows and reloads the context; an imported unknown item is
+learned, listed Untiered and tiered with its awards re-weighted (a preview learns nothing); preview days are labels, not
+ISO; a moved rev; member 403; the MCP
+actor; weights re-score but the ledger file is byte-identical; the weights route is the owner's and reviewed; rescore
+writes nothing; distil writes nothing, drops unshown refs and retired precedents, member 403; the appended sentences are
+exactly the confirmed ones; the TMB preview per character keeps native entries; the wizard's harness run).
+
+### 5.49 Dual interfaces, phase 4 — members and the public: appeals, the public schedule, unlisted guilds (built 2026-10-22)
+
+Phase 4's members-and-public part (out/dual_interface_design.md §3.1 *Members* L32, §3.2 B10, PUB-01 / PUB-05; owner
+decisions: the DM rule, D2, D8, D26, D40). No LLM anywhere in this part.
+
+**Loot appeals (L32) — `appeals.py`, `flows_appeal.py`.** A member asks the council about one of their OWN awards.
+- *Record.* `Appeal` in `<guild>/appeals/<id>.yaml` (file per entity, commit per change). The id IS the award's:
+  `award_id(a)` = 12 hex of sha1(`lootctx.award_ref(a)`) — so **one appeal per award**, open or resolved, enforced under
+  a per-guild lock (`record_open`); it keeps `award_ref`, so an award corrected later still has its appeal (officer
+  details read the ledger with voided rows: `all_awards`, keyed by appeal id). Two identical imported rows without an
+  import_id share an award_ref ('raider|item|received'); `ledger_ids` (over the ledger in file order — such rows are never
+  voided, so the live ledger and the full fold agree) gives the n-th repeat sha1('<ref>#<n>'), the first keeping the plain
+  id; every caller with a ledger takes ids from it (`own_awards` for the member's list, the Me page rows). Fields: member, character, item, boss, date, MS/OS, the words,
+  state open | resolved, outcome (an `OUTCOMES` key), note (officers only), who resolved and when, the card / thread ids.
+- *Open* — `open_appeal(bot, reg, uid, award_id, text, by, by_id, via)`: the words validated (`check_text`, 10–1000
+  characters; never parsed), the award must be one of `uid`'s live awards (`find_award` over `loot_ops.member_awards`;
+  anything else is `NOT_YOURS`), stored, then the card posted (records first, Discord second — §2.9), one ops line.
+  Callers decide who: the Me page route uses the viewer's own uid, the wizard the presser's; **an officer never opens one
+  for a member** (an officer who disagrees with an award corrects it — the appeal is the member's voice) and **MCP never
+  opens one** (`FROM_MCP`: the token is the owner's).
+- *The card* — `post_card`: `RaidMixin.officer_channel` (roster, else ops — D1's rule) gets an embed (`card_embed`) with
+  the award as the public loot log shows it (`award_words`) and the words as a quote under "<member> wrote:" (`quote`:
+  markdown and @everyone escaped, `AllowedMentions.none()`), then a PUBLIC thread off it named `loot · <member> · <item>`
+  for the officers. **Nothing officer-only on the card or in the thread** (D2): scores, candidates, the bot's pick,
+  reasons and who recorded it come from **Details** (an ephemeral reply to the officer who pressed — `details_text`) or
+  Loot › Appeals (`officer_details`). No officer channel / Discord refused: the appeal stands, one ops warn, it waits on
+  Loot › Appeals. `AppealButton` (DynamicItem `appeal.<gk>:details|resolve:<id>`, registered in `discord_bot`): officers
+  only, re-checked live (`is_officer_anywhere`), `channel_card_guild` (a channel card is never a DM fallback).
+- *Resolve* — `resolve_appeal(bot, reg, aid, outcome, note, by, by_id, via)`: one outcome from the fixed choice
+  (`OUTCOMES`: stands · corrected · noted · withdrawn — the line the member reads), an optional note that stays with the
+  officers; stored with the member's notice (`Registry.notify(kind="appeal")`, new NOTICE_KINDS entry) in one commit —
+  **never a DM** (the DM rule: nothing to act on) — then the card edited to its final state (no buttons, *Resolved*), a
+  closing line in the thread and the thread archived + locked; one ops line. A second resolve is refused naming who and
+  when. `resolve_consequence` is THE sentence (Discord's decide screen, the web confirm, the route's preview).
+- *Discord* — `/me loot-ask` (discord_registry) → `FLOWS["me_loot_ask"]`: the award select (your awards not yet asked
+  about; skipped when an award id is given) → ONE prose modal → `Wizard.decide` with `open_consequence` + the quote,
+  `[Send to the council]` `[Edit my words]` `[Back]`; nothing is written before Send; a refusal keeps the words ("Fix my
+  words"). The card's Resolve… → `FLOWS["appeal_resolve"]`: the outcome select → decide `[Resolve]` `[Resolve with a
+  note…]` `[Back]`, the guard re-checks officer rights on every press.
+- *Web* (`web/api_loot.py`'s member section): GET `/api/me/loot` rows carry `award` + `appeal`, and `appeals` lists the
+  member's own questions (state words and the outcome line — never the note or who resolved; `member_appeal_json`);
+  POST `/api/me/loot/{award}/appeal` {text | preview} (the viewer only; 403 from MCP); GET `/api/loot/appeals`
+  (officers: open oldest first, the last 50 resolved, `details`, `consequences` per outcome, the thread link) and POST
+  `/api/loot/appeals/{aid}/resolve` {outcome, note | preview} (officers, live; from MCP a decision about a person → the
+  X-Oibot-Actor header, D8). `APPEAL_LISTENERS` → `publish("loot:appeals")`. Frontend: Me › My loot's question-mark
+  button → a modal (textarea + the server's consequence + Confirm; `useDirty("appeal")`), "Your questions to the
+  council"; Loot › **Appeals** (`components/loot/Appeals.tsx`: the officer record, outcome select → `useConfirm` with the
+  server's sentence and the officers' note).
+- *Parity* (tests/test_parity_matrix.py `APPEALS`): appeals are not an op — plain text has no path by design (no LLM
+  reads a member's words), so their rows live beside the op matrix: open = `flow:me_loot_ask` / `slash:me loot-ask` /
+  POST `/api/me/loot/{award}/appeal`; list = the card's Details button / GET `/api/loot/appeals`; resolve =
+  `flow:appeal_resolve` / POST `/api/loot/appeals/{aid}/resolve`. MCP: `list_appeals` (GET `/api/loot/appeals`) and
+  `resolve_appeal` (POST `…/resolve`, `actor=True` unless `preview` — D8, refused without OIBOT_MCP_ACTOR); open is
+  exempt in writing (`APPEALS_MCP_EXEMPT`: never — the appeal is the member's own voice).
+
+**Unlisted guilds (B10) — `GuildConfig.public: bool = True`.** `web/app.listed(bot)` = the guilds with `public` on, in
+`Guilds.ordered()` order: the only ones the homepage cards, the not-a-member page, GET `/api/public` and `/schedule`
+name. An unlisted guild is not closed: its members log in, the selector and `/api/guilds` (a web session lists only the
+guilds the person may open; the MCP bearer, the owner's, still sees every guild) show it. The owner sets it through the
+one `set` path: `configops` `set public` (SETTINGS_FIELDS, SETTING_WORDS "Listed on the homepage", describe
+listed → unlisted; owner-only like every `set`), so the Config page (Recruitment and more › **Homepage** switch via
+`useOpsSave`), plain text and MCP `set_config(fields={"public": false})` are one write; `/api/config` settings carry
+`public`. Config › Overview and `/gm config show` say it (`configops.listed_words` in `config_summary`'s Recruitment
+section). **No refusal names an unlisted guild to someone outside it**: `web/app.listed_name(reg)` is the name a
+not-a-member 403 may carry (`NotMember`) — None for an unlisted guild, so an `X-Oibot-Guild` / `?g=` naming it, or the
+one unlisted guild's own refusal, reads exactly like a key nobody serves (the /schedule 404 rule, for /api).
+Fixer (2026-10-22) closed the other tells: the guild cookie's fallback sets `moved` to the guild's name only when it is
+listed (an unlisted key answers like an unknown one — the cookie is just what the browser sends); `/healthz` gives
+`per_guild` (the guild keys) only to this machine (`local_request`) or the MCP bearer — anonymous callers get the counts
+(`guilds`, `servers_seen`, `guilds_failed`); `/img/raid/<rid>.png?g=` honours an unlisted guild only for its members (the
+session) or with the HMAC its own cards carry (`raid_views.raid_thumb_sig` under OIBOT_WEB_SECRET, `&s=` added by
+`raid_thumb_url` for unlisted guilds only), anyone else gets the profile defaults like a key nobody serves; and in Discord
+`guild_routing.not_in_any` / `join_lines` name only LISTED guilds (`guild_routing.listed`) to someone in none of the servers
+— none listed → `NOT_IN_ANY_UNLISTED`, no name, no invite (the DM slash-command resolver and the plain-text DM path).
+
+**Homepage copy (PUB-01).** No invite → no Join button and `INVITES_CLOSED` = *"Invitations are closed — ask an officer
+in game."* (the card, the single-guild page and the not-a-member page); "availability" → "schedules"; each card names
+its public schedule (`schedule_link`). The single-guild goldens in tests/test_web_multiguild.py were re-cut for exactly
+this copy.
+
+**The public schedule (PUB-05) — GET `/schedule[?g=<key>]`, no login.** `schedule_sections(reg)`: per raid its name and
+size; per schedule its `Registry.schedule_label` and the next three runs (`rc.next_runs_of(n=3)` → `Registry.local12`:
+the clock rule), a paused schedule "paused for now" (its label without schedule_label's own " · paused": said once), a pickup template "an officer opens these runs". Nothing about
+members (no regulars, counts or names). An unknown or unlisted key is the same 404 (an unlisted guild is never
+confirmed to exist); without `g`: the only listed guild, else an index of the listed ones.
+
+**Carry-over: no self-notice for your own absence.** `discord_people.record_absence(…, by_id)` → `announce_absence(…,
+by_id=)` → `RaidMixin.after_absence(…, by_id=)`: the freed seat's "seat released (you're marked away)" notice
+(`drop_seated(notice=)` → `rc.seat_gone`) is written only when someone else recorded the absence — `by_id` ≠ the
+member, decided by id, never a name; `by_id` None (unknown) keeps writing it. Every caller already passed `by_id` to
+record_absence (the absences card, flows_absence, `/api/me/absence`, configops' absence op, MCP through the route).
+
+Tests: tests/test_appeals.py (one appeal per award; the words in the quote block, escaped, no mentions; nothing
+officer-only on the card; only the member opens — someone else, an officer, MCP refused; no officer channel → recorded,
+warn; resolve → the notice, no DM (a `send_member_dm` that raises), the card's final state, the thread archived; a member
+cannot resolve; the D8 actor; no LLM touched; two identical imported awards each get their own question; the two wizards through tests/wizard_harness.py; button ids; MCP list_appeals / resolve_appeal through the real routes,
+refused without the actor, a preview without), tests/
+test_public_schedule.py (words only, three 12-hour runs, no member names, no login; unlisted hidden from the homepage,
+/api/public, /schedule and a non-member's guild list, still open to its members; the index; homepage copy; the `set
+public` op; a non-member's 403 never names an unlisted guild — header, ?g= and the one-guild case; "paused" once;
+the Overview line; every SETTINGS_FIELDS entry named in MCP set_config's description), tests/test_absence_self_notice.py (own absence → no notice; an officer's → the notice; a shared display name
+is not the actor — fails without the fix).
 
 ### 5.50 Dual interfaces, phase 4 — companion tokens (built 2026-10-22)
 

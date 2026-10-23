@@ -38,6 +38,12 @@ def award_ref(a) -> str:
     return f"{a.raider}|{a.item_id or (a.item_name or '').lower()}|{a.received.isoformat()}"
 
 
+def void_row(import_id: str, reason: str, by: str, at: str) -> dict:
+    """THE void row: voids the award with `import_id` (a council correction — RegistryLootContext.void — or an undone
+    import — Registry.undo_import). Append-only: the award row stays; fold_ledger marks it void."""
+    return {"kind": "void", "import_id": import_id, "reason": reason, "by": by, "at": at}
+
+
 def fold_ledger(rows: list[dict]) -> tuple[list[LootAward], set[str]]:
     """Ledger rows → (live awards, every import_id seen). A `kind: void` row voids the award with its import_id; a
     `kind: reweight` row (Loot › Items' "re-weight past awards", D12) sets the tier / weight of the award it names
@@ -219,7 +225,7 @@ class RegistryLootContext:
                     log.exception("ledger listener failed")
 
     def void(self, import_id: str, reason: str, by: str, at: str) -> None:
-        self.store.append_jsonl(Path(self.guild_key) / "ledger.jsonl", {"kind": "void", "import_id": import_id, "reason": reason, "by": by, "at": at})
+        self.store.append_jsonl(Path(self.guild_key) / "ledger.jsonl", void_row(import_id, reason, by, at))
         gone = next((a for a in self.ledger if a.import_id == import_id), None)
         if gone is not None:  # the correction appended next names who it replaced (the public log's "was X, now Y")
             self.__dict__.setdefault("_voided", {})[re.sub(r"-c\d+$", "", import_id)] = gone.raider

@@ -7,11 +7,12 @@ import { History, Precedents } from "../components/loot/History";
 import { Items } from "../components/loot/Items";
 import { Wishlists } from "../components/loot/Wishlists";
 import { Companions } from "../components/loot/Companions";
+import { Appeals } from "../components/loot/Appeals";
 
-const TABS = ["tonight", "history", "precedents", "items", "wishlists", "companions"] as const;
+const TABS = ["tonight", "history", "precedents", "items", "wishlists", "appeals", "companions"] as const;
 
 /** Loot (officers): the council's web surface — Tonight (live, the same verbs as the thread), History, Precedents,
- *  Items (the untiered list, the tier grid, Claude drafts, CSV), Wishlists and Companions (presence; feed-token names for the owner). The thread in Discord is the other surface; both act on
+ *  Items (the untiered list, the tier grid, Claude drafts, CSV), Wishlists, Appeals (members' questions about their awards, L32) and Companions (presence; feed-token names for the owner). The thread in Discord is the other surface; both act on
  *  one council and see each other's changes at once. */
 export function LootPage({ meta }: { meta: Meta }) {
   const [params, setParams] = useSearchParams();
@@ -27,6 +28,7 @@ export function LootPage({ meta }: { meta: Meta }) {
           <Tabs.Tab value="precedents">Precedents</Tabs.Tab>
           <Tabs.Tab value="items">Items</Tabs.Tab>
           <Tabs.Tab value="wishlists">Wishlists</Tabs.Tab>
+          <Tabs.Tab value="appeals">Appeals</Tabs.Tab>
           <Tabs.Tab value="companions">Companions</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="tonight"><Tonight meta={meta} goItems={() => go("items")} /></Tabs.Panel>
@@ -34,6 +36,7 @@ export function LootPage({ meta }: { meta: Meta }) {
         <Tabs.Panel value="precedents"><Precedents /></Tabs.Panel>
         <Tabs.Panel value="items"><Items meta={meta} /></Tabs.Panel>
         <Tabs.Panel value="wishlists"><Wishlists meta={meta} /></Tabs.Panel>
+        <Tabs.Panel value="appeals"><Appeals meta={meta} /></Tabs.Panel>
         <Tabs.Panel value="companions"><Companions /></Tabs.Panel>
       </Tabs>
     </Stack>

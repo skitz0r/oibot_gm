@@ -81,7 +81,7 @@ class Harness:
         self.channel = None  # the channel the command is used in (None = unknown); a test sets it when a flow posts there
         self.screens: list[dict] = []  # every render: {"text", "view", "message_id"}
 
-    async def _announce(self, reg, m, a, by):
+    async def _announce(self, reg, m, a, by, by_id=None):
         self.announced.append((m.display_name, a.start, a.end, by))
 
     def _record(self, content, view, message_id, embed):

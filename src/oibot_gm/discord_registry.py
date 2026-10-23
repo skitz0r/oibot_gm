@@ -922,6 +922,13 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["me_wishlist"](interaction, reg)
 
+    @me.command(name="loot-ask", description="Ask the council about one of your awards (the answer comes to your Me page)")
+    async def me_loot_ask(interaction: discord.Interaction):
+        """L32 (design §5.49): pick your award → your words (one modal) → Send. flows_appeal.me_loot_ask; no LLM, no DM."""
+        reg, interaction = await need(interaction)
+        if reg:
+            await FLOWS["me_loot_ask"](interaction, reg)
+
     @tree.command(name="apply", description="Apply to join the guild")
     async def apply(interaction: discord.Interaction):
         reg, interaction = await need(interaction)

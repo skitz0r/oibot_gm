@@ -28,6 +28,7 @@ ROUTES: dict[str, tuple[str, str]] = {
     "config_change": ("claude-sonnet-5", "medium"), # plain-text config -> typed ops (cheap, confirmed by a human)
     "help": ("claude-sonnet-5", "low"),             # "how does X work?" from the manual + live state (cached prefix)
     "tier_draft": ("claude-sonnet-5", "medium"),    # Loot › Items "Draft with Claude": a tier proposal an officer confirms per item
+    "distil": ("claude-sonnet-5", "medium"),        # Loot › Precedents "Distil": ≤5 policy sentences drafted from precedents; officers pick
 }
 
 # $ per million tokens: (input, output, cache read, cache write)

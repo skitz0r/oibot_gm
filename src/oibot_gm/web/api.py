@@ -2100,7 +2100,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                                  "missing": bool(getattr(cfg, attr)) and guild is not None and str(getattr(cfg, attr)) not in chans} for k, attr in CHANNEL_KINDS.items()},
                 "guild_channels": bot.guild_channels(reg), "guild_roles": guild_roles,
                 "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles, "news_keywords": list(cfg.news_keywords),
-                             "loot_log": bool(cfg.loot_log), "loot_log_state": loot_log_state(reg),
+                             "loot_log": bool(cfg.loot_log), "loot_log_state": loot_log_state(reg), "public": bool(cfg.public),
                              "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None,
                              "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids],
                              # OPS-01: who gets the error alerts — null = the owner (the default), [] = nobody; saved as settings field error_dm_ids
@@ -2139,7 +2139,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def public(request: Request):
         """Anonymous: the guild's name, blurb, invite and whether it is recruiting. Nothing personal. One guild (or none):
         exactly that shape, as always (K13); several: {"guilds": [each one's facts + key]} in Guilds.ordered() order."""
-        regs = bot.registries.ordered()
+        from .app import listed
+
+        regs = listed(bot)  # an unlisted guild (B10) is never named here
         if len(regs) <= 1:
             return public_info(bot, regs[0] if regs else None)
         return {"guilds": [public_card(bot, r) for r in regs]}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, Card, Modal, Select, Stack, Table, Text } from "@mantine/core";
+import { Badge, Button, Card, Group, Modal, Select, Stack, Table, Text } from "@mantine/core";
 import { api, type LootHistoryRow, type Precedent } from "../../api";
 import { CardHeader, fail, ok } from "../Page";
 import { useLive } from "../../hooks/useLive";
 import { ReasonModal, SourceBadge } from "./shared";
+import { DistilModal } from "./Distil";
 
 interface Council { id: string; run: string; label: string | null; date_label: string; test: boolean; summary: string;
   drops: { drop_id: string; item: string; boss: string; tiered: boolean }[];
@@ -63,11 +64,13 @@ export function History() {
 
 /** Loot › Precedents: council overrides with their reasons — what the bot cites next time. Retire one (the bot stops
  *  citing it; append-only, the reason stays on it) or restore it; "needs a reason" lists awards the companion recorded
- *  against the bot's pick that still have none (Loot › Tonight gives the reason). */
+ *  against the bot's pick that still have none (Loot › Tonight gives the reason). Distil… (phase 4, L29): Claude drafts up to
+ *  five policy sentences from the active precedents; an officer picks which to append (DistilModal). */
 export function Precedents() {
   const [data, setData] = useState<{ rows: Precedent[]; needs_reason: { import_id: string; item: string; recipient: string; bot: string | null; received_label: string }[] } | null>(null);
   const [status, setStatus] = useState<string | null>("active");
   const [target, setTarget] = useState<{ p: Precedent; restore: boolean } | null>(null);
+  const [distil, setDistil] = useState(false);
   const load = () => api.get<typeof data & object>(`/api/loot/precedents${status ? `?status=${status}` : ""}`).then(setData).catch(fail);
   useEffect(() => { load(); }, [status]);
   useLive(load, ["loot:"]);
@@ -81,7 +84,11 @@ export function Precedents() {
         </Card>
       )}
       <Card>
-        <CardHeader title="Precedents" hint="the bot cites active ones" action={<Select size="xs" w={150} value={status} onChange={setStatus} clearable placeholder="all" data={["active", "retired", "superseded"]} />} />
+        <CardHeader title="Precedents" hint="the bot cites active ones" action={
+          <Group gap="xs">
+            <Button size="xs" variant="default" onClick={() => setDistil(true)}>Distil…</Button>
+            <Select size="xs" w={150} value={status} onChange={setStatus} clearable placeholder="all" data={["active", "retired", "superseded"]} />
+          </Group>} />
         <Table.ScrollContainer minWidth={720}>
           <Table>
             <Table.Thead><Table.Tr><Table.Th>Date</Table.Th><Table.Th>Item</Table.Th><Table.Th>Bot picked</Table.Th><Table.Th>Council awarded</Table.Th><Table.Th>Reason</Table.Th><Table.Th /></Table.Tr></Table.Thead>
@@ -101,6 +108,7 @@ export function Precedents() {
           </Table>
         </Table.ScrollContainer>
       </Card>
+      {distil && <DistilModal onClose={() => setDistil(false)} />}
       <ReasonModal opened={!!target} title={target ? `${target.restore ? "Restore" : "Retire"} the precedent on ${target.p.item}` : ""}
         message={target ? `${target.p.item}: the bot picked ${target.p.bot}, the council gave it to ${target.p.human} — “${target.p.reason}”. ${target.restore ? "The bot cites it again." : "The bot stops citing it; it stays in the record."}` : ""}
         label="Why (kept on the precedent)" onClose={() => setTarget(null)}

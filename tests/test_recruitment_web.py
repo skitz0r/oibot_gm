@@ -137,7 +137,7 @@ def test_non_member_gets_the_friendly_page_not_json(client, reg):
     assert api.status_code == 403 and api.json()["not_member"] is True and "isn't a member" in api.json()["error"]
     reg.set_recruitment("t", invite_url="")
     r = client.get("/")
-    assert "Join our Discord" not in r.text and "Ask a member" in r.text
+    assert "Join our Discord" not in r.text and "Invitations are closed — ask an officer in game" in r.text  # B10 copy (§5.49)
 
 
 # ---- recruitment settings

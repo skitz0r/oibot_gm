@@ -1,19 +1,42 @@
 import { useEffect, useRef, useState } from "react";
 import { useDirty } from "../../hooks/useDirty";
-import { ActionIcon, Autocomplete, Badge, Button, Card, Group, SegmentedControl, Stack, Text, TextInput, Tooltip } from "@mantine/core";
-import { IconArrowDown, IconArrowUp, IconPencil, IconTrash } from "@tabler/icons-react";
-import { api, ApiError, type LogRow, type Meta, type WishCharacter, type WishEntry } from "../../api";
+import { ActionIcon, Autocomplete, Badge, Button, Card, Group, Modal, SegmentedControl, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
+import { IconArrowDown, IconArrowUp, IconMessageQuestion, IconPencil, IconTrash } from "@tabler/icons-react";
+import { api, ApiError, type LogRow, type Meta, type MyAppeal, type WishCharacter, type WishEntry } from "../../api";
 import { CardHeader, fail, ok } from "../Page";
 import { useLive } from "../../hooks/useLive";
 import { Who } from "./shared";
 
 /** Me › My loot: what my characters received, newest first (by my Discord id; rows recorded by name count too).
- *  Members never see scores, reasons or who recorded it here (D2). */
+ *  Members never see scores, reasons or who recorded it here (D2). Each award without a question has *Ask the
+ *  council* (L32): your words → the server's consequence sentence → Confirm; the answer comes back here and as a notice
+ *  (no DM). One question per award; "Your questions" lists them with their state. */
 export function MyLootCard({ meta }: { meta: Meta }) {
   const [rows, setRows] = useState<LogRow[] | null>(null);
-  const load = () => api.get<{ rows: LogRow[] }>("/api/me/loot?limit=20").then((d) => setRows(d.rows)).catch(fail);
+  const [asked, setAsked] = useState<MyAppeal[]>([]);
+  const [limits, setLimits] = useState({ min: 10, max: 1000 });
+  const [draft, setDraft] = useState<{ row: LogRow; text: string; consequence: string } | null>(null);  // the question being written
+  useDirty("appeal", draft !== null);
+  const [sending, setSending] = useState(false);
+  const load = () => api.get<{ rows: LogRow[]; appeals: MyAppeal[]; appeal_text: { min: number; max: number } }>("/api/me/loot?limit=20")
+    .then((d) => { setRows(d.rows); setAsked(d.appeals || []); if (d.appeal_text) setLimits(d.appeal_text); }).catch(fail);
   useEffect(() => { load(); }, []);
-  useLive(load, ["loot:"]);
+  useLive(load, ["loot:", "member"]);
+  async function start(r: LogRow) {
+    try {
+      const p = await api.post<{ consequence: string }>(`/api/me/loot/${r.award}/appeal`, { preview: true });
+      setDraft({ row: r, text: "", consequence: p.consequence });
+    } catch (e) { fail(e); }
+  }
+  async function send() {
+    if (!draft) return;
+    setSending(true);
+    try {
+      const r = await api.post<{ message: string }>(`/api/me/loot/${draft.row.award}/appeal`, { text: draft.text });
+      ok(r.message); setDraft(null); load();
+    } catch (e) { fail(e); } finally { setSending(false); }  // a refusal keeps your words in the box
+  }
+  const n = draft?.text.trim().length || 0;
   return (
     <Card>
       <CardHeader title="My loot" hint="newest first" />
@@ -26,10 +49,44 @@ export function MyLootCard({ meta }: { meta: Meta }) {
               <Who meta={meta} name={r.character} cls={r.cls} spec={r.spec} />
               <Text size="sm" truncate>{r.item}</Text>
             </Group>
-            <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{r.date_label} · {r.offspec ? "OS" : "MS"}</Text>
+            <Group gap={6} wrap="nowrap">
+              <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>{r.date_label} · {r.offspec ? "OS" : "MS"}</Text>
+              {r.award && !r.appeal && (
+                <Tooltip label="Ask the council about this award">
+                  <ActionIcon size="sm" variant="subtle" color="gray" aria-label="Ask the council" onClick={() => start(r)}><IconMessageQuestion size={14} /></ActionIcon>
+                </Tooltip>
+              )}
+              {r.appeal && <Tooltip label={r.appeal.state_text}><Badge size="xs" variant="light" color={r.appeal.state === "open" ? "yellow" : "gray"}>{r.appeal.state === "open" ? "asked" : "answered"}</Badge></Tooltip>}
+            </Group>
           </Group>
         ))}
+        {asked.length > 0 && (
+          <Stack gap={6} mt="sm">
+            <Text size="xs" fw={600} c="dimmed">Your questions to the council</Text>
+            {asked.map((a) => (
+              <Stack key={a.id} gap={0}>
+                <Text size="sm">{a.award}</Text>
+                <Text size="xs" c={a.state === "open" ? "yellow" : "dimmed"}>{a.state_text}</Text>
+              </Stack>
+            ))}
+          </Stack>
+        )}
       </Stack>
+      <Modal opened={draft !== null} onClose={() => setDraft(null)} title={draft ? `Ask the council · ${draft.row.item}` : ""} centered>
+        {draft && (
+          <Stack gap="md">
+            <Text size="sm" c="dimmed">{draft.row.character} · {draft.row.item} · {draft.row.date_label} · {draft.row.offspec ? "OS" : "MS"}</Text>
+            <Textarea label="What should the council know?" autosize minRows={3} maxLength={limits.max} value={draft.text}
+              description={`${n}/${limits.max}${n < limits.min ? ` · at least ${limits.min}` : ""}`}
+              onChange={(e) => setDraft({ ...draft, text: e.currentTarget.value })} />
+            <Text size="sm">{draft.consequence}</Text>
+            <Group justify="flex-end" gap="sm">
+              <Button variant="default" size="sm" onClick={() => setDraft(null)}>Cancel</Button>
+              <Button size="sm" loading={sending} disabled={n < limits.min} onClick={send}>Confirm</Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
     </Card>
   );
 }

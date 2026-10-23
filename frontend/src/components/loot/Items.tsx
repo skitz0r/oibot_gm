@@ -5,6 +5,7 @@ import { api, guildQuery, type ItemBrief, type ItemGrid, type Meta } from "../..
 import { CardHeader, fail, ok } from "../Page";
 import { GameIcon } from "../Icons";
 import { useLive } from "../../hooks/useLive";
+import { LedgerImport } from "./LedgerImport";
 
 const CLEAR = "–";
 
@@ -21,12 +22,13 @@ interface ImportPreview {
  *  they were first seen, how often they dropped and how many awards they have; a row opens the tier grid. Saving tiers
  *  for an item that already has awards asks whether to re-weight them (default no; who got what never changes).
  *  Phase 3: "Draft with Claude" on the grid (a proposal, saved only by the officer's Save) and the CSV export / import
- *  of the whole grid (preview first). */
+ *  of the whole grid (preview first). Phase 4: Import loot history (LedgerImport — BisCouncil, ThatsMyBIS, generic CSV). */
 export function Items({ meta }: { meta: Meta }) {
   const [data, setData] = useState<{ untiered: ItemBrief[]; tiered: ItemBrief[] } | null>(null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [history, setHistory] = useState(false);
   const load = () => api.get<{ untiered: ItemBrief[]; tiered: ItemBrief[] }>("/api/loot/items").then(setData).catch(fail);
   useEffect(() => { load(); }, []);
   useLive(load, ["items", "loot:"]);
@@ -40,6 +42,7 @@ export function Items({ meta }: { meta: Meta }) {
             <TextInput size="xs" placeholder="filter by name" value={q} onChange={(e) => setQ(e.currentTarget.value)} w={180} />
             <Button size="xs" variant="default" component="a" href={`/api/loot/items/export${guildQuery()}`} download>Export CSV</Button>
             <Button size="xs" variant="default" onClick={() => setImporting(true)}>Import CSV…</Button>
+            <Button size="xs" variant="default" onClick={() => setHistory(true)}>Import loot history…</Button>
           </Group>} />
         <Table.ScrollContainer minWidth={600}>
           <Table highlightOnHover>
@@ -48,7 +51,7 @@ export function Items({ meta }: { meta: Meta }) {
               {data.untiered.filter(match).length === 0 && <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="dimmed">Nothing untiered.</Text></Table.Td></Table.Tr>}
               {data.untiered.filter(match).map((i) => (
                 <Table.Tr key={i.key} style={{ cursor: "pointer" }} onClick={() => setOpen(i.key)}>
-                  <Table.Td><Text size="sm" fw={600}>{i.name}</Text>{i.learned && <Badge size="xs" variant="outline" color="yellow">learned from a drop</Badge>}</Table.Td>
+                  <Table.Td><Text size="sm" fw={600}>{i.name}</Text>{i.learned && <Badge size="xs" variant="outline" color="yellow">{i.source === "import" ? "learned from an import" : "learned from a drop"}</Badge>}</Table.Td>
                   <Table.Td>{i.boss || "—"}</Table.Td><Table.Td><Text size="xs" c="dimmed">{i.first_seen_label || "—"}</Text></Table.Td><Table.Td>{i.times_dropped ?? "—"}</Table.Td><Table.Td>{i.awards ?? 0}</Table.Td>
                 </Table.Tr>
               ))}
@@ -65,6 +68,7 @@ export function Items({ meta }: { meta: Meta }) {
       </Card>
       {open && <TierGrid meta={meta} itemKey={open} onClose={() => setOpen(null)} onSaved={load} />}
       {importing && <ImportModal meta={meta} onClose={() => setImporting(false)} onDone={load} />}
+      {history && <LedgerImport onClose={() => setHistory(false)} onDone={load} />}
     </Stack>
   );
 }

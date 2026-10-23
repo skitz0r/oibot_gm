@@ -184,7 +184,7 @@ async def record_absence(bot, reg: Registry, uid: int, start: str, end: str | No
     marked, a rostered seat handed back, the absences card) — the absences card, /me absent add, /roster absent, the Me
     and Members pages, plain text and MCP. Returns (member, absence, touched run keys)."""
     m, a = await asyncio.to_thread(reg.add_absence, uid, start, end, reason, by, display_name, by_id=by_id)
-    touched = await _call(bot, "announce_absence", reg, m, a, by) or []
+    touched = await _call(bot, "announce_absence", reg, m, a, by, by_id=by_id) or []  # by_id: their own act writes them no notice
     return m, a, list(touched)
 
 

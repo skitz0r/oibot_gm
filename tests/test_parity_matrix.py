@@ -82,6 +82,9 @@ SURFACES: dict[str, dict[str, str]] = {
     "loot": {"discord": "slash:raid loot", "web": "POST /api/loot/{run}/confirm", "mcp": "loot_confirm"},
     "wishlist": {"discord": "flow:me_wishlist", "web": "POST /api/me/wishlist", "mcp": "set_wishlist"},
     "tier": {"web": "POST /api/loot/items/{key}/tiers", "mcp": "tier_item"},
+    # the scoring weights (phase 4, §5.48): Config › Loot scoring (useOpsSave → /api/ops/change; POST /api/loot/weights is the
+    # translator), MCP set_loot_weights; in Discord the owner says it in plain text (/gm change) — a table of numbers has no wizard
+    "loot_weights": {"discord": "slash:gm change", "web": "POST /api/loot/weights", "mcp": "set_loot_weights"},
 }
 SURFACE_NAMES = ("discord", "web", "mcp")
 # the `test` op's actions, one row each (dual interfaces phase 2, B9: both halves of the test bench on both surfaces):
@@ -230,4 +233,35 @@ def test_every_test_bench_action_is_on_every_surface(mcp_tools, web_routes, slas
             ok = discord_path_exists(ref, slash_paths) if surface == "discord" else (ref in web_routes if surface == "web" else ref in mcp_tools)
             if not ok:
                 missing.append(f"test {action}/{surface}: {ref!r} does not exist")
+    assert not missing, "\n".join(missing)
+
+
+# loot appeals (L32, phase 4 — design §5.49): not an op (no plain text: the flow has NO LLM by design, and a member's words
+# are never parsed), so their rows live here. MCP reads and resolves (resolving is a decision about a person: D8, the
+# actor header) but opens none (an appeal is the member's own voice; the token is the owner's).
+APPEALS: dict[str, dict[str, str]] = {
+    "open": {"discord": "flow:me_loot_ask", "web": "POST /api/me/loot/{award}/appeal"},
+    "open_command": {"discord": "slash:me loot-ask"},
+    "list": {"discord": "button:oibot_gm.appeals.AppealButton", "web": "GET /api/loot/appeals", "mcp": "list_appeals"},  # the card's Details; Loot › Appeals
+    "resolve": {"discord": "flow:appeal_resolve", "web": "POST /api/loot/appeals/{aid}/resolve", "mcp": "resolve_appeal"},
+}
+APPEALS_MCP_EXEMPT = {
+    "open": "an appeal is a member's own words about their own award (Discord or the Me page); MCP's token is the owner's",
+    "open_command": "the slash command is Discord's entry to the same flow",
+}
+
+
+def test_appeals_have_their_discord_and_web_paths_and_written_mcp_exemptions(mcp_tools, web_routes, slash_paths):
+    missing = []
+    for action, row in APPEALS.items():
+        if "discord" in row and not discord_path_exists(row["discord"], slash_paths):
+            missing.append(f"appeal {action}/discord: {row['discord']!r}")
+        if "web" in row and row["web"] not in web_routes:
+            missing.append(f"appeal {action}/web: {row['web']!r}")
+        if "mcp" in row:
+            assert action not in APPEALS_MCP_EXEMPT, f"appeal {action}: has an MCP tool AND an exemption"
+            if row["mcp"] not in mcp_tools:
+                missing.append(f"appeal {action}/mcp: {row['mcp']!r}")
+        else:
+            assert len(APPEALS_MCP_EXEMPT.get(action, "")) > 15, f"appeal {action}: no MCP tool — say why"
     assert not missing, "\n".join(missing)

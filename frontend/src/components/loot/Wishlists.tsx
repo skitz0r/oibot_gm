@@ -7,10 +7,13 @@ import { Who } from "./shared";
 
 interface Wanted { key: string; name: string; item_id: number; boss: string | null; wants: { character: string; cls: string; spec: string; rank: number; offspec: boolean }[] }
 interface Overview { people: { uid: string; display_name: string; test: boolean; characters: WishCharacter[] }[]; items: Wanted[]; max: number }
-interface ImportReport { rows: number; characters: number; added: number; replaced: number; duplicates: number; received: number; over_cap: number; unknown: string[]; lines: string[] }
+/** One character's part of a TMB import (Registry.import_tmb_wishlists per_character): item names. */
+interface PerCharacter { character: string; added: string[]; kept: string[]; replaced: string[]; duplicates: string[]; over_cap: string[] }
+interface ImportReport { rows: number; characters: number; added: number; replaced: number; duplicates: number; received: number; over_cap: number; unknown: string[]; lines: string[]; per_character?: PerCharacter[] }
 
 /** Loot › Wishlists (officers): who wants each item most (main spec before offspec, by place on the list) — the same
- *  lists scoring reads — and the ThatsMyBIS import (D5: preview first; an import never deletes an entry made on the site). */
+ *  lists scoring reads — and the ThatsMyBIS import (D5: preview first — per character what is added and what is kept —
+ *  then Confirm; an import never deletes an entry made on the site). */
 export function Wishlists({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Overview | null>(null);
   const [csv, setCsv] = useState("");
@@ -60,14 +63,36 @@ export function Wishlists({ meta }: { meta: Meta }) {
           <Textarea autosize minRows={3} maxRows={10} value={csv} onChange={(e) => { setCsv(e.currentTarget.value); setReport(null); }} placeholder="type,character_name,sort_order,item_name,item_id,is_offspec,note,received_at,…" />
           <Text size="xs" c="dimmed">Per character in TMB's order. An item already on someone's list stays as it is; a character's earlier TMB rows are replaced; entries made on the site are never deleted; past {data.max} the rest is skipped and counted.</Text>
           {report && (
-            <Stack gap={2}>
+            <Stack gap={4}>
               <Text size="sm">{report.message}</Text>
-              {report.report.lines.map((l) => <Text key={l} size="xs" c="dimmed">{l}</Text>)}
+              {report.preview && (report.report.per_character || []).length > 0 && (
+                <Table.ScrollContainer minWidth={560}>
+                  <Table verticalSpacing={2}>
+                    <Table.Thead><Table.Tr><Table.Th>Character</Table.Th><Table.Th>Added from TMB</Table.Th><Table.Th>Kept (made on the site)</Table.Th><Table.Th>Not added</Table.Th></Table.Tr></Table.Thead>
+                    <Table.Tbody>
+                      {(report.report.per_character || []).map((c) => (
+                        <Table.Tr key={c.character}>
+                          <Table.Td><Text size="sm" fw={600}>{c.character}</Text></Table.Td>
+                          <Table.Td><Text size="xs">{c.added.join(" · ") || "—"}</Text>{c.replaced.length > 0 && <Text size="xs" c="dimmed">replaces the earlier TMB rows: {c.replaced.join(" · ")}</Text>}</Table.Td>
+                          <Table.Td><Text size="xs">{c.kept.join(" · ") || "—"}</Text></Table.Td>
+                          <Table.Td>
+                            {c.duplicates.length > 0 && <Text size="xs" c="dimmed">already on the list: {c.duplicates.join(" · ")}</Text>}
+                            {c.over_cap.length > 0 && <Text size="xs" c="yellow">past {data.max}: {c.over_cap.join(" · ")}</Text>}
+                            {!c.duplicates.length && !c.over_cap.length && <Text size="xs" c="dimmed">—</Text>}
+                          </Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </Table.ScrollContainer>
+              )}
+              {report.preview && <Text size="xs" c="dimmed">Nothing is deleted: every entry made on the site stays, in its place.</Text>}
+              {!report.preview && report.report.lines.map((l) => <Text key={l} size="xs" c="dimmed">{l}</Text>)}
             </Stack>
           )}
           <Group justify="flex-end" gap="sm">
             <Button variant="default" disabled={!csv.trim()} onClick={() => run(true)}>Preview</Button>
-            <Button disabled={!csv.trim() || !report?.preview} onClick={() => run(false)}>Import</Button>
+            <Button disabled={!csv.trim() || !report?.preview || !(report.report.added || report.report.replaced)} onClick={() => run(false)}>Confirm — import {report?.preview ? report.report.added : ""}</Button>
           </Group>
         </Stack>
       </Card>
