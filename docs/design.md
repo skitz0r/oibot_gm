@@ -2903,7 +2903,13 @@ awards keep deduping by import_id). New rows are APPENDED to `ledger.jsonl` (`so
 `imported_at`, the note, `by_id`) in one commit — never an edit, never a delete. Weight: the file's tier and weight
 (BisCouncil), else `scoring.weight_for` for the registered character's spec, else (an item the tables don't know)
 recorded by name, `tier ?`, `untiered_weight`, `tiered False` (D4); a character nobody registered is recorded by name
-(no discord_id). The report: rows / new / duplicates / unknown_items / unknown_characters, the groups (new · duplicates
+(no discord_id). D4's "tiered later on Loot › Items": in the same commit (`GitStore.batch`) an apply LEARNS every item of
+the new rows that has no tiers — unknown, or on the tables untiered — through `learn_item(..., source="import",
+times=<its rows>)`, once per item, so it is on GET `/api/loot/items` Untiered (`item_brief.source` = import → the badge
+"learned from an import") with its awards, and tiering it asks the D12 re-weight question like any learned drop; the
+report carries `learned`, the route's line adds it and publishes `items`. A preview learns nothing. Each shown row has
+`received` (ISO, machines) and `received_label` (`Registry.day_label(..., with_year=True)` — the clock rule: what the
+preview tables print). The report: rows / new / duplicates / unknown_items / unknown_characters, the groups (new · duplicates
 with why · unknown items with counts; ≤300 each), `rev` (a hash of the rows that would be added) and THE line *"N
 row(s), M duplicate(s), K unknown item(s) (recorded by name)"*. `preview` writes nothing; an apply carrying a `rev` that
 no longer matches (the ledger moved) writes nothing and says `changed`. POST `/api/loot/import` {csv, kind, preview
@@ -2968,7 +2974,9 @@ long lists; a received entry renders as small text with its day (`-# 3. Robe of 
 `loot_ops.received_map` (shared with the Me page — moved out of web/api_loot.py), still on the list until removed; the
 place select defaults to the next free one; Remove one… unchanged. Tests: tests/test_loot_import.py (each parser on a
 fixture under tests/ — ledger_generic.csv, ledger_tmb.csv, ledger_biscouncil.csv; preview writes nothing; dedupe never
-edits; unknown item by name; apply appends exactly the new rows and reloads the context; a moved rev; member 403; the MCP
+edits; unknown item by name; apply appends exactly the new rows and reloads the context; an imported unknown item is
+learned, listed Untiered and tiered with its awards re-weighted (a preview learns nothing); preview days are labels, not
+ISO; a moved rev; member 403; the MCP
 actor; weights re-score but the ledger file is byte-identical; the weights route is the owner's and reviewed; rescore
 writes nothing; distil writes nothing, drops unshown refs and retired precedents, member 403; the appended sentences are
 exactly the confirmed ones; the TMB preview per character keeps native entries; the wizard's harness run).

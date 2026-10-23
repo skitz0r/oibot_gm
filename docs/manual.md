@@ -1389,7 +1389,7 @@ news post says can make the review read or write another server.
 | `list_items` · `tier_item` | the untiered items and one item's tier grid · set tiers per spec (actor); with past awards and no `reweight` answer nothing is written and the reply asks |
 | `draft_tiers` · `export_tiers` | Claude's suggested tiers for one item — a proposal, nothing saved (confirm it with `tier_item`) · the whole tier grid as CSV text |
 | `get_wishlists` · `set_wishlist` · `import_wishlists` | who wants each item / one member's lists with their `rev` · replace a character's whole list (actor; a list changed since `rev` is refused) · a ThatsMyBIS export (preview first; writing needs the actor) |
-| `import_ledger` | a loot history file (`csv` text or a local `path`; `kind` auto / biscouncil / tmb / generic) into the ledger: preview first ('N rows, M duplicates, K unknown items', the groups, a `rev`), then `preview=false` with that `rev` (needs the actor); only ever adds rows |
+| `import_ledger` | a loot history file (`csv` text or a local `path`; `kind` auto / biscouncil / tmb / generic) into the ledger: preview first ('N rows, M duplicates, K unknown items', the groups, a `rev`), then `preview=false` with that `rev` (needs the actor); only ever adds rows; unknown items land on Loot › Items › Untiered (`tier_item`) |
 | `loot_weights` · `set_loot_weights` | the scoring weights with the game's default beside each · change some (`fields` = {path: number or null for the default}; the owner's; `preview=True` first — weights are reviewed) |
 | `distil` | Claude's draft of up to five loot-policy sentences from the active precedents, each with the precedents it rests on — nothing written; add the ones the person wants with `policy_append` |
 | `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
@@ -1694,7 +1694,9 @@ make, one award per row:
 **Preview** says *"N rows, M duplicates, K unknown items (recorded by name)"* and shows three groups: the **new** rows
 (with the weight each will carry), the **duplicates** (the ledger already holds that character, item and day — or an
 earlier line of the same file does) and the **unknown items** (not on the tables: recorded by name and scored the same
-for everyone until you tier them here). A line that can't be read (no character, no item, no date) is listed with its
+for everyone until tiered). Each row shows the day it was received. After **Confirm** every unknown item — and any item on
+the tables without tiers — is listed under **Untiered** on Loot › Items (marked *learned from an import*), where you tier
+it like a learned drop; saving its tiers asks whether to re-weight the awards it already has (default no). A line that can't be read (no character, no item, no date) is listed with its
 line number and skipped. **Confirm** adds exactly the new rows — an import only ever adds: it never changes or removes a
 row already in the ledger — and the council reads them at its next judgement (recent loot, "already has it"). If the
 ledger changed since your preview the import is refused and the fresh preview shown. A character nobody registered is

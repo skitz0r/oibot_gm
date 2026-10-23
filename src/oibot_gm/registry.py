@@ -2007,11 +2007,12 @@ class Registry:
         return it.tier_for(spec)
 
     def learn_item(self, item_id: int | None, name: str | None, *, boss: str | None = None, instance: str | None = None,
-                   run: str | None = None, source: str = "companion"):
+                   run: str | None = None, source: str = "companion", times: int = 1):
         """A drop the item tables don't know (or know untiered): remember it in <guild>/items/<key>.yaml as learned
         (first seen, times dropped, boss, the run) so it can be tiered later on Loot › Items. Returns the Item
         (untiered until someone tiers it). An item the profile knows WITH tiers is returned as is and nothing is
-        written. Commits (inside the caller's GitStore.batch, one commit with the drop)."""
+        written. Commits (inside the caller's GitStore.batch, one commit with the drop). `times`: how many drops this
+        call records (a loot history import learns an item once for all its rows; source 'import')."""
         known = self.item(item_id, name)
         if known is not None and known.tiers:
             return known
@@ -2032,7 +2033,7 @@ class Registry:
         learned.setdefault("first_run", run)
         learned.setdefault("source", source)
         learned["last_seen"] = stamp
-        learned["times_dropped"] = int(learned.get("times_dropped") or 0) + 1
+        learned["times_dropped"] = int(learned.get("times_dropped") or 0) + max(1, int(times))
         self.store.write_text(rel, yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
         self.store.commit(f"{self.key}: learned item {nm}" + (f" ({iid})" if iid else ""))
         self.__dict__.pop("_items_cache", None)
@@ -2161,11 +2162,14 @@ class Registry:
         an earlier row of the same file already holds (character, item by id or name, day) — the council's own awards
         dedupe by their import_id as before. New rows are APPENDED (source 'import', `by`, the file's kind, its note);
         nothing in the ledger is ever edited or deleted. An item the tables don't know is recorded by name (D4: untiered,
-        `untiered_weight`); a known item is weighed tier × slot for the character's spec (the file's own tier and weight
+        `untiered_weight`) and, on an apply, learned (learn_item, source 'import', once per item for all its rows) so it is
+        listed on Loot › Items › Untiered and can be tiered there — its awards then re-weight on the D12 question like
+        any learned drop's (an untiered item the tables know is learned the same way); a known item is weighed tier × slot for the character's spec (the file's own tier and weight
         when it carries them — BisCouncil); a character nobody registered is recorded by name. `preview`: nothing written.
         One commit. `rev` (an apply): the preview's rev — when the rows that would be added differ now (the ledger moved
         since the preview), nothing is written and the report says `changed`. Returns {rows, new, duplicates,
-        unknown_items, unknown_characters, groups{new, duplicates, unknown_items}, rev, changed, line: 'N rows, M
+        unknown_items, unknown_characters, groups{new, duplicates, unknown_items} (each row with `received` ISO and
+        `received_label` — the day a person reads), rev, changed, learned (an apply: items learned), line: 'N rows, M
         duplicates, K unknown items (recorded by name)'}."""
         from .loot import scoring
         from .lootctx import fold_ledger
@@ -2196,6 +2200,7 @@ class Registry:
                 it = self.item(int(r.item_id or 0) or None, r.item_name)
                 label = it.name if it is not None else (r.item_name or f"item {r.item_id}")
                 shown = {"line": r.line, "character": c.label if c is not None else r.raider, "item": label, "received": r.received.isoformat(),
+                         "received_label": self.day_label(r.received.isoformat(), with_year=True),  # what a person reads (ISO stays for machines)
                          "boss": r.boss or None, "offspec": r.offspec, "known_item": it is not None, "known_character": hit is not None}
                 why = next((seen[k] for k in keys if k in seen), None)
                 if why is not None:
@@ -2238,11 +2243,23 @@ class Registry:
             if preview or not new or report["changed"]:
                 return report
             stamp = now()
+            learn: dict[str, list] = {}  # item key → [item_id, name, boss, instance, rows]: untiered items land on Loot › Items › Untiered
             for a, r, _ in new:
-                row = a.model_dump(mode="json", exclude_none=True)
-                row.update(imported=kind, imported_at=stamp, **({"note": r.note} if r.note else {}), **({"by_id": by_id} if by_id else {}))
-                self.store.append_jsonl(rel, row)
-            self.store.commit(f"{self.key}: {len(new)} award(s) imported from a {kind} file by {by}")
+                it = self.item(a.item_id or None, a.item_name)
+                if it is not None and it.tiers:
+                    continue
+                k = item_key(a.item_id or (it.id if it is not None else 0), a.item_name or (it.name if it is not None else None))
+                hold = learn.setdefault(k, [a.item_id or None, a.item_name, a.boss or None, a.instance or None, 0])
+                hold[4] += 1
+            with self.store.batch(f"{self.key}: {len(new)} award(s) imported from a {kind} file by {by}"):
+                for a, r, _ in new:
+                    row = a.model_dump(mode="json", exclude_none=True)
+                    row.update(imported=kind, imported_at=stamp, **({"note": r.note} if r.note else {}), **({"by_id": by_id} if by_id else {}))
+                    self.store.append_jsonl(rel, row)
+                for iid, nm, boss, inst, n in learn.values():
+                    self.learn_item(iid, nm, boss=boss, instance=inst, source="import", times=n)
+                self.store.commit(f"{self.key}: {len(new)} award(s) imported from a {kind} file by {by}")
+            report["learned"] = len(learn)
         return report
 
     # ---- attendance (design §3.5 L35/M43, D49): from DONE runs, keyed by the member (every character rolls up)

@@ -23,7 +23,7 @@ from oibot_gm.llm.provider import ROUTES
 from oibot_gm.loot import distil as distil_mod
 from oibot_gm.loot import scoring
 from oibot_gm.policy import PolicyStore
-from oibot_gm.registry import ConfigChanged, RegistryError
+from oibot_gm.registry import ConfigChanged, RegistryError, item_key
 from oibot_gm.web import app as web
 
 ACTOR = {"X-Oibot-Actor": str(OFFICER)}
@@ -190,6 +190,49 @@ def test_import_route_previews_then_applies_and_reloads_the_council_context(w):
     assert any("loot history imported" in line for _k, _l, line in w.bot.ops.lines), "one audit line"
     stale = w.c.post("/api/loot/import", json={"csv": text, "preview": False, "rev": pv["rev"]}, headers=officer)
     assert stale.status_code == 409 and stale.json()["preview"]["new"] == 0, "the ledger moved since that preview"
+
+
+def test_preview_rows_show_the_day_a_person_reads_never_iso(reg):
+    """Clock rule: the preview tables print `received_label` (a day label); ISO `received` stays for machines."""
+    a = reg.test_members()[0].main.label
+    rep = reg.import_awards(ledger_csv.parse(f"character,item,received\n{a},Shard of Doom,2026-12-09\n").rows, "Officer", preview=True)
+    row = rep["groups"]["new"][0]
+    assert row["received"] == "2026-12-09" and row["received_label"] == reg.day_label("2026-12-09", with_year=True) == "Wed 09 Dec 2026"
+    assert "2026-12-09" not in row["received_label"]
+
+
+def test_an_imported_unknown_item_is_learned_and_tiered_on_loot_items(w):
+    """D4 'tiered later on Loot › Items': an apply learns every unknown / untiered item (once for all its rows,
+    source 'import'), so it is on the Untiered list with its awards, and tiering it re-weights them on the D12 question.
+    A preview learns nothing."""
+    a, b = names(w)
+    tiered_item(w.reg, 90001, "Robe of Tests")
+    items_dir = w.reg.store.root / w.reg.key / "items"
+    before_files = sorted(p.name for p in items_dir.glob("*.yaml"))
+    text = fixture("ledger_generic.csv", a, b)
+    officer = as_user(w.c, OFFICER)
+    pv = w.c.post("/api/loot/import", json={"csv": text}, headers=officer).json()["preview"]
+    assert sorted(p.name for p in items_dir.glob("*.yaml")) == before_files, "a preview learns nothing"
+    r = w.c.post("/api/loot/import", json={"csv": text, "preview": False, "rev": pv["rev"]}, headers=officer).json()
+    assert r["report"]["learned"] == 2 and "2 untiered item(s) now on Loot › Items › Untiered" in r["message"]
+    key = item_key(0, "Sunfire Pauldrons")
+    assert key in w.reg.items() and not w.reg.items()[key].tiers
+    meta = w.reg.item_meta(key)
+    assert meta["source"] == "import" and meta["times_dropped"] == 1 and w.reg.items()[key].boss == "Gatekeeper"
+    listed = w.c.get("/api/loot/items", headers=H).json()["untiered"]
+    row = next(i for i in listed if i["key"] == key)
+    assert row["learned"] and row["source"] == "import" and row["awards"] == 1, "listed on Loot › Items › Untiered with its award"
+    assert any(i["key"] == item_key(0, "Shard of Doom") for i in listed)
+    win = w.ms[1]
+    spec_key = f"{win.main.cls}:{win.main.spec}"
+    t = w.c.post(f"/api/loot/items/{key}/tiers", json={"tiers": {spec_key: "S"}, "reweight": True}, headers=officer | ACTOR).json()
+    assert t.get("reweighted") == 1, t
+    rows = ledger(w.reg)
+    assert rows[-1]["kind"] == "reweight" and w.reg.items()[key].tiers == {spec_key: "S"}
+    ctx = loot_ops.guild_ctx(w.bot, w.reg)
+    ctx.reload()
+    award = next(x for x in ctx.ledger if x.item_name == "Sunfire Pauldrons")
+    assert award.tier == "S" and award.raider == win.main.label, "who got it never changes; its weight follows the tier"
 
 
 def test_import_route_refuses_members_and_an_mcp_apply_needs_the_actor(w):

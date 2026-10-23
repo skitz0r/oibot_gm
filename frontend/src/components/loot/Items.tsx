@@ -51,7 +51,7 @@ export function Items({ meta }: { meta: Meta }) {
               {data.untiered.filter(match).length === 0 && <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="dimmed">Nothing untiered.</Text></Table.Td></Table.Tr>}
               {data.untiered.filter(match).map((i) => (
                 <Table.Tr key={i.key} style={{ cursor: "pointer" }} onClick={() => setOpen(i.key)}>
-                  <Table.Td><Text size="sm" fw={600}>{i.name}</Text>{i.learned && <Badge size="xs" variant="outline" color="yellow">learned from a drop</Badge>}</Table.Td>
+                  <Table.Td><Text size="sm" fw={600}>{i.name}</Text>{i.learned && <Badge size="xs" variant="outline" color="yellow">{i.source === "import" ? "learned from an import" : "learned from a drop"}</Badge>}</Table.Td>
                   <Table.Td>{i.boss || "—"}</Table.Td><Table.Td><Text size="xs" c="dimmed">{i.first_seen_label || "—"}</Text></Table.Td><Table.Td>{i.times_dropped ?? "—"}</Table.Td><Table.Td>{i.awards ?? 0}</Table.Td>
                 </Table.Tr>
               ))}

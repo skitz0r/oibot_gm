@@ -752,8 +752,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         writes nothing and answers the groups — new rows · duplicates · unknown items — with 'N rows, M duplicates, K
         unknown items (recorded by name)' and a `rev`; the apply (`preview: false`) needs that rev (none → 400; the rows
         that would be added changed since → 409 with the fresh preview) and APPENDS exactly the new rows (Registry.
-        import_awards: dedupe on (character, item, day) for imports only — never an edit, never a delete), then the
-        council's context reloads. Officers; from MCP the apply records awards in someone's name: X-Oibot-Actor (D8)."""
+        import_awards: dedupe on (character, item, day) for imports only — never an edit, never a delete; an untiered
+        or unknown item is learned onto Loot › Items › Untiered so it can be tiered there), then the council's context reloads. Officers; from MCP the apply records awards in someone's name: X-Oibot-Actor (D8)."""
         from ..importers import ledger_csv
 
         v, d = await writer(request)  # officers; the apply below is the decision that needs the actor from MCP (D8)
@@ -779,10 +779,14 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
             return JSONResponse({"error": "The ledger changed since you looked — here is the file against it now; import again if it still reads right.",
                                  "preview": report}, status_code=409)
         line = f"loot history imported from a {ledger_csv.KIND_WORDS[parsed.kind]}: {report['new']} award(s) added — {report['line']}"
+        if report.get("learned"):
+            line += f"; {report['learned']} untiered item(s) now on Loot › Items › Untiered to tier"
         if report["new"]:
             ctx_of(reg).reload()  # the council reads the new rows at its next judgement (recent loot, already-has)
             await ops_mod.audited(bot.ops, reg, by_of(v), line, via=v.via, by_id=v.uid)
             publish("loot:ledger", reg.key)
+            if report.get("learned"):
+                publish("items", reg.key)  # Loot › Items lists the items the import learned
         else:
             line = "Nothing to import — " + report["line"]
         return {"message": line, "report": report}
@@ -941,7 +945,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         out = {"key": key, "id": it.id, "name": it.name, "boss": it.boss, "slot": it.slot, "type": it.type, "tiered": bool(it.tiers), "learned": bool(meta)}
         if meta:
             out.update(first_seen_label=reg.local12(meta["first_seen"]) if meta.get("first_seen") else "", times_dropped=int(meta.get("times_dropped") or 0),
-                       first_run=meta.get("first_run"))
+                       first_run=meta.get("first_run"), source=meta.get("source") or "companion")
         if ctx is not None:
             out["awards"] = len(ctx.awards_of_item(it))
         return out

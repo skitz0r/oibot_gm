@@ -3,7 +3,7 @@ import { Alert, Badge, Button, FileButton, Group, Modal, Select, Stack, Table, T
 import { api } from "../../api";
 import { fail, ok } from "../Page";
 
-interface Row { line: number; character: string; item: string; received: string; boss: string | null; offspec: boolean; known_item: boolean; known_character: boolean; tier?: string; weight?: number; why?: string }
+interface Row { line: number; character: string; item: string; received: string; received_label: string; boss: string | null; offspec: boolean; known_item: boolean; known_character: boolean; tier?: string; weight?: number; why?: string }
 /** POST /api/loot/import's preview (Registry.import_awards): the groups and the rev an import must carry. */
 interface LedgerPreview {
   kind: string; kind_words: string; rows: number; new: number; duplicates: number; unknown_items: number; unknown_characters: string[]; line: string; rev: string;
@@ -20,7 +20,7 @@ const GENERIC = "character,item,received,boss,ms_os,note";
 
 /** Loot › Items › Import loot history (L07, design §5.48): a CSV from another tool — upload or paste — previewed as three
  *  groups (new rows · duplicates · unknown items, recorded by name) with the server's own counts, then Confirm appends exactly
- *  the new rows. An import never edits or deletes a ledger row; a row the ledger already holds (same character, item and day)
+ *  the new rows; an unknown or untiered item is learned onto Loot › Items › Untiered, where it is tiered like a learned drop. An import never edits or deletes a ledger row; a row the ledger already holds (same character, item and day)
  *  is a duplicate. Gargul / RCLootCouncil aren't read yet (which addon is still open): the generic columns are the fallback. */
 export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [csv, setCsv] = useState("");
@@ -54,7 +54,7 @@ export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone:
               <Table.Td><Text size="xs" c="dimmed">{r.line}</Text></Table.Td>
               <Table.Td><Text size="sm">{r.character}</Text>{!r.known_character && <Text size="xs" c="dimmed">nobody registered — by name</Text>}</Table.Td>
               <Table.Td><Text size="sm">{r.item}</Text>{!r.known_item && <Text size="xs" c="dimmed">not on the tables — by name</Text>}</Table.Td>
-              <Table.Td><Text size="xs">{r.received}{r.offspec ? " · OS" : ""}</Text></Table.Td>
+              <Table.Td><Text size="xs">{r.received_label || r.received}{r.offspec ? " · OS" : ""}</Text></Table.Td>
               <Table.Td><Text size="xs" c="dimmed">{why ? r.why : `${r.tier ?? "?"} · ${r.weight ?? ""}`}</Text></Table.Td>
             </Table.Tr>
           ))}
@@ -87,7 +87,7 @@ export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone:
               <Tabs.Panel value="unknown" pt="xs">
                 <Stack gap={2}>
                   {pv.groups.unknown_items.length === 0 && <Text size="sm" c="dimmed">None — every item is on the tables.</Text>}
-                  {pv.groups.unknown_items.map((u) => <Text key={u.item} size="sm">{u.item} <Text span size="xs" c="dimmed">· {u.rows} row(s), recorded by name and scored untiered until tiered here</Text></Text>)}
+                  {pv.groups.unknown_items.map((u) => <Text key={u.item} size="sm">{u.item} <Text span size="xs" c="dimmed">· {u.rows} row(s), recorded by name — after Confirm it is listed under Untiered on this page; tier it there (its awards can be re-weighted)</Text></Text>)}
                 </Stack>
               </Tabs.Panel>
             </Tabs>

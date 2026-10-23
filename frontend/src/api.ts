@@ -327,7 +327,7 @@ export interface LogRow {
 }
 export interface WishEntry { item_id: number; name: string; key: string; rank: number; offspec: boolean; note: string | null; source: string; known: boolean; tiered: boolean; boss: string | null; received: string | null; received_label: string | null }
 export interface WishCharacter { label: string; cls: string; spec: string; is_main: boolean; rev: string; entries: WishEntry[] }
-export interface ItemBrief { key: string; id: number; name: string; boss: string | null; slot: string; type: string; tiered: boolean; learned: boolean; first_seen_label?: string; times_dropped?: number; first_run?: string; awards?: number }
+export interface ItemBrief { key: string; id: number; name: string; boss: string | null; slot: string; type: string; tiered: boolean; learned: boolean; first_seen_label?: string; times_dropped?: number; first_run?: string; source?: string; awards?: number }
 export interface ItemGrid extends ItemBrief {
   rows: { key: string; cls: string; spec: string; role: string; tier: string; own: string | null; profile: string | null; equippable: boolean; why: string | null }[];
   wide: Record<string, string>; own: Record<string, string>; tiers: string[]; roles: string[]; awards: number;
