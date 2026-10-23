@@ -989,7 +989,12 @@ nobody can read a token back, not even the owner — and token values never appe
 repo (the lines name the label and its id, `ft-…`). The raid leader starts the companion with `--token <token>`,
 `--token-file <file>` or the `OIBOT_COMPANION_TOKEN` environment variable (companion/README.md). The host sets
 `OIBOT_FEED_BIND` (the tailnet address the bot listens on) and may set `OIBOT_FEED_URL` (the address the DM quotes); the
-listener starts by itself with the first token. The older `.env` tokens above keep working.
+listener starts by itself with the first token. Without `OIBOT_FEED_BIND` it listens on the bot's own machine only, and
+the Companions hub (and Loot › Companions) says so: *listening on this machine only — set OIBOT_FEED_BIND for companions
+on other PCs* (the address itself is never shown). If the token's DM can't be delivered — for any reason — the token is
+withdrawn at once and the hub says *not delivered — nothing is active*. A companion's drops that were waiting for a
+council when its token was revoked are not recorded (the ops channel lists them, to record by hand). The older `.env`
+tokens above keep working.
 
 **Moving a guild to another server** (rather than claiming the new server as a guild of its own):
 `scripts/move_guild.py --to <new server id> [--key <guild>]` with the bot stopped (which stops every server it looks

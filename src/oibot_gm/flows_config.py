@@ -2449,13 +2449,17 @@ class CompanionsWizard(OwnerWizard):
         from .feed import token_line
         from .registry import FEED_TOKEN_MAX
 
+        from .feed import listen_state
+
         rows = self.rows(i)
         active = [r for r in rows if r["active"]]
         gone = len(rows) - len(active)
         lines = [token_line(r) for r in active] or ["No companion token yet."]
+        ls = listen_state(getattr(i.client, "feed", None))
+        reach = f"\n-# {ls['words']}" if (active and (not ls["listening"] or ls["local_only"])) else ""  # off, or this machine only
         text = ("The loot companion on a raid leader's PC streams drops and awards from their chat log. Each token feeds "
                 f"**{discord.utils.escape_markdown(self.reg.config.name)}** only; a revoked one stops at its next message.\n\n" + "\n".join(lines)
-                + (f"\n-# {gone} revoked — the site lists them" if gone else "") + (f"\n\n{note}" if note else ""))
+                + (f"\n-# {gone} revoked — the site lists them" if gone else "") + reach + (f"\n\n{note}" if note else ""))
         await self.show(i, text, self.button("Issue…", self.issue_form, discord.ButtonStyle.primary, disabled=len(active) >= FEED_TOKEN_MAX),
                         self.button("Revoke…", self.pick_revoke, discord.ButtonStyle.secondary, disabled=not active),
                         self.button("Done", self.done))

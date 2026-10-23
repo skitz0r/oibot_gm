@@ -678,11 +678,12 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         """Loot › Companions: this guild's companions (live · quiet · disconnected, last seen in words, events) for
         officers; for the owner also which feed-token variables are set (OIBOT_FEED_TOKEN, OIBOT_FEED_TOKEN_<KEY>) —
         names and yes/no only, never a value (secrets stay in .env, §2.8)."""
-        from ..feed import token_state
+        from ..feed import listen_state, token_state
 
         v = await who(request, officer=True)
         many = bool(getattr(bot.registries, "many", False))
-        return {"companions": companion_json(v.reg), "listening": getattr(bot, "feed", None) is not None, "many": many,
+        ls = listen_state(getattr(bot, "feed", None))
+        return {"companions": companion_json(v.reg), "listening": ls["listening"], "local_only": ls["local_only"], "listen_words": ls["words"], "many": many,
                 "tokens": token_state(v.reg.key, many=many) if v.owner else None, "owner": v.owner}
 
     # ------------------------------------------------------------ attendance (design §3.5 L35/M43, D49)

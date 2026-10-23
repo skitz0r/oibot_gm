@@ -1028,21 +1028,45 @@ class SetupMixin:
         if deliver_to is not None:
             try:
                 await deliver_to.send(companion_dm_text(reg, rec, token, by))
-            except (discord.HTTPException, AttributeError) as e:
+            except BaseException as e:  # ANY failure (a refusal, a timeout, a bug, a cancel): never a live token nobody holds
                 token = None  # forget it: nobody will ever see this one
-                await asyncio.to_thread(reg.revoke_feed_token, rec.id, f"the bot (the DM to {name} didn't arrive)")
-                await ops_mod.audited(self.ops, reg, by, f"companion token “{rec.label}” ({rec.id}) withdrawn: the DM to {name} didn't arrive",
-                                      via=via, level="warn", by_id=by_id)
-                why = "their DMs from this server are closed" if isinstance(e, discord.Forbidden) else "Discord refused the DM"
-                raise RegistryError(f"Couldn't DM {name} ({why}) — nothing was issued. Ask them to allow DMs from server members, or issue the "
-                                    "token on the site (Config › Companions) and hand it over yourself.") from None
+                await self._withdraw_undelivered(reg, rec, name, by, by_id, via, cancelled=not isinstance(e, Exception))
+                if not isinstance(e, Exception):
+                    raise  # a cancel (shutdown) still unwinds — after the token is withdrawn
+                why = ("their DMs from this server are closed" if isinstance(e, discord.Forbidden) else
+                       "Discord refused the DM" if isinstance(e, discord.HTTPException) else "the DM failed")
+                raise RegistryError(f"Couldn't DM {name} ({why}) — not delivered — nothing is active. Ask them to allow DMs from server members, "
+                                    "or issue the token on the site (Config › Companions) and hand it over yourself.") from None
             token = None  # delivered: the owner never sees it
         where = f"DMed to {name}" if deliver_to is not None else "shown once on the site"
         await ops_mod.audited(self.ops, reg, by, f"issued companion token “{rec.label}” ({rec.id}) — {where}", via=via, by_id=by_id)
         msg = (f"Token “{rec.label}” sent to {name}." if deliver_to is not None else f"Token “{rec.label}” issued — copy it now; it won't be shown again.")
-        if not listening:
-            msg += " The loot feed isn't listening on this host yet (OIBOT_FEED_BIND) — the owner of the host has to set it."
-        return {"record": rec, "token": token, "sent_to": name, "message": msg, "listening": bool(listening)}
+        from .feed import LISTEN_OFF, listen_state
+
+        ls = listen_state(getattr(self, "feed", None)) if listening else {"listening": False, "local_only": False, "words": LISTEN_OFF}
+        if not ls["listening"] or ls["local_only"]:
+            msg += " " + ls["words"]  # off, or this machine only: the host's owner sets OIBOT_FEED_BIND
+        return {"record": rec, "token": token, "sent_to": name, "message": msg, "listening": bool(listening), "local_only": ls["local_only"]}
+
+    async def _withdraw_undelivered(self, reg: Registry, rec, name: str, by: str, by_id: int | None, via: str, *, cancelled: bool = False) -> None:
+        """A token whose DM didn't arrive is revoked at once and audited (one warn line). A cancel revokes on this thread
+        (no await may run after a cancellation is delivered and still be trusted to finish)."""
+        reason = f"the bot (the DM to {name} didn't arrive)"
+        try:
+            if cancelled:
+                reg.revoke_feed_token(rec.id, reason)
+            else:
+                await asyncio.to_thread(reg.revoke_feed_token, rec.id, reason)
+        except Exception:  # noqa: BLE001 — the owner's error alert names it; the hub still says nothing is delivered
+            log.exception("companion token %s: withdrawing the undelivered token failed", rec.id)
+            if self.ops is not None:
+                await self.ops.emit(reg.config, "error", f"companion token “{rec.label}” ({rec.id}): its DM to {name} failed and the withdraw failed too — revoke it on Config › Companions")
+            return
+        if cancelled:  # shutting down: the log keeps the line (the ops channel may not be reachable any more)
+            log.warning("[%s] companion token %s (%s) withdrawn: the DM to %s was cancelled", reg.key, rec.label, rec.id, name)
+            return
+        await ops_mod.audited(self.ops, reg, by, f"companion token “{rec.label}” ({rec.id}) withdrawn: the DM to {name} didn't arrive",
+                              via=via, level="warn", by_id=by_id)
 
     async def revoke_companion(self, reg: Registry, ref: str, by: str, *, by_id: int | None = None, via: str = "discord") -> str:
         """Revoke a companion token (id or label): stored at once, refused by the feed at the companion's next frame, and

@@ -1370,7 +1370,8 @@ class LootMixin:
             return
         row = {"at": now_iso(), "guild": guild_key, "ev": ev, "comp": {"character": getattr(comp, "character", "?"), "client": getattr(comp, "client", "?"),
                                                                         "guild": getattr(comp, "named", getattr(comp, "guild", "")) or "", "peer": getattr(comp, "peer", "held"),
-                                                                        "bound": getattr(comp, "bound", None)}}
+                                                                        "bound": getattr(comp, "bound", None),
+                                                                        "token_id": getattr(comp, "token_id", None)}}  # an issued token: re-checked at replay
         ended = self.loot_recent_end(guild_key, FEED_AFTER_END_S)
         if ended is not None:
             row["after_end"] = ended
@@ -1428,7 +1429,7 @@ class LootMixin:
         await self._feed_announce_lost(guild_key, old)
         return old
 
-    async def _feed_announce_lost(self, guild_key: str, rows: list[dict]) -> None:
+    async def _feed_announce_lost(self, guild_key: str, rows: list[dict], why: str = "expired") -> None:
         def what(ev: dict) -> str:
             k = ev.get("type")
             if k == "drop":
@@ -1444,8 +1445,10 @@ class LootMixin:
             ended = r.get("after_end")
             return what(r.get("ev") or {}) + (f" (after {ended}'s council ended — record it on that run)" if ended else "")
         chars = ", ".join(sorted({(r.get("comp") or {}).get("character", "?") for r in rows}))
-        text = (f"companion events from {chars}'s log waited {FEED_BUFFER_S // 60} min with no loot council taking them and were NOT recorded: "
-                + "; ".join(row_what(r) for r in rows) + " — record them by hand (the run's loot council, or the site).")
+        head = (f"companion events from {chars}'s log were held, and their companion token was revoked before a council took them — NOT recorded: "
+                if why == "revoked" else
+                f"companion events from {chars}'s log waited {FEED_BUFFER_S // 60} min with no loot council taking them and were NOT recorded: ")
+        text = head + "; ".join(row_what(r) for r in rows) + " — record them by hand (the run's loot council, or the site)."
         cfg_for = getattr(self.registries, "cfg_for", None)
         cfg = cfg_for(guild_key) if cfg_for else None
         if cfg is not None and getattr(self, "ops", None) is not None:
@@ -1483,13 +1486,22 @@ class LootMixin:
 
             handle = getattr(self, "handle_feed_event", None)
             keep: list[dict] = []
+            revoked: list[dict] = []
             n = 0
             for r in fresh:
                 if handle is None or self._held_for_run(reg, r, ev) is not None:
                     keep.append(r)
                     continue
                 c = r.get("comp") or {}
-                comp = Companion(c.get("character", "?"), c.get("client", "?"), c.get("guild", ""), c.get("peer", "held"), bound=c.get("bound"))
+                comp = Companion(c.get("character", "?"), c.get("client", "?"), c.get("guild", ""), c.get("peer", "held"), bound=c.get("bound"),
+                                 token_id=c.get("token_id"))
+                still = self._held_token_valid(comp)
+                if still is False:  # its token was revoked while the event waited: the revoke wins — never applied
+                    revoked.append(r)
+                    continue
+                if still is None:  # can't tell now (its guild is parked, a lookup failed): it stays held
+                    keep.append(r)
+                    continue
                 token = _REPLAYING.set(True)
                 try:
                     out = await handle(r.get("ev") or {}, comp)
@@ -1503,10 +1515,27 @@ class LootMixin:
                 else:
                     n += 1
             arrived = [x for x in self._held_rows(reg.key) if json.dumps(x, sort_keys=True, default=str) not in seen]  # held meanwhile
-            self._held_write(reg.key, keep + arrived, f"{n} held companion event(s) replayed, {len(keep)} still held")
+            self._held_write(reg.key, keep + arrived, f"{n} held companion event(s) replayed, {len(keep)} still held"
+                             + (f", {len(revoked)} dropped (token revoked)" if revoked else ""))
         if old:
             await self._feed_announce_lost(reg.key, old)
+        if revoked:
+            await self._feed_announce_lost(reg.key, revoked, why="revoked")
         return n
+
+    def _held_token_valid(self, comp) -> bool | None:
+        """A held event's companion token, re-checked at replay (FeedMixin.feed_token_valid, the per-frame check): True for
+        a .env token (no token id) or a live issued one, False once revoked, None when it can't be told now."""
+        if getattr(comp, "token_id", None) is None:
+            return True
+        check = getattr(self, "feed_token_valid", None)
+        if check is None:
+            return True
+        try:
+            return check(comp)
+        except Exception:  # noqa: BLE001 — a lookup that fails never lets an event through
+            log.exception("held event token check failed")
+            return None
 
     # ------------------------------------------------------------ the thread's buttons (the Discord surface's)
     def loot_view(self, reg, session: LootSession, kind: str, drop_id: str | None = None):

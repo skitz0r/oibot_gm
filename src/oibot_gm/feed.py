@@ -308,22 +308,11 @@ def guild_tokens(env: dict | None = None) -> dict[str, str]:
     return {k[len(GUILD_TOKEN_PREFIX):].upper(): v for k, v in env.items() if k.startswith(GUILD_TOKEN_PREFIX) and v}
 
 
-def authorize(token: str, shared: str | None, per_guild: dict[str, str], keys: Callable[[], list[str]]) -> tuple[bool, str | None]:
-    """A hello's token → (ok, guild key it belongs to). A guild's own token first (so the owner may give the guild token
-    the shared value and leave the companion as it is); a guild token naming no guild served is refused; then the
-    shared one (bound to no guild). `keys()`: the guild keys served now (a guild claimed at run time counts at once)."""
-    for suffix, t in per_guild.items():
-        if same(token, t):
-            key = next((k for k in keys() if token_suffix(k) == suffix), None)
-            if key:
-                return True, key
-    return same(token, shared), None
-
-
 def authorize_any(token: str, shared: str | None, per_guild: dict[str, str], keys: Callable[[], list[str]],
                   issued: Callable[[str], tuple[str, str, str] | None] | None = None) -> tuple[bool, str | None, str | None, str | None]:
-    """A hello's token → (ok, guild key, issued token id, label): a guild's .env token first (as `authorize`), then an
-    issued token by hash (`issued(token)` → (guild key, token id, label) or None — Registry.match_feed_token over the
+    """THE token check of a hello (the only one — design §5.50): → (ok, guild key, issued token id, label). A guild's
+    .env token first (OIBOT_FEED_TOKEN_<KEY>, so the owner may give it the shared value and leave the companion as it
+    is: it binds to that guild), then an issued token by hash (`issued(token)` → (guild key, token id, label) or None — Registry.match_feed_token over the
     guilds served), then the shared one. ok None: no match, but a guild that holds it isn't served now — a guild's .env
     token (OIBOT_FEED_TOKEN_<KEY>) whose guild is detached or failed to load, or `issued` raised TokenUnverifiable —
     refused without auth:true, so the companion retries and comes back when the guild does."""
@@ -424,6 +413,35 @@ def ops_warner(bot) -> Callable[["Companion", str], Awaitable[None]]:
 
 
 # ---------------------------------------------------------------- the companion tokens card (Loot › Companions)
+LISTEN_OFF = ("The loot feed isn't listening on this host yet — it starts with the first token; a companion on another PC also "
+              "needs OIBOT_FEED_BIND set on the host.")
+LISTEN_LOCAL = "The loot feed is listening on this machine only — set OIBOT_FEED_BIND for companions on other PCs."
+LISTEN_ON = "The loot feed is listening."
+
+
+def is_loopback(host: str | None) -> bool:
+    """A bind address only this machine can reach (127.x, ::1, localhost, or none given → the loopback default)."""
+    import ipaddress
+
+    h = str(host or "").strip().strip("[]").lower()
+    if h in ("", "localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def listen_state(feed) -> dict:
+    """THE words for whether companions can reach this host (Config › Companions, Loot › Companions, /gm config
+    companion, the issue reply, MCP list_companions): {listening, local_only, words}. Listening on a loopback bind is
+    'this machine only'. Never the address itself (a host fact) and never a token."""
+    if feed is None:
+        return {"listening": False, "local_only": False, "words": LISTEN_OFF}
+    local = is_loopback(getattr(feed, "host", None))
+    return {"listening": True, "local_only": local, "words": LISTEN_LOCAL if local else LISTEN_ON}
+
+
 def token_state(key: str, *, many: bool, env: dict | None = None) -> dict:
     """What the owner's card shows about the feed tokens for guild `key` — WHICH variables are set, never a value:
     {shared: OIBOT_FEED_TOKEN set, shared_feeds: whether the shared token feeds this guild's raids (one guild served),

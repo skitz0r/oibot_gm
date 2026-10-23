@@ -438,6 +438,35 @@ def test_the_web_issue_carries_the_value_exactly_once(cw, caplog, store):
     assert not files_holding(store.root, token)
 
 
+def test_a_loopback_feed_is_listening_on_this_machine_only(cw):
+    """Regression (review item 6): the Companions hub said the feed was "listening" when OIBOT_FEED_BIND was loopback
+    only, so a raid leader's companion on another PC could never reach it. feed.listen_state words it — never the
+    address — on Config › Companions, Loot › Companions and the issue reply."""
+    from oibot_gm.feed import LISTEN_LOCAL, LISTEN_OFF, LISTEN_ON
+
+    h = as_user(cw.c, OWNER)
+    cw.bot.feed = None
+    d = cw.c.get("/api/companions", headers=h).json()
+    assert (d["listening"], d["local_only"], d["listen_words"]) == (False, False, LISTEN_OFF)
+    cw.bot.feed = FeedServer(lambda ev, c: None, None, "127.0.0.1:8787")  # built, never started
+    r = cw.c.get("/api/companions", headers=h)
+    d = r.json()
+    assert d["listening"] and d["local_only"] and d["listen_words"] == LISTEN_LOCAL
+    assert "listening on this machine only — set OIBOT_FEED_BIND for companions on other PCs" in d["listen_words"]
+    assert "127.0.0.1" not in r.text and "8787" not in r.text, "never the bind address"
+    cw.c.cookies.clear()
+    loot = cw.c.get("/api/loot/companions", headers=MCP)  # Loot › Companions (officers; the MCP token acts as the owner)
+    assert loot.status_code == 200, loot.text
+    loot = loot.json()
+    assert loot["local_only"] and loot["listen_words"] == LISTEN_LOCAL
+    h = as_user(cw.c, OWNER)
+    issued = cw.c.post("/api/companions/issue", json={"label": "Far PC"}, headers=h).json()
+    assert LISTEN_LOCAL in issued["message"] and issued["local_only"] is True
+    cw.bot.feed = FeedServer(lambda ev, c: None, None, "100.101.102.103:8787")
+    r = cw.c.get("/api/companions", headers=h)
+    assert r.json()["listen_words"] == LISTEN_ON and not r.json()["local_only"] and "100.101.102.103" not in r.text
+
+
 def test_officers_members_and_mcp_may_not_issue(cw, reg):
     reg_members = [m for m in reg.members.values() if m.test]
     off = as_user(cw.c, OFFICER)
@@ -573,8 +602,29 @@ def test_a_dm_that_cant_be_delivered_issues_nothing(reg, rs, in_server):
         await h.pick_member("Pick the raid leader", leader)
         await h.press("Issue and DM")
     run(go())
-    assert "Couldn't DM Rhozy" in h.text and "nothing was issued" in h.text
+    assert "Couldn't DM Rhozy" in h.text and "not delivered — nothing is active" in h.text
     assert reg.feed_tokens(include_revoked=False) == [], "the token was withdrawn at once"
+
+
+@pytest.mark.parametrize("fail", [RuntimeError("socket closed"), asyncio.TimeoutError(), ValueError("bad payload")])
+def test_any_dm_failure_withdraws_the_token_audits_and_says_nothing_is_active(reg, rs, in_server, fail):
+    """Regression (review item 5b): only discord.HTTPException / AttributeError were caught, so a DM that failed any
+    other way left a LIVE token nobody received, with no audit line. Any failure now revokes it, audits it and tells the
+    owner's hub 'not delivered — nothing is active'."""
+    h = owner_harness(reg, rs)
+    leader = Leader(fail=fail)
+
+    async def go():
+        await FLOWS["companion"](h.command(), reg)
+        await h.press("Issue…")
+        await h.submit(label="Jon's PC")
+        await h.pick_member("Pick the raid leader", leader)
+        await h.press("Issue and DM")
+    run(go())
+    assert "Couldn't DM Rhozy (the DM failed) — not delivered — nothing is active" in h.text
+    assert reg.feed_tokens(include_revoked=False) == [] and len(reg.feed_tokens()) == 1, "issued, then withdrawn at once"
+    lines = [t for _k, lvl, t in h.client.ops.lines if lvl == "warn"]
+    assert any("withdrawn: the DM to Rhozy didn't arrive" in t for t in lines), h.client.ops.lines
 
 
 def test_the_hub_refuses_a_bot_a_bad_label_and_non_owners(reg, rs, in_server):

@@ -1155,7 +1155,7 @@ environment) makes `Api._send` refuse a `guild=` resolving to any other guild be
 member text and must never steer the review into another guild (reading its policy, planting proposals there). An
 interactive session (no lock) keeps "a call's own `guild=` wins". *The MCP guild list is never stale:* `Api.guilds()`
 re-reads on a `key_for` miss (once), on every `list_guilds`, and after a "Which guild?" 400; the 404 fallback of a bot
-from before several guilds is never kept. *The companion feed binds a token to a guild:* `feed.authorize` — a guild's
+from before several guilds is never kept. *The companion feed binds a token to a guild:* `feed.authorize_any` (the one token check; §5.50 added the issued tokens) — a guild's
 own token (`OIBOT_FEED_TOKEN_<KEY>`, key upper-cased, non-alphanumerics → `_`, resolved against the guilds served NOW so
 a server claimed later counts at once) binds the companion (`Companion.bound`; its `guild` becomes that key, `named`
 keeps what the hello said); the shared `OIBOT_FEED_TOKEN` binds none. With several guilds `active_raid` routes by
@@ -3148,8 +3148,15 @@ the address; a port in use logs and stays off).
 ONCE (`companion_dm_text`: the token in a spoiler code span, how to start the companion — `OIBOT_FEED_URL` when the host
 names its feed address — and "this message is the only copy") and NOT returned: the owner reads only "Token “…” sent to
 <name>". This DM is allowed under the DM rule: the token is a credential the raid leader must install (an act). A DM
-Discord refuses withdraws the token at once (revoked by "the bot (the DM to X didn't arrive)", a warn audit line) and the
-owner is told to have DMs opened or to issue on the site. Without `deliver_to` (the site) the token is in the result for
+that fails in ANY way (Discord refusing it, a timeout, anything raised — `_withdraw_undelivered`; a cancel withdraws on
+the spot and re-raises) withdraws the token at once (revoked by "the bot (the DM to X didn't arrive)", a warn audit line)
+and the owner's hub reads "Couldn't DM X (…) — not delivered — nothing is active", with the advice to have DMs opened or
+to issue on the site. Reachability: `feed.listen_state(bot.feed)` → {listening, local_only, words} is THE sentence on
+every surface (the issue reply, the Discord hub, `/api/companions` + `/api/loot/companions` `local_only` /
+`listen_words`, MCP `list_companions`): on a loopback bind it says "listening on this machine only — set
+OIBOT_FEED_BIND for companions on other PCs" (never the address). Held events (no council live, `<guild>/loot/held.json`)
+keep their companion's `token_id`; `feed_replay` re-checks it like a frame (`_held_token_valid` → `feed_token_valid`):
+revoked → dropped and named in one ops warn ("their companion token was revoked … NOT recorded"), can't tell → still held. Without `deliver_to` (the site) the token is in the result for
 the caller to show once. One audit line: "issued companion token “label” (ft-…) — DMed to X | shown once on the site".
 `revoke_companion(reg, ref, by, …)`: the revoke, the sockets closed, one warn audit line. `companion_rows(reg)` =
 `feed.token_rows(reg, feed_presence(…))`: per token {state live | quiet | disconnected | offline | never | revoked,
@@ -3164,7 +3171,7 @@ active tokens → decide (danger). Web: Config › Companions (owner tab, `compo
 label → the token in a modal (no outside-click close) with Copy and "I've saved it" → gone from the page for good;
 revoke through `useConfirm` with the server's sentence; presence per token (polled); `useDirty("companions")` while a
 label is typed or a token is on screen. Routes (web/api_setup.py, owner — the id decides, not the officer roles):
-GET `/api/companions` (rows, `listening`, the cap, the issue sentence, `env` = token_state names only), POST
+GET `/api/companions` (rows, `listening`, `local_only`, `listen_words`, the cap, the issue sentence, `env` = token_state names only), POST
 `/api/companions/issue {label}` (the value in the body once, `Cache-Control: no-store`; the request log keeps path and
 status only; refused for MCP: a value must never land in a transcript), POST `/api/companions/revoke {id}` (id or label).
 MCP: `list_companions` (never a value) and `revoke_companion(token, preview)`. Parity: the DM delivery is

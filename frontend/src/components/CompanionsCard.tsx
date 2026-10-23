@@ -13,7 +13,7 @@ interface TokenRow {
   active: boolean; revoked_label: string | null; revoked_by: string | null; revoke_consequence: string | null;
 }
 interface CompanionsData {
-  tokens: TokenRow[]; listening: boolean; max: number; label_max: number; issue_consequence: string;
+  tokens: TokenRow[]; listening: boolean; local_only?: boolean; listen_words?: string; max: number; label_max: number; issue_consequence: string;
   env: { shared: boolean; var: string; set: boolean; bind_set: boolean };
 }
 interface Issued { token: string; label: string; message: string }
@@ -62,7 +62,7 @@ export function CompanionsCard() {
       <CardHeader title="Companions" hint="owner · loot companion tokens" />
       <Stack p="md" gap="md">
         <Text size="sm">The companion on a raid leader's PC streams drops and awards from their chat log. Each token feeds this guild only. {d.issue_consequence}</Text>
-        {!d.listening && <Alert color="yellow" py="xs">The loot feed isn't listening on this host yet — it starts with the first token; a companion on another PC also needs OIBOT_FEED_BIND set on the host.</Alert>}
+        {(!d.listening || d.local_only) && <Alert color="yellow" py="xs">{d.listen_words}</Alert>}
         <Group align="flex-end" gap="sm" wrap="wrap">
           <TextInput label="Label: whose PC runs it" placeholder="Jon's PC" value={label} maxLength={d.label_max} style={{ flex: "1 1 220px" }}
             onChange={(e) => setLabel(e.currentTarget.value)} description={`${label.length}/${d.label_max}`} />

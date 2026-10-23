@@ -187,18 +187,21 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
 
     # ---- companion tokens (design §5.50): owner only; the value only ever in the issue response's body, once
     def companions_state(reg) -> dict:
-        from ..feed import issue_consequence, token_rows, token_state
+        from ..feed import issue_consequence, listen_state, token_rows, token_state
         from ..registry import FEED_LABEL_MAX, FEED_TOKEN_MAX
 
         rows_fn = getattr(bot, "companion_rows", None)
         rows = rows_fn(reg) if rows_fn is not None else token_rows(reg, [])
-        return {"tokens": rows, "listening": getattr(bot, "feed", None) is not None, "max": FEED_TOKEN_MAX, "label_max": FEED_LABEL_MAX,
+        ls = listen_state(getattr(bot, "feed", None))  # loopback-only says "this machine only" (never the address)
+        return {"tokens": rows, "listening": ls["listening"], "local_only": ls["local_only"], "listen_words": ls["words"],
+                "max": FEED_TOKEN_MAX, "label_max": FEED_LABEL_MAX,
                 "issue_consequence": issue_consequence(reg, None).replace("**", ""), "env": token_state(reg.key, many=bool(getattr(bot.registries, "many", False)))}
 
     @app.get("/api/companions")
     async def companions_get(request: Request):
         """Owner: the guild's companion tokens (label · presence · last seen · who issued it), never a value or a hash;
-        `env` names which .env feed-token variables are set (names only); `listening`: the loot feed runs on this host."""
+        `env` names which .env feed-token variables are set (names only); `listening`: the loot feed runs on this host,
+        `local_only` + `listen_words` (feed.listen_state): on a loopback bind only this machine's companions reach it."""
         v = await who(request)
         need_owner(v)  # the owner (or a host superuser) — owner rights come from the id, not the officer roles
         return companions_state(v.reg)

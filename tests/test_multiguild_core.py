@@ -758,16 +758,24 @@ def test_a_council_on_a_run_that_is_not_locked_is_not_live(duo, raiding):
 
 
 def test_feed_tokens_bind_a_companion_to_its_guild():
-    """feed.authorize: a guild's own token → that guild (a guild claimed later counts at once); the shared token →
-    bound to none; a guild token for a guild not served, or a wrong token → refused."""
-    from oibot_gm.feed import authorize, guild_tokens, token_suffix
+    """feed.authorize_any (the ONE token check — review item 5c removed the duplicate `authorize`): a guild's own token →
+    that guild (a guild claimed later counts at once); the shared token → bound to none; a guild token for a guild not
+    served → can't tell now (None: the companion retries); a wrong token → refused."""
+    import oibot_gm.feed as feed_mod
+    from oibot_gm.feed import authorize_any, guild_tokens, token_suffix
+
+    assert not hasattr(feed_mod, "authorize"), "one token check: authorize_any"
+
+    def authorize(token, shared, per, keys):
+        ok, key, _tid, _label = authorize_any(token, shared, per, keys)
+        return ok, key
 
     per = guild_tokens({"OIBOT_FEED_TOKEN_DUO": "tb", "OIBOT_FEED_TOKEN_OI_2": "tc", "OIBOT_FEED_TOKEN": "shared", "OTHER": "x"})
     assert per == {"DUO": "tb", "OI_2": "tc"} and token_suffix("oi-2") == "OI_2"
     keys = ["demo", "duo"]
     assert authorize("tb", "shared", per, lambda: keys) == (True, "duo")
     assert authorize("shared", "shared", per, lambda: keys) == (True, None)
-    assert authorize("tc", "shared", per, lambda: keys) == (False, None), "oi-2 isn't served yet"
+    assert authorize("tc", "shared", per, lambda: keys) == (None, None), "oi-2 isn't served yet: not a dead token"
     keys.append("oi-2")
     assert authorize("tc", "shared", per, lambda: keys) == (True, "oi-2")
     assert authorize("", None, per, lambda: keys) == (False, None) and authorize("nope", "shared", per, lambda: keys) == (False, None)
@@ -779,7 +787,7 @@ def test_the_feed_server_binds_the_token_at_hello():
     from aiohttp.test_utils import TestClient as AioClient, TestServer
     from aiohttp import web as aioweb
 
-    from oibot_gm.feed import FeedServer, authorize
+    from oibot_gm.feed import FeedServer, authorize_any
 
     seen = []
 
@@ -788,7 +796,7 @@ def test_the_feed_server_binds_the_token_at_hello():
         return {"routes_to": None}
 
     async def go():
-        fs = FeedServer(handler, "shared", auth=lambda t: authorize(t, "shared", {"DUO": "tb"}, lambda: ["demo", "duo"]))
+        fs = FeedServer(handler, "shared", auth=lambda t: authorize_any(t, "shared", {"DUO": "tb"}, lambda: ["demo", "duo"]))
         app = aioweb.Application()
         app.router.add_get("/feed", fs._ws)
         async with AioClient(TestServer(app)) as cl:

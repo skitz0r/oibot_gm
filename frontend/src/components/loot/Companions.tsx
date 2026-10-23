@@ -9,7 +9,7 @@ import { COMPANION_COLOUR } from "./shared";
 /** GET /api/loot/companions: presence for officers; `tokens` (the owner's only) names the feed-token variables and
  *  whether each is set — never a value (secrets live in .env on the host). */
 interface CompanionsCard {
-  companions: Companion[]; listening: boolean; many: boolean; owner: boolean;
+  companions: Companion[]; listening: boolean; local_only?: boolean; listen_words?: string; many: boolean; owner: boolean;
   tokens: { shared: boolean; shared_feeds: boolean; var: string; set: boolean; listener: boolean; bind_set: boolean } | null;
 }
 
@@ -26,7 +26,7 @@ export function Companions() {
   return (
     <Stack gap="lg">
       <Card>
-        <CardHeader title="Companions" hint={d.listening ? "the loot feed is listening" : "the loot feed is off on this host"} />
+        <CardHeader title="Companions" hint={!d.listening ? "the loot feed is off on this host" : d.local_only ? "the loot feed is listening on this machine only — set OIBOT_FEED_BIND for companions on other PCs" : "the loot feed is listening"} />
         <Table.ScrollContainer minWidth={420}>
           <Table>
             <Table.Thead><Table.Tr><Table.Th>Character</Table.Th><Table.Th>State</Table.Th><Table.Th>Last seen</Table.Th><Table.Th>Events</Table.Th></Table.Tr></Table.Thead>

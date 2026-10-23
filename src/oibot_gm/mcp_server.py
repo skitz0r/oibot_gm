@@ -986,7 +986,7 @@ def list_companions(guild: Guild = None) -> dict:
     in a transcript: the owner issues one on the site (Config › Companions) or with /gm config companion."""
     d = api(guild).get("/api/companions")
     rows = [{k: r.get(k) for k in COMPANION_FIELDS} for r in d.get("tokens", [])]
-    return {"tokens": rows, "listening": d.get("listening"), "env": d.get("env")}
+    return {"tokens": rows, "listening": d.get("listening"), "listen_words": d.get("listen_words"), "env": d.get("env")}
 
 
 @mcp.tool()

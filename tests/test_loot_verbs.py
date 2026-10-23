@@ -1069,6 +1069,29 @@ def test_run_fill_refuses_past_the_close(reg, rs):
     assert asks == [] and not sent and not ev.fill_asks, "never a fill DM after the raid"
 
 
+def test_a_held_event_whose_token_was_revoked_is_never_replayed(reg, rs):
+    """Regression (review item 5a): companion events held (no council live) before their issued token's revoke were
+    still applied when a council opened. At replay the token is re-checked like a live frame: revoked → dropped and
+    named in the ops channel (never silently); a live token's events replay as before."""
+    ev, ms = real_run(reg, rs)
+    tonight(reg, rs, ev)
+    bot = LootBot(reg, rs)
+    _t1, gone = reg.issue_feed_token("Old PC", "Owner")
+    _t2, kept = reg.issue_feed_token("Raid PC", "Owner")
+    old = Companion("Scribe", "oibot-companion/0.1", "", "peer", bound=reg.key, token_id=gone.id)
+    live = Companion("Penman", "oibot-companion/0.1", "", "peer2", bound=reg.key, token_id=kept.id)
+    assert run(bot.handle_feed_event({"type": "drop", "boss": "Gatekeeper", "items": [{"name": "Stolen Idol"}], "idem": "r1"}, old))["held"]
+    assert run(bot.handle_feed_event({"type": "drop", "boss": "Gatekeeper", "items": [{"name": "Honest Idol"}], "idem": "r2"}, live))["held"]
+    held = json.loads((reg.store.root / reg.key / "loot" / "held.json").read_text())
+    assert [r["comp"]["token_id"] for r in held] == [gone.id, kept.id], "the held row remembers its token"
+    reg.revoke_feed_token(gone.id, "Owner")
+    s, _ = run(bot.open_loot(reg, rs, ev, by="Officer"))
+    assert [d.item_name for d in s.drop_list] == ["Honest Idol"], "the revoked token's event is not applied"
+    assert json.loads((reg.store.root / reg.key / "loot" / "held.json").read_text()) == [], "dropped, not held for later"
+    (warn,) = [t for _, lvl, t in bot.ops.lines if lvl == "warn"]
+    assert "revoked" in warn and "NOT recorded" in warn and "Stolen Idol" in warn
+
+
 def test_held_companion_events_survive_a_restart_and_expired_ones_are_announced(reg, rs):
     ev, ms = real_run(reg, rs)
     tonight(reg, rs, ev)
