@@ -231,3 +231,31 @@ def test_every_test_bench_action_is_on_every_surface(mcp_tools, web_routes, slas
             if not ok:
                 missing.append(f"test {action}/{surface}: {ref!r} does not exist")
     assert not missing, "\n".join(missing)
+
+
+# loot appeals (L32, phase 4 — design §5.49): not an op (no plain text: the flow has NO LLM by design, and a member's words
+# are never parsed), so their rows live here. MCP opens none (an appeal is the member's own voice; the token is the
+# owner's); resolving from MCP is a decision about a person (D8) and waits for a tool in a later phase.
+APPEALS: dict[str, dict[str, str]] = {
+    "open": {"discord": "flow:me_loot_ask", "web": "POST /api/me/loot/{award}/appeal"},
+    "open_command": {"discord": "slash:me loot-ask"},
+    "list": {"discord": "button:oibot_gm.appeals.AppealButton", "web": "GET /api/loot/appeals"},  # the card's Details; Loot › Appeals
+    "resolve": {"discord": "flow:appeal_resolve", "web": "POST /api/loot/appeals/{aid}/resolve"},
+}
+APPEALS_MCP_EXEMPT = {
+    "open": "an appeal is a member's own words about their own award (Discord or the Me page); MCP's token is the owner's",
+    "open_command": "the slash command is Discord's entry to the same flow",
+    "list": "officers read appeals on Loot › Appeals or the card; an MCP read tool is phase 5 (with the actor rule)",
+    "resolve": "resolving answers a person (D8: X-Oibot-Actor) — the web route takes it; the MCP tool is phase 5",
+}
+
+
+def test_appeals_have_their_discord_and_web_paths_and_written_mcp_exemptions(web_routes, slash_paths):
+    missing = []
+    for action, row in APPEALS.items():
+        if "discord" in row and not discord_path_exists(row["discord"], slash_paths):
+            missing.append(f"appeal {action}/discord: {row['discord']!r}")
+        if "web" in row and row["web"] not in web_routes:
+            missing.append(f"appeal {action}/web: {row['web']!r}")
+        assert len(APPEALS_MCP_EXEMPT.get(action, "")) > 15, f"appeal {action}: MCP is exempt — say why"
+    assert not missing, "\n".join(missing)

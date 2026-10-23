@@ -71,10 +71,20 @@ fill in anywhere: you answer each run's sheet when it is posted, and you post ab
 
 **https://gm.earlyandoften.gg** — the homepage (for visitors who aren't logged in) shows the guild's name and
 Discord icon, a one-line intro, the owner's *about* paragraph, **Join our Discord** when the owner has set an
-invite (no invite, no button) and **Log in with Discord** for members. Anyone can join the Discord server;
-new raiders apply there with `/apply` (there is no application form on the website). Someone who logs in
-with a Discord account that isn't in the server yet gets a short page saying so, with the Join button and a
-log-out link, instead of an error; after joining they log in again. A logged-in member goes straight to **Me**.
+invite and **Log in with Discord** for members. Anyone can join the Discord server;
+new raiders apply there with `/apply` (there is no application form on the website). With no invite set there is no
+Join button and the card says *"Invitations are closed — ask an officer in game."* Someone who logs in
+with a Discord account that isn't in the server yet gets a short page saying so, with the Join button (or that same
+line) and a log-out link, instead of an error; after joining they log in again. A logged-in member goes straight to **Me**.
+
+**Raid schedule** (the link on the card, `/schedule`): a public page — no login — with each raid's name and size and,
+per schedule, when it runs and its **next three runs** in words (*"Fri 6 Nov 8:00 PM"*, guild time; a paused schedule
+says so, a pickup template says an officer opens those runs). Nothing about members is on it. With several servers it
+lists them; `/schedule?g=<key>` opens one.
+
+**Unlisted guilds.** The owner can switch a guild to *unlisted* (Config › Recruitment and more › **Homepage**, or
+"unlist the guild" in plain text): it then has no card on the homepage, no public schedule, and the not-a-member page
+doesn't name it. Its members still log in and find it in their own server list as before.
 
 **When the bot looks after more than one Discord server**, the homepage shows the servers side by side, each with
 its own icon, name, about text, **Join our Discord** (its own invite) and **Log in with Discord**. Once you're logged
@@ -185,7 +195,9 @@ standing signup: each run is answered on its sheet in Discord, or by telling the
   Tue 9 Dec → Thu 11 Dec (recorded by Kessa) — clear that one first (I'm back), or pick days outside it"). Sheets on those days
   get *No thanks* for you, and if you were already rostered the seat is released (your confirmation card in your DMs is
   edited to say so — no new DM) and the bench is asked; the reply names the sheets it touched (on the Me page and over MCP too). Officers record one for
-  someone else with `/roster absent` and a member picker, same screens.
+  someone else with `/roster absent` and a member picker, same screens. Your own absence writes you no "seat released"
+  notice (you did it); when an officer records it for you, your Me page and `/me view` say your seat was released
+  because you're marked away.
 - **See everything the bot has on you**: `/me view` (your inbox first — open asks and unread notices, with **Mark
   notices read** — then characters, rosters, absences, your attendance, your last ten awards and how many items are on
   your wishlist) or the *My status* button.
@@ -1400,7 +1412,7 @@ news post says can make the review read or write another server.
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
-| `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone (with runs open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
+| `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone (with runs open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `public` (listed on the homepage and the public schedule, or not), `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, created and saved as the invite link in one step (`preview=true` shows it first) |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |
 | `test_bench` | seed (`count=0` = the whole built-in roster; more than it is capped) / run (`tempo` = quick, standard, slow or minutes; refused without a signup channel) / answer (a mix of join/bench/out, yes/no on the puppets' open asks, or one `member` + `status`) / clear / compose / comp / feed (the test feed) / state, as `/gm test` and the site's Test bench |
@@ -1672,6 +1684,16 @@ back as the same item.
 export (preview first; per character in TMB's order; an item already on someone's list stays as it is; a re-import
 replaces only the earlier TMB rows; nothing made on the site is ever deleted).
 
+**Appeals**: members' questions about their own awards (*Ask the council*, §9 *Members*), open ones oldest first, then
+the resolved. Each shows the award, the member's words as written, the council's record of the award (how it was
+decided, the bot's pick, who recorded it, tier and weight, the candidates then and the reason on file) and a link to its
+thread. **Resolve…**: pick one outcome (*The award stands* · *Corrected* · *Noted for next time* · *Withdrawn*) — the
+confirm says exactly what the member will read and takes an optional note that stays with the officers. In Discord the
+card's **Details** shows the same record to the officer who pressed it only, and **Resolve…** is the same choice and
+confirm. The member gets a notice, never a DM; the card is edited to *Resolved* and the thread archived. To change who
+got the item, use **Correct…** as usual and resolve the question as *Corrected*. Over MCP, resolving needs the
+`X-Oibot-Actor` header (an officer's decision about a person); MCP never opens one.
+
 ### Members: your loot and your wishlist
 
 Every logged-in member sees **Me › My loot** (what your characters received: item, date, main or offspec) and the
@@ -1685,6 +1707,17 @@ your edits kept), with `/me wishlist` in Discord (pick the character, then an it
 then its place and MS/OS, Confirm), with **Add to my wishlist** under a line of the public loot log, or by telling the
 bot ("put the Robe of Tests on my wishlist as #2 for offspec"). An item you received stays on the list, greyed
 (*received 9 Dec*), until you remove it. The council's scoring reads these lists.
+
+**Ask the council** about one of your own awards (a question, a disagreement, "I was told I'm next for this"): on
+**Me › My loot** press the question mark beside the award, write it in your own words (10 to 1000 characters), and
+**Confirm** — the box says what happens first; in Discord, `/me loot-ask` → pick the award → write it → **Send to the
+council** (nothing is sent before that; **Edit my words** goes back). One question per award, and it can't be edited
+once sent. It goes to the officers as a card in their channel (the roster channel, else the ops channel) with a thread
+named *loot · <you> · <item>* for them to talk it over: the card shows the award as the loot log does and your words as
+written — never scores or reasons. No AI reads or answers it. When an officer closes it you get a notice on your Me
+page and in `/me view` with one of: *The award stands* · *The award was corrected* · *Noted for the next drop* ·
+*Closed at your request* — never a DM. My loot lists your questions and where each stands. Someone else's award, or one
+on someone's behalf, can't be asked about: an officer who thinks an award was wrong corrects it.
 
 ### The public loot log
 

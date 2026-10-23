@@ -1459,9 +1459,13 @@ class RaidMixin:
                 lines.append(f"{label}: the seat freed by the absence was not handed back")
         return lines
 
-    async def after_absence(self, reg, m, start: str, end: str, by: str) -> list[str]:
-        """Mark every live sheet inside the absence: open → out; locked and rostered → seat freed + fill."""
+    async def after_absence(self, reg, m, start: str, end: str, by: str, *, by_id: int | None = None) -> list[str]:
+        """Mark every live sheet inside the absence: open → out; locked and rostered → seat freed + fill. A freed seat
+        writes the member a "seat released (you're marked away)" notice only when someone else recorded the absence
+        (an officer); their own absence (`by_id` = the member — decided by id, never a name) tells them nothing about
+        what they just did. `by_id` None (who is unknown): the notice is written, as before."""
         rs = self.raids.store(reg)
+        notice = by_id is None or int(by_id) != int(m.discord_id)
         touched = []
         for ev in rc.runs_in_span(reg, rs, start, end):  # the same runs describe(absence) and MCP's preview list
             if not rc.on_bench_side(reg, ev, m):
@@ -1470,7 +1474,7 @@ class RaidMixin:
             sg = ev.signups.get(str(m.discord_id))
             released = await self.release_asks_of(reg, rs, ev, m, "away that day")  # before drop_seated, so its fill sees the seat free
             if ev.state != "open" and ev.seat_of(m):
-                await self.drop_seated(reg, rs, ev, team, m, "absence", None)
+                await self.drop_seated(reg, rs, ev, team, m, "absence", None, notice=notice)
             else:
                 if not sg or sg.status != "out":
                     c = rc.expected_character(reg, ev, m)  # a regular is marked away on their regular character

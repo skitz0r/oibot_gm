@@ -339,11 +339,12 @@ class AbsencesMixin(PeopleMixin):
         except Exception:  # noqa: BLE001
             pass
 
-    async def announce_absence(self, reg: Registry, m, a, by: str) -> list[str]:
+    async def announce_absence(self, reg: Registry, m, a, by: str, *, by_id: int | None = None) -> list[str]:
         """Public line (no reason), sheets updated, card refreshed, ops line with the reason. Returns the keys of the
-        live sheets it touched (answered No thanks, or a rostered seat freed) so every caller can say which."""
+        live sheets it touched (answered No thanks, or a rostered seat freed) so every caller can say which. `by_id`: who
+        recorded it (the member themself → no "seat released" notice about their own act; after_absence)."""
         span = reg.span_label(a.start, a.end)  # people read it: "Sat 1 Nov → Mon 3 Nov", never ISO
-        touched = await self.after_absence(reg, m, a.start, a.end, by)
+        touched = await self.after_absence(reg, m, a.start, a.end, by, by_id=by_id)
         ch = self.get_channel(reg.config.absences_channel_id) if reg.config.absences_channel_id and not m.test else None
         if ch:  # a test puppet's absence stays in the rehearsal: no public line, no card change (the ops line below remains)
             try:

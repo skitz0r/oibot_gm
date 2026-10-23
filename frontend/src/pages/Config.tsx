@@ -19,7 +19,9 @@ interface ConfigData {
   /** officer_roles: by role id (renames are safe); officer_roles_pending: legacy names the bot could not match to a role */
   settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null; news_keywords: string[];
     /** the public loot log: on/off, and its state in words (off · a channel · on with no channel) */
-    loot_log: boolean; loot_log_state: LootLogState };
+    loot_log: boolean; loot_log_state: LootLogState;
+    /** B10: listed on the public homepage, /api/public and the public /schedule page (false = unlisted) */
+    public: boolean };
   test_bench: { members: number; runs: string[] }; owner: boolean;
   revs?: Record<string, string>;
 }
@@ -103,6 +105,15 @@ export function ConfigPage({ meta }: { meta: Meta }) {
               <Box p="md">
                 <Alert color={data.settings.loot_log_state.state === "no_channel" ? "yellow" : data.settings.loot_log_state.state === "off" ? "gray" : "teal"} py="xs">{data.settings.loot_log_state.text}</Alert>
                 <Text size="xs" c="dimmed" mt="xs">The channel is picked under Channels (Loot log). Every line carries an "Add to my wishlist" button; members see the whole log on the site (logged in) and their own loot on the Me page.</Text>
+              </Box>
+            </Card>
+
+            <Card>
+              <CardHeader title="Homepage" hint="the public site's card and raid schedule" action={<Switch label={lab("public", "listed")} checked={data.settings.public} disabled={ro || busy === "public"} onChange={(e) => set("public", e.currentTarget.checked)} />} />
+              <Box p="md">
+                <Text size="sm">{data.settings.public
+                  ? <>Visitors see this guild's card on the homepage and its raid schedule at <Anchor href={`/schedule?g=${encodeURIComponent(meta.guild_key)}`} target="_blank">/schedule</Anchor> — days and times only, nothing about members.</>
+                  : "Unlisted: the homepage, the public schedule and the not-a-member page don't name this guild. Members still log in and find it in their own list."}</Text>
               </Box>
             </Card>
 

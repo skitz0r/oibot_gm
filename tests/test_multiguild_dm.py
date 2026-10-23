@@ -537,7 +537,7 @@ def test_every_persistent_custom_id_in_the_source_carries_the_guild():
 
     src = Path(__file__).resolve().parents[1] / "src" / "oibot_gm"
     templates = re.findall(r'DynamicItem\[[^\]]+\], template=r"([^"]+)"', "\n".join(p.read_text() for p in src.glob("*.py")))
-    assert len(templates) == 15 and all(r"(?:\.(?P<g>[a-z0-9_-]{1,16}))?" in t for t in templates), templates  # + cfgapply (the diff Apply/Cancel) + loot, lootpick, lootstart (the council), lootwish (the loot log), testans (the puppet digest)
+    assert len(templates) == 16 and all(r"(?:\.(?P<g>[a-z0-9_-]{1,16}))?" in t for t in templates), templates  # + cfgapply (the diff Apply/Cancel) + loot, lootpick, lootstart (the council), lootwish (the loot log), testans (the puppet digest), appeal (the loot question card, §5.49)
 
 
 def test_help_in_a_dm_when_the_picker_runs_out_answers_once(duo, monkeypatch):

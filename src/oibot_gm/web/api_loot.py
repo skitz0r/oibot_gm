@@ -19,7 +19,10 @@ the `loot:<run>` topic). Routes only decide who may (§2.6) and translate:
 - Phase 3 (G4): Loot › Items' "Draft with Claude" (a PROPOSAL — nothing written; the officer saves it per item through
   the tiers route) and the CSV export / import of the tier grid (preview first, then apply with the preview's rev);
   attendance (Me › Attendance, an officer's view of a member: Registry.attendance, D49); the companions card (presence,
-  and for the owner WHICH feed-token variables are set — never a value); the council's "Bosses 3 / 6"."""
+  and for the owner WHICH feed-token variables are set — never a value); the council's "Bosses 3 / 6".
+- Phase 4 (design §5.49): loot appeals — a member's question about their OWN award (POST /api/me/loot/{award}/appeal;
+  never for someone else, never from MCP), Loot › Appeals for officers (list + resolve, the D8 actor from MCP); the verbs
+  are appeals.py's. No LLM, no DM: the member hears the outcome as a notice."""
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +33,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from .. import appeals
 from .. import ops as ops_mod
 from ..raid_views import run_title
 from ..raidcycle import is_test_run
@@ -570,7 +574,94 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         chars = char_index(reg)
         rows = [a for a in ctx.ledger if a.discord_id == v.uid or (a.discord_id is None and a.raider.lower() in mine)]
         rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
-        return {"rows": [log_row(reg, a, chars, False, False, ctx, v.uid, mine) for a in rows[:max(1, min(int(limit), 200))]]}
+        asked = {ap.id: ap for ap in appeals.store_of(reg).of_member(v.uid)} if v.member else {}
+        out = []
+        for a in rows[:max(1, min(int(limit), 200))]:
+            aid = appeals.award_id(a)
+            ap = asked.get(aid)
+            out.append({**log_row(reg, a, chars, False, False, ctx, v.uid, mine), "award": aid, "appeal": member_appeal_json(reg, ap) if ap else None})
+        # my questions to the council (L32), newest first — also those about an award corrected since (no longer a row above)
+        mine_q = sorted(asked.values(), key=lambda ap: ap.created_at, reverse=True)
+        return {"rows": out, "appeals": [member_appeal_json(reg, ap) for ap in mine_q], "appeal_text": {"min": appeals.TEXT_MIN, "max": appeals.TEXT_MAX}}
+
+    # ------------------------------------------------------------ loot appeals (L32, design §5.49 — no LLM, no DM)
+    def member_appeal_json(reg, ap) -> dict:
+        """A member's own question as THEY see it: the award, their words, the state and the outcome line — never the
+        officer's note or who resolved it (D2: who recorded what is officer data)."""
+        return {"id": ap.id, "item": ap.item, "character": ap.character, "award": appeals.award_words(reg, ap), "text": ap.text, "state": ap.state,
+                "outcome": ap.outcome, "outcome_label": appeals.OUTCOME_LABELS.get(ap.outcome or "") if ap.outcome else None,
+                "state_text": appeals.state_words(reg, ap)}
+
+    def officer_appeal_json(reg, ap, ctx, chars=None, awards=None) -> dict:
+        chars = chars if chars is not None else char_index(reg)
+        _uid, cls, spec = chars.get(ap.character.lower(), (None, None, None))
+        gid = reg.config.discord_guild_id
+        link = f"https://discord.com/channels/{gid}/{ap.thread_id or ap.channel_id}" + ("" if ap.thread_id else f"/{ap.message_id}") if (ap.thread_id or ap.message_id) else None
+        out = {**member_appeal_json(reg, ap), "member": ap.member_name, "member_id": str(ap.member_id), "cls": cls, "spec": spec, "item_id": ap.item_id,
+               "boss": ap.boss, "date_label": day(reg, ap.received), "offspec": ap.offspec, "asked_label": reg.local12(ap.created_at), "via": ap.via,
+               "note": ap.note, "resolved_by": ap.resolved_by, "resolved_label": reg.local12(ap.resolved_at) if ap.resolved_at else None, "link": link,
+               "details": appeals.officer_details(reg, ctx, ap, awards)}
+        if ap.state == "open":  # THE consequence sentence per outcome (the browser never composes it)
+            out["consequences"] = {k: appeals.resolve_consequence(reg, ap, k) for k in appeals.OUTCOMES}
+        return out
+
+    @app.post("/api/me/loot/{award}/appeal")
+    async def me_loot_appeal(request: Request, award: str):
+        """Me › My loot › Ask the council: {text, preview?} about one of MY awards. `preview` answers the consequence
+        sentence and writes nothing. Only the member themself (never an officer for them, never MCP); one per award."""
+        v, d = await body(request)
+        if v.via == "mcp":
+            raise HTTPException(403, appeals.FROM_MCP)
+        reg = v.reg
+        try:
+            a = appeals.find_award(reg, ctx_of(reg), v.uid, award)
+            if d.get("preview"):
+                return {"preview": True, "consequence": appeals.open_consequence(reg, a), "award": appeals.award_words(reg, character=a.raider, item=a.item_name or a.item_id,
+                                                                                                                     received=a.received.isoformat(), boss=a.boss, offspec=a.offspec)}
+            ap, receipt = await appeals.open_appeal(bot, reg, v.uid, award, d.get("text"), by=v.name, by_id=v.uid, via=v.via)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": receipt, "appeal": member_appeal_json(reg, ap)}
+
+    @app.get("/api/loot/appeals")
+    async def loot_appeals(request: Request, limit: int = 50):
+        """Loot › Appeals (officers): open questions oldest first, then the last `limit` resolved, each with the award,
+        the member's words, the council's record of the award (officer details) and the card / thread link."""
+        v = await who(request, officer=True)
+        reg = v.reg
+        ctx = ctx_of(reg)
+
+        def build() -> dict:  # file reads (the appeals, the ledger once): off the event loop
+            rows = appeals.store_of(reg).all()
+            open_ = sorted([ap for ap in rows if ap.state == "open"], key=lambda ap: ap.created_at)
+            done = sorted([ap for ap in rows if ap.state != "open"], key=lambda ap: ap.resolved_at or ap.created_at, reverse=True)[:max(1, min(int(limit), 500))]
+            chars, awards = char_index(reg), appeals.all_awards(reg)
+            return {"open": [officer_appeal_json(reg, ap, ctx, chars, awards) for ap in open_], "resolved": [officer_appeal_json(reg, ap, ctx, chars, awards) for ap in done],
+                    "outcomes": [{"value": k, "label": appeals.OUTCOME_LABELS[k], "text": t} for k, t in appeals.OUTCOMES.items()], "note_max": appeals.NOTE_MAX}
+
+        return await asyncio.to_thread(build)
+
+    @app.post("/api/loot/appeals/{aid}/resolve")
+    async def loot_appeal_resolve(request: Request, aid: str):
+        """An officer closes a question: {outcome, note?}. `preview` answers the consequence sentence. From MCP it is a
+        decision about a person (D8): the X-Oibot-Actor header names the officer."""
+        v, d = await writer(request, actor="Resolving a loot question", preview_ok=True)
+        reg = v.reg
+        try:
+            if d.get("preview"):
+                ap = appeals.store_of(reg).get(aid)
+                if ap is None:
+                    raise appeals.AppealError(f"No loot question {aid}.")
+                return {"preview": True, "consequence": appeals.resolve_consequence(reg, ap, appeals.check_outcome(d.get("outcome")))}
+            ap, line = await appeals.resolve_appeal(bot, reg, aid, d.get("outcome"), note=d.get("note") or None, by=by_of(v), by_id=v.uid, via=v.via)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": line, "appeal": officer_appeal_json(reg, ap, ctx_of(reg))}
+
+    def appeal_saved(guild_key: str, _aid: str) -> None:
+        publish("loot:appeals", guild_key)  # Loot › Appeals and Me › My loot (useLive "loot:") reload on every save
+
+    appeals.APPEAL_LISTENERS[:] = [f for f in appeals.APPEAL_LISTENERS if getattr(f, "__name__", "") != appeal_saved.__name__] + [appeal_saved]
 
     # ------------------------------------------------------------ the companions card (officers; token names: owner)
     @app.get("/api/loot/companions")

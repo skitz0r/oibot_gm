@@ -128,7 +128,7 @@ def test_apply_async_absence_names_the_sheets_it_touched(reg, rs):
     m = reg.test_members()[0]
     seen = []
 
-    async def announce_absence(reg_, m_, a, by):
+    async def announce_absence(reg_, m_, a, by, by_id=None):
         seen.append((m_.display_name, a.start, by))
         return [ev.key]
 
@@ -137,7 +137,7 @@ def test_apply_async_absence_names_the_sheets_it_touched(reg, rs):
     assert line == f"{m.display_name} absent {reg.span_label('2030-03-01', '2030-03-02')} · off 1 sheet: {run_title(reg, ev)}"
     assert seen == [(m.display_name, "2030-03-01", "Officer")]
 
-    async def none(reg_, m_, a, by):
+    async def none(reg_, m_, a, by, by_id=None):
         return []
 
     bot.announce_absence = none

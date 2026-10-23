@@ -414,11 +414,17 @@ def test_discord_links_and_emblems_name_their_guild(duo, monkeypatch):
 # ---------------------------------------------------------------- one guild: as before
 
 def test_single_guild_pages_are_byte_for_byte_the_old_ones():
+    """Goldens from the pre-S2 functions, re-cut in phase 4 for B10's copy only (design §5.49: "schedules" for
+    "availability", the card's Raid schedule link to the public /schedule page — a card naming its guild carries it)."""
     info = {"name": "Demo <Guild>", "about": "Tue & Thu", "invite_url": "https://discord.gg/x?a=1&b=2", "recruiting": True, "icon": "https://cdn/x.png"}
-    sha = lambda s: hashlib.sha256(s.encode()).hexdigest()  # noqa: E731 — goldens from the pre-S2 functions
-    assert sha(web.landing_page([info])) == sha(web.landing_page([{**info, "key": "demo"}])) == "6035d0443af9d9690aedd9e524fa53bf32b41020810919cc7e818f4210e3931a"
+    sha = lambda s: hashlib.sha256(s.encode()).hexdigest()  # noqa: E731
+    assert sha(web.landing_page([info])) == "0dedf9dddc3b11a695c00e3473ed150cc69c59cf999c0dd4c3ef68baa4ba7f5c"
+    keyed = web.landing_page([{**info, "key": "demo"}])
+    assert sha(keyed) == "18a6dc558147b0b8f496ebdac9993cc333ee8dd768b5254fb2704ad198b62b1e"
+    assert keyed.replace(' · <a class="plain" href="/schedule?g=demo">Raid schedule</a>', "") == web.landing_page([info]), "the key adds the schedule link only"
     assert sha(web.not_member_page([info])) == "112a47be51ec067f3bbc680d32bbe8894af5103c5d594fde42db13ec727b7d8f"
-    assert sha(web.landing_page([])) == "8cd8b72c40ea38b366668ee9a8da08ed393750092d9d5ef20ae9322cdcf59955", "no guild yet: the generic card (K22)"
+    assert sha(web.landing_page([])) == "d93f9bc2ca8b0f686e3f09efeb48bab63fdee8a835f34da815548bf791661d63", "no guild yet: the generic card (K22)"
+    assert "availability" not in web.landing_page([]) and "schedules" in web.landing_page([])
 
 
 def test_single_guild_needs_no_header_or_cookie_and_has_one_choice(reg, rs, env):

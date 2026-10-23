@@ -23,6 +23,7 @@ from .discord_policy import CfgApplyButton, PolicyContext, handle_change, left_s
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
 from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_tokens, ops_warner as feed_ops_warner
+from .appeals import AppealButton
 from .discord_pool import AbsenceButton, AbsencesMixin, LootLogMixin, LootWishButton, SetupMixin
 from .flows_test import TestAnswerButton
 from .discord_news import NewsMixin, ProposalButton
@@ -198,7 +199,7 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         if bad:
             raise SystemExit("command descriptions over 100 chars: " + ", ".join(bad))
         self.add_dynamic_items(SignupButton, FillButton, PlaceButton, RunButton, RegisterButton, ApplicationButton, GuideSelect, AbsenceButton, ProposalButton, CfgApplyButton,
-                               LootButton, LootPick, LootStartButton, LootWishButton, TestAnswerButton)
+                               LootButton, LootPick, LootStartButton, LootWishButton, TestAnswerButton, AppealButton)
         self.tree.on_error = self._on_command_error
 
     async def _on_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):

@@ -202,7 +202,7 @@ class ConfigOp(BaseModel):
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier")
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|news_keywords|ask_audience|about|error_dms")
+    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, schedule_*, run_open, regular, comp_target*, comp_groups), run key (run_*, pin, comp_target*, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default (plain), item name or id (tier)")
     field: Optional[str] = Field(default=None, description="set timezone: keep|move (the runs already open); raid_set/aura_set/family_set: the setting name from the schema; schedule_set: <schedule id>.<setting>; schedule_remove / run_open / regular: a schedule id; comp_target*: the slot (role, Class or Class:Spec); character: add|spec|offspec|name|rank|main|retire|delete|flex; recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: 'min', 'min-max' or '-max'; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: 'seed N'|'run <raid> [quick|standard|slow] [dm]'|'answer join N bench N out N'|'clear'; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear; set <channel>: a mention or none)")
@@ -1910,7 +1910,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             return f"recruit {op.field or ''}: {e}"
     if op.op == "set":
         cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:60], "news_keywords": ", ".join(cfg.news_keywords),
-               "loot_log": "on" if cfg.loot_log else "off", "error_dms": reg.error_dm_words(),
+               "loot_log": "on" if cfg.loot_log else "off", "public": "listed" if cfg.public else "unlisted", "error_dms": reg.error_dm_words(),
                **{p: (getattr(cfg, f"{p}_id", None) and f"<#{getattr(cfg, f'{p}_id')}>") for p in CHANNEL_PATHS}}.get(op.path or "", "?")
         if op.path in CHANNEL_PATHS and _clear_word(op.value):
             return f"{op.path}: {cur or '—'} → not set"
@@ -2733,6 +2733,10 @@ def _apply_set(reg: Registry, op: ConfigOp, by: str, raids=None) -> str:
         from .registry import parse_bool
 
         cfg.loot_log = parse_bool(op.value)
+    elif op.path == "public":  # B10: listed on the public homepage, /api/public and /schedule (owner-only, like every `set`)
+        from .registry import parse_bool
+
+        cfg.public = parse_bool(op.value)
     elif op.path == "error_dms":  # one verb: Registry.set_error_dms validates and commits
         return reg.set_error_dms(_error_dm_ids(op.value), by)
     elif op.path in CHANNEL_PATHS and _clear_word(op.value):
@@ -3258,12 +3262,12 @@ def _hours_words(h) -> str:
 # follows consequence: a batch with a WARN_OPS op or a consequence line is reviewed first; anything else saves directly.
 
 STRUCTURED_KINDS = ("settings", "raid", "raid_reset", "schedule", "schedule_remove", "buff", "family", "aura_reset", "recruitment", "plain", "comp")
-SETTINGS_FIELDS = ("timezone", "ask_audience", "about", "news_keywords", "loot_log")  # + officer_roles (whole list) + channel:<kind> + error_dm_ids
+SETTINGS_FIELDS = ("timezone", "ask_audience", "about", "news_keywords", "loot_log", "public")  # + officer_roles (whole list) + channel:<kind> + error_dm_ids
 RAID_FORM_FIELDS = ("lockout_days", "duration_hours", "notes", "split_policy")
 AURA_VALUE_WORDS = {"all": "Everyone", "physical": "Physical damage", "spell": "Spell damage", "mana": "Mana users", "melee": "Melee",
                     "ranged": "Ranged", "healer": "Healers", "tank": "Tanks"}
 SETTING_WORDS = {"timezone": "Timezone", "ask_audience": "Who may ask questions", "about": "About", "news_keywords": "News keywords",
-                 "loot_log": "Public loot log", "error_dms": "Error alerts", **{p: p.removesuffix("_channel").capitalize() + " channel" for p in CHANNEL_PATHS}}
+                 "loot_log": "Public loot log", "public": "Listed on the homepage", "error_dms": "Error alerts", **{p: p.removesuffix("_channel").capitalize() + " channel" for p in CHANNEL_PATHS}}
 BUFF_FIELD_WORDS = {"scope": "Scope", "family": "Stacking family", "strength": "Strength", "status": "Status", "note": "Note"}
 FAMILY_FIELD_WORDS = {"name": "Name", "status": "Status", "note": "Note", "value": "Who benefits"}
 
@@ -4006,12 +4010,17 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
             if op.path == "error_dms":
                 return "Guild settings", DescribedPart(label="Error alerts", before=reg.error_dm_words(), after=error_dm_words(_error_dm_ids(op.value))), []
             cur = {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": (cfg.about or "")[:80] or "none",
-                   "news_keywords": ", ".join(cfg.news_keywords) or "none", "loot_log": "on" if cfg.loot_log else "off"}.get(op.path or "", "?")
+                   "news_keywords": ", ".join(cfg.news_keywords) or "none", "loot_log": "on" if cfg.loot_log else "off",
+                   "public": "listed" if cfg.public else "unlisted"}.get(op.path or "", "?")
             new = op.value or "none"
             if op.path == "loot_log":
                 from .registry import parse_bool
 
                 new = "on" if parse_bool(op.value or "") else "off"
+            if op.path == "public":
+                from .registry import parse_bool
+
+                new = "listed" if parse_bool(op.value or "") else "unlisted"
             notes = []
             if op.path == "timezone" and op.value and op.value != cfg.timezone:
                 from . import raidcycle as rc

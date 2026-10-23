@@ -2879,6 +2879,92 @@ saves on change (tests/test_frontend_source.py pins it). The tier draft (`loot/t
 `llm.provider.for_guild(reg.key)`, so its usage row is the guild's (§5.45, D45). Parked guilds in GET /api/guilds carry
 `detached` and no `busy`; served ones carry `busy` (the apply job's raid guard).
 
+### 5.49 Dual interfaces, phase 4 — members and the public: appeals, the public schedule, unlisted guilds (built 2026-10-22)
+
+Phase 4's members-and-public part (out/dual_interface_design.md §3.1 *Members* L32, §3.2 B10, PUB-01 / PUB-05; owner
+decisions: the DM rule, D2, D8, D26, D40). No LLM anywhere in this part.
+
+**Loot appeals (L32) — `appeals.py`, `flows_appeal.py`.** A member asks the council about one of their OWN awards.
+- *Record.* `Appeal` in `<guild>/appeals/<id>.yaml` (file per entity, commit per change). The id IS the award's:
+  `award_id(a)` = 12 hex of sha1(`lootctx.award_ref(a)`) — so **one appeal per award**, open or resolved, enforced under
+  a per-guild lock (`record_open`); it keeps `award_ref`, so an award corrected later still has its appeal (officer
+  details read the ledger with voided rows: `all_awards`). Fields: member, character, item, boss, date, MS/OS, the words,
+  state open | resolved, outcome (an `OUTCOMES` key), note (officers only), who resolved and when, the card / thread ids.
+- *Open* — `open_appeal(bot, reg, uid, award_id, text, by, by_id, via)`: the words validated (`check_text`, 10–1000
+  characters; never parsed), the award must be one of `uid`'s live awards (`find_award` over `loot_ops.member_awards`;
+  anything else is `NOT_YOURS`), stored, then the card posted (records first, Discord second — §2.9), one ops line.
+  Callers decide who: the Me page route uses the viewer's own uid, the wizard the presser's; **an officer never opens one
+  for a member** (an officer who disagrees with an award corrects it — the appeal is the member's voice) and **MCP never
+  opens one** (`FROM_MCP`: the token is the owner's).
+- *The card* — `post_card`: `RaidMixin.officer_channel` (roster, else ops — D1's rule) gets an embed (`card_embed`) with
+  the award as the public loot log shows it (`award_words`) and the words as a quote under "<member> wrote:" (`quote`:
+  markdown and @everyone escaped, `AllowedMentions.none()`), then a PUBLIC thread off it named `loot · <member> · <item>`
+  for the officers. **Nothing officer-only on the card or in the thread** (D2): scores, candidates, the bot's pick,
+  reasons and who recorded it come from **Details** (an ephemeral reply to the officer who pressed — `details_text`) or
+  Loot › Appeals (`officer_details`). No officer channel / Discord refused: the appeal stands, one ops warn, it waits on
+  Loot › Appeals. `AppealButton` (DynamicItem `appeal.<gk>:details|resolve:<id>`, registered in `discord_bot`): officers
+  only, re-checked live (`is_officer_anywhere`), `channel_card_guild` (a channel card is never a DM fallback).
+- *Resolve* — `resolve_appeal(bot, reg, aid, outcome, note, by, by_id, via)`: one outcome from the fixed choice
+  (`OUTCOMES`: stands · corrected · noted · withdrawn — the line the member reads), an optional note that stays with the
+  officers; stored with the member's notice (`Registry.notify(kind="appeal")`, new NOTICE_KINDS entry) in one commit —
+  **never a DM** (the DM rule: nothing to act on) — then the card edited to its final state (no buttons, *Resolved*), a
+  closing line in the thread and the thread archived + locked; one ops line. A second resolve is refused naming who and
+  when. `resolve_consequence` is THE sentence (Discord's decide screen, the web confirm, the route's preview).
+- *Discord* — `/me loot-ask` (discord_registry) → `FLOWS["me_loot_ask"]`: the award select (your awards not yet asked
+  about; skipped when an award id is given) → ONE prose modal → `Wizard.decide` with `open_consequence` + the quote,
+  `[Send to the council]` `[Edit my words]` `[Back]`; nothing is written before Send; a refusal keeps the words ("Fix my
+  words"). The card's Resolve… → `FLOWS["appeal_resolve"]`: the outcome select → decide `[Resolve]` `[Resolve with a
+  note…]` `[Back]`, the guard re-checks officer rights on every press.
+- *Web* (`web/api_loot.py`'s member section): GET `/api/me/loot` rows carry `award` + `appeal`, and `appeals` lists the
+  member's own questions (state words and the outcome line — never the note or who resolved; `member_appeal_json`);
+  POST `/api/me/loot/{award}/appeal` {text | preview} (the viewer only; 403 from MCP); GET `/api/loot/appeals`
+  (officers: open oldest first, the last 50 resolved, `details`, `consequences` per outcome, the thread link) and POST
+  `/api/loot/appeals/{aid}/resolve` {outcome, note | preview} (officers, live; from MCP a decision about a person → the
+  X-Oibot-Actor header, D8). `APPEAL_LISTENERS` → `publish("loot:appeals")`. Frontend: Me › My loot's question-mark
+  button → a modal (textarea + the server's consequence + Confirm; `useDirty("appeal")`), "Your questions to the
+  council"; Loot › **Appeals** (`components/loot/Appeals.tsx`: the officer record, outcome select → `useConfirm` with the
+  server's sentence and the officers' note).
+- *Parity* (tests/test_parity_matrix.py `APPEALS`): appeals are not an op — plain text has no path by design (no LLM
+  reads a member's words), so their rows live beside the op matrix: open = `flow:me_loot_ask` / `slash:me loot-ask` /
+  POST `/api/me/loot/{award}/appeal`; list = the card's Details button / GET `/api/loot/appeals`; resolve =
+  `flow:appeal_resolve` / POST `/api/loot/appeals/{aid}/resolve`; MCP exempt with written reasons (open: never; list and
+  resolve: a later phase, with the actor rule).
+
+**Unlisted guilds (B10) — `GuildConfig.public: bool = True`.** `web/app.listed(bot)` = the guilds with `public` on, in
+`Guilds.ordered()` order: the only ones the homepage cards, the not-a-member page, GET `/api/public` and `/schedule`
+name. An unlisted guild is not closed: its members log in, the selector and `/api/guilds` (a web session lists only the
+guilds the person may open; the MCP bearer, the owner's, still sees every guild) show it. The owner sets it through the
+one `set` path: `configops` `set public` (SETTINGS_FIELDS, SETTING_WORDS "Listed on the homepage", describe
+listed → unlisted; owner-only like every `set`), so the Config page (Recruitment and more › **Homepage** switch via
+`useOpsSave`), plain text and MCP `set_config(fields={"public": false})` are one write; `/api/config` settings carry
+`public`.
+
+**Homepage copy (PUB-01).** No invite → no Join button and `INVITES_CLOSED` = *"Invitations are closed — ask an officer
+in game."* (the card, the single-guild page and the not-a-member page); "availability" → "schedules"; each card names
+its public schedule (`schedule_link`). The single-guild goldens in tests/test_web_multiguild.py were re-cut for exactly
+this copy.
+
+**The public schedule (PUB-05) — GET `/schedule[?g=<key>]`, no login.** `schedule_sections(reg)`: per raid its name and
+size; per schedule its `Registry.schedule_label` and the next three runs (`rc.next_runs_of(n=3)` → `Registry.local12`:
+the clock rule), a paused schedule "paused for now", a pickup template "an officer opens these runs". Nothing about
+members (no regulars, counts or names). An unknown or unlisted key is the same 404 (an unlisted guild is never
+confirmed to exist); without `g`: the only listed guild, else an index of the listed ones.
+
+**Carry-over: no self-notice for your own absence.** `discord_people.record_absence(…, by_id)` → `announce_absence(…,
+by_id=)` → `RaidMixin.after_absence(…, by_id=)`: the freed seat's "seat released (you're marked away)" notice
+(`drop_seated(notice=)` → `rc.seat_gone`) is written only when someone else recorded the absence — `by_id` ≠ the
+member, decided by id, never a name; `by_id` None (unknown) keeps writing it. Every caller already passed `by_id` to
+record_absence (the absences card, flows_absence, `/api/me/absence`, configops' absence op, MCP through the route).
+
+Tests: tests/test_appeals.py (one appeal per award; the words in the quote block, escaped, no mentions; nothing
+officer-only on the card; only the member opens — someone else, an officer, MCP refused; no officer channel → recorded,
+warn; resolve → the notice, no DM (a `send_member_dm` that raises), the card's final state, the thread archived; a member
+cannot resolve; the D8 actor; no LLM touched; the two wizards through tests/wizard_harness.py; button ids), tests/
+test_public_schedule.py (words only, three 12-hour runs, no member names, no login; unlisted hidden from the homepage,
+/api/public, /schedule and a non-member's guild list, still open to its members; the index; homepage copy; the `set
+public` op), tests/test_absence_self_notice.py (own absence → no notice; an officer's → the notice; a shared display name
+is not the actor — fails without the fix).
+
 ## 6. Architecture
 
 ```mermaid

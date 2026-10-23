@@ -84,6 +84,14 @@ src/oibot_gm/
   flows_loot.py        every LootButton / LootPick press and lootmodal submit (loot_press / loot_pick / loot_modal_submit; loot_modal_raw =
                        the restart path from on_interaction); wizards loot_tick (TickWizard), loot_override (grouped select → reason modal,
                        also Correct…), loot_distribute (/raid distribute), loot_end (/raid end + End council: the decide screen), gm_precedents
+  appeals.py           loot appeals (L32, design §5.49): Appeal / AppealStore (<guild>/appeals/<award id>.yaml — ONE per award, id =
+                       award_id = a hash of lootctx.award_ref); open_appeal (the member's OWN award only; words validated, never parsed, quoted
+                       and escaped; the card + a PUBLIC thread "loot · <member> · <item>" on officer_channel; no channel → waits on Loot › Appeals)
+                       and resolve_appeal (one OUTCOMES choice, officers' note, the member's `appeal` NOTICE — never a DM — card to its final state,
+                       thread archived); officer_details = the council's record (D2: Details button / Loot › Appeals only, never the card);
+                       AppealButton `appeal.<gk>:details|resolve:<id>`; APPEAL_LISTENERS → `loot:appeals`. NO LLM anywhere
+  flows_appeal.py      me_loot_ask (/me loot-ask: award select → one prose modal → decide "Send to the council") · appeal_resolve (officers:
+                       outcome select → decide, note optional)
   lootctx.py           RegistryLootContext (one per guild, reload(); void / reweight rows and superseding / status precedents folded; wishlists derived
                        live from Registry.wishlists; set_precedent_status = Retire/Restore; reweight (D12)); LEDGER_LISTENERS on every new award row
   loot_ops.py          the `loot` / `wishlist` / `tier` plain-text ops (configops' loot branch → LootMixin verbs / Registry wishlist + tier verbs),
@@ -120,7 +128,8 @@ src/oibot_gm/
                        live seat — D29: no self-service delete); applications: decide adds the character FIRST, caps the note (DECISION_NOTE_MAX),
                        decided_refusal ("Already declined by X"), Applicant.history → prior_decision_line, role_note (D31), application_state (own first)
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
-                       /me view|wishlist|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
+                       /me view|wishlist|loot-ask|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
+                       /me loot-ask = flows_appeal, a question about one of your own awards;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
                        /roster overview (always ephemeral, per-schedule fields, officers' Post button)|add|remove|members|list|confirm|rank|set-main|char|
                        absences|absent|back|comp|applicants|applicant (officers; `comp` = flows_config.CompTargetsWizard, the desired comp's targets;
@@ -223,7 +232,7 @@ src/oibot_gm/
                        save_characters (the character table + its ripple: rc.character_changes/effects/preview/after_character_change → drop_seated
                        for a freed seat, a run-update + warn line for a kept role flip; preview=), record_absence, im_back (THE "I'm back"),
                        transfer_owner (D50; Discord only — /gm config owner, BY_DESIGN_ONLY), absence_lines / absence_clear_lines (the preview words);
-                       a member's own retire / delete frees the seat with no self-notice (by_id decides). No DMs anywhere
+                       a member's own retire / delete — and their own absence (record_absence → announce_absence → RaidMixin.after_absence(by_id=)) — frees the seat with no self-notice (by_id decides). No DMs anywhere
   comp.py              pool → Players, solver run at roster size, raid-buff status, ideal_comp (targets with justifications)
   help.py              the bot explains itself: docs/manual.md + live command tree + guild settings + the asker's record → Claude (route `help`);
                        officers' `config` section = configops.summary_text(config_summary(audience)) (owner: Host too);
@@ -315,7 +324,10 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
   web/app.py           FastAPI served inside the bot (OIBOT_WEB_BIND): Discord OAuth2, landing page, icon/emblem/card images, old URLs → /app redirects;
                        published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Several guilds: `selected_reg` picks ONE guild per
                        request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first
-                       guild the person may open (guild_routing.member_of); homepage/not-member page = one card per server (one guild: the old page byte for byte)
+                       guild the person may open (guild_routing.member_of); homepage/not-member page = one card per LISTED server (`listed(bot)`:
+                       GuildConfig.public — an unlisted guild is never named on the homepage, the not-a-member page, /api/public or /schedule);
+                       no invite → INVITES_CLOSED; GET /schedule[?g=<key>] = the PUBLIC raid schedule (no login: raid name + size, next three runs per
+                       schedule in Registry.local12 words, nothing about members; schedule_sections) — design §5.49
   web/api_agents.py    /api/news, /api/proposals… (resolve via decide_proposal; job_of = bearer + X-Oibot-Job; a bare bearer never approves or
                        dismisses (D8: X-Oibot-Actor); /interrupted = the owner's recovery; `consequence` per proposal), /api/agents
                        (the monitor + apply_mode, elsewhere/install per job, owner's mcp card and llm usage), /api/agents/quiet (quiet_state),
@@ -342,7 +354,10 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        (+ tiers with the D12 re-weight ask), wishlists (+ TMB import), /api/me/loot, /api/me/wishlist, /api/members/wishlist, /api/loot/log
                        (members logged in; officers' `scores` filtered server-side, D2). D8: decisions from MCP need X-Oibot-Actor (app.py mcp_actor).
                        Phase 3 (§5.47): /api/loot/items/{key}/draft (DRAFTS in memory), /api/loot/items/export|import (CSV), /api/loot/companions,
-                       /api/me/attendance, /api/members/attendance; councils carry bosses_progress
+                       /api/me/attendance, /api/members/attendance; councils carry bosses_progress.
+                       Phase 4 (§5.49): /api/me/loot rows carry `award` + `appeal` and `appeals` (the member's own questions, never the note or
+                       who resolved); POST /api/me/loot/{award}/appeal (the member only; never MCP), GET /api/loot/appeals + POST
+                       /api/loot/appeals/{aid}/resolve (officers; D8 actor from MCP) → appeals.py
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
                        sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`.
@@ -356,7 +371,7 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        components/ChannelsCard.tsx + SetupCard.tsx (Config: channels edit mode via useOpsSave; Setup / Host cards), LeftServer.tsx (Members: Remove record),
                        MyApplication.tsx (Me: own application), setupApi.ts (their shapes), hooks/useDirty.ts (EVERY edit mode registers — linted — so the server selector asks
                        "Save or discard your edits first");
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Companions) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more; Mantine, left rail,
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Appeals (L32) · Companions); Me › My loot's Ask the council (MyLoot.tsx) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more; Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            raid thumbnails and generated class / role / buff badges (the emoji fallback; no roster or analytics images any more);  report_html.py → out/coverage.html

@@ -425,7 +425,7 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         v, d = await body(request, officer=True)
         need_owner(v)
         field, value = str(d.get("field") or ""), d.get("value")
-        if not (field.startswith("channel:") or field in ("officer_roles", "timezone", "ask_audience", "about", "news_keywords", "loot_log")):
+        if not (field.startswith("channel:") or field in ("officer_roles", "timezone", "ask_audience", "about", "news_keywords", "loot_log", "public")):
             return JSONResponse({"error": f"unknown setting {field}"}, status_code=400)
         have = set(v.reg.config.officer_role_ids)
         res = await translate(v, [{"kind": "settings", "fields": {field: value}}], d)

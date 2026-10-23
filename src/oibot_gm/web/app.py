@@ -169,15 +169,32 @@ def login_href(next_path: str) -> str:
     return "/auth/login?next=" + quote(next_path, safe="/")
 
 
+INVITES_CLOSED = "Invitations are closed — ask an officer in game."  # B10: a homepage with no invite still says how to get in
+INTRO_ONE = "A World of Warcraft raiding guild. Members keep their characters, schedules and raid signups here."
+INTRO_MANY = "World of Warcraft raiding guilds. Members keep their characters, schedules and raid signups here."
+
+
+def join_tail(info: dict) -> str:
+    """The small line under the buttons: how to get in — with an invite, anyone can join (and apply inside when
+    recruiting); without one, INVITES_CLOSED."""
+    if info.get("invite_url"):
+        return "Anyone can join the Discord; new raiders apply there with /apply." if info.get("recruiting") else "Anyone can join the Discord."
+    return INVITES_CLOSED
+
+
+def schedule_link(info: dict) -> str:
+    """' · Raid schedule' → the guild's public /schedule page (PUB-05), when the card names a guild."""
+    return f' · <a class="plain" href="/schedule?{html.escape(urlencode({"g": info["key"]}), quote=True)}">Raid schedule</a>' if info.get("key") else ""
+
+
 def landing_card(info: dict) -> str:
     """One guild's card on the several-guild homepage: icon, name, about, its own Join button and its own Log in."""
     about = f'<p class="about">{html.escape(info["about"])}</p>' if info.get("about") else ""
     login_cls = "alt" if info.get("invite_url") else "login"
     nxt = f"/app/me?g={info['key']}" if info.get("key") else "/app/me"
-    tail = ("Anyone can join the Discord; new raiders apply there with /apply." if info.get("recruiting") else "Anyone can join the Discord.") if info.get("invite_url") else ""
     return ('<div class="card">' + head_block(info) + about
             + f'<div class="btns">{join_button(info.get("invite_url"))}<a class="btn {login_cls}" href="{html.escape(login_href(nxt), quote=True)}">Log in with Discord</a></div>'
-            + (f'<p class="small">{tail}</p>' if tail else "") + "</div>")
+            + f'<p class="small">{join_tail(info)}{schedule_link(info)}</p>' + "</div>")
 
 
 def landing_page(infos: list[dict] | dict) -> str:
@@ -187,18 +204,16 @@ def landing_page(infos: list[dict] | dict) -> str:
         infos = [infos]
     if len(infos) > 1:
         return (PAGE_HEAD_MANY.replace("{title}", "oibot_GM")
-                + '<p class="intro">World of Warcraft raiding guilds. Members keep their characters, availability and raid signups here.</p>'
+                + f'<p class="intro">{INTRO_MANY}</p>'
                 + '<div class="cards">' + "".join(landing_card(i) for i in infos) + "</div></div></body></html>")
     info = infos[0] if infos else GENERIC_INFO
     about = f'<p class="about">{html.escape(info["about"])}</p>' if info.get("about") else ""
     login_cls = "alt" if info.get("invite_url") else "login"
-    tail = ""
-    if info.get("invite_url"):
-        tail = "Anyone can join the Discord; new raiders apply there with /apply." if info.get("recruiting") else "Anyone can join the Discord."
+    tail = join_tail(info) if infos else ""  # no guild listed (none configured yet, K22, or the only one unlisted): no join line
     return (PAGE_HEAD.replace("{title}", html.escape(info["name"])) + head_block(info)
-            + "<p>A World of Warcraft raiding guild. Members keep their characters, availability and raid signups here.</p>" + about
+            + f"<p>{INTRO_ONE}</p>" + about
             + f'<div class="btns">{join_button(info.get("invite_url"))}<a class="btn {login_cls}" href="/auth/login?next=/app/me">Log in with Discord</a></div>'
-            + (f'<p class="small">{tail}</p>' if tail else "") + "</div></body></html>")
+            + (f'<p class="small">{tail}{schedule_link(info)}</p>' if tail else "") + "</div></body></html>")
 
 
 def not_member_page(infos: list[dict] | dict) -> str:
@@ -208,13 +223,13 @@ def not_member_page(infos: list[dict] | dict) -> str:
         infos = [infos]
     if len(infos) > 1:
         cards = "".join('<div class="card">' + head_block(i) + (f'<p class="about">{html.escape(i["about"])}</p>' if i.get("about") else "")
-                        + (f'<div class="btns">{join_button(i.get("invite_url"))}</div>' if i.get("invite_url") else "<p>Ask a member of the guild for an invite.</p>")
+                        + (f'<div class="btns">{join_button(i.get("invite_url"))}</div>' if i.get("invite_url") else f"<p>{INVITES_CLOSED}</p>")
                         + "</div>" for i in infos)
         return (PAGE_HEAD_MANY.replace("{title}", "oibot_GM")
                 + "<p class=\"intro\">You're not in any of these Discord servers yet. The site is for members of a server. Join one, then come back and log in again.</p>"
                 + f'<div class="cards">{cards}</div><p class="small intro"><a class="plain" href="/auth/logout">Log out</a></p></div></body></html>')
     info = infos[0] if infos else GENERIC_INFO
-    how = "Join the server, then come back and log in again." if info.get("invite_url") else "Ask a member of the guild for an invite, then come back and log in again."
+    how = "Join the server, then come back and log in again." if info.get("invite_url") else f"{INVITES_CLOSED} Once you're in, come back and log in again."
     return (PAGE_HEAD.replace("{title}", html.escape(info["name"])) + head_block(info)
             + f"<p>You're not in the {html.escape(info['name'])} Discord yet. The site is for members of the server. {how}</p>"
             + f'<div class="btns">{join_button(info.get("invite_url"))}</div>'
@@ -227,6 +242,83 @@ def unsure_page(retry_href: str) -> str:
             + "<p>We couldn't check whether you're in that Discord server just now. Nothing changed; try again in a moment.</p>"
             + f'<div class="btns"><a class="btn login" href="{html.escape(retry_href, quote=True)}">Try again</a></div>'
             + '<p class="small"><a class="plain" href="/auth/logout">Log out</a></p></div></body></html>')
+
+
+def listed(bot) -> list:
+    """The guilds that are LISTED (GuildConfig.public, B10), in Guilds.ordered() order: the only ones the homepage, the
+    not-a-member page, GET /api/public and /schedule name. An unlisted guild's members still log in and see it."""
+    return [r for r in bot.registries.ordered() if getattr(r.config, "public", True)]
+
+
+SCHEDULE_RUNS = 3  # the next three runs per schedule (PUB-05)
+
+
+def schedule_sections(reg) -> list[dict]:
+    """A guild's raid schedules in words, for anyone: per raid its name and size, per schedule its label and the next
+    three runs (Registry.local12 — the clock rule), paused or ad hoc said in words. Nothing about members: no regulars,
+    no counts, no names."""
+    from .. import raidcycle as rc
+
+    out = []
+    for rid in reg.profile.raids:
+        rd = reg.raid_def(rid)
+        rows = []
+        for sc in reg.schedules(rid):
+            title = sc.get("name") if sc.get("id") != rc.DEFAULT_SCHEDULE and sc.get("name") else None
+            if sc.get("kind") == "pickup":
+                rows.append({"title": title, "label": "Ad hoc: an officer opens these runs when there's interest — first come, first served", "runs": []})
+                continue
+            if not sc.get("active", True):
+                rows.append({"title": title, "label": reg.schedule_label(rid, sc), "runs": [], "paused": True})
+                continue
+            rows.append({"title": title, "label": reg.schedule_label(rid, sc), "runs": [reg.local12(t) for t in rc.next_runs_of(reg, rid, sc, n=SCHEDULE_RUNS)]})
+        if rows:
+            out.append({"raid": rd.get("name", rid), "size": rd.get("size"), "schedules": rows})
+    return out
+
+
+def schedule_block(reg) -> str:
+    parts = []
+    for sec in schedule_sections(reg):
+        size = f" · {int(sec['size'])}-player" if sec.get("size") else ""
+        rows = []
+        for r in sec["schedules"]:
+            head = (f"<b>{html.escape(r['title'])}</b>: " if r.get("title") else "") + html.escape(r["label"])
+            if r.get("paused"):
+                nxt = "paused for now"
+            elif r["runs"]:
+                nxt = "next: " + ", ".join(html.escape(x) for x in r["runs"])
+            else:
+                nxt = ""
+            rows.append(f"<li>{head}" + (f'<br><span class="when">{nxt}</span>' if nxt else "") + "</li>")
+        parts.append(f'<h2>{html.escape(sec["raid"])}<span class="size">{size}</span></h2><ul>' + "".join(rows) + "</ul>")
+    tz = html.escape(reg.config.timezone.replace("_", " "))
+    return ("".join(parts) or "<p>No raid times set yet.</p>") + f'<p class="small">Times are guild time ({tz}). Each run gets a signup sheet in the Discord.</p>'
+
+
+SCHEDULE_CSS = ("h2{font:700 18px Manrope,sans-serif;margin:18px 0 6px}h2 .size{font:400 14px 'Source Sans 3',sans-serif;color:#8C97A8}"
+                "ul{margin:0;padding-left:18px}li{margin:0 0 8px;color:#C9D1DC}.when{color:#8C97A8;font-size:14px}")
+
+
+def schedule_page(reg, info: dict) -> str:
+    """GET /schedule?g=<key>: one listed guild's raid schedule for visitors — no login (PUB-05)."""
+    head = PAGE_HEAD.replace("{title}", html.escape(info["name"]) + " · raid schedule").replace("</style>", SCHEDULE_CSS + "</style>")
+    return (head + head_block(info) + "<p>Raid schedule</p>" + schedule_block(reg)
+            + (f'<div class="btns" style="margin-top:16px">{join_button(info.get("invite_url"))}</div>' if info.get("invite_url") else "")
+            + f'<p class="small">{join_tail(info)} · <a class="plain" href="/">Home</a></p></div></body></html>')
+
+
+def schedule_index_page(infos: list[dict]) -> str:
+    """GET /schedule with several listed guilds and no ?g=: one card per guild, each linking to its schedule."""
+    cards = "".join('<div class="card">' + head_block(i) + f'<p class="small"><a class="plain" href="/schedule?{html.escape(urlencode({"g": i["key"]}), quote=True)}">Raid schedule</a></p></div>'
+                    for i in infos)
+    return (PAGE_HEAD_MANY.replace("{title}", "oibot_GM · raid schedules") + '<p class="intro">Raid schedules</p>'
+            + f'<div class="cards">{cards}</div><p class="small intro"><a class="plain" href="/">Home</a></p></div></body></html>')
+
+
+def no_schedule_page() -> str:
+    return (PAGE_HEAD.replace("{title}", "oibot_GM") + '<div class="head"><h1>No schedule here</h1></div>'
+            + "<p>There's no public raid schedule at this address.</p>" + '<p class="small"><a class="plain" href="/">Home</a></p></div></body></html>')
 
 
 class Viewer:
@@ -711,8 +803,25 @@ def create_app(bot) -> FastAPI:
     from .api import public_card
 
     def guild_infos() -> list[dict]:
-        """Every configured guild's public facts (public_info + key), in Guilds.ordered() order."""
-        return [public_card(bot, r) for r in bot.registries.ordered()]
+        """Every LISTED guild's public facts (public_info + key), in Guilds.ordered() order (an unlisted guild — B10,
+        GuildConfig.public False — has no card for anyone; its members reach it by logging in)."""
+        return [public_card(bot, r) for r in listed(bot)]
+
+    @app.get("/schedule", response_class=HTMLResponse)
+    async def public_schedule(g: str | None = None):
+        """The public raid schedule (PUB-05): no login, words only (the next three runs per schedule, 12-hour guild
+        time), nothing about members. `?g=<key>` picks a listed guild; an unknown or unlisted key is the same 404 (an
+        unlisted guild is never confirmed to exist). Without `g`: the only listed guild's page, else an index."""
+        regs = listed(bot)
+        if g:
+            reg = next((r for r in regs if r.key == g.strip()), None)
+        else:
+            if len(regs) > 1:
+                return HTMLResponse(schedule_index_page([public_card(bot, r) for r in regs]))
+            reg = regs[0] if regs else None
+        if reg is None:
+            return HTMLResponse(no_schedule_page(), status_code=404)
+        return HTMLResponse(await asyncio.to_thread(schedule_page, reg, public_card(bot, reg)))
 
     @app.exception_handler(NotMember)
     async def _not_member(request: Request, exc: NotMember):

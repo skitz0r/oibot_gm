@@ -34,7 +34,8 @@ PLACEMENT_ASK_HISTORY = 12  # placement asks kept per member
 NOTICE_CAP = 20
 NOTICE_DAYS = 30
 NOTICE_TEXT_MAX = 300
-NOTICE_KINDS = ("not_rostered", "released", "answered_for_you", "cancelled", "schedule_removed", "application", "loot_award", "ask_closed", "confirmed")
+NOTICE_KINDS = ("not_rostered", "released", "answered_for_you", "cancelled", "schedule_removed", "application", "loot_award", "ask_closed", "confirmed",
+                "appeal")  # appeal: the council answered a member's question about an award (appeals.py, design §5.49)
 MAX_ABSENCE_DAYS = 120
 ABSENCE_REASON_MAX = 200  # an absence's reason (officer-only prose), capped at the verb so every surface refuses alike
 PLAYER_RANKS = ("trial", "raider", "core")
@@ -300,6 +301,9 @@ class GuildConfig(BaseModel):
     ask_audience: str = "registered"  # who may ask the LLM free-form questions: officers | confirmed | registered | everyone
     about: Optional[str] = None  # short public blurb for the static guide (owner-set)
     invite_url: Optional[str] = None  # the public Discord invite the homepage's Join button opens (anyone can join; members apply inside)
+    # listed (B10, design §5.49): the guild has a card on the public homepage, the not-a-member page, GET /api/public and a
+    # public /schedule page. False = UNLISTED: none of those name it (its members still log in and see it in their own list)
+    public: bool = True
     recruitment: Recruitment = Field(default_factory=Recruitment)  # the Discord application: open/closed, a note, the guild's questions
     # people holding one of these Discord roles register without applying (existing members who haven't registered yet); officers always can
     member_role_ids: list[int] = Field(default_factory=list)
