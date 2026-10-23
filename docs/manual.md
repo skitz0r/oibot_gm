@@ -1806,7 +1806,9 @@ bot ("put the Robe of Tests on my wishlist as #2 for offspec"). An item you rece
 **Ask the council** about one of your own awards (a question, a disagreement, "I was told I'm next for this"): on
 **Me › My loot** press the question mark beside the award, write it in your own words (10 to 1000 characters), and
 **Confirm** — the box says what happens first; in Discord, `/me loot-ask` → pick the award → write it → **Send to the
-council** (nothing is sent before that; **Edit my words** goes back). One question per award, and it can't be edited
+council** (nothing is sent before that; **Edit my words** goes back). Every award you have can be asked about: My loot
+shows the newest 20 with **Show more** for older ones and a search box (item, character or boss) once you have more;
+Discord's list holds your newest 25 and its first line says the older ones are on the site. One question per award, and it can't be edited
 once sent. It goes to the officers as a card in their channel (the roster channel, else the ops channel) with a thread
 named *loot · <you> · <item>* for them to talk it over: the card shows the award as the loot log does and your words as
 written — never scores or reasons. No AI reads or answers it. When an officer closes it you get a notice on your Me

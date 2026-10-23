@@ -7,20 +7,37 @@ import { CardHeader, fail, ok } from "../Page";
 import { useLive } from "../../hooks/useLive";
 import { Who } from "./shared";
 
+type MyLootPage = { rows: LogRow[]; total?: number; more?: boolean; appeals: MyAppeal[]; appeal_text: { min: number; max: number } };
+const PAGE = 20;
+
 /** Me › My loot: what my characters received, newest first (by my Discord id; rows recorded by name count too).
  *  Members never see scores, reasons or who recorded it here (D2). Each award without a question has *Ask the
  *  council* (L32): your words → the server's consequence sentence → Confirm; the answer comes back here and as a notice
- *  (no DM). One question per award; "Your questions" lists them with their state. */
+ *  (no DM). One question per award; "Your questions" lists them with their state. All of your awards are reachable:
+ *  a search box (item, character, boss) and *Show more* page through them (Discord's select holds only the newest 25). */
 export function MyLootCard({ meta }: { meta: Meta }) {
   const [rows, setRows] = useState<LogRow[] | null>(null);
   const [asked, setAsked] = useState<MyAppeal[]>([]);
   const [limits, setLimits] = useState({ min: 10, max: 1000 });
+  const [q, setQ] = useState("");
+  const [more, setMore] = useState(false);
+  const [total, setTotal] = useState(0);
   const [draft, setDraft] = useState<{ row: LogRow; text: string; consequence: string } | null>(null);  // the question being written
   useDirty("appeal", draft !== null);
   const [sending, setSending] = useState(false);
-  const load = () => api.get<{ rows: LogRow[]; appeals: MyAppeal[]; appeal_text: { min: number; max: number } }>("/api/me/loot?limit=20")
-    .then((d) => { setRows(d.rows); setAsked(d.appeals || []); if (d.appeal_text) setLimits(d.appeal_text); }).catch(fail);
-  useEffect(() => { load(); }, []);
+  const shown = useRef(PAGE);  // how many rows a reload brings back (Show more grows it)
+  const query = useRef("");
+  const url = (offset: number, limit: number) => `/api/me/loot?limit=${limit}&offset=${offset}${query.current ? `&q=${encodeURIComponent(query.current)}` : ""}`;
+  const take = (d: MyLootPage) => { setMore(!!d.more); setTotal(d.total ?? d.rows.length); setAsked(d.appeals || []); if (d.appeal_text) setLimits(d.appeal_text); };
+  const load = () => api.get<MyLootPage>(url(0, Math.min(shown.current, 200))).then((d) => { setRows(d.rows); take(d); }).catch(fail);
+  const showMore = () => {
+    const from = rows?.length || 0;
+    api.get<MyLootPage>(url(from, PAGE)).then((d) => { setRows((r) => [...(r || []).slice(0, from), ...d.rows]); shown.current = from + d.rows.length; take(d); }).catch(fail);
+  };
+  useEffect(() => {
+    const t = setTimeout(() => { query.current = q.trim(); shown.current = PAGE; load(); }, q ? 250 : 0);
+    return () => clearTimeout(t);
+  }, [q]);
   useLive(load, ["loot:", "member"]);
   async function start(r: LogRow) {
     try {
@@ -39,10 +56,11 @@ export function MyLootCard({ meta }: { meta: Meta }) {
   const n = draft?.text.trim().length || 0;
   return (
     <Card>
-      <CardHeader title="My loot" hint="newest first" />
+      <CardHeader title="My loot" hint={total > PAGE || q ? `newest first · ${total}` : "newest first"} />
       <Stack p="md" gap={4}>
+        {(total > PAGE || q) && <TextInput size="xs" mb={6} placeholder="Search your awards — item, character or boss" value={q} maxLength={60} onChange={(e) => setQ(e.currentTarget.value)} />}
         {rows === null && <Text size="sm" c="dimmed">Loading…</Text>}
-        {rows?.length === 0 && <Text size="sm" c="dimmed">Nothing yet. Say what you want on your wishlist below.</Text>}
+        {rows?.length === 0 && <Text size="sm" c="dimmed">{q ? "None of your awards match." : "Nothing yet. Say what you want on your wishlist below."}</Text>}
         {rows?.map((r, i) => (
           <Group key={i} gap="xs" wrap="nowrap" justify="space-between">
             <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
@@ -60,6 +78,7 @@ export function MyLootCard({ meta }: { meta: Meta }) {
             </Group>
           </Group>
         ))}
+        {more && <Group justify="center" mt={4}><Button size="compact-xs" variant="default" onClick={showMore}>Show more ({total - (rows?.length || 0)} older)</Button></Group>}
         {asked.length > 0 && (
           <Stack gap={6} mt="sm">
             <Text size="xs" fw={600} c="dimmed">Your questions to the council</Text>

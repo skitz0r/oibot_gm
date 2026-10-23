@@ -4,7 +4,7 @@
   typed reference) → one prose modal (validated, never parsed) → THE confirm screen (wizard.Wizard.decide: the
   consequence from appeals.open_consequence, your words quoted, `[Send to the council]` `[Edit my words]` `[Back]`).
   Nothing is written before Send. Awards you already asked about are left out of the select.
-- `appeal_resolve` (the card's *Resolve…*): officers only, re-checked on every press — pick ONE outcome (a select over
+- `appeal_resolve` (the card's *Resolve…*): officers only, re-checked LIVE (PRIV_LIVE) on every press — pick ONE outcome (a select over
   appeals.OUTCOMES) → the decide screen (appeals.resolve_consequence; `[Resolve]` `[Resolve with a note…]` `[Back]`, the
   note stays with the officers) → appeals.resolve_appeal: the member's notice, the card's final state. No DM, no LLM."""
 from __future__ import annotations
@@ -14,6 +14,8 @@ import discord
 from . import appeals
 from .registry import Registry, RegistryError
 from .wizard import Field, Form, Opt, Wizard, flow
+
+SELECT_MAX = 25  # Discord's select: the newest 25 awards; the first line points at the site for the rest
 
 
 class AskWizard(Wizard):
@@ -29,8 +31,10 @@ class AskWizard(Wizard):
     async def pick_screen(self, interaction: discord.Interaction) -> None:
         opts = [Opt(aid, f"{a.item_name or a.item_id} · {a.raider}"[:100], description=appeals.award_words(self.reg, character=a.raider, item=a.item_name or a.item_id,
                                                                                                           received=a.received.isoformat(), boss=a.boss, offspec=a.offspec)[:100])
-                for aid, a in list(self.awards.items())[:25]]
-        await self.show(interaction, "Pick the award your question is about. Your words go to the officers as you write them; their answer comes "
+                for aid, a in list(self.awards.items())[:SELECT_MAX]]
+        older = (f"Your newest {SELECT_MAX} awards — older awards: on the site (Me › My loot › Ask the council).\n"
+                 if len(self.awards) > SELECT_MAX else "")  # Discord's select holds 25; the site pages through all of them
+        await self.show(interaction, older + "Pick the award your question is about. Your words go to the officers as you write them; their answer comes "
                                      "back as a notice on your Me page and in `/me view` (no DM).\n-# One question per award. The Me page (My loot › Ask the council) does the same.",
                         self.select("Pick the award…", opts, self.picked), self.button("Cancel", self.cancel))
 
@@ -101,9 +105,13 @@ async def me_loot_ask(interaction: discord.Interaction, reg: Registry, *, award:
 
 @flow("appeal_resolve")
 async def appeal_resolve(interaction: discord.Interaction, reg: Registry, *, aid: str, **_seed) -> None:
-    """An officer closes appeal `aid` with one outcome (the card's Resolve…)."""
+    """An officer closes appeal `aid` with one outcome (the card's Resolve…). Officer rights are decided LIVE
+    (PRIV_LIVE, flows_loot.is_loot_officer) here, on every press and on the note's submit — the write is resolve_appeal,
+    and a write never trusts a cached role (design §2.6)."""
+    from .flows_loot import is_loot_officer
+
     bot = interaction.client
-    if not await bot.is_officer_anywhere(reg, interaction.user.id):
+    if not await is_loot_officer(bot, reg, interaction.user):
         await interaction.response.send_message("Officers only.", ephemeral=True)
         return
     try:
@@ -118,8 +126,8 @@ async def appeal_resolve(interaction: discord.Interaction, reg: Registry, *, aid
             await appeals.update_card(bot, reg, ap)  # a stale card catches up
         return
 
-    async def guard(i: discord.Interaction) -> str | None:
-        return None if await bot.is_officer_anywhere(reg, i.user.id) else "Officers only."
+    async def guard(i: discord.Interaction) -> str | None:  # every press and the note's submit: live, never the cache
+        return None if await is_loot_officer(bot, reg, i.user) else "Officers only."
 
     wiz = Wizard(reg, interaction.user.id, title=f"Resolve: {ap.member_name} · {ap.item}"[:80], guard=guard)
 

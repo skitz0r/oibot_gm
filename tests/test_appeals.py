@@ -11,6 +11,7 @@ import itertools
 import types
 from datetime import date
 
+import discord
 import pytest
 from fastapi.testclient import TestClient
 from test_loot_web import OFFICER, WebLootBot, as_user, env  # noqa: F401 — env is a fixture
@@ -89,6 +90,10 @@ class AppealBot(WebLootBot):
 
     async def is_officer_anywhere(self, reg, uid):
         return int(uid) == OFFICER
+
+    async def role_of(self, reg, user, *, max_age=10.0):
+        self.role_ages = getattr(self, "role_ages", []) + [max_age]
+        return "officer" if int(getattr(user, "id", user)) == OFFICER else "member"
 
 
 def award(reg, m, item="Robe of Tests", *, iid=None, offspec=False, other="Somebody"):
@@ -321,6 +326,81 @@ def test_the_thread_close_line_escapes_the_note_and_cannot_open_a_fence(a):
     line = appeals.thread_close_line(ap)
     assert "</data>" not in line and "‹/data>" in line
     assert "@everyone" not in line and "\\*\\*now\\*\\*" in line and "Jon\\*\\*ny\\*\\*" in line, line
+
+
+def test_resolving_in_discord_decides_officer_rights_live(a):
+    """Regression (review item 4): the Resolve flow checked officer rights from a cache up to 10 s old
+    (is_officer_anywhere, PRIV_ROUTING), so an officer demoted moments ago could still resolve. The open, every press
+    and the note's submit now ask role_of with max_age=PRIV_LIVE; the cache's stale 'officer' decides nothing."""
+    from oibot_gm import guild_routing
+
+    assert ask(a, a.m.discord_id).status_code == 200
+    bot = harness_client(a)
+    state = {"demoted": False}
+
+    async def role_of(reg, user, *, max_age=10.0):
+        bot.role_ages = getattr(bot, "role_ages", []) + [max_age]
+        if max_age > guild_routing.PRIV_LIVE:
+            return "officer"  # the cached answer, from before the demotion
+        return "member" if state["demoted"] else "officer"
+
+    async def cached_officer(reg, uid):
+        return True  # what a 10-second-old lookup still says
+
+    bot.role_of, bot.is_officer_anywhere = role_of, cached_officer
+    officer = types.SimpleNamespace(id=OFFICER, display_name="Jonny", mention="@j")
+    h = Harness(a.reg, None, user=officer, client=bot)
+
+    async def go():
+        await FLOWS["appeal_resolve"](h.card_press(), a.reg, aid=a.aid)
+        assert "Pick the outcome" in h.text
+        await h.pick("Pick the outcome…", "stands")
+        state["demoted"] = True  # the officer role is taken away before the Resolve press
+        with pytest.raises(AssertionError):  # the harness: the view's interaction_check (the guard) refused the press
+            await h.press("Resolve")
+    asyncio.run(go())
+    assert appeals.store_of(a.reg).get(a.aid).state == "open", "a demoted officer resolves nothing"
+    assert bot.role_ages and set(bot.role_ages) == {guild_routing.PRIV_LIVE}, "every check was a live one"
+    state["demoted"] = False
+    h2 = Harness(a.reg, None, user=officer, client=bot)
+    state["demoted"] = True
+    asyncio.run(FLOWS["appeal_resolve"](h2.card_press(), a.reg, aid=a.aid))
+    assert h2.text == "Officers only.", "the open itself is live too"
+
+
+def many_awards(a, n):
+    c = a.m.main or a.m.characters[0]
+    for k in range(n):
+        row = LootAward(raider=c.label, item_id=0, tier="B", total_weight=1.0, received=date(2026, 1, 1 + k % 28).replace(month=1 + k // 28), instance="barrow_deeps",
+                        offspec=False, boss="Gatekeeper" if k % 2 else "Warden", item_name=f"Trinket {k:02d}", discord_id=a.m.discord_id, source="import")
+        a.reg.store.append_jsonl(f"{a.reg.key}/ledger.jsonl", row.model_dump(mode="json"))
+    a.bot.__dict__.pop("contexts", None)
+
+
+def test_every_award_can_be_asked_about_on_the_site_and_discord_says_where_older_ones_are(a):
+    """Regression (review item 7): a member could only ask about their newest 20 (site) / 25 (Discord's select) awards.
+    The site pages and searches ALL of the member's own awards; Discord keeps the newest 25 and says on its first line
+    that older ones are on the site."""
+    many_awards(a, 30)  # + the fixture's one = 31 awards
+    h = as_user(a.c, a.m.discord_id)
+    first = a.c.get("/api/me/loot?limit=20", headers=h).json()
+    assert len(first["rows"]) == 20 and first["total"] == 31 and first["more"] is True
+    rest = a.c.get("/api/me/loot?limit=20&offset=20", headers=h).json()
+    assert len(rest["rows"]) == 11 and rest["more"] is False
+    oldest = rest["rows"][-1]
+    assert {r["award"] for r in first["rows"]}.isdisjoint({r["award"] for r in rest["rows"]})
+    assert ask(a, a.m.discord_id, text="I was told this one was mine after the vote", aid=oldest["award"]).status_code == 200, "the oldest award can be asked about"
+    found = a.c.get("/api/me/loot?q=trinket%2003", headers=h).json()
+    assert [r["item"] for r in found["rows"]] == ["Trinket 03"] and found["total"] == 1
+    other = a.c.get("/api/me/loot?q=trinket", headers=as_user(a.c, a.other.discord_id)).json()
+    assert other["rows"] == [] and other["total"] == 0, "a search never shows someone else's awards"
+    user = types.SimpleNamespace(id=a.m.discord_id, display_name=a.m.display_name, mention="@m")
+    hd = Harness(a.reg, None, user=user, client=harness_client(a))
+    asyncio.run(FLOWS["me_loot_ask"](hd.command(), a.reg))
+    lines = hd.text.split("\n")
+    assert "older awards: on the site" in lines[1], lines[:3]
+    sel = next(i for i in hd._items() if isinstance(i, discord.ui.Select))
+    assert len(sel.options) == 25
 
 
 def test_the_card_buttons_carry_the_guild_and_match_after_a_restart(reg):

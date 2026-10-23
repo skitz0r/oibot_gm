@@ -565,8 +565,11 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         return {"rows": out, "scores": bool(v.officer and scores), "officer": v.officer}
 
     @app.get("/api/me/loot")
-    async def me_loot(request: Request, limit: int = 50):
-        """My loot: what my characters received (by my Discord id; by character name for rows recorded without one)."""
+    async def me_loot(request: Request, limit: int = 50, offset: int = 0, q: str = ""):
+        """My loot: what my characters received (by my Discord id; by character name for rows recorded without one),
+        newest first, a page at a time — `offset` / `limit` (≤200) over ALL of them, `q` narrows to the awards whose item,
+        character or boss holds that text — so any award can be asked about (Discord's select holds the newest 25).
+        {rows, total (matching), more, appeals, appeal_text}."""
         v = await who(request)
         reg = v.reg
         ctx = ctx_of(reg)
@@ -574,16 +577,21 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         chars = char_index(reg)
         rows = [a for a in ctx.ledger if a.discord_id == v.uid or (a.discord_id is None and a.raider.lower() in mine)]
         rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
+        needle = " ".join(str(q or "").split()).lower()[:60]
+        if needle:  # the member's own awards only — a search never widens what they see
+            rows = [a for a in rows if needle in " ".join(str(x or "") for x in (a.item_name, a.item_id, a.raider, a.boss)).lower()]
         asked = {ap.id: ap for ap in appeals.store_of(reg).of_member(v.uid)} if v.member else {}
         out = []
         ids = appeals.ledger_ids(ctx.ledger)  # the appeal id of each award (two identical imported rows apart)
-        for a in rows[:max(1, min(int(limit), 200))]:
+        start, size = max(0, int(offset)), max(1, min(int(limit), 200))
+        for a in rows[start:start + size]:
             aid = ids[id(a)]
             ap = asked.get(aid)
             out.append({**log_row(reg, a, chars, False, False, ctx, v.uid, mine), "award": aid, "appeal": member_appeal_json(reg, ap) if ap else None})
         # my questions to the council (L32), newest first — also those about an award corrected since (no longer a row above)
         mine_q = sorted(asked.values(), key=lambda ap: ap.created_at, reverse=True)
-        return {"rows": out, "appeals": [member_appeal_json(reg, ap) for ap in mine_q], "appeal_text": {"min": appeals.TEXT_MIN, "max": appeals.TEXT_MAX}}
+        return {"rows": out, "total": len(rows), "more": start + size < len(rows), "appeals": [member_appeal_json(reg, ap) for ap in mine_q],
+                "appeal_text": {"min": appeals.TEXT_MIN, "max": appeals.TEXT_MAX}}
 
     # ------------------------------------------------------------ loot appeals (L32, design §5.49 — no LLM, no DM)
     def member_appeal_json(reg, ap) -> dict:
