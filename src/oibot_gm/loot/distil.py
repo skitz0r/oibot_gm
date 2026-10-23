@@ -56,11 +56,21 @@ def active_precedents(precedents: list[dict]) -> list[dict]:
     return [p for p in precedents if p.get("status", "active") == "active"][-MAX_PRECEDENTS:]
 
 
+FENCES = ("policy", "rules", "precedents")  # the prompt's data blocks: nothing inside one may open or close any of them
+
+
+def _safe(text) -> str:
+    """Officers' prose / the guild's text inside a data block: unable to open or close a block (llm.provider.unfence)."""
+    from ..llm.provider import unfence
+
+    return unfence(text, *FENCES)
+
+
 def prompt(policy: str, compiled: dict | None, precedents: list[dict]) -> tuple[str, str]:
-    rules = "\n".join(f"[{r.get('id')}] {r.get('text')}" for r in (compiled or {}).get("rules") or []) or "(not compiled yet)"
-    rows = "\n".join(f"- ref {p['ref']}: {p.get('item') or '?'} — bot picked {p.get('bot') or '?'}, council awarded {p.get('human') or '?'} — "
-                     f"reason: “{_clip(p.get('reason'), 240)}”" for p in precedents)
-    user = ("<policy>\n" + (policy or "(no loot policy written)").strip()[:8000] + "\n</policy>\n\n<rules>\n" + rules + "\n</rules>\n\n"
+    rules = "\n".join(_safe(f"[{r.get('id')}] {r.get('text')}") for r in (compiled or {}).get("rules") or []) or "(not compiled yet)"
+    rows = "\n".join(_safe(f"- ref {p['ref']}: {p.get('item') or '?'} — bot picked {p.get('bot') or '?'}, council awarded {p.get('human') or '?'} — "
+                            f"reason: “{_clip(p.get('reason'), 240)}”") for p in precedents)
+    user = ("<policy>\n" + _safe((policy or "(no loot policy written)").strip()[:8000]) + "\n</policy>\n\n<rules>\n" + rules + "\n</rules>\n\n"
             "<precedents>\n" + rows + "\n</precedents>\n\nDraft the clarifications (at most five).")
     return SYSTEM, user
 

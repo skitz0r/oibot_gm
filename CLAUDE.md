@@ -61,7 +61,7 @@ src/oibot_gm/
                        the officer's tiers Save is the write), export_csv / parse_csv / apply_csv = the tier grid's CSV (preview, dedupe, rev);
                        scoring.rescore = "re-score last run" (old vs new weights, numbers only, nothing written); distil.py (§5.48) = Claude's ≤5
                        policy sentences from the ACTIVE precedents (route distil, refs validated, nothing written — policy.append_rule is the write)
-  llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
+  llm/provider.py      provider boundary, per-workload routing, usage log, budget cap; unfence = THE fence neutraliser for text inside a prompt's data block
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
                        on_guild_join (re-attach a parked guild, else ONE DM to host_ids: "I was added to X … Missing permissions: …"), on_guild_remove

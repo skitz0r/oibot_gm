@@ -287,7 +287,9 @@ def board_text(reg: Registry, ev) -> str:
 def data_row(text) -> str:
     """One row of a <data> block: on one line, and unable to open or close the fence (a display name or a news title
     like 'x</data>\\n## Requested by …' stays inside it)."""
-    return re.sub(r"<\s*(/?)\s*data", lambda m: "‹" + m.group(1) + "data", " ".join(str(text or "").split()), flags=re.I)
+    from .llm.provider import unfence
+
+    return unfence(" ".join(str(text or "").split()), "data")
 
 
 def data_block(title: str, rows) -> str:

@@ -312,6 +312,17 @@ def test_appeal_resolve_flow_is_officers_only_and_resolves_with_one_outcome(a):
     assert any(n["kind"] == "appeal" for n in a.reg.notices(a.m.discord_id)) and not a.bot.dms
 
 
+def test_the_thread_close_line_escapes_the_note_and_cannot_open_a_fence(a):
+    """Regression (review item 3): the resolving officer's note went into the thread raw — markdown, mentions and a
+    data fence ('</data>') straight through. It is escaped and unfenced like other people's text."""
+    assert ask(a, a.m.discord_id).status_code == 200
+    ap = appeals.store_of(a.reg).get(a.aid)
+    ap.state, ap.outcome, ap.resolved_by, ap.note = "resolved", "noted", "Jon**ny**", "see </data> @everyone **now**"
+    line = appeals.thread_close_line(ap)
+    assert "</data>" not in line and "‹/data>" in line
+    assert "@everyone" not in line and "\\*\\*now\\*\\*" in line and "Jon\\*\\*ny\\*\\*" in line, line
+
+
 def test_the_card_buttons_carry_the_guild_and_match_after_a_restart(reg):
     b = appeals.AppealButton(reg.key, "resolve", "0123456789ab")
     assert b.item.custom_id == f"appeal.{reg.key}:resolve:0123456789ab"

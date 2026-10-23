@@ -209,6 +209,17 @@ def state_words(reg: Registry, ap: Appeal) -> str:
     return f"asked {reg.local12(ap.created_at)} — the officers have it"
 
 
+def thread_close_line(ap: Appeal) -> str:
+    """The thread's last line: who resolved it, the outcome and the officer's note — the note and the name are people's
+    text, so they are escaped (markdown, mentions) and can't open or close a fence (llm.provider.unfence, the same
+    neutraliser the prompts use), on one line."""
+    from .llm.provider import unfence
+
+    def safe(t) -> str:
+        return discord.utils.escape_mentions(discord.utils.escape_markdown(unfence(" ".join(str(t or "").split()), "data", "member-text")))
+    return f"✅ Resolved by {safe(ap.resolved_by) or 'an officer'}: {OUTCOME_LABELS.get(ap.outcome or '', ap.outcome)}" + (f" — {safe(ap.note)}" if ap.note else "")
+
+
 def thread_name(ap: Appeal) -> str:
     return f"loot · {ap.member_name} · {ap.item}"[:100]
 
@@ -428,7 +439,7 @@ async def update_card(bot, reg: Registry, ap: Appeal) -> None:
     th = bot.get_channel(ap.thread_id) if ap.thread_id else None
     if th is not None:
         try:
-            await th.send(f"✅ Resolved by {ap.resolved_by}: {OUTCOME_LABELS.get(ap.outcome or '', ap.outcome)}" + (f" — {ap.note}" if ap.note else ""),
+            await th.send(thread_close_line(ap),
                           allowed_mentions=discord.AllowedMentions.none())
             await th.edit(archived=True, locked=True)
         except Exception:  # noqa: BLE001

@@ -10,6 +10,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -17,6 +18,18 @@ from typing import Protocol, TypeVar
 from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
+
+def unfence(text, *tags: str) -> str:
+    """THE fence neutraliser (member text is data): text that goes inside a delimited block of a prompt — `<data>`,
+    `<member-text>`, distil's `<policy>` / `<rules>` / `<precedents>` — can neither open nor close any of `tags`:
+    '<data' and '</data' become '‹data' and '‹/data' (whitespace inside the tag too). configops.data_row, help's
+    member-text blocks and loot/distil all go through it."""
+    text = str(text or "")
+    if not tags:
+        return text
+    pat = "|".join(re.escape(t) for t in tags)
+    return re.sub(rf"<\s*(/?)\s*({pat})", lambda m: "‹" + m.group(1) + m.group(2), text, flags=re.I)
+
 
 # workload -> (model, effort). Overridable via OIBOT_MODEL_<WORKLOAD>.
 ROUTES: dict[str, tuple[str, str]] = {

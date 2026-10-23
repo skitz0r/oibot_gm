@@ -217,7 +217,9 @@ def _names(items, limit: int = MAX_LIST) -> str:
 
 def _safe(text) -> str:
     """Member text inside a block can't close or open one."""
-    return re.sub(r"</?\s*member-text", "‹member-text", str(text or ""), flags=re.I).replace("\n", " ").strip()
+    from .llm.provider import unfence
+
+    return unfence(text, "member-text").replace("\n", " ").strip()
 
 
 def _block(source: str, lines: list[str]) -> list[str]:
