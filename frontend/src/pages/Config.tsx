@@ -12,6 +12,7 @@ import { useDirty } from "../hooks/useDirty";
 import { Recruitment } from "../components/Recruitment";
 import { ChannelsCard } from "../components/ChannelsCard";
 import { SetupCard } from "../components/SetupCard";
+import { LootWeightsCard } from "../components/LootWeightsCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -105,6 +106,8 @@ export function ConfigPage({ meta }: { meta: Meta }) {
                 <Text size="xs" c="dimmed" mt="xs">The channel is picked under Channels (Loot log). Every line carries an "Add to my wishlist" button; members see the whole log on the site (logged in) and their own loot on the Me page.</Text>
               </Box>
             </Card>
+
+            <LootWeightsCard />
 
             <Recruitment channels={data.guild_channels} />
 

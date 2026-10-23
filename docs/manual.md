@@ -103,8 +103,8 @@ your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the 
 inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make it, a seat or swap question, a pre-lock
 "could you come?" — as a card with its two buttons and its deadline, then your **Notices** (what happened that you
 should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
-Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**; every officer edits the **Desired comp** table; each schedule has **Pause / Resume** beside Edit), **Readiness** (per raid: the pool against its size, roles with who could cover, buffs nobody brings, the desired comp against what the pool has, the officers' targets with **Edit targets**, and the regulars' coverage with the next four weeks — §6), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings**, **Channels** and **Recruitment and more**; owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire;
-Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
+Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**; every officer edits the **Desired comp** table; each schedule has **Pause / Resume** beside Edit), **Readiness** (per raid: the pool against its size, roles with who could cover, buffs nobody brings, the desired comp against what the pool has, the officers' targets with **Edit targets**, and the regulars' coverage with the next four weeks — §6), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings**, **Channels** and **Recruitment and more** (with the **Loot scoring** weights, §9); owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire and Distil;
+Items — the untiered list, the tier grid and the loot history import; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
 bot's recent actions and the plain-text permissions; a badge counts errors folded into an earlier alert), **Applications**
 (the open applications oldest first with every answer in full, the earlier verdicts, Accept / Decline with the same
 sentences as the Discord card and an optional note, the last 20 decided — who decided, the note, what happened to the
@@ -1389,6 +1389,9 @@ news post says can make the review read or write another server.
 | `list_items` · `tier_item` | the untiered items and one item's tier grid · set tiers per spec (actor); with past awards and no `reweight` answer nothing is written and the reply asks |
 | `draft_tiers` · `export_tiers` | Claude's suggested tiers for one item — a proposal, nothing saved (confirm it with `tier_item`) · the whole tier grid as CSV text |
 | `get_wishlists` · `set_wishlist` · `import_wishlists` | who wants each item / one member's lists with their `rev` · replace a character's whole list (actor; a list changed since `rev` is refused) · a ThatsMyBIS export (preview first; writing needs the actor) |
+| `import_ledger` | a loot history file (`csv` text or a local `path`; `kind` auto / biscouncil / tmb / generic) into the ledger: preview first ('N rows, M duplicates, K unknown items', the groups, a `rev`), then `preview=false` with that `rev` (needs the actor); only ever adds rows |
+| `loot_weights` · `set_loot_weights` | the scoring weights with the game's default beside each · change some (`fields` = {path: number or null for the default}; the owner's; `preview=True` first — weights are reviewed) |
+| `distil` | Claude's draft of up to five loot-policy sentences from the active precedents, each with the precedents it rests on — nothing written; add the ones the person wants with `policy_append` |
 | `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
 | `schedule_set` · `schedule_remove` | a raid schedule's settings, one or several as `fields` in one write (creates it with its kind, slots or lockout days) · drop a schedule (schedules come back in `list_raids` / `get_raid`) |
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
@@ -1642,6 +1645,17 @@ reason was replaced is retired by its newer reason (the one the bot cites). *Nee
 game against the bot's pick that still have none; retiring a reason never puts its award back on that list. Retiring
 here, with `/gm precedents`, in plain text or over MCP is the same action.
 
+**Distil…** (on Precedents) asks Claude to read the active precedents beside the compiled loot policy and draft **up
+to five sentences** the policy could add so the next council decides the same way without an override — each shown
+with the precedents it rests on, marked *"drafted from N precedent(s) by Claude, unverified"*. A sentence that rests
+on no precedent it was shown, or that the policy already says, is left out and listed; retired precedents are never
+read. Tick the ones worth keeping (reword them if you like) and **Review**: one review screen lists exactly those lines,
+and **Apply** adds them to the loot policy as a draft — the same "add a rule" every surface uses — which the officers
+then compile and confirm on the Policy page before the bot reads it. Nothing is written until you apply; a sentence
+changed after the review is refused and shown again. It is refused while another officer's policy draft waits (it
+names them). With no active precedents, or when the bot can't reach Claude, it says so. MCP `distil` returns the same
+draft; add a sentence with `policy_append`.
+
 **Items and tiers** (Loot › Items): the **untiered** items — learned from drops by name, or on the tables without tiers — with when
 each was first seen, how often it dropped and how many awards it has. A row opens the **tier grid**: one tier per spec
 (S+, S, A, B, or – for none), the guild's over the game profile's; specs that can't equip the item are greyed. Saving
@@ -1668,9 +1682,40 @@ already has awards. MCP `export_tiers` returns the file. An item or boss name th
 is written with a leading `'` so a spreadsheet shows it as text instead of running it as a formula; the import reads it
 back as the same item.
 
+**Import loot history…** (on Items) brings in the awards your guild recorded before the bot, from a file — pick it or
+paste it: a **BisCouncil** loot summary (its detailed table; each row keeps the tier and weight BisCouncil gave it), a
+**ThatsMyBIS** export (its *received* rows; wishlist and prio rows are skipped), or a **generic CSV** any spreadsheet can
+make, one award per row:
+
+    character,item,received,boss,ms_os,note
+
+`character`, `item` (an item id, or the item's name) and `received` (the day: `2026-12-09`) are required; `boss`,
+`ms_os` (`ms` or `os`) and `note` may be left empty. *Tell from the file* recognises the three by their headers.
+**Preview** says *"N rows, M duplicates, K unknown items (recorded by name)"* and shows three groups: the **new** rows
+(with the weight each will carry), the **duplicates** (the ledger already holds that character, item and day — or an
+earlier line of the same file does) and the **unknown items** (not on the tables: recorded by name and scored the same
+for everyone until you tier them here). A line that can't be read (no character, no item, no date) is listed with its
+line number and skipped. **Confirm** adds exactly the new rows — an import only ever adds: it never changes or removes a
+row already in the ledger — and the council reads them at its next judgement (recent loot, "already has it"). If the
+ledger changed since your preview the import is refused and the fresh preview shown. A character nobody registered is
+recorded by name. Gargul and RCLootCouncil exports aren't read yet (which addon the council will run is still open):
+export them to the generic columns. Officers; over MCP `import_ledger` (preview, then apply with its `rev` — the apply
+needs the actor, §8b).
+
+**Loot scoring** (Config › Recruitment and more; the owner edits, officers read) lists every number behind a
+candidate's score — tier weights, the untiered weight, attendance, rank factors, recent loot (window, strength, curve,
+free allowance), wishlist bonuses and the offspec multiplier, the same-slot discount and the slot weights — each with
+the game's **default** beside it. **Edit**, change any number (or **reset** it to the default), **Save**: the change is
+always reviewed first (each weight, current → new) and saved in one go. Weights change scores from the next judgement
+on; **no award already recorded changes** — who got what, and what it weighed, stay as they were. **Re-score last run**
+shows what the newest council's drops would have scored, with the weights as they are and as drafted (top three per
+drop, and which top picks would change) — the numbers alone, no Claude, nothing saved. Plain text: "make S items worth
+0.8" (the owner); MCP `loot_weights` / `set_loot_weights`.
+
 **Wishlists**: who wants each item most, and every member's lists; **Import from ThatsMyBIS** takes a TMB wishlist
-export (preview first; per character in TMB's order; an item already on someone's list stays as it is; a re-import
-replaces only the earlier TMB rows; nothing made on the site is ever deleted).
+export (paste it, **Preview**: per character what is added from TMB, what is kept from the site and what isn't added —
+already on the list, or past 10 — then **Confirm**; per character in TMB's order; a re-import replaces only the earlier
+TMB rows; nothing made on the site is ever deleted).
 
 ### Members: your loot and your wishlist
 
@@ -1681,10 +1726,11 @@ bot about your loot ("what did I get this month?") answers from your own awards 
 character, up to 10 items, in the order you want them, each main spec or offspec with an optional note: build it on
 **Me › Wishlist** (Edit, add items by name — an item the tables don't know yet is kept by name — reorder, one
 **Save**; if the list changed meanwhile, in another tab or in Discord, the save is refused with the current list and
-your edits kept), with `/me wishlist` in Discord (pick the character, then an item from the list or *Search by name…*,
-then its place and MS/OS, Confirm), with **Add to my wishlist** under a line of the public loot log, or by telling the
+your edits kept), with `/me wishlist` in Discord (its first line links the Me page for long lists; pick the character,
+then an item from the list or *Search by name…*, then its place — the next free one unless you pick another — and MS/OS,
+Confirm; **Remove one…** takes an item off), with **Add to my wishlist** under a line of the public loot log, or by telling the
 bot ("put the Robe of Tests on my wishlist as #2 for offspec"). An item you received stays on the list, greyed
-(*received 9 Dec*), until you remove it. The council's scoring reads these lists.
+(*received 9 Dec* — in `/me wishlist` too, in small text), until you remove it. The council's scoring reads these lists.
 
 ### The public loot log
 
@@ -1711,7 +1757,8 @@ council, ticks, distributes, discards and ends; **decisions about an award** —
 `loot_reason`, `loot_correct`, `retire_precedent`, `tier_item`, setting someone's wishlist — are made by a named
 officer: `OIBOT_MCP_ACTOR` in `.env` (that officer's Discord id) rides with them, the bot checks the id is an officer of
 that server, and the record and the ops line read *"Jon via MCP"*. Without it those tools are refused and say so; only
-the true previews (`loot_confirm` and `import_wishlists` with `preview`) need no actor (§8b).
+the true previews (`loot_confirm`, `import_wishlists` and `import_ledger` with `preview`) need no actor (§8b). The
+owner's own setup — the loot scoring weights (`set_loot_weights`) — needs none; `distil` drafts and decides nothing.
 
 Every award, override, reason, correction, retired precedent, tier change and wishlist change is an ops line with the
 officer's (or member's) name — a companion's own records read *"[companion] companion:<character>"*; members never see
@@ -1832,8 +1879,10 @@ Servers: there is no per-server spending cap — the monthly budget is shared by
 removing a server (when the bot leaves it) or renaming a guild's key is a manual job in the data repo.
 
 Loot: a ThatsMyBIS import has no Discord path (the Loot › Wishlists page and MCP `import_wishlists`); the item tier
-grid, its CSV import and Claude's tier drafts are on the site only (MCP: `draft_tiers`, `export_tiers`); importing a
-loot history from another addon (Gargul, RCLC, BisCouncil) is not built yet; a Claude draft is forgotten on a restart;
+grid, its CSV import and Claude's tier drafts are on the site only (MCP: `draft_tiers`, `export_tiers`); a loot history
+import reads BisCouncil, ThatsMyBIS and the generic CSV only — **Gargul and RCLootCouncil exports aren't read** (which
+addon the council runs is still undecided), and the import, the loot scoring card and the precedents' Distil have no
+Discord screens (the site and MCP; the weights also in plain text); a Claude draft is forgotten on a restart;
 the member's "ask the council about an item" thread
 doesn't exist yet; a companion bound to a council with **Bind companion…** is forgotten on a restart (the card offers it
 again). Splits: the **Loot-quality** split philosophy is a greyed placeholder, not built yet (Balanced, Raid one first

@@ -1295,6 +1295,65 @@ def import_wishlists(csv: str, preview: bool = True, guild: Guild = None) -> dic
     return {"message": data.get("message"), "report": data.get("report")}
 
 
+# ---------------------------------------------------------------- the data on-ramp (phase 4, design §5.48)
+
+@mcp.tool()
+def import_ledger(csv: str | None = None, path: str | None = None, kind: str = "auto", preview: bool = True, rev: str | None = None,
+                  guild: Guild = None) -> dict:
+    """Import a loot history file into the ledger (Loot › Items › Import): `csv` = the file's text, or `path` = a CSV
+    file on this machine. `kind` = auto | biscouncil (the BisCouncil loot summary) | tmb (a ThatsMyBIS export: its
+    received rows) | generic (columns character,item,received,boss,ms_os,note — item = an id or a name, received =
+    YYYY-MM-DD). Gargul and RCLootCouncil exports aren't read yet (which addon the council runs is still open): export to
+    the generic columns. `preview=true` (default) writes nothing: it answers 'N rows, M duplicates, K unknown items
+    (recorded by name)', the groups and a `rev` — show the person, then call again with preview=false and that rev
+    (needs OIBOT_MCP_ACTOR: the rows are awards in people's names). An import only appends new rows; it never edits or
+    deletes one, and a row the ledger already holds (same character, item and day) is a duplicate."""
+    if bool(csv) == bool(path):
+        raise ToolError("give the file's text as csv, or a path to the file — one of the two")
+    if path:
+        p = Path(path).expanduser()
+        if not p.is_file():
+            raise ToolError(f"no file at {p}")
+        csv = p.read_text(encoding="utf-8", errors="replace")
+    if not preview and not rev:
+        raise ToolError("preview first (preview=true), show the person the groups, then apply with the rev that preview returned")
+    data = api(guild).post("/api/loot/import", _loot_body(csv=csv, kind=kind, preview=bool(preview), rev=rev), actor=not preview)
+    if preview:
+        pv = data.get("preview") or {}
+        return {"message": data.get("message"), "rev": pv.get("rev"), "new": pv.get("new"), "duplicates": pv.get("duplicates"),
+                "unknown_items": pv.get("unknown_items"), "unknown_characters": pv.get("unknown_characters"), "errors": pv.get("errors"),
+                "groups": pv.get("groups"), "kind": pv.get("kind_words")}
+    return {"message": data.get("message"), "added": (data.get("report") or {}).get("new")}
+
+
+@mcp.tool()
+def loot_weights(guild: Guild = None) -> dict:
+    """The loot scoring weights (Config › Loot scoring): every weight's path, its value now, the game profile's default
+    beside it and whether the guild set it — read this before set_loot_weights."""
+    return api(guild).get("/api/loot/weights")
+
+
+@mcp.tool()
+def set_loot_weights(fields: dict[str, Any], preview: bool = False, guild: Guild = None) -> str | dict:
+    """Change loot scoring weights (the OWNER's; Config › Loot scoring): fields = {path: number | null}, a path as
+    loot_weights lists it (tier_weight.S, attendance.weight, wishlist.rank_bonus.1, slot_weight.two_hand …); null puts the
+    game's default back. One validated write. Scores change from the next judgement on — no ledger row ever changes.
+    `preview=True` shows each weight current → new, nothing saved — weights are reviewed: read it to the person first."""
+    if not fields:
+        raise ToolError("fields = {weight path: number | null} — loot_weights lists the paths")
+    return ops_change(guild, [{"kind": "loot_weights", "fields": dict(fields)}], preview)
+
+
+@mcp.tool()
+def distil(guild: Guild = None) -> dict:
+    """Ask Claude to DRAFT up to five clarification sentences for the loot policy from the guild's active precedents (the
+    council's overrides with their reasons), each with the precedents it rests on (Loot › Precedents › Distil). Nothing
+    is written and it is unverified: show the person the sentences; for each one they want, call policy_append(doc="loot",
+    text=<exactly that sentence>) — then policy_compile and policy_confirm make it live."""
+    data = api(guild).post("/api/loot/distil", {})
+    return data.get("draft") or data
+
+
 # ---------------------------------------------------------------- policy documents (loot, comp, persona)
 
 @mcp.tool()

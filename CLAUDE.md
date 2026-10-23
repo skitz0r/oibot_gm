@@ -48,7 +48,9 @@ src/oibot_gm/
   presets.py           shared presets: raid cadence PRESETS (standard/short/same_week), test-run TEMPOS, absence DURATIONS (the wizard's For how long
                        and /api/meta.durations); used by the wizards, plain text and the web
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
-  importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping)
+  importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping); ledger_csv.py (design §5.48) = loot history files
+                       → ImportRow: biscouncil (reuses biscouncil.row_award) · tmb (received rows) · generic `character,item,received,boss,ms_os,note`
+                       (+ detect); Gargul / RCLC NOT read (D13 open) — Registry.import_awards does the dedupe and the append
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
@@ -56,7 +58,9 @@ src/oibot_gm/
                        run_distribution on a snapshot + merge, make_award/sync_ledger, load_sessions/migrate_sessions, LOOT_LISTENERS; undistributed() =
                        killed bosses first; raid_bosses / boss_progress / run_boss_progress = "Bosses 3 / 6" from the session files) — design §5.35;
                        tierdraft.py (design §5.47): draft = Claude's tier PROPOSAL for one item (route tier_draft, validated, nothing written —
-                       the officer's tiers Save is the write), export_csv / parse_csv / apply_csv = the tier grid's CSV (preview, dedupe, rev)
+                       the officer's tiers Save is the write), export_csv / parse_csv / apply_csv = the tier grid's CSV (preview, dedupe, rev);
+                       scoring.rescore = "re-score last run" (old vs new weights, numbers only, nothing written); distil.py (§5.48) = Claude's ≤5
+                       policy sentences from the ACTIVE precedents (route distil, refs validated, nothing written — policy.append_rule is the write)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
@@ -87,7 +91,9 @@ src/oibot_gm/
   lootctx.py           RegistryLootContext (one per guild, reload(); void / reweight rows and superseding / status precedents folded; wishlists derived
                        live from Registry.wishlists; set_precedent_status = Retire/Restore; reweight (D12)); LEDGER_LISTENERS on every new award row
   loot_ops.py          the `loot` / `wishlist` / `tier` plain-text ops (configops' loot branch → LootMixin verbs / Registry wishlist + tier verbs),
-                       SCHEMA (into SCHEMA_TEXT), needs_actor (D8), loot_revs (batch_rev on a confirm-all diff), loot_log_state, member_awards, loot_block
+                       SCHEMA (into SCHEMA_TEXT), needs_actor (D8), loot_revs (batch_rev on a confirm-all diff), loot_log_state, member_awards, loot_block;
+                       phase 4 (§5.48): the `loot_weights` op's words (weight_rows / weight_part / WEIGHT_GROUPS) + apply_weights, received_map
+                       (the Me page's and /me wishlist's "received" marks), last_council (what re-score reads)
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
                        schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule/remove_schedule = one set_raid_overrides write, _check_schedules);
                        Recruitment on GuildConfig.recruitment (open, note, questions ≤15; invite_url; member_role_ids) + must_apply (a newcomer
@@ -96,7 +102,7 @@ src/oibot_gm/
                        Owner rights = Registry.is_owner_id(uid): the guild's owner OR a host superuser (OIBOT_SUPERUSERS, every guild) — never compare
                        owner_discord_id directly; a server claim defaults the owner to the Discord server's owner.
                        Dual interfaces phase 0 (design §5.33): `config_lock` (RLock) held by save_config and every config verb (`_config_verb`);
-                       `config_rev(section)` for settings | raids:<id> | buffs | recruitment | plain (computed, excludes rosters[] / *_message_id),
+                       `config_rev(section)` for settings | raids:<id> | buffs | recruitment | plain | loot (computed, excludes rosters[] / *_message_id),
                        `characters_rev(member)`, verbs take `rev=` and raise `ConfigChanged`; `preview(fn)` runs on shadow(); `member(uid, name)`
                        never renames — `rename(uid, name, by)` is the explicit step.
                        People (design §5.41): save_character_table(officer=, by_id=, rev=) validates the whole table on a copy (check_character_table)
@@ -119,6 +125,10 @@ src/oibot_gm/
                        detached_at (set_detached; Guilds parks it); Member.left_at (member_left) + remove_record (officers only, someone who left, no
                        live seat — D29: no self-service delete); applications: decide adds the character FIRST, caps the note (DECISION_NOTE_MAX),
                        decided_refusal ("Already declined by X"), Applicant.history → prior_decision_line, role_note (D31), application_state (own first)
+                       Loot data on-ramp (§5.48): import_awards(rows, by, by_id, preview=, kind=, rev=) = THE history import (dedupe on (character,
+                       item id|name, day) for imports only; appends source=import rows, never edits); loot_cfg merges `loot:` at every depth;
+                       loot_weight_defaults / loot_weights / loot_overridden / loot_weight_check; set_loot_weights(fields, by, rev=) = one write of the
+                       new `loot` config section; import_tmb_wishlists reports per_character
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
@@ -266,7 +276,8 @@ src/oibot_gm/
                        headers, so the token never works through the tunnel). Never a second code path: every write is the site's route. `.mcp.json` (repo root, no secrets)
                        registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py.
                        Loot tools (§5.36): reads / tick / distribute / discard / end as the token; DECISIONS (loot_confirm/award/reason/correct,
-                       retire_precedent, tier_item, set_wishlist, import_wishlists) send X-Oibot-Actor = OIBOT_MCP_ACTOR (D8; app.py mcp_actor validates it).
+                       retire_precedent, tier_item, set_wishlist, import_wishlists, import_ledger's apply) send X-Oibot-Actor = OIBOT_MCP_ACTOR (D8; app.py
+                       mcp_actor validates it); §5.48: import_ledger (csv | path, preview → rev), loot_weights / set_loot_weights (owner, ops_change), distil.
                        Setup tools (raid_set, schedule_*, raid_reset, aura_*, family_set, set_channel, set_config, set_recruitment, set_plain_permissions) send
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines);
                        set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
@@ -342,7 +353,9 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        (+ tiers with the D12 re-weight ask), wishlists (+ TMB import), /api/me/loot, /api/me/wishlist, /api/members/wishlist, /api/loot/log
                        (members logged in; officers' `scores` filtered server-side, D2). D8: decisions from MCP need X-Oibot-Actor (app.py mcp_actor).
                        Phase 3 (§5.47): /api/loot/items/{key}/draft (DRAFTS in memory), /api/loot/items/export|import (CSV), /api/loot/companions,
-                       /api/me/attendance, /api/members/attendance; councils carry bosses_progress
+                       /api/me/attendance, /api/members/attendance; councils carry bosses_progress. Phase 4 (§5.48): POST /api/loot/import (preview →
+                       rev → apply; MCP apply needs the actor), GET/POST /api/loot/weights (POST = a translator through app.state.ops_translate),
+                       POST /api/loot/rescore, POST /api/loot/distil + /api/loot/distil/append (the review's token = exactly the confirmed sentences)
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
                        sets the selection; SSE is per guild (`publish(topic, guild)`; None = every page); Discord-side site URLs carry `?g=<key>`.
@@ -356,7 +369,7 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        components/ChannelsCard.tsx + SetupCard.tsx (Config: channels edit mode via useOpsSave; Setup / Host cards), LeftServer.tsx (Members: Remove record),
                        MyApplication.tsx (Me: own application), setupApi.ts (their shapes), hooks/useDirty.ts (EVERY edit mode registers — linted — so the server selector asks
                        "Save or discard your edits first");
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Companions) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more; Mantine, left rail,
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents (+ Distil.tsx) · Items (+ Claude draft, CSV import/export, LedgerImport.tsx = the loot history import) · Wishlists (TMB import previewed per character) · Companions) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more (+ LootWeightsCard.tsx = Loot scoring, §5.48); Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            raid thumbnails and generated class / role / buff badges (the emoji fallback; no roster or analytics images any more);  report_html.py → out/coverage.html

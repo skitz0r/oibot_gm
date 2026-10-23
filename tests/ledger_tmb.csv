@@ -1,0 +1,7 @@
+type,raid_group_name,member_name,character_name,character_class,character_is_alt,sort_order,item_name,item_id,is_offspec,note,received_at,item_note
+received,Main,someone,{A},Warrior,0,,Robe of Tests,90001,0,,2026-12-09 20:15:00,
+received,Main,other,{B},Priest,0,,Helm of Order,0,1,offspec helm,2026-12-02 21:00:00,
+wishlist,Main,someone,{A},Warrior,0,1,Gloves of the Council,0,0,BiS hands,,
+prio,Main,someone,{A},Warrior,0,1,Prio Thing,0,0,,,
+received,Main,ghost,Nobodyhere,Mage,0,,Thing,0,0,,2026-11-25 20:00:00,
+received,Main,someone,{A},Warrior,0,,,,0,,2026-12-09 20:15:00,

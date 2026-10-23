@@ -337,7 +337,7 @@ export interface ItemGrid extends ItemBrief {
 /** A typed draft: `kind` names what it edits, `target` which one, `fields` typed values (never the plain-text grammar).
  *  kinds: settings · raid · raid_reset · schedule (target "<raid>:<schedule>") · schedule_remove · buff · family (target null + name = new) ·
  *  aura_reset (target null = everything) · recruitment · plain. The server builds the ops (configops.ops_from_fields). */
-export interface OpsChange { kind: "settings" | "raid" | "raid_reset" | "schedule" | "schedule_remove" | "buff" | "family" | "aura_reset" | "recruitment" | "plain" | "comp"; target?: string | null; fields?: Record<string, unknown> }
+export interface OpsChange { kind: "settings" | "raid" | "raid_reset" | "schedule" | "schedule_remove" | "buff" | "family" | "aura_reset" | "recruitment" | "plain" | "comp" | "loot_weights"; target?: string | null; fields?: Record<string, unknown> }
 /** One setting of a write, current → new, in words (mentions already rendered as #channel / @Role). `before` null = a new thing. */
 export interface DescribedPart { label: string; before: string | null; after: string | null }
 /** One WRITE (a buff, a family, a raid, a schedule, the guild settings): its parts, the refusal its apply would give, warn, consequences. */

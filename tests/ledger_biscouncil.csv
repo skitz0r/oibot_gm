@@ -1,0 +1,8 @@
+Playername,loadout_power,prio_power,projected_loadout_power,avg_loadout_power,avg_projected_loadout_power,total_b,total_a,total_s,total_s_plus,total_l,total_all,class_id,role_id,loadout_power_parse,prio_power_parse,projected_loadout_parse,spec_id
+{A},1.50,0.00,1.50,1.50,1.50,0,0,2,0,0,2,1,1,50,0,50,1
+#DETAILED_LOOT_START
+raider_name,role_id,class_id,spec_id,item_id,item_tier,tier_weight,slot_weight,total_weight,offspec_flag,date_received,order_received,instance_name,boss_name
+{A},1,2,6,30916,S,0.75,1.00,0.75,0,2026-08-27,1,Hyjal Summit,Kaz'rogal
+{A},1,2,6,31090,S+,1.00,1.00,1.00,1,2026-09-01,3,Black Temple,Armor Tokens
+{B},1,2,6,31093,A,0.20,1.00,0.20,0,2026-09-02,2,Hyjal Summit,Armor Tokens
+{B},1,2,6,bad,A,0.20,1.00,0.20,0,2026-09-02,2,Hyjal Summit,Armor Tokens

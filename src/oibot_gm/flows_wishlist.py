@@ -2,9 +2,11 @@
 page is the list builder. Character (skipped with one) → the list as it stands → one item select over the guild's
 items by name (learned drops first, then the tables; past 24 a *Search by name…* box — an item name is prose, matched
 against the items, and one the tables don't know yet can be kept by name) → one form: place on the list (a preset
-select) and main/offspec, an optional note → Confirm. Nothing is written before Confirm; the write is
-Registry.wish_add / wish_remove (the plain-text `wishlist` op's verbs). The public loot log's *Add to my wishlist*
-button opens this wizard on its item."""
+select, defaulting to the next free place) and main/offspec, an optional note → Confirm. Nothing is written before
+Confirm; the write is Registry.wish_add / wish_remove (the plain-text `wishlist` op's verbs). The public loot log's *Add
+to my wishlist* button opens this wizard on its item. Phase 4 polish (design §5.48): the first line points at the Me page
+for long lists; an item the character already received shows greyed (small text, "received <day>") — never removed by
+the bot (loot_ops.received_map, the Me page's marks); Remove one… takes it off."""
 from __future__ import annotations
 
 import asyncio
@@ -25,9 +27,10 @@ def me_page(reg: Registry) -> str:
 
 
 class WishlistWizard(Wizard):
-    def __init__(self, reg: Registry, owner_id: int, display_name: str):
+    def __init__(self, reg: Registry, owner_id: int, display_name: str, client=None):
         super().__init__(reg, owner_id, title="My wishlist")
         self.display_name = display_name
+        self.client = client  # the bot: its cached loot context says what was received
         self.draft = {"character": None, "item": None, "name": None, "rank": None, "offspec": False, "note": "", "q": ""}
 
     # ---- who and what
@@ -64,17 +67,42 @@ class WishlistWizard(Wizard):
         self.draft["character"] = values[0]
         await (self.details_prompt(interaction) if self.draft["name"] else self.home(interaction))
 
+    def received(self) -> dict:
+        """(character label lower, item key) → the day it was received (the ledger; the Me page greys the same)."""
+        from .loot_ops import guild_ctx, received_map
+
+        try:
+            return received_map(self.reg, guild_ctx(self.client, self.reg), self.member())
+        except Exception:  # noqa: BLE001 — a mark is a courtesy; the list shows without it
+            return {}
+
     def list_text(self) -> str:
+        """One line per entry; a received one in small text with its day (greyed, as on the Me page) — still on the list
+        until the member removes it."""
+        from datetime import datetime, time
+
         c = self.char()
         if c is None or not c.wishlist:
             return "_empty so far_"
-        return "\n".join(f"{e.rank}. {e.name} · {'OS' if e.offspec else 'MS'}" + (f" — {e.note}" if e.note else "") for e in c.wishlist)
+        got = self.received()
+        out = []
+        for e in c.wishlist:
+            line = f"{e.rank}. {e.name} · {'OS' if e.offspec else 'MS'}" + (f" — {e.note}" if e.note else "")
+            when = got.get((c.label.lower(), e.key)) or got.get((c.label.lower(), "n:" + e.name.lower()))
+            if when:
+                try:
+                    stamp = int(datetime.combine(datetime.fromisoformat(when).date(), time(12), tzinfo=self.reg.tz).timestamp())
+                    line = f"-# {line} · received <t:{stamp}:d>"
+                except ValueError:
+                    line = f"-# {line} · received"
+            out.append(line)
+        return "\n".join(out)
 
     async def home(self, interaction: discord.Interaction, note: str | None = None) -> None:
         c = self.char()
         n = len(c.wishlist) if c else 0
-        head = (note + "\n\n" if note else "") + f"**{self.draft['character']}** · {n}/{WISHLIST_MAX}\n{self.list_text()}\n\n"
-        head += f"-# Long lists and re-ordering: {me_page(self.reg)} (Me › Wishlist)."
+        head = f"-# Long lists and re-ordering: {me_page(self.reg)} (Me › Wishlist).\n"
+        head += (note + "\n\n" if note else "") + f"**{self.draft['character']}** · {n}/{WISHLIST_MAX}\n{self.list_text()}\n"
         items = []
         if n < WISHLIST_MAX:
             items.append(self.select("Add an item…", self.item_opts(), self.item_picked))
@@ -247,7 +275,7 @@ class WishlistWizard(Wizard):
 @flow("me_wishlist")
 async def open_wishlist(interaction: discord.Interaction, reg: Registry, *, item: str | None = None) -> None:
     """Your own wishlist (`item`: an item key to add — the loot log's *Add to my wishlist*)."""
-    await WishlistWizard(reg, interaction.user.id, interaction.user.display_name).start(interaction, item=item)
+    await WishlistWizard(reg, interaction.user.id, interaction.user.display_name, client=getattr(interaction, "client", None)).start(interaction, item=item)
 
 
 __all__ = ["WishlistWizard", "open_wishlist"]
