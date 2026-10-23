@@ -500,6 +500,22 @@ def test_companion_tokens_are_on_every_surface(slash_paths, web_routes):  # noqa
     assert "companion_tokens" not in configops.BY_DESIGN_ONLY, "the issued tokens are no longer a web-only card"
 
 
+def test_the_companion_command_fits_discords_limits(reg):
+    """Discord refuses a description over 100 characters at sync (check_commands caught a 101-character one)."""
+    from discord import app_commands
+
+    from oibot_gm.discord_registry import Guilds, register_commands
+    from oibot_gm.ops import Ops
+
+    client = discord.Client(intents=discord.Intents.none())
+    tree = app_commands.CommandTree(client)
+    register_commands(tree, Guilds.of(reg.store, reg), Ops(client), lambda k, v: "")
+    gm = next(c for c in tree.get_commands() if c.name == "gm")
+    config = next(c for c in gm.commands if c.name == "config")
+    cmd = next(c for c in config.commands if c.name == "companion")
+    assert len(cmd.description) <= 100 and not cmd.parameters, "no typed argument: the hub picks everything"
+
+
 # ---------------------------------------------------------------- the companion: --token / --token-file / env; a refused token ends it
 
 def _companion():

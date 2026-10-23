@@ -1228,7 +1228,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["officers"](interaction, reg)
 
-    @config.command(name="companion", description="Owner: loot companion tokens — issue one (DMed to the raid leader once), revoke, see who is connected")
+    @config.command(name="companion", description="Owner: loot companion tokens — issue one (DMed once to the raid leader), revoke, presence")
     async def cfg_companion(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if reg:
