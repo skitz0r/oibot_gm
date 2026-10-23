@@ -798,6 +798,51 @@ async def refresh_registration_card(client, reg: Registry) -> bool:
         return False
 
 
+DISCORD_MAX_CHILDREN = 25  # Discord: subcommands (and subcommand groups) per command group — /gm config is close to it
+
+
+def group_sizes(tree: app_commands.CommandTree) -> dict[str, int]:
+    """Every command group of the tree by its path ('gm config') → how many subcommands it holds."""
+    out: dict[str, int] = {}
+
+    def walk(c, path: str = "") -> None:
+        name = f"{path} {c.name}".strip()
+        if isinstance(c, app_commands.Group):
+            out[name] = len(c.commands)
+            for sub in c.commands:
+                walk(sub, name)
+    for c in tree.get_commands():
+        walk(c)
+    return out
+
+
+def too_many_subcommands(path: str, n: int) -> str:
+    """The warning, in words, for the next builder who adds one subcommand too many."""
+    return (f"/{path} would have {n} subcommands — Discord allows {DISCORD_MAX_CHILDREN} per group. Fold the new one into an "
+            "existing hub (one subcommand that opens a wizard, like /gm config companion or /gm config recruitment) or "
+            "another group; never a 26th.")
+
+
+def tree_build_error(e: BaseException) -> str | None:
+    """discord.py's bare "maximum number of child commands exceeded" (raised while the commands are being registered)
+    → too_many_subcommands for the group it happened in (found in the traceback; the group already holds the 26th);
+    None for any other error."""
+    if not (isinstance(e, ValueError) and "maximum number of child commands" in str(e)):
+        return None
+    group, tb = None, e.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_name == "add_command":
+            group = tb.tb_frame.f_locals.get("self")
+        tb = tb.tb_next
+    path = getattr(group, "qualified_name", None) or "a command group"
+    return too_many_subcommands(path, len(getattr(group, "commands", None) or []) or DISCORD_MAX_CHILDREN + 1)
+
+
+def tree_limit_problems(tree: app_commands.CommandTree) -> list[str]:
+    """What Discord would refuse about the groups' sizes (the offline check in scripts/check_commands.py)."""
+    return [too_many_subcommands(p, n) for p, n in group_sizes(tree).items() if n > DISCORD_MAX_CHILDREN]
+
+
 def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_mod.Ops, ico) -> None:
     async def need(interaction: discord.Interaction) -> tuple[Registry | None, discord.Interaction]:
         """guild_routing.need over this tree's Guilds: (guild, interaction) — rebind both at every call site."""

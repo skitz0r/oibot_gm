@@ -1,4 +1,4 @@
-"""Loot history imports (design §3.1 "Data on-ramp" L07, dual interfaces phase 4): a CSV someone exported from another
+"""Loot history imports (design §3.1 "Data on-ramp" L07, dual interfaces phase 4 — design §5.48): a CSV someone exported from another
 tool → rows Registry.import_awards appends to the guild's ledger (deduped, never editing a row). Three formats:
 
 - **biscouncil** — the BisCouncil "Loot Summary" export (importers/biscouncil.py reads its `#DETAILED_LOOT_START`

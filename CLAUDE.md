@@ -50,7 +50,9 @@ src/oibot_gm/
   profiles.py          loader; Buff.benefit(spec); Item.tier_for; equippable() guard
   importers/           biscouncil.py, wcl.py, signup.py (Raid-Helper → Player, registry mapping); ledger_csv.py (design §5.48) = loot history files
                        → ImportRow: biscouncil (reuses biscouncil.row_award) · tmb (received rows) · generic `character,item,received,boss,ms_os,note`
-                       (+ detect); Gargul / RCLC NOT read (D13 open) — Registry.import_awards does the dedupe and the append
+                       (+ detect; stamp keeps a time WITH its zone as received_at); Gargul / RCLC NOT read (D13 open) — Registry.import_awards does the
+                       dedupe (_import_plan on a ledger snapshot outside config_lock: guild day, ±1 day for a zone-less day, one for one) and the
+                       append; an apply is refused while a council of the guild is live (live_council_refusal)
   roster/              solver.py (CP-SAT select+group, pins/forces, role min/max, per-player bonus), explain.py (advisories), coverage.py (slot-aware)
   loot/                scoring.py (candidates + base score; untiered items; candidates(reg=) reads loot_cfg / items / attendance_lookup(reg) —
                        Registry.attendance_known, unknown → neutral 1.0; attendance_factor), recommend.py (Claude structured output + fallback),
@@ -60,7 +62,8 @@ src/oibot_gm/
                        tierdraft.py (design §5.47): draft = Claude's tier PROPOSAL for one item (route tier_draft, validated, nothing written —
                        the officer's tiers Save is the write), export_csv / parse_csv / apply_csv = the tier grid's CSV (preview, dedupe, rev);
                        scoring.rescore = "re-score last run" (old vs new weights, numbers only, nothing written); distil.py (§5.48) = Claude's ≤5
-                       policy sentences from the ACTIVE precedents (route distil, refs validated, nothing written — policy.append_rule is the write)
+                       policy sentences from the ACTIVE precedents (route distil, refs validated, nothing written — policy.append_rule is the write;
+                       the <policy>/<rules>/<precedents> blocks go through llm.provider.unfence)
   llm/provider.py      provider boundary, per-workload routing, usage log, budget cap; unfence = THE fence neutraliser for text inside a prompt's data block
   nl.py                NL → RosterRequest / LootFeedback schemas
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
@@ -92,11 +95,13 @@ src/oibot_gm/
                        award_id = a hash of lootctx.award_ref); open_appeal (the member's OWN award only; words validated, never parsed, quoted
                        and escaped; the card + a PUBLIC thread "loot · <member> · <item>" on officer_channel; no channel → waits on Loot › Appeals)
                        and resolve_appeal (one OUTCOMES choice, officers' note, the member's `appeal` NOTICE — never a DM — card to its final state,
-                       thread archived); officer_details = the council's record (D2: Details button / Loot › Appeals only, never the card);
+                       thread archived, thread_close_line escapes the note); officer_details = the council's record (D2: Details button / Loot ›
+                       Appeals only, never the card);
                        AppealButton `appeal.<gk>:details|resolve:<id>`; APPEAL_LISTENERS → `loot:appeals`; MCP list_appeals / resolve_appeal
                        (actor, D8) — never opens one. NO LLM anywhere
-  flows_appeal.py      me_loot_ask (/me loot-ask: award select → one prose modal → decide "Send to the council") · appeal_resolve (officers:
-                       outcome select → decide, note optional)
+  flows_appeal.py      me_loot_ask (/me loot-ask: award select — the newest 25, its first line points at the site for older ones — → one prose
+                       modal → decide "Send to the council") · appeal_resolve (officers, rights decided LIVE on open, every press and the note's
+                       submit — flows_loot.is_loot_officer, PRIV_LIVE: outcome select → decide, note optional)
   lootctx.py           RegistryLootContext (one per guild, reload(); void / reweight rows and superseding / status precedents folded; wishlists derived
                        live from Registry.wishlists; set_precedent_status = Retire/Restore; reweight (D12)); LEDGER_LISTENERS on every new award row
   loot_ops.py          the `loot` / `wishlist` / `tier` plain-text ops (configops' loot branch → LootMixin verbs / Registry wishlist + tier verbs),
@@ -325,7 +330,8 @@ src/oibot_gm/
                        dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line;
                        ts = epoch seconds (ts_kind); refuse_event = a clock-only KILL refused + warn_once → on_warn (ops_warner: "companion too old", once);
                        token_state(key, many=) = which feed-token variables are set (names only — the Loot › Companions card).
-                       Issued tokens (§5.50): authorize_any (.env guild token → an issued token by hash → the shared one) binds the companion to the
+                       listen_state(feed) = THE reachability words (a loopback bind: "listening on this machine only — set OIBOT_FEED_BIND …").
+                       Issued tokens (§5.50): authorize_any — THE token check (no other) — (.env guild token → an issued token by hash → the shared one) binds the companion to the
                        token's guild (Companion.token_id/label); still_valid re-checked at EVERY frame (a revoke = {"type":"error","auth":true}, no
                        restart), on_seen → last_seen, close_token; hash_token / new_token; token_rows / token_line / issue_consequence /
                        revoke_consequence = the hub's rows and THE sentences. Values never logged, stored or in an ops line. auth:true only for a
@@ -389,8 +395,8 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        /api/me/attendance, /api/members/attendance; councils carry bosses_progress. Phase 4 (§5.48): POST /api/loot/import (preview →
                        rev → apply; MCP apply needs the actor), GET/POST /api/loot/weights (POST = a translator through app.state.ops_translate),
                        POST /api/loot/rescore, POST /api/loot/distil + /api/loot/distil/append (the review's token = exactly the confirmed sentences)
-                       Phase 4 (§5.49): /api/me/loot rows carry `award` + `appeal` and `appeals` (the member's own questions, never the note or
-                       who resolved); POST /api/me/loot/{award}/appeal (the member only; never MCP), GET /api/loot/appeals + POST
+                       Phase 4 (§5.49): /api/me/loot (offset/limit/q over ALL the member's own awards; total, more) rows carry `award` + `appeal`
+                       and `appeals` (the member's own questions, never the note or who resolved); POST /api/me/loot/{award}/appeal (the member only; never MCP), GET /api/loot/appeals + POST
                        /api/loot/appeals/{aid}/resolve (officers; D8 actor from MCP) → appeals.py
   web/api.py           JSON API (/api/*) for the React app + SPA mount at /app (history fallback to index.html). POSTs need `X-Requested-With: oibot` (CSRF).
                        Mutations reuse Registry/configops exactly like the Discord commands. Every route reads `v.reg` (the selected guild); `POST /api/guild`
