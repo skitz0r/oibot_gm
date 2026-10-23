@@ -498,6 +498,7 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "companion_tokens": {"surface": "web", "path": "GET /api/loot/companions", "reason": "which feed-token variables are set and each companion's presence is an owner's host card; Discord shows presence on the council card"},
     # phase 4 (§5.48): a loot history file and Claude's distilled policy sentences are reviewed in tables; MCP reaches both
     "ledger_import": {"surface": "web", "path": "POST /api/loot/import", "reason": "a loot history CSV is a file with a preview of new rows, duplicates and unknown items (MCP import_ledger reads the same route); Discord has no file editor"},
+    "ledger_import_undo": {"surface": "web", "path": "POST /api/loot/import/undo", "reason": "undoing an import is picked from the list of earlier imports beside the import itself (MCP undo_import reads the same route); Discord has no file editor"},
     "policy_distil": {"surface": "web", "path": "POST /api/loot/distil", "reason": "Claude's drafted policy sentences are picked from a list beside the precedents each rests on (MCP distil); the pick appends through policy_append, which every surface has"},
 }
 

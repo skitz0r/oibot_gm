@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, Badge, Button, FileButton, Group, Modal, Select, Stack, Table, Tabs, Text, Textarea } from "@mantine/core";
 import { api } from "../../api";
 import { fail, ok } from "../Page";
+import { useConfirm } from "../ConfirmModal";
 
 interface Row { line: number; character: string; item: string; received: string; received_label: string; boss: string | null; offspec: boolean; known_item: boolean; known_character: boolean; tier?: string; weight?: number; why?: string }
 /** POST /api/loot/import's preview (Registry.import_awards): the groups and the rev an import must carry. */
@@ -9,6 +10,9 @@ interface LedgerPreview {
   kind: string; kind_words: string; rows: number; new: number; duplicates: number; unknown_items: number; unknown_characters: string[]; line: string; rev: string;
   groups: { new: Row[]; duplicates: Row[]; unknown_items: { item: string; rows: number }[] }; errors: string[]; skipped: number;
 }
+
+/** GET /api/loot/imports (Registry.import_batches): one earlier import, newest first; `consequence` is the server's Undo sentence. */
+interface Batch { batch: string; kind: string | null; at: string | null; at_label: string; by: string | null; rows: number; live: number; consequence: string }
 
 const KINDS = [
   { value: "auto", label: "Tell from the file" },
@@ -27,6 +31,20 @@ export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone:
   const [kind, setKind] = useState<string>("auto");
   const [pv, setPv] = useState<LedgerPreview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [ask, dialog] = useConfirm();
+  const loadBatches = useCallback(() => { api.get<{ batches: Batch[] }>("/api/loot/imports").then((r) => setBatches(r.batches)).catch(fail); }, []);
+  useEffect(loadBatches, [loadBatches]);
+  /** Undo this import: a void row per award it added (the council's correction path); the rows stay in the ledger. */
+  async function undo(b: Batch) {
+    const r = await ask({ title: "Undo this import?", message: b.consequence, confirmLabel: "Undo the import", color: "red",
+      note: { label: "Why (kept on each void row)", maxLength: 200, placeholder: "the received column held the export date" } });
+    if (!r) return;
+    try {
+      const out = await api.post<{ message: string }>("/api/loot/import/undo", { batch: b.batch, reason: typeof r === "object" ? r.note : "" });
+      ok(out.message); loadBatches(); onDone();
+    } catch (e) { fail(e); }
+  }
   async function preview(text = csv, k = kind) {
     setBusy(true);
     try { setPv((await api.post<{ preview: LedgerPreview }>("/api/loot/import", { csv: text, kind: k })).preview); } catch (e) { fail(e); setPv(null); } finally { setBusy(false); }
@@ -36,7 +54,7 @@ export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone:
     setBusy(true);
     try {
       const r = await api.post<{ message: string }>("/api/loot/import", { csv, kind, preview: false, rev: pv.rev });
-      ok(r.message); onDone(); onClose();
+      ok(r.message); onDone(); setPv(null); setCsv(""); loadBatches();
     } catch (e) { fail(e); preview(); } finally { setBusy(false); }
   }
   function pick(f: File | null) {
@@ -64,6 +82,7 @@ export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone:
   );
   return (
     <Modal opened onClose={onClose} title="Import loot history" size="xl">
+      {dialog}
       <Stack gap="sm">
         <Text size="xs" c="dimmed">A BisCouncil loot summary, a ThatsMyBIS export (its received rows), or a generic CSV with the columns <b>{GENERIC}</b> (item = an id or the item's name; received = the day, 2026-12-09). Gargul and RCLootCouncil exports aren't read yet — export to the generic columns. Nothing is written before Confirm, and an import only adds rows.</Text>
         <Group gap="xs" wrap="wrap">
@@ -91,6 +110,17 @@ export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone:
                 </Stack>
               </Tabs.Panel>
             </Tabs>
+          </Stack>
+        )}
+        {batches.length > 0 && (
+          <Stack gap={4}>
+            <Text size="sm" fw={600}>Earlier imports</Text>
+            {batches.map((b) => (
+              <Group key={b.batch} gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="xs">{b.at_label} · {b.kind ?? "file"} · {b.by ?? "?"} · {b.live === b.rows ? `${b.rows} row(s)` : `${b.live} of ${b.rows} row(s) live`}</Text>
+                <Button size="compact-xs" variant="subtle" color="red" disabled={b.live === 0} onClick={() => undo(b)}>{b.live === 0 ? "Undone" : "Undo this import"}</Button>
+              </Group>
+            ))}
           </Stack>
         )}
         <Group justify="flex-end" gap="sm">

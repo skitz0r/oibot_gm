@@ -167,6 +167,72 @@ def test_a_rev_that_moved_writes_nothing(reg):
     assert rep["changed"] and ledger_bytes(reg) == before
 
 
+def test_imported_rows_carry_an_import_id_and_an_undo_voids_them(reg):
+    """Regression: imported rows had no import_id, so a wrongly applied file could never be voided (the void row and the
+    `correct` verb are keyed by import_id) — every row counted in recent loot and 'already has' for good."""
+    from oibot_gm.lootctx import fold_ledger
+
+    a = reg.test_members()[0].main.label
+    rows = ledger_csv.parse(f"character,item,received\n{a},Shard of Doom,2026-12-01\n{a},Sunfire Pauldrons,2026-12-01\n").rows
+    rep = reg.import_awards(rows, "Officer", 7, kind="generic")
+    batch = rep["batch"]
+    added = ledger(reg)
+    assert [r["import_id"] for r in added] == [f"{batch}-1", f"{batch}-2"] and {r["import_batch"] for r in added} == {batch}
+    (b,) = reg.import_batches()
+    assert (b["batch"], b["rows"], b["live"], b["kind"]) == (batch, 2, 2, "generic") and "Voids the 2 award(s)" in b["consequence"]
+    assert ":" in b["at_label"] and ("AM" in b["at_label"] or "PM" in b["at_label"]), "a time a person reads (12-hour)"
+    before = ledger_bytes(reg)
+    out = reg.undo_import(batch, "Officer", "the received column held the export date", 7)
+    assert out["voided"] == 2 and ledger_bytes(reg).startswith(before), "append-only: the award rows stay byte for byte"
+    voids = [r for r in ledger(reg) if r.get("kind") == "void"]
+    assert {r["import_id"] for r in voids} == {f"{batch}-1", f"{batch}-2"} and voids[0]["reason"].startswith("the received column")
+    awards, _ = fold_ledger(reg.store.read_jsonl(Path(reg.key) / "ledger.jsonl"))
+    assert all(x.void for x in awards), "voided: they no longer count in recent loot or already-has"
+    assert reg.import_batches()[0]["live"] == 0
+    assert reg.undo_import(batch, "Officer")["voided"] == 0, "idempotent"
+    with pytest.raises(RegistryError):
+        reg.undo_import("imp-nope", "Officer")
+    fixed = ledger_csv.parse(f"character,item,received\n{a},Shard of Doom,2026-11-24\n{a},Sunfire Pauldrons,2026-12-01\n").rows
+    again = reg.import_awards(fixed, "Officer", 7)
+    assert again["new"] == 2 and again["duplicates"] == 0, "a voided row no longer makes the fixed file's row a duplicate"
+
+
+def test_undo_import_route_and_mcp_tool(w, monkeypatch):
+    a, b = names(w)
+    officer = as_user(w.c, OFFICER)
+    text = f"character,item,received\n{a},Shard of Doom,2026-12-01\n{b},Shard of Doom,2026-12-01\n"
+    pv = w.c.post("/api/loot/import", json={"csv": text}, headers=officer).json()["preview"]
+    r = w.c.post("/api/loot/import", json={"csv": text, "preview": False, "rev": pv["rev"]}, headers=officer)
+    assert r.status_code == 200 and r.json()["report"]["batch"] in r.json()["message"], r.text
+    ctx = loot_ops.guild_ctx(w.bot, w.reg)
+    n = len(ctx.ledger)
+    (bt,) = w.c.get("/api/loot/imports", headers=officer).json()["batches"]
+    member = as_user(w.c, w.ms[3].discord_id)
+    assert w.c.get("/api/loot/imports", headers=member).status_code == 403
+    assert w.c.post("/api/loot/import/undo", json={"batch": bt["batch"]}, headers=member).status_code == 403
+    w.c.cookies.clear()
+    assert w.c.post("/api/loot/import/undo", json={"batch": bt["batch"]}, headers=H).status_code == 403, "D8: needs the actor"
+    calls = []
+
+    class Fake:
+        def get(self, path, **params):
+            return w.c.get(path, headers=H).json()
+
+        def post(self, path, body=None, actor=False):
+            calls.append((path, actor))
+            r = w.c.post(path, json=body, headers=H | (ACTOR if actor else {}))
+            assert r.status_code == 200, r.text
+            return r.json()
+
+    monkeypatch.setattr(ms, "api", lambda guild=None: Fake())
+    assert ms.import_batches()["batches"][0]["batch"] == bt["batch"]
+    out = ms.undo_import(bt["batch"], "wrong file")
+    assert out["voided"] == 2 and calls[-1] == ("/api/loot/import/undo", True)
+    assert len(loot_ops.guild_ctx(w.bot, w.reg).ledger) == n - 2, "the council's context reloaded without the voided rows"
+    assert any("undone" in line for _k, _l, line in w.bot.ops.lines), "one audit line"
+    assert ms.undo_import(bt["batch"])["voided"] == 0
+
+
 # ---------------------------------------------------------------- POST /api/loot/import
 
 def test_import_route_previews_then_applies_and_reloads_the_council_context(w):

@@ -1328,6 +1328,23 @@ def import_ledger(csv: str | None = None, path: str | None = None, kind: str = "
 
 
 @mcp.tool()
+def import_batches(guild: Guild = None) -> dict:
+    """The ledger's loot history imports, newest first (Loot › Items › Import › Earlier imports): each one's `batch`
+    id, kind, who and when, how many of its rows are still live, and the sentence an Undo would carry out."""
+    return api(guild).get("/api/loot/imports")
+
+
+@mcp.tool()
+def undo_import(batch: str, reason: str = "", guild: Guild = None) -> dict:
+    """Undo a loot history import that was applied wrongly (the wrong date or character column…): appends a void row for
+    every award of that `batch` (import_batches lists them) — they stop counting in recent loot and 'already has'; the
+    rows stay in the ledger (the audit trail) and a fixed file can be imported afterwards. Read import_batches' sentence
+    to the person first. Needs OIBOT_MCP_ACTOR (the awards are in people's names, D8)."""
+    data = api(guild).post("/api/loot/import/undo", {"batch": batch, "reason": reason}, actor=True)
+    return {"message": data.get("message"), "voided": data.get("voided")}
+
+
+@mcp.tool()
 def loot_weights(guild: Guild = None) -> dict:
     """The loot scoring weights (Config › Loot scoring): every weight's path, its value now, the game profile's default
     beside it and whether the guild set it — read this before set_loot_weights."""

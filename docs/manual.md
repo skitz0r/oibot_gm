@@ -1390,6 +1390,7 @@ news post says can make the review read or write another server.
 | `draft_tiers` · `export_tiers` | Claude's suggested tiers for one item — a proposal, nothing saved (confirm it with `tier_item`) · the whole tier grid as CSV text |
 | `get_wishlists` · `set_wishlist` · `import_wishlists` | who wants each item / one member's lists with their `rev` · replace a character's whole list (actor; a list changed since `rev` is refused) · a ThatsMyBIS export (preview first; writing needs the actor) |
 | `import_ledger` | a loot history file (`csv` text or a local `path`; `kind` auto / biscouncil / tmb / generic) into the ledger: preview first ('N rows, M duplicates, K unknown items', the groups, a `rev`), then `preview=false` with that `rev` (needs the actor); only ever adds rows; unknown items land on Loot › Items › Untiered (`tier_item`) |
+| `import_batches` · `undo_import` | the ledger's imports, newest first (batch id, who, when, rows still live, what an undo does) · void every award of one import (`batch`, an optional `reason`; needs the actor) — the rows stay, a fixed file imports again |
 | `loot_weights` · `set_loot_weights` | the scoring weights with the game's default beside each · change some (`fields` = {path: number or null for the default}; the owner's; `preview=True` first — weights are reviewed) |
 | `distil` | Claude's draft of up to five loot-policy sentences from the active precedents, each with the precedents it rests on — nothing written; add the ones the person wants with `policy_append` |
 | `open_run` | open a sheet now (next slot, or a date and time — an upcoming run's exact time opens that run, any other time is a one-off ad hoc run; `schedule` = that schedule's next run, or a pickup template at `when`) |
@@ -1703,6 +1704,12 @@ ledger changed since your preview the import is refused and the fresh preview sh
 recorded by name. Gargul and RCLootCouncil exports aren't read yet (which addon the council will run is still open):
 export them to the generic columns. Officers; over MCP `import_ledger` (preview, then apply with its `rev` — the apply
 needs the actor, §8b).
+
+Applied a file wrongly (the received column held the export date, the wrong character column)? The Import window lists
+**Earlier imports** — when, who, how many rows are still live — each with **Undo this import**: after a confirm (and an
+optional why) every award that import added is voided, so it stops counting in recent loot and in "already has it". The
+rows stay in the ledger with a void beside each (the audit trail), and importing the fixed file afterwards adds them again.
+Officers; over MCP `import_batches` and `undo_import` (needs the actor).
 
 **Loot scoring** (Config › Recruitment and more; the owner edits, officers read) lists every number behind a
 candidate's score — tier weights, the untiered weight, attendance, rank factors, recent loot (window, strength, curve,

@@ -277,7 +277,7 @@ src/oibot_gm/
                        registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py.
                        Loot tools (§5.36): reads / tick / distribute / discard / end as the token; DECISIONS (loot_confirm/award/reason/correct,
                        retire_precedent, tier_item, set_wishlist, import_wishlists, import_ledger's apply) send X-Oibot-Actor = OIBOT_MCP_ACTOR (D8; app.py
-                       mcp_actor validates it); §5.48: import_ledger (csv | path, preview → rev), loot_weights / set_loot_weights (owner, ops_change), distil.
+                       mcp_actor validates it); §5.48: import_ledger (csv | path, preview → rev), import_batches / undo_import (void rows per batch, actor), loot_weights / set_loot_weights (owner, ops_change), distil.
                        Setup tools (raid_set, schedule_*, raid_reset, aura_*, family_set, set_channel, set_config, set_recruitment, set_plain_permissions) send
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines);
                        set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44

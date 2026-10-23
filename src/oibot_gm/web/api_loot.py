@@ -778,7 +778,8 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         if report.get("changed"):
             return JSONResponse({"error": "The ledger changed since you looked — here is the file against it now; import again if it still reads right.",
                                  "preview": report}, status_code=409)
-        line = f"loot history imported from a {ledger_csv.KIND_WORDS[parsed.kind]}: {report['new']} award(s) added — {report['line']}"
+        line = (f"loot history imported from a {ledger_csv.KIND_WORDS[parsed.kind]}: {report['new']} award(s) added — {report['line']}"
+                + (f" (import {report['batch']}: Undo on Loot › Items › Import)" if report.get("batch") else ""))
         if report.get("learned"):
             line += f"; {report['learned']} untiered item(s) now on Loot › Items › Untiered to tier"
         if report["new"]:
@@ -790,6 +791,34 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         else:
             line = "Nothing to import — " + report["line"]
         return {"message": line, "report": report}
+
+    @app.get("/api/loot/imports")
+    async def loot_imports(request: Request):
+        """Loot › Items › Import's 'Earlier imports' (MCP import_batches): the ledger's imports, newest first, each with
+        its batch id, who, when (a time a person reads), how many rows are still live and the Undo confirm's sentence."""
+        v = await who(request, officer=True)
+        return {"batches": await asyncio.to_thread(v.reg.import_batches)}
+
+    @app.post("/api/loot/import/undo")
+    async def loot_import_undo(request: Request):
+        """Undo one loot history import (MCP undo_import): {batch, reason} — a void row for every award of that import
+        still live (Registry.undo_import, the council's void row), never an edit or a delete; idempotent. Officers; from
+        MCP the awards are in people's names, so it needs X-Oibot-Actor (D8). The council's context reloads."""
+        v, d = await writer(request, actor="Undoing a loot import")
+        batch = str(d.get("batch") or "").strip()
+        if not batch:
+            raise HTTPException(400, "batch required (an import's id from /api/loot/imports)")
+        try:
+            out = await asyncio.to_thread(v.reg.undo_import, batch, by_of(v), str(d.get("reason") or ""), v.uid)
+        except RegistryError as e:
+            from ..configops import user_error
+
+            return JSONResponse({"error": user_error(e)}, status_code=400)
+        if out["voided"]:
+            ctx_of(v.reg).reload()  # the council stops counting the rows at its next judgement
+            await ops_mod.audited(bot.ops, v.reg, by_of(v), out["line"], via=v.via, by_id=v.uid)
+            publish("loot:ledger", v.reg.key)
+        return {"message": out["line"], "voided": out["voided"]}
 
     @app.get("/api/loot/weights")
     async def loot_weights(request: Request):

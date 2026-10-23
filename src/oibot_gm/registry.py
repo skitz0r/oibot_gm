@@ -2183,6 +2183,8 @@ class Registry:
             awards, _ = fold_ledger(self.store.read_jsonl(rel))
             seen: dict[tuple, str] = {}
             for a in awards:
+                if a.void:
+                    continue  # a voided award (an undone import, a corrected one) no longer holds the row: the fixed file imports
                 for k in self._award_keys([a.raider], a.item_id, a.item_name, a.received):
                     seen.setdefault(k, "already in the ledger")
             new: list[tuple] = []
@@ -2243,6 +2245,9 @@ class Registry:
             if preview or not new or report["changed"]:
                 return report
             stamp = now()
+            # every imported row gets a stable import_id ('<batch>-<n>') and the batch id, so the import can be undone
+            # (undo_import: one void row per award, the shape the council's corrections write — lootctx.void_row)
+            batch = f"imp-{datetime.now(timezone.utc):%Y%m%d%H%M%S}-{new_rev[:6]}"
             learn: dict[str, list] = {}  # item key → [item_id, name, boss, instance, rows]: untiered items land on Loot › Items › Untiered
             for a, r, _ in new:
                 it = self.item(a.item_id or None, a.item_name)
@@ -2252,15 +2257,76 @@ class Registry:
                 hold = learn.setdefault(k, [a.item_id or None, a.item_name, a.boss or None, a.instance or None, 0])
                 hold[4] += 1
             with self.store.batch(f"{self.key}: {len(new)} award(s) imported from a {kind} file by {by}"):
-                for a, r, _ in new:
+                for n, (a, r, _) in enumerate(new, 1):
+                    a.import_id = f"{batch}-{n}"
                     row = a.model_dump(mode="json", exclude_none=True)
-                    row.update(imported=kind, imported_at=stamp, **({"note": r.note} if r.note else {}), **({"by_id": by_id} if by_id else {}))
+                    row.update(imported=kind, imported_at=stamp, import_batch=batch, **({"note": r.note} if r.note else {}),
+                               **({"by_id": by_id} if by_id else {}))
                     self.store.append_jsonl(rel, row)
                 for iid, nm, boss, inst, n in learn.values():
                     self.learn_item(iid, nm, boss=boss, instance=inst, source="import", times=n)
                 self.store.commit(f"{self.key}: {len(new)} award(s) imported from a {kind} file by {by}")
             report["learned"] = len(learn)
+            report["batch"] = batch
         return report
+
+    def import_batches(self, limit: int = 20) -> list[dict]:
+        """The ledger's imports, newest first (Loot › Items › Import's 'Earlier imports', MCP import_ledger_batches):
+        {batch, kind, at (ISO), at_label (what a person reads), by, rows, live (rows not voided), consequence (the Undo
+        confirm's sentence, composed here)}. Only rows written since imports carry an import_id (imp-<stamp>-<rev>-<n>)."""
+        from .lootctx import fold_ledger
+
+        rows = self.store.read_jsonl(Path(self.key) / "ledger.jsonl")
+        awards, _ = fold_ledger(rows)
+        live = {a.import_id for a in awards if a.import_id and not a.void}
+        out: dict[str, dict] = {}
+        for r in rows:
+            b = r.get("import_batch")
+            if r.get("kind") or not b:
+                continue
+            o = out.setdefault(b, {"batch": b, "kind": r.get("imported"), "at": r.get("imported_at"), "by": r.get("by"), "rows": 0, "live": 0})
+            o["rows"] += 1
+            o["live"] += 1 if r.get("import_id") in live else 0
+        res = sorted(out.values(), key=lambda o: str(o["at"] or ""), reverse=True)[:limit]
+        for o in res:
+            o["at_label"] = self.local12(o["at"]) if o["at"] else ""
+            o["consequence"] = self.undo_consequence(o)
+        return res
+
+    @staticmethod
+    def undo_consequence(o: dict) -> str:
+        if not o.get("live"):
+            return "Every award this import added is already voided; nothing to undo."
+        return (f"Voids the {o['live']} award(s) this import added: they stop counting in recent loot and in 'already has'. "
+                "The rows stay in the ledger with a void row beside each (the audit trail); importing a fixed file afterwards adds them again.")
+
+    def undo_import(self, batch: str, by: str, reason: str = "", by_id: int | None = None) -> dict:
+        """Undo one import: a `kind: void` row (lootctx.void_row — the council's correction path) for every award of the
+        batch that is still live; nothing is edited or deleted. One commit; idempotent (an undone import voids nothing).
+        Returns {batch, voided, line}. RegistryError for a batch the ledger doesn't hold. The caller reloads the council's
+        context (RegistryLootContext.reload)."""
+        from .lootctx import fold_ledger, void_row
+
+        batch = str(batch or "").strip()
+        rel = Path(self.key) / "ledger.jsonl"
+        why = (str(reason or "").strip() or "import undone")[:200]
+        with self.config_lock:
+            rows = self.store.read_jsonl(rel)
+            ids = [r["import_id"] for r in rows if not r.get("kind") and r.get("import_batch") == batch and r.get("import_id")]
+            if not batch or not ids:
+                raise RegistryError(f"{batch or '?'}: no import with that id in the ledger")
+            awards, _ = fold_ledger(rows)
+            live = {a.import_id for a in awards if a.import_id and not a.void}
+            todo = [i for i in ids if i in live]
+            if todo:
+                at = now()
+                msg = f"{self.key}: import {batch} undone by {by} ({len(todo)} award(s) voided)"
+                with self.store.batch(msg):
+                    for i in todo:
+                        self.store.append_jsonl(rel, {**void_row(i, why, by, at), **({"by_id": by_id} if by_id else {})})
+                    self.store.commit(msg)
+        line = (f"import {batch} undone: {len(todo)} award(s) voided — {why}" if todo else f"import {batch}: already undone, nothing voided")
+        return {"batch": batch, "voided": len(todo), "line": line}
 
     # ---- attendance (design §3.5 L35/M43, D49): from DONE runs, keyed by the member (every character rolls up)
     def attendance_window(self, window_days: int | None = None) -> int:

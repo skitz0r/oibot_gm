@@ -2921,6 +2921,18 @@ Loot › Items › **Import loot history…** (`components/loot/LedgerImport.tsx
 from the file · BisCouncil · ThatsMyBIS · Generic), Preview → the server's line + three tabs (New · Duplicates · Unknown
 items) → **Confirm — import N rows**. BY_DESIGN_ONLY `ledger_import` (web; MCP beside it).
 
+**Undo an import (fixer, 2026-10-22).** Every applied row carries a stable `import_id` = `<batch>-<n>` and `import_batch` =
+`imp-<UTC stamp>-<rev[:6]>` (the report's `batch`; the audit line names it), so a wrongly applied file (the export date in the
+received column, the wrong character column) is correctable: `Registry.undo_import(batch, by, reason, by_id)` appends one
+`kind: void` row per still-live award of the batch — `lootctx.void_row`, the same row the council's corrections write
+(`RegistryLootContext.void`) — under `config_lock`, one commit, idempotent; nothing is edited or deleted. The dedupe skips
+voided awards, so the fixed file imports afterwards. `Registry.import_batches()` lists the imports newest first (who, when as
+`local12`, rows, live, and the Undo confirm's `consequence` sentence composed in code). GET `/api/loot/imports`, POST
+`/api/loot/import/undo` {batch, reason} (officers; from MCP the actor, D8; the council's context reloads, one audit line,
+`publish("loot:ledger")`); MCP `import_batches`, `undo_import`; the Import modal's **Earlier imports** list with **Undo this
+import** (useConfirm with the server's sentence and an optional why). BY_DESIGN_ONLY `ledger_import_undo` (web; MCP beside it).
+Rows imported before this change have no import_id and stay uncorrectable from the surfaces.
+
 **Weights (L06).** `Registry.loot_cfg()` now merges the guild's `loot:` overrides at EVERY depth with keys matched by their
 text (`_merge_loot`: 'wishlist.rank_bonus.1' alone keeps #2–#5; the int key stays an int — scoring reads `rank_bonus[1]`).
 `loot_weight_defaults()` = every numeric leaf of the profile's loot defaults (+ `untiered_weight`; `distribution` is not a
