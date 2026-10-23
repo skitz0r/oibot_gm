@@ -973,6 +973,37 @@ def setup_status(guild: Guild = None) -> dict:
     return api(guild).get("/api/admin/setup")
 
 
+COMPANION_FIELDS = ("id", "label", "state", "state_words", "characters", "events", "last_seen_label", "issued_by", "issued_label", "sent_to", "active",
+                    "revoked_label", "revoke_consequence")
+
+
+@mcp.tool()
+def list_companions(guild: Guild = None) -> dict:
+    """The guild's loot-companion tokens (owner): label, presence (live | quiet | disconnected | offline | never |
+    revoked), the characters connected with it, last seen, who issued it and to whom it was DMed. NEVER a token value
+    (it is stored hashed and shown once at issue). Issuing a token is not an MCP tool on purpose — a value must not land
+    in a transcript: the owner issues one on the site (Config › Companions) or with /gm config companion."""
+    d = api(guild).get("/api/companions")
+    rows = [{k: r.get(k) for k in COMPANION_FIELDS} for r in d.get("tokens", [])]
+    return {"tokens": rows, "listening": d.get("listening"), "env": d.get("env")}
+
+
+@mcp.tool()
+def revoke_companion(token: str, preview: bool = False, guild: Guild = None) -> str:
+    """Revoke a loot-companion token (owner): `token` = its id (ft-…) or its label from list_companions. The companion
+    using it is cut off at its next message — no restart; whoever runs it needs a new token. `preview=True`: the
+    consequence sentence only, nothing changed — read it to the person first."""
+    rows = api(guild).get("/api/companions").get("tokens", [])
+    ref = token.strip()
+    hit = [r for r in rows if r["active"] and (r["id"] == ref or r["label"].casefold() == ref.casefold())]
+    if len(hit) != 1:
+        active = ", ".join(f"{r['label']} ({r['id']})" for r in rows if r["active"]) or "none"
+        raise ToolError(f"{token!r} isn't an active companion token (active: {active})")
+    if preview:
+        return hit[0]["revoke_consequence"]
+    return msg(api(guild).post("/api/companions/revoke", {"id": hit[0]["id"]}))
+
+
 @mcp.tool()
 def left_members(guild: Guild = None) -> dict:
     """Members who left the Discord server (their record stays until an officer removes it): name, when, characters, and

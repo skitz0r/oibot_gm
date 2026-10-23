@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Badge, Card, Group, Stack, Table, Text } from "@mantine/core";
+import { Anchor, Badge, Card, Group, Stack, Table, Text } from "@mantine/core";
+import { Link } from "react-router-dom";
 import { api, type Companion } from "../../api";
 import { CardHeader, fail } from "../Page";
 import { usePoll } from "../../hooks/usePoll";
@@ -45,13 +46,14 @@ export function Companions() {
       </Card>
       {d.tokens && (
         <Card>
-          <CardHeader title="Feed tokens" hint="owner · names only, never the values" />
+          <CardHeader title="Host feed tokens" hint="owner · .env names only, never the values" />
           <Stack p="md" gap="xs">
             <Group gap="sm"><Text size="sm" ff="monospace">{d.tokens.var}</Text>{YES(d.tokens.set)}<Text size="xs" c="dimmed">this guild's own token: a companion using it feeds this guild only</Text></Group>
             <Group gap="sm"><Text size="sm" ff="monospace">OIBOT_FEED_TOKEN</Text>{YES(d.tokens.shared)}
               <Text size="xs" c="dimmed">{d.tokens.shared ? (d.tokens.shared_feeds ? "the shared token feeds this guild (the bot serves one guild)" : "the shared token feeds no guild's raids while the bot serves several") : "no shared token"}</Text></Group>
             <Group gap="sm"><Text size="sm" ff="monospace">OIBOT_FEED_BIND</Text>{YES(d.tokens.bind_set)}<Text size="xs" c="dimmed">the tailnet address the feed listens on (not shown)</Text></Group>
-            <Text size="xs" c="dimmed">Tokens are set in .env on the host and read when the bot starts. Give the raider running the companion the token, never post it in a channel. A companion older than the one in the repo is refused on its first kill ("companion too old") — the ops channel says so once.</Text>
+            <Text size="sm">Issue and revoke companion tokens on <Anchor component={Link} to="/config">Config › Companions</Anchor> (or <Text span ff="monospace">/gm config companion</Text>) — no restart, nothing in .env.</Text>
+            <Text size="xs" c="dimmed">These older host tokens are set in .env on the host and read when the bot starts. Give the raider running the companion the token, never post it in a channel. A companion older than the one in the repo is refused on its first kill ("companion too old") — the ops channel says so once.</Text>
           </Stack>
         </Card>
       )}

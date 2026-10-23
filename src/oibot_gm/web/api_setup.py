@@ -15,6 +15,9 @@ OPS-01/S-01/S-05/S-06, §3.3 D).
   (detached) guilds.
 - `GET /api/admin/left` + `POST /api/admin/member/remove {uid}`: people who left the server (Member.left_at) and the
   officers' Remove record (discord_registry.remove_record — D29: never a member's own delete; there is no such route).
+- `GET /api/companions` + `POST /api/companions/issue {label}` + `POST /api/companions/revoke {id}` (owner; design §5.50):
+  the guild's loot-companion tokens through SetupMixin.issue_companion / revoke_companion — the value is in the issue
+  reply's body ONCE (no-store) and nowhere else (stored hashed, never logged); MCP lists and revokes but never issues.
 """
 from __future__ import annotations
 
@@ -181,3 +184,56 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": line}
+
+    # ---- companion tokens (design §5.50): owner only; the value only ever in the issue response's body, once
+    def companions_state(reg) -> dict:
+        from ..feed import issue_consequence, token_rows, token_state
+        from ..registry import FEED_LABEL_MAX, FEED_TOKEN_MAX
+
+        rows_fn = getattr(bot, "companion_rows", None)
+        rows = rows_fn(reg) if rows_fn is not None else token_rows(reg, [])
+        return {"tokens": rows, "listening": getattr(bot, "feed", None) is not None, "max": FEED_TOKEN_MAX, "label_max": FEED_LABEL_MAX,
+                "issue_consequence": issue_consequence(reg, None).replace("**", ""), "env": token_state(reg.key, many=bool(getattr(bot.registries, "many", False)))}
+
+    @app.get("/api/companions")
+    async def companions_get(request: Request):
+        """Owner: the guild's companion tokens (label · presence · last seen · who issued it), never a value or a hash;
+        `env` names which .env feed-token variables are set (names only); `listening`: the loot feed runs on this host."""
+        v = await who(request)
+        need_owner(v)  # the owner (or a host superuser) — owner rights come from the id, not the officer roles
+        return companions_state(v.reg)
+
+    @app.post("/api/companions/issue")
+    async def companions_issue(request: Request):
+        """Owner: {label} → a new token. The reply's `token` is the ONLY time the value exists outside the companion: the
+        page shows it once (Copy, "I've saved it"); it is stored hashed, never logged (the request log has the path and
+        status only), never in the audit line. MCP never issues one (a value must not enter a Claude transcript)."""
+        v, d = await body(request)
+        need_owner(v)
+        if v.via == "mcp":
+            raise HTTPException(403, "MCP never issues a companion token (its value would land in a transcript) — issue it on the site or with /gm config companion.")
+        issue = getattr(bot, "issue_companion", None)
+        if issue is None:
+            raise HTTPException(503, "the bot isn't connected")
+        try:
+            res = await issue(v.reg, str(d.get("label") or ""), v.name, by_id=v.uid, via=v.via)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        rec = res["record"]
+        return JSONResponse({"token": res["token"], "id": rec.id, "label": rec.label, "message": res["message"], "listening": res.get("listening", False),
+                             **companions_state(v.reg)}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/companions/revoke")
+    async def companions_revoke(request: Request):
+        """Owner (the site, MCP revoke_companion): {id} (a token's id, or its label) → revoked; the feed refuses it at the
+        companion's next message, no restart. {message, tokens…}."""
+        v, d = await body(request)
+        need_owner(v)
+        revoke = getattr(bot, "revoke_companion", None)
+        if revoke is None:
+            raise HTTPException(503, "the bot isn't connected")
+        try:
+            line = await revoke(v.reg, str(d.get("id") or ""), v.name, by_id=v.uid, via=v.via)
+        except (RegistryError, ValueError) as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"message": line, **companions_state(v.reg)}

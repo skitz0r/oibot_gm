@@ -22,7 +22,6 @@ from .discord_loot_surface import LootSurfaceMixin
 from .discord_policy import CfgApplyButton, PolicyContext, handle_change, left_server, register_policy_commands
 from .discord_help import ACT as HELP_ACT, GuideSelect, HelpMixin, apply_view as help_apply_view, guide_intro, guide_view, register_help_commands
 from .discord_pool import PoolMixin
-from .feed import FeedServer, authorize as feed_authorize, feed_config, guild_tokens, ops_warner as feed_ops_warner
 from .discord_pool import AbsenceButton, AbsencesMixin, LootLogMixin, LootWishButton, SetupMixin
 from .flows_test import TestAnswerButton
 from .discord_news import NewsMixin, ProposalButton
@@ -789,16 +788,7 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         self.attach_pool_listeners()
         self.attach_loot_listeners()  # a seat change on a run with a council → "now a candidate" (candidates are read live)
         self.attach_loot_log()  # every new award row → one line in the public loot log (LootLogMixin)
-        token, bind = feed_config()
-        per_guild = guild_tokens()  # OIBOT_FEED_TOKEN_<KEY>: a token that feeds one guild only
-        if token or per_guild:
-            self.feed = FeedServer(self.handle_feed_event, token, bind,
-                                   auth=lambda t: feed_authorize(t, token, per_guild, lambda: list(self.registries.by_key)))
-            self.feed.on_disconnect = self.feed_disconnected
-            self.feed.on_warn = feed_ops_warner(self)  # "companion too old" (a clock-only kill stamp): once per companion, to ops
-            await self.feed.start()
-        else:
-            print("loot feed disabled (set OIBOT_FEED_TOKEN or OIBOT_FEED_TOKEN_<KEY>, and OIBOT_FEED_BIND)")
+        await self.start_feed()  # .env tokens + every guild's issued (hashed) tokens — FeedMixin.start_feed (design §5.50)
         from .web.app import serve as web_serve
 
         self.started_at = time.time()

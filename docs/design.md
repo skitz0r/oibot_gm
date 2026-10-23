@@ -2866,8 +2866,8 @@ call parses every run file). MCP `draft_tiers(item)` and `export_tiers()`. Loot 
 `/api/loot/companions`): presence for officers; for the owner `feed.token_state(key, many=)` — which of
 OIBOT_FEED_TOKEN_<KEY> / OIBOT_FEED_TOKEN / OIBOT_FEED_BIND are set, and whether the shared token feeds this guild —
 names and yes/no only, never a value. Single-surface features in `configops.BY_DESIGN_ONLY`: items_csv, tier_draft,
-companion_tokens (web; MCP reads beside them). The companion tokens are still `.env` + restart (issuing / revoking from
-the card is not built). Tests: tests/test_attendance.py (D49 cases), tests/test_loot_followthrough.py (kill order, the
+companion_tokens (web; MCP reads beside them — renamed `companion_env` in §5.50). The companion tokens were still `.env` + restart here;
+issuing / revoking without a restart is §5.50. Tests: tests/test_attendance.py (D49 cases), tests/test_loot_followthrough.py (kill order, the
 prompt once, the lock card and its harness press, stamps and the one warn on a real FeedServer, the draft never writes,
 CSV round trip / dedupe / rev / re-weight ask, the tokens card, attendance routes, MCP).
 
@@ -2878,6 +2878,79 @@ ChannelsCard (edit mode through useOpsSave) + §5.44's NewsCard (the one keyword
 saves on change (tests/test_frontend_source.py pins it). The tier draft (`loot/tierdraft.draft`) runs inside
 `llm.provider.for_guild(reg.key)`, so its usage row is the guild's (§5.45, D45). Parked guilds in GET /api/guilds carry
 `detached` and no `busy`; served ones carry `busy` (the apply job's raid guard).
+
+### 5.50 Dual interfaces, phase 4 — companion tokens (built 2026-10-22)
+
+Out of out/dual_interface_design.md §3.1 "Data on-ramp" (L08/S-03 "Companion tokens") and §2.9 "the companion routes by
+its token's guild"; phase 4. Until now a companion token was a `.env` variable (`OIBOT_FEED_TOKEN`,
+`OIBOT_FEED_TOKEN_<KEY>`) read at start; now the owner issues and revokes one per raid leader, with no restart. The
+`.env` tokens keep working unchanged (§5.32 "Feed"). Standing rule: a token is a SECRET — secrets only in `.env` — so
+the data repo holds its HASH only, the value is shown once and is never logged, committed, audited or sent to MCP.
+
+**Storage and verbs (registry.py).** `GuildConfig.feed_tokens: list[FeedToken]` = {id (`ft-` + 6 hex), hash
+(`feed.hash_token`: "sha256:<hex>" of a 256-bit `secrets.token_urlsafe` value prefixed `oibot-feed-`, so a leak scanner
+can spot it), label (prose, ≤ `FEED_LABEL_MAX` = 40, one line, unique among the active tokens), issued_by (+ _id),
+issued_at, sent_to (the display name it was DMed to), revoked_at, revoked_by, last_seen}. `feed_tokens` is in
+`Registry.REV_SKIP`: no section rev covers it, so a companion's last_seen never 409s an owner's settings edit.
+`issue_feed_token(label, by, by_id, sent_to=) -> (token, record)` — the token returned EXACTLY once, never stored;
+≤ `FEED_TOKEN_MAX` = 10 active per guild; `revoke_feed_token(ref, by, by_id)` (id or label; refused when unknown or
+already revoked; the record stays); `match_feed_token(token)` compares the token's hash with EVERY stored hash by
+`hmac.compare_digest` and answers the active match; `feed_token_active(id)`; `touch_feed_token(id)` moves last_seen in
+memory on every frame and writes guild.yaml at most every `FEED_SEEN_SAVE_S` = 15 min (no change-log line). All under
+`config_lock`; every commit message and audit line names the label and the id, never the value.
+
+**The listener (feed.py, discord_feed.py).** `feed.authorize_any(token, shared, per_guild, keys, issued)` → (ok, guild,
+token id, label): the guild's `.env` token first, then an issued token (`FeedMixin.feed_issued` = `match_feed_token` over
+`Guilds.ordered()` — a parked guild's tokens feed nothing), then the shared one. The hello binds the companion to the
+token's guild (`Companion.bound`, plus `token_id` / `label`); whatever `--guild` names is ignored as before. Revocation
+needs no restart: `FeedServer` re-checks an issued token at EVERY frame after the hello (`still_valid` =
+`FeedMixin.feed_token_valid`; a check that raises refuses) and answers `{"type": "error", "auth": true, "message":
+REVOKED}` then closes; `revoke_companion` also closes any live socket with it at once (`FeedServer.close_token`). A bad
+token at hello gets the same `auth: true` error. `on_seen` = `feed_seen` (touch off the loop). `presence()` rows carry
+`token_id` and `label`, so presence is per token. `FeedMixin.start_feed()` (setup_hook) starts the listener when a `.env`
+token is set OR any guild holds an issued token; `ensure_feed()` starts it after the first issue (OIBOT_FEED_BIND picks
+the address; a port in use logs and stays off).
+
+**THE verbs (SetupMixin, discord_pool.py).** `issue_companion(reg, label, by, *, by_id, via, deliver_to=None)`:
+`issue_feed_token` in a thread → `ensure_feed` → with `deliver_to` (the raid leader picked in Discord) the token is DMed
+ONCE (`companion_dm_text`: the token in a spoiler code span, how to start the companion — `OIBOT_FEED_URL` when the host
+names its feed address — and "this message is the only copy") and NOT returned: the owner reads only "Token “…” sent to
+<name>". This DM is allowed under the DM rule: the token is a credential the raid leader must install (an act). A DM
+Discord refuses withdraws the token at once (revoked by "the bot (the DM to X didn't arrive)", a warn audit line) and the
+owner is told to have DMs opened or to issue on the site. Without `deliver_to` (the site) the token is in the result for
+the caller to show once. One audit line: "issued companion token “label” (ft-…) — DMed to X | shown once on the site".
+`revoke_companion(reg, ref, by, …)`: the revoke, the sockets closed, one warn audit line. `companion_rows(reg)` =
+`feed.token_rows(reg, feed_presence(…))`: per token {state live | quiet | disconnected | offline | never | revoked,
+state_words, characters, events, last_seen_label (12-hour guild time), issued_by, issued_label, sent_to, revoked_label,
+revoke_consequence}; `feed.issue_consequence` / `revoke_consequence` = THE sentences (the decide screen, the site's
+confirm, MCP's preview); `feed.token_line` = a row in words.
+
+**Surfaces.** Discord: `/gm config companion` (owner) → `flows_config.CompanionsWizard` (FLOWS["companion"]): the hub
+(one line per active token) → Issue… (a label modal, checked by the verb on `Registry.preview`) → Discord's member picker
+(refuses a bot and someone not in the server) → THE decide screen ("Issue and DM") → done; Revoke… → a select of the
+active tokens → decide (danger). Web: Config › Companions (owner tab, `components/CompanionsCard.tsx`): issue with a
+label → the token in a modal (no outside-click close) with Copy and "I've saved it" → gone from the page for good;
+revoke through `useConfirm` with the server's sentence; presence per token (polled); `useDirty("companions")` while a
+label is typed or a token is on screen. Routes (web/api_setup.py, owner — the id decides, not the officer roles):
+GET `/api/companions` (rows, `listening`, the cap, the issue sentence, `env` = token_state names only), POST
+`/api/companions/issue {label}` (the value in the body once, `Cache-Control: no-store`; the request log keeps path and
+status only; refused for MCP: a value must never land in a transcript), POST `/api/companions/revoke {id}` (id or label).
+MCP: `list_companions` (never a value) and `revoke_companion(token, preview)`. Parity: the DM delivery is
+`configops.BY_DESIGN_ONLY["companion_token_dm"]` (Discord); the old web-only `companion_tokens` entry became
+`companion_env` (the `.env` names card, Loot › Companions, which now points at Config › Companions).
+
+**The companion (companion/oibot_companion.py).** `--token`, `--token-file` (first line; keeps it out of shell history)
+or `OIBOT_COMPANION_TOKEN` (`OIBOT_FEED_TOKEN` still read); the hello carries it as before. An `auth: true` error (at
+hello or after a revoke) raises `TokenRefused` and the companion exits with "ask the guild's owner for a new one" instead
+of reconnecting forever; the in-flight event stays in the Outbox. Docs: companion/README.md.
+
+Tests: tests/test_companion_tokens.py (the hash is never the value and the value is in no file or commit of the scratch
+data repo, labels and the cap, the settings rev unmoved, last_seen throttled, hello by an issued token binds its guild, a
+revoke refused at the next frame and at a new hello with no restart, a live socket closed, the `.env` tokens unchanged,
+a parked guild's token, the listener started for an issued token, the web value once / no-store / never in the request
+log or an ops line, officer / member / MCP 403 on issue, MCP list + revoke with no value, the hub's one DM to the chosen
+member, a refused DM issues nothing, label / bot / owner refusals, every surface present, the companion's token sources
+and its exit on a revoke).
 
 ## 6. Architecture
 

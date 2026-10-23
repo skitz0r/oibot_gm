@@ -81,7 +81,69 @@ def feed_presence(bot, reg) -> list[dict]:
 
 
 class FeedMixin:
-    feed = None  # FeedServer, set in setup_hook when OIBOT_FEED_TOKEN is present
+    feed = None  # FeedServer, started in setup_hook (start_feed) when a token exists, or at the first issued token (ensure_feed)
+
+    # ---- the listener and its tokens (design §5.50): .env tokens as before + every guild's ISSUED tokens (hashed in
+    # guild.yaml), read at each hello and re-checked at each frame — an issue or a revoke needs no restart
+    def feed_issued(self, token: str) -> tuple[str, str, str] | None:
+        """An issued companion token → (guild key, token id, label), over the guilds served now (a parked guild's tokens
+        feed nothing); None when no guild issued it (or it was revoked)."""
+        for reg in self.registries.ordered():
+            rec = reg.match_feed_token(token)
+            if rec is not None:
+                return reg.key, rec.id, rec.label
+        return None
+
+    def feed_token_valid(self, comp: Companion) -> bool:
+        """Is the companion's issued token still good — its guild served and the token not revoked (every frame)."""
+        reg = (getattr(self.registries, "by_key", {}) or {}).get(getattr(comp, "bound", None) or "")
+        return reg is not None and reg.feed_token_active(getattr(comp, "token_id", None))
+
+    def feed_seen(self, comp: Companion) -> None:
+        """A frame with an issued token: its last_seen (in memory now; guild.yaml at most every 15 min, off the loop)."""
+        reg = (getattr(self.registries, "by_key", {}) or {}).get(getattr(comp, "bound", None) or "")
+        if reg is None or not getattr(comp, "token_id", None):
+            return
+        try:
+            import asyncio
+
+            asyncio.get_running_loop().run_in_executor(None, reg.touch_feed_token, comp.token_id)
+        except RuntimeError:  # no loop (a test calling it directly)
+            reg.touch_feed_token(comp.token_id)
+
+    def feed_tokens_issued(self) -> bool:
+        return any(reg.feed_tokens(include_revoked=False) for reg in self.registries.ordered())
+
+    async def start_feed(self, *, force: bool = False) -> bool:
+        """Start the companion listener (once): when a .env token is set or any guild holds an issued token — or `force`
+        (the owner just issued the first one: ensure_feed). OIBOT_FEED_BIND picks the address (default loopback). False
+        when it stays off (nothing to listen for, or the port is taken — the log says which)."""
+        if self.feed is not None:
+            return True
+        from .feed import FeedServer, authorize_any, feed_config, guild_tokens, ops_warner
+
+        token, bind = feed_config()
+        per_guild = guild_tokens()  # OIBOT_FEED_TOKEN_<KEY>: a token that feeds one guild only
+        if not (token or per_guild or force or self.feed_tokens_issued()):
+            print("loot feed disabled (no companion token: issue one on Config › Companions, or set OIBOT_FEED_TOKEN / OIBOT_FEED_TOKEN_<KEY>; and OIBOT_FEED_BIND)")
+            return False
+        feed = FeedServer(self.handle_feed_event, token, bind,
+                          auth=lambda t: authorize_any(t, token, per_guild, lambda: list(self.registries.by_key), self.feed_issued))
+        feed.on_disconnect = self.feed_disconnected
+        feed.on_warn = ops_warner(self)  # "companion too old" (a clock-only kill stamp): once per companion, to ops
+        feed.still_valid = self.feed_token_valid
+        feed.on_seen = self.feed_seen
+        try:
+            await feed.start()
+        except OSError as e:
+            log.error("loot feed could not listen on %s: %s", bind, e)
+            return False
+        self.feed = feed
+        return True
+
+    async def ensure_feed(self) -> bool:
+        """After an issue: the listener runs (started now when it was off), so the new token works without a restart."""
+        return await self.start_feed(force=True)
 
     # ---- routing (design §5.32 + §3.1): each companion feeds a live council of ITS guild
     def companion_key(self, ref: str | None) -> str | None:
@@ -199,7 +261,7 @@ class FeedMixin:
         if getattr(self.registries, "many", False):
             if not bound:
                 return ("several guilds are served: a companion feeds the guild its token belongs to — "
-                        "start it with that guild's own token (OIBOT_FEED_TOKEN_<KEY> on the bot)")
+                        "start it with that guild's own token (issued on Config › Companions, or OIBOT_FEED_TOKEN_<KEY> on the bot)")
             if named and self.companion_key(named) not in (None, bound):
                 return f"this token feeds {bound}; --guild {named!r} is ignored"
             return None

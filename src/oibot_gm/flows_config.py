@@ -2424,5 +2424,129 @@ async def open_officers(interaction: discord.Interaction, reg: Registry, **_seed
     await OfficersWizard(reg, interaction.user.id).start(interaction)
 
 
-__all__ = ["MultiForm", "RaidConfigWizard", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "OwnerTransferWizard", "open_raid_config", "open_aura",
+# ---------------------------------------------------------------- companion tokens (design §5.50; out/dual_interface_design.md §3.1 L08/S-03)
+
+class CompanionsWizard(OwnerWizard):
+    """`/gm config companion` (owner): the Companions hub — every active token as one line (label · presence · last seen)
+    → **Issue…** (a label modal: prose, checked by Registry.issue_feed_token on a shadow) → Discord's member picker (the raid
+    leader who installs it) → THE decide screen (feed.issue_consequence) → SetupMixin.issue_companion DMs the token to them
+    ONCE (a credential they must install: an act under the DM rule); the owner only ever reads "sent to <name>".
+    **Revoke…** → a select of the active tokens → decide (feed.revoke_consequence) → SetupMixin.revoke_companion.
+    Owner-only presses, re-checked on every press. The site's Config › Companions is the same verbs."""
+
+    def __init__(self, reg: Registry, owner_id: int):
+        super().__init__(reg, owner_id, title="Companions", guard=_owner_guard(reg))
+
+    def rows(self, i: discord.Interaction) -> list[dict]:
+        fn = getattr(i.client, "companion_rows", None)
+        if fn is not None:
+            return fn(self.reg)
+        from .feed import token_rows
+
+        return token_rows(self.reg, [])
+
+    async def start(self, i: discord.Interaction, note: str = "") -> None:
+        from .feed import token_line
+        from .registry import FEED_TOKEN_MAX
+
+        rows = self.rows(i)
+        active = [r for r in rows if r["active"]]
+        gone = len(rows) - len(active)
+        lines = [token_line(r) for r in active] or ["No companion token yet."]
+        text = ("The loot companion on a raid leader's PC streams drops and awards from their chat log. Each token feeds "
+                f"**{discord.utils.escape_markdown(self.reg.config.name)}** only; a revoked one stops at its next message.\n\n" + "\n".join(lines)
+                + (f"\n-# {gone} revoked — the site lists them" if gone else "") + (f"\n\n{note}" if note else ""))
+        await self.show(i, text, self.button("Issue…", self.issue_form, discord.ButtonStyle.primary, disabled=len(active) >= FEED_TOKEN_MAX),
+                        self.button("Revoke…", self.pick_revoke, discord.ButtonStyle.secondary, disabled=not active),
+                        self.button("Done", self.done))
+
+    async def done(self, i: discord.Interaction) -> None:
+        await self.finish(i, "Done.")
+
+    # ---- Issue: label → raid leader → decide → DM
+    async def issue_form(self, i: discord.Interaction) -> None:
+        from .registry import FEED_LABEL_MAX
+
+        await self.open_form(i, Form("Issue a companion token", [Field("label", "Label: whose PC runs it", placeholder="Jon's PC", max_length=FEED_LABEL_MAX,
+                                                                       description="a name for this token — you'll see it in the list and when revoking")],
+                                     self.labelled))
+
+    async def labelled(self, si: discord.Interaction, values: dict[str, str]) -> None:
+        if si.user.id != self.owner_id or (await self.guard(si)):
+            await si.response.send_message("Owner only.", ephemeral=True)
+            return
+        label = " ".join((values.get("label") or "").split())
+        try:  # the verb's own checks (empty, too long, a label in use, the cap) on a throw-away copy: nothing written
+            self.reg.preview(lambda sh: sh.issue_feed_token(label, "preview"))
+        except RegistryError as e:
+            await self.refuse(si, str(e), self.issue_form, "Pick another label")
+            return
+        self.draft["label"] = label
+        await self.pick_leader(si)
+
+    async def pick_leader(self, i: discord.Interaction) -> None:
+        await self.show(i, f"Who installs “{discord.utils.escape_markdown(self.draft['label'])}”? The token is DMed to them once — you won't see it.",
+                        self.members("Pick the raid leader", self.picked), self.button("Back", self.start))
+
+    async def picked(self, i: discord.Interaction, users: list) -> None:
+        from . import guild_routing
+        from .feed import issue_consequence
+
+        user = users[0]
+        if getattr(user, "bot", False):
+            await self.refuse(i, "A bot can't run the companion — pick the raid leader.", self.pick_leader, "Pick someone else")
+            return
+        answer, member = await guild_routing.member_of(i.client, self.reg, user.id)
+        if isinstance(user, discord.Member):  # the picker handed us a member of this server
+            answer, member = "yes", user
+        if answer == "no":
+            await self.refuse(i, f"{getattr(user, 'display_name', user.id)} isn't in this server.", self.pick_leader, "Pick someone else")
+            return
+        name = getattr(member or user, "display_name", None) or str(user.id)
+        self.draft.update(user=member or user, name=name)
+        await self.decide(i, issue_consequence(self.reg, self.draft["label"], name), do=self.issue, do_label="Issue and DM")
+
+    async def issue(self, i: discord.Interaction, _note: str | None) -> None:
+        try:
+            res = await i.client.issue_companion(self.reg, self.draft["label"], i.user.display_name, by_id=i.user.id, via="discord", deliver_to=self.draft["user"])
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        await self.finish(i, f"✅ {res['message']}")
+
+    # ---- Revoke: pick → decide
+    async def pick_revoke(self, i: discord.Interaction) -> None:
+        rows = [r for r in self.rows(i) if r["active"]]
+        if not rows:
+            await self.start(i, "No active token to revoke.")
+            return
+        opts = [Opt(r["id"], r["label"], description=r["state_words"] + (f" · last seen {r['last_seen_label']}" if r.get("last_seen_label") else "")) for r in rows]
+        await self.show(i, "Which token stops working?", self.select("Pick the token to revoke", opts, self.revoke_picked), self.button("Back", self.start))
+
+    async def revoke_picked(self, i: discord.Interaction, values: list[str]) -> None:
+        row = next((r for r in self.rows(i) if r["id"] == values[0] and r["active"]), None)
+        if row is None:
+            await self.start(i, "That token was revoked meanwhile.")
+            return
+        self.draft["revoke"] = row["id"]
+        await self.decide(i, row["revoke_consequence"], do=self.revoke, do_label="Revoke", danger=True)
+
+    async def revoke(self, i: discord.Interaction, _note: str | None) -> None:
+        try:
+            line = await i.client.revoke_companion(self.reg, self.draft["revoke"], i.user.display_name, by_id=i.user.id, via="discord")
+        except RegistryError as e:
+            await self.finish(i, f"❌ {e}")
+            return
+        await self.finish(i, f"✅ {line}")
+
+
+@flow("companion")
+async def open_companion(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """`/gm config companion`: the owner's Companions hub (issue a token DMed to the raid leader, revoke)."""
+    if not await _owner_or_refuse(interaction, reg):
+        return
+    await CompanionsWizard(reg, interaction.user.id).start(interaction)
+
+
+__all__ = ["MultiForm", "RaidConfigWizard", "CompanionsWizard", "open_companion", "AuraWizard", "TimezoneWizard", "AboutWizard", "GuildClaimWizard", "OwnerTransferWizard", "open_raid_config", "open_aura",
            "open_timezone", "open_about", "open_guild_claim", "open_owner_transfer", "ChannelsWizard", "ChannelSetWizard", "OfficersWizard", "open_channels", "open_channel_set", "open_officers", "claim_refusal", "next_runs", "hours_words", "tz_cities"]

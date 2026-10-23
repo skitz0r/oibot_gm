@@ -493,7 +493,10 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     # phase 3 (G4): the grid's bulk path and its Claude draft are part of the grid; the companions card is a host fact
     "items_csv": {"surface": "web", "path": "POST /api/loot/items/import", "reason": "a CSV of the item × spec grid is a file to export, edit and import with a preview (MCP export_tiers reads it); Discord has no file editor"},
     "tier_draft": {"surface": "web", "path": "POST /api/loot/items/{key}/draft", "reason": "Claude's tier draft is reviewed ON the grid it fills and saved per item there (MCP draft_tiers + tier_item); Discord has no grid"},
-    "companion_tokens": {"surface": "web", "path": "GET /api/loot/companions", "reason": "which feed-token variables are set and each companion's presence is an owner's host card; Discord shows presence on the council card"},
+    "companion_env": {"surface": "web", "path": "GET /api/loot/companions", "reason": "which .env feed-token variables the host has is a host fact on the owner's card; the ISSUED tokens are on every surface (Config › Companions, /gm config companion, MCP list_companions / revoke_companion)"},
+    # phase 4 (§5.50): a companion token travels ONCE — Discord DMs it to the raid leader who installs it (an act under the DM
+    # rule); the site shows it once to the owner instead; MCP lists and revokes but never issues (a value in a transcript)
+    "companion_token_dm": {"surface": "discord", "path": "flow:companion", "reason": "the token is DMed once to the raid leader who must install it (a credential: an act under the DM rule); the web shows it once to the owner instead, and MCP never issues one so no value lands in a transcript"},
 }
 
 

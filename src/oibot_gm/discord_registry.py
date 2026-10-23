@@ -1228,6 +1228,12 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         if reg:
             await FLOWS["officers"](interaction, reg)
 
+    @config.command(name="companion", description="Owner: loot companion tokens — issue one (DMed to the raid leader once), revoke, see who is connected")
+    async def cfg_companion(interaction: discord.Interaction):
+        reg, interaction = await need(interaction)
+        if reg:
+            await FLOWS["companion"](interaction, reg)
+
     @config.command(name="officer-role", description="Owner: add or remove a Discord role that counts as officer")
     async def cfg_role(interaction: discord.Interaction, role: discord.Role, remove: bool = False):
         reg, interaction = await need(interaction)

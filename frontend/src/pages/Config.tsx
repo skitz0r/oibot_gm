@@ -12,6 +12,7 @@ import { useDirty } from "../hooks/useDirty";
 import { Recruitment } from "../components/Recruitment";
 import { ChannelsCard } from "../components/ChannelsCard";
 import { SetupCard } from "../components/SetupCard";
+import { CompanionsCard } from "../components/CompanionsCard";
 
 interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
@@ -75,6 +76,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
           <Tabs.Tab value="settings">Settings</Tabs.Tab>
           <Tabs.Tab value="channels">Channels</Tabs.Tab>
           <Tabs.Tab value="more">Recruitment and more</Tabs.Tab>
+          {data.owner && <Tabs.Tab value="companions">Companions</Tabs.Tab>}
         </Tabs.List>
 
         <Tabs.Panel value="overview" pt="md">
@@ -95,6 +97,12 @@ export function ConfigPage({ meta }: { meta: Meta }) {
             <NewsCard data={data} ro={ro} onSaved={load} />
           </Stack>
         </Tabs.Panel>
+
+        {data.owner && (
+          <Tabs.Panel value="companions" pt="md">
+            <CompanionsCard />
+          </Tabs.Panel>
+        )}
 
         <Tabs.Panel value="more" pt="md">
           <Stack gap="lg">

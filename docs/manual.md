@@ -103,7 +103,7 @@ your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the 
 inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make it, a seat or swap question, a pre-lock
 "could you come?" — as a card with its two buttons and its deadline, then your **Notices** (what happened that you
 should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
-Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**; every officer edits the **Desired comp** table; each schedule has **Pause / Resume** beside Edit), **Readiness** (per raid: the pool against its size, roles with who could cover, buffs nobody brings, the desired comp against what the pool has, the officers' targets with **Edit targets**, and the regulars' coverage with the next four weeks — §6), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings**, **Channels** and **Recruitment and more**; owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire;
+Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (slots, cadence, nudge/lock/confirm/fill-ask hours, autofill, open_dm, comp and seat weights per raid; the owner presses **Edit rules**; every officer edits the **Desired comp** table; each schedule has **Pause / Resume** beside Edit), **Readiness** (per raid: the pool against its size, roles with who could cover, buffs nobody brings, the desired comp against what the pool has, the officers' targets with **Edit targets**, and the regulars' coverage with the next four weeks — §6), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings**, **Channels**, **Recruitment and more** and, for the owner, **Companions** — the loot companion tokens, §8; owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire;
 Items — the untiered list and the tier grid; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
 bot's recent actions and the plain-text permissions; a badge counts errors folded into an earlier alert), **Applications**
 (the open applications oldest first with every answer in full, the earlier verdicts, Accept / Decline with the same
@@ -948,7 +948,30 @@ this guild. **Loot companion with two servers:** each server's companion needs t
 `OIBOT_FEED_TOKEN_<KEY>` in the bot's `.env` (the guild key in capitals, `-` as `_`; e.g. `OIBOT_FEED_TOKEN_OI`) — and
 feeds that server's raid only, whatever `--guild` says. The shared `OIBOT_FEED_TOKEN` feeds no real raid once two
 servers are looked after; to keep an existing companion as it is, give its server's token
-the shared value. Never hand one server's raid leader another server's token.
+the shared value. Never hand one server's raid leader another server's token. (Simpler: issue each server's tokens from
+the bot, below — an issued token always feeds its own server only.)
+
+**Loot companion tokens (owner).** The raid leader who runs the loot companion needs a token. Issue one per PC — no
+`.env`, no restart:
+- **In Discord:** `/gm config companion` lists your tokens (label · live / quiet / disconnected / not connected · last
+  seen). **Issue…** asks for a label (whose PC — *"Jon's PC"*), then Discord's member picker for the raid leader, then
+  one confirm: the bot **DMs the token to them once** (it's a credential they must install — the one DM this sends).
+  You only ever see *"Token “Jon's PC” sent to Rhozy."* If their DMs from the server are closed, nothing is issued — ask
+  them to allow DMs, or issue it on the site. **Revoke…** picks a token and confirms what it does.
+- **On the site:** Config › **Companions** (owner tab): type a label, **Issue a token** — the token is shown **once**
+  with **Copy** and **I've saved it**; after that it can't be shown again. Hand it to the raid leader privately. Each
+  row has **Revoke** (it confirms first) and shows whether that token's companion is connected now.
+- **From Claude Code (MCP):** `list_companions` and `revoke_companion` — never the values; MCP can't issue one (a token
+  must not end up in a transcript).
+
+A token feeds this server's raids only, whatever the companion's `--guild` says. **Revoking** cuts the companion off at
+its very next message, no restart; it stops with *"the bot refused this companion's token"* and needs a new token. At
+most 10 active tokens per server; labels must be different. The bot keeps only a fingerprint (hash) of each token —
+nobody can read a token back, not even the owner — and token values never appear in the ops channel, logs or the data
+repo (the lines name the label and its id, `ft-…`). The raid leader starts the companion with `--token <token>`,
+`--token-file <file>` or the `OIBOT_COMPANION_TOKEN` environment variable (companion/README.md). The host sets
+`OIBOT_FEED_BIND` (the tailnet address the bot listens on) and may set `OIBOT_FEED_URL` (the address the DM quotes); the
+listener starts by itself with the first token. The older `.env` tokens above keep working.
 
 **Moving a guild to another server** (rather than claiming the new server as a guild of its own):
 `scripts/move_guild.py --to <new server id> [--key <guild>]` with the bot stopped (which stops every server it looks
@@ -1377,6 +1400,7 @@ news post says can make the review read or write another server.
 | `list_guilds` | every server the bot serves, and which one a tool uses when `guild` is left out; `detached` = parked guilds (the bot was removed from their server — never a target) |
 | `setup_status` | the Config page's Setup checklist (each row ok / warn / bad with what was tested), the invite's state, and the Host card (invite link, servers that aren't guilds, parked guilds) |
 | `left_members` · `remove_record` | members who left the Discord server · remove one's record (officers; refused while they're in the server or hold a live seat) |
+| `list_companions` · `revoke_companion` | the loot-companion tokens (label, connected or not, last seen, who issued it — never a value) · revoke one by label or id (`preview=true` says what it does first). Issuing is not a tool: a token is issued on the site or with `/gm config companion` (§8) |
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench, and `summary`: the configuration in words by section (as `config_summary`) |
 | `list_runs` · `get_run` | live sheets per raid with upcoming slots · one run in full (recurring or ad hoc and its schedule; signups; `not_answered` = the regulars who haven't answered, and each regular's answer; board and its `rev`, confirmations, fill asks, callouts with their notes, absences that day, log; an open sheet's health: headcount, roles with who could cover, buffs nobody brings) |
 | `list_raids` · `get_raid` | effective raid settings and overrides; each schedule's class (recurring / ad hoc), regulars count, where each inherited value comes from, seat weights |
@@ -1553,8 +1577,8 @@ correction, never happened — and an award whose reason was given (even if that
 back on the "needs a reason" list. A reason owed and an in-game award that disagrees with the record both stay fixable
 after the council ends (Loot › Tonight lists them under *Still owed from ended councils*).
 
-**Which council it feeds.** A companion's events go to its own server's live council (each server uses its own token,
-`OIBOT_FEED_TOKEN_<KEY>`, see §8); tonight's council comes first — a council kept open past its raid's end (a pick
+**Which council it feeds.** A companion's events go to its own server's live council (each server uses its own token —
+issued with `/gm config companion` or on Config › Companions, see §8); tonight's council comes first — a council kept open past its raid's end (a pick
 still waiting) never takes the companion's events — and when several are live it picks the one whose roster has the
 companion's character. When it can't tell, it refuses and says why, and every live council card shows **Bind
 companion…**: pick it on the right council and its drops and awards go there from then on (until the bot restarts; the
@@ -1589,9 +1613,9 @@ the raider's PC was in) — the companion prints *"companion too old"* and the o
 from the repo's `companion/` folder.
 
 **Loot › Companions** (officers) lists the companions feeding your server — live / quiet / disconnected, last seen,
-events. The owner also sees which feed-token settings the host has (`OIBOT_FEED_TOKEN_<KEY>` for your server, the
-shared `OIBOT_FEED_TOKEN`, the listen address) as **set / not set** — never a token's value; tokens live in `.env` on
-the host.
+events. The owner also sees which older `.env` feed-token settings the host has (`OIBOT_FEED_TOKEN_<KEY>` for your
+server, the shared `OIBOT_FEED_TOKEN`, the listen address) as **set / not set** — never a token's value. Tokens are
+issued and revoked on Config › **Companions** or with `/gm config companion` (§8).
 
 ### Asking the bot in the thread
 

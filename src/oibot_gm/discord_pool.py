@@ -1003,6 +1003,70 @@ class SetupMixin:
         await self._test_ops(reg, "warn", f"test bench: {line}", by=by, via=via, by_id=by_id)
         return line
 
+    # ---- companion tokens (design §5.50; out/dual_interface_design.md §3.1 L08/S-03): THE issue and revoke verbs of every
+    # surface — /gm config companion (DMs the token to the chosen raid leader), Config › Companions (shows it once), MCP
+    # (list + revoke only: a token value never enters a Claude transcript). Callers check the presser is the owner.
+    def companion_rows(self, reg: Registry) -> list[dict]:
+        """The Companions hub: one row per issued token with its presence (feed.token_rows over feed_presence)."""
+        from .discord_feed import feed_presence
+        from .feed import token_rows
+
+        return token_rows(reg, feed_presence(self, reg))
+
+    async def issue_companion(self, reg: Registry, label: str, by: str, *, by_id: int | None = None, via: str = "discord",
+                              deliver_to=None) -> dict:
+        """Issue a companion token for `reg` → {record, token, sent_to, message}. `deliver_to` (a discord User/Member, the
+        raid leader picked in /gm config companion): the token is DMed to them ONCE — a credential they must install, so an
+        act under the DM rule — and NOT returned (`token` None; the owner sees only "sent to <name>"); a DM that can't be
+        delivered withdraws the token at once (revoked) and refuses. Without `deliver_to` (the site) `token` carries the
+        value — the caller shows it once and never stores or logs it. One audit line naming the label and the id; the
+        listener is started if it was off, so the token works without a restart."""
+        name = (getattr(deliver_to, "display_name", None) or getattr(deliver_to, "name", None) or str(deliver_to.id)) if deliver_to is not None else None
+        token, rec = await asyncio.to_thread(reg.issue_feed_token, label, by, by_id, sent_to=name)
+        listening = await self.ensure_feed() if hasattr(self, "ensure_feed") else False
+        if deliver_to is not None:
+            try:
+                await deliver_to.send(companion_dm_text(reg, rec, token, by))
+            except (discord.HTTPException, AttributeError) as e:
+                token = None  # forget it: nobody will ever see this one
+                await asyncio.to_thread(reg.revoke_feed_token, rec.id, f"the bot (the DM to {name} didn't arrive)")
+                await ops_mod.audited(self.ops, reg, by, f"companion token “{rec.label}” ({rec.id}) withdrawn: the DM to {name} didn't arrive",
+                                      via=via, level="warn", by_id=by_id)
+                why = "their DMs from this server are closed" if isinstance(e, discord.Forbidden) else "Discord refused the DM"
+                raise RegistryError(f"Couldn't DM {name} ({why}) — nothing was issued. Ask them to allow DMs from server members, or issue the "
+                                    "token on the site (Config › Companions) and hand it over yourself.") from None
+            token = None  # delivered: the owner never sees it
+        where = f"DMed to {name}" if deliver_to is not None else "shown once on the site"
+        await ops_mod.audited(self.ops, reg, by, f"issued companion token “{rec.label}” ({rec.id}) — {where}", via=via, by_id=by_id)
+        msg = (f"Token “{rec.label}” sent to {name}." if deliver_to is not None else f"Token “{rec.label}” issued — copy it now; it won't be shown again.")
+        if not listening:
+            msg += " The loot feed isn't listening on this host yet (OIBOT_FEED_BIND) — the owner of the host has to set it."
+        return {"record": rec, "token": token, "sent_to": name, "message": msg, "listening": bool(listening)}
+
+    async def revoke_companion(self, reg: Registry, ref: str, by: str, *, by_id: int | None = None, via: str = "discord") -> str:
+        """Revoke a companion token (id or label): stored at once, refused by the feed at the companion's next frame, and
+        any socket using it is closed now. One audit line (label and id)."""
+        rec = await asyncio.to_thread(reg.revoke_feed_token, ref, by, by_id)
+        closed = await self.feed.close_token(rec.id) if getattr(self, "feed", None) is not None else 0
+        await ops_mod.audited(self.ops, reg, by, f"revoked companion token “{rec.label}” ({rec.id})" + (f" — {closed} companion disconnected" if closed else ""),
+                              via=via, level="warn", by_id=by_id)
+        return f"“{rec.label}” revoked" + (" — its companion was disconnected." if closed else ".")
+
+
+FEED_URL_ENV = "OIBOT_FEED_URL"  # optional: the address raid leaders' companions dial (ws://<tailnet name>:8787/feed), named in the token DM
+
+
+def companion_dm_text(reg: Registry, rec, token: str, by: str) -> str:
+    """The ONE DM a companion token travels in (the raid leader must install it — an act under the DM rule): the token
+    in a spoiler code span, how to start the companion, and that this message is the only copy. Never logged."""
+    url = os.environ.get(FEED_URL_ENV) or "<the address the owner gives you>"
+    return (f"{views.guild_prefix(reg)}🔑 **Companion token “{discord.utils.escape_markdown(rec.label)}”** — {discord.utils.escape_markdown(by)} issued it for "
+            f"you to run the loot companion on your PC (it feeds {discord.utils.escape_markdown(reg.config.name)}'s raids only).\n"
+            f"||`{token}`||\n"
+            f"Start it with `python oibot_companion.py --server {url} --token <the token> --character <your character> --log <WoWChatLog.txt>` "
+            "(or set OIBOT_COMPANION_TOKEN). This message is the only copy: keep it private, never post it in a channel. "
+            "The owner can revoke it at any time; then ask for a new one.")
+
 
 # ---------------------------------------------------------------- the public loot log (design §3.1 "Members", D2)
 

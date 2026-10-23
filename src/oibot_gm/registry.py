@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -189,6 +190,31 @@ QUESTIONS_MAX = 15  # three pages of five in Discord's modals
 ANSWER_MAX = 1000
 DECISION_NOTE_MAX = 400  # the officer's note to an applicant (the decide screen's box and the web's)
 ERROR_DM_MAX = 5  # people who get the error alerts (GuildConfig.error_dm_ids)
+FEED_TOKEN_MAX = 10  # companion tokens a guild may hold at once (unrevoked)
+FEED_LABEL_MAX = 40  # a companion token's label ("Jon's PC"): prose, validated, never parsed
+FEED_SEEN_SAVE_S = 900  # a token's last_seen reaches guild.yaml at most this often (it is updated in memory on every frame)
+
+
+class FeedToken(BaseModel):
+    """A companion token of this guild (design §5.50; out/dual_interface_design.md §3.1 L08/S-03). The token itself is a
+    SECRET: only its hash is stored (`hash` = feed.hash_token — sha256 of a 256-bit random value), the value is shown once
+    at issue (DMed to the raid leader, or in the site's one response) and never logged, committed or audited. `id` and
+    `label` are what every line names."""
+
+    id: str
+    hash: str
+    label: str
+    issued_by: str
+    issued_by_id: Optional[int] = None
+    issued_at: str
+    sent_to: Optional[str] = None  # the display name it was DMed to (Discord's Issue), None when shown on the site
+    revoked_at: Optional[str] = None
+    revoked_by: Optional[str] = None
+    last_seen: Optional[str] = None  # the companion's last frame with it (UTC ISO; saved at most every FEED_SEEN_SAVE_S)
+
+    @property
+    def active(self) -> bool:
+        return self.revoked_at is None
 
 
 def prior_row(a: "Applicant") -> dict:
@@ -324,6 +350,9 @@ class GuildConfig(BaseModel):
     # the bot was removed from the server (on_guild_remove → Guilds.detach): the guild is parked — out of routing, the
     # scheduler, the feed, the picker and the homepage — until the bot is back in that server (on_guild_join / available)
     detached_at: Optional[str] = None
+    # companion tokens (design §5.50): HASHED, issued and revoked by the owner (Registry.issue_feed_token / revoke_feed_token);
+    # read by the feed listener at every hello and frame, so an issue or a revoke takes effect without a restart
+    feed_tokens: list[FeedToken] = Field(default_factory=list)
 
     def __init__(self, **data):
         if "raid_teams" in data and not data.get("rosters"):
@@ -396,6 +425,17 @@ class CharactersChanged(RegistryError):
 
 class WishlistChanged(RegistryError):
     """A whole-wishlist save made against a list that changed since its author opened it (a stale wishlist_rev)."""
+
+
+def feed_token_id(used: set[str] | None = None) -> str:
+    """A short id for a companion token record ('ft-3fa9c1'): what lines, buttons and routes name — never the value."""
+    import secrets
+
+    used = used or set()
+    while True:
+        tid = f"ft-{secrets.token_hex(3)}"
+        if tid not in used:
+            return tid
 
 
 def section_words(section: str) -> str:
@@ -1115,6 +1155,112 @@ class Registry:
             return "the owner"
         return ", ".join(f"<@{i}>" for i in ids) if ids else "nobody (the ops channel only)"
 
+    # ---- companion tokens (design §5.50, out/dual_interface_design.md §3.1 L08/S-03): hashed, shown once, revocable
+    def feed_tokens(self, *, include_revoked: bool = True) -> list[FeedToken]:
+        """The guild's companion tokens, newest first (records only: a hash and words, never a value)."""
+        rows = [(n, t) for n, t in enumerate(self.config.feed_tokens) if include_revoked or t.active]
+        return [t for _, t in sorted(rows, key=lambda r: (r[1].issued_at, r[0]), reverse=True)]  # issued in the same second: the later one first
+
+    def feed_token(self, ref: str | None) -> FeedToken | None:
+        """A token record by its id, else by its label (case-insensitive; an active one first); None when unknown."""
+        ref = str(ref or "").strip()
+        if not ref:
+            return None
+        rows = self.config.feed_tokens
+        hit = next((t for t in rows if t.id == ref), None)
+        if hit is not None:
+            return hit
+        low = ref.casefold()
+        named = [t for t in rows if t.label.casefold() == low]
+        return next((t for t in named if t.active), named[0] if named else None)
+
+    def issue_feed_token(self, label: str, by: str, by_id: int | None = None, *, sent_to: str | None = None) -> tuple[str, FeedToken]:
+        """Issue a companion token for this guild → (the token, its record). The token is returned EXACTLY ONCE and
+        never stored: guild.yaml keeps its hash only, the commit message names the label and the id. The label is prose
+        (≤ FEED_LABEL_MAX, one line) and unique among the active tokens; at most FEED_TOKEN_MAX active at once. Callers
+        check the presser is the owner (Registry.is_owner_id) and write the audit line (ops.audited) — never the value."""
+        from .feed import hash_token, new_token
+
+        label = " ".join(str(label or "").split())
+        if not label:
+            raise RegistryError("Give the token a label — whose PC runs the companion (\"Jon's PC\").")
+        if len(label) > FEED_LABEL_MAX:
+            raise RegistryError(f"A label is at most {FEED_LABEL_MAX} characters.")
+        with self.config_lock:
+            active = [t for t in self.config.feed_tokens if t.active]
+            if any(t.label.casefold() == label.casefold() for t in active):
+                raise RegistryError(f"A token labelled “{label}” is already in use — revoke it first, or pick another label.")
+            if len(active) >= FEED_TOKEN_MAX:
+                raise RegistryError(f"{self.config.name} has {FEED_TOKEN_MAX} companion tokens — revoke one before issuing another.")
+            token = new_token()
+            used = {t.id for t in self.config.feed_tokens}
+            tid = feed_token_id(used)
+            rec = FeedToken(id=tid, hash=hash_token(token), label=label, issued_by=str(by or "?"), issued_by_id=int(by_id) if by_id is not None else None,
+                            issued_at=now(), sent_to=sent_to)
+            self.config.feed_tokens.append(rec)
+            try:
+                self.save_config(f"companion token “{label}” ({tid}) issued (by {by})")
+            except Exception:
+                self.config.feed_tokens = [t for t in self.config.feed_tokens if t.id != tid]
+                raise
+        return token, rec
+
+    def revoke_feed_token(self, ref: str, by: str, by_id: int | None = None) -> FeedToken:
+        """Revoke a companion token (by id, or its label): the feed refuses it at the companion's next frame, no restart.
+        Refused when unknown or already revoked. One commit; the record stays (who issued it, when it was last seen)."""
+        with self.config_lock:
+            rec = self.feed_token(ref)
+            if rec is None:
+                raise RegistryError(f"No companion token {ref!r} — the Companions list shows the labels.")
+            if not rec.active:
+                raise RegistryError(f"“{rec.label}” was already revoked.")
+            rec.revoked_at, rec.revoked_by = now(), str(by or "?")
+            try:
+                self.save_config(f"companion token “{rec.label}” ({rec.id}) revoked (by {by})")
+            except Exception:
+                rec.revoked_at = rec.revoked_by = None
+                raise
+        return rec
+
+    def match_feed_token(self, token: str | None) -> FeedToken | None:
+        """The ACTIVE token record whose hash is this token's, else None. Every stored hash is compared in constant
+        time (hmac.compare_digest), all of them, so the answer's timing says nothing about which one matched."""
+        from .feed import hash_token
+
+        if not token:
+            return None
+        digest = hash_token(str(token))
+        hit = None
+        for t in list(self.config.feed_tokens):
+            if hmac.compare_digest(digest.encode(), str(t.hash).encode()) and t.active and hit is None:
+                hit = t
+        return hit
+
+    def feed_token_active(self, tid: str | None) -> bool:
+        """Is the token `tid` still valid (issued here, not revoked)? Read at every frame the companion sends."""
+        rec = next((t for t in self.config.feed_tokens if t.id == tid), None) if tid else None
+        return rec is not None and rec.active
+
+    def touch_feed_token(self, tid: str, *, save_after: float = FEED_SEEN_SAVE_S) -> bool:
+        """A frame arrived with token `tid`: its last_seen moves in memory at once; guild.yaml gets it when the stored
+        value is older than `save_after` seconds (a commit at most every 15 minutes per token, quietly — no change-log
+        line). True when it was written."""
+        with self.config_lock:
+            rec = next((t for t in self.config.feed_tokens if t.id == tid), None)
+            if rec is None:
+                return False
+            stamp = now()
+            saved = getattr(self, "_feed_seen_saved", None)
+            if saved is None:
+                saved = self._feed_seen_saved = {}
+            last = saved.get(tid) or (datetime.fromisoformat(rec.last_seen).timestamp() if rec.last_seen else 0.0)
+            rec.last_seen = stamp
+            if datetime.now(timezone.utc).timestamp() - last < save_after:
+                return False
+            saved[tid] = datetime.now(timezone.utc).timestamp()
+            self.save_config(f"companion token “{rec.label}” ({rec.id}) seen", notify=False)
+            return True
+
     # ---- detached guilds (design §3.5 S-05/S-06): the bot was removed from the server
     def set_detached(self, at: str | None, by: str) -> None:
         """Park (at = an ISO stamp) or re-attach (None) the guild — Guilds.detach / attach own the routing; this is the
@@ -1433,7 +1579,7 @@ class Registry:
     REV_SECTIONS = ("settings", "buffs", "recruitment", "plain")  # plus raids:<instance id>
     # what no rev covers: the scheduler's own bookkeeping (run rosters, card and sheet message ids) — an owner's edit during a
     # raid week must never be refused because a card was re-posted
-    REV_SKIP = ("rosters",)
+    REV_SKIP = ("rosters", "feed_tokens")  # feed_tokens: a companion's last_seen must never 409 an owner's settings edit
 
     def _section_blob(self, section: str):
         cfg = self.config.model_dump()

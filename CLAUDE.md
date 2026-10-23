@@ -119,6 +119,10 @@ src/oibot_gm/
                        detached_at (set_detached; Guilds parks it); Member.left_at (member_left) + remove_record (officers only, someone who left, no
                        live seat — D29: no self-service delete); applications: decide adds the character FIRST, caps the note (DECISION_NOTE_MAX),
                        decided_refusal ("Already declined by X"), Applicant.history → prior_decision_line, role_note (D31), application_state (own first)
+                       Companion tokens (§5.50): GuildConfig.feed_tokens[] FeedToken {id ft-…, hash, label, issued_by, issued_at, sent_to, revoked_at,
+                       last_seen} — HASHED, in REV_SKIP; issue_feed_token(label, by, by_id) → (token, record) = the value returned ONCE, never stored;
+                       revoke_feed_token(id|label); match_feed_token (constant-time over every hash); feed_token_active; touch_feed_token (last_seen,
+                       saved at most every 15 min). Lines and commits name the label and the id, never the value
   discord_registry.py  real commands. Layout (keep it to these groups): /register, /apply (public);
                        /me view|wishlist|plan main|alt|char [action]|absent add|list|clear (members; /me wishlist = flows_wishlist, the Me page builds long lists;
                        /me char = ONE command on flows_roster.CharWizard's self mode — `plan roles` and the char subcommands are gone);
@@ -133,7 +137,7 @@ src/oibot_gm/
                        say "team" (aliases) — don't rename them casually.
                        /gm status|config …(owner: owner (first claim / transfer), the eight <kind>-channel shortcuts = CHANNEL_SHORTCUTS → ONE helper (channel: | clear:)
                        → FLOWS["channel_set"] (the one-screen confirm), channels (the hub), officers (the role hub), officer-role (apply_async), errors-to, loot-channel,
-                       recruitment, raid, aura, timezone, ask-audience, about, show (config_summary sections), plain (the D37 READ view, discord_policy.py); no command
+                       recruitment, raid, aura, timezone, ask-audience, about, companion (flows_config.CompanionsWizard, §5.50), show (config_summary sections), plain (the D37 READ view, discord_policy.py); no command
                        writes reg.config — set_channel / Registry verbs do; no standing rosters)|change|policy …|rule loot|comp|precedents|test …; /raid … (discord_raid.py);
                        /roster remove-record (decide screen → remove_record). Applications: settle_application(…, by_id, via) = THE verdict (one audit line,
                        assign_member_role D31, the DM they wait on), application_decide (card + /roster applicant), application_consequence, client_decide
@@ -209,6 +213,9 @@ src/oibot_gm/
                        else a warn) / setup_tick (hourly, from raid_scheduler.scheduler_tick), note_membership + sweep_left (Member.left_at from Discord's
                        own 404s and sightings — the bot has no members intent, so on_member_remove never arrives), setup_checklist (the Setup card / /gm status), guild_channels/roles, test_bench_clear,
                        plain_table (the plain-text policy in words; plain_read_text / plain_why render /gm config plain).
+                       Companion tokens (§5.50): issue_companion(reg, label, by, by_id, via, deliver_to=) = THE issue (deliver_to → the token DMed ONCE
+                       via companion_dm_text — a credential the raid leader must install, an act under the DM rule — and never returned; a refused DM
+                       withdraws it; else the value in the result for the site to show once), revoke_companion (sockets closed now), companion_rows
                        LootLogMixin: the public loot log (LEDGER_LISTENERS → one line per award in the loot channel, else the run's updates thread; never
                        the signup channel; loot_log off = nothing) with LootWishButton (`lootwish.<gk>:<item key>` → /me wishlist on that item)
                        Test bench (design §5.42): Member.test puppets; SetupMixin.test_seed/test_compose/test_comp/test_answer/puppet_asks/test_bench_clear =
@@ -240,7 +247,8 @@ src/oibot_gm/
                        flows_config (+ OwnerTransferWizard; AuraWizard = a draft hub per buff, one Save this buff through configops.apply_ops; CompTargetsBlock = the
                        Group make-up screen's targets block, in RaidConfigWizard and in CompTargetsWizard = /roster comp; ChannelsWizard
                        (/gm config channels: ChannelSelect / — not set — → draft → Review → apply_ops), ChannelSetWizard (the eight shortcuts' one confirm),
-                       OfficersWizard (/gm config officers: RoleSelect, Map <legacy name>…)) · flows_roster (MemberWizard/CharWizard: /me char, /roster char|rank|set-main) · flows_register (incl. the Discord application: picks → names → schedules → the guild's
+                       OfficersWizard (/gm config officers: RoleSelect, Map <legacy name>…), CompanionsWizard (/gm config companion: the hub → Issue… label
+                       modal → member picker → decide → the DM; Revoke… → decide)) · flows_roster (MemberWizard/CharWizard: /me char, /roster char|rank|set-main) · flows_register (incl. the Discord application: picks → names → schedules → the guild's
                        questions five per modal → review) · flows_recruit (/gm config recruitment) · flows_wishlist (/me wishlist) · flows_misc · flows_news (the proposal decide screen) · flows_loot · flows_test (/gm test compose|comp, the digest's TestAnswerButton). Commands and card buttons call FLOWS[name].
                        tests/wizard_harness.py drives a flow end to end with fake interactions and lints every screen
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id; schedule_set field = <schedule id>.<setting>), describe() diff,
@@ -267,6 +275,7 @@ src/oibot_gm/
                        registers it for Claude Code; the token lives in `.env` only. Design §5.24, manual §8b, tests/test_mcp.py.
                        Loot tools (§5.36): reads / tick / distribute / discard / end as the token; DECISIONS (loot_confirm/award/reason/correct,
                        retire_precedent, tier_item, set_wishlist, import_wishlists) send X-Oibot-Actor = OIBOT_MCP_ACTOR (D8; app.py mcp_actor validates it).
+                       list_companions / revoke_companion (§5.50: never a value; no issue tool — a token must not land in a transcript).
                        Setup tools (raid_set, schedule_*, raid_reset, aura_*, family_set, set_channel, set_config, set_recruitment, set_plain_permissions) send
                        TYPED changes through ops_change(guild, changes, preview) → POST /api/ops/change (`confirmed`; preview=True returns the Described lines);
                        set_comp_target (a `comp` change), list_regulars (GET /api/readiness series), config_summary (GET /api/config/summary) — §5.44
@@ -294,11 +303,16 @@ src/oibot_gm/
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token;
                        dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line;
                        ts = epoch seconds (ts_kind); refuse_event = a clock-only KILL refused + warn_once → on_warn (ops_warner: "companion too old", once);
-                       token_state(key, many=) = which feed-token variables are set (names only — the Loot › Companions card)
+                       token_state(key, many=) = which feed-token variables are set (names only — the Loot › Companions card).
+                       Issued tokens (§5.50): authorize_any (.env guild token → an issued token by hash → the shared one) binds the companion to the
+                       token's guild (Companion.token_id/label); still_valid re-checked at EVERY frame (a revoke = {"type":"error","auth":true}, no
+                       restart), on_seen → last_seen, close_token; hash_token / new_token; token_rows / token_line / issue_consequence /
+                       revoke_consequence = the hub's rows and THE sentences. Values never logged, stored or in an ops line
   discord_feed.py      FeedMixin through the LootMixin verbs: drop → tick (+ auto-distribute); loot → confirm / mismatch (recorded, reason pending) / manual /
                        conflict; kill. loot_route(comp): the token's guild → one live council (test only from a puppet/tester companion; several → by
                        seated character; else refused; a council past its run's close never competes with tonight's); no live run → held 10 min
-                       (persisted); feed_presence(bot, reg) rows, feed_status the line
+                       (persisted); feed_presence(bot, reg) rows (token_id / label per companion), feed_status the line; start_feed (setup_hook: a .env token
+                       or any guild's issued token) / ensure_feed (after the first issue), feed_issued / feed_token_valid / feed_seen (§5.50)
   ops.py               ops feed (channel line per action; errors DM error_targets(cfg) = error_dm_ids, default the owner — ONE DM per (guild, error_signature)
                        per 30 min, later ones EDIT it and count in suppressed_for; 3 failed ops-channel posts alert once); the recent-lines ring is per guild (recent_for(key)), LISTENERS get the key.
                        ONE audit format: audit_line / audited(ops, reg, by, line, via, level, by_id) → "[web] Jon (host): …" — `by` is a display name,
@@ -311,7 +325,8 @@ scripts/agents/        loop EVERY guild (Api().guilds()): review.py (daily 9:00 
                        `auto: False` = the proposal moved meanwhile: restarted at the next quiet poll / the owner's Apply now without moving it), health/revert — by the
                        SCRIPT; the gate refuses a profile approval that wasn't the owner's (news.profile_approval_refusal → failed); --pr), menubar.py (rumps via uv --with),
                        install/uninstall.sh; plists in scripts/launchd/
-companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests
+companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests; the token from --token,
+                       --token-file or OIBOT_COMPANION_TOKEN; an auth error (revoked) exits instead of reconnecting (TokenRefused)
   web/app.py           FastAPI served inside the bot (OIBOT_WEB_BIND): Discord OAuth2, landing page, icon/emblem/card images, old URLs → /app redirects;
                        published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Several guilds: `selected_reg` picks ONE guild per
                        request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first
@@ -333,7 +348,8 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        bearer), GET /api/admin/left + POST
                        /api/admin/member/remove (officers' Remove record); discord_ready(bot, reg) → /api/meta.discord. No /api/admin/invite: the invite
                        is created AT the recruitment Save (invite_create). A stale membership (§2.9): web/app.viewer drops v.officer for any write
-                       (v.stale_write → api.who 503 STALE_OFFICER)
+                       (v.stale_write → api.who 503 STALE_OFFICER). Companion tokens (§5.50, owner): GET /api/companions (rows, never a value),
+                       POST /api/companions/issue (the value in that body ONCE, no-store; refused for MCP), POST /api/companions/revoke
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras
@@ -354,9 +370,10 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        components/ConfirmModal.tsx (useConfirm), components/ReviewModal.tsx (THE edit-mode review: ReviewModal + useOpsSave = the tiered Save over
                        /api/ops/change, the result sheet, stale-token / restart handling; api.ts opsApi + OpsChange / Described / OpsReply), components/PlainPermissions.tsx (Ops page: who may do what, where), components/ScheduleCard.tsx (Raids page schedules + editor: Pause/Resume, diff-only Save, presets, the server's preview), components/TellTheBot.tsx (the officers' box: /api/ask → or the plain-text preview + Apply; officer pages' rail + each SheetCard; NEVER on Me — D40), components/CompTargets.tsx (the Desired comp table + Edit targets, a `comp` change; Readiness + Raids), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
                        components/ChannelsCard.tsx + SetupCard.tsx (Config: channels edit mode via useOpsSave; Setup / Host cards), LeftServer.tsx (Members: Remove record),
-                       MyApplication.tsx (Me: own application), setupApi.ts (their shapes), hooks/useDirty.ts (EVERY edit mode registers — linted — so the server selector asks
+                       MyApplication.tsx (Me: own application), CompanionsCard.tsx (Config › Companions, owner: issue → the token once in a modal with
+                       Copy / "I've saved it", revoke via useConfirm, presence per token), setupApi.ts (their shapes), hooks/useDirty.ts (EVERY edit mode registers — linted — so the server selector asks
                        "Save or discard your edits first");
-                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Companions) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more; Mantine, left rail,
+                       `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents · Items (+ Claude draft, CSV import/export) · Wishlists · Companions) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more · Companions (owner); Mantine, left rail,
                        tables switch to an edit mode with one Save). Screenshot audit: `uv run python scripts/shots.py` (Playwright, desktop + phone)
   store.py             GitStore: atomic writes, append-only jsonl, commit + debounced push; resolve_data_root()
   render.py            raid thumbnails and generated class / role / buff badges (the emoji fallback; no roster or analytics images any more);  report_html.py → out/coverage.html

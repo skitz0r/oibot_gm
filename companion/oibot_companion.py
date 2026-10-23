@@ -13,6 +13,12 @@ Dependency: `pip install websockets`.
 Stamps: every event's `ts` is epoch seconds (the chat log's local stamp read on this PC); a bot refuses a kill stamped
 with a clock time only (a companion older than this one) and tells its ops channel once — update this file then.
 
+Token: the guild's owner issues one (Config › Companions on the site, or /gm config companion — DMed to you once). Give it
+with --token, --token-file (a file holding it: keeps it out of your shell history) or the OIBOT_COMPANION_TOKEN
+environment variable (OIBOT_FEED_TOKEN, the older name, still works). The hello frame carries it. A token the bot refuses
+or revokes ends the companion with a message ({"type":"error","auth":true}) instead of retrying forever: ask the owner for
+a new one.
+
 Delivery: an event stays in the Outbox until the bot acks it (matched by its idem). A dropped socket re-sends the
 in-flight event first after the reconnect; an error reply (the bot refused it — e.g. several loot councils are live and
 this character is rostered on none, until an officer binds the companion on a council card) is retried every RETRY_S
@@ -127,12 +133,39 @@ def wire(ev: dict) -> str:
     return json.dumps({k: v for k, v in ev.items() if not k.startswith("_")})
 
 
+class TokenRefused(Exception):
+    """The bot refused this companion's token (wrong, or revoked by the owner): reconnecting can't help."""
+
+
+def auth_refusal(reply: dict) -> str | None:
+    """The bot's message when a reply refuses the token itself ({"type":"error","auth":true}), else None."""
+    if isinstance(reply, dict) and reply.get("type") == "error" and reply.get("auth"):
+        return str(reply.get("message") or "token refused")
+    return None
+
+
+def token_from(args: argparse.Namespace, env: dict | None = None) -> str:
+    """--token, else the first line of --token-file, else OIBOT_COMPANION_TOKEN, else OIBOT_FEED_TOKEN (the older name)."""
+    env = os.environ if env is None else env
+    if getattr(args, "token", ""):
+        return args.token.strip()
+    path = getattr(args, "token_file", None)
+    if path:
+        with open(path, encoding="utf-8") as f:
+            return (f.readline() or "").strip()
+    return (env.get("OIBOT_COMPANION_TOKEN") or env.get("OIBOT_FEED_TOKEN") or "").strip()
+
+
 async def deliver(ws, ev: dict, outbox: Outbox, verbose: bool = False) -> str:
     """Send one event and wait for ITS reply (an ack or error with its idem; a heartbeat's reply is skipped):
-    'ack' | 'refused' | 'dropped'. A socket error propagates and leaves the event in flight (re-sent after the reconnect)."""
+    'ack' | 'refused' | 'dropped'. A socket error propagates and leaves the event in flight (re-sent after the reconnect).
+    A refusal of the TOKEN (revoked meanwhile) raises TokenRefused — whatever idem it carries."""
     await ws.send(wire(ev))
     while True:
         reply = json.loads(await ws.recv())
+        why = auth_refusal(reply)
+        if why is not None:
+            raise TokenRefused(why)
         if reply.get("idem") != ev.get("idem"):
             continue  # a heartbeat's ack, or a late reply to something else
         if reply.get("type") == "error":
@@ -221,7 +254,11 @@ async def run(args: argparse.Namespace) -> None:
             try:
                 async with websockets.connect(args.server, max_size=2**20) as ws:
                     await ws.send(json.dumps({"type": "hello", "token": args.token, "character": args.character, "client": "oibot-companion/0.1", "guild": args.guild}))
-                    print("connected:", await ws.recv())
+                    welcome = json.loads(await ws.recv())
+                    why = auth_refusal(welcome)
+                    if why is not None:
+                        raise TokenRefused(why)
+                    print("connected:", {k: v for k, v in welcome.items() if k != "token"})
                     backoff = 2
 
                     async def heartbeat():
@@ -244,6 +281,9 @@ async def run(args: argparse.Namespace) -> None:
                             await deliver(ws, ev, outbox, args.verbose)  # a dropped socket leaves ev in flight
                     finally:
                         hb.cancel()
+            except TokenRefused as e:
+                sys.exit(f"the bot refused this companion's token: {e}. Ask the guild's owner for a new one "
+                         "(Config › Companions or /gm config companion) and start again with it.")
             except Exception as e:  # noqa: BLE001
                 print(f"disconnected ({e}); retry in {backoff}s")
                 await asyncio.sleep(backoff)
@@ -255,7 +295,9 @@ async def run(args: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="oibot companion: stream WoW chat-log loot events to oibot_GM")
     p.add_argument("--server", default=os.environ.get("OIBOT_SERVER", "ws://127.0.0.1:8787/feed"))
-    p.add_argument("--token", default=os.environ.get("OIBOT_FEED_TOKEN", ""))
+    p.add_argument("--token", default="",
+                   help="the companion token the guild's owner issued you (or OIBOT_COMPANION_TOKEN; never post it anywhere)")
+    p.add_argument("--token-file", help="a file whose first line is the token (keeps it out of your shell history)")
     p.add_argument("--character", default=os.environ.get("OIBOT_CHARACTER", "?"), help="your character (the master looter)")
     p.add_argument("--guild", default=os.environ.get("OIBOT_GUILD", ""), help="guild key on the bot (optional)")
     p.add_argument("--log", default=os.environ.get("OIBOT_CHATLOG"), help="path to WoWChatLog.txt")
@@ -263,8 +305,9 @@ def main() -> None:
     p.add_argument("--dry-run", action="store_true", help="with --replay: print parsed events, no network")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
+    args.token = token_from(args)
     if not args.dry_run and not args.token:
-        sys.exit("need --token (or OIBOT_FEED_TOKEN)")
+        sys.exit("need the companion token: --token, --token-file, or OIBOT_COMPANION_TOKEN (the guild's owner issues one)")
     asyncio.run(run(args))
 
 

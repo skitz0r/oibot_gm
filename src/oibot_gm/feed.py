@@ -22,15 +22,25 @@ Tokens (design §5.32 "Feed"): `OIBOT_FEED_TOKEN` is the shared one (one guild s
 `OIBOT_FEED_TOKEN_<KEY>` belongs to one guild (key upper-cased, anything not a letter or digit → `_`). A companion
 authenticated with a guild's token feeds that guild only, whatever its hello names; with several guilds the shared
 token feeds no real raid (mock sessions only), so a token handed to one guild's raid leader can't reach another guild.
+
+Issued tokens (design §5.50): the owner issues a guild's companion token from Config › Companions or /gm config companion
+— stored HASHED in guild.yaml (`feed_tokens[]`, Registry.issue_feed_token), shown once, revocable. `authorize_any` takes
+them beside the .env ones (the .env per-guild token first, then the issued ones by hash in constant time, then the shared
+one) and binds the companion to the token's guild; the server re-checks an issued token at EVERY frame (`still_valid`), so
+a revoke disconnects the companion at its next message without a restart ({"type":"error","auth":true,…}: the companion
+stops retrying). Token values are never logged, printed, stored in the data repo or written to an ops line — only the id
+and the label.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
 import json
 import logging
 import os
 import re
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
@@ -43,11 +53,18 @@ QUIET_AFTER_S = 120  # no event for this long: "quiet" (breaks and trash pulls a
 GONE_KEEP_S = 6 * 3600  # a disconnected companion stays listed (state "disconnected") this long
 
 
+REVOKED = "this companion's token was revoked — ask the guild's owner for a new one (Config › Companions)"
+BAD_TOKEN = "hello with a valid token first"
+
+
 class Companion:
-    def __init__(self, character: str, client: str, guild: str, peer: str, bound: str | None = None):
+    def __init__(self, character: str, client: str, guild: str, peer: str, bound: str | None = None, token_id: str | None = None,
+                 label: str | None = None):
         self.character, self.client, self.guild, self.peer = character, client, guild, peer
         self.named = guild  # what its hello said (the note when it differs from its token's guild)
-        self.bound = bound  # the guild key its token belongs to (OIBOT_FEED_TOKEN_<KEY>); None = the shared token
+        self.bound = bound  # the guild key its token belongs to (OIBOT_FEED_TOKEN_<KEY> or an issued token); None = the shared token
+        self.token_id, self.label = token_id, label  # an ISSUED token's record id and label (None: a .env token)
+        self.ws = None  # the socket (FeedServer.close_token closes it on a revoke)
         if bound:
             self.guild = bound  # the token decides; status and routing read this
         self.connected_at = datetime.now(timezone.utc)
@@ -73,10 +90,13 @@ class Companion:
 
 class FeedServer:
     def __init__(self, handler: Handler, token: str | None, bind: str = "127.0.0.1:8787",
-                 auth: Callable[[str], tuple[bool, str | None]] | None = None):
-        """`auth(token) → (ok, guild key the token belongs to | None)`: the bot's per-guild tokens; without it, the one
-        shared `token`."""
+                 auth: Callable[[str], tuple] | None = None):
+        """`auth(token) → (ok, guild key the token belongs to | None[, issued token id | None, label])`: the bot's
+        per-guild tokens; without it, the one shared `token`. `still_valid(companion)`: is its issued token still
+        unrevoked (read at every frame); `on_seen(companion)`: a frame arrived (the token's last_seen)."""
         self.handler, self.token, self.auth = handler, token, auth
+        self.still_valid: Callable[["Companion"], bool] | None = None
+        self.on_seen: Callable[["Companion"], None] | None = None
         host, _, port = bind.rpartition(":")
         self.host, self.port = host or "127.0.0.1", int(port or 8787)
         self.companions: dict[str, Companion] = {}  # peer -> companion
@@ -113,19 +133,26 @@ class FeedServer:
                 await ws.send_json({"type": "error", "message": "bad json"})
                 continue
             if comp is None:
-                ok, bound = self.authorize(ev.get("token")) if ev.get("type") == "hello" else (False, None)
+                ok, bound, tid, label = self.authorize(ev.get("token")) if ev.get("type") == "hello" else (False, None, None, None)
                 if not ok:
-                    await ws.send_json({"type": "error", "message": "hello with a valid token first"})
+                    await ws.send_json({"type": "error", "auth": True, "message": BAD_TOKEN})
                     await ws.close()
                     break
-                comp = Companion(ev.get("character", "?"), ev.get("client", "?"), ev.get("guild", ""), peer, bound=bound)
+                comp = Companion(ev.get("character", "?"), ev.get("client", "?"), ev.get("guild", ""), peer, bound=bound, token_id=tid, label=label)
+                comp.ws = ws
                 if self.gone.pop((comp.character, comp.guild), None) is not None:
                     comp.was_disconnected = True
                 self.companions[peer] = comp
+                self.seen(comp)
                 reply = await self.handler(ev, comp)
                 await ws.send_json({"type": "welcome", **(reply or {})})
                 continue
+            if not self.valid(comp):  # revoked since the hello: refused at this frame, no restart (design §5.50)
+                await ws.send_json({"type": "error", "auth": True, "idem": ev.get("idem"), "message": REVOKED})
+                await ws.close()
+                break
             comp.touch()
+            self.seen(comp)
             idem = ev.get("idem")
             refusal = refuse_event(ev)
             if refusal is not None:  # not an ack: the companion prints it (and gives up after its retry window)
@@ -168,10 +195,45 @@ class FeedServer:
             log.warning(text)
         return True
 
-    def authorize(self, token: Any) -> tuple[bool, str | None]:
+    def authorize(self, token: Any) -> tuple[bool, str | None, str | None, str | None]:
+        """(ok, guild key, issued token id, label) — `auth` may answer the older (ok, guild) pair."""
         if self.auth is not None:
-            return self.auth(str(token or ""))
-        return same(token, self.token), None
+            got = tuple(self.auth(str(token or "")))
+            return (*got, None, None, None)[:4]
+        return same(token, self.token), None, None, None
+
+    def valid(self, comp: "Companion") -> bool:
+        """An issued token is re-checked at every frame (a revoke takes effect at once); a .env token always holds."""
+        if comp.token_id is None or self.still_valid is None:
+            return True
+        try:
+            return bool(self.still_valid(comp))
+        except Exception:  # noqa: BLE001 — a lookup that fails must not let a revoked token through
+            log.exception("feed token check failed")
+            return False
+
+    def seen(self, comp: "Companion") -> None:
+        if comp.token_id is not None and self.on_seen is not None:
+            try:
+                self.on_seen(comp)
+            except Exception:  # noqa: BLE001 — last_seen is bookkeeping
+                log.exception("feed last_seen failed")
+
+    async def close_token(self, token_id: str) -> int:
+        """Disconnect every companion using the issued token `token_id` now (the revoke's courtesy — the per-frame check is
+        the guarantee). How many sockets were closed."""
+        n = 0
+        for comp in [c for c in self.companions.values() if c.token_id == token_id]:
+            ws = comp.ws
+            if ws is None or ws.closed:
+                continue
+            try:
+                await ws.send_json({"type": "error", "auth": True, "message": REVOKED})
+                await ws.close()
+                n += 1
+            except Exception:  # noqa: BLE001 — a socket already gone
+                pass
+        return n
 
     def status(self, guild: str | None = None, resolve: Callable[["Companion"], str | None] | None = None) -> str:
         """The connected companions as one line; `guild` (a key) keeps only those feeding that guild — the companion's
@@ -193,7 +255,8 @@ class FeedServer:
         if guild is not None:
             comps = [c for c in comps if (resolve(c) if resolve else c.guild) == guild]
         return [{"character": c.character, "client": c.client, "guild": c.guild, "state": c.state, "events": c.events,
-                 "last_seen": (c.disconnected_at or c.last_seen).isoformat(timespec="seconds"), "silent_s": int(c.silent_for)} for c in comps]
+                 "last_seen": (c.disconnected_at or c.last_seen).isoformat(timespec="seconds"), "silent_s": int(c.silent_for),
+                 "token_id": getattr(c, "token_id", None), "label": getattr(c, "label", None)} for c in comps]
 
 
 GUILD_TOKEN_PREFIX = "OIBOT_FEED_TOKEN_"
@@ -230,6 +293,37 @@ def authorize(token: str, shared: str | None, per_guild: dict[str, str], keys: C
             if key:
                 return True, key
     return same(token, shared), None
+
+
+def authorize_any(token: str, shared: str | None, per_guild: dict[str, str], keys: Callable[[], list[str]],
+                  issued: Callable[[str], tuple[str, str, str] | None] | None = None) -> tuple[bool, str | None, str | None, str | None]:
+    """A hello's token → (ok, guild key, issued token id, label): a guild's .env token first (as `authorize`), then an
+    issued token by hash (`issued(token)` → (guild key, token id, label) or None — Registry.match_feed_token over the
+    guilds served), then the shared one."""
+    for suffix, t in per_guild.items():
+        if same(token, t):
+            key = next((k for k in keys() if token_suffix(k) == suffix), None)
+            if key:
+                return True, key, None, None
+    if token and issued is not None:
+        hit = issued(str(token))
+        if hit:
+            return True, hit[0], hit[1], hit[2]
+    return same(token, shared), None, None, None
+
+
+TOKEN_PREFIX = "oibot-feed-"
+
+
+def new_token() -> str:
+    """A fresh companion token: 256 random bits, URL-safe, with a recognisable prefix (a leak scanner can spot it)."""
+    return TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def hash_token(token: str) -> str:
+    """What guild.yaml keeps of a companion token: 'sha256:<hex>'. The token is 256 random bits, so a plain digest is
+    enough (there is no dictionary to guess from); it is never reversed, only compared (hmac.compare_digest)."""
+    return "sha256:" + hashlib.sha256(str(token).encode()).hexdigest()
 
 
 # ---------------------------------------------------------------- stamps (design §3.5 L12)
@@ -307,3 +401,63 @@ def token_state(key: str, *, many: bool, env: dict | None = None) -> dict:
     own = bool(env.get(var))
     return {"shared": shared, "shared_feeds": shared and not many, "var": var, "set": own,
             "listener": shared or bool(guild_tokens(env)), "bind_set": bool(env.get("OIBOT_FEED_BIND"))}
+
+
+# ---------------------------------------------------------------- issued tokens on the surfaces (design §5.50)
+STATE_RANK = {"live": 0, "quiet": 1, "disconnected": 2}
+STATE_WORDS = {"live": "live", "quiet": "quiet", "disconnected": "disconnected", "offline": "not connected", "never": "never connected",
+               "revoked": "revoked"}
+
+
+def token_rows(reg, presence: list[dict]) -> list[dict]:
+    """The Companions hub's rows (Config › Companions, /gm config companion, MCP list_companions): one per issued token,
+    newest first — {id, label, state (live | quiet | disconnected | offline | never | revoked), state_words, characters,
+    events, last_seen (ISO), last_seen_label (12-hour guild time), issued_by, issued_label, sent_to, active, revoked_label,
+    revoked_by, revoke_consequence}. `presence` = feed_presence rows (they carry token_id). Never a value, never a hash."""
+    out = []
+    for rec in reg.feed_tokens():
+        mine = [p for p in presence if p.get("token_id") == rec.id]
+        live = sorted(mine, key=lambda p: STATE_RANK.get(p.get("state"), 9))
+        if not rec.active:
+            state = "revoked"
+        elif live:
+            state = live[0].get("state") or "offline"
+        else:
+            state = "offline" if rec.last_seen else "never"
+        stamps = [p.get("last_seen") for p in mine if p.get("last_seen")] + ([rec.last_seen] if rec.last_seen else [])
+        seen = max(stamps, key=lambda t: datetime.fromisoformat(t)) if stamps else None
+        row = {"id": rec.id, "label": rec.label, "state": state, "state_words": STATE_WORDS.get(state, state),
+               "characters": sorted({str(p.get("character") or "?") for p in mine}), "events": sum(int(p.get("events") or 0) for p in mine),
+               "last_seen": seen, "last_seen_label": reg.local12(seen) if seen else None, "issued_by": rec.issued_by,
+               "issued_label": reg.local12(rec.issued_at), "sent_to": rec.sent_to, "active": rec.active,
+               "revoked_label": reg.local12(rec.revoked_at) if rec.revoked_at else None, "revoked_by": rec.revoked_by}
+        row["revoke_consequence"] = revoke_consequence(reg, rec, row) if rec.active else None
+        out.append(row)
+    return out
+
+
+def token_line(row: dict) -> str:
+    """One hub row in words (Discord, MCP): 'Jon's PC · live (Rhozy) · last seen Tue 9 Dec 8:14 PM'."""
+    who = f" ({', '.join(row['characters'])})" if row.get("characters") and row["state"] in ("live", "quiet", "disconnected") else ""
+    if row["state"] == "revoked":
+        return f"~~{row['label']}~~ · revoked {row.get('revoked_label') or ''}".rstrip()
+    seen = f" · last seen {row['last_seen_label']}" if row.get("last_seen_label") else ""
+    return f"**{row['label']}** · {row['state_words']}{who}{seen}"
+
+
+def issue_consequence(reg, label: str | None, name: str | None = None) -> str:
+    """THE sentence of an issue: DMed once to `name` (Discord's confirm), or shown once to the owner (the site's hint)."""
+    where = (f"DMed once to **{name}** — they start the companion with it on their PC. You won't see it." if name else
+             "shown to you ONCE on this page — copy it to the raid leader's PC; it can't be shown again.")
+    what = f"A new companion token “{label}”" if label else "A new companion token"
+    return (f"{what} for **{reg.config.name}** is {where} It feeds this guild's raids only, works at once "
+            "(no restart) and stops at its next message when you revoke it.")
+
+
+def revoke_consequence(reg, rec, row: dict | None = None) -> str:
+    """THE confirm sentence of a revoke (the decide screen, the site's confirm, MCP's preview)."""
+    state = (row or {}).get("state")
+    who = ", ".join((row or {}).get("characters") or [])
+    on = f"connected now{f' ({who})' if who else ''} — it is cut off at its next message"
+    now = {"live": on, "quiet": on, "disconnected": "not connected — it can't reconnect"}.get(state or "", "it can't connect again")
+    return f"“{rec.label}” stops working: {now}. Whoever runs that companion needs a new token. Nothing else changes; nobody is DMed."
