@@ -2904,9 +2904,14 @@ token id, label): the guild's `.env` token first, then an issued token (`FeedMix
 `Guilds.ordered()` — a parked guild's tokens feed nothing), then the shared one. The hello binds the companion to the
 token's guild (`Companion.bound`, plus `token_id` / `label`); whatever `--guild` names is ignored as before. Revocation
 needs no restart: `FeedServer` re-checks an issued token at EVERY frame after the hello (`still_valid` =
-`FeedMixin.feed_token_valid`; a check that raises refuses) and answers `{"type": "error", "auth": true, "message":
-REVOKED}` then closes; `revoke_companion` also closes any live socket with it at once (`FeedServer.close_token`). A bad
-token at hello gets the same `auth: true` error. `on_seen` = `feed_seen` (touch off the loop). `presence()` rows carry
+`FeedMixin.feed_token_valid`) and answers `{"type": "error", "auth": true, "message": REVOKED}` then closes;
+`revoke_companion` also closes any live socket with it at once (`FeedServer.close_token`). A bad token at hello gets the
+same `auth: true` error. `auth: true` (which ends the companion) is kept for a genuine no-match or revoke: when the bot
+can't tell for now — the token's guild is parked with the token unrevoked (`Guilds.detached`), an issued-looking token
+(`oibot-feed-…`) matches nothing while a guild failed to load (`Guilds.load_errors`), or the check itself raised —
+`feed_issued` raises `feed.TokenUnverifiable` / `still_valid` answers None / `FeedServer.authorize` catches, and the reply
+is a plain `{"type": "error", "message": UNAVAILABLE}` (no idem, no auth) and the socket closes: nothing is applied, the
+event stays in the companion's flight and it reconnects with its backoff (fail-closed for data, not fatal mid-raid). `on_seen` = `feed_seen` (touch off the loop). `presence()` rows carry
 `token_id` and `label`, so presence is per token. `FeedMixin.start_feed()` (setup_hook) starts the listener when a `.env`
 token is set OR any guild holds an issued token; `ensure_feed()` starts it after the first issue (OIBOT_FEED_BIND picks
 the address; a port in use logs and stays off).
@@ -2942,7 +2947,13 @@ MCP: `list_companions` (never a value) and `revoke_companion(token, preview)`. P
 **The companion (companion/oibot_companion.py).** `--token`, `--token-file` (first line; keeps it out of shell history)
 or `OIBOT_COMPANION_TOKEN` (`OIBOT_FEED_TOKEN` still read); the hello carries it as before. An `auth: true` error (at
 hello or after a revoke) raises `TokenRefused` and the companion exits with "ask the guild's owner for a new one" instead
-of reconnecting forever; the in-flight event stays in the Outbox. Docs: companion/README.md.
+of reconnecting forever; the in-flight event stays in the Outbox. A plain error at the hello (UNAVAILABLE) is retried
+with the reconnect backoff.
+
+**The records stay on the hub.** `registry.readable_config(cfg)` = `model_dump()` without `PRIVATE_CONFIG_FIELDS`
+(`feed_tokens`): what the site's Config "As stored" (GET `/api/config`, officers) and the config parser's prompt
+(`configops.current_config_text`, any requester — a member's plain-text request included) read, so no hash, label,
+issuer, `sent_to` or `last_seen` reaches an officer or a prompt; guild.yaml itself keeps them. Docs: companion/README.md.
 
 Tests: tests/test_companion_tokens.py (the hash is never the value and the value is in no file or commit of the scratch
 data repo, labels and the cap, the settings rev unmoved, last_seen throttled, hello by an issued token binds its guild, a
@@ -2950,7 +2961,8 @@ revoke refused at the next frame and at a new hello with no restart, a live sock
 a parked guild's token, the listener started for an issued token, the web value once / no-store / never in the request
 log or an ops line, officer / member / MCP 403 on issue, MCP list + revoke with no value, the hub's one DM to the chosen
 member, a refused DM issues nothing, label / bot / owner refusals, every surface present, the companion's token sources
-and its exit on a revoke).
+and its exit on a revoke; the officer's /api/config and the parser prompt hold no token record; a parked or unloaded
+guild's token, a throwing check and a throwing auth answer UNAVAILABLE without auth and never log the value).
 
 ## 6. Architecture
 

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from .llm.provider import Provider
 from .constants import ROLES
 from .loot_ops import SCHEMA as LOOT_SCHEMA
-from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError, join_words
+from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError, join_words, readable_config
 
 log = logging.getLogger(__name__)
 
@@ -303,7 +303,7 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     member-role names, the unconfirmed characters) are left out for anyone else, like the help snapshot does.
     `raids`: the bot's RaidStore (the live events), None reads it from disk."""
     raids_store = raids
-    cfg = reg.config.model_dump()
+    cfg = readable_config(reg.config)  # never the companion token records (hashes, labels): a member may be the requester
     cfg.pop("rosters", None)  # the ephemeral run rosters are noise here; live runs are listed on their own below
     roles = cfg.pop("member_role_ids", None)
     overrides = cfg.pop("raids", None) or {}  # the stored overrides get their own section below, each value beside its words

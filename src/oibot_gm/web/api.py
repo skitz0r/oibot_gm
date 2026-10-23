@@ -2082,6 +2082,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         from ..discord_pool import CHANNEL_KINDS
         from ..policy import PolicyStore
         from .api_loot import loot_log_state
+        from ..registry import readable_config
 
         reg, cfg = v.reg, v.reg.config
         ps = PolicyStore(bot.registries.store, reg.key)
@@ -2092,7 +2093,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         # officer roles by id (ids as strings: JS numbers can't hold a snowflake); the pickable roles likewise
         guild_roles = [{"id": str(r.id), "name": r.name} for r in sorted(guild.roles, key=lambda r: -r.position) if not r.is_default() and not r.managed] if guild else []
         officer_roles = [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.officer_role_ids]
-        return {"yaml": yaml.safe_dump(cfg.model_dump(), sort_keys=False),
+        return {"yaml": yaml.safe_dump(readable_config(cfg), sort_keys=False),  # officers read it: never the companion token records
                 "docs": {d: {"text": ps.read(d), "compiled": bool(ps.compiled(d)), "summary": ((ps.compiled(d) or {}).get("summary") if isinstance(ps.compiled(d), dict) else None)} for d in ("loot", "comp", "persona")},
                 # `missing`: set, but not a channel the bot can see any more (deleted, or its permissions changed)
                 "channels": {k: {"id": str(getattr(cfg, attr)) if getattr(cfg, attr) else None, "name": chans.get(str(getattr(cfg, attr))),

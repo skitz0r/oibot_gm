@@ -28,8 +28,10 @@ Issued tokens (design §5.50): the owner issues a guild's companion token from C
 them beside the .env ones (the .env per-guild token first, then the issued ones by hash in constant time, then the shared
 one) and binds the companion to the token's guild; the server re-checks an issued token at EVERY frame (`still_valid`), so
 a revoke disconnects the companion at its next message without a restart ({"type":"error","auth":true,…}: the companion
-stops retrying). Token values are never logged, printed, stored in the data repo or written to an ops line — only the id
-and the label.
+stops retrying). `auth:true` is kept for a token that is genuinely unknown or revoked: when the bot can't tell for now (the
+token's guild didn't load, is parked, or the lookup failed) the answer is a plain error and the socket closes, so the
+companion reconnects with its backoff instead of exiting mid-raid (UNAVAILABLE; nothing is applied meanwhile). Token
+values are never logged, printed, stored in the data repo or written to an ops line — only the id and the label.
 """
 from __future__ import annotations
 
@@ -55,6 +57,12 @@ GONE_KEEP_S = 6 * 3600  # a disconnected companion stays listed (state "disconne
 
 REVOKED = "this companion's token was revoked — ask the guild's owner for a new one (Config › Companions)"
 BAD_TOKEN = "hello with a valid token first"
+UNAVAILABLE = "the bot can't check this companion's token right now (its guild isn't being served) — retrying"
+
+
+class TokenUnverifiable(Exception):
+    """An issued-token lookup can't answer for now (a guild that didn't load or is parked might hold it): the hello is
+    refused WITHOUT auth:true, so the companion retries instead of exiting."""
 
 
 class Companion:
@@ -134,6 +142,10 @@ class FeedServer:
                 continue
             if comp is None:
                 ok, bound, tid, label = self.authorize(ev.get("token")) if ev.get("type") == "hello" else (False, None, None, None)
+                if ok is None:  # can't tell now (guild not served, lookup failed): a plain error — the companion reconnects
+                    await ws.send_json({"type": "error", "message": UNAVAILABLE})
+                    await ws.close()
+                    break
                 if not ok:
                     await ws.send_json({"type": "error", "auth": True, "message": BAD_TOKEN})
                     await ws.close()
@@ -147,8 +159,13 @@ class FeedServer:
                 reply = await self.handler(ev, comp)
                 await ws.send_json({"type": "welcome", **(reply or {})})
                 continue
-            if not self.valid(comp):  # revoked since the hello: refused at this frame, no restart (design §5.50)
+            valid = self.valid(comp)
+            if valid is False:  # revoked since the hello: refused at this frame, no restart (design §5.50)
                 await ws.send_json({"type": "error", "auth": True, "idem": ev.get("idem"), "message": REVOKED})
+                await ws.close()
+                break
+            if valid is None:  # can't tell now: not applied, not acked, no auth — the event stays in flight and the
+                await ws.send_json({"type": "error", "message": UNAVAILABLE})  # companion re-sends it after reconnecting
                 await ws.close()
                 break
             comp.touch()
@@ -195,22 +212,30 @@ class FeedServer:
             log.warning(text)
         return True
 
-    def authorize(self, token: Any) -> tuple[bool, str | None, str | None, str | None]:
-        """(ok, guild key, issued token id, label) — `auth` may answer the older (ok, guild) pair."""
+    def authorize(self, token: Any) -> tuple[bool | None, str | None, str | None, str | None]:
+        """(ok, guild key, issued token id, label) — `auth` may answer the older (ok, guild) pair. ok None = can't tell
+        now (the check failed or the token's guild isn't served): refused, but not as a bad token."""
         if self.auth is not None:
-            got = tuple(self.auth(str(token or "")))
+            try:
+                got = tuple(self.auth(str(token or "")))
+            except Exception as e:  # noqa: BLE001 — never the token in the log: the exception's type only
+                log.error("feed token check failed: %s", type(e).__name__)
+                return None, None, None, None
             return (*got, None, None, None)[:4]
         return same(token, self.token), None, None, None
 
-    def valid(self, comp: "Companion") -> bool:
-        """An issued token is re-checked at every frame (a revoke takes effect at once); a .env token always holds."""
+    def valid(self, comp: "Companion") -> bool | None:
+        """An issued token is re-checked at every frame (a revoke takes effect at once); a .env token always holds.
+        True = good, False = revoked (or never issued), None = can't tell now (its guild isn't served, the lookup failed):
+        the frame is refused either way — only False tells the companion its token is dead."""
         if comp.token_id is None or self.still_valid is None:
             return True
         try:
-            return bool(self.still_valid(comp))
-        except Exception:  # noqa: BLE001 — a lookup that fails must not let a revoked token through
-            log.exception("feed token check failed")
-            return False
+            got = self.still_valid(comp)
+        except Exception as e:  # noqa: BLE001 — a lookup that fails never lets a frame through, nor ends the companion
+            log.error("feed token check failed: %s", type(e).__name__)
+            return None
+        return None if got is None else bool(got)
 
     def seen(self, comp: "Companion") -> None:
         if comp.token_id is not None and self.on_seen is not None:
@@ -299,17 +324,24 @@ def authorize_any(token: str, shared: str | None, per_guild: dict[str, str], key
                   issued: Callable[[str], tuple[str, str, str] | None] | None = None) -> tuple[bool, str | None, str | None, str | None]:
     """A hello's token → (ok, guild key, issued token id, label): a guild's .env token first (as `authorize`), then an
     issued token by hash (`issued(token)` → (guild key, token id, label) or None — Registry.match_feed_token over the
-    guilds served), then the shared one."""
+    guilds served), then the shared one. ok None: no match, but `issued` raised TokenUnverifiable (a guild that might
+    hold it isn't served now) — refused without auth:true, so the companion retries."""
     for suffix, t in per_guild.items():
         if same(token, t):
             key = next((k for k in keys() if token_suffix(k) == suffix), None)
             if key:
                 return True, key, None, None
+    unsure = False
     if token and issued is not None:
-        hit = issued(str(token))
+        try:
+            hit = issued(str(token))
+        except TokenUnverifiable:
+            hit, unsure = None, True
         if hit:
             return True, hit[0], hit[1], hit[2]
-    return same(token, shared), None, None, None
+    if same(token, shared):
+        return True, None, None, None
+    return (None if unsure else False), None, None, None
 
 
 TOKEN_PREFIX = "oibot-feed-"

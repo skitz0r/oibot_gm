@@ -17,7 +17,8 @@ Token: the guild's owner issues one (Config › Companions on the site, or /gm c
 with --token, --token-file (a file holding it: keeps it out of your shell history) or the OIBOT_COMPANION_TOKEN
 environment variable (OIBOT_FEED_TOKEN, the older name, still works). The hello frame carries it. A token the bot refuses
 or revokes ends the companion with a message ({"type":"error","auth":true}) instead of retrying forever: ask the owner for
-a new one.
+a new one. A plain error at the hello (the bot can't check the token right now — its guild isn't being served after a
+restart) is retried with the reconnect backoff, like a dropped socket.
 
 Delivery: an event stays in the Outbox until the bot acks it (matched by its idem). A dropped socket re-sends the
 in-flight event first after the reconnect; an error reply (the bot refused it — e.g. several loot councils are live and
@@ -258,6 +259,8 @@ async def run(args: argparse.Namespace) -> None:
                     why = auth_refusal(welcome)
                     if why is not None:
                         raise TokenRefused(why)
+                    if welcome.get("type") == "error":  # the bot can't check the token right now: retried with the backoff
+                        raise ConnectionError(str(welcome.get("message") or "refused for now"))
                     print("connected:", {k: v for k, v in welcome.items() if k != "token"})
                     backoff = 2
 

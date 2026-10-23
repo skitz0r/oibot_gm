@@ -87,17 +87,38 @@ class FeedMixin:
     # guild.yaml), read at each hello and re-checked at each frame — an issue or a revoke needs no restart
     def feed_issued(self, token: str) -> tuple[str, str, str] | None:
         """An issued companion token → (guild key, token id, label), over the guilds served now (a parked guild's tokens
-        feed nothing); None when no guild issued it (or it was revoked)."""
-        for reg in self.registries.ordered():
+        feed nothing); None when no guild issued it (or it was revoked). Raises TokenUnverifiable when it might be a
+        live token of a guild not served right now — a parked guild's unrevoked token, or (an issued-looking token) any
+        guild that failed to load — so the companion retries rather than being told its token is dead."""
+        import hmac
+
+        from .feed import TOKEN_PREFIX, TokenUnverifiable, hash_token
+
+        served = self.registries.ordered()
+        for reg in served:
             rec = reg.match_feed_token(token)
             if rec is not None:
                 return reg.key, rec.id, rec.label
+        if any(reg.match_feed_token(token) is not None for reg in (getattr(self.registries, "detached", None) or {}).values()):
+            raise TokenUnverifiable("parked guild")
+        if str(token).startswith(TOKEN_PREFIX) and getattr(self.registries, "load_errors", None):
+            digest = hash_token(str(token)).encode()  # a served guild's REVOKED record: genuinely dead, whatever didn't load
+            if not any(hmac.compare_digest(digest, str(t.hash).encode()) for reg in served for t in reg.config.feed_tokens):
+                raise TokenUnverifiable("a guild did not load")
         return None
 
-    def feed_token_valid(self, comp: Companion) -> bool:
-        """Is the companion's issued token still good — its guild served and the token not revoked (every frame)."""
-        reg = (getattr(self.registries, "by_key", {}) or {}).get(getattr(comp, "bound", None) or "")
-        return reg is not None and reg.feed_token_active(getattr(comp, "token_id", None))
+    def feed_token_valid(self, comp: Companion) -> bool | None:
+        """Is the companion's issued token still good (every frame)? True = its guild served and the token unrevoked;
+        False = revoked, or its guild is gone for good; None = can't tell now (its guild is parked with the token still
+        unrevoked, or a guild failed to load) — the frame is refused but the companion keeps retrying."""
+        bound, tid = getattr(comp, "bound", None) or "", getattr(comp, "token_id", None)
+        reg = (getattr(self.registries, "by_key", {}) or {}).get(bound)
+        if reg is not None:
+            return reg.feed_token_active(tid)
+        parked = (getattr(self.registries, "detached", None) or {}).get(bound)
+        if parked is not None:
+            return None if parked.feed_token_active(tid) else False
+        return None if getattr(self.registries, "load_errors", None) else False
 
     def feed_seen(self, comp: Companion) -> None:
         """A frame with an issued token: its last_seen (in memory now; guild.yaml at most every 15 min, off the loop)."""

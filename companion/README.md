@@ -18,6 +18,8 @@ run `/chatlog`) and nothing else: no memory reading, no addon networking, no inp
    Instead of `--token` you can put the token in a file and pass `--token-file token.txt` (it stays out of your shell
    history), or set the `OIBOT_COMPANION_TOKEN` environment variable (`OIBOT_FEED_TOKEN`, the older name, still works).
    If the owner revokes the token, the companion stops with "the bot refused this companion's token" — ask for a new one.
+   If the bot only can't check the token for now (just restarted, the guild not served yet), it says so and the
+   companion keeps reconnecting; nothing it sends is lost.
 
 Events it emits: `drop` (Gargul/RCLC announcements with item links), `loot`
 (`X receives loot: [item]`), `kill` (boss-mod "defeated" lines), `heartbeat`.

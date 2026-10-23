@@ -17,7 +17,7 @@ from pathlib import Path
 import discord
 import httpx
 import pytest
-from conftest import OWNER
+from conftest import OFFICER_ROLE, OWNER
 from fastapi.testclient import TestClient
 from test_loot_web import OFFICER, TOKEN, WebLootBot, as_user, env  # noqa: F401 — env is a fixture
 from test_parity_matrix import discord_path_exists, slash_paths, web_routes  # noqa: F401 — fixtures
@@ -253,20 +253,111 @@ def test_authorize_any_order():
 
 
 def test_a_failing_check_refuses_rather_than_lets_through():
+    """A lookup that throws never lets the frame through — and is answered as 'can't tell now' (None), not as a revoke."""
     fs = FeedServer(lambda ev, c: None, None)
 
     def boom(c):
         raise RuntimeError("lookup failed")
     fs.still_valid = boom
-    assert fs.valid(types.SimpleNamespace(token_id="ft-1")) is False and fs.valid(types.SimpleNamespace(token_id=None)) is True
+    assert fs.valid(types.SimpleNamespace(token_id="ft-1")) is None and fs.valid(types.SimpleNamespace(token_id=None)) is True
 
 
-def test_a_parked_guilds_token_feeds_nothing(reg):
+def test_a_gone_guilds_token_feeds_nothing(reg):
     token, rec = reg.issue_feed_token("Jon's PC", "Owner")
     bot = FeedBot(reg)
     assert bot.feed_issued(token) == (reg.key, rec.id, "Jon's PC")
-    bot.registries = types.SimpleNamespace(ordered=lambda: [], by_key={})
-    assert bot.feed_issued(token) is None and not bot.feed_token_valid(types.SimpleNamespace(bound=reg.key, token_id=rec.id))
+    bot.registries = types.SimpleNamespace(ordered=lambda: [], by_key={}, detached={}, load_errors=[])
+    assert bot.feed_issued(token) is None and bot.feed_token_valid(types.SimpleNamespace(bound=reg.key, token_id=rec.id)) is False
+
+
+# ---------------------------------------------------------------- auth:true only for a genuine no-match or revoke (fixer finding 3)
+
+def test_a_parked_guilds_live_token_is_unverifiable_not_dead(reg):
+    """The guild is parked (or not served yet): its unrevoked token feeds nothing, but the companion is told 'can't check
+    now' (it retries) — not that its token is dead. Once revoked, it IS dead."""
+    from oibot_gm.feed import TokenUnverifiable
+
+    token, rec = reg.issue_feed_token("Jon's PC", "Owner")
+    bot = FeedBot(reg)
+    bot.registries = types.SimpleNamespace(ordered=lambda: [], by_key={}, detached={reg.key: reg}, load_errors=[])
+    with pytest.raises(TokenUnverifiable):
+        bot.feed_issued(token)
+    comp = types.SimpleNamespace(bound=reg.key, token_id=rec.id)
+    assert bot.feed_token_valid(comp) is None
+    reg.revoke_feed_token(rec.id, "Owner")
+    assert bot.feed_token_valid(comp) is False and bot.feed_issued(token) is None
+
+
+def test_a_guild_that_did_not_load_makes_an_issued_looking_token_unverifiable(reg):
+    from oibot_gm.feed import TOKEN_PREFIX, TokenUnverifiable
+
+    bot = FeedBot(reg)
+    bot.registries = types.SimpleNamespace(ordered=lambda: [reg], by_key={reg.key: reg}, detached={}, load_errors=["other: ValueError: bad"])
+    with pytest.raises(TokenUnverifiable):
+        bot.feed_issued(TOKEN_PREFIX + "x" * 43)
+    assert bot.feed_issued("not-an-issued-token") is None, "a token that can't be an issued one is just wrong"
+    token, rec = reg.issue_feed_token("Jon's PC", "Owner")
+    reg.revoke_feed_token(rec.id, "Owner")
+    assert bot.feed_issued(token) is None, "a served guild's revoked token is dead, whatever else didn't load"
+    assert bot.feed_token_valid(types.SimpleNamespace(bound="other", token_id="ft-1")) is None
+
+
+def test_authorize_any_unsure():
+    from oibot_gm.feed import TokenUnverifiable
+
+    def unsure(t):
+        raise TokenUnverifiable("parked")
+    assert authorize_any("x", "shared", {}, lambda: [], unsure) == (None, None, None, None)
+    assert authorize_any("shared", "shared", {}, lambda: [], unsure) == (True, None, None, None), "the shared token still holds"
+
+
+def test_an_unverifiable_hello_or_frame_is_a_plain_error_and_the_socket_closes(reg):
+    """The wire: a hello the bot can't check now, and a frame whose guild went away, get {type:error} WITHOUT auth (the
+    companion reconnects and re-sends) and nothing reaches the handler; a genuinely unknown token still gets auth:true."""
+    from oibot_gm.feed import UNAVAILABLE
+
+    token, rec = reg.issue_feed_token("Jon's PC", "Owner")
+    seen: list = []
+    fs = feed_server(reg, seen)
+    bot = FeedBot(reg)
+    parked = types.SimpleNamespace(ordered=lambda: [], by_key={}, detached={reg.key: reg}, load_errors=[])
+    fs.auth = lambda t: authorize_any(t, "shared-env", {}, lambda: [], bot.feed_issued)
+    fs.still_valid = bot.feed_token_valid
+    bot.registries = parked
+    out = run(session(fs, [{"type": "hello", "token": token, "character": "Rhozy"}]))
+    assert out[0] == {"type": "error", "message": UNAVAILABLE} and "auth" not in out[0] and seen == []
+    bot.registries = FeedBot(reg).registries  # served again: the same token works
+    served = bot.registries
+    out = run(session(fs, [{"type": "hello", "token": token, "character": "Rhozy"},
+                           lambda: setattr(bot, "registries", parked),
+                           {"type": "loot", "idem": "l1"}]))
+    assert out[0]["type"] == "welcome" and out[1] == {"type": "error", "message": UNAVAILABLE}, "no idem: the event stays in flight"
+    assert [s[0] for s in seen] == ["hello"], "the frame is never applied"
+    bot.registries = served
+    assert run(session(fs, [{"type": "hello", "token": "oibot-feed-unknown", "character": "X"}]))[0] == {"type": "error", "auth": True, "message": BAD_TOKEN}
+
+
+def test_a_throwing_auth_is_a_plain_error_and_never_logs_the_token(reg, caplog):
+    from oibot_gm.feed import UNAVAILABLE
+
+    fs = FeedServer(lambda ev, c: None, None)
+
+    def boom(t):
+        raise RuntimeError(f"lookup failed for {t}")
+    fs.auth = boom
+    with caplog.at_level(logging.DEBUG):
+        out = run(session(fs, [{"type": "hello", "token": "oibot-feed-SECRETVALUE", "character": "X"}]))
+    assert out[0] == {"type": "error", "message": UNAVAILABLE}
+    assert "SECRETVALUE" not in caplog.text
+
+
+def test_the_companion_retries_a_plain_hello_error():
+    """The companion's sender: an auth refusal raises TokenRefused (exit); a plain error at the hello is NOT a token
+    refusal (it reconnects with the backoff) — the source raises ConnectionError for it."""
+    comp = _companion()
+    assert comp.auth_refusal({"type": "error", "message": "the bot can't check"}) is None
+    src = (Path(__file__).resolve().parents[1] / "companion" / "oibot_companion.py").read_text()
+    assert 'if welcome.get("type") == "error":' in src and "raise ConnectionError" in src
 
 
 def test_the_listener_starts_for_an_issued_token(reg, monkeypatch):
@@ -556,3 +647,49 @@ def test_a_revoked_token_ends_the_companion_instead_of_retrying():
         run(comp.deliver(WS([{"type": "error", "auth": True, "idem": "zzz", "message": REVOKED}]), box.next(0), box))
     assert len(box) == 1, "the event stays (a new token re-sends it)"
     assert comp.auth_refusal({"type": "error", "message": "several councils"}) is None, "a routing refusal is retried as before"
+
+
+# ---------------------------------------------------------------- the token records never leave the owner's hub (fixer findings 1-2)
+
+def test_officers_config_view_holds_no_token_record(cw):
+    """GET /api/config (officers) dumps guild.yaml as 'As stored': never a companion token's hash, label, issuer or sent_to."""
+    token, rec = cw.reg.issue_feed_token("Jon's PC", "Owner", 4242, sent_to="Raidlead Rhozy")
+    server = cw.bot.get_guild
+
+    def get_guild(gid):  # the member directory's server, with its officer role to list (the config route reads the roles)
+        g = server(gid)
+        if g is not None and not hasattr(g, "roles"):
+            g.roles = [types.SimpleNamespace(id=OFFICER_ROLE, name="Officer", position=1, managed=False, is_default=lambda: False)]
+        return g
+    cw.bot.get_guild = get_guild
+    for who in ("officer", "mcp"):  # an officer's session, and the owner's bearer (MCP guild_overview reads this route)
+        if who == "officer":
+            h = as_user(cw.c, OFFICER)
+        else:
+            cw.c.cookies.clear()
+            h = MCP
+        r = cw.c.get("/api/config", headers=h)
+        assert r.status_code == 200, (who, r.text)
+        assert r.json()["yaml"].strip(), "the 'As stored' dump is still there"
+        for needle in (token, rec.hash, rec.hash.split(":", 1)[1], "Jon's PC", "Raidlead Rhozy", rec.id, "feed_tokens"):
+            assert needle not in r.text, (who, needle)
+    assert "feed_tokens" in (cw.reg.store.root / cw.reg.key / "guild.yaml").read_text(), "guild.yaml itself keeps the records"
+
+
+def test_the_config_parsers_prompt_holds_no_token_record(reg):
+    """configops.current_config_text is the config_change parser's context — a member's plain-text request gets the
+    parser's reply, so the token records (hash, label, sent_to, last_seen) are never in it, for anyone."""
+    token, rec = reg.issue_feed_token("Jon's PC", "Owner", 4242, sent_to="Raidlead Rhozy")
+    reg.touch_feed_token(rec.id, save_after=0)
+    for officer in (False, True):
+        text = configops.current_config_text(reg, officer=officer)
+        for needle in (token, rec.hash, rec.hash.split(":", 1)[1], "Jon's PC", "Raidlead Rhozy", rec.id, "feed_tokens"):
+            assert needle not in text, (officer, needle)
+
+
+def test_readable_config_drops_every_private_field(reg):
+    from oibot_gm.registry import PRIVATE_CONFIG_FIELDS, readable_config
+
+    reg.issue_feed_token("Jon's PC", "Owner")
+    d = readable_config(reg.config)
+    assert not set(PRIVATE_CONFIG_FIELDS) & set(d) and reg.config.feed_tokens, "a copy: the live config keeps them"

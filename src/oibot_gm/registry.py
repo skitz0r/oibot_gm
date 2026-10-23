@@ -438,6 +438,20 @@ def feed_token_id(used: set[str] | None = None) -> str:
             return tid
 
 
+# guild.yaml fields no person or prompt reads as raw config: the companion token records (hashes, labels, who got them —
+# the owner sees them on the Companions hub only, design §5.50)
+PRIVATE_CONFIG_FIELDS = ("feed_tokens",)
+
+
+def readable_config(cfg: "GuildConfig") -> dict:
+    """The guild config as a dict a person or a prompt may read (the site's 'As stored', the config parser's context):
+    model_dump() without PRIVATE_CONFIG_FIELDS. guild.yaml itself (save_config) keeps them."""
+    out = cfg.model_dump()
+    for f in PRIVATE_CONFIG_FIELDS:
+        out.pop(f, None)
+    return out
+
+
 def section_words(section: str) -> str:
     if section.startswith("raids:"):
         return f"{section[6:]} raid settings"

@@ -307,7 +307,10 @@ src/oibot_gm/
                        Issued tokens (§5.50): authorize_any (.env guild token → an issued token by hash → the shared one) binds the companion to the
                        token's guild (Companion.token_id/label); still_valid re-checked at EVERY frame (a revoke = {"type":"error","auth":true}, no
                        restart), on_seen → last_seen, close_token; hash_token / new_token; token_rows / token_line / issue_consequence /
-                       revoke_consequence = the hub's rows and THE sentences. Values never logged, stored or in an ops line
+                       revoke_consequence = the hub's rows and THE sentences. Values never logged, stored or in an ops line. auth:true only for a
+                       genuine no-match / revoke; can't-tell-now (parked or unloaded guild, a check that raised: TokenUnverifiable, still_valid None)
+                       = a plain UNAVAILABLE error + close (the companion reconnects). The records never leave the hub: registry.readable_config
+                       (PRIVATE_CONFIG_FIELDS) is what /api/config's "As stored" and the config parser's prompt dump
   discord_feed.py      FeedMixin through the LootMixin verbs: drop → tick (+ auto-distribute); loot → confirm / mismatch (recorded, reason pending) / manual /
                        conflict; kill. loot_route(comp): the token's guild → one live council (test only from a puppet/tester companion; several → by
                        seated character; else refused; a council past its run's close never competes with tonight's); no live run → held 10 min
@@ -326,7 +329,8 @@ scripts/agents/        loop EVERY guild (Api().guilds()): review.py (daily 9:00 
                        SCRIPT; the gate refuses a profile approval that wasn't the owner's (news.profile_approval_refusal → failed); --pr), menubar.py (rumps via uv --with),
                        install/uninstall.sh; plists in scripts/launchd/
 companion/             Windows-side client: tails WoWChatLog.txt, parses loot/drop/kill, streams to feed.py; --replay for tests; the token from --token,
-                       --token-file or OIBOT_COMPANION_TOKEN; an auth error (revoked) exits instead of reconnecting (TokenRefused)
+                       --token-file or OIBOT_COMPANION_TOKEN; an auth error (revoked) exits instead of reconnecting (TokenRefused); a plain hello
+                       error (UNAVAILABLE) reconnects
   web/app.py           FastAPI served inside the bot (OIBOT_WEB_BIND): Discord OAuth2, landing page, icon/emblem/card images, old URLs → /app redirects;
                        published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Several guilds: `selected_reg` picks ONE guild per
                        request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first
