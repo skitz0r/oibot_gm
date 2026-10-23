@@ -468,6 +468,25 @@ def test_plain_dm_from_someone_in_neither_lists_both_join_links(duo):
     assert "https://discord.gg/demo" in out[0] and "https://discord.gg/duo" in out[0]
 
 
+def test_an_unlisted_guild_is_never_named_to_a_stranger_in_dms(duo):
+    """Regression (B10): not_in_any listed EVERY guild with its invite, so a stranger DMing the bot learned an unlisted
+    guild's name and got its invite — both the plain-text DM path and a slash command in a DM."""
+    duo.a.config.invite_url, duo.b.config.invite_url = "https://discord.gg/demo", "https://discord.gg/duo"
+    duo.b.config.public = False
+    bot = dm_bot(duo, members={})
+    out = []
+    msg = types.SimpleNamespace(author=types.SimpleNamespace(id=PUPPET), reply=lambda text, **kw: _rec(out, text))
+    assert run(OibotGM.dm_guild(bot, msg)) is None
+    assert "https://discord.gg/demo" in out[0] and duo.a.config.name in out[0], "a listed guild still names itself with its Join link"
+    assert "https://discord.gg/duo" not in out[0] and duo.b.config.name not in out[0], "never the unlisted guild"
+    i = Itx(bot)
+    reg, _ = run(guild_routing.need(i))
+    assert reg is None and i.said and duo.b.config.name not in i.said[-1] and "discord.gg/duo" not in i.said[-1]
+    duo.a.config.public = False  # none listed: no guild named at all
+    text = guild_routing.not_in_any(duo.guilds.ordered())
+    assert text == guild_routing.NOT_IN_ANY_UNLISTED and "discord.gg" not in text and duo.a.config.name not in text
+
+
 async def _rec(out, text):
     out.append(text)
 

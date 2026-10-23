@@ -85,7 +85,7 @@ lists them; `/schedule?g=<key>` opens one.
 **Unlisted guilds.** The owner can switch a guild to *unlisted* (Config › Recruitment and more › **Homepage**, or
 "unlist the guild" in plain text): it then has no card on the homepage, no public schedule, and the not-a-member page
 doesn't name it — nor does any refusal someone outside it gets: a link to it reads like a link to a server the site
-doesn't serve. Its members still log in and find it in their own server list as before. Config › Overview and
+doesn't serve, and someone in none of the servers who DMs the bot is never told its name or given its invite. Its members still log in and find it in their own server list as before. Config › Overview and
 `/gm config show` say which it is (*Homepage: listed* or *unlisted*).
 
 **When the bot looks after more than one Discord server**, the homepage shows the servers side by side, each with

@@ -569,7 +569,9 @@ def create_app(bot) -> FastAPI:
                     return tried, member, None
                 if answer == "unknown":
                     raise DiscordUnsure()
-                moved = tried.config.name
+                # an UNLISTED guild answers exactly like a key nobody serves (B10): the cookie is only what the browser
+                # sends, so naming the guild here would name it to anyone who sets the cookie to its key
+                moved = tried.config.name if getattr(tried.config, "public", True) else (ck if many else None)
             elif many:
                 moved = ck  # a guild that isn't served any more
         rest = [r for r in regs if r is not tried]
@@ -729,12 +731,37 @@ def create_app(bot) -> FastAPI:
     thumb_cache: dict[str, bytes] = {}
 
     @app.get("/img/raid/{rid}.png")
-    async def raid_thumb(request: Request, rid: str, g: str | None = None):
+    async def raid_thumb(request: Request, rid: str, g: str | None = None, s: str | None = None):
         """The raid emblem with that guild's size / lockout / name: ?g=<key> (Discord fetches without cookies, so every
         caller names its guild), else the cookie, else the only guild; several guilds and none named → the game
-        profile's defaults (never "the first guild", K15)."""
+        profile's defaults (never "the first guild", K15). An UNLISTED guild (B10) is used only for its members (the
+        session) or with the signature its own cards carry (`s`, raid_views.raid_thumb_sig); anyone else gets the
+        defaults, exactly as for a key nobody serves — the emblem never confirms an unlisted key exists."""
+        import hmac as _hmac
+
+        from ..raid_views import raid_thumb_sig
+
+        async def may_see(r) -> bool:
+            if r is None or getattr(r.config, "public", True):
+                return r is not None
+            sig = raid_thumb_sig(r.key, rid)
+            if s and sig and _hmac.compare_digest(s, sig):
+                return True
+            sess = session(request)
+            if not sess:
+                return False
+            try:
+                ok, _answer, _member = await look(r, int(sess["uid"]))
+            except Exception:  # noqa: BLE001 — a lookup that fails shows the defaults
+                return False
+            return ok
+
         guilds = bot.registries
-        reg = guilds.by_key.get(g or "") or guilds.by_key.get(request.cookies.get(GUILD_COOKIE) or "") or guilds.only()
+        reg = None
+        for cand in (guilds.by_key.get(g or ""), guilds.by_key.get(request.cookies.get(GUILD_COOKIE) or ""), guilds.only()):
+            if cand is not None and await may_see(cand):
+                reg = cand
+                break
         if reg is not None:
             if rid not in reg.profile.raids:
                 raise HTTPException(404)
@@ -799,14 +826,20 @@ def create_app(bot) -> FastAPI:
         return Response(badge_cache[key], media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/healthz")
-    async def healthz():
-        """Liveness for launchd tooling (menubar, the apply job): the bot user, the guild count, and per guild whether
-        the bot sees its Discord server. `guilds_failed` = guild folders that didn't load (their names are in the log)."""
+    async def healthz(request: Request):
+        """Liveness for launchd tooling (menubar, the apply job): the bot user, the guild count, and how many guilds' Discord
+        servers the bot sees. `per_guild` (each guild KEY → whether the bot sees its server) only for this machine (a
+        loopback request without proxy headers) or the MCP bearer: anonymous callers through the tunnel never learn a
+        guild's key (an unlisted guild's key is what its cookie would need, B10). `guilds_failed` = guild folders that
+        didn't load (their names are in the log)."""
         get_guild = getattr(bot, "get_guild", None)
         regs = bot.registries.ordered() if hasattr(bot.registries, "ordered") else list(bot.registries.by_discord.values())
         per = {r.key: {"server": bool(get_guild and get_guild(r.config.discord_guild_id) is not None)} for r in regs}
-        return {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(regs), "per_guild": per,
-                "guilds_failed": len(getattr(bot.registries, "load_errors", None) or [])}
+        out = {"ok": True, "bot": str(bot.user) if bot.user else None, "guilds": len(regs), "servers_seen": sum(1 for x in per.values() if x["server"]),
+               "guilds_failed": len(getattr(bot.registries, "load_errors", None) or [])}
+        if local_request(request) or mcp_authorized(request, os.environ.get(MCP_TOKEN_ENV) or None, bot):
+            out["per_guild"] = per
+        return out
 
     from .api import public_card
 

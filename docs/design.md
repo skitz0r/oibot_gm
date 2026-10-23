@@ -1009,7 +1009,7 @@ thread check matches `s.guild`. `SetupMixin.set_channel` refuses a channel from 
 Pool listeners per guild (`attach_pool_listener`, idempotent). `OIBOT_COMMAND_SCOPE=guild` syncs the test server plus
 every configured server (`sync_servers`, deduplicated). `/gm status`, `help_extras` and `/api/ops` show this guild's ops lines and
 companions; "(whole bot)" labels appear only with several guilds (K17). `/healthz` adds `per_guild` (does the bot see
-each server) and `guilds_failed`. `check_emoji_conflicts` warns when two loaded profiles map one icon name to
+each server; to this machine or the MCP bearer only, §5.49) and `guilds_failed`. `check_emoji_conflicts` warns when two loaded profiles map one icon name to
 different art. **Shared on purpose:** the LLM budget (one monthly cap for the whole bot), the feed token and listener.
 Tests: `tests/test_multiguild_core.py` on the two-guild fixture (`conftest.duo`: demo on server 1, duo on server 2
 with its own owner and members; `same_run` opens one run key in both, also via a shared schedule id).
@@ -2945,6 +2945,14 @@ listed → unlisted; owner-only like every `set`), so the Config page (Recruitme
 section). **No refusal names an unlisted guild to someone outside it**: `web/app.listed_name(reg)` is the name a
 not-a-member 403 may carry (`NotMember`) — None for an unlisted guild, so an `X-Oibot-Guild` / `?g=` naming it, or the
 one unlisted guild's own refusal, reads exactly like a key nobody serves (the /schedule 404 rule, for /api).
+Fixer (2026-10-22) closed the other tells: the guild cookie's fallback sets `moved` to the guild's name only when it is
+listed (an unlisted key answers like an unknown one — the cookie is just what the browser sends); `/healthz` gives
+`per_guild` (the guild keys) only to this machine (`local_request`) or the MCP bearer — anonymous callers get the counts
+(`guilds`, `servers_seen`, `guilds_failed`); `/img/raid/<rid>.png?g=` honours an unlisted guild only for its members (the
+session) or with the HMAC its own cards carry (`raid_views.raid_thumb_sig` under OIBOT_WEB_SECRET, `&s=` added by
+`raid_thumb_url` for unlisted guilds only), anyone else gets the profile defaults like a key nobody serves; and in Discord
+`guild_routing.not_in_any` / `join_lines` name only LISTED guilds (`guild_routing.listed`) to someone in none of the servers
+— none listed → `NOT_IN_ANY_UNLISTED`, no name, no invite (the DM slash-command resolver and the plain-text DM path).
 
 **Homepage copy (PUB-01).** No invite → no Join button and `INVITES_CLOSED` = *"Invitations are closed — ask an officer
 in game."* (the card, the single-guild page and the not-a-member page); "availability" → "schedules"; each card names

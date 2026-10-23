@@ -153,7 +153,7 @@ src/oibot_gm/
                        (flows_config `guild_claim` → OibotGM.claim_guild → registry.create_guild; any number of servers — Guilds.ALLOW_SECOND is on since S3)
   guild_routing.py     THE resolver: need(interaction, reply=True) → (reg, interaction) — every command rebinds both (and sync_name: a Member's
                        changed nick is the ONE trigger of Registry.rename; verbs never rename); an unconfigured server is told
-                       "isn't set up" and never reaches another guild; DMs: only() → else guilds_of (owner / membership yes|no|unknown) → one, none (Join links),
+                       "isn't set up" and never reaches another guild; DMs: only() → else guilds_of (owner / membership yes|no|unknown) → one, none (Join links of LISTED guilds only, B10),
                        several → the DM server picker (guild_picker.choose_guild: asked EVERY time, asker only, 2 min; the command continues on
                        the press); resolve_button(interaction, g, legacy) for persistent buttons; may_access = the strict "belongs to" (the web uses it).
                        THE identity predicate (design §2.6/§5.33): resolve_role(bot, reg, who, max_age=) → Resolved(role owner|officer|member|outside,

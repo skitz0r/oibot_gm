@@ -126,6 +126,67 @@ def test_a_non_members_403_never_names_an_unlisted_guild(two):
     assert duo.b.config.name in c.get("/api/meta", headers={**h, "X-Oibot-Guild": GUILD2}).json()["error"]
 
 
+def test_the_guild_cookie_never_names_an_unlisted_guild(two):
+    """Regression: the cookie fallback set `moved` to the guild's name for any served guild the person can't open, so
+    oibot_guild=<an unlisted key> made /api/meta name it (and confirm it exists). Unlisted = an unknown key."""
+    bot, c, duo = two
+    duo.b.config.public = False
+    duo.b.save_config("t: unlisted")
+    as_user(c, DEMO_ONLY, guild_cookie=GUILD2)
+    unlisted = c.get("/api/meta")
+    assert unlisted.status_code == 200 and duo.b.config.name not in unlisted.text
+    as_user(c, DEMO_ONLY, guild_cookie="nope")
+    unknown = c.get("/api/meta").json()
+    assert (unlisted.json()["moved"] or "").replace(GUILD2, "nope") == (unknown["moved"] or ""), "no tell between the two"
+    duo.b.config.public = True
+    as_user(c, DEMO_ONLY, guild_cookie=GUILD2)
+    assert c.get("/api/meta").json()["moved"] == duo.b.config.name, "a listed guild still says where the browser was"
+
+
+def test_healthz_gives_guild_keys_only_to_this_machine(two):
+    """Regression: the anonymous /healthz listed every guild's key (an unlisted one's too) in `per_guild`."""
+    bot, c, duo = two
+    duo.b.config.public = False
+    tunnel = TestClient(web.create_app(bot), client=("203.0.113.9", 4000))
+    body = tunnel.get("/healthz").json()
+    assert body["ok"] and body["guilds"] == 2 and "per_guild" not in body and GUILD2 not in tunnel.get("/healthz").text
+    proxied = c.get("/healthz", headers={"cf-connecting-ip": "203.0.113.9"}).json()
+    assert "per_guild" not in proxied, "a loopback hop through the tunnel is still anonymous"
+    assert set(c.get("/healthz").json()["per_guild"]) == {GUILD, GUILD2}, "this machine (launchd tooling) sees every guild"
+
+
+def test_raid_emblem_never_confirms_an_unlisted_key(two, monkeypatch):
+    """Regression: /img/raid?g=<unlisted key> rendered that guild's own raid size / lockout (an unknown key fell back to
+    the profile defaults) — a tell that the key exists. Its members and its own signed card URLs still get it."""
+    from oibot_gm import raid_views
+    from oibot_gm.web import app as appmod
+
+    bot, c, duo = two
+    rid = next(iter(duo.b.profile.raids))
+    duo.b.set_raid_overrides(rid, {"lockout_days": 13}, "t")
+    duo.b.config.public = False
+    monkeypatch.setattr(appmod.render, "raid_thumb_png", lambda r, name, size, lock: f"png:{lock}".encode())
+    monkeypatch.setenv("OIBOT_WEB_SECRET", "s3cret")
+
+    def lock(**params) -> bytes:
+        r = c.get(f"/img/raid/{rid}.png", params=params)
+        assert r.status_code == 200
+        return r.content
+
+    own = b"png:13"
+    c.cookies.clear()
+    assert lock(g=GUILD2) != own, "anonymous: the defaults"
+    assert lock(g=GUILD2) == lock(g="nope"), "the same answer as a key nobody serves"
+    monkeypatch.setenv("OIBOT_WEB_URL", "https://gm.example")
+    url = raid_views.raid_thumb_url(duo.b, rid)
+    assert "&s=" in url and "&s=" not in raid_views.raid_thumb_url(duo.a, rid), "only an unlisted guild's URL is signed"
+    sig = url.split("&s=", 1)[1]
+    assert lock(g=GUILD2, s=sig) == own, "the guild's own card (Discord fetches without cookies) still shows its emblem"
+    assert lock(g=GUILD2, s="0" * 20) != own, "a forged signature is nobody"
+    as_user(c, DUO_ONLY)
+    assert lock(g=GUILD2) == own, "a member of the unlisted guild sees its emblem on the site"
+
+
 def test_the_one_unlisted_guilds_403_names_nobody(reg, rs, monkeypatch):
     from test_recruitment_web import OUTSIDER_UID, RecruitBot, SECRET
     from test_recruitment_web import as_user as login
