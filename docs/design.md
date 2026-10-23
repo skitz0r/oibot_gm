@@ -2888,7 +2888,10 @@ decisions: the DM rule, D2, D8, D26, D40). No LLM anywhere in this part.
 - *Record.* `Appeal` in `<guild>/appeals/<id>.yaml` (file per entity, commit per change). The id IS the award's:
   `award_id(a)` = 12 hex of sha1(`lootctx.award_ref(a)`) — so **one appeal per award**, open or resolved, enforced under
   a per-guild lock (`record_open`); it keeps `award_ref`, so an award corrected later still has its appeal (officer
-  details read the ledger with voided rows: `all_awards`). Fields: member, character, item, boss, date, MS/OS, the words,
+  details read the ledger with voided rows: `all_awards`, keyed by appeal id). Two identical imported rows without an
+  import_id share an award_ref ('raider|item|received'); `ledger_ids` (over the ledger in file order — such rows are never
+  voided, so the live ledger and the full fold agree) gives the n-th repeat sha1('<ref>#<n>'), the first keeping the plain
+  id; every caller with a ledger takes ids from it (`own_awards` for the member's list, the Me page rows). Fields: member, character, item, boss, date, MS/OS, the words,
   state open | resolved, outcome (an `OUTCOMES` key), note (officers only), who resolved and when, the card / thread ids.
 - *Open* — `open_appeal(bot, reg, uid, award_id, text, by, by_id, via)`: the words validated (`check_text`, 10–1000
   characters; never parsed), the award must be one of `uid`'s live awards (`find_award` over `loot_ops.member_awards`;
@@ -2927,8 +2930,9 @@ decisions: the DM rule, D2, D8, D26, D40). No LLM anywhere in this part.
 - *Parity* (tests/test_parity_matrix.py `APPEALS`): appeals are not an op — plain text has no path by design (no LLM
   reads a member's words), so their rows live beside the op matrix: open = `flow:me_loot_ask` / `slash:me loot-ask` /
   POST `/api/me/loot/{award}/appeal`; list = the card's Details button / GET `/api/loot/appeals`; resolve =
-  `flow:appeal_resolve` / POST `/api/loot/appeals/{aid}/resolve`; MCP exempt with written reasons (open: never; list and
-  resolve: a later phase, with the actor rule).
+  `flow:appeal_resolve` / POST `/api/loot/appeals/{aid}/resolve`. MCP: `list_appeals` (GET `/api/loot/appeals`) and
+  `resolve_appeal` (POST `…/resolve`, `actor=True` unless `preview` — D8, refused without OIBOT_MCP_ACTOR); open is
+  exempt in writing (`APPEALS_MCP_EXEMPT`: never — the appeal is the member's own voice).
 
 **Unlisted guilds (B10) — `GuildConfig.public: bool = True`.** `web/app.listed(bot)` = the guilds with `public` on, in
 `Guilds.ordered()` order: the only ones the homepage cards, the not-a-member page, GET `/api/public` and `/schedule`
@@ -2937,7 +2941,10 @@ guilds the person may open; the MCP bearer, the owner's, still sees every guild)
 one `set` path: `configops` `set public` (SETTINGS_FIELDS, SETTING_WORDS "Listed on the homepage", describe
 listed → unlisted; owner-only like every `set`), so the Config page (Recruitment and more › **Homepage** switch via
 `useOpsSave`), plain text and MCP `set_config(fields={"public": false})` are one write; `/api/config` settings carry
-`public`.
+`public`. Config › Overview and `/gm config show` say it (`configops.listed_words` in `config_summary`'s Recruitment
+section). **No refusal names an unlisted guild to someone outside it**: `web/app.listed_name(reg)` is the name a
+not-a-member 403 may carry (`NotMember`) — None for an unlisted guild, so an `X-Oibot-Guild` / `?g=` naming it, or the
+one unlisted guild's own refusal, reads exactly like a key nobody serves (the /schedule 404 rule, for /api).
 
 **Homepage copy (PUB-01).** No invite → no Join button and `INVITES_CLOSED` = *"Invitations are closed — ask an officer
 in game."* (the card, the single-guild page and the not-a-member page); "availability" → "schedules"; each card names
@@ -2946,7 +2953,7 @@ this copy.
 
 **The public schedule (PUB-05) — GET `/schedule[?g=<key>]`, no login.** `schedule_sections(reg)`: per raid its name and
 size; per schedule its `Registry.schedule_label` and the next three runs (`rc.next_runs_of(n=3)` → `Registry.local12`:
-the clock rule), a paused schedule "paused for now", a pickup template "an officer opens these runs". Nothing about
+the clock rule), a paused schedule "paused for now" (its label without schedule_label's own " · paused": said once), a pickup template "an officer opens these runs". Nothing about
 members (no regulars, counts or names). An unknown or unlisted key is the same 404 (an unlisted guild is never
 confirmed to exist); without `g`: the only listed guild, else an index of the listed ones.
 
@@ -2959,10 +2966,12 @@ record_absence (the absences card, flows_absence, `/api/me/absence`, configops' 
 Tests: tests/test_appeals.py (one appeal per award; the words in the quote block, escaped, no mentions; nothing
 officer-only on the card; only the member opens — someone else, an officer, MCP refused; no officer channel → recorded,
 warn; resolve → the notice, no DM (a `send_member_dm` that raises), the card's final state, the thread archived; a member
-cannot resolve; the D8 actor; no LLM touched; the two wizards through tests/wizard_harness.py; button ids), tests/
+cannot resolve; the D8 actor; no LLM touched; two identical imported awards each get their own question; the two wizards through tests/wizard_harness.py; button ids; MCP list_appeals / resolve_appeal through the real routes,
+refused without the actor, a preview without), tests/
 test_public_schedule.py (words only, three 12-hour runs, no member names, no login; unlisted hidden from the homepage,
 /api/public, /schedule and a non-member's guild list, still open to its members; the index; homepage copy; the `set
-public` op), tests/test_absence_self_notice.py (own absence → no notice; an officer's → the notice; a shared display name
+public` op; a non-member's 403 never names an unlisted guild — header, ?g= and the one-guild case; "paused" once;
+the Overview line; every SETTINGS_FIELDS entry named in MCP set_config's description), tests/test_absence_self_notice.py (own absence → no notice; an officer's → the notice; a shared display name
 is not the actor — fails without the fix).
 
 ## 6. Architecture

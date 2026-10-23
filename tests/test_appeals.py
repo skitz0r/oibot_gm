@@ -213,6 +213,37 @@ def test_resolve_writes_a_notice_never_a_dm_and_the_member_cannot_resolve(a):
     assert r.status_code == 400 and "Already resolved" in r.json()["error"]
 
 
+def test_mcp_lists_and_resolves_with_the_named_officer_and_never_opens(a, monkeypatch):
+    """MCP list_appeals / resolve_appeal go through the site's routes: resolving is a decision about a person (D8) — refused
+    without OIBOT_MCP_ACTOR, a preview needs none; the member still gets a notice and no DM; no tool opens one."""
+    from mcp.server.fastmcp.exceptions import ToolError
+    from test_mcp_multiguild import through
+
+    from oibot_gm import mcp_server as ms
+
+    assert ask(a, a.m.discord_id).status_code == 200
+    a.c.cookies.clear()
+    ms.use(through(a.c))
+    try:
+        monkeypatch.delenv(ms.ACTOR_ENV, raising=False)
+        lst = ms.list_appeals()
+        assert [x["id"] for x in lst["open"]] == [a.aid] and {o["value"] for o in lst["outcomes"]} == set(appeals.OUTCOMES)
+        assert "nobody is DMed" in ms.resolve_appeal(a.aid, "noted", preview=True), "a preview needs no actor"
+        with pytest.raises(ToolError, match="X-Oibot-Actor"):
+            ms.resolve_appeal(a.aid, "noted")
+        assert appeals.store_of(a.reg).get(a.aid).state == "open"
+        monkeypatch.setenv(ms.ACTOR_ENV, str(OFFICER))
+        ms.resolve_appeal(a.aid, "noted", note="from the agent")
+    finally:
+        ms.use(None)
+    ap = appeals.store_of(a.reg).get(a.aid)
+    assert ap.state == "resolved" and ap.outcome == "noted" and ap.resolved_by_id == OFFICER, "resolved as the named officer"
+    assert any("[mcp]" in t for _, _, t in a.bot.ops.lines), "audited with the surface prefix"
+    assert [n for n in a.reg.notices(a.m.discord_id) if n["kind"] == "appeal"] and not a.bot.dms
+    names = {t.name for t in asyncio.run(ms.mcp.list_tools())}
+    assert {"list_appeals", "resolve_appeal"} <= names and not any("appeal" in n and n not in ("list_appeals", "resolve_appeal") for n in names)
+
+
 def test_no_llm_anywhere_in_the_flow(a, monkeypatch):
     """No model reads, routes or answers an appeal: a provider that explodes on use is never touched."""
     from oibot_gm.llm import provider as prov
@@ -294,3 +325,29 @@ def test_award_ids_are_stable_and_name_the_award(reg):
     aw = award(reg, m, iid="run-1-d1")
     assert appeals.award_id(aw) == appeals.award_id(LootAward(**aw.model_dump())) and len(appeals.award_id(aw)) == 12
     assert lootctx.award_ref(aw) == "run-1-d1"
+
+
+def test_two_identical_imported_awards_each_get_their_own_question(a):
+    """Regression: imported rows without an import_id are named 'raider|item|received' (lootctx.award_ref), so two of the
+    same item to the same character on the same day shared one appeal id and the second was 'already asked'. Each now
+    has its own id (its place in the ledger), the first keeps the plain one, and officer details find each."""
+    c = a.m.main or a.m.characters[0]
+    rows = []
+    for _ in range(2):
+        row = LootAward(raider=c.label, item_id=0, tier="B", total_weight=1.0, received=date(2026, 9, 1), instance="barrow_deeps", offspec=False, boss="Gatekeeper",
+                        item_name="Band of Twins", discord_id=a.m.discord_id, source="import")
+        a.reg.store.append_jsonl(f"{a.reg.key}/ledger.jsonl", row.model_dump(mode="json"))
+        rows.append(row)
+    a.bot.__dict__.pop("contexts", None)
+    assert lootctx.award_ref(rows[0]) == lootctx.award_ref(rows[1]), "the shared ref this test is about"
+    h = as_user(a.c, a.m.discord_id)
+    ids = [r["award"] for r in a.c.get("/api/me/loot", headers=h).json()["rows"] if r["item"] == "Band of Twins"]
+    assert len(ids) == 2 and len(set(ids)) == 2, "each row its own id"
+    assert appeals.award_id(rows[0]) in ids, "the first of the two keeps the plain id"
+    for aid in ids:
+        r = ask(a, a.m.discord_id, "Two of these the same night — which one is this?", aid=aid)
+        assert r.status_code == 200, r.text
+    assert {ap.id for ap in appeals.store_of(a.reg).all()} == set(ids)
+    off = a.c.get("/api/loot/appeals", headers=as_user(a.c, OFFICER)).json()
+    assert all(x["details"]["found"] for x in off["open"])
+    assert ask(a, a.m.discord_id, "And once more about the second one", aid=ids[1]).json()["error"].startswith("You've already asked")

@@ -66,6 +66,15 @@ def test_paused_and_ad_hoc_schedules_read_in_words(one, reg):
     assert "Pickups" in body and "first come" in body
 
 
+def test_a_paused_schedule_says_paused_once(one, reg):
+    """Regression: schedule_label's ' · paused' plus the page's 'paused for now' read 'paused' twice."""
+    bot, c = one
+    reg.set_schedule("barrow_deeps", "fri", {"kind": "weekly", "slots": "Fri 20:00", "name": "Fridays", "active": False}, "t")
+    body = c.get("/schedule").text
+    row = body.split("Fridays", 1)[1].split("</li>", 1)[0]
+    assert row.count("paused") == 1 and "paused for now" in row and "next:" not in row
+
+
 def test_an_unlisted_guild_has_no_schedule_page_no_homepage_card_and_no_public_facts(one, reg):
     bot, c = one
     reg.config.public = False
@@ -97,6 +106,41 @@ def test_several_guilds_list_only_the_listed_ones_everywhere(two):
     as_user(c, 300_000_000_000_000_999)  # in neither server
     page = c.get("/app/me")
     assert duo.b.config.name not in page.text
+
+
+def test_a_non_members_403_never_names_an_unlisted_guild(two):
+    """Regression: X-Oibot-Guild / ?g= naming an unlisted guild answered 'isn't a member of the <name> server' to anyone
+    logged in. An unlisted key is refused exactly like a key nobody serves (the same 404 rule /schedule follows)."""
+    bot, c, duo = two
+    duo.b.config.public = False
+    duo.b.save_config("t: unlisted")
+    h = as_user(c, DEMO_ONLY)
+    for ask in ({"headers": {**h, "X-Oibot-Guild": GUILD2}}, {"params": {"g": GUILD2}}):
+        r = c.get("/api/meta", **ask)
+        assert r.status_code == 403 and r.json()["not_member"] is True
+        assert duo.b.config.name not in r.text, "an unlisted guild is never named to a non-member"
+    unlisted = c.get("/api/meta", headers={**h, "X-Oibot-Guild": GUILD2}).json()
+    unknown = c.get("/api/meta", headers={**h, "X-Oibot-Guild": "nope"}).json()
+    assert unlisted["error"] == unknown["error"] and unlisted["guilds"] == unknown["guilds"] == [GUILD], "no tell between the two"
+    duo.b.config.public = True  # a LISTED guild still names itself (the refusal says which server to join)
+    assert duo.b.config.name in c.get("/api/meta", headers={**h, "X-Oibot-Guild": GUILD2}).json()["error"]
+
+
+def test_the_one_unlisted_guilds_403_names_nobody(reg, rs, monkeypatch):
+    from test_recruitment_web import OUTSIDER_UID, RecruitBot, SECRET
+    from test_recruitment_web import as_user as login
+
+    monkeypatch.setenv("OIBOT_WEB_SECRET", SECRET)
+    monkeypatch.delenv("OIBOT_WEB_DEV", raising=False)
+    monkeypatch.delenv("OIBOT_WEB_SESSION_EPOCH", raising=False)
+    c = TestClient(web.create_app(RecruitBot(reg, rs)), follow_redirects=False)
+    login(c, OUTSIDER_UID)
+    assert reg.config.name in c.get("/api/meta").json()["error"], "listed: the refusal names the server"
+    reg.config.public = False
+    reg.save_config("t: unlisted")
+    r = c.get("/api/meta")
+    assert r.status_code == 403 and r.json()["not_member"] is True and reg.config.name not in r.text
+    assert reg.config.name not in c.get("/app/me").text
 
 
 def test_two_listed_guilds_get_a_schedule_index(two):
@@ -134,3 +178,21 @@ def test_the_public_flag_is_an_owner_setting_on_the_structured_path(reg):
     assert reg.config.public is False
     configops.apply(reg, ConfigOp(op="set", path="public", value="true"), "Owner", True)
     assert reg.config.public is True
+
+
+def test_config_overview_and_gm_config_show_say_listed_or_unlisted(reg):
+    """/gm config show, the Config Overview and MCP config_summary read the same sections: the `public` setting is in them."""
+    rec = next(x for x in configops.config_summary(reg) if x.key == "recruitment").lines
+    assert any(line.startswith("Homepage: listed") for line in rec)
+    reg.config.public = False
+    text = configops.summary_text(configops.config_summary(reg))
+    assert "Homepage: unlisted" in text and "Homepage: listed" not in text
+
+
+def test_every_settings_field_is_named_in_the_mcp_set_config_tool():
+    """An agent finds a setting from the tool's description: every SETTINGS_FIELDS entry is named in set_config's docstring."""
+    from oibot_gm import mcp_server
+
+    doc = mcp_server.set_config.__doc__ or ""
+    missing = [f for f in configops.SETTINGS_FIELDS if not re.search(rf"\b{f}\b(?= \(|,)", doc)]
+    assert not missing, f"set_config's description doesn't name {missing}"

@@ -3132,6 +3132,12 @@ def invite_words(url: str | None) -> str:
     return f"Invite link: {u} — not a Discord invite link, so the Join button may not work; make one with /gm config recruitment."
 
 
+def listed_words(public: bool) -> str:
+    """GuildConfig.public (B10) as the Config Overview and /gm config show say it."""
+    return ("Homepage: listed — a public card and a public schedule page" if public
+            else "Homepage: unlisted — no public card or schedule page; its members still log in")
+
+
 def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[SummarySection]:
     """The effective configuration as a person reads it (dual interfaces §2.5, §3.5 O-17), in sections — `/gm config show`
     (one embed field per section), the Config page's Overview tab (GET /api/config/summary) and MCP config_summary print
@@ -3183,7 +3189,7 @@ def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[S
     rec = cfg.recruitment
     rec_lines = [f"Applications: {'open' if rec.open else 'closed'}" + (f" — {rec.note}" if getattr(rec, "note", None) else ""),
                  f"{len(rec.questions)} question{'s' if len(rec.questions) != 1 else ''} of the guild's own" if rec.questions else "No questions of the guild's own",
-                 invite_words(cfg.invite_url)]
+                 invite_words(cfg.invite_url), listed_words(cfg.public)]
     if cfg.member_role_ids:
         rec_lines.append("Member roles (register without applying): " + ", ".join(f"<@&{r}>" for r in cfg.member_role_ids))
     out.append(SummarySection(key="recruitment", title="Recruitment", lines=rec_lines))

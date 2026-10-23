@@ -17,9 +17,9 @@ from .wizard import Field, Form, Opt, Wizard, flow
 
 
 class AskWizard(Wizard):
-    def __init__(self, reg: Registry, uid: int, name: str, awards: list):
+    def __init__(self, reg: Registry, uid: int, name: str, awards: list[tuple[str, object]]):
         super().__init__(reg, uid, title="Ask the council about an award")
-        self.name, self.awards = name, {appeals.award_id(a): a for a in awards}
+        self.name, self.awards = name, dict(awards)  # (appeal id, award) pairs from appeals.own_awards
         self.aid: str | None = None
         self.text = ""
 
@@ -86,7 +86,7 @@ async def me_loot_ask(interaction: discord.Interaction, reg: Registry, *, award:
         await interaction.response.send_message("Nothing registered yet — /register to start.", ephemeral=True)
         return
     asked = {ap.id for ap in appeals.store_of(reg).of_member(uid)}
-    mine = [a for a in appeals.member_awards_all(reg, guild_ctx(interaction.client, reg), m) if appeals.award_id(a) not in asked]
+    mine = [(aid, a) for aid, a in appeals.own_awards(reg, guild_ctx(interaction.client, reg), m) if aid not in asked]
     if not mine:
         await interaction.response.send_message("No award to ask about: nothing recorded for you yet, or you've asked about each one already "
                                                 "(the answers are on your Me page and in `/me view`).", ephemeral=True)

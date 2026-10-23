@@ -89,7 +89,8 @@ src/oibot_gm/
                        and escaped; the card + a PUBLIC thread "loot · <member> · <item>" on officer_channel; no channel → waits on Loot › Appeals)
                        and resolve_appeal (one OUTCOMES choice, officers' note, the member's `appeal` NOTICE — never a DM — card to its final state,
                        thread archived); officer_details = the council's record (D2: Details button / Loot › Appeals only, never the card);
-                       AppealButton `appeal.<gk>:details|resolve:<id>`; APPEAL_LISTENERS → `loot:appeals`. NO LLM anywhere
+                       AppealButton `appeal.<gk>:details|resolve:<id>`; APPEAL_LISTENERS → `loot:appeals`; MCP list_appeals / resolve_appeal
+                       (actor, D8) — never opens one. NO LLM anywhere
   flows_appeal.py      me_loot_ask (/me loot-ask: award select → one prose modal → decide "Send to the council") · appeal_resolve (officers:
                        outcome select → decide, note optional)
   lootctx.py           RegistryLootContext (one per guild, reload(); void / reweight rows and superseding / status precedents folded; wishlists derived

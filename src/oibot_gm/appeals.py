@@ -1,6 +1,7 @@
 """Loot appeals (L32; dual interfaces phase 4 — design §5.49): a member asks the council about one of THEIR OWN awards.
 
-- **One appeal per award.** The appeal's id IS the award's id (`award_id`: a short hash of lootctx.award_ref), stored as
+- **One appeal per award.** The appeal's id IS the award's id (`award_id`: a short hash of lootctx.award_ref; two
+  identical imported rows without an import_id are told apart by their place in the ledger — `ledger_ids`), stored as
   `<guild>/appeals/<id>.yaml` in the data repo (file per entity, commit per change — git log is the audit trail). A
   second question about the same award is refused, open or resolved; an award that was corrected later keeps its appeal.
 - **The member's words are data.** Prose from `/me loot-ask`'s modal or Me › My loot › *Ask the council* is validated
@@ -26,6 +27,7 @@ import hashlib
 import logging
 import re
 import threading
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -92,9 +94,28 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def award_id(a) -> str:
-    """The id an award is asked about by (URLs, button ids, the appeal file): 12 hex characters of its award_ref."""
-    return hashlib.sha1(award_ref(a).encode()).hexdigest()[:12]
+def award_id(a, n: int = 0) -> str:
+    """The id an award is asked about by (URLs, button ids, the appeal file): 12 hex characters of its award_ref. `n` =
+    how many earlier ledger rows WITHOUT an import_id share that award_ref ('raider|item|received': two identical
+    imported rows) — the n-th repeat hashes '<ref>#<n>' so each has its own appeal. An award with an import_id is unique
+    already. Callers with a ledger take the id from `ledger_ids`, never award_id(a) alone."""
+    ref = award_ref(a)
+    if n and not getattr(a, "import_id", None):
+        ref = f"{ref}#{n}"
+    return hashlib.sha1(ref.encode()).hexdigest()[:12]
+
+
+def ledger_ids(awards) -> dict[int, str]:
+    """id(award object) → its appeal id, over a LEDGER-ORDERED list (RegistryLootContext.ledger, fold_ledger's output —
+    the file is append-only and rows without an import_id are never voided, so their places agree between the two)."""
+    seen: Counter = Counter()
+    out: dict[int, str] = {}
+    for a in awards:
+        ref = award_ref(a)
+        out[id(a)] = award_id(a, 0 if a.import_id else seen[ref])
+        if not a.import_id:
+            seen[ref] += 1
+    return out
 
 
 class AppealStore:
@@ -206,28 +227,35 @@ def member_awards_all(reg: Registry, ctx, m) -> list:
     return member_awards(reg, ctx, m, 100_000)
 
 
+def own_awards(reg: Registry, ctx, m) -> list[tuple[str, object]]:
+    """(appeal id, award) for each of the member's live awards, newest first — ids over the whole ledger (ledger_ids)."""
+    ids = ledger_ids(ctx.ledger)
+    return [(ids[id(a)], a) for a in member_awards_all(reg, ctx, m)]
+
+
 def find_award(reg: Registry, ctx, uid: int, aid: str):
     """One of the member's own live awards by id; anything else (someone else's, voided, unknown) is NOT_YOURS."""
     m = reg.members.get(int(uid))
     if m is None:
         raise AppealError("Nothing registered yet — /register to start.")
-    hit = next((a for a in member_awards_all(reg, ctx, m) if award_id(a) == aid), None)
+    hit = next((a for i, a in own_awards(reg, ctx, m) if i == aid), None)
     if hit is None:
         raise AppealError(NOT_YOURS)
     return hit
 
 
 def all_awards(reg: Registry) -> dict:
-    """Every ledger award by award_ref, voided ones too (an appeal can outlive a correction) — read once per listing."""
+    """Every ledger award by appeal id, voided ones too (an appeal can outlive a correction) — read once per listing."""
     awards, _ = fold_ledger(reg.store.read_jsonl(Path(reg.key) / "ledger.jsonl"))
-    return {award_ref(a): a for a in awards}
+    ids = ledger_ids(awards)
+    return {ids[id(a)]: a for a in awards}
 
 
 def officer_details(reg: Registry, ctx, ap: Appeal, awards: dict | None = None) -> dict:
     """The council's record of the award (D2: officers only — Loot › Appeals and the card's Details button): how it was
     decided, the bot's pick, who recorded it, tier and weight, the candidates at the time and the precedent's reason.
     `awards`: all_awards(reg) when the caller lists several."""
-    a = (awards if awards is not None else all_awards(reg)).get(ap.award_ref)
+    a = (awards if awards is not None else all_awards(reg)).get(ap.id)
     if a is None:
         return {"found": False}
     prec = ctx.precedent_for(a.import_id) if (ctx is not None and a.import_id) else None
@@ -260,10 +288,11 @@ def details_text(reg: Registry, ctx, ap: Appeal) -> str:
 
 # ---------------------------------------------------------------- writes (each on a worker thread: a git commit)
 
-def record_open(reg: Registry, m, award, text: str, *, via: str) -> Appeal:
-    """Store a new appeal — refused when the award already has one (open or resolved), under the guild's appeal lock."""
+def record_open(reg: Registry, m, award, text: str, *, via: str, aid: str | None = None) -> Appeal:
+    """Store a new appeal — refused when the award already has one (open or resolved), under the guild's appeal lock.
+    `aid` = the award's id from ledger_ids (find_award's caller has it); award_id(award) only for a unique award."""
     st = store_of(reg)
-    aid = award_id(award)
+    aid = aid or award_id(award)
     with _lock(reg):
         old = st.get(aid)
         if old is not None:
@@ -316,7 +345,7 @@ async def open_appeal(bot, reg: Registry, uid: int, aid: str, text, *, by: str, 
     if m is None:
         raise AppealError("Nothing registered yet — /register to start.")
     award = find_award(reg, guild_ctx(bot, reg), uid, aid)
-    ap = await asyncio.to_thread(record_open, reg, m, award, words, via=via)
+    ap = await asyncio.to_thread(record_open, reg, m, award, words, via=via, aid=aid)
     posted = await post_card(bot, reg, ap)
     await ops_mod.audited(bot.ops, reg, by, f"loot question from {ap.member_name} about {ap.item} ({ap.character})" + ("" if posted else " — no officer channel: it waits on Loot › Appeals"),
                           via=via, by_id=by_id)

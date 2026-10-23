@@ -106,6 +106,12 @@ def session_valid(s: dict | None, now: float | None = None) -> bool:
     return iat <= now + 60 and now - iat <= SESSION_MAX_AGE_S and iat >= session_epoch()
 
 
+def listed_name(reg) -> str | None:
+    """The guild's name for a refusal a NON-member reads, or None when the guild is unlisted (GuildConfig.public False):
+    an unlisted guild is never named to someone outside it, so its refusal reads like a key nobody serves (B10)."""
+    return reg.config.name if reg is not None and getattr(reg.config, "public", True) else None
+
+
 class NotMember(HTTPException):
     """A logged-in Discord user who isn't in the guild's server. The API answers 403 JSON as before; an HTML page
     request (/, /app/*) gets the friendly 'not in the Discord yet' page with the Join button instead.
@@ -269,7 +275,8 @@ def schedule_sections(reg) -> list[dict]:
                 rows.append({"title": title, "label": "Ad hoc: an officer opens these runs when there's interest — first come, first served", "runs": []})
                 continue
             if not sc.get("active", True):
-                rows.append({"title": title, "label": reg.schedule_label(rid, sc), "runs": [], "paused": True})
+                # schedule_label ends ' · paused'; the page says it once, in its own words ('paused for now')
+                rows.append({"title": title, "label": reg.schedule_label(rid, sc).removesuffix(" · paused"), "runs": [], "paused": True})
                 continue
             rows.append({"title": title, "label": reg.schedule_label(rid, sc), "runs": [reg.local12(t) for t in rc.next_runs_of(reg, rid, sc, n=SCHEDULE_RUNS)]})
         if rows:
@@ -549,7 +556,8 @@ def create_app(bot) -> FastAPI:
                     return reg, member, None
                 if answer == "unknown":
                     raise DiscordUnsure()
-            raise NotMember(reg.config.name if reg else None, requested=want, guilds=await accessible_keys(uid, skip=reg))
+            # an UNLISTED guild is refused exactly like a key nobody serves: the 403 never names it (B10, design §5.49)
+            raise NotMember(listed_name(reg), requested=want, guilds=await accessible_keys(uid, skip=reg))
         moved, tried = None, None
         ck = (request.cookies.get(GUILD_COOKIE) or "").strip()
         if ck:
@@ -572,7 +580,7 @@ def create_app(bot) -> FastAPI:
                 return r, member, moved
         if any(answer == "unknown" for _, answer, _ in looks):
             raise DiscordUnsure()
-        raise NotMember(regs[0].config.name if not many else None)
+        raise NotMember(listed_name(regs[0]) if not many else None)
 
     async def viewer(request: Request, guild: str | None = None, query: bool = True) -> Viewer | None:
         """None = not logged in (or no guild configured). Raises 403 (NotMember) for a Discord user who may not open

@@ -84,7 +84,9 @@ lists them; `/schedule?g=<key>` opens one.
 
 **Unlisted guilds.** The owner can switch a guild to *unlisted* (Config › Recruitment and more › **Homepage**, or
 "unlist the guild" in plain text): it then has no card on the homepage, no public schedule, and the not-a-member page
-doesn't name it. Its members still log in and find it in their own server list as before.
+doesn't name it — nor does any refusal someone outside it gets: a link to it reads like a link to a server the site
+doesn't serve. Its members still log in and find it in their own server list as before. Config › Overview and
+`/gm config show` say which it is (*Homepage: listed* or *unlisted*).
 
 **When the bot looks after more than one Discord server**, the homepage shows the servers side by side, each with
 its own icon, name, about text, **Join our Discord** (its own invite) and **Log in with Discord**. Once you're logged
@@ -1397,6 +1399,7 @@ news post says can make the review read or write another server.
 | `list_absences` · `list_auras` · `ops_log` | upcoming absences · the buff matrix · status, the ops feed, the registry change lines since the bot started, and the loot precedents (up to 50) and award log (up to 100) from the Loot pages, `member` narrowing both to one person |
 | `get_loot` · `open_loot` · `loot_tick` · `loot_distribute` · `loot_discard` · `end_loot` | the councils (every locked run, or one run in full: drops by boss, picks with their candidate tables, pending overrides, awards, reasons owed, the roster, `batch_rev` / `drops_rev`, the End sentence) · open the council on a locked run · tick drops by name or id (`remove` un-ticks) · judge the ticked drops · drop pending picks (`batch_rev`, or `only` some = decide later; `preview`) · end the run and its council (`preview` = the sentence) |
 | `loot_confirm` · `loot_award` · `loot_reason` · `loot_correct` | **decisions — need `OIBOT_MCP_ACTOR`**: record picks (one with `expect_to`, or the rest with `batch_rev`; `preview` needs no actor) · override a pick with a reason · the reason for an in-game award (an ended council too) · fix a recorded award |
+| `list_appeals` · `resolve_appeal` | members' questions about their own awards (open oldest first, then the resolved; the officers' record of each award, the outcome choices) · close one with an outcome (stands · corrected · noted · withdrawn) and an officers-only note — **a decision: needs `OIBOT_MCP_ACTOR`** (`preview` = the sentence, no actor); the member gets a notice, never a DM. No tool opens one |
 | `loot_history` · `loot_log` · `list_precedents` · `retire_precedent` | ended councils (one in full) · the award log (`scores` for officers' columns) · precedents with their refs and the awards still needing a reason · retire or restore one (actor) |
 | `list_items` · `tier_item` | the untiered items and one item's tier grid · set tiers per spec (actor); with past awards and no `reweight` answer nothing is written and the reply asks |
 | `draft_tiers` · `export_tiers` | Claude's suggested tiers for one item — a proposal, nothing saved (confirm it with `tier_item`) · the whole tier grid as CSV text |
@@ -1691,8 +1694,9 @@ thread. **Resolve…**: pick one outcome (*The award stands* · *Corrected* · *
 confirm says exactly what the member will read and takes an optional note that stays with the officers. In Discord the
 card's **Details** shows the same record to the officer who pressed it only, and **Resolve…** is the same choice and
 confirm. The member gets a notice, never a DM; the card is edited to *Resolved* and the thread archived. To change who
-got the item, use **Correct…** as usual and resolve the question as *Corrected*. Over MCP, resolving needs the
-`X-Oibot-Actor` header (an officer's decision about a person); MCP never opens one.
+got the item, use **Correct…** as usual and resolve the question as *Corrected*. Over MCP, `list_appeals` reads the
+same list and `resolve_appeal` closes one — that needs `OIBOT_MCP_ACTOR` (sent as the `X-Oibot-Actor` header: an
+officer's decision about a person; its `preview` doesn't); MCP never opens one.
 
 ### Members: your loot and your wishlist
 

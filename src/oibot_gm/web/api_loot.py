@@ -576,8 +576,9 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
         asked = {ap.id: ap for ap in appeals.store_of(reg).of_member(v.uid)} if v.member else {}
         out = []
+        ids = appeals.ledger_ids(ctx.ledger)  # the appeal id of each award (two identical imported rows apart)
         for a in rows[:max(1, min(int(limit), 200))]:
-            aid = appeals.award_id(a)
+            aid = ids[id(a)]
             ap = asked.get(aid)
             out.append({**log_row(reg, a, chars, False, False, ctx, v.uid, mine), "award": aid, "appeal": member_appeal_json(reg, ap) if ap else None})
         # my questions to the council (L32), newest first — also those about an award corrected since (no longer a row above)
