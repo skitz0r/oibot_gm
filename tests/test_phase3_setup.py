@@ -343,7 +343,7 @@ def test_config_summary_sections_and_the_owners_host_facts(reg, monkeypatch, tmp
                                 guild_channels=lambda r: [])
     host = configops.config_summary(reg, bot, "owner")[-1].lines
     assert any("Host superusers" in x for x in host) and any("$1.00 of $5" in x for x in host)
-    assert any("works only on the host (local only)" in x for x in host) and any(".env) changed since the bot started" in x for x in host)
+    assert any("local only (the owner token works only on the host)" in x for x in host) and any(".env) changed since the bot started" in x for x in host)
 
 
 def test_gm_config_show_is_one_field_per_section_with_a_more_line(reg):

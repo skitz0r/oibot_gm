@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useDirty } from "../hooks/useDirty";
-import { ActionIcon, Badge, Button, Card, Group, Menu, MultiSelect, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Button, Card, Group, Menu, MultiSelect, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconCrown, IconDots, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { api, ApiError, type Character, type Me, type Meta, type TableSaved } from "../api";
 import { GameIcon } from "./Icons";
-import { CharacterCell, SpecCell } from "./Cells";
+import { CharacterCell, SpecCell, StatusBadge } from "./Cells";
 import { CardHeader, fail, ok } from "./Page";
 import { useConfirm } from "./ConfirmModal";
 import { classColour } from "../theme";
@@ -76,7 +76,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
         action={!editing && !me.must_apply ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} onClick={startEdit}>Edit</Button> : undefined} />
       <Table.ScrollContainer minWidth={680}>
         <Table style={{ tableLayout: "fixed" }}>
-          <Table.Thead><Table.Tr><Table.Th w={editing ? 84 : 44} /><Table.Th>Character</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Spec</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Offspec</Table.Th><Table.Th w={editing ? "20%" : "14%"}>Flex</Table.Th>{!editing && <Table.Th w="16%">Status</Table.Th>}<Table.Th w={48} /></Table.Tr></Table.Thead>
+          <Table.Thead><Table.Tr><Table.Th w={editing ? 84 : 44} /><Table.Th>Character</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Spec</Table.Th><Table.Th w={editing ? "22%" : "14%"}>Offspec</Table.Th><Table.Th w={editing ? "20%" : "14%"}>Flex</Table.Th>{!editing && <Table.Th w={120}>Status</Table.Th>}<Table.Th w={48} /></Table.Tr></Table.Thead>
           <Table.Tbody>
             {!editing && me.characters.map((c) => (
               <Table.Tr key={c.label}>
@@ -85,7 +85,7 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
                 <Table.Td><SpecCell meta={meta} cls={c.cls} spec={c.spec} role={c.role} /></Table.Td>
                 <Table.Td>{c.offspec ? <SpecCell meta={meta} cls={c.cls} spec={c.offspec} role={c.off_role || ""} /> : <Text c="dimmed">—</Text>}</Table.Td>
                 <Table.Td><FlexIcons meta={meta} flex={c.flex} /></Table.Td>
-                <Table.Td>{!c.name ? <Badge variant="outline" color="gray">planned</Badge> : c.confirmed ? <Badge variant="light" color="teal">confirmed</Badge> : <Badge variant="light" color="yellow">unconfirmed</Badge>}</Table.Td>
+                <Table.Td><StatusBadge named={!!c.name} confirmed={!!c.confirmed} /></Table.Td>
                 <Table.Td>
                   <Menu position="bottom-end" withinPortal>
                     <Menu.Target><ActionIcon variant="subtle" color="gray" loading={busy === c.label} aria-label={`${c.label} actions`}><IconDots size={17} /></ActionIcon></Menu.Target>

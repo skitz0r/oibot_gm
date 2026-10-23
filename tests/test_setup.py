@@ -1150,6 +1150,32 @@ def test_setup_route_and_the_host_card(wc, web_bot, reg, monkeypatch):
     d = wc.get("/api/admin/setup", headers=as_user(wc, SUPER)).json()
     assert d["host"]["invite_link"].startswith("https://discord.com/oauth2/authorize?client_id=42")
     assert [g["name"] for g in d["host"]["unclaimed"]] == ["Stray"] and d["host"]["detached"] == []
+    # UI audit: ONE Host card — the summary's Host lines ride on it (the Config page drops the Overview's Host section)
+    facts = d["host"]["facts"]
+    assert facts[0].startswith("Error alerts: the owner") and any(x.startswith("Host superusers") and "Host" in x for x in facts)
+    assert sum(x.startswith("MCP:") for x in facts) == 1, "MCP is one sentence"
+
+
+def test_mcp_is_one_sentence_with_the_12_hour_label_only(reg, monkeypatch, tmp_path):
+    """UI audit: the Host card printed the MCP block as raw key: value lines, the request log's 24-hour stamp among them
+    ('last used: 2026-10-23 09:00:02'). It is one sentence now, with the 12-hour label only; the payload carries no raw
+    stamp for a page to print."""
+    from oibot_gm.web import api_agents
+
+    log = tmp_path / "oibot.log"
+    log.write_text("2026-10-23 09:00:02 INFO web POST /api/raid/x/lock via=mcp\n")
+    monkeypatch.setattr(api_agents, "LOG_FILE", log)
+    monkeypatch.setenv("OIBOT_MCP_TOKEN", "x" * 64)
+    monkeypatch.delenv("OIBOT_MCP_LOCAL_ONLY", raising=False)
+    card = api_agents.mcp_card(reg)
+    assert "last_used" not in card and card["last_used_label"] and not re.search(r"\d{4}-\d{2}-\d{2}|\b\d{2}:\d{2}:\d{2}\b", str(card))
+    line = configops.mcp_words(reg)
+    assert line.startswith("MCP: configured, local only") and f"last write {card['last_used_label']}" in line
+    assert re.search(r"\d{1,2}:\d{2} [AP]M", line) and "2026-10-23" not in line and "09:00:02" not in line
+    host = next(x for x in configops.config_summary(reg, None, "owner") if x.key == "host").lines
+    assert [x for x in host if x.startswith("MCP:")] == [line]
+    monkeypatch.delenv("OIBOT_MCP_TOKEN")
+    assert configops.mcp_words(reg) == "MCP: not set up on this host (no token)"
 
 
 def test_left_and_remove_record_routes(wc, web_bot, reg):

@@ -90,7 +90,8 @@ def mcp_card(reg, tz=None, log: Path | None = None) -> dict:
             label = reg.local12(datetime.strptime(seen, "%Y-%m-%d %H:%M:%S").astimezone())
         except ValueError:
             label = ""
-    return {"configured": bool(os.environ.get(MCP_TOKEN_ENV)), "local_only": mcp_local_only(), "last_used": seen, "last_used_label": label,
+    # the log's 24-hour stamp stays here: a person reads last_used_label (12-hour, the guild's clock) and nothing else
+    return {"configured": bool(os.environ.get(MCP_TOKEN_ENV)), "local_only": mcp_local_only(), "last_used_label": label,
             "config_file": (agents.ROOT / ".mcp.json").exists()}
 
 

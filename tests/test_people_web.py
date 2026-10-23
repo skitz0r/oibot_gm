@@ -121,6 +121,25 @@ def test_members_lists_characterless_members_and_hides_others_puppets(w):
     assert not any(r.get("test") for r in w.c.get("/api/absences", headers=h).json()["rows"])
 
 
+def test_members_ask_badge_never_reads_the_run_key(w):
+    """UI audit: an unanswered confirm ask whose run had ended showed on the Members page as "confirm BD-0917-1919?" —
+    the run key, its tail the 24-hour start. An ended run reads as its raid and 12-hour start; a key with no run file
+    left reads in words."""
+    import re
+
+    m = real(w.reg, 7)
+    ev = real_run(w.reg, w.rs)
+    ev.state = "done"
+    w.rs.save(ev, "test: ended")
+    m.placement_asks = [{"roster": ev.team, "character": m.characters[0].label, "asked_at": "2026-09-17T19:19:00+00:00", "answer": None},
+                        {"roster": "BD-0917-1919", "character": m.characters[0].label, "asked_at": "2026-09-17T19:19:00+00:00", "answer": None}]
+    rows = w.c.get("/api/members", headers=as_user(w, OFFICER)).json()["rows"]
+    asks = next(r for r in rows if r["uid"] == str(m.discord_id))["asks"]
+    assert [a["key"] for a in asks] == [None, None]
+    assert asks[0]["raid"] == w.reg.raid_def(ev.instance).get("name", ev.instance) and re.search(r"\d{1,2}:\d{2} [AP]M", asks[0]["when"])
+    assert asks[1]["raid"] == "a run that has ended" and not any("1919" in a["raid"] or ev.team == a["raid"] for a in asks)
+
+
 def test_members_save_refuses_only_the_stale_member(w):
     a, b = member(w, 0), member(w, 1, cls="Mage", spec="Fire")
     h = as_user(w, OFFICER)

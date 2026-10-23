@@ -19,7 +19,7 @@ interface ConfigData {
   yaml: string; docs: Record<string, { text: string; compiled: boolean; summary: string | null }>;
   channels: Record<string, { id: string | null; name: string | null }>; guild_channels: { id: string; name: string; category: string | null }[]; guild_roles: RoleRef[];
   /** officer_roles: by role id (renames are safe); officer_roles_pending: legacy names the bot could not match to a role */
-  settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null; news_keywords: string[];
+  settings: { timezone: string; ask_audience: string; about: string; officer_roles: RoleRef[]; officer_roles_pending: string[]; owner_id: string | null; owner_name?: string | null; news_keywords: string[];
     /** the public loot log: on/off, and its state in words (off · a channel · on with no channel) */
     loot_log: boolean; loot_log_state: LootLogState;
     /** B10: listed on the public homepage, /api/public and the public /schedule page (false = unlisted) */
@@ -43,6 +43,7 @@ export function ConfigPage({ meta }: { meta: Meta }) {
   const [saved, setSaved] = useState<string | null>(null);
   const [tab, setTab] = useState<string | null>("overview");
   const [summary, setSummary] = useState<ConfigSummary | null>(null);
+  const [hostCard, setHostCard] = useState(false);  // the Setup card shows THE Host card (a superuser): no second one below
   const [draft, setDraft] = useState<SettingsDraft | null>(null);  // the Settings card's edit mode: one Save
   const [stale, setStale] = useState(false);  // someone else changed the settings while the draft was open
   const draftRef = useRef(false);
@@ -84,8 +85,8 @@ export function ConfigPage({ meta }: { meta: Meta }) {
 
         <Tabs.Panel value="overview" pt="md">
           <Stack gap="lg">
-            <SetupCard />
-            <Overview s={summary} />
+            <SetupCard onHost={setHostCard} />
+            <Overview s={summary} skipHost={hostCard} />
           </Stack>
         </Tabs.Panel>
 
@@ -153,11 +154,11 @@ export function ConfigPage({ meta }: { meta: Meta }) {
 }
 
 /** The effective configuration in words (configops.config_summary — the same sections /gm config show prints). */
-function Overview({ s }: { s: ConfigSummary | null }) {
+function Overview({ s, skipHost }: { s: ConfigSummary | null; skipHost?: boolean }) {
   if (!s) return <Text c="dimmed">Loading…</Text>;
   return (
     <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-      {s.sections.map((x) => (
+      {s.sections.filter((x) => !(skipHost && x.key === "host")).map((x) => (
         <Card key={x.key}>
           <CardHeader title={x.title} hint={x.key === "host" && s.audience === "owner" ? "only you see this" : undefined} />
           <Stack gap={4} p="md">{x.lines.map((ln, i) => <Text key={i} size="sm" style={{ overflowWrap: "anywhere" }}>{ln}</Text>)}</Stack>
@@ -264,7 +265,7 @@ function SettingsCard({ meta, data, draft, setDraft, stale, onReload, onSaved }:
           <Fact label="About the guild" value={st.about || "—"} />
         </SimpleGrid>
         {st.officer_roles_pending.length > 0 && <Text size="xs" c="orange" px="md" pb="md">Not found in the server (from an older config, by name): {st.officer_roles_pending.join(", ")} — edit the settings to pick the role again.</Text>}
-        <Text size="xs" c="dimmed" px="md" pb="md">Owner: {st.owner_id ? `Discord id ${st.owner_id}` : "not claimed — /gm config owner"} · transfer with /gm config owner in the server</Text>
+        <Text size="xs" c="dimmed" px="md" pb="md">Owner: {st.owner_id ? (st.owner_name || "set") : "not claimed — /gm config owner"} · transfer with /gm config owner in the server</Text>
       </Card>
     );
   }

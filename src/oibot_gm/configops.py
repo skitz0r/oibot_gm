@@ -3237,12 +3237,9 @@ def config_summary(reg: Registry, bot=None, audience: str = "officer") -> list[S
 def host_facts(reg: Registry, bot=None) -> list[str]:
     """What the guild's owner must know about the host they share (design §3.5 O-01 / O-19 / O-20 / OPS-01, owner only):
     who gets the error alerts, who can act as them (the host superusers, by name), the LLM spend against the shared cap,
-    whether the MCP owner token works only on the host (web.app.mcp_local_only — the one reading of
-    OIBOT_MCP_LOCAL_ONLY), a parked guild, and a .env edited since the bot started (restart to apply). Never a secret."""
-    import os
-
+    the MCP status in one sentence (mcp_words: web.app.mcp_local_only is the one reading of OIBOT_MCP_LOCAL_ONLY), a
+    parked guild, and a .env edited since the bot started (restart to apply). Never a secret."""
     from .registry import superusers
-    from .web.app import mcp_local_only
 
     lines = [f"Error alerts: {reg.error_dm_words()} (one DM per distinct error per 30 min; /gm config errors-to)"]
     supers = sorted(superusers())
@@ -3250,11 +3247,7 @@ def host_facts(reg: Registry, bot=None) -> list[str]:
                  if supers else "No host superusers: only you act as this guild's owner.")
     provider = getattr(getattr(bot, "ctx", None), "provider", None) if bot is not None else None
     lines.append(f"Claude: {provider.summary()} (one cap shared by every guild on this host)" if provider is not None else "Claude: off (no API key on the host)")
-    if os.environ.get("OIBOT_MCP_TOKEN"):
-        lines.append("MCP: the owner token works only on the host (local only)" if mcp_local_only()
-                     else "MCP: the owner token also works through the tunnel (OIBOT_MCP_LOCAL_ONLY is off)")
-    else:
-        lines.append("MCP: not set up on this host (no token)")
+    lines.append(mcp_words(reg))
     if reg.config.detached_at:
         lines.append(f"Parked since {reg.local12(reg.config.detached_at)}: the bot is no longer in this server — invite it back")
     started = float(getattr(bot, "started_at", 0) or 0) if bot is not None else 0.0
@@ -3265,6 +3258,24 @@ def host_facts(reg: Registry, bot=None) -> list[str]:
     if changed:
         lines.append("Settings on disk (.env) changed since the bot started — restart to apply.")
     return lines
+
+
+def mcp_words(reg: Registry) -> str:
+    """The MCP status as ONE sentence (the Host card, /gm config show): configured, local only or not, when the token
+    last wrote (Registry.local12 — never the request log's 24-hour stamp) and whether .mcp.json registers it. The facts
+    are web.api_agents.mcp_card's, the Agents page's MCP card."""
+    from .web.api_agents import mcp_card
+
+    card = mcp_card(reg)
+    if not card["configured"]:
+        return "MCP: not set up on this host (no token)"
+    parts = ["configured",
+             "local only (the owner token works only on the host)" if card["local_only"]
+             else "the owner token also works through the tunnel (OIBOT_MCP_LOCAL_ONLY is off)",
+             f"last write {card['last_used_label']}" if card["last_used_label"] else "no write through it in the recent log"]
+    if card["config_file"]:
+        parts.append("registered in .mcp.json")
+    return "MCP: " + ", ".join(parts)
 
 
 def summary_text(sections: list[SummarySection]) -> str:

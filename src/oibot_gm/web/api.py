@@ -29,7 +29,7 @@ from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule
 from ..roster import coverage as cov_mod
 from .api_me import sheet_row_extras
 from .api_setup import discord_ready
-from .app import GUILD_COOKIE, NotMember, login_href, set_guild_cookie
+from .app import GUILD_COOKIE, NotMember, login_href, owner_name, set_guild_cookie
 
 HERE = Path(__file__).parent
 APP_DIR = HERE / "static" / "app"
@@ -560,10 +560,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     def run_label(reg, rs, team_key: str) -> dict:
         """Placement asks are keyed by the run's roster key; people see the raid name and the start time instead (B3)."""
         evs = sorted((e for e in rs.live() if e.team == team_key), key=lambda e: e.starts_at)
-        if not evs:
-            return {"raid": team_key, "when": "", "key": None}
+        if not evs:  # the run has ended (or its file is gone): its name and 12-hour start, never the key (UI audit:
+            # the Members page read "confirm BD-0917-1919?" — the key's tail is the 24-hour start)
+            past = sorted((e for e in rs.events.values() if e.team == team_key), key=lambda e: e.starts_at)
+            if not past:
+                return {"raid": "a run that has ended", "when": "", "key": None}
+            ev = past[-1]
+            return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "a run", "when": t12(reg, ev.starts_at), "key": None}
         ev = evs[0]
-        return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else team_key, "when": t12(reg, ev.starts_at), "key": ev.key}
+        return {"raid": reg.raid_def(ev.instance).get("name", ev.instance) if ev.instance else "a run", "when": t12(reg, ev.starts_at), "key": ev.key}
 
     def seat_runs(reg, rs, m) -> dict[str, list[str]]:
         """character label -> the locked live runs it holds a seat on (from the run files: rc.rostered_runs), as a
@@ -2102,6 +2107,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "settings": {"timezone": cfg.timezone, "ask_audience": cfg.ask_audience, "about": cfg.about or "", "officer_roles": officer_roles, "news_keywords": list(cfg.news_keywords),
                              "loot_log": bool(cfg.loot_log), "loot_log_state": loot_log_state(reg), "public": bool(cfg.public),
                              "officer_roles_pending": cfg.officer_roles_pending(), "owner_id": str(cfg.owner_discord_id) if cfg.owner_discord_id else None,
+                             "owner_name": owner_name(bot, reg) if cfg.owner_discord_id else None,  # what the page prints, never the snowflake
                              "member_roles": [{"id": str(rid), "name": reg.role_names.get(rid, f"role:{rid}")} for rid in cfg.member_role_ids],
                              # OPS-01: who gets the error alerts — null = the owner (the default), [] = nobody; saved as settings field error_dm_ids
                              "error_dm_ids": None if cfg.error_dm_ids is None else [str(u) for u in cfg.error_dm_ids],

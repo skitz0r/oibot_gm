@@ -11,26 +11,22 @@ type AlertMode = "owner" | "people" | "nobody";
 
 const MARK: Record<string, { c: string; t: string }> = { ok: { c: "teal", t: "✓" }, warn: { c: "yellow", t: "!" }, bad: { c: "red", t: "✗" } };
 
-/** The MCP status the Agents API reports (design §3.5 M-01: configured, local-only, token last used) — rendered as given. */
-type McpStatus = Record<string, unknown> | null;
-
 /** Config › Setup (design §3.5 O-01, S-05): the checklist — each row's ✓ computed by the bot with the test it runs at
  *  runtime (hover names it): the owner, every channel (perms.missing_for), officer roles (none = amber "Manage Server
  *  only"), the server-wide permissions, the optional ones, the error alerts — plus the invite's state and "Open in
- *  Discord". For a host superuser, the Host card: the bot's invite link, servers it is in that aren't guilds yet, parked
- *  guilds (the bot was removed from their server; nothing deleted) and the MCP status from the Agents API. */
-export function SetupCard() {
+ *  Discord". For a host superuser, THE Host card (one, not two): the bot's invite link, servers it is in that aren't
+ *  guilds yet, parked guilds (the bot was removed from their server; nothing deleted), then the config summary's Host
+ *  lines in words (error alerts, superusers, Claude spend, MCP in one sentence) — `onHost` tells the Config page it is
+ *  shown, so the Overview leaves its own Host section out. */
+export function SetupCard({ onHost }: { onHost?: (shown: boolean) => void } = {}) {
   const [data, setData] = useState<SetupData | null>(null);
-  const [mcp, setMcp] = useState<McpStatus>(null);
   // OPS-01: the owner's edit of who gets the error alerts (null = not editing) — saved through the structured ops path
   const [alerts, setAlerts] = useState<{ mode: AlertMode; ids: string[] } | null>(null);
   const [saving, setSaving] = useState(false);
   const [save, review] = useOpsSave();
   useDirty("error-alerts", alerts !== null);
-  const load = () => api.get<SetupData>("/api/admin/setup").then((d) => {
-    setData(d);
-    if (d.host) api.get<{ mcp?: McpStatus }>("/api/agents").then((a) => setMcp(a.mcp ?? null)).catch(() => setMcp(null));
-  }).catch(fail);
+  // the Overview drops its Host section only when this card carries the lines (a bot not yet restarted onto `facts` keeps it)
+  const load = () => api.get<SetupData>("/api/admin/setup").then((d) => { setData(d); onHost?.(!!d.host?.facts); }).catch(fail);
   useEffect(() => { load(); }, []);
   useLive(load, ["config", "ops"]);
   if (!data) return null;
@@ -102,13 +98,13 @@ export function SetupCard() {
       </Card>
       {data.host && (
         <Card>
-          <CardHeader title="Host" hint="superusers only: the bot itself" />
+          <CardHeader title="Host" hint="only host superusers see this" />
           <Stack p="md" gap="sm">
             {data.host.invite_link ? (
               <Group gap="xs" wrap="nowrap">
                 <Text size="sm" style={{ flex: "none" }}>Invite link</Text>
                 <Code style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.host.invite_link}</Code>
-                <Button size="compact-xs" variant="default" onClick={() => { navigator.clipboard?.writeText(data.host!.invite_link!); ok("Copied"); }}>Copy</Button>
+                <Button size="compact-xs" variant="default" style={{ flexShrink: 0 }} onClick={() => { navigator.clipboard?.writeText(data.host!.invite_link!); ok("Copied"); }}>Copy</Button>
               </Group>
             ) : <Text size="sm" c="dimmed">No invite link (DISCORD_CLIENT_ID isn't set on the host).</Text>}
             <Box>
@@ -121,12 +117,7 @@ export function SetupCard() {
               {data.host.detached.length === 0 ? <Text size="sm" c="dimmed">None.</Text>
                 : data.host.detached.map((g) => <Text key={g.key} size="sm">{g.name} — the bot was removed from its server{g.detached ? ` (${g.detached})` : ""}; invite it back and it is served again (nothing was deleted)</Text>)}
             </Box>
-            {mcp && (
-              <Box>
-                <Text size="sm" fw={600}>MCP</Text>
-                {Object.entries(mcp).map(([k, v]) => <Text key={k} size="sm"><Text span c="dimmed">{k.replace(/_/g, " ")}: </Text>{typeof v === "boolean" ? (v ? "yes" : "no") : String(v ?? "—")}</Text>)}
-              </Box>
-            )}
+            {(data.host.facts || []).length > 0 && <Stack gap={4}>{data.host.facts.map((ln, i) => <Text key={i} size="sm" style={{ overflowWrap: "anywhere" }}>{ln}</Text>)}</Stack>}
           </Stack>
         </Card>
       )}

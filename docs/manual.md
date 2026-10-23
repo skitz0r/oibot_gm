@@ -850,8 +850,10 @@ edits that new family and leaves the one it shared alone.
   schedules (in words, paused ones say so), Recruitment (open or closed, the questions, the invite link and whether it
   is a Discord invite), Plain text, Test bench (with the analytics cards paused while puppets exist) and, for the owner,
   **Host** (who gets the error alerts, the host superusers by name — who can act as owner here — the AI spend against the
-  shared cap, whether the MCP token works only on the host, a parked guild, *Settings on disk (.env) changed since the bot started — restart to apply*); officers read *Host facts: owner
-  only.*; a long block ends *+N more on the site* — the Config page's **Overview** prints the same sections in full.
+  shared cap, MCP in one sentence — configured, local only or not, its last write in the guild's 12-hour clock, registered in .mcp.json — a parked guild, *Settings on disk (.env) changed since the bot started — restart to apply*); officers read *Host facts: owner
+  only.*; a long block ends *+N more on the site* — the Config page's **Overview** prints the same sections in full
+  (for a host superuser the Host lines join the Setup card's one **Host** card — the invite link, servers that aren't guilds
+  yet, parked guilds — instead of a second Host card).
   Never the raw file). An officer's `/ask` about the settings, the setup, the channels or the host reads the same
   sections (the owner's with Host).
 - Every refusal and error reads the same on Discord, the site, in plain text and over MCP: a refusal as written, a bug
@@ -1421,7 +1423,7 @@ news post says can make the review read or write another server.
 | Tool | Does |
 |---|---|
 | `list_guilds` | every server the bot serves, and which one a tool uses when `guild` is left out; `detached` = parked guilds (the bot was removed from their server — never a target) |
-| `setup_status` | the Config page's Setup checklist (each row ok / warn / bad with what was tested), the invite's state, and the Host card (invite link, servers that aren't guilds, parked guilds) |
+| `setup_status` | the Config page's Setup checklist (each row ok / warn / bad with what was tested), the invite's state, and the Host card (invite link, servers that aren't guilds, parked guilds, the summary's Host lines as `facts`) |
 | `left_members` · `remove_record` | members who left the Discord server · remove one's record (officers; refused while they're in the server or hold a live seat) |
 | `list_companions` · `revoke_companion` | the loot-companion tokens (label, connected or not, last seen, who issued it — never a value) · revoke one by label or id (`preview=true` says what it does first). Issuing is not a tool: a token is issued on the site or with `/gm config companion` (§8) |
 | `guild_overview` | timezone, owner, officer and member roles, news keywords, channels (a channel the bot can no longer see is marked missing), the policy documents (summary and text), raids' cadence, live runs, test bench, and `summary`: the configuration in words by section (as `config_summary`) |

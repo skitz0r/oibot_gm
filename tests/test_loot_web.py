@@ -584,6 +584,10 @@ def test_config_carries_the_loot_log_state_and_settings(w):
     w.bot.get_guild = lambda gid: None  # no gateway: channel and role names can't be shown (the config route copes)
     d = w.c.get("/api/config", headers=H).json()
     assert d["settings"]["loot_log"] is True and d["settings"]["loot_log_state"]["state"] == "no_channel" and "loot" in d["channels"]
+    # UI audit: Config › Settings printed "Owner: Discord id 1376…" — the page prints the owner's name, never the snowflake
+    from oibot_gm.web.app import owner_name
+
+    assert d["settings"]["owner_name"] == owner_name(w.bot, w.reg) and d["settings"]["owner_name"] != d["settings"]["owner_id"]
     r = w.c.post("/api/admin/config", json={"field": "loot_log", "value": False}, headers=H)
     assert r.status_code == 200 and w.reg.config.loot_log is False, r.text
     assert w.c.get("/api/config", headers=H).json()["settings"]["loot_log_state"]["state"] == "off"

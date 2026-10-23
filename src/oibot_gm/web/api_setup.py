@@ -133,7 +133,7 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
         v = await who(request, officer=True)
         reg = v.reg
         ready = discord_ready(bot, reg)
-        from ..configops import render
+        from ..configops import host_facts, render
 
         chans = bot.guild_channels(reg) if ready else []
         web = lambda t: render(t, reg, "web", chans)  # noqa: E731 — mentions as #name / @Role / @Member, never a snowflake
@@ -157,7 +157,10 @@ def install_setup_api(app: FastAPI, bot, *, who, body, need_owner, as_int) -> No
             out["host"] = {"invite_link": perms.invite_link(cid) if cid else None,
                            "unclaimed": [{"id": str(g.id), "name": g.name, "missing": [perms.WORDS.get(p, p) for p in perms.missing_for(g)]}
                                          for g in getattr(bot, "guilds", []) if int(g.id) not in served and int(g.id) not in parked_ids],
-                           "detached": [{"key": r.key, "name": r.config.name, "detached": reg.local12(r.config.detached_at) if r.config.detached_at else None} for r in parked]}
+                           "detached": [{"key": r.key, "name": r.config.name, "detached": reg.local12(r.config.detached_at) if r.config.detached_at else None} for r in parked],
+                           # the summary's Host lines (configops.host_facts: error alerts, superusers, Claude spend, MCP in one
+                           # sentence) — the Config page shows ONE Host card, this one, and drops the Overview's Host section
+                           "facts": [web(x) for x in host_facts(reg, bot)]}
         return out
 
     @app.get("/api/admin/left")

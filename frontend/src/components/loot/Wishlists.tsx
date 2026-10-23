@@ -33,7 +33,8 @@ export function Wishlists({ meta }: { meta: Meta }) {
     <Stack gap="lg">
       <Card>
         <CardHeader title="Most wanted" hint="not yet received · main spec first, then the place on each list" />
-        <Table.ScrollContainer minWidth={560}>
+        {/* no rows: no minimum width, so the empty line wraps on a phone instead of running out of sight */}
+        <Table.ScrollContainer minWidth={data.items.length ? 560 : 0}>
           <Table>
             <Table.Thead><Table.Tr><Table.Th>Item</Table.Th><Table.Th>Wanted by</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>
@@ -99,6 +100,7 @@ export function Wishlists({ meta }: { meta: Meta }) {
       <Card>
         <CardHeader title="By member" />
         <Stack p="md" gap="sm">
+          {data.people.length === 0 && <Text c="dimmed" size="sm">Nobody has a wishlist yet.</Text>}
           {data.people.map((p) => (
             <Stack key={p.uid} gap={2}>
               <Group gap="xs"><Text fw={600}>{p.display_name}</Text>{p.test && <Badge size="xs" color="violet" variant="light">test</Badge>}</Group>

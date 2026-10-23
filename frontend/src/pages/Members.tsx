@@ -6,7 +6,7 @@ import { IconChevronDown, IconChevronRight, IconCrown, IconDots, IconMessage, Ic
 import { useLive } from "../hooks/useLive";
 import { api, ApiError, type Character, type MemberRow, type Members as MembersData, type Meta, type TableSaved } from "../api";
 import { GameIcon } from "../components/Icons";
-import { CharacterCell, SpecCell } from "../components/Cells";
+import { CharacterCell, SpecCell, StatusBadge } from "../components/Cells";
 import { PageTitle, fail, ok } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { TestBench } from "../components/TestBench";
@@ -132,8 +132,10 @@ export function MembersPage({ meta }: { meta: Meta }) {
 
   const memberCell = (r: MemberRow, span: number) => (
     <Table.Td rowSpan={span} style={STICKY}>
+      {/* the name has the first line to itself (a long one truncates, whole on hover); the privilege badge sits by the
+          verification line below, whole — never "OFFI…" squeezed beside the name */}
       <Group gap={8} wrap="nowrap" justify="space-between">
-        <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}><Text fw={700} truncate>{r.display_name}</Text><Badge size="xs" variant="outline" color={PRIV[r.privilege] || "gray"}>{r.privilege}</Badge></Group>
+        <Text fw={700} truncate title={r.display_name} style={{ minWidth: 0 }}>{r.display_name}</Text>
         {r.privilege !== "test" && (
           <Tooltip label={r.dm === false ? "DMs off — asks wait on their Me page" : "DMs on"}>
             <ActionIcon size="sm" variant="subtle" color={r.dm === false ? "red" : "gray"} loading={busy === `dm${r.uid}`} onClick={() => setDm(r, r.dm === false)} aria-label="DMs">
@@ -142,7 +144,7 @@ export function MembersPage({ meta }: { meta: Meta }) {
           </Tooltip>
         )}
       </Group>
-      <Text size="xs" c="dimmed">{r.verification}</Text>
+      <Group gap={6} wrap="wrap"><Badge size="xs" variant="outline" color={PRIV[r.privilege] || "gray"} style={{ flexShrink: 0 }}>{r.privilege}</Badge><Text size="xs" c="dimmed">{r.verification}</Text></Group>
       {att[r.uid]?.text && <Tooltip label={att[r.uid].loot ? `${att[r.uid].loot} (rostered and confirmed: the loot factor's)` : "finished runs in the loot policy's window; the bench counts here"}><Text size="xs" c="dimmed">{att[r.uid].text}</Text></Tooltip>}
       {stale[r.uid] && <Text size="xs" c="red">{stale[r.uid]}</Text>}
       {r.asks.map((a) => <Badge key={a.roster} size="xs" variant="light" color="yellow" mt={4}>confirm {a.raid}{a.when ? ` · ${a.when}` : ""}?</Badge>)}
@@ -162,10 +164,12 @@ export function MembersPage({ meta }: { meta: Meta }) {
       <PageTitle title="Members" intro={`${data.rows.length - nTest} members${nTest ? ` (and ${nTest} test members)` : ""} · ${data.members} in the registry · owner and officer badges come from Discord roles · rank lives on the main · someone away on a run's day is listed under Away on its sheet`}
         right={!editing ? <Group gap="md">{nTest > 0 && <Switch size="sm" label={`show ${nTest} test members`} checked={showTest} onChange={(e) => setShowTest(e.currentTarget.checked)} />}<Button variant="default" leftSection={<IconPencil size={15} />} onClick={startEdit}>Edit members</Button></Group> : null} />
       <Card>
-        <Table.ScrollContainer minWidth={1220}>
+        {/* viewing: icon columns sized to their icons so the table fits the 1360px page with the Character column
+            readable; editing: the selects need the room, and the table scrolls sideways under the sticky member cell */}
+        <Table.ScrollContainer minWidth={editing ? 1220 : 1040}>
           <Table style={{ tableLayout: "fixed" }}>
             <Table.Thead>
-              <Table.Tr><Table.Th w={230} style={{ ...STICKY, verticalAlign: undefined }}>Member</Table.Th><Table.Th w={editing ? 56 : 44} /><Table.Th>Character</Table.Th><Table.Th w="11%">Spec</Table.Th><Table.Th w="11%">Offspec</Table.Th><Table.Th w="12%">Flex</Table.Th><Table.Th w={110}>Rank</Table.Th><Table.Th w="15%">Regular on</Table.Th><Table.Th w={120}>{editing ? "" : "Confirmed"}</Table.Th><Table.Th w={48} /></Table.Tr>
+              <Table.Tr><Table.Th w={editing ? 230 : 220} style={{ ...STICKY, verticalAlign: undefined }}>Member</Table.Th><Table.Th w={editing ? 56 : 44} /><Table.Th>Character</Table.Th><Table.Th w={editing ? "11%" : 64}>Spec</Table.Th><Table.Th w={editing ? "11%" : 72}>Offspec</Table.Th><Table.Th w={editing ? "12%" : 96}>Flex</Table.Th><Table.Th w={editing ? 110 : 104}>Rank</Table.Th><Table.Th w={editing ? "15%" : 140}>Regular on</Table.Th><Table.Th w={editing ? 120 : 112}>{editing ? "" : "Status"}</Table.Th><Table.Th w={editing ? 48 : 44} /></Table.Tr>
             </Table.Thead>
             <Table.Tbody>
               {rows.map((r) => {
@@ -236,7 +240,7 @@ function ViewRow({ meta, r, c, busy, ranks, onRank, onMain, onConfirm, onRetire,
         ? <Select size="xs" data={ranks} value={r.rank || c.rank} onChange={onRank} allowDeselect={false} disabled={busy === `rank${r.uid}` || r.privilege === "test"} aria-label="rank" />
         : <Tooltip label="rank lives on the main"><Text size="xs" c="dimmed">alt</Text></Tooltip>}</Table.Td>
       <Table.Td><RegularOn on={c.regular_on} /></Table.Td>
-      <Table.Td>{!c.name ? <Badge variant="outline" color="gray">planned</Badge> : c.confirmed ? <Badge variant="light" color="teal">confirmed</Badge> : <Badge variant="light" color="yellow">unconfirmed</Badge>}</Table.Td>
+      <Table.Td><StatusBadge named={!!c.name} confirmed={!!c.confirmed} /></Table.Td>
       <Table.Td>
         <Menu position="bottom-end" withinPortal>
           <Menu.Target><ActionIcon variant="subtle" color="gray" loading={busy === `${r.uid}${c.label}`} aria-label={`${c.label} actions`}><IconDots size={17} /></ActionIcon></Menu.Target>

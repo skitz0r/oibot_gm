@@ -2761,7 +2761,7 @@ error alerts, a parked guild, MCP local-only from `web.app.mcp_local_only` (the 
 officers read "Host facts: owner only." (`host_summary` was folded into `host_facts` at the merge.)
 
 Not in this part: the Settings edit mode's own `error_dm_ids` field (G1b — the Setup card edits it meanwhile), the Agents
-page's MCP card data (G2; the Host card renders what `/api/agents.mcp` holds), the Discord recruitment hub's channel pick
+page's MCP card data (G2; since the UI audit the Host card prints `host.facts` — host_facts' lines, MCP as one sentence from `configops.mcp_words` over `mcp_card` — and the Overview leaves its Host section out beside it; `mcp_card` no longer carries the log's raw stamp), the Discord recruitment hub's channel pick
 for an invite (the hub keeps the typed link).
 
 **Final review fixes.** (1) D8: `configops.people_needs_actor` covers the `application` op, so `mcp_actor_rule` drops

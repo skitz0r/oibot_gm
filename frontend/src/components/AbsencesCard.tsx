@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Button, Card, Group, Stack, Text } from "@mantine/core";
+import { Badge, Button, Card, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { IconPlus } from "@tabler/icons-react";
 import { api, type Absence, type AbsenceCleared, type AbsencePreview, type Meta } from "../api";
 import { CardHeader, fail, ok } from "./Page";
@@ -38,11 +38,13 @@ export function AbsencesCard({ meta, absences, onChanged }: { meta: Meta; absenc
       <Stack p="md" gap="xs">
         {absences.length === 0 && <Text c="dimmed" size="sm">None upcoming.</Text>}
         {absences.map((a) => (
-          <Group key={a.start} justify="space-between" wrap="nowrap">
-            <Text size="sm">{a.span || a.start}</Text>
-            <Group gap="xs" wrap="nowrap">
-              {a.reason && <Badge variant="outline" color="gray" tt="none" maw={160}>{a.reason}</Badge>}
-              <Button size="compact-xs" variant="subtle" loading={busy === `me${a.start}`} onClick={() => back(a)}>I'm back</Button>
+          // a narrow card (the Me page's side column): the days wrap, the reason chip shrinks (its full text on hover)
+          // and the actions drop under the days rather than run past the card's edge; I'm back is never squeezed
+          <Group key={a.start} justify="space-between" wrap="wrap" gap={6} align="center">
+            <Text size="sm" style={{ flex: "1 1 8rem", minWidth: 0 }}>{a.span || a.start}</Text>
+            <Group gap="xs" wrap="nowrap" ml="auto" style={{ minWidth: 0, maxWidth: "100%" }}>
+              {a.reason && <Tooltip label={a.reason}><Badge variant="outline" color="gray" tt="none" title={a.reason} style={{ minWidth: 0, flexShrink: 1, maxWidth: 160 }}>{a.reason}</Badge></Tooltip>}
+              <Button size="compact-xs" variant="subtle" style={{ flexShrink: 0 }} loading={busy === `me${a.start}`} onClick={() => back(a)}>I'm back</Button>
             </Group>
           </Group>
         ))}

@@ -34,7 +34,7 @@ def test_config_page_has_one_editor_per_setting_and_no_auto_saved_review_class_f
     keywords are NewsCard's; only the loot-log switch and the homepage's listed switch (phase 4, B10 — a reversible
     routine setting, not review-class) save as they are flipped (through useOpsSave, which still reviews a warn-class batch)."""
     page = (SRC / "pages" / "Config.tsx").read_text()
-    assert "<ChannelsCard />" in page and "<SetupCard />" in page and "<NewsCard " in page
+    assert "<ChannelsCard />" in page and "<SetupCard " in page and "<NewsCard " in page
     assert "set(`channel:" not in page and 'set("officer_roles"' not in page and 'set("news_keywords"' not in page
     assert page.count("<TagsInput") == 1, "one news keywords editor"
     assert page.count('<MultiSelect label="Officer roles"') == 1 and "officer_roles\", \"Officer roles" not in page, "one officer roles editor"
@@ -95,3 +95,72 @@ def test_every_edit_mode_registers_with_the_guild_switchers_guard():
         assert "useDirty(" in (SRC / rel).read_text(), rel
     me = (SRC / "pages" / "Me.tsx").read_text()
     assert "onEditing={setEditing}" in me and "setEditing(true)" not in me, DIRTY_MIRRORS["pages/Me.tsx"]
+
+
+# A payload field named *_iso / *_at is a machine stamp unless its route formats it (the clock rule: Registry.local12 /
+# t12 / clock12 server side, never a 24-hour or ISO value a person reads). The ones below are already words — and why.
+STAMP_FIELDS_FORMATTED = {
+    "locked_at": "web/api.py run timeline: clock12(reg, ev.locked_at)",
+    "reminded_at": "web/api.py run json: t12(reg, ev.reminded_at)",
+    "closed_at": "web/api.py run json: t12(reg, ev.closed_at)",
+    "pending_at": "policy.policy_state(…, when=reg.local12): the web route passes Registry.local12",
+}
+# printed: a JSX child `{x.y_at}` (not an attribute value) or a template-literal hole `${x.y_at}`
+STAMP_PRINTED = re.compile(r"(?<![=\w])\{\s*[\w.?!]+\.(\w+_(?:iso|at))\s*\}|\$\{\s*[\w.?!]+\.(\w+_(?:iso|at))\s*\}")
+DATETIME_INPUT = re.compile(r"datetime-local|DateTimePicker|DateInput")
+
+
+def test_no_component_prints_a_raw_stamp_field():
+    """UI audit: the Host card printed the MCP card's `last_used` (the request log's 24-hour stamp) next to its 12-hour
+    label. No component prints a field named *_iso / *_at as text; a datetime-local input's value is for machines."""
+    hits = []
+    for f in sorted(SRC.rglob("*.tsx")):
+        for n, line in enumerate(f.read_text().splitlines(), 1):
+            if DATETIME_INPUT.search(line):
+                continue
+            for m in STAMP_PRINTED.finditer(line):
+                field = m.group(1) or m.group(2)
+                if field not in STAMP_FIELDS_FORMATTED:
+                    hits.append(f"{f.relative_to(SRC)}:{n}: {field}")
+    assert not hits, "print the route's 12-hour label (a *_label field), never the stamp itself:\n" + "\n".join(hits)
+    assert STAMP_PRINTED.search("<Text>{d.last_used_iso}</Text>") and STAMP_PRINTED.search("`since ${r.created_at}`")
+    assert not STAMP_PRINTED.search("<Input value={d.start_at} />"), "an attribute value is not printed text"
+
+
+def test_one_host_card_and_no_raw_key_value_dump():
+    """UI audit: Config › Overview had TWO Host cards — the Setup card's (the MCP block as raw `key: value` lines, the
+    ISO stamp among them) and the summary's. The Setup card prints the summary's Host lines (`host.facts`) and tells the
+    page it did (`onHost`), so the Overview leaves its Host section out."""
+    setup = (SRC / "components" / "SetupCard.tsx").read_text()
+    assert "Object.entries" not in setup and "/api/agents" not in setup and "host.facts" in setup
+    assert re.search(r'<Button[^>]*flexShrink: 0[^>]*>[^<]*?Copy</Button>', setup.replace("\n", " ")), "on a phone the Copy button read 'C'"
+    page = (SRC / "pages" / "Config.tsx").read_text()
+    assert "<SetupCard onHost={setHostCard} />" in page and "skipHost={hostCard}" in page
+    assert re.search(r'filter\(\(x\) => !\(skipHost && x\.key === "host"\)\)', page)
+
+
+def test_character_status_is_one_badge_in_full_words():
+    """UI audit: the Status badges read 'CONFIRM…' / 'UNCONFI…' / 'PLAN…' — upper case in a column too narrow. One
+    StatusBadge (Cells.tsx) for Me › Characters and Members: lower case, the word never clipped, a fixed-width column."""
+    cells = (SRC / "components" / "Cells.tsx").read_text()
+    badge = cells[cells.index("export function StatusBadge"):]
+    assert 'tt="none"' in badge and 'textOverflow: "clip"' in badge and "flexShrink: 0" in badge
+    for f in ("components/CharacterTable.tsx", "pages/Members.tsx"):
+        text = (SRC / f).read_text()
+        assert "<StatusBadge " in text and ">unconfirmed</Badge>" not in text and ">planned</Badge>" not in text, f
+    assert '<Table.Th w={120}>Status</Table.Th>' in (SRC / "components" / "CharacterTable.tsx").read_text()
+
+
+def test_absence_row_wraps_instead_of_overflowing_the_card():
+    """UI audit: on the Me page's side column the row 'Wed 04 Nov → Fri 06 Nov · vacati… · I'm back' ran past the card's
+    edge. The row wraps (the actions drop under the days), the reason chip shrinks with its full text on hover, I'm back
+    never shrinks."""
+    card = (SRC / "components" / "AbsencesCard.tsx").read_text()
+    row = card[card.index("absences.map((a) =>"):card.index("</Stack>", card.index("absences.map((a) =>"))]
+    assert 'justify="space-between" wrap="wrap"' in row and "title={a.reason}" in row and "flexShrink: 0" in row
+
+
+def test_settings_card_names_the_owner():
+    """UI audit: Config › Settings read "Owner: Discord id 137691328623542272". A person reads a name, never a snowflake."""
+    page = (SRC / "pages" / "Config.tsx").read_text()
+    assert "Discord id ${" not in page and "st.owner_name" in page

@@ -21,8 +21,8 @@ export interface SetupData {
     ids: string[] | null; choices: { id: string; name: string }[] };
   /** the settings rev the error-alerts edit saves against */
   rev: string;
-  /** the host (a superuser) only: the bot's invite link, servers the bot is in that aren't guilds, parked guilds */
-  host: null | { invite_link: string | null; unclaimed: { id: string; name: string; missing: string[] }[]; detached: { key: string; name: string; detached: string | null }[] };
+  /** the host (a superuser) only: the bot's invite link, servers the bot is in that aren't guilds, parked guilds, the summary's Host lines */
+  host: null | { invite_link: string | null; unclaimed: { id: string; name: string; missing: string[] }[]; detached: { key: string; name: string; detached: string | null }[]; facts: string[] };
 }
 export interface WebhookReply { url: string | null; note: string; created: boolean }
 
