@@ -3221,6 +3221,35 @@ the owner's reply ("can you just @ him in this channel after opening the raid?")
   `conversation: [{request, reply, questions}]` on POST /api/ops/change `text` and POST /api/ask
   (`conversation.exchanges_from_client` → the same block). Tests: tests/test_conversation.py.
 
+### 5.52 Copy (user decision 2026-10-24)
+
+The dual-interface rules (§2.1–2.10 of the local working notes, out/dual_interface_design.md — not in the repo; this
+section is the committed rule) made the surfaces agree on verbs, refusals and identity, but not on words: the Raids page
+said "how the solver weighs seats", the comp table "Bounds (the solver; the owner's)" and "readiness uses the derived ones
+(the bounds and the buff matrix)", the regulars wizard line and the plain-text preview "seated ahead of others at lock".
+The rule (also a principle in CLAUDE.md):
+
+- **A label says what the thing does for the reader**, in the word of the manual's glossary (`docs/manual.md` §1a
+  *The words*): limits (owner) ↔ bounds, aims (officers) ↔ (comp) targets, a run's week ↔ cadence, who gets a seat ↔
+  seat weights, rostered ↔ seated (a seat is a place on the roster — that word stays; the member is never "seated"), who could play ↔ the pool, your record ↔ the character table. The code's
+  nouns — solver, derived, rev, series, ephemeral, ev / rc / ctx, matrix, override(s) as a config noun — never reach a
+  person; the loot verb *Override…* is a verb and stays.
+- **An empty list, card or section names what is missing and how to fill it**, in one sentence — never "none yet",
+  "not set", "none", "nothing" or "—" alone. Two carve-outs: a bare dash in a table cell or an icon column (under its
+  column header; the Iconography rule keeps words away from icons), and a value in a review diff ("not set → #loot").
+- **A tooltip adds only why or where**; **a number's owner is in its label**; **one vocabulary** on every surface, in the
+  plain-text replies, the manual and the help answers (and the data blocks they are written from).
+- **Exceptions**: the operator surfaces (the Host card, the Agents page — launchd, the data repo's rev) and code a person
+  types or pastes (an install line, a run key shown as a key). Text in backticks, URLs and Discord mentions are skipped
+  before matching; anything else is an `ALLOW` entry scoped to a substring, with a reason, that must still suppress a hit.
+
+`tests/test_copy.py` extracts only user-visible strings (JSX text, ternary branches that read as words, and the label /
+title / description / placeholder / intro / tooltip / message literals of `frontend/src/**/*.tsx`; the prose literals of
+the Discord-facing modules and of registry.py / raidcycle.py, whose refusals and run-log lines people read — never custom
+ids, dict keys, log lines, commit messages or docstrings) and fails on the code's nouns and on bare empty words. It is
+`xfail(strict=True)` until the copy sweep lands; `out/copy_findings.md` (`uv run python tests/test_copy.py`) is the sweep
+list. A sweep that renames a label the glossary names (e.g. the *Desired comp* table) changes §1a in the same commit.
+
 ## 6. Architecture
 
 ```mermaid

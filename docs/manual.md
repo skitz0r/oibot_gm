@@ -20,6 +20,47 @@ main has no name yet). Roles are derived from the spec you register (Protection 
 Fire → ranged…); an offspec in another role counts as flexibility. There is no standing availability to
 fill in anywhere: you answer each run's sheet when it is posted, and you post absences for days you're away.
 
+## 1a. The words
+
+The bot, the site and this manual use one word for each thing. When you ask the bot, these are the words it answers in.
+
+- **Limits** (owner) — the fewest and most of each role (tank, healer, dps) a run takes; the lock builds rosters
+  within them (one nobody could fill to its minimum says *Locked short*). The owner sets them on the Raids page
+  (**Edit rules**, *tank min / max*, *healer min*, *dps min*…), with `/gm config raid` (*Group make-up*) or in plain text.
+  Until the owner sets a make-up, they come from the game's rules scaled to the run's size, with any number of dps.
+- **Aims** (officers) — the make-up the guild wants for a raid, per role, class or spec, each with its reason; the
+  Readiness page compares the guild with them. Any officer sets them in the **Desired comp** table on the Readiness page
+  or the Raids page, with `/roster comp` or in plain text ("we want 3–4 healers"). A role aim (tank, healer, melee,
+  ranged) outside the owner's limits is refused; class and spec aims aren't checked against the limits.
+- **A run's week** — when a run's sheet **opens** (a few days before the run; it differs per raid), when those who
+  haven't answered get a **reminder** (by default halfway between the opening and the lock), when it **locks** (a day
+  before; the roster is decided then) and when the rostered must **confirm by** (6 hours before). The owner sets them per
+  raid or per schedule on the Raids page or with `/gm config raid`; an ad hoc run locks 2 hours before and, by default,
+  asks nobody to confirm.
+- **Who gets a seat** — what decides between joiners at lock on a recurring run: rank, main over alt, who sat out last
+  time, who signed up early, and being a regular (each with a weight the owner sets per raid or schedule on the Raids
+  page). An ad hoc run is first come instead.
+- **Rostered** — you have a place on a locked run's roster. On a recurring run you are asked to Confirm or say Can't
+  make it (by DM, or on your Me page) unless the owner turned confirmations off.
+- **Bench** — the sheet answer "call me if you need me": you aren't on the roster, but when a place frees up you are
+  among the first asked.
+- **Regulars** — the people expected every week on a recurring schedule, each on one character. Officers keep the list
+  (the Rosters page's *Regulars* tab or `/roster add`); nothing is answered for them, they press Join like everyone else,
+  and being one counts at lock.
+- **Who could play** — every member's main: the headcount the Readiness page and the analytics cards measure against
+  the raid's size, limits and aims. Alts and offspecs don't add to the headcount; they show as who could cover a role.
+- **Your record** — your characters (name, spec, offspec, extra roles, which is your main) and your absences. You keep
+  it on the Me page or with `/me char` and `/me absent`; officers can edit it for you, and they set your rank.
+- **Main / alt** — your main is the character you raid on by default (one per member; your rank is on it); alts are
+  your other characters.
+- **Puppets** — pretend members the **test bench** creates for rehearsals (`/gm test seed`, or the Test bench card on
+  the Members page). They only ever take part in test runs.
+- **The council** — the loot council for a run: code scores each candidate, the bot explains the pick against the
+  guild's loot policy, and an officer confirms or overrides it — in the run's thread in Discord or on **Loot › Tonight**.
+- **The companion** — a small program the raid leader runs next to the game; it reads the game's chat log and tells the
+  bot what dropped, who looted it and which bosses died. It needs a token from the owner (Config › Companions or
+  `/gm config companion`).
+
 ## 2. Channels
 
 - **#register (registration channel)** — read-only; the pinned card has four buttons: *Apply to join*

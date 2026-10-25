@@ -26,6 +26,15 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
   notices on the Me page / `/me view` and as the Discord card edited to its final state. The one exception is the owner's error alerts
   (one DM per distinct error per 30 min). Decisions: out/dual_interface_decisions.md.
 - **Iconography rule (user decision 2026-09-17):** in-game icons stand on their own — class, spec, role and aura icons never get a text label beside them on the site; a role count is the role icon plus a number; a buff row is icons only (tooltips carry the names). Don't add "3 tank" style labels, "seated" totals or buff-name strings next to icons. A **spec icon alone** denotes role + spec on a member line (no role icon beside it; role icons are for counts only). DMs and Discord cards reuse the board's group layout — one member per line, never the whole roster on one line.
+- **Copy rule (user decision 2026-10-24):** every label, hint, tooltip, empty state and card line — site and Discord — says what
+  the thing does FOR THE READER, in the glossary's word (`docs/manual.md` §1a *The words*): limits (owner) not bounds, aims
+  (officers) not (comp) targets, rostered not seated (a seat is a place on the roster, that word stays), who could play not the pool, a run's week not cadence; never solver,
+  derived, rev, series, ephemeral, ev/rc/ctx, matrix, override(s) as a config noun (the loot verb *Override…* stays). An empty
+  list, card or section names what is missing and how to fill it (never "none yet" / "not set" / "none" / "—" alone); a bare
+  dash in a table cell or an icon column stays (the Iconography rule — no words beside icons), and a review diff's "not set →
+  #loot" is a value, not an empty state. A tooltip adds only why or where; a number's owner is in its label. Read-aloud test: a
+  raid leader who never saw the code gets it first time. `tests/test_copy.py` lints it; the only exceptions are the operator
+  surfaces (the Host card, the Agents page) and code a person types or pastes — an `ALLOW` entry each, scoped and reasoned.
 - **Native vs foreign data.** Native guild state (characters, events, ledger, precedents, policy) lives in the private sibling repo `../oibot_gm-data` via `store.py` (file per entity, commit per change, debounced push; git log = audit trail). Foreign reference data (profiles/) lives here. `fixtures/demo` is an anonymized copy for public use; never commit real guild data to this repo.
 
 ## Layout
