@@ -36,9 +36,9 @@ type Draft = { split_policy: string; nudge: boolean; autofill: boolean; open_dm:
 
 /** A raid setting as the reset confirm names it (the reader's words, never the stored key). */
 const SETTING_WORDS: Record<string, string> = {
-  signup_lead_hours: "when the sheet opens", nudge: "the nudge", nudge_hours_before: "when the nudge goes", lock_hours_before: "when it locks",
+  signup_lead_hours: "when the sheet opens", nudge: "the reminder", nudge_hours_before: "when the reminder goes", lock_hours_before: "when it locks",
   confirm: "confirmations", confirm_hours_before: "the confirm-by time", fill_ask_hours: "how long a fill ask waits", autofill: "filling seats automatically",
-  open_dm: "the DM when the sheet opens", split_policy: "how one night's two groups are made", first_open: "the first run", lockout_days: "the lockout",
+  open_dm: "the DM when the sheet opens", split_policy: "how one night's two groups are made", first_open: "when the first sheet opens", lockout_days: "the lockout",
   duration_hours: "how long a run lasts", notes: "the notes", size: "the size", slots: "the run times", schedules: "the schedules", comp_targets: "the officers' aims",
   comp_groups: "the group layout", name: "the name",
 };
@@ -84,7 +84,7 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
     [`${r.size}-player`, over("size")],
     [`${r.lockout_days}-day lockout`, over("lockout_days")],
     [`${r.duration_hours} h`, over("duration_hours")],
-    [r.first_open_words ? `first run ${r.first_open_words}` : "no first-run date yet — the owner sets it under Edit rules", over("first_open")],
+    [r.first_open_words ? `first opens ${r.first_open_words}` : "no first opening yet — the owner sets it under Edit rules", over("first_open")],
   ];
   const metaLine = (
     <Group component="span" gap={6} wrap="wrap" style={{ rowGap: 2 }}>
@@ -113,7 +113,7 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
                 </Panel>
                 {r.comp_groups.length > 0 && <Text size="xs" c="dimmed">Group layout: {r.comp_groups.join(", ")} (set in plain text in the analytics channel)</Text>}
               </Section>
-              <Section title="Who gets a seat" hint="when more people join than there are seats, these count — a higher number counts more">
+              <Section title="Who gets a seat" hint="when more people join a recurring run than there are seats, these count — a higher number counts more; an ad hoc run is first come">
                 <Panel>
                   <SeatWeights r={r} keys={weightKeys} />
                   <Text size="xs" c={over("split_policy") ? "yellow" : "dimmed"} mt={4}>When one night fills two groups: {split} — {SPLIT_BLURB[r.split_policy] || split}.</Text>
@@ -128,15 +128,15 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
             <Text size="xs" c="dimmed">The raid's timing: every schedule below follows it unless the schedule sets its own. Run times are set per schedule.</Text>
             <Group gap="md" wrap="wrap" align="flex-end">
               <NumberInput label="signup opens (h before)" min={1} value={d.signup_lead_hours} onChange={(v) => setD({ ...d, signup_lead_hours: v })} w={190} />
-              <NumberInput label="nudge (h before)" description="one DM to mains who haven't answered" min={0} value={d.nudge_hours_before} onChange={(v) => setD({ ...d, nudge_hours_before: v })} w={170} disabled={!d.nudge} />
-              <Switch label="nudge on" checked={d.nudge} onChange={(e) => setD({ ...d, nudge: e.currentTarget.checked })} mb={6} />
+              <NumberInput label="reminder (h before)" description="one DM to the regulars who haven't answered" min={0} value={d.nudge_hours_before} onChange={(v) => setD({ ...d, nudge_hours_before: v })} w={170} disabled={!d.nudge} />
+              <Switch label="reminder on" checked={d.nudge} onChange={(e) => setD({ ...d, nudge: e.currentTarget.checked })} mb={6} />
               <Switch label="fill seats automatically after lock" checked={d.autofill} onChange={(e) => setD({ ...d, autofill: e.currentTarget.checked })} mb={6} />
-              <Switch label="DM every raider when the sheet opens" checked={d.open_dm} onChange={(e) => setD({ ...d, open_dm: e.currentTarget.checked })} mb={6} />
+              <Switch label="DM the regulars (every main while a schedule has none) when the sheet opens" checked={d.open_dm} onChange={(e) => setD({ ...d, open_dm: e.currentTarget.checked })} mb={6} />
               <Switch label="ask the rostered to confirm" checked={d.confirm} onChange={(e) => setD({ ...d, confirm: e.currentTarget.checked })} mb={6} />
               <NumberInput label="locks (h before)" min={0} value={d.lock_hours_before} onChange={(v) => setD({ ...d, lock_hours_before: v })} w={150} />
               <NumberInput label="confirm by (h before)" min={0} value={d.confirm_hours_before} onChange={(v) => setD({ ...d, confirm_hours_before: v })} w={170} />
               <NumberInput label="fill asks (h to answer)" description="no answer counts as no" min={0} value={d.fill_ask_hours} onChange={(v) => setD({ ...d, fill_ask_hours: v })} w={170} />
-              <Select label="split policy" description="when more join than one run seats" data={policies.map((p) => ({ value: p, label: SPLIT_LABEL[p] || p }))} value={d.split_policy} onChange={(v) => setD({ ...d, split_policy: v || d.split_policy })} w={200} />
+              <Select label="when one night fills two groups" description="how the two groups are made" data={policies.map((p) => ({ value: p, label: SPLIT_LABEL[p] || p }))} value={d.split_policy} onChange={(v) => setD({ ...d, split_policy: v || d.split_policy })} w={200} />
             </Group>
             <Group gap="md" wrap="wrap" align="flex-end">
               <DateTimePicker label="first opens" description="guild time" value={pickerValue(d.first_open)} onChange={(v) => setD({ ...d, first_open: fromPicker(v, d.first_open) })}
@@ -172,7 +172,7 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
 }
 
 export const SPLIT_LABEL: Record<string, string> = { balanced: "Balanced", first: "Raid one first", rotation: "Rotation" };
-export const SPLIT_BLURB: Record<string, string> = { balanced: "both made equally strong", first: "the first group is made as strong as it can be; the second takes the rest", rotation: "whoever sat out or was in the weaker group last time moves up" };
+export const SPLIT_BLURB: Record<string, string> = { balanced: "both made equally strong", first: "raid one is made as strong as it can be; raid two takes the rest", rotation: "whoever joined last lockout but wasn't in raid one moves into raid one" };
 
 function toDraft(r: RaidRule): Draft {
   return { split_policy: r.split_policy, nudge: r.nudge, autofill: r.autofill, open_dm: r.open_dm, confirm: r.confirm !== false, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },

@@ -27,18 +27,21 @@ export function Pair({ children }: { children: React.ReactNode }) {
 
 type Tick = { label: string; hours: number; changed: boolean; why: string };
 
-/** A run's week, counted back from the raid: opens · nudge · locks · confirm by · the raid. A step the raid doesn't take
- *  (nudge off, no confirmations) has no tick — the sentence below says so. Amber = changed from the game's default. */
+/** A run's week, counted back from the raid: opens · reminder · locks · confirm by · the raid. A step the raid doesn't take
+ *  (reminder off, no confirmations) has no tick — the sentence below says so. Amber = changed from the game's default. */
 export function RunWeek({ r }: { r: RaidRule }) {
   const over = (...ks: string[]) => ks.some((k) => r.overridden.includes(k));
   const ticks: Tick[] = [
     { label: "opens", hours: r.signup_lead_hours, changed: over("signup_lead_hours"), why: "the sheet is posted and everyone can answer" },
-    ...(r.nudge ? [{ label: "nudge", hours: r.nudge_hours_before, changed: over("nudge", "nudge_hours_before"), why: "one reminder DM to the mains who haven't answered" }] : []),
+    ...(r.nudge ? [{ label: "reminder", hours: r.nudge_hours_before, changed: over("nudge", "nudge_hours_before"), why: "one DM to the regulars who haven't answered (every main while the schedule has none)" }] : []),
     { label: "locks", hours: r.lock_hours_before, changed: over("lock_hours_before"), why: "the roster is decided" },
     ...(r.confirm !== false ? [{ label: "confirm by", hours: r.confirm_hours_before, changed: over("confirm", "confirm_hours_before"), why: "the rostered confirm or say they can't make it by then" }] : []),
   ].sort((a, b) => b.hours - a.hours);
   const labels = r.slot_labels || r.slots;
-  const start = labels.length === 1 ? labels[0] : labels.length > 1 ? `${labels.length} run times a week` : "when it starts";
+  // several schedules each set their own start: the raid's default times alone would leave the others out
+  const many = (r.schedules || []).length > 1;
+  const start = many || labels.length === 0 ? "each run's start" : labels.length === 1 ? labels[0] : `${labels.length} run times a week`;
+  const startWhy = many ? "each schedule below sets its own start times" : labels.length > 1 ? labels.join(" · ") : "each run's start; the schedules below set it";
   return (
     <>
       <ol className={css.week}>
@@ -52,7 +55,7 @@ export function RunWeek({ r }: { r: RaidRule }) {
         ))}
         <li className={[css.tick, css.last].join(" ")}>
           <span className={css.end} />
-          <Tooltip label={labels.length > 1 ? labels.join(" · ") : "each run's start; the schedules below set it"}>
+          <Tooltip label={startWhy}>
             <span className={css.text}><span className={css.label}>raid</span><span className={css.when}>{start}</span></span>
           </Tooltip>
         </li>
@@ -70,16 +73,22 @@ function hoursBefore(h: number): string {
 function weekSentence(r: RaidRule): { text: string; changed: boolean }[] {
   const over = (...ks: string[]) => ks.some((k) => r.overridden.includes(k));
   return [
-    { text: r.autofill ? "After the lock, open seats are filled automatically" : "After the lock, an officer fills open seats (Fill seats on the Rosters page)", changed: over("autofill") },
+    { text: r.autofill ? "After the lock, the bot asks people to fill open seats (a role swap waits for an officer)" : "After the lock, an officer fills open seats (Fill seats on the Rosters page)", changed: over("autofill") },
     { text: `a fill ask gets ${r.fill_ask_hours} h to answer`, changed: over("fill_ask_hours") },
-    { text: r.open_dm ? "every raider gets a DM when the sheet opens" : "no DM when the sheet opens", changed: over("open_dm") },
+    { text: r.open_dm ? "the regulars (every main while the schedule has none) get a DM when the sheet opens" : "no DM when the sheet opens", changed: over("open_dm") },
     ...(r.nudge ? [] : [{ text: "no reminder before the lock", changed: over("nudge") }]),
     ...(r.confirm !== false ? [] : [{ text: "the rostered aren't asked to confirm", changed: over("confirm") }]),
   ];
 }
 
 export const WEIGHT_WORDS: Record<string, string> = { regular: "regular", rank: "rank", main: "main", sat_out: "sat out", signup_order: "signup order" };
-export const WEIGHT_HINT: Record<string, string> = { rank: "core > raider > trial", main: "a main over an alt", sat_out: "sat out last time", signup_order: "signed up earlier", regular: "a regular of the schedule" };
+export const WEIGHT_HINT: Record<string, string> = {
+  rank: "core counts most, then raider, then trial; ranks are set on the Members page",
+  main: "joined on their main character, not an alt",
+  sat_out: "joined a run last lockout but wasn't rostered",
+  signup_order: "the earlier someone joined, the more it counts",
+  regular: "joined with the character they're a regular of this schedule with; officers name the regulars on the Rosters page",
+};
 
 /** Who gets a seat: the weights as bars, highest first; a bar's length is its weight against the highest. */
 export function SeatWeights({ r, keys }: { r: RaidRule; keys: string[] }) {

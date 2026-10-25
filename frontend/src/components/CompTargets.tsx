@@ -104,7 +104,7 @@ export function CompTargets({ meta, rid, size, targets, bounds, boundsChanged, s
         <div className={css.mrow}>
           <span className={css.mlabel}>aims <Text span inherit c="dimmed" opacity={0.75}>(officers)</Text></span>
           {aims.length === 0
-            ? <Text size="sm" c="dimmed" style={{ flex: "1 1 220px", minWidth: 0 }}>No aims set yet — {readiness} compares who could play with the limits above.</Text>
+            ? <Text size="sm" c="dimmed" style={{ flex: "1 1 220px", minWidth: 0 }}>No aims set yet — {readiness} compares who could play with the limits above and the default aims the raid buffs give.</Text>
             : aims.map(([slot, t]) => (
               <span key={slot} className={css.count}>
                 <SlotIcon meta={meta} slot={slot} label={`${words(slot)} — ${t.note || "no reason given"}`} />{range(t.min ?? 0, t.max)}
