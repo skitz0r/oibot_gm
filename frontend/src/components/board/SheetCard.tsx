@@ -120,8 +120,8 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           </Box>
         ))}
       </Group>
-      <ChipRow label={`${meta.labels.sub} (${signups.filter((s) => s.status === "sub").length})`} items={signups.filter((s) => s.status === "sub")} empty={`Nobody has pressed ${meta.labels.sub} for this run.`} menu={menu} />
-      <ChipRow label={`${meta.labels.out} (${signups.filter((s) => s.status === "out").length})`} items={signups.filter((s) => s.status === "out")} empty={`Nobody has pressed ${meta.labels.out} for this run.`} menu={menu} />
+      <ChipRow label={`${meta.labels.sub} (${signups.filter((s) => s.status === "sub").length})`} items={signups.filter((s) => s.status === "sub")} empty={`Nobody is on ${meta.labels.sub} for this run.`} menu={menu} />
+      <ChipRow label={`${meta.labels.out} (${signups.filter((s) => s.status === "out").length})`} items={signups.filter((s) => s.status === "out")} empty={`Nobody has said ${meta.labels.out} for this run.`} menu={menu} />
       <Group gap="xs" mt={8} justify="space-between" wrap="wrap">
         <Group gap="xs"><Eyebrow>Away that day</Eyebrow>{(e.absences || []).length === 0 ? <Text size="sm" c="dimmed">nobody</Text> : e.absences!.map((a) => <Text key={a.display_name} size="sm">{a.display_name}{a.reason ? <Text span c="dimmed"> ({a.reason})</Text> : null}</Text>)}</Group>
         <Group gap="xs">

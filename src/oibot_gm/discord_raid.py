@@ -519,7 +519,7 @@ class RaidMixin:
                     ev.fill_state = "suggested"
                     ev.log.append("fill: a role swap would cover it — waiting for an officer's Ask")
                     rs.save(ev, "fill: role swap suggested")
-                    await self.post_run_update(reg, ev, f"🧩 short {gaps_text(self.ico, nd)} — a role swap would cover it; it needs an officer's **Ask** (the Suggested block on the lock card)")
+                    await self.post_run_update(reg, ev, "🧩 " + (f"short {gaps} — " if (gaps := gaps_text(self.ico, nd)) else "") + "a role swap would cover it; it needs an officer's **Ask** (the Suggested block on the lock card)")
                     await self.refresh_cards(reg, ev)
             else:
                 ev.fill_state = "exhausted"

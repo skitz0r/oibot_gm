@@ -328,7 +328,7 @@ def suggested_block(reg: Registry, ico, plan) -> str:
     if len(seats) > SUGGEST_LINES:
         lines.append(f"-# +{len(seats) - SUGGEST_LINES} more — Ask sends only the {SUGGEST_LINES} above; Suggest… lists them all")
     short = still_short_md(ico, plan)
-    lines.append(f"Still short if all say yes: {short}" if short else "Full if all say yes.")
+    lines.append(f"Still short if everyone says yes: {short or rc.still_short_words(plan)}")  # the empty word is raidcycle's, as on every other surface
     return "\n".join(lines)
 
 
@@ -350,10 +350,10 @@ def _role_counts(ico, players) -> str:
 
 def gaps_text(ico, nd: dict) -> str:
     """What a run is short, from rc.needs(): seats as a number, role shortfalls as role icon + number (never "2 tank");
-    "no gaps" when it is short of nothing."""
+    "" when it is short of nothing — the caller says that in its own sentence."""
     bits = [f"{nd['headcount']} seat{'s' if nd['headcount'] != 1 else ''}"] if nd["headcount"] else []
     bits += [f"{ico('role', r)} {n}" for r, n in nd["roles"].items()]
-    return "   ".join(bits) if bits else "no gaps"
+    return "   ".join(bits)
 
 
 LEVEL_DOT = {"green": "🟢", "amber": "🟠", "red": "🔴"}

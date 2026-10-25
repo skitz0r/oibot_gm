@@ -190,7 +190,7 @@ def test_health_card_has_the_suggested_block_with_ask_and_suggest(reg, rs):
     assert "<spec:Warrior:Protection> **Kael** · offspec" in lines and "alternates: Gorm" in body
     assert "<spec:Paladin:Holy> **Ana** · flex" in lines and "alternates: Wren · Pip" in body
     assert not any("<role:" in ln and "<spec:" in ln for ln in lines), "a spec icon alone on a member line — never a role icon beside it"
-    assert "Full if all say yes." in body
+    assert "Still short if everyone says yes: nothing" in body
     ids = [b.custom_id for b in buttons(view)]
     rev = rc.role_plan(reg, rs, ev).rev
     assert f"runact.{reg.key}:{ev.key}:ask:{rev}" in ids and f"runact.{reg.key}:{ev.key}:suggest" in ids

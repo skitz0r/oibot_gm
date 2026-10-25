@@ -228,10 +228,12 @@ class RaidSchedulerMixin:
                 sent, nd = await self.run_fill(reg, rs, ev, team)
                 if sent:
                     exhausted_posted.discard((reg.key, ev.key))
-                    await self.post_run_update(reg, ev, f"🧩 short {gaps_text(self.ico, nd)}:\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
+                    gaps = gaps_text(self.ico, nd)
+                    await self.post_run_update(reg, ev, (f"🧩 short {gaps}:" if gaps else "🧩 asked:") + "\n🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
                 elif ev.fill_state == "exhausted" and (reg.key, ev.key) not in exhausted_posted:  # just transitioned: say so once
                     exhausted_posted.add((reg.key, ev.key))
-                    await self.post_run_update(reg, ev, f"🧩 nobody left to ask — short {gaps_text(self.ico, nd)}")
+                    gaps = gaps_text(self.ico, nd)
+                    await self.post_run_update(reg, ev, "🧩 nobody left to ask" + (f" — short {gaps}" if gaps else ""))
             elif ev.fill_state != "exhausted":
                 exhausted_posted.discard((reg.key, ev.key))
         # the loot council's minute (LootSurfaceMixin.loot_scheduler_step): companion drops arriving with no run live →
