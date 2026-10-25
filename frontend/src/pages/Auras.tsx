@@ -18,6 +18,8 @@ const STATUS_COLOUR: Record<string, string> = { confirmed: "teal", reported: "ye
 /** Strength presets (the Discord wizard's list); "other…" opens a number box. */
 const STRENGTHS = ["0.5", "1", "1.5", "2", "3"];
 const NEW_FAMILY = "__new";
+/** The other buffs in this buff's stacking family: the ones it doesn't stack with (the family's head included). */
+const familyMates = (data: Auras, b: Buff) => data.buffs.filter((x) => x.family === b.family && x.id !== b.id).map((x) => x.name);
 type BuffDraft = { scope: string; family: string; strength: number | string; status: string; note: string; family_new?: string };
 
 export function AurasPage({ meta }: { meta: Meta }) {
@@ -95,7 +97,7 @@ export function AurasPage({ meta }: { meta: Meta }) {
         <CardHeader title="Buffs" hint={data.owner ? undefined : "the owner edits these"} action={data.owner && !drafts ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} onClick={() => setDrafts(Object.fromEntries(data.buffs.map((b) => [b.id, draftOf(b)])))}>Edit auras</Button> : undefined} />
         <Table.ScrollContainer minWidth={820}>
           <Table>
-            <Table.Thead><Table.Tr><Table.Th>Buff</Table.Th><Table.Th>Cast by</Table.Th><Table.Th>Scope</Table.Th><Table.Th>Family</Table.Th><Table.Th w={90}>Strength</Table.Th><Table.Th w={drafts ? 150 : 110}>Status</Table.Th><Table.Th>Note</Table.Th><Table.Th w={40} /></Table.Tr></Table.Thead>
+            <Table.Thead><Table.Tr><Table.Th>Buff</Table.Th><Table.Th>Cast by</Table.Th><Table.Th w={96}>Scope</Table.Th><Table.Th>Family</Table.Th><Table.Th w={90}>Strength</Table.Th><Table.Th w={drafts ? 150 : 110}>Status</Table.Th><Table.Th>Note</Table.Th><Table.Th w={40} /></Table.Tr></Table.Thead>
             <Table.Tbody>
               {data.buffs.map((b) => drafts
                 ? <BuffEdit key={b.id} b={b} data={data} d={drafts[b.id]} refused={refused.has(b.id)} setD={(d) => setDrafts({ ...drafts, [b.id]: d })} onReset={() => resetOne(b.id, () => { setDrafts(null); load(); })} />
@@ -104,7 +106,7 @@ export function AurasPage({ meta }: { meta: Meta }) {
                     <Table.Td><Group gap="sm" wrap="nowrap">{b.art ? <Box component="img" src={`/img/icon/${b.art}.jpg`} alt="" style={{ width: 26, height: 26, borderRadius: 5, border: "1px solid var(--mantine-color-slate-5)" }} /> : <Box style={{ width: 26, height: 26, borderRadius: 5, background: b.colour }} />}<Box><Text size="sm" fw={600}>{b.name}</Text><Text size="xs" c="dimmed">{b.id}{b.slot ? ` · slot ${b.slot.replace("shaman_", "")}` : ""}</Text></Box></Group></Table.Td>
                     <Table.Td><Group gap={4}>{b.providers.map((p) => <Text key={p} size="xs" c={CLASS_COLOURS[p.split(":")[0]]}>{p.replace(":*", "")}</Text>)}</Group></Table.Td>
                     <Table.Td><Badge variant="light" color={b.overridden.includes("scope") ? "yellow" : b.scope === "raid" ? "teal" : "gray"}>{b.scope}</Badge></Table.Td>
-                    <Table.Td><Text size="sm" c={b.overridden.includes("family") ? "yellow" : undefined}>{famName(b.family)}</Text>{b.family !== b.id && <Text size="xs" c="dimmed">doesn't stack with {data.buffs.filter((x) => x.family === b.family && x.id !== b.id).map((x) => x.name).join(", ") || "—"}</Text>}</Table.Td>
+                    <Table.Td><Text size="sm" c={b.overridden.includes("family") ? "yellow" : undefined}>{famName(b.family)}</Text>{familyMates(data, b).length > 0 && <Text size="xs" c="dimmed">doesn't stack with {familyMates(data, b).join(", ")}</Text>}</Table.Td>
                     <Table.Td><Text size="sm" c={b.overridden.includes("strength") ? "yellow" : undefined}>×{b.strength}</Text></Table.Td>
                     <Table.Td><Badge size="xs" variant="outline" color={b.overridden.includes("status") ? "yellow" : STATUS_COLOUR[b.status]}>{b.status}</Badge></Table.Td>
                     <Table.Td><Text size="xs" c="dimmed" lineClamp={2}>{b.note}</Text></Table.Td>

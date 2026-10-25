@@ -361,6 +361,8 @@ src/oibot_gm/
                        ONE audit format: audit_line / audited(ops, reg, by, line, via, level, by_id) → "[web] Jon (host): …" — `by` is a display name,
                        the surface is the prefix from via (web|mcp|chat; none for Discord), " (host)" = a superuser in a guild they don't own, no DM.
                        set_channel, apply_async(via=) and the web's mutation helpers write through it
+scripts/raidhelper_roster.py  a Raid-Helper event export (JSON) → `<guild>/test_roster.yaml` rows ({name, character, cls, spec, rank}) for the
+                       PRIVATE data repo: the test bench's seed then rehearses against the guild's real signup shape (§5.42); specs → classes, never names here
 scripts/agents/        loop EVERY guild (Api().guilds()): review.py (daily 9:00 AM; one tagged run per guild, its own since, a Claude session only for a
                        guild with new news, pinned with OIBOT_MCP_GUILD), apply.py (every 15 min; X-Oibot-Job: apply; recovery of `applying`; every guild
                        setting this poll, then the first profile edit whose preflight + D33 guard pass: resolve("applying") gate, Claude, checks/commit/push,

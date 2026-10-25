@@ -771,7 +771,7 @@ only updates a draft, shown as one line (*"✏️ Not saved yet: Scope party →
 changes"*) — and **Save this buff** writes it all at once; *Another buff* or *Done* with unsaved changes asks Save /
 Discard / Back. *Who benefits* changes one beneficiary at a time and leaves the rest of the family's map alone. **Reset
 everything to game defaults** (on the buff list) says exactly what goes — *"The guild's changes to 3 buffs (…) and 1 family (…)
-go…"* — before it does it. Amber on the page marks what the guild changed from the game's default; *Reset* returns one buff or family to the game
+go…"* — before it does it. Amber on the page marks what the guild changed from the game's default (a value set back to the game's own drops out, so a buff is never amber for nothing; every buff of a family of several says *doesn't stack with* the others); *Reset* returns one buff or family to the game
 defaults, and asks first on the page as in Discord (*"Blood Pact goes back to the game's scope, family, strength, status
 and note…"*). Choosing *Stands alone* for a buff that shares a family gives it a family of its own: *Who benefits* then
 edits that new family and leaves the one it shared alone.
@@ -1376,7 +1376,7 @@ The test bench is on both surfaces: everything below works in Discord (`/gm test
 bench** card on the Members page), and plain text and MCP reach the same steps.
 
 **Puppets.** `/gm test seed` asks how many puppet members to create (5, 10, 20 or the whole bench; fake Discord ids, a
-realistic class mix and ranks, mains confirmed). `/gm test compose` builds the bench by composition instead: pick a
+realistic class mix and ranks, mains confirmed — or, when the host put a `test_roster.yaml` in the guild's data folder, the guild's own signup shape by name; `scripts/raidhelper_roster.py` writes that file from a Raid-Helper event export). `/gm test compose` builds the bench by composition instead: pick a
 class, then a spec, then how many; repeat for as many specs as you like; the screen keeps the review line ("3 to add ·
 2 to remove") and nothing is written before **Save** (removals take the newest puppets of that spec; one rostered on a
 locked run is refused — cancel that run or clear the bench). On the site the card shows the bench as spec icons with a

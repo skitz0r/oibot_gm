@@ -603,3 +603,16 @@ def test_about_cancel_writes_nothing(reg, store, owner):
         await h.press("Cancel")
     asyncio.run(go())
     assert commits(store) == n0 and reg.config.about != "draft"
+
+
+def test_an_aura_field_set_back_to_the_games_value_is_no_override(reg):
+    """Seen live 2026-10-24: a plain-text change wrote Moonkin Aura's family = the family the profile already gives it, and the
+    row went amber. Amber means "differs from the game": a default written back drops out, and a buff with nothing left is gone
+    from the guild's overrides (the reset sentence counts only real changes)."""
+    reg.set_buff_overrides("moonkin_aura", {"scope": "raid", "family": "leader_of_the_pack"}, "Jon")
+    assert reg.config.buffs["moonkin_aura"] == {"scope": "raid"}
+    assert "moonkin_aura" not in reg.config.families
+    base = next(b for b in reg.base_profile.buffs if b.id == "moonkin_aura")
+    reg.set_buff_overrides("moonkin_aura", {"scope": base.scope}, "Jon")
+    assert "moonkin_aura" not in reg.config.buffs
+    assert reg.aura_reset_sentence().startswith("Nothing to reset")

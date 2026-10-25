@@ -403,7 +403,8 @@ def list_members(filter: str | None = None, guild: Guild = None) -> dict:
     if filter:
         f = filter.strip().lower()
         rows = [r for r in rows if f in r["display_name"].lower() or any(f in " ".join(str(x) for x in (c.get("name"), c.get("cls"), c.get("spec"), c.get("role"), c.get("rank"))).lower() for c in r.get("characters", []))]
-    return {"members": len(data.get("members", rows)) if isinstance(data.get("members"), int) else len(rows), "shown": len(rows), "rows": rows}
+    total = data.get("members")  # the API's count when it sends one (an int); else the rows themselves
+    return {"members": total if isinstance(total, int) else len(rows), "shown": len(rows), "rows": rows}
 
 
 @mcp.tool()

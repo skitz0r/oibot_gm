@@ -380,7 +380,7 @@ families:
     status: confirmed
     value: {ranged: 3, "spec:Elemental": 0, "spec:Balance": 0, "spec:Shadow": 0, "spec:Fire": 0, "spec:Frost": 0, "spec:Arcane": 0, "spec:Affliction": 0, "spec:Destruction": 0, "spec:Demonology": 0}
   - id: leader_of_the_pack
-    name: Critical strike (party)
+    name: Critical strike
     status: reported
     # Leader of the Pack and Moonkin Aura: +3% crit of every kind, and "exclusive with" each other
     value: {physical: 4, spell: 4, tank: 2, healer: 1}

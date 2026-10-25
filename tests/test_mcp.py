@@ -303,3 +303,24 @@ def test_board_moves_merge_and_stale_whole_board_write_is_refused(client, reg, r
     assert r.status_code == 200
     r = client.post(f"/api/run/{ev.key}/move", json={"member": "Nobody", "to": None}, headers=bearer())
     assert r.status_code == 409 and "board" in r.json()
+
+
+def test_list_members_reads_the_apis_count():
+    """Seen live 2026-10-25: /api/members answers {rows, members: <int>} and the tool called len() on the int — every
+    list_members call failed. The count is the API's number when it sends one, else the rows shown."""
+    rows = [{"display_name": "Kessa", "characters": [{"name": "Kessa", "cls": "Druid", "spec": "Feral", "role": "melee", "rank": "raider"}]},
+            {"display_name": "Korrin", "characters": [{"name": "Korrin", "cls": "Mage", "spec": "Frost", "role": "ranged", "rank": "trial"}]}]
+
+    def handler(request):
+        if request.url.path == "/api/members":
+            return httpx.Response(200, json={"rows": rows, "members": 2, "tz": "America/Los_Angeles"})
+        return httpx.Response(404, json={"error": "no such route"})
+
+    ms.use(ms.Api(url="http://bot", token=TOKEN, transport=httpx.MockTransport(handler)))
+    try:
+        out = ms.list_members()
+        assert out["members"] == 2 and out["shown"] == 2
+        out = ms.list_members(filter="mage")
+        assert out["members"] == 2 and out["shown"] == 1 and out["rows"][0]["display_name"] == "Korrin"
+    finally:
+        ms.use(None)

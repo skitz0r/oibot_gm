@@ -3704,8 +3704,24 @@ class Registry:
             else:
                 self.config.buffs[bid] = before
             raise
+        self._prune_buff_defaults(bid)
         self.save_config(f"aura {bid} " + ", ".join(f"{f} → {v}" for f, v in fields.items()) + f" (by {by})")
         return lines
+
+    def _prune_buff_defaults(self, bid: str) -> None:
+        """A field written back to the game's own value is no override: amber on the Auras page means "differs from the
+        game", and the reset sentence counts only real changes. Seen live on 2026-10-24: a plain-text change set Moonkin
+        Aura's family to the family the profile already gave it, and the row went amber for nothing."""
+        over = self.config.buffs.get(bid)
+        base = next((b for b in self.base_profile.buffs if b.id == bid), None)
+        if not over or base is None:
+            return
+        defaults = {"scope": base.scope, "family": base.family_id, "strength": float(base.strength), "status": base.status, "note": base.note}
+        for f, v in list(over.items()):
+            if f in defaults and v == defaults[f]:
+                over.pop(f)
+        if not over:
+            self.config.buffs.pop(bid, None)
 
     def _family_field(self, fid: str, over: dict, field: str, value) -> str:
         """One family field validated into `over` (the family's override dict); nothing saved."""
