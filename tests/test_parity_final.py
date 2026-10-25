@@ -102,7 +102,7 @@ def test_a_no_thanks_pressed_during_the_lock_solve_is_not_rostered(reg, rs, monk
     assert ev.signups[str(quitter.discord_id)].status == "out"
     assert quitter.display_name not in seated(ev), "rostered from an answer they had already changed"
     assert len(calls) == 2 and quitter.display_name not in calls[1], "solved again on the live answers"
-    assert any("changed during the solve — solving again" in line for line in ev.log)
+    assert any("changed while the groups were being built — building again" in line for line in ev.log)
     asked = {m.discord_id for m in ms if any(a["roster"] == ev.team for a in reg.members[m.discord_id].placement_asks)}
     assert quitter.discord_id not in asked and len(asked) == 9, "no Confirm ask for a seat they declined"
 

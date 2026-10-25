@@ -937,7 +937,7 @@ class TickWizard(Wizard):
         except RegistryError as e:
             await self.refuse(interaction, _err(e), self.untick)
             return
-        await self.show(interaction, "↩ Un-ticked " + (", ".join(d.item_name for d in res["removed"]) or "nothing") + ".",
+        await self.show(interaction, ("↩ Un-ticked " + ", ".join(d.item_name for d in res["removed"]) + ".") if res["removed"] else "↩ Nothing was un-ticked.",
                         self.button("Tick drops", self.start, discord.ButtonStyle.primary), self.button("Done", self.done))
 
 
@@ -1079,7 +1079,7 @@ async def open_gm_precedents(interaction: discord.Interaction, reg: Registry, **
     wiz = loot_wizard(bot, reg, interaction, "Precedents")
     rows = [p for p in bot.loot_precedents(reg) if p.get("import_id")][-MAX_OPTIONS:][::-1]
     if not rows:
-        await wiz.finish(interaction, "No active precedents yet — they are written when the council confirms an override (or gives a companion award's reason).")
+        await wiz.finish(interaction, "No active precedents yet — one is written when the council confirms an override, or gives the reason for a companion award.")
         return
     by_id = {p["import_id"]: p for p in rows}
 

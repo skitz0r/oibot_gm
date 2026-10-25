@@ -169,7 +169,7 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
     if key == "confirm_no":
         return f"{m.display_name} can't make {run}: their seat is freed" + (" and the bench is asked." if fill else ".") + tail
     if key == "fill_yes":
-        return f"{m.display_name} takes the fill ask on {run} (seated the way they were asked, if the seat is still free)." + tail
+        return f"{m.display_name} takes the fill ask on {run} (placed the way they were asked, if the seat is still free)." + tail
     if key == "fill_no":
         return f"{m.display_name} declines the fill ask on {run}; the next person is asked." + tail
     if key in ("pin_in", "pin_out", "unpin"):

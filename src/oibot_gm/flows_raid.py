@@ -564,7 +564,7 @@ async def show_suggestions(i: discord.Interaction, wiz: Wizard, rs, key: str, no
         wiz.draft["picks"] = {}  # a new plan: earlier picks pointed at its predecessor's seats
     wiz.draft["rev"], wiz.draft["key"] = plan.rev, key
     picks = wiz.draft.setdefault("picks", {})
-    when = "before lock — a yes changes their signup, nobody is seated until the lock" if plan.phase == "prelock" else "after lock — a yes takes the seat (role swaps need your Ask)"
+    when = "before lock — a yes changes their signup, nobody is rostered until the lock" if plan.phase == "prelock" else "after lock — a yes takes the seat (role swaps need your Ask)"
     lines = ([note] if note else []) + [f"{run_title(reg, ev)} · {when}"]
     withdraw = withdraw_select(wiz, rs, key, ev)  # an ask already out can be closed early from here (D15)
     if not plan.seats:

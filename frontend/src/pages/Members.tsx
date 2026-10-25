@@ -239,7 +239,7 @@ function ViewRow({ meta, r, c, busy, ranks, onRank, onMain, onConfirm, onRetire,
       <Table.Td>{c.is_main
         ? <Select size="xs" data={ranks} value={r.rank || c.rank} onChange={onRank} allowDeselect={false} disabled={busy === `rank${r.uid}` || r.privilege === "test"} aria-label="rank" />
         : <Tooltip label="rank lives on the main"><Text size="xs" c="dimmed">alt</Text></Tooltip>}</Table.Td>
-      <Table.Td><RegularOn on={c.regular_on} /></Table.Td>
+      <Table.Td><RegularOnCell on={c.regular_on} /></Table.Td>
       <Table.Td><StatusBadge named={!!c.name} confirmed={!!c.confirmed} /></Table.Td>
       <Table.Td>
         <Menu position="bottom-end" withinPortal>
@@ -256,8 +256,8 @@ function ViewRow({ meta, r, c, busy, ranks, onRank, onMain, onConfirm, onRetire,
   );
 }
 
-/** The recurring schedules this character is a regular of, in words; officers change them on the Rosters page (or /roster add|remove). */
-function RegularOn({ on }: { on?: string[] }) {
+/** The "Regular on" cell: the recurring schedules this character is a regular of, in words; officers change them on the Rosters page (or /roster add|remove). A bare dash under the column header when none. */
+function RegularOnCell({ on }: { on?: string[] }) {
   if (!on || !on.length) return <Text c="dimmed">—</Text>;
   return <Group gap={4} wrap="wrap">{on.map((l) => <Badge key={l} size="sm" variant="light" color="teal" tt="none" style={{ maxWidth: "100%" }}><Text span size="xs" truncate>{l}</Text></Badge>)}</Group>;
 }
@@ -278,10 +278,10 @@ function EditRow({ meta, d, uid, ranks, specsOf, onChange, onRemove, regularOn }
         </Stack>
       </Table.Td>
       <Table.Td><Select size="sm" data={specsOf(d.cls)} value={d.spec || null} onChange={(v) => onChange({ spec: v || d.spec })} disabled={!d.cls} /></Table.Td>
-      <Table.Td><Select size="sm" placeholder="none" data={specsOf(d.cls)} value={d.offspec} onChange={(v) => onChange({ offspec: v || null })} disabled={!d.cls} clearable /></Table.Td>
-      <Table.Td><MultiSelect size="sm" placeholder="none" data={choices} value={d.flex.filter((r) => choices.includes(r))} onChange={(v) => onChange({ flex: v })} disabled={!d.cls} /></Table.Td>
+      <Table.Td><Select size="sm" placeholder="No offspec" data={specsOf(d.cls)} value={d.offspec} onChange={(v) => onChange({ offspec: v || null })} disabled={!d.cls} clearable /></Table.Td>
+      <Table.Td><MultiSelect size="sm" placeholder="No extra roles" data={choices} value={d.flex.filter((r) => choices.includes(r))} onChange={(v) => onChange({ flex: v })} disabled={!d.cls} /></Table.Td>
       <Table.Td>{d.main ? <Select size="sm" data={ranks} value={d.rank || "trial"} onChange={(v) => onChange({ rank: v || undefined })} allowDeselect={false} /> : <Text size="xs" c="dimmed">alt</Text>}</Table.Td>
-      <Table.Td><RegularOn on={regularOn} /></Table.Td>
+      <Table.Td><RegularOnCell on={regularOn} /></Table.Td>
       <Table.Td><Text size="xs" c="dimmed">{d.isNew ? (d.name ? "confirm after save" : "planned until named") : ""}</Text></Table.Td>
       <Table.Td><Tooltip label={d.isNew ? "discard" : "delete on save"}><ActionIcon variant="subtle" color="red" onClick={onRemove}><IconTrash size={17} /></ActionIcon></Tooltip></Table.Td>
     </>

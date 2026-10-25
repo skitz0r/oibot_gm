@@ -32,11 +32,11 @@ export function SplitModal({ e, meta, multi, opened, onClose, onUse }: { e: Shee
           <Tooltip label="needs wishlists and loot tables — not yet"><Box p="sm" style={{ flex: "1 1 180px", border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8, opacity: 0.4 }}><Text size="sm" fw={700}>Loot quality</Text><Text size="xs" c="dimmed">seat people where the drops they need go uncontested</Text></Box></Tooltip>
         </Group>}
         <Group justify="space-between" wrap="wrap">
-          <Text size="xs" c="dimmed">{busy ? "solving…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : <>Solver's pick · synergy {preview.total} · your own placements on the board are kept</>) : ""}</Text>
+          <Text size="xs" c="dimmed">{busy ? "building…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : <>The bot's pick · synergy {preview.total} · your own placements on the board are kept</>) : ""}</Text>
           {preview && !busy && <Button size="compact-xs" variant="subtle" leftSection={<IconRefresh size={12} />} onClick={() => run(strategy, seen)}>{multi ? "another split like this" : "another layout"}</Button>}
         </Group>
         {preview && !busy && <BoardPreview meta={meta} board={preview.board} reason={preview.reason} />}
-        {busy && <Text size="sm" c="dimmed" ta="center" py="xl">The solver is working on it…</Text>}
+        {busy && <Text size="sm" c="dimmed" ta="center" py="xl">Building the groups…</Text>}
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={onClose}>Cancel</Button>
           <Button disabled={!preview || busy} loading={using} onClick={async () => { if (!preview) return; setUsing(true); try { await onUse(preview.layout, preview.strategy); onClose(); } finally { setUsing(false); } }}>{multi ? "Use this split on the board" : "Use this layout on the board"}</Button>

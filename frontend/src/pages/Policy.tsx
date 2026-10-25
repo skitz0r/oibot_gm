@@ -10,7 +10,7 @@ import { useLive } from "../hooks/useLive";
 const TITLE: Record<string, string> = { loot: "Loot policy", comp: "Standing comp instructions", persona: "Persona" };
 const HINT: Record<string, string> = {
   loot: "the loot council cites these rules as [R1], [R2]… — the compiled reading is what it applies",
-  comp: "standing instructions for the group solver — the compiled constraints are what it applies",
+  comp: "standing instructions for how groups are built — the compiled constraints are what the lock applies",
   persona: "the bot's voice in every answer — the confirmed text is what it speaks with",
 };
 

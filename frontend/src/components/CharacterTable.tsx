@@ -113,8 +113,8 @@ export function CharacterTable({ meta, me, onChanged, onEditing }: { meta: Meta;
                   </Stack>
                 </Table.Td>
                 <Table.Td><Select size="sm" data={specsOf(d.cls)} value={d.spec || null} onChange={(v) => upd(i, { spec: v || d.spec })} disabled={!d.cls} /></Table.Td>
-                <Table.Td><Select size="sm" placeholder="none" data={specsOf(d.cls)} value={d.offspec} onChange={(v) => upd(i, { offspec: v || null })} disabled={!d.cls} clearable /></Table.Td>
-                <Table.Td><MultiSelect size="sm" placeholder="none" data={d.cls ? flexChoices(meta, d.cls, d.spec, d.offspec) : []} value={d.flex.filter((r) => flexChoices(meta, d.cls, d.spec, d.offspec).includes(r))} onChange={(v) => upd(i, { flex: v })} disabled={!d.cls} /></Table.Td>
+                <Table.Td><Select size="sm" placeholder="No offspec" data={specsOf(d.cls)} value={d.offspec} onChange={(v) => upd(i, { offspec: v || null })} disabled={!d.cls} clearable /></Table.Td>
+                <Table.Td><MultiSelect size="sm" placeholder="No extra roles" data={d.cls ? flexChoices(meta, d.cls, d.spec, d.offspec) : []} value={d.flex.filter((r) => flexChoices(meta, d.cls, d.spec, d.offspec).includes(r))} onChange={(v) => upd(i, { flex: v })} disabled={!d.cls} /></Table.Td>
                 <Table.Td>{d.isNew && <ActionIcon variant="subtle" color="red" onClick={() => setDrafts(drafts.filter((_, j) => j !== i))}><IconTrash size={17} /></ActionIcon>}</Table.Td>
               </Table.Tr>
             ))}

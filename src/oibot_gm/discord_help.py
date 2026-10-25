@@ -146,7 +146,7 @@ def guide_text(reg, key: str, user_id: int | None = None) -> str:
                 "you'll get a DM with the decision. Accepted applicants are registered as trial." + (f"\n> {rec.note}" if rec.note else ""))
     if key == "contact":
         officers = ", ".join(f"@{r}" for r in reg.officer_role_names()) or "anyone with Manage Server"
-        owner = f"<@{cfg.owner_discord_id}>" if cfg.owner_discord_id else "not set"
+        owner = f"<@{cfg.owner_discord_id}>" if cfg.owner_discord_id else "nobody has claimed the guild yet"
         return f"**Who to contact**\nOfficers: {officers}. Owner: {owner}." + (f"\nOps channel: <#{cfg.ops_channel_id}>" if cfg.ops_channel_id else "")
     return "Pick a topic."
 

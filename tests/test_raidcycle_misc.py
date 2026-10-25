@@ -7,9 +7,9 @@ from oibot_gm import raidcycle as rc
 def test_solver_error_text():
     assert rc.solver_error_text(RuntimeError("solver status INFEASIBLE")).startswith("no roster satisfies the rules")
     assert rc.solver_error_text(RuntimeError("no roster found")).startswith("no roster satisfies the rules")
-    assert rc.solver_error_text(RuntimeError("status UNKNOWN")).startswith("the solver ran out of time")
-    assert rc.solver_error_text(RuntimeError("time limit hit")).startswith("the solver ran out of time")
-    assert rc.solver_error_text(ValueError("boom")) == "the solver failed: boom"
+    assert rc.solver_error_text(RuntimeError("status UNKNOWN")).startswith("the bot couldn't find a roster in time")
+    assert rc.solver_error_text(RuntimeError("time limit hit")).startswith("the bot couldn't find a roster in time")
+    assert rc.solver_error_text(ValueError("boom")) == "building the roster failed: boom"
 
 
 def test_parse_schedule_and_run_key():

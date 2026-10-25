@@ -89,7 +89,7 @@ export function AurasPage({ meta }: { meta: Meta }) {
   }
   return (
     <Stack gap="lg">
-      <PageTitle title="Auras" intro={`What we know about ${meta.game}'s buffs. A stacking family says which buffs don't stack (the strongest present one counts) and who benefits from it; each buff says who casts it, whether it reaches the party or the whole raid, how strong it is, and how sure we are. Amber marks a guild override of the game defaults. The solver, the cards and the board all read this.`} />
+      <PageTitle title="Auras" intro={`What we know about ${meta.game}'s buffs. A stacking family says which buffs don't stack (the strongest present one counts) and who benefits from it; each buff says who casts it, whether it reaches the party or the whole raid, how strong it is, and how sure we are. Amber marks what the guild changed from the game's default. The bot reads this when it builds the groups, draws the cards and shows the board.`} />
 
       <Card>
         <CardHeader title="Buffs" hint={data.owner ? undefined : "the owner edits these"} action={data.owner && !drafts ? <Button size="xs" variant="default" leftSection={<IconPencil size={13} />} onClick={() => setDrafts(Object.fromEntries(data.buffs.map((b) => [b.id, draftOf(b)])))}>Edit auras</Button> : undefined} />

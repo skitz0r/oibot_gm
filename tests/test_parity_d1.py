@@ -624,7 +624,7 @@ def test_card_lock_button_answers_a_busy_or_locked_run_quietly(reg, rs, why):
 
     asyncio.run(go())
     assert "lock failed" not in h.text, h.text
-    assert ("the solver is already working" in h.text) if why == "busy" else ("already locked" in h.text)
+    assert ("the roster is already being built" in h.text) if why == "busy" else ("already locked" in h.text)
     assert feed.lines == [], feed.lines
 
 

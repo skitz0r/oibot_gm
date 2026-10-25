@@ -121,7 +121,7 @@ export function LootWeightsCard() {
             {rescore.rows.length > 0 && (
               <Table.ScrollContainer minWidth={620}>
                 <Table verticalSpacing={2}>
-                  <Table.Thead><Table.Tr><Table.Th>Item</Table.Th><Table.Th>Went to</Table.Th><Table.Th>Top now</Table.Th><Table.Th>{Object.keys(diff).length ? "Top with the draft" : "—"}</Table.Th><Table.Th /></Table.Tr></Table.Thead>
+                  <Table.Thead><Table.Tr><Table.Th>Item</Table.Th><Table.Th>Went to</Table.Th><Table.Th>Top now</Table.Th><Table.Th>{Object.keys(diff).length ? "Top with the draft" : ""}</Table.Th><Table.Th /></Table.Tr></Table.Thead>
                   <Table.Tbody>
                     {rescore.rows.map((r) => (
                       <Table.Tr key={r.drop_id || r.item}>

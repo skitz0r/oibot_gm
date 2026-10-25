@@ -128,7 +128,7 @@ def test_card_lock_preview_refusal_offers_back(reg, rs):
     async def go():
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
         await h.press("Preview lock")
-        assert "already working" in h.text and h.buttons() == ["Back", "Cancel"]
+        assert "already being built" in h.text and h.buttons() == ["Back", "Cancel"]
         await h.press("Back")
         assert h.buttons() == ["Lock now", "Preview lock", "Back"]
     run(go())

@@ -114,7 +114,7 @@ export function SetupCard({ onHost }: { onHost?: (shown: boolean) => void } = {}
             </Box>
             <Box>
               <Text size="sm" fw={600}>Parked guilds</Text>
-              {data.host.detached.length === 0 ? <Text size="sm" c="dimmed">None.</Text>
+              {data.host.detached.length === 0 ? <Text size="sm" c="dimmed">None — every guild still has the bot in its server.</Text>
                 : data.host.detached.map((g) => <Text key={g.key} size="sm">{g.name} — the bot was removed from its server{g.detached ? ` (${g.detached})` : ""}; invite it back and it is served again (nothing was deleted)</Text>)}
             </Box>
             {(data.host.facts || []).length > 0 && <Stack gap={4}>{data.host.facts.map((ln, i) => <Text key={i} size="sm" style={{ overflowWrap: "anywhere" }}>{ln}</Text>)}</Stack>}

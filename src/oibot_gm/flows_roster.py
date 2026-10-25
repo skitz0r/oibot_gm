@@ -675,7 +675,7 @@ class RegularAddWizard(RegularsWizard):
                             *([self.button("Back", back)] if back else []), self.button("Cancel", self.cancel))
             return
         lines = [f"Make **{c.label}** · {c.cls} {c.spec} ({m.display_name}) a regular of **{self.label()}**?",
-                 "-# Regulars are expected on every sheet of it: officers see who hasn't answered, the reminder goes to them, and they're seated ahead of others at lock. Nothing is answered for them."]
+                 "-# Regulars are expected on every sheet of it: officers see who hasn't answered, the reminder goes to them, and they're weighted ahead of others at lock. Nothing is answered for them."]
         other = next((x for x in m.active() if x is not c and key in x.rosters), None)
         if other:
             lines.append(f"-# One character per member per schedule: this replaces **{other.label}** there.")
