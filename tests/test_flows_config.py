@@ -74,7 +74,7 @@ def test_raid_config_multi_section_edit_saves_in_one_commit(reg, store, owner):
         assert "Tue 7:30 PM" in h.text and "Thu 7:30 PM" in h.text and "19:30" not in h.text
         await h.press("Back to the sections")
         await h.pick("Pick a section", "cadence")
-        await h.pick("Pick a cadence", "standard")
+        await h.pick("Pick a run's week", "standard")
         assert "3 unsaved changes" in h.text  # run times + opens + nudge (lock and confirm already match)
         await h.pick("Pick a section", "weights")
         await h.submit(h.modal, rank="5", main="2", sat_out="2", signup_order="1")
@@ -108,7 +108,7 @@ def test_a_refused_cadence_is_caught_in_its_section_and_writes_nothing(reg, stor
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "cadence")
-        await h.pick("Pick a cadence", "custom")
+        await h.pick("Pick a run's week", "custom")
         await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="24", lock_hours_before="48", confirm_hours_before="6")
         assert h.text.startswith("**Raid rules**\n❌") and "nudge" in h.text
         assert h.buttons() == ["Fix this", "Back to the sections", "Cancel"]
@@ -128,7 +128,7 @@ def test_a_refusal_at_save_keeps_the_draft_and_leaves_config_and_git_untouched(r
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "cadence")
-        await h.pick("Pick a cadence", "custom")
+        await h.pick("Pick a run's week", "custom")
         await h.submit(h.modal, signup_lead_hours="120", nudge_hours_before="72", lock_hours_before="24", confirm_hours_before="12")
         await h.press("Save")
         assert "Save these changes" in h.text
@@ -150,7 +150,7 @@ def test_cancel_from_the_hub_writes_nothing(reg, store, owner):
     async def go():
         await open_raid(h, reg)
         await h.pick("Pick a section", "cadence")
-        await h.pick("Pick a cadence", "same_week")
+        await h.pick("Pick a run's week", "same_week")
         await h.pick("Pick a section", "notes")
         await h.submit(h.modal, notes="x")
         await h.press("Cancel")

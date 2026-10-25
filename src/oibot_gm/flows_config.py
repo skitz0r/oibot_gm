@@ -116,9 +116,9 @@ CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "conf
 ROLES = ("tank", "healer", "dps")
 ROLE_WORDS = {"tank": "tanks", "healer": "healers", "dps": "dps"}
 WEIGHTS = tuple(RAID_WEIGHT_DEFAULTS)
-WEIGHT_LABEL = {"rank": "Rank", "main": "Main over alt", "sat_out": "Sat out last time", "signup_order": "Signed up early", "regular": "Regular of the series"}
+WEIGHT_LABEL = {"rank": "Rank", "main": "Main over alt", "sat_out": "Sat out last time", "signup_order": "Signed up early", "regular": "Regular of the schedule"}
 WEIGHT_HINT = {"rank": "core > raider > trial", "main": "a main is picked over an alt", "sat_out": "benched in the last lockout",
-               "signup_order": "an earlier signup", "regular": "being one of the series' regulars (on their regular character)"}  # the Raids page's WEIGHT_HINT, in words
+               "signup_order": "an earlier signup", "regular": "being one of the schedule's regulars (on their regular character)"}  # the Raids page's WEIGHT_HINT, in words
 WEIGHT_WORDS = {0: "doesn't count", 1: "a little", 2: "some", 3: "a lot", 4: "more", 5: "the most"}
 SPLIT_WORDS = {"balanced": ("Balanced", "both runs equal in synergy, tanks, healers and seats"),
                "first": ("Raid one first", "roster 1 gets the best, roster 2 the rest"),
@@ -127,7 +127,7 @@ BOOL_WORDS = {"nudge": "Nudge the unanswered", "autofill": "Fill seats automatic
               "confirm": "Ask the rostered to confirm"}  # registry.RAID_BOOL_FIELDS, in words
 SECTIONS = [  # (key, label, fields it edits)
     ("times", "Schedules", ("slots", "schedules")),
-    ("cadence", "Signup cadence", CADENCE),
+    ("cadence", "A run's week", CADENCE),
     ("comp", "Group make-up", tuple(f"{r}_{b}" for r in ROLES for b in ("min", "max"))),
     ("weights", "Selection weights", tuple(f"weight_{k}" for k in WEIGHTS)),
     ("length", "Lockout & length", ("lockout_days", "duration_hours")),
@@ -277,7 +277,7 @@ class CompTargetsBlock:
 
     def bounds_line(self) -> str:
         b = self.reg.role_bounds(self.raid, self.t_size())
-        return "-# Bounds — what the solver seats (the owner's): " + " · ".join(f"{ROLE_WORDS[r]} {b[r]['min']}–{b[r]['max']}" for r in ROLES if r in b)
+        return "-# Limits (the owner's) — the fewest and the most of each role a run takes: " +" · ".join(f"{ROLE_WORDS[r]} {b[r]['min']}–{b[r]['max']}" for r in ROLES if r in b)
 
     async def targets(self, i: discord.Interaction, note: str = "") -> None:
         from .configops import _target_words
@@ -286,21 +286,21 @@ class CompTargetsBlock:
         rd = self.reg.raid_def(self.raid)
         cur = self.t_current()
         lines = [note] if note else []
-        lines += [f"**Desired comp** · {rd.get('name', self.raid)} — what readiness aims for; officers set it.", self.bounds_line()]
+        lines += [f"**Aims** · {rd.get('name', self.raid)} — what readiness compares the guild with; officers set them.", self.bounds_line()]
         for slot in sorted(cur, key=lambda s: (s not in ("tank", "healer", "melee", "ranged"), s)):
             t = cur[slot]
             lines.append(f"• {self.reg.comp_slot_words(slot)}: {_target_words(t)}" + (f" — {t['note']}" if t.get("note") else " — (no reason given)"))
         if not cur:
-            lines.append("No officer targets: readiness uses the derived ones (the bounds and the buff matrix).")
+            lines.append("No aims set yet — readiness uses the default aims (the limits above and the raid buffs). Pick a role, class or spec below to set one.")
         n = len(self.tdraft)
-        lines.append(f"✎ **{n} unsaved change{'' if n == 1 else 's'}** — nothing is saved until Save." if n else "-# Pick a slot to set its target. Nothing is saved until Save.")
+        lines.append(f"✎ **{n} unsaved change{'' if n == 1 else 's'}** — nothing is saved until Save." if n else "-# Pick a role, class or spec to set its aim. Nothing is saved until Save.")
         slots = [Opt(r, self.reg.comp_slot_words(r), "a role") for r in ("tank", "healer", "melee", "ranged")]
         slots += [Opt(c, self.reg.comp_slot_words(c), "a class") for c in self.reg.profile.classes]
         slots.append(Opt("__spec", "A particular spec…", "pick the class, then the spec"))
-        items: list = [self.select("Set a target for…", slots[:MAX_OPTIONS], self.t_slot_picked)]
+        items: list = [self.select("Set an aim for…", slots[:MAX_OPTIONS], self.t_slot_picked)]
         if cur:
-            items.append(self.select("Remove a target", [Opt(s, self.reg.comp_slot_words(s), _target_words(cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
-        items.append(self.button("Save targets", self.t_save, discord.ButtonStyle.success, disabled=not n))
+            items.append(self.select("Remove an aim", [Opt(s, self.reg.comp_slot_words(s), _target_words(cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
+        items.append(self.button("Save aims", self.t_save, discord.ButtonStyle.success, disabled=not n))
         if n:
             items.append(self.button("Discard changes", self.t_discard))
         items.append(self.button("Back", self.targets_back) if self.targets_back else self.button("Cancel", self.cancel))
@@ -347,7 +347,7 @@ class CompTargetsBlock:
                 return
             self.tdraft[slot] = entry
             await self.targets(it, f"{words}: {'at least ' + str(entry['min'])}{', at most ' + str(entry['max']) if entry['max'] is not None else ''} — not saved yet.")
-        await self.open_form(i, Form(f"Target · {words}"[:45], [
+        await self.open_form(i, Form(f"Aim · {words}"[:45], [
             Field("min", "We aim for at least", [Opt(str(n), str(n), default=n == lo) for n in target_numbers(top, lo)], description="what readiness counts as enough"),
             Field("max", "And at most", [Opt("none", "No upper limit", default=hi in (None, ""))]
                   + [Opt(str(n), str(n), default=hi not in (None, "") and n == int(hi)) for n in target_numbers(top, hi, MAX_OPTIONS - 1, drop_low=True)],
@@ -365,7 +365,7 @@ class CompTargetsBlock:
             self.tdraft.pop(slot)  # a target drafted here and never saved: just drop it
         else:
             self.tdraft[slot] = None
-        await self.targets(i, f"{self.reg.comp_slot_words(slot)}: back to the derived target — not saved yet.")
+        await self.targets(i, f"{self.reg.comp_slot_words(slot)}: back to the default aim — not saved yet.")
 
     async def t_discard(self, i: discord.Interaction) -> None:
         self.tdraft = {}
@@ -382,7 +382,7 @@ class CompTargetsBlock:
         try:
             ops = configops.ops_from_fields(self.reg, "comp", self.raid, dict(self.tdraft))
         except RegistryError as e:
-            await self.refuse(i, str(e), self.t_back, "Back to the targets")
+            await self.refuse(i, str(e), self.t_back, "Back to the aims")
             return
         allowed, refused = configops.authorize_ops(self.reg, ops, i.user.id, role=role)
         res = await configops.apply_ops(self.reg, allowed, by=i.user.display_name, by_id=i.user.id, bot=getattr(i, "client", None), via="discord",
@@ -390,7 +390,7 @@ class CompTargetsBlock:
         bad = [*refused, *(r["line"] for r in res["results"] if not r["ok"])]
         if not res["applied"]:
             self.trev = self.reg.config_rev(f"raids:{self.raid}")
-            await self.refuse(i, "; ".join(bad) or "Nothing was changed.", self.t_back, "Back to the targets")
+            await self.refuse(i, "; ".join(bad) or "Nothing was changed.", self.t_back, "Back to the aims")
             return
         self.tdraft = {}
         self.trev = self.reg.config_rev(f"raids:{self.raid}")
@@ -450,7 +450,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     def say(self, field: str, v) -> str:
         """A field's value as a sentence fragment a person reads (12-hour, words)."""
         if field == "slots":
-            return ", ".join(self.reg.slot_label(s) for s in v) or "none"
+            return ", ".join(self.reg.slot_label(s) for s in v) or "no run times (add one under Schedules)"
         if field == "schedules":
             return "; ".join(f"{s['name']}: {self.reg.schedule_label(self.raid, s)}" for s in schedules_of({**self.sview(), "schedules": v}) if s["id"] != DEFAULT_SCHEDULE) or "only the run times"
         if field in CADENCE:
@@ -468,9 +468,9 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         if field == "duration_hours":
             return length_words(v)
         if field == "first_open":
-            return self.reg.local12(datetime.fromisoformat(v)) if v else "not set"
+            return self.reg.local12(datetime.fromisoformat(v)) if v else "no first lockout set — weekly runs start at the next run time; a day-of-lockout schedule needs one"
         if field == "notes":
-            return f"“{v[:80]}{'…' if len(v) > 80 else ''}”" if v else "none"
+            return f"“{v[:80]}{'…' if len(v) > 80 else ''}”" if v else "no notes"
         return str(v)
 
     def summary(self, key: str, eff: dict) -> str:
@@ -686,7 +686,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         n = int(s.get("rosters") or 1)
         return [Opt("name", "Rename", f"now “{s['name']}”"),
                 Opt("rosters", "Rosters per run", f"{n} now — the sheet advertises {n} × {self.size()} seats from the next run"),
-                Opt("cadence", "Cadence", "when its sheet opens, nudges, locks and confirms"),
+                Opt("cadence", "A run's week", "when its sheet opens, nudges, locks and must be confirmed by"),
                 Opt("behaviour", "Behaviour", "nudge, fill, DM on open, split — or the raid's"),
                 Opt("active", "Resume" if not s.get("active", True) else "Pause", "nothing opens from it while paused"),
                 Opt("remove", "Remove this schedule", "runs already open keep their times")]
@@ -750,13 +750,13 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
             suffix = "" if f == "fill_ask_hours" else " before"
             inherit = Opt("inherit", f"Same as the raid ({hours_words(view[f])}{suffix})", default=f not in own)
             fields.append(Field(f, label, [inherit] + [Opt(o.value, o.label, default=f in own and o.default) for o in hours_opts(own.get(f), suffix=suffix)][:MAX_OPTIONS - 1], description=desc))
-        return Form(f"Cadence · {sd['schedule']['name']}"[:45], fields, self.sched_cadence_submitted)
+        return Form(f"A run's week · {sd['schedule']['name']}"[:45], fields, self.sched_cadence_submitted)
 
     async def sched_cadence_submitted(self, i: discord.Interaction, v: dict[str, str]) -> None:
         snapshot = dict(self.draft)
         self.entry_put(self.sid, **{f: (None if not v.get(f) or v[f] == "inherit" else schedule_value(f, v[f]))
                                     for f in ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours")})
-        await self.sched_checked(i, snapshot, self.sid, "Cadence updated.")
+        await self.sched_checked(i, snapshot, self.sid, "A run's week updated.")
 
     async def sched_behaviour(self, i: discord.Interaction, note: str = "") -> None:
         sd = schedule_def_of(self.sview(), self.sid)
@@ -791,7 +791,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
 
     # ---- a new schedule: its kind, then one form
     async def add_schedule(self, i: discord.Interaction) -> None:
-        opts = [Opt("weekly", "Weekly nights", "e.g. Saturdays 8:00 PM — its own cadence and rosters"),
+        opts = [Opt("weekly", "Weekly nights", "e.g. Saturdays 8:00 PM — its own timing and rosters"),
                 Opt("lockout", "Days of each lockout", f"e.g. day 1 of each {lockout_words(self.sview().get('lockout_days') or 7)} lockout"),
                 Opt("pickup", "Pickup template", "never opens by itself; /raid open offers it with a day and time")]
         await self.show(i, "**Add a schedule** — what kind?", self.select("What kind of schedule?", opts, self.kind_picked), self.button("Back", self.to_times))
@@ -915,7 +915,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         self.put_slots(sid, slots)
         await self.sched_checked(i, snapshot, sid, f"Added {', '.join(self.reg.slot_label(s) for s in new)}.")
 
-    # ---- Signup cadence
+    # ---- A run's week (the code's "cadence")
     def cadence_words(self, lead, nudge, lock, confirm) -> str:
         return f"opens {hours_words(lead)} · nudge {hours_words(nudge)} · locks {hours_words(lock)} · confirm by {hours_words(confirm)} before"
 
@@ -924,10 +924,10 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         opts = [Opt("keep", "Keep current", self.cadence_words(*cur), default=True)]
         opts += [Opt(key, name, self.cadence_words(*hs)) for key, name, *hs in PRESETS]
         opts.append(Opt("custom", "Custom…", "pick each step yourself"))
-        text = ("**Signup cadence**, counted back from each run's start:\n"
+        text = ("**A run's week**, counted back from each run's start:\n"
                 f"• the sheet opens **{hours_words(cur[0])} before**\n• the unanswered are nudged **{hours_words(cur[1])} before**\n"
                 f"• the roster locks **{hours_words(cur[2])} before**\n• rostered members confirm by **{hours_words(cur[3])} before**")
-        await self.show(i, text, self.select("Pick a cadence", opts, self.cadence_picked), self.button("Back to the sections", self.to_hub))
+        await self.show(i, text, self.select("Pick a run's week", opts, self.cadence_picked), self.button("Back to the sections", self.to_hub))
 
     async def cadence_picked(self, i: discord.Interaction, values: list[str]) -> None:
         key = values[0]
@@ -941,12 +941,12 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         snapshot = dict(self.draft)
         for f, h in zip(CADENCE, hs):
             self.put(f, float(h))
-        await self.checked(i, snapshot, self.custom_again, f"Signup cadence → **{name}**: {self.cadence_words(*hs)}.")
+        await self.checked(i, snapshot, self.custom_again, f"A run's week → **{name}**: {self.cadence_words(*hs)}.")
 
     def cadence_form(self) -> Form:
         a = self._attempt
         val = {f: float(a[f]) if f in a else self.cur(f) for f in CADENCE}
-        return Form("Signup cadence", [
+        return Form("A run's week", [
             Field("signup_lead_hours", "The sheet opens", hours_opts(val["signup_lead_hours"]), description="before the run starts"),
             Field("nudge_hours_before", "Nudge the unanswered", hours_opts(val["nudge_hours_before"]), description="between opening and the lock"),
             Field("lock_hours_before", "The roster locks", hours_opts(val["lock_hours_before"]), description="before the run starts"),
@@ -962,7 +962,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         for f in CADENCE:
             if v.get(f):
                 self.put(f, float(v[f]))
-        await self.checked(i, snapshot, self.custom_again, "Signup cadence → " + self.cadence_words(*(self.cur(f) for f in CADENCE)) + ".")
+        await self.checked(i, snapshot, self.custom_again, "A run's week → " + self.cadence_words(*(self.cur(f) for f in CADENCE)) + ".")
 
     # ---- Group make-up (min first, then a max that starts at that min: min above max can't be picked)
     async def comp(self, i: discord.Interaction) -> None:
@@ -971,13 +971,14 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         opts = [Opt(r, ROLE_WORDS[r].capitalize(), f"{self.cur(f'{r}_min')}–{self.cur(f'{r}_max')} now") for r in ROLES]
         targets = _comp_current(self.reg, self.raid)
         lines = [f"**Group make-up** for a {self.size()}-player run.",
-                 "**Bounds** (the solver; yours): the fewest and the most of each role a run seats — "
+                 "**Limits** (yours): the fewest and the most of each role a run takes — "
                  + " · ".join(f"{ROLE_WORDS[r]} {self.cur(f'{r}_min')}–{self.cur(f'{r}_max')}" for r in ROLES) + ". Saved with this wizard's Save.",
-                 "**Targets** (readiness; officers): what the guild aims for — "
-                 + ("; ".join(f"{self.reg.comp_slot_words(k)} {_target_words(t)}" for k, t in sorted(targets.items())) or "none of the officers' own, the derived ones apply")
+                 "**Aims** (officers): what readiness compares the guild with — "
+                 + ("; ".join(f"{self.reg.comp_slot_words(k)} {_target_words(t)}" for k, t in sorted(targets.items()))
+                    or "no aims set yet, so readiness uses the default aims (the limits and the raid buffs); press Aims… to set one")
                  + ". Saved on their own (officers set them with /roster comp too)."]
         await self.show(i, "\n".join(lines), self.select("Pick a role", opts, self.comp_role),
-                        self.button("Desired comp (targets)…", self.targets, discord.ButtonStyle.primary),
+                        self.button("Aims…", self.targets, discord.ButtonStyle.primary),
                         self.button("Back to the sections", self.to_hub))
 
     async def comp_role(self, i: discord.Interaction, values: list[str]) -> None:
@@ -1132,7 +1133,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
     async def reset(self, i: discord.Interaction) -> None:
         has = self.raid in self.reg.config.raids
         name = self.reg.raid_def(self.raid).get("name", self.raid)
-        text = (f"Reset **{name}** to the game's defaults? Every guild change for this raid goes — run times and schedules, cadence, make-up, weights, notes."
+        text = (f"Reset **{name}** to the game's defaults? Every guild change for this raid goes — run times and schedules, a run's week, make-up, weights, notes."
                 + (f"\n-# Your {len(self.draft)} unsaved change(s) are dropped too." if self.draft else "")) if has else f"**{name}** is already on the game's defaults."
         await self.show(i, text, self.button("Reset", self.do_reset, discord.ButtonStyle.danger, disabled=not has),
                         self.button("Back to the sections", self.to_hub))
@@ -1233,7 +1234,7 @@ class CompTargetsWizard(CompTargetsBlock, OwnerWizard):
             from . import discord_registry
 
             return None if discord_registry.is_officer(i, reg) else "Officers only."
-        super().__init__(reg, owner_id, title="Desired comp", guard=guard)
+        super().__init__(reg, owner_id, title="Aims", guard=guard)
         self.raid = raid
 
     async def start(self, i: discord.Interaction) -> None:
@@ -1247,14 +1248,14 @@ class CompTargetsWizard(CompTargetsBlock, OwnerWizard):
             async def picked(it: discord.Interaction, values: list[str]) -> None:
                 self.raid = values[0]
                 await self.targets(it)
-            await self.show(i, "Which raid's desired comp?", self.select("Pick a raid", raids(self.reg), picked), self.button("Cancel", self.cancel))
+            await self.show(i, "Which raid's aims?", self.select("Pick a raid", raids(self.reg), picked), self.button("Cancel", self.cancel))
             return
         await self.targets(i)
 
 
 @flow("roster_comp")
 async def open_roster_comp(interaction: discord.Interaction, reg: Registry, *, raid: str | None = None, **_seed) -> None:
-    """/roster comp: officers set the comp targets (what readiness aims for). The bounds stay the owner's (/gm config raid)."""
+    """/roster comp: officers set the aims (what readiness compares the guild with). The limits stay the owner's (/gm config raid)."""
     from . import discord_registry
 
     if not discord_registry.is_officer(interaction, reg):
@@ -1467,7 +1468,7 @@ class AuraWizard(OwnerWizard):
                 Opt("strength", "Strength", f"×{strength} of the family's value"),
                 Opt("status", "Status", f"{status} — {STATUS_WORDS.get(status, '')}"),
                 Opt("benefits", "Who benefits", self.map_text(self.drafted_map())),
-                Opt("note", "Note", (bnote or "none")[:100]),
+                Opt("note", "Note", (bnote or "no note — pick to add one")[:100]),
                 Opt("reset", "Reset to game defaults", "drop the guild's changes to this buff")]
         items = [self.select("What to change", opts, self.field_picked),
                  self.button("Save this buff", self.save_pressed, discord.ButtonStyle.success, disabled=not self.dirty())]
@@ -2352,7 +2353,7 @@ class OfficersWizard(OwnerWizard):
         pending = [n for n in self.reg.config.officer_roles_pending() if n not in self.mapped]
         lines = ["Now: " + (", ".join(f"<@&{r}>" for r in cur) if cur else "none — only the server owner and Manage Server count.")]
         if self.want is not None or self.mapped:
-            lines.append("✏️ Drafted: " + (", ".join(f"<@&{r}>" for r in self.ids()) or "none"))
+            lines.append("✏️ Drafted: " + (", ".join(f"<@&{r}>" for r in self.ids()) or "no officer role — only the server owner and Manage Server will count"))
         if pending:
             lines.append("From an older config, by name (not found in the server): " + ", ".join(f"**{discord.utils.escape_markdown(n)}**" for n in pending)
                          + " — map each to a role.")

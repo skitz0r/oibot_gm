@@ -74,7 +74,7 @@ def test_about_recruitment_channels_and_raid_lines(reg, rs):
     # channels: '(not found)' only when the bot said which channels it can see
     assert "(not found" not in officer
     seen = state(reg, rs, OWNER, True, extras=help_mod.HelpExtras(channels={56}))
-    assert "ops <#55> (not found" in seen and "signup <#56>," in seen
+    assert "ops: <#55> (not found" in seen and "signup: <#56>," in seen
     # raid notes and the lockout window it is in now
     assert "notes “" in officer and "first lockout (the raid opens then) " in officer, "before first_open: the first window"
     reg.set_raid_override("barrow_deeps", "first_open", (reg.now_local() - timedelta(days=1)).replace(microsecond=0).isoformat(), "t")
@@ -226,7 +226,7 @@ def test_sections_are_gated_by_keyword(reg, rs):
     assert "### " not in state(reg, rs, reg.test_members()[0].discord_id, False, "what's going on?", extras_full())
     auras = state(reg, rs, OWNER, True, "does windfury totem stack with anything?")
     assert "### Auras" in auras and auras.split("### Auras")[1].split("\n")[2].startswith("windfury_totem"), "what the question names comes first"
-    assert "### Pool readiness" in state(reg, rs, OWNER, True, "are we ready, what comp are we short?")
+    assert "### Who could play, per raid" in state(reg, rs, OWNER, True, "are we ready, what comp are we short?")
     assert "### Test bench" in state(reg, rs, OWNER, True, "how many puppets on the test bench?") and f"of {reg.TEST_MAX} puppets" in state(reg, rs, OWNER, True, "puppets?")
 
 

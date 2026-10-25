@@ -27,7 +27,7 @@ def preset_fields(key: str) -> dict[str, str]:
     Registry.set_raid_overrides / set_schedule. Unknown key → ValueError naming the options."""
     row = next((p for p in PRESETS if p[0] == key), None)
     if row is None:
-        raise ValueError(f"cadence is one of {', '.join(p[0] for p in PRESETS)}")
+        raise ValueError(f"a run's week is one of the presets: {', '.join(p[0] for p in PRESETS)}")
     return {f: str(h) for f, h in zip(CADENCE_FIELDS, row[2:])}
 
 

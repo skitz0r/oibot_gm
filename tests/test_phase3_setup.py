@@ -62,9 +62,9 @@ def test_set_comp_targets_is_one_write_and_refuses_outside_the_bounds(reg, store
     t = reg.config.raids["barrow_deeps"]["comp_targets"]
     assert t["healer"] == {"min": 2, "max": 3, "note": "two raid healers"} and t["Shaman"] == {"min": 1}
     # the owner's bounds: barrow_deeps seats at most 3 healers
-    with pytest.raises(RegistryError, match=r"at least 4 healers but the raid allows at most 3 — change the bounds first \(owner\)"):
+    with pytest.raises(RegistryError, match=r"at least 4 healers but the raid allows at most 3 — change the limits first \(owner\)"):
         reg.set_comp_targets("barrow_deeps", {"Mage": {"min": 1}, "healer": {"min": 4}}, "Jon")
-    with pytest.raises(RegistryError, match="at most 1 tank but the raid seats at least 2"):
+    with pytest.raises(RegistryError, match="at most 1 tank but the raid takes at least 2"):
         reg.set_comp_targets("barrow_deeps", {"tank": {"min": 0, "max": 1}}, "Jon")
     with pytest.raises(RegistryError, match="below at least"):
         reg.set_comp_targets("barrow_deeps", {"Mage": {"min": 3, "max": 2}}, "Jon")
@@ -83,7 +83,7 @@ def test_comp_target_op_goes_through_the_verb_and_coalesces_into_one_write(reg, 
     assert "Healers: at least 2, at most 3 (raid heals)" in line
     configops.apply(reg, ConfigOp(op="comp_target", target="barrow_deeps", field="healer", value="2"), "Jon", True)
     assert reg.config.raids["barrow_deeps"]["comp_targets"]["healer"] == {"min": 2, "max": 3, "note": "raid heals"}
-    with pytest.raises(RegistryError, match="change the bounds first"):
+    with pytest.raises(RegistryError, match="change the limits first"):
         configops.apply(reg, ConfigOp(op="comp_target", target="barrow_deeps", field="healer", value="4-4"), "Jon", True)
     # the structured kind: whole entries as JSON, only what differs, null clears
     ops = configops.ops_from_fields(reg, "comp", "barrow_deeps", {"healer": {"min": 2, "max": 3, "note": "raid heals"}, "Mage": {"min": 1, "max": 2}, "Rogue": None})
@@ -97,7 +97,7 @@ def test_comp_target_op_goes_through_the_verb_and_coalesces_into_one_write(reg, 
     assert reg.config.raids["barrow_deeps"]["comp_targets"] == {"Mage": {"min": 1, "max": 2}, "Warlock": {"min": 1}}
     d = configops.describe_ops(reg, configops.ops_from_fields(reg, "comp", "barrow_deeps", {"Mage": {"min": 2, "max": 2, "note": "Intellect"}}))
     ln = d.lines[0]
-    assert ln.label == "Barrow Deeps · Desired comp" and ln.parts[0].label == "Mages" and ln.parts[0].before == "at least 1, at most 2"
+    assert ln.label == "Barrow Deeps · Aims" and ln.parts[0].label == "Mages" and ln.parts[0].before == "at least 1, at most 2"
     assert ln.parts[0].after == "at least 2, at most 2" and "Why: Intellect" in ln.notes and not d.review  # routine: saves directly
 
 
@@ -143,7 +143,7 @@ def test_pause_sentence_names_the_open_run(reg, rs):
     ev = open_real(reg, rs)
     s = configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", True, rs)
     assert s.startswith("Nothing new opens from Alt run; ") and reg.config.roster(ev.team)["name"] in s and s.endswith("Regulars stay.")
-    assert configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", False).startswith("Alt run opens its sheets again on its cadence — next run ")
+    assert configops.schedule_pause_sentence(reg, "barrow_deeps", "alt", False).startswith("Alt run opens its sheets again on its usual week — next run ")
 
 
 # ---------------------------------------------------------------- timezone change with live runs
@@ -316,7 +316,7 @@ def test_the_target_form_preselects_a_max_equal_to_the_run_size(reg, rs, officer
     async def go():
         await FLOWS["roster_comp"](h.command(), reg)
         await h.pick("Pick a raid", "barrow_deeps")
-        await h.pick("Set a target for…", "Mage")
+        await h.pick("Set an aim for…", "Mage")
         mx = h.modal._items["max"]
         assert [o.value for o in mx.options if o.default] == ["10"] and len(mx.options) <= 25
         assert [o.value for o in h.modal._items["min"].options if o.default] == ["1"]
@@ -560,19 +560,19 @@ def test_roster_comp_sets_a_target_through_configops(reg, rs, store, officer_onl
     async def go():
         await FLOWS["roster_comp"](h.command(), reg)
         await h.pick("Pick a raid", "barrow_deeps")
-        assert "Desired comp" in h.text and "Bounds — what the solver seats" in h.text and "Save targets" in h.buttons()
-        await h.pick("Set a target for…", "healer")
+        assert "**Aims**" in h.text and "Limits (the owner's)" in h.text and "Save aims" in h.buttons()
+        await h.pick("Set an aim for…", "healer")
         await h.submit(h.modal, min="4")  # past the owner's bounds: refused at once, Fix this reopens the form
-        assert "change the bounds first (owner)" in h.text and "Fix this" in h.buttons()
+        assert "change the limits first (owner)" in h.text and "Fix this" in h.buttons()
         await h.press("Fix this")
         await h.submit(h.modal, min="2", max="3", note="raid heals")
         assert "not saved yet" in h.text and "1 unsaved change" in h.text
-        await h.pick("Set a target for…", "__spec")
+        await h.pick("Set an aim for…", "__spec")
         await h.pick("Pick a class", "Shaman")
         await h.pick("Pick a spec", "Enhancement")
         await h.submit(h.modal, min="1", max="none")
         n0 = commits(store)
-        await h.press("Save targets")
+        await h.press("Save aims")
         assert "✅" in h.text and commits(store) == n0 + 1
     run(go())
     assert reg.config.raids["barrow_deeps"]["comp_targets"] == {"healer": {"min": 2, "max": 3, "note": "raid heals"}, "Shaman:Enhancement": {"min": 1}}
@@ -599,12 +599,12 @@ def test_the_raid_wizards_group_make_up_opens_the_targets_block(reg, rs, monkeyp
         await FLOWS["raid_config"](h.command(), reg)
         await h.pick("Pick a raid", "barrow_deeps")
         await h.pick("Pick a section", "comp")
-        assert "**Bounds**" in h.text and "**Targets**" in h.text and "Mages at least 1" in h.text
-        await h.press("Desired comp (targets)…")
-        assert "Desired comp" in h.text and "Back" in h.buttons()
-        await h.pick("Remove a target", "Mage")
-        await h.press("Save targets")
-        assert "✅" in h.text and "Mages: back to the derived target" in h.text and "Set a target for…" in h.selects()
+        assert "**Limits**" in h.text and "**Aims**" in h.text and "Mages at least 1" in h.text
+        await h.press("Aims…")
+        assert "**Aims**" in h.text and "Back" in h.buttons()
+        await h.pick("Remove an aim", "Mage")
+        await h.press("Save aims")
+        assert "✅" in h.text and "Mages: back to the default aim" in h.text and "Set an aim for…" in h.selects()
         await h.press("Back")
         assert "Pick a role" in h.selects()
     run(go())
@@ -667,8 +667,8 @@ def test_mcp_comp_and_summary_tools(owner_client, reg, monkeypatch):
     out = ms.set_comp_target("Barrow Deeps", "Mage", min=1, max=2, note="Intellect")
     assert "Mages: at least 1, at most 2 (Intellect)" in out and reg.config.raids["barrow_deeps"]["comp_targets"]["Mage"]["max"] == 2
     pv = ms.set_comp_target("barrow_deeps", "Mage", clear=True, preview=True)
-    assert pv["preview"][0]["parts"][0]["after"] == "derived" and "Mage" in reg.config.raids["barrow_deeps"]["comp_targets"]
-    with pytest.raises(Exception, match="change the bounds first"):
+    assert pv["preview"][0]["parts"][0]["after"] == "the default aim" and "Mage" in reg.config.raids["barrow_deeps"]["comp_targets"]
+    with pytest.raises(Exception, match="change the limits first"):
         ms.set_comp_target("barrow_deeps", "healer", min=5)
     alt_schedule(reg)
     m = real(reg, 0)

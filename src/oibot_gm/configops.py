@@ -95,7 +95,7 @@ Plain-text permissions (owner only, never opened to anyone else): plain: target=
 Registry (officer): rank <character> (trial|raider|core|alt|social); confirm <character> (character="all pending" = every
   character in the unconfirmed list: "confirm everyone pending"); set main of <member> to <character>;
   absence for <member> from <date> [to <date>] [reason] (announced in the absences channel, sheets updated);
-  pin: target=<run key>, member, value=in (must be seated at lock) | out (kept on the bench) | clear — an officer decision the lock solver honours.
+  pin: target=<run key>, member, value=in (must be rostered at lock) | out (kept on the bench) | clear — an officer decision the lock honours.
 Policy (officer): policy_append: doc=loot|comp, text=<one rule line> — appended as "- <line>".
   policy: doc=loot|comp|persona, field=replace (text = the WHOLE new document) | remove (text = the line to take out, as
   written in the doc) | compile (no text: re-read the current document, e.g. after a PR edit). After a write the bot compiles
@@ -105,12 +105,12 @@ News proposals (officer): proposal: target=<proposal id like 260927-a1b2 from th
   reason=<optional note>. Approve only records the decision (the apply job carries it out); a needs-developer one can only be dismissed.
 Jobs (owner only, never opened to anyone else): job: value=review|apply — start that local job now (the news review, or
   applying approved proposals); refused when it is already running or not installed.
-Comp ideals (officer): comp_target: target=<raid id (barrow_deeps|hyjal_summit_forever|onyxias_lair) or run key>, field=<slot: a role tank|healer|melee|ranged, a class "Paladin",
+Aims (officer): comp_target: target=<raid id (barrow_deeps|hyjal_summit_forever|onyxias_lair) or run key>, field=<slot: a role tank|healer|melee|ranged, a class "Paladin",
   or "Class:Spec" "Shaman:Enhancement">, value=<count as "min", "min-max" or "-max", e.g. "3", "3-5", "-2">,
-  reason=<optional note, the justification readiness and /ask show next to the target>.
-  comp_target_clear (target, field) removes an officer target so the derived value applies again.
+  reason=<optional note, the justification readiness and /ask show next to the aim>.
+  comp_target_clear (target, field) removes an officer aim so the default aim (the game's rules) applies again.
   comp_groups: target=<raid id or run key>, value=<comma-separated group labels in order, e.g. "tank, healers, melee, casters">
-  — the archetype layout the group optimiser seeds (labels may combine: "tank/heal", "melee+ranged"); empty value = default layout.
+  — the layout the groups are built from (labels may combine: "tank/heal", "melee+ranged"); empty value = default layout.
 Raids (owner): raid_set: target=<raid id: barrow_deeps|hyjal_summit_forever|onyxias_lair>, field=<slots (comma list of 'Tue 19:30' run times)
   |cadence (standard|short|same_week: a preset that sets when the sheet opens, the nudge, the lock and the confirm deadline together)
   |split_policy (balanced|first|rotation: how a slot with more joiners than one run seats is split at the scheduled lock)
@@ -120,14 +120,14 @@ Raids (owner): raid_set: target=<raid id: barrow_deeps|hyjal_summit_forever|onyx
   |open_dm (true|false: DM every main when a sheet opens)|weight_rank|weight_main|weight_sat_out|weight_signup_order|lockout_days|duration_hours
   |first_open (ISO datetime, when the instance first opens)|notes|tank_min|tank_max|healer_min|healer_max|dps_min|dps_max>, value.
   Several raid_set ops on one raid in a row are saved together (so "open 48h before and lock 36h before" can't fail half way).
-  raid_reset (owner): target=<raid id> — drop the guild's overrides for that raid.
-Schedules (owner): WHEN a raid runs. Each raid has schedules (ids in the effective raid cadence below; `default` = the raid's own
+  raid_reset (owner): target=<raid id> — drop the guild's changes to that raid (back to the game's defaults).
+Schedules (owner): WHEN a raid runs. Each raid has schedules (ids under "A run's week and each raid's other settings" below; `default` = the raid's own
   weekly slots). schedule_set: target=<raid id>, field=<schedule id>.<setting>, value. A new schedule id is created by its first op,
   which must say what it is: <id>.slots (weekly: comma list of 'Sat 20:00' run times), <id>.lockout (value "<days> at <HH:MM>",
   e.g. "1, 3 at 20:00" = days 1 and 3 of every lockout; day 1 = the reset day) or <id>.kind=pickup (a template officers open on demand).
   Other settings: name (e.g. "Alt run") | active (true|false: false = paused, opens nothing) | rosters (1-4: rosters the run expects;
   the sheet advertises size × this) | slots | lockout | signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before
-  | fill_ask_hours | nudge | autofill | open_dm | split_policy — a cadence setting given value "inherit" goes back to the raid's.
+  | fill_ask_hours | nudge | autofill | open_dm | split_policy — a timing setting (a run's week) given value "inherit" goes back to the raid's.
   Several schedule_set ops on one schedule in a row are saved together.
   schedule_remove: target=<raid id>, field=<schedule id> (removing `default` clears the raid's weekly slots).
 Auras (owner): aura_set: what the guild learns about a buff. target=<buff id, e.g. fortitude|blood_pact|windfury_totem|devotion_aura>,
@@ -155,9 +155,9 @@ Runs (officer; target = the run key like bd-1209-1930 from the live-runs list, o
     shows them, send DMs those people a Yes/No ask ("send them", "ask them"). After lock: the asks a send would DM (role
     swaps marked) — send DMs exactly the batch the diff listed, refused if the plan changed before Apply.
   run_strategy: target, value=balanced|first|rotation — how a slot with more joiners than seats is split into rosters.
-  run_autofill: target — before lock: the solver fills the board's empty seats around the officers' placements.
+  run_autofill: target — before lock: the bot builds the groups, filling the board's empty seats around the officers' placements.
   run_propose: target, value=<optional strategy balanced|first|rotation>, field=<empty = a fresh preview | another (a different
-    one from the ones already shown) | use (put the last preview on the board)> — before lock: the solver's layout, shown, the board unchanged
+    one from the ones already shown) | use (put the last preview on the board)> — before lock: the bot's proposed groups, shown, the board unchanged
     until "use it".
   run_board: target, value=<groups of display names, "A, B, C | D, E" ('|' separates groups in order; a joiner in no group is bench)>
     — before lock it is the layout the lock will use; after lock it is the roster itself (names added are asked to confirm, names dropped are freed).
@@ -184,8 +184,8 @@ Members (officer): character: member, character=<their character's name>, field=
   dm: member, value=on|off — whether the bot DMs them (off: never asked to fill, confirmations wait on the site).
   regular: target=<raid id>, field=<schedule id of a RECURRING schedule (weekly or lockout; blank = default, the raid's own run
     times)>, member, character=<optional: which of their characters raids there; blank = their main>, value=add|remove — the
-    schedule's REGULARS: expected on every sheet of it (officers see who hasn't answered, the reminder goes to them, they're
-    seated ahead of others at lock; nothing is answered for them). One character per member per schedule. "make Ana a Tuesday
+    schedule's REGULARS: expected on every sheet of it (officers see who hasn't answered, the reminder goes to them, being one
+    counts at lock — Who gets a seat; nothing is answered for them). One character per member per schedule. "make Ana a Tuesday
     BD regular with Anabelle" → regular add. Someone stepping down themselves ("take me off the Tuesday regulars") = remove with
     member empty. Pickup templates and one-off runs are ad hoc: no regulars (first come).
 Test bench (officer): test: value="seed <N>" | "seed all" (puppet members; all = the whole built-in roster)
@@ -341,8 +341,8 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
                                 for s in reg.schedules(rid)) for rid in reg.profile.raids)
     over_text = "\n".join(stored(rid, over) for rid, over in overrides.items() if over) or "(none)"
     return ("## Current config\n```yaml\n" + yaml.safe_dump(cfg, sort_keys=False) + "```\n"
-            + "## Guild raid overrides (raid id: setting=stored value (= as a person reads it); raid_set / raid_reset change these)\n" + over_text
-            + "\n## Effective raid cadence (profile defaults + overrides)\n" + raids
+            + "## The guild's changes to its raids (raid id: setting=stored value (= as a person reads it); raid_set / raid_reset change these)\n" + over_text
+            + "\n## A run's week and each raid's other settings (the game's defaults + the guild's changes)\n" + raids
             + f"\n## Now: {reg.now_local().strftime('%a %Y-%m-%d %H:%M %Z')} = {reg.local12(reg.now_local())} (guild time)\n## Live runs (run key: raid, start = as a person reads it, state, answers)\n" + live_runs_text(reg, raids_store)
             + f"\n## Test bench: {len(reg.test_members())} of {reg.TEST_MAX} puppet member(s)"
             + (f"\n## Plain-text permissions (who may ask for what; where)\n{plain_text_policy(reg)}" if officer else "")
@@ -848,18 +848,18 @@ def _overrides_words(reg: Registry, rid: str, over: dict) -> str:
     for k, v in over.items():
         try:
             if k == "slots":
-                out.append("run times " + (", ".join(reg.slot_label(x) for x in v or []) or "none"))
+                out.append(("run times " + ", ".join(reg.slot_label(x) for x in v)) if v else "no run times")
             elif k == "first_open":
                 t = v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
                 out.append("first open " + reg.local12(t if t.tzinfo else t.replace(tzinfo=reg.tz), "%a %d %b %Y %I:%M %p"))
             elif k in RAID_HOURS_FIELDS or k in RAID_BOOL_FIELDS or k == "split_policy":
                 out.append(f"{OVERRIDE_WORDS.get(k, k.replace('_', ' '))} {_value_words(k, v)}")
             elif k == "schedules":
-                out.append("schedules " + (", ".join(f"{s.get('name') or s.get('id')} ({reg.schedule_label(rid, s)})" for s in v or []) or "none"))
+                out.append(("schedules " + ", ".join(f"{s.get('name') or s.get('id')} ({reg.schedule_label(rid, s)})" for s in v)) if v else "no schedules of its own")
             elif k == "comp_targets":
-                out.append("comp targets " + ", ".join(f"{slot} {t.get('min', '?')}" + (f"–{t['max']}" if t.get("max") is not None else "") for slot, t in (v or {}).items()))
+                out.append("aims " + ", ".join(f"{slot} {t.get('min', '?')}" + (f"–{t['max']}" if t.get("max") is not None else "") for slot, t in (v or {}).items()))
             elif k == "comp":
-                out.append("comp " + ", ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in (v or {}).items()))
+                out.append("limits " + ", ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in (v or {}).items()))
             elif k == "weights":
                 out.append("weights " + ", ".join(f"{w} {n}" for w, n in (v or {}).items()))
             elif k == "comp_groups":
@@ -983,7 +983,7 @@ def _apply_merged(reg: Registry, op: MergedOp, by: str, rev: str | None = None) 
         return reg.set_plain_policy(reg.merge_plain_policy(_plain_merged(reg, op.parts)), by, rev=rev)
     if op.op in ("comp_target", "comp_target_clear"):
         targets = {reg.comp_slot(p.field or p.path or ""): _comp_entry(reg, p) for p in op.parts}
-        return "; ".join(reg.set_comp_targets(op.target or "", targets, by, rev=rev)) or "the targets already read that — nothing changed"
+        return "; ".join(reg.set_comp_targets(op.target or "", targets, by, rev=rev)) or "the aims already read that — nothing changed"
     if op.op == "recruit":
         kw: dict = {}
         for p in op.parts:
@@ -1242,9 +1242,9 @@ def _comp_entry(reg: Registry, op: ConfigOp) -> dict | None:
 
 
 def _target_words(t: dict | None) -> str:
-    """A target in words: 'at least 2, at most 3' / 'at least 1' / 'derived' (no officer target)."""
+    """An aim in words: 'at least 2, at most 3' / 'at least 1' / 'the default aim' (no officer aim: the game's rules give it)."""
     if not t:
-        return "derived"
+        return "the default aim"
     return f"at least {t.get('min', 0)}" + (f", at most {t['max']}" if t.get("max") not in (None, "") else "")
 
 
@@ -1639,7 +1639,7 @@ def _plain_patch(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
         return {"default": mode}, f"plain text in every other channel: {p.default} → {mode}"
     cid = _channel_id(t)
     if cid is None:
-        raise RegistryError(f"plain target is a group ({', '.join(PLAIN_GROUPS)}), a channel mention, dm or default")
+        raise RegistryError(f"the plain-text place is a group ({', '.join(PLAIN_GROUPS)}), a channel mention, dm or default")
     if mode not in PLAIN_CLEAR and mode not in PLAIN_MODES:
         raise RegistryError(f"a channel's mode is one of {', '.join(PLAIN_MODES)} (or clear)")
     cur = reg.plain_mode(cid)
@@ -1702,8 +1702,9 @@ def _recruit(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
             if rid is None:
                 raise RegistryError(f"no role “{x}” I know of")
             ids.append(rid)
-        names = lambda xs: ", ".join(f"<@&{int(x)}>" for x in xs) or "none"  # noqa: E731
-        return {"member_role_ids": ids}, f"member roles (register without applying): {names(cfg.member_role_ids)} → {names(ids)}"
+        def role_words(xs) -> str:  # a before / after value of the diff ("none → @Raider")
+            return ", ".join(f"<@&{int(x)}>" for x in xs) or "none"
+        return {"member_role_ids": ids}, f"member roles (register without applying): {role_words(cfg.member_role_ids)} → {role_words(ids)}"
     if f == "open":
         words = {"true": True, "yes": True, "on": True, "open": True, "false": False, "no": False, "off": False, "closed": False}
         if value.lower() not in words:
@@ -1759,8 +1760,9 @@ def _recruit(reg: Registry, op: ConfigOp) -> tuple[dict, str]:
         ids = [i for i in cfg.member_role_ids if i != rid] + ([rid] if add else [])
         if ids == list(cfg.member_role_ids):
             raise RegistryError(f"@{reg.role_names.get(rid, rid)} is {'already' if add else 'not'} a member role")
-        names = lambda xs: ", ".join("@" + reg.role_names.get(int(x), f"role {x}") for x in xs) or "none"  # noqa: E731
-        return {"member_role_ids": ids}, f"member roles (register without applying): {names(cfg.member_role_ids)} → {names(ids)}"
+        def role_words(xs) -> str:  # a before / after value of the diff ("none → @Raider")
+            return ", ".join("@" + reg.role_names.get(int(x), f"role {x}") for x in xs) or "none"
+        return {"member_role_ids": ids}, f"member roles (register without applying): {role_words(cfg.member_role_ids)} → {role_words(ids)}"
     if f == "invite_create":
         cid = _channel_id(value)
         if not cid:
@@ -1788,7 +1790,7 @@ def _applicant(reg: Registry, ref: str | None):
     name. Applicants aren't members yet, so `_member` can't find them."""
     r = (ref or "").strip()
     opens = reg.open_applicants()
-    listed = ", ".join(f"{a.display_name} ({a.label})" for a in opens) or "none"
+    listed = ", ".join(f"{a.display_name} ({a.label})" for a in opens) or "no applications are waiting"
     if not r:
         raise RegistryError(f"say whose application (open: {listed})")
     digits = r[2:-1].lstrip("!") if r.startswith("<@") and r.endswith(">") else r
@@ -2023,9 +2025,9 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             try:
                 fields = _raid_fields(op)
             except RegistryError as e:
-                return f"raid {op.target} cadence: {e}"
+                return f"raid {op.target} — a run's week: {e}"
             words = lambda d: f"opens {float(d['signup_lead_hours']):g}h, nudge {float(d['nudge_hours_before']):g}h, lock {float(d['lock_hours_before']):g}h, confirm by {float(d['confirm_hours_before']):g}h before"  # noqa: E731
-            return f"raid {op.target} cadence: {words(rd)} → {(op.value or '').strip()} ({words(fields)})"
+            return f"raid {op.target} — a run's week: {words(rd)} → {(op.value or '').strip()} ({words(fields)})"
         if f in ("slots", "first_open"):  # in words, 12-hour (the clock rule): the stored 'Tue 19:30' / ISO never reach a person
             from .registry import parse_slots
 
@@ -2059,10 +2061,10 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         cur = (f.value if op.field == "value" else getattr(f, (op.field or "").split(":")[0], "?")) if f else "(new family)"
         return f"family {op.target}: {op.field} {cur} → {op.value}"
     if op.op == "aura_reset":
-        return f"auras: drop overrides for {op.target or 'everything'}"
+        return f"auras: drop the guild's changes to {op.target or 'every aura'}"
     if op.op == "raid_reset":
         over = cfg.raids.get(op.target or "", {}) or {}
-        return f"raid {op.target}: " + (f"drop the guild's overrides — {_overrides_words(reg, op.target or '', over)} → profile defaults" if over else "no overrides to drop (already the profile defaults)")
+        return f"raid {op.target}: " + (f"drop the guild's changes — {_overrides_words(reg, op.target or '', over)} → the game's defaults" if over else "nothing to drop (already the game's defaults)")
     if op.op in ("schedule_set", "schedule_remove"):
         try:
             return _describe_schedule(reg, op)
@@ -2073,7 +2075,7 @@ def describe(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         slot = (op.field or op.path or "").strip()
         cur = _comp_current(reg, key).get(slot)
         new = _comp_entry(reg, op)
-        return f"{key} comp {slot}: {_target_words(cur)} → {_target_words(new)}" + (f" ({new['note']})" if new and new.get("note") else "")
+        return f"{key} aim {slot}: {_target_words(cur)} → {_target_words(new)}" + (f" ({new['note']})" if new and new.get("note") else "")
     if op.op in RUN_OPS or op.op in ("character", "absence_clear", "dm", "regular", "test"):
         try:
             return _describe_action(reg, op, channel)
@@ -2210,7 +2212,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             raise RegistryError(f"{m.display_name} has no {'character named ' + op.character if op.character else 'main'}")
         twin = [reg.series_label(k) for k in c.rosters if k != key and k.partition(":")[0] == key.partition(":")[0]]
         return (f"{label}: {m.display_name} ({c.label}) becomes a regular" + (f" (replaces {on.label})" if on is not None and on is not c else " (already is)" if on is c else "")
-                + " — expected on every sheet, seated ahead of others at lock; nothing is answered for them"
+                + " — expected on every sheet, and being a regular counts at lock (Who gets a seat); nothing is answered for them"
                 + (f" · warning: {c.label} is also a regular of {', '.join(twin)} (same lockout)" if twin else ""))
     if op.op == "run_reopen":  # a run that ENDED: not a live one
         rs, ev = _ended_event(reg, op.target)
@@ -2274,7 +2276,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         strategy = v or ev.split_strategy or reg.raid_def(ev.instance).get("split_policy", "balanced")
         if f == "use":
             return f"{label}: put the last proposal you were shown (here, on the site or in Discord) on the board with its strategy, in one write — the lock uses it"
-        return f"{label}: {'another' if f == 'another' else 'a'} {strategy} proposal from the solver — shown here, the board unchanged"
+        return f"{label}: {'another' if f == 'another' else 'a'} {strategy} proposal for the groups — shown here, the board unchanged"
     if op.op == "run_sheet":
         where = "this channel" if channel not in (_UNSET, None, PLAIN_WEB) else "the channel you ask in (not DMs or the site)"
         if op._sheet_copy is True:  # a member (D21): the live sheet stays where it is
@@ -2310,9 +2312,9 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
             raise RegistryError(f"{ev.key} is {ev.state}")
         nd = rc.needs(reg, ev, rc.run_team(reg, ev))
         parts = ([f"{nd['headcount']} seat(s)"] if nd["headcount"] else []) + [f"{n} {r}" for r, n in nd["roles"].items()]
-        short = ", ".join(parts) or "nothing"
+        short = ("short " + ", ".join(parts)) if parts else "every seat and role is filled"
         waiting = [a.display_name for a in ev.fill_asks if a.pending]
-        head = f"{label}: fill {'preview (nothing sent)' if v == 'preview' else 'send exactly these fill DMs (refused if the plan changes before Apply)'} — short {short}" + (f", waiting on {', '.join(waiting)}" if waiting else "")
+        head = f"{label}: fill {'preview (nothing sent)' if v == 'preview' else 'send exactly these fill DMs (refused if the plan changes before Apply)'} — {short}" + (f", waiting on {', '.join(waiting)}" if waiting else "")
         if not (nd["headcount"] or nd["roles"]):
             return head
         # the exact batch an Apply sends (rc.send_batch through RaidMixin.send_plan with this plan's rev): each ask,
@@ -2329,7 +2331,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET) -> str:
         if ev.state != "open":
             raise RegistryError("already locked — move people on the board instead")
         placed = sum(len(g) for g in (ev.layout or []))
-        return f"{label}: auto-fill the board — the solver seats the {len(ev.by_status('in'))} joined around the {placed} already placed (nothing is locked or sent)"
+        return f"{label}: auto-fill the board — the bot builds the groups, placing the {len(ev.by_status('in'))} joined around the {placed} already placed (nothing is locked or sent)"
     if op.op == "run_board":
         layout = _layout(op.value)
         names = {s.display_name for s in ev.signups.values() if s.status == "in"}
@@ -3559,7 +3561,7 @@ def ops_from_fields(reg: Registry, kind: str, target: str | None, fields: dict |
                     ops.append(ConfigOp(op="comp_target_clear", target=key, field=slot))
                 continue
             if not isinstance(t, dict):
-                raise RegistryError(f"{reg.comp_slot_words(slot)}: a target is {{min, max, note}} (null removes it)")
+                raise RegistryError(f"{reg.comp_slot_words(slot)}: an aim is {{min, max, note}} (null removes it)")
             entry = {"min": t.get("min") if t.get("min") not in (None, "") else 0, "max": t.get("max") if t.get("max") not in (None, "") else None,
                      "note": str(t.get("note") or "").strip() or None}
             have = cur.get(slot) or {}
@@ -3798,7 +3800,7 @@ def schedule_pause_sentence(reg: Registry, rid: str, sid: str, pause: bool, rs=N
         from . import raidcycle as rc
 
         nxt = rc.next_runs_of(reg, rid, s, n=1) if s and s.get("kind") != "pickup" else []
-        return f"{name} opens its sheets again on its cadence" + (f" — next run {reg.local12(nxt[0])}." if nxt else ".")
+        return f"{name} opens its sheets again on its usual week" + (f" — next run {reg.local12(nxt[0])}." if nxt else ".")
     try:
         runs = [str(t.get("name") or t.get("key")) for t in reg.schedule_runs_open(rid, sid, rs)]
     except Exception:  # noqa: BLE001 — the sentence without the run names is still true
@@ -4068,10 +4070,10 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
         if op.op == "aura_reset":
             t = (op.target or "").strip()
             if not t:
-                return "Every aura", DescribedPart(label="Overrides", before="the guild's", after="the game defaults"), []
+                return "Every aura", DescribedPart(label="The guild's changes", before="kept", after="back to the game defaults"), []
             b = next((x for x in reg.profile.buffs if x.id == t), None)
             name = b.short if b else (reg.profile.families[t].name if t in reg.profile.families else t)
-            return name, DescribedPart(label="Overrides", before="the guild's", after="the game defaults"), []
+            return name, DescribedPart(label="The guild's changes", before="kept", after="back to the game defaults"), []
         if op.op == "set":
             cfg = reg.config
             if op.path in CHANNEL_PATHS:
@@ -4116,7 +4118,7 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
                 return f"{name} · {s['name'] if s else sid}", DescribedPart(label="Schedule", before=reg.schedule_label(rid, s) if s else None, after="removed"), []
             if op.op == "raid_reset":
                 over = reg.config.raids.get(rid, {}) or {}
-                return name, DescribedPart(label="Overrides", before=_overrides_words(reg, rid, over) if over else "none", after="the profile defaults"), []
+                return name, DescribedPart(label="The guild's changes", before=_overrides_words(reg, rid, over) if over else "none", after="the game's defaults"), []
             if op.op == "schedule_set":
                 sid, setting = _schedule_ref(op)
                 s = next((x for x in reg.schedules(rid) if x["id"] == sid), None)
@@ -4134,7 +4136,7 @@ def _part(reg: Registry, op: ConfigOp) -> tuple[str, DescribedPart, list[str]]:
             name = (run or {}).get("name") or (reg.raid_def(key).get("name", key) if key in reg.profile.raids else key)
             slot = reg.comp_slot(op.field or op.path or "")
             new = _comp_entry(reg, op)
-            return f"{name} · Desired comp", DescribedPart(label=reg.comp_slot_words(slot), before=_target_words(_comp_current(reg, key).get(slot)),
+            return f"{name} · Aims", DescribedPart(label=reg.comp_slot_words(slot), before=_target_words(_comp_current(reg, key).get(slot)),
                                                            after=_target_words(new)), ([f"Why: {new['note']}"] if new and new.get("note") else [])
         if op.op == "loot_weights":
             from . import loot_ops

@@ -422,8 +422,8 @@ def test_guild_state_reads(reg, rs):
     assert f"{ms[0].display_name} ({ms[0].main.label} {ms[0].main.spec} {ms[0].main.cls})" in s
     assert f"absent that day: {ms[9].display_name}" in s and "wedding" not in s, "reasons are officer-only"
     assert "## Asker (member)" in s and f"on {ev.key}: in as {ms[0].main.label}" in s and "pinned in" in s
-    assert "aura overrides: none" in s and "test bench: 16 puppet member(s)" in s and f"test runs {ev.key}" in s
-    assert "absences <#" not in s and "absences not set" in s
+    assert "the guild's changes to buffs: no buff or family changed" in s and "test bench: 16 puppet member(s)" in s and f"test runs {ev.key}" in s
+    assert "absences: <#" not in s and "absences: no channel set (/gm config channels)" in s
     # an officer asking about someone by character name gets their record; a member doesn't
     q = f"is {ms[3].main.name} coming tonight?"
     officer = help_mod.guild_state(reg, rs, ms[0].discord_id, True, q)
