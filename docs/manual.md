@@ -1696,7 +1696,7 @@ from the repo's `companion/` folder.
 
 **Loot › Companions** (officers) lists the companions feeding your server — live / quiet / disconnected, last seen,
 events. The owner also sees which older `.env` feed-token settings the host has (`OIBOT_FEED_TOKEN_<KEY>` for your
-server, the shared `OIBOT_FEED_TOKEN`, the listen address) as **set / not set** — never a token's value. Tokens are
+server, the shared `OIBOT_FEED_TOKEN`, the listen address) as **set on the host / not set on the host** — never a token's value. Tokens are
 issued and revoked on Config › **Companions** or with `/gm config companion` (§8).
 
 ### Asking the bot in the thread
