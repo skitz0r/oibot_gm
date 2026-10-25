@@ -78,7 +78,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
                     <Table.Td><SlotIcon meta={meta} slot={c.key} label={words(c.key)} /></Table.Td>
                     <Table.Td><Text size="sm" fw={600} c={c.have < c.want ? "red" : c.max !== null && c.have > c.max ? "yellow" : "teal"} style={{ fontVariantNumeric: "tabular-nums" }}>{c.have}</Text></Table.Td>
                     <Table.Td style={{ fontVariantNumeric: "tabular-nums" }}>{c.max !== null && c.max !== c.want ? `${c.want}–${c.max}` : c.want}</Table.Td>
-                    <Table.Td><Group gap={6} wrap="nowrap">{c.source === "officer" && <Badge size="xs" variant="light" color="teal">officers' aim</Badge>}<Text size="xs" c="dimmed">{c.note || c.why}</Text></Group></Table.Td>
+                    <Table.Td style={{ whiteSpace: "normal" }}><Group gap={6} wrap="wrap">{c.source === "officer" && <Badge size="xs" variant="light" color="teal">officers' aim</Badge>}<Text size="xs" c="dimmed">{c.note || c.why}</Text></Group></Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>

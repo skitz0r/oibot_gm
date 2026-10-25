@@ -61,7 +61,7 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
       {r.schedules.length === 0 && <Text size="sm" c="dimmed">No schedules: no sheet opens for this raid on its own. Add one, or open a run from the Rosters page.</Text>}
       <Stack gap="xs">
         {r.schedules.map((s) => (
-          <Group key={s.id} justify="space-between" align="flex-start" wrap="nowrap" p="xs" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8 }}>
+          <Group key={s.id} justify="space-between" align="flex-start" wrap="wrap" p="xs" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8 }}>
             <Box style={{ minWidth: 0 }}>
               <Group gap={6} wrap="wrap">
                 <Text fw={600} size="sm">{s.name}</Text>

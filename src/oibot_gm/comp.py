@@ -287,10 +287,10 @@ def ideal_comp(profile: GameProfile, size: int, players: list[Player], targets: 
     from_raid = bool(rd.get("comp"))
     bounds = reg.role_bounds(instance, size) if reg else solver.scaled_role_bounds(rules, size)
     ic = IdealComp(size=size, groups=groups)
-    src = f"{rd.get('name', instance)} desired comp" if from_raid else "comp rule"
+    src = "the raid's limits (owner)" if from_raid else "the game's comp rules"
     note = (rd.get("tank_needs") or {}).get("note")
-    ic.lines.append(CompLine("tank", bounds["tank"]["min"], 0, f"{src}: {bounds['tank']['min']}–{bounds['tank']['max']} for a {size}-man" + (f" ({note})" if note else ""), max=bounds["tank"]["max"]))
-    ic.lines.append(CompLine("healer", bounds["healer"]["min"], 0, f"{src}: {bounds['healer']['min']}–{bounds['healer']['max']} for a {size}-man", max=bounds["healer"]["max"]))
+    ic.lines.append(CompLine("tank", bounds["tank"]["min"], 0, f"{src}: {bounds['tank']['min']}–{bounds['tank']['max']} for a {size}-player run" + (f" ({note})" if note else ""), max=bounds["tank"]["max"]))
+    ic.lines.append(CompLine("healer", bounds["healer"]["min"], 0, f"{src}: {bounds['healer']['min']}–{bounds['healer']['max']} for a {size}-player run", max=bounds["healer"]["max"]))
     if from_raid and bounds.get("dps", {}).get("min"):
         ic.lines.append(CompLine("dps", bounds["dps"]["min"], 0, f"{src}: {bounds['dps']['min']}–{bounds['dps']['max']} damage dealers", max=bounds["dps"]["max"]))
     # class wants from the buff matrix: party auras worth having (max benefit ≥ 3) want one provider per group
