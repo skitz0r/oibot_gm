@@ -15,7 +15,7 @@ import discord
 import yaml
 from discord import app_commands
 
-from . import configops, guild_routing, render
+from . import configops, conversation, guild_routing, render
 from .discord_feed import FeedMixin
 from .discord_loot import LootMixin
 from .discord_loot_surface import LootSurfaceMixin
@@ -711,26 +711,31 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
         def apply_button(base=None):  # a newcomer who must apply gets the Apply to join button (the wizard opens from here, DMs too)
             return help_apply_view(reg, uid, officer=officer, role_ids=role_ids, base=base)
 
+        # what this message continues (design §5.51): a reply to the bot's plain-text message, else this person here lately
+        convo = conversation.context_block(conversation.recall(reg, channel, uid, reply_to_message_id=conversation.reply_to_id(message)))
+        conv_kw = {"conversation": convo} if convo else {}
         async with message.channel.typing():
             if may_act and not reg.may_ask(uid, officer):
                 try:
-                    req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name, officer=officer and not public)
+                    req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name, officer=officer and not public,
+                                                  **conv_kw)
                 except Exception as e:  # noqa: BLE001 — the model being down is a reply + an ops error, never silence
                     await message.reply(await configops.report_error(self.ops, reg.config, e, "plain-text parse"), allowed_mentions=quiet)
                     return
                 if req.kind == "change" and req.ops:
-                    await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req)
+                    await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req, conversation=convo)
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
-            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public)
+            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw)
             if answer == HELP_ACT:
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel)
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo)
                 return
         if answer is None:  # outside the ask audience: static guide only
             await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
         else:
-            await message.reply(answer, view=apply_button(), allowed_mentions=quiet)
+            sent = await message.reply(answer, view=apply_button(), allowed_mentions=quiet)
+            conversation.remember(reg, channel, uid, text, answer, message_id=getattr(message, "id", None), reply_message_id=getattr(sent, "id", None))
 
     async def on_message(self, message: discord.Message):
         if await self.news_message(message):  # the news webhook (a bot) is read before the bot filter below

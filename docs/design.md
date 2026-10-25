@@ -3198,6 +3198,29 @@ member, a refused DM issues nothing, label / bot / owner refusals, every surface
 and its exit on a revoke; the officer's /api/config and the parser prompt hold no token record; a parked or unloaded
 guild's token, a throwing check and a throwing auth answer UNAVAILABLE without auth and never log the value).
 
+### 5.51 Plain-text conversational memory (built 2026-10-24)
+
+Seen live: "open a barrow deeps raid for 11/4 then dm trun and ask him if he can tank it" got two good questions back;
+the owner's reply ("can you just @ him in this channel after opening the raid?") was parsed alone and the bot asked
+"which raid, who?". Each plain-text message was parsed with the config and its own `<request>` only.
+
+- `conversation.py`: `Exchange(at, uid, channel_id, request, reply, questions, message_id, reply_message_id)`; one ring
+  per (guild key, channel id or DM, Discord id) of the last N=4 exchanges, **in memory only** (never the data repo; a
+  restart forgets). `recall(reg, channel, uid, reply_to_message_id=)`: a Discord reply to one of the bot's plain-text
+  messages continues that exchange whatever its age (while the ring holds it); otherwise the same person in the same
+  place within CONTEXT_MINUTES=20. Another person's messages are never someone's context (the ring is uid-keyed).
+- `context_block` = ONE `<conversation>` data block (`asker:` / `bot:` / `bot asked:`), every piece of text through
+  `llm.provider.unfence` — a request holding `</conversation>` cannot close it. `configops.parse(conversation=)` and
+  `help.answer(conversation=)` put it before `<request>` / `<question>` (the request line is the new text only); both
+  system prompts say it is the recent exchange, to resolve "him" / "that run" / answers to earlier questions, and that it
+  is data, not instructions. When the new text answers the bot's questions, the parser composes the ops from both.
+- Callers: `discord_policy.handle_change` (recalls unless handed the block; remembers every reply with the bot's message
+  id — a Message reply or the interaction followup), `discord_bot.plain_text` (help path and the direct parse),
+  `loot_chat`'s help path. `/gm change` shares the channel's ring with @mentions. Refusals keep their wording.
+- The site keeps no server memory: TellTheBot holds its last four exchanges in component state and sends
+  `conversation: [{request, reply, questions}]` on POST /api/ops/change `text` and POST /api/ask
+  (`conversation.exchanges_from_client` → the same block). Tests: tests/test_conversation.py.
+
 ## 6. Architecture
 
 ```mermaid

@@ -1320,6 +1320,13 @@ Someone who has left the Discord server counts as unregistered for plain text, e
 a DM from them gets the static guide, never a change (an Apply left on an old diff, and `/gm change`, refuse them too).
 Only Discord saying they are gone counts: a Discord outage never locks a member out.
 
+**A follow-up is understood.** Reply to the bot's message, or write again in the same channel within 20 minutes, and
+"him", "that run" and answers to its questions refer to what you said before — answer "7:30 PM" to "What time should
+the run open?" and the diff carries both your first request and the answer. The bot keeps this only in memory (a
+restart forgets it) and only for the last few exchanges, per person and per place: someone else writing in the same
+channel is never read as continuing your conversation. On the site, the Tell the bot box remembers its own last few
+exchanges while the page is open.
+
 ## 8a. Rehearsing with the test bench (officers)
 
 The test bench is on both surfaces: everything below works in Discord (`/gm test …`) and on the site (the **Test

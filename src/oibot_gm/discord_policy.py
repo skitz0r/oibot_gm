@@ -377,12 +377,17 @@ def _reply_private(bot, reg: Registry, message: discord.Message) -> bool:
 
 
 async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.PolicyStore, provider, ops: Ops, text: str, *, bot, channel,
-                        req: configops.ConfigRequest | None = None, to_help: bool | None = None):
+                        req: configops.ConfigRequest | None = None, to_help: bool | None = None, conversation: str | None = None):
     """Shared by /gm change, @mentions and DMs. `interaction_or_message` is an Interaction (deferred) or a Message;
     `channel`: where it was asked (channel id, None = DMs) — Registry.may_plain decides per op what may act there;
     `req`: an already parsed request (the router parsed first). Refused ops are listed; the rest can still apply.
     `to_help`: a plain question (no ops, nothing to clarify) goes to bot.help_answer — the full /ask snapshot — instead
-    of the parser's short reply; by default in an act channel and on /gm change (elsewhere help already answered)."""
+    of the parser's short reply; by default in an act channel and on /gm change (elsewhere help already answered).
+    `conversation`: the recent exchange (conversation.context_block); None = recalled here — a Discord reply to one of
+    the bot's plain-text messages continues that exchange, else the same person in the same place within the window
+    (design §5.51). Every reply is remembered with the bot's message id; a /gm change shares the channel's ring."""
+    from . import conversation as conv_mod
+
     is_msg = isinstance(interaction_or_message, discord.Message)
 
     async def send(content=None, **kw):
@@ -399,6 +404,13 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         return
     me = reg.members.get(author.id)
     name = me.display_name if me else author.display_name
+    if conversation is None:
+        conversation = conv_mod.context_block(conv_mod.recall(reg, channel, author.id, reply_to_message_id=conv_mod.reply_to_id(interaction_or_message) if is_msg else None))
+    conv_kw = {"conversation": conversation} if conversation else {}
+
+    def keep(sent, reply: str, questions=()) -> None:  # the exchange, in memory only (a restart forgets)
+        conv_mod.remember(reg, channel, author.id, text, reply, list(questions), message_id=getattr(interaction_or_message, "id", None) if is_msg else None,
+                          reply_message_id=getattr(sent, "id", None))
     officer, role_ids = await bot.plain_identity(reg, author)  # decided in code, before the parser sees anything
     # who can READ the reply decides how much it may carry: a Message outside DMs and officer-only channels is public,
     # so the parser (whose reply and questions go back verbatim) and the help snapshot get the member-level context
@@ -408,7 +420,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
 
         try:
             with for_guild(reg.key):  # D45: the parse is this guild's spend
-                req = await asyncio.to_thread(configops.parse, provider, reg, text, name, officer=officer and not public)
+                req = await asyncio.to_thread(configops.parse, provider, reg, text, name, officer=officer and not public, **conv_kw)
         except Exception as e:  # noqa: BLE001 — §2.7: the model being down is a sentence to the asker + an ops error, never silence
             await send(await configops.report_error(ops, reg.config, e, "plain-text parse"), ephemeral=True)
             return
@@ -417,15 +429,16 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
         to_help = not is_msg or reg.plain_mode(channel) == "act"
     if req.kind == "question" and not req.ops and not req.questions and to_help and getattr(bot, "help_answer", None) is not None:
-        answer = await bot.help_answer(reg, author.id, officer, text, public=public)
+        answer = await bot.help_answer(reg, author.id, officer, text, public=public, **conv_kw)
         if answer:
-            await send(answer[:1950], ephemeral=True)
+            keep(await send(answer[:1950], ephemeral=True), answer[:1950])
             return
     if req.kind == "question" or req.questions:
-        await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900] or "Could you say that another way?", ephemeral=True)
+        keep(await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900] or "Could you say that another way?", ephemeral=True),
+             req.reply, req.questions)
         return
     if not req.ops:
-        await send(req.reply[:1900] or "Nothing to change.", ephemeral=True)
+        keep(await send(req.reply[:1900] or "Nothing to change.", ephemeral=True), req.reply or "Nothing to change.")
         return
     raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
     allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)
@@ -439,7 +452,8 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
 
     if not allowed:
         view = apply_button()
-        await send(configops.plain_footer(guild_prefix(reg) + "⛔ " + "\n⛔ ".join(refused))[:1990], ephemeral=True, **({"view": view} if view is not None else {}))
+        keep(await send(configops.plain_footer(guild_prefix(reg) + "⛔ " + "\n⛔ ".join(refused))[:1990], ephemeral=True, **({"view": view} if view is not None else {})),
+             "Refused: " + "; ".join(refused))
         return
     req.ops = allowed
     body = await diff_text(reg, allowed, refused, channel)
@@ -452,6 +466,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     confirm = ConfigConfirmView(reg, req, ps, ops, author.id, name, channel, revs=revs)
     view = apply_button(confirm)
     sent = await send(req.reply[:500] if req.reply else None, embed=e, view=view, ephemeral=True)
+    keep(sent, ((req.reply or "") + "\nProposed changes (shown with Apply; nothing written yet):\n" + body).strip())
     # how the view edits its own message when it expires (EXPIRED): the reply Message, or the interaction's original response
     confirm.bind(sent if is_msg else getattr(interaction_or_message, "edit_original_response", None))
 

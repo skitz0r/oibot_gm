@@ -39,6 +39,16 @@ TEST_MEMBERS = 16  # 2 tanks, 5 healers, 9 dps from Registry.TEST_MIX
 
 
 @pytest.fixture(autouse=True)
+def _no_conversation_memory():
+    """conversation's rings are process-wide (plain-text memory, design §5.51): every test starts and ends without one."""
+    from oibot_gm import conversation
+
+    conversation.forget()
+    yield
+    conversation.forget()
+
+
+@pytest.fixture(autouse=True)
 def _no_pending_policy_edits():
     """policy.PENDING is process-wide (one pending edit per guild and doc): every test starts and ends without one."""
     from oibot_gm import policy

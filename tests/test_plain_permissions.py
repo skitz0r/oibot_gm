@@ -420,12 +420,12 @@ def router(reg, monkeypatch, help_says, officer=False):
 
     seen = {"help": [], "change": [], "replies": []}
 
-    async def fake_change(message, reg_, ps, provider, ops, text, *, bot, channel, req=None):
+    async def fake_change(message, reg_, ps, provider, ops, text, *, bot, channel, req=None, conversation=None):
         seen["change"].append((text, channel, req))
 
     monkeypatch.setattr(db, "handle_change", fake_change)
 
-    async def help_answer(reg_, uid, off, text, may_act=False, public=False):
+    async def help_answer(reg_, uid, off, text, may_act=False, public=False, **_):
         seen["help"].append((text, may_act))
         return db.HELP_ACT if (may_act and help_says == "act") else "an answer"
 

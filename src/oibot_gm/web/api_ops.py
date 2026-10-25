@@ -273,7 +273,11 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
         if provider is None:
             return JSONResponse({"error": "the LLM provider is off (ANTHROPIC_API_KEY unset)"}, status_code=503)
         try:
-            req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name, officer=v.officer)
+            # the Tell the bot box's own last exchanges (the site keeps no server memory — design §5.51): one fenced block
+            from .. import conversation
+
+            convo = conversation.context_block(conversation.exchanges_from_client(d.get("conversation"), v.uid))
+            req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name, officer=v.officer, **({"conversation": convo} if convo else {}))
         except Exception as e:  # noqa: BLE001 — provider/schema errors are 502s the caller can retry
             return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
         # the same policy check as Discord: the site (and MCP, as the owner) counts as a channel where plain text acts

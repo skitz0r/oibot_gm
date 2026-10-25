@@ -170,7 +170,7 @@ def test_handle_change_in_a_public_channel_parses_and_answers_with_the_member_vi
     async def plain_identity(reg_, user, **_):
         return True, []
 
-    async def help_answer(reg_, uid, officer, text, may_act=False, public=False):
+    async def help_answer(reg_, uid, officer, text, may_act=False, public=False, **_):
         helped.append((officer, public))
         return None  # fall through to the parser's own reply
 
@@ -204,7 +204,7 @@ def test_plain_text_mention_by_an_officer_in_a_public_channel_is_answered_public
 
     helped, replies = [], []
 
-    async def help_answer(reg_, uid, officer, text, may_act=False, public=False):
+    async def help_answer(reg_, uid, officer, text, may_act=False, public=False, **_):
         helped.append((officer, public))
         return "an answer"
 

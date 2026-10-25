@@ -15,11 +15,15 @@ import { fail, ok } from "./Page";
  *  The box's state lives in a store outside the card tree, keyed by guild + `scope` (the run key on a sheet), so the
  *  live reloads of the page around it (useLive at 7:55 PM) never blank a preview someone is reading. */
 
+/** One exchange the box remembers (design §5.51): sent back with the next message so a follow-up ("him", "that run", an
+ *  answer to the bot's question) is read with what it follows. Only here, while the page is open — no server memory. */
+type Turn = { request: string; reply: string; questions?: string[] };
+const TURNS = 4;
 type BoxState = {
   text: string; busy: boolean; answer: string | null; note: string | null;
-  preview: TextPreview | null; result: OpsReply | null; down: string | null; expiresAt: number | null;
+  preview: TextPreview | null; result: OpsReply | null; down: string | null; expiresAt: number | null; turns: Turn[];
 };
-const EMPTY: BoxState = { text: "", busy: false, answer: null, note: null, preview: null, result: null, down: null, expiresAt: null };
+const EMPTY: BoxState = { text: "", busy: false, answer: null, note: null, preview: null, result: null, down: null, expiresAt: null, turns: [] };
 const boxes = new Map<string, BoxState>();
 const listeners = new Set<() => void>();
 function getBox(key: string): BoxState { return boxes.get(key) || EMPTY; }
@@ -38,9 +42,12 @@ export function TellTheBot({ scope = "rail", prefill = "", guild = "", placehold
   }, [st.expiresAt]);
   const minsLeft = st.expiresAt ? Math.max(0, Math.ceil((st.expiresAt - now) / 60_000)) : null;
 
-  async function previewChange(text: string, again = false) {
-    const p = await api.post<TextPreview>("/api/ops/change", { text });
+  function remember(turn: Turn) { setBox(key, { turns: [...getBox(key).turns, turn].slice(-TURNS) }); }
+
+  async function previewChange(text: string, again = false, turns: Turn[] = getBox(key).turns) {
+    const p = await api.post<TextPreview>("/api/ops/change", { text, conversation: turns });
     setBox(key, { preview: p, result: null, answer: null, note: again ? "Previewed again — check the lines." : null, expiresAt: p.expires_in ? Date.now() + p.expires_in * 1000 : null });
+    if (!again) remember({ request: text, reply: [p.reply || "", ...(p.describe || [])].filter(Boolean).join("\n"), questions: p.questions || [] });
   }
 
   async function send() {
@@ -48,9 +55,14 @@ export function TellTheBot({ scope = "rail", prefill = "", guild = "", placehold
     if (!text || st.busy) return;
     setBox(key, { busy: true, answer: null, preview: null, result: null, note: null, down: null });
     try {
-      const r = await api.post<AskReply>("/api/ask", { question: text });
-      if (r.act) await previewChange(text);
-      else setBox(key, { answer: r.answer ?? r.message ?? "No answer." });
+      const turns = getBox(key).turns;
+      const r = await api.post<AskReply>("/api/ask", { question: text, conversation: turns });
+      if (r.act) await previewChange(text, false, turns);
+      else {
+        const answer = r.answer ?? r.message ?? "No answer.";
+        setBox(key, { answer });
+        remember({ request: text, reply: answer });
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) setBox(key, { down: e.message });
       else fail(e);
@@ -69,7 +81,7 @@ export function TellTheBot({ scope = "rail", prefill = "", guild = "", placehold
       (nBad ? fail(new Error(summary)) : ok(summary));
     } catch (e) {
       if (e instanceof ApiError && e.status === 400) {  // the preview expired (or the bot restarted): preview again once, never apply unseen
-        try { await previewChange(st.text.trim(), true); } catch (e2) { fail(e2); }
+        try { await previewChange(st.text.trim(), true, getBox(key).turns.slice(0, -1)); } catch (e2) { fail(e2); }
       } else if (e instanceof ApiError && e.status === 409) {
         setBox(key, { note: /board/i.test(e.message) ? "The board changed since your preview — preview again." : e.message });
       } else fail(e);

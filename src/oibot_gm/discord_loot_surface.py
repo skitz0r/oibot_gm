@@ -634,14 +634,21 @@ class LootSurfaceMixin:
         seen_to = {p.drop_id: p.to for p in session.proposals}
         uid, by = message.author.id, message.author.display_name
         parent = loot_parent(session, message.channel)  # plain_mode reads a thread as its parent channel
+        # what this message continues (design §5.51): a reply to the bot's answer here, else this officer in this thread lately
+        from . import conversation
+
+        here = getattr(message.channel, "id", None)
+        convo = conversation.context_block(conversation.recall(reg, here, uid, reply_to_message_id=conversation.reply_to_id(message)))
         async with message.channel.typing():
             try:
-                answer = await self.help_answer(reg, uid, True, text, may_act=True, public=False, data=loot_digest(session))
+                answer = await self.help_answer(reg, uid, True, text, may_act=True, public=False, data=loot_digest(session),
+                                                **({"conversation": convo} if convo else {}))
             except Exception as e:  # noqa: BLE001
                 await message.reply(await configops.report_error(self.ops, reg.config, e, "loot chat"))
                 return
             if answer is not None and answer != ACT:
-                await message.reply(answer[:1900])
+                sent = await message.reply(answer[:1900])
+                conversation.remember(reg, here, uid, text, answer[:1900], message_id=getattr(message, "id", None), reply_message_id=getattr(sent, "id", None))
                 return
             # a request to act: the plain-text check (Registry.may_plain) on the `loot` group in the parent channel's
             # mode — the same check configops.authorize makes at Apply

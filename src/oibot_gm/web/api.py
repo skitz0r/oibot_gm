@@ -1116,7 +1116,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": ASK_DOWN}, status_code=503)
         officer = bool(v.officer)
         try:
-            ans = await answer_fn(v.reg, v.uid, officer, q, may_act=officer, public=False)
+            from .. import conversation  # the box's own last exchanges, never stored (design §5.51)
+
+            convo = conversation.context_block(conversation.exchanges_from_client(d.get("conversation"), v.uid))
+            ans = await answer_fn(v.reg, v.uid, officer, q, may_act=officer, public=False, **({"conversation": convo} if convo else {}))
         except Exception as e:  # noqa: BLE001 — never a type name in a reply
             text = await report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} /api/ask")
             return JSONResponse({"error": text}, status_code=500 if text == GENERIC_ERROR else 400)

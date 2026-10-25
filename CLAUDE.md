@@ -41,6 +41,10 @@ src/oibot_gm/
                        (Registry.notify = the outcome half of the DM rule), DM_ON/OFF_SENTENCE; officers on behalf: action_consequence(by_id=) +
                        do_member_action over rc.member_actions (the SetWizard, the row ⋮ menu, POST /api/admin/action); pin_write / pin_member =
                        THE pin write (every surface; re-renders the sheet's pin footer). Never a DM from here
+  conversation.py      plain-text memory (design §5.51): a ring per (guild, channel|DM, uid) of the last 4 exchanges, IN MEMORY only (a restart
+                       forgets); recall = a Discord reply to the bot's message (any age) else the same person + place within 20 min; context_block =
+                       ONE fenced <conversation> data block (unfence) → configops.parse / help.answer(conversation=); handle_change, plain_text,
+                       loot_chat remember after replying; the web sends TellTheBot's own exchanges (exchanges_from_client), no server memory
   perms.py             THE Discord permission test (design §5.46): required(kind) (+ Manage Messages for the pinned cards, + threads for roster,
                        + history for news), missing_for(channel, kind) / missing_for(guild), cant_post() = the one sentence; permissions_value() /
                        invite_link() (scripts/move_guild.py imports them; Manage Webhooks in — D39; Manage Roles / Channels OPTIONAL); CLIENT = the
