@@ -9,19 +9,19 @@ import { useDirty } from "../hooks/useDirty";
 import { Eyebrow, fail, ok } from "./Page";
 import { SlotEditor } from "./SlotEditor";
 
-const HOURS: [string, string][] = [["signup_lead_hours", "sheet opens (h before)"], ["nudge_hours_before", "nudge (h before)"], ["lock_hours_before", "locks (h before)"],
+const HOURS: [string, string][] = [["signup_lead_hours", "sheet opens (h before)"], ["nudge_hours_before", "reminder (h before)"], ["lock_hours_before", "locks (h before)"],
   ["confirm_hours_before", "confirm by (h before)"], ["fill_ask_hours", "fill asks (h to answer)"]];
-const BOOLS: [string, string][] = [["nudge", "nudge the unanswered"], ["autofill", "fill seats automatically"], ["open_dm", "DM everyone on open"], ["confirm", "ask the rostered to confirm"]];
+const BOOLS: [string, string][] = [["nudge", "remind the unanswered"], ["autofill", "fill seats automatically"], ["open_dm", "DM the regulars on open"], ["confirm", "ask the rostered to confirm"]];
 /** Ad hoc (pickup) runs open on demand and remind nobody: these fields mean nothing there, so the editor hides them. */
 const ADHOC_HIDDEN = new Set(["signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"]);
-const WEIGHTS: [string, string][] = [["regular", "being a regular"], ["rank", "rank"], ["main", "main over alt"], ["sat_out", "sat out last time"], ["signup_order", "signed up early"]];
+const WEIGHTS: [string, string][] = [["regular", "being a regular"], ["rank", "rank"], ["main", "main over alt"], ["sat_out", "sat out last lockout"], ["signup_order", "signed up early"]];
 const SOURCE_WORDS: Record<string, string> = { raid: "raid", adhoc: "ad hoc default", own: "own" };
 const SPLIT_LABEL: Record<string, string> = { balanced: "Balanced", first: "Raid one first", rotation: "Rotation" };
 const KIND_LABEL: Record<string, string> = { weekly: "Weekly nights", lockout: "Days of each lockout", pickup: "Pickup template" };
-const OWN_WORDS: Record<string, string> = { signup_lead_hours: "opens", nudge_hours_before: "nudge", lock_hours_before: "locks", confirm_hours_before: "confirm by", fill_ask_hours: "fill asks",
-  nudge: "nudge", autofill: "autofill", open_dm: "DM on open", confirm: "confirmations", split_policy: "split" };
+const OWN_WORDS: Record<string, string> = { signup_lead_hours: "opens", nudge_hours_before: "reminder", lock_hours_before: "locks", confirm_hours_before: "confirm by", fill_ask_hours: "fill asks",
+  nudge: "reminder", autofill: "autofill", open_dm: "DM on open", confirm: "confirmations", split_policy: "two groups:" };
 
-/** What a schedule sets itself, in words ("locks 12 h before · split Rotation"); empty = all the raid's. */
+/** What a schedule sets itself, in words ("locks 12 h before · two groups: Rotation"); empty = all the raid's. */
 function ownWords(s: Schedule): string {
   return Object.entries(s.own).map(([k, v]) => `${OWN_WORDS[k] || k} ${typeof v === "boolean" ? (v ? "on" : "off") : k === "split_policy" ? SPLIT_LABEL[String(v)] || v : `${v} h${k === "fill_ask_hours" ? "" : " before"}`}`).join(" · ");
 }
@@ -74,7 +74,7 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
               {s.kind !== "pickup" && (s.active
                 ? <Text size="xs" c="dimmed">{s.next.length ? `next: ${s.next.join(" · ")}` : "no run coming up"}</Text>
                 : <Text size="xs" c="yellow">{(s.next_if_active || []).length ? `Paused — would next run ${s.next_if_active![0]} · nothing opens` : "Paused · nothing opens"}</Text>)}
-              <Text size="xs" c={Object.keys(s.own).length ? "yellow" : "dimmed"}>{Object.keys(s.own).length ? `own cadence: ${ownWords(s)}` : s.class === "adhoc" ? "the ad hoc defaults: first come, no reminder, no confirmations, locks 2 h before" : "the raid's cadence"}</Text>
+              <Text size="xs" c={Object.keys(s.own).length ? "yellow" : "dimmed"}>{Object.keys(s.own).length ? `its own timing: ${ownWords(s)}` : s.class === "adhoc" ? "the ad hoc defaults: first come, no reminder, no confirmations, locks 2 h before" : "follows the raid's timing"}</Text>
             </Box>
             {owner && (
               <Group gap={4} wrap="nowrap">
@@ -220,7 +220,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
           </Group>
         )}
         {d.kind === "pickup" && <Text size="sm" c="dimmed">A template never opens by itself: the Rosters page and /raid open offer it, and the run starts at the day and time picked there.</Text>}
-        <Text size="sm" fw={500} mt="xs">{adhoc ? "Ad hoc" : "Recurring"} cadence <Text span size="xs" c="dimmed">— empty follows {adhoc ? "the ad hoc defaults (it takes only the raid's size, comp and lockout)" : "the raid's rules"}</Text></Text>
+        <Text size="sm" fw={500} mt="xs">{adhoc ? "An ad hoc run's timing" : "A run's week"} <Text span size="xs" c="dimmed">— empty follows {adhoc ? "the ad hoc defaults (it takes only the raid's size, comp and lockout)" : "the raid's rules"}</Text></Text>
         {!adhoc && (meta?.cadence_presets || []).length > 0 && (
           <Group gap={6} wrap="wrap">
             <Text size="xs" c="dimmed">Presets:</Text>
@@ -241,7 +241,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
             return <Select key={k} label={label} w={200} allowDeselect={false} value={d.cadence[k] || ""} onChange={(x) => setC(k, x || "")}
               data={[{ value: "", label: `${from === "raid" ? "the raid's" : from} (${v ? "on" : "off"})` }, { value: "on", label: "on" }, { value: "off", label: "off" }]} />;
           })}
-          <Select label="split a full run" w={200} allowDeselect={false} value={d.cadence.split_policy || ""} onChange={(v) => setC("split_policy", v || "")}
+          <Select label="when one night fills two groups" w={200} allowDeselect={false} value={d.cadence.split_policy || ""} onChange={(v) => setC("split_policy", v || "")}
             data={[{ value: "", label: `the raid's (${SPLIT_LABEL[String(raidVal("split_policy"))] || raidVal("split_policy")})` }, ...policies.map((p) => ({ value: p, label: SPLIT_LABEL[p] || p }))]} />
         </Group>
         <Text size="sm" fw={500} mt="xs">Seat order at lock <Text span size="xs" c="dimmed">— empty follows {adhoc ? "first come (signup order)" : "the raid's weights"}</Text></Text>
