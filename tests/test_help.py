@@ -74,7 +74,7 @@ def test_about_recruitment_channels_and_raid_lines(reg, rs):
     # channels: '(not found)' only when the bot said which channels it can see
     assert "(not found" not in officer
     seen = state(reg, rs, OWNER, True, extras=help_mod.HelpExtras(channels={56}))
-    assert "ops <#55> (not found" in seen and "signup <#56>," in seen
+    assert "ops: <#55> (not found" in seen and "signup: <#56>," in seen
     # raid notes and the lockout window it is in now
     assert "notes “" in officer and "first lockout (the raid opens then) " in officer, "before first_open: the first window"
     reg.set_raid_override("barrow_deeps", "first_open", (reg.now_local() - timedelta(days=1)).replace(microsecond=0).isoformat(), "t")

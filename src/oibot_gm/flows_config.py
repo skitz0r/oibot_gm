@@ -300,7 +300,7 @@ class CompTargetsBlock:
         items: list = [self.select("Set an aim for…", slots[:MAX_OPTIONS], self.t_slot_picked)]
         if cur:
             items.append(self.select("Remove an aim", [Opt(s, self.reg.comp_slot_words(s), _target_words(cur[s])) for s in sorted(cur)][:MAX_OPTIONS], self.t_removed))
-        items.append(self.button("Save aims",self.t_save, discord.ButtonStyle.success, disabled=not n))
+        items.append(self.button("Save aims", self.t_save, discord.ButtonStyle.success, disabled=not n))
         if n:
             items.append(self.button("Discard changes", self.t_discard))
         items.append(self.button("Back", self.targets_back) if self.targets_back else self.button("Cancel", self.cancel))
@@ -468,7 +468,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         if field == "duration_hours":
             return length_words(v)
         if field == "first_open":
-            return self.reg.local12(datetime.fromisoformat(v)) if v else "no start date (runs open from the next run time)"
+            return self.reg.local12(datetime.fromisoformat(v)) if v else "no first lockout set — weekly runs start at the next run time; a day-of-lockout schedule needs one"
         if field == "notes":
             return f"“{v[:80]}{'…' if len(v) > 80 else ''}”" if v else "no notes"
         return str(v)
@@ -941,7 +941,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         snapshot = dict(self.draft)
         for f, h in zip(CADENCE, hs):
             self.put(f, float(h))
-        await self.checked(i, snapshot, self.custom_again, f"A run's week → **{name}**:{self.cadence_words(*hs)}.")
+        await self.checked(i, snapshot, self.custom_again, f"A run's week → **{name}**: {self.cadence_words(*hs)}.")
 
     def cadence_form(self) -> Form:
         a = self._attempt
@@ -962,7 +962,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
         for f in CADENCE:
             if v.get(f):
                 self.put(f, float(v[f]))
-        await self.checked(i, snapshot, self.custom_again, "A run's week → " +self.cadence_words(*(self.cur(f) for f in CADENCE)) + ".")
+        await self.checked(i, snapshot, self.custom_again, "A run's week → " + self.cadence_words(*(self.cur(f) for f in CADENCE)) + ".")
 
     # ---- Group make-up (min first, then a max that starts at that min: min above max can't be picked)
     async def comp(self, i: discord.Interaction) -> None:
@@ -978,7 +978,7 @@ class RaidConfigWizard(CompTargetsBlock, OwnerWizard):
                     or "no aims set yet, so readiness uses the default aims (the limits and the raid buffs); press Aims… to set one")
                  + ". Saved on their own (officers set them with /roster comp too)."]
         await self.show(i, "\n".join(lines), self.select("Pick a role", opts, self.comp_role),
-                        self.button("Aims…",self.targets, discord.ButtonStyle.primary),
+                        self.button("Aims…", self.targets, discord.ButtonStyle.primary),
                         self.button("Back to the sections", self.to_hub))
 
     async def comp_role(self, i: discord.Interaction, values: list[str]) -> None:
@@ -1234,7 +1234,7 @@ class CompTargetsWizard(CompTargetsBlock, OwnerWizard):
             from . import discord_registry
 
             return None if discord_registry.is_officer(i, reg) else "Officers only."
-        super().__init__(reg, owner_id, title="Desired comp", guard=guard)
+        super().__init__(reg, owner_id, title="Aims", guard=guard)
         self.raid = raid
 
     async def start(self, i: discord.Interaction) -> None:
@@ -1248,14 +1248,14 @@ class CompTargetsWizard(CompTargetsBlock, OwnerWizard):
             async def picked(it: discord.Interaction, values: list[str]) -> None:
                 self.raid = values[0]
                 await self.targets(it)
-            await self.show(i, "Which raid's desired comp?", self.select("Pick a raid", raids(self.reg), picked), self.button("Cancel", self.cancel))
+            await self.show(i, "Which raid's aims?", self.select("Pick a raid", raids(self.reg), picked), self.button("Cancel", self.cancel))
             return
         await self.targets(i)
 
 
 @flow("roster_comp")
 async def open_roster_comp(interaction: discord.Interaction, reg: Registry, *, raid: str | None = None, **_seed) -> None:
-    """/roster comp: officers set the comp targets (what readiness aims for). The bounds stay the owner's (/gm config raid)."""
+    """/roster comp: officers set the aims (what readiness compares the guild with). The limits stay the owner's (/gm config raid)."""
     from . import discord_registry
 
     if not discord_registry.is_officer(interaction, reg):

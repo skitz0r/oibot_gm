@@ -442,7 +442,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     runs_now = rc.how_many_rosters(reg, players, size, rb, want=n_rosters) if live else len(ev.all_rosters)
     kind = rc.run_kind(reg, ev)
     series = rc.run_series(reg, ev)
-    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" (schedule {reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
+    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" ({reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
              + ("" if rc.run_confirms(reg, ev) else " · no confirmations (Join is the commitment)")
              + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else ""))
     out = [head]
@@ -1017,7 +1017,7 @@ def core_lines(ask: Ask) -> list[str]:
         return f"<#{i}>" + (" (not found: deleted, or the bot can't see it)" if known is not None and int(i) not in known else "")
 
     lines = [f"## Guild: {cfg.name} · game profile {cfg.game_profile} · timezone {cfg.timezone} · now {reg.local12(reg.now_local(), '%a %d %b %Y %I:%M %p')} (all times below are guild time)",
-             f"channels: registration {ch(cfg.registration_channel_id)}, signup {ch(cfg.signup_channel_id)}, roster {ch(cfg.roster_channel_id)}, analytics {ch(cfg.analytics_channel_id)}, ops {ch(cfg.ops_channel_id)}, applications {ch(cfg.applications_channel_id)}, absences {ch(cfg.absences_channel_id)}, news {ch(cfg.news_channel_id)}",
+             f"channels: registration: {ch(cfg.registration_channel_id)}, signup: {ch(cfg.signup_channel_id)}, roster: {ch(cfg.roster_channel_id)}, analytics: {ch(cfg.analytics_channel_id)}, ops: {ch(cfg.ops_channel_id)}, applications: {ch(cfg.applications_channel_id)}, absences: {ch(cfg.absences_channel_id)}, news: {ch(cfg.news_channel_id)}",
              f"officer roles: {', '.join(reg.officer_role_names()) or 'none (Manage Server counts)'}" + (f" (pending by name: {', '.join(cfg.officer_roles_pending())})" if cfg.officer_roles_pending() else "")
              + f" · owner {'<@%d>' % cfg.owner_discord_id if cfg.owner_discord_id else 'not set'} · ask_audience {cfg.ask_audience} · members {len(reg.members)} · mains {sum(1 for m in reg.members.values() if m.main)} · unconfirmed characters {len(reg.pending())}"]
     about = (cfg.about or "").strip()

@@ -859,7 +859,7 @@ def _overrides_words(reg: Registry, rid: str, over: dict) -> str:
             elif k == "comp_targets":
                 out.append("aims " + ", ".join(f"{slot} {t.get('min', '?')}" + (f"–{t['max']}" if t.get("max") is not None else "") for slot, t in (v or {}).items()))
             elif k == "comp":
-                out.append("limits " +", ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in (v or {}).items()))
+                out.append("limits " + ", ".join(f"{r} {b.get('min', '?')}–{b.get('max', '?')}" for r, b in (v or {}).items()))
             elif k == "weights":
                 out.append("weights " + ", ".join(f"{w} {n}" for w, n in (v or {}).items()))
             elif k == "comp_groups":

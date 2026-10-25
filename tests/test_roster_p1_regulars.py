@@ -210,7 +210,7 @@ def test_officer_help_snapshot_names_regulars_and_member_record(reg, rs):
     ev = next_run(reg, rs)
     rc.set_signup(reg, rs, ev, ms[0], None, "in")
     text = "\n".join(help_mod.run_lines(reg, rs, ev, is_officer=True))
-    assert "not answered (regulars)" in text and ms[1].display_name in text and "schedule Barrow Deeps · Raid nights" in text
+    assert "not answered (regulars)" in text and ms[1].display_name in text and "(Barrow Deeps · Raid nights)" in text
     assert f"{ms[0].display_name} ({ms[0].main.label}) Join" in text
     member = "\n".join(help_mod.member_lines(reg, rs, ms[0], "asker", True))
     assert f"regular on: Barrow Deeps · Raid nights ({ms[0].main.label})" in member

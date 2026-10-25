@@ -29,8 +29,8 @@ The bot, the site and this manual use one word for each thing. When you ask the 
   (**Edit rules**, *tank min / max*, *healer min*, *dps min*…), with `/gm config raid` (*Group make-up*) or in plain text.
   Until the owner sets a make-up, they come from the game's rules scaled to the run's size, with any number of dps.
 - **Aims** (officers) — the make-up the guild wants for a raid, per role, class or spec, each with its reason; the
-  Readiness page compares the guild with them. Any officer sets them in the **Aims** table on the Readiness page
-  or the Raids page (*Edit aims*), with `/roster comp` (*Aims* in Discord) or in plain text ("we want 3–4 healers"). A role aim (tank, healer, melee,
+  Readiness page compares the guild with them. Any officer sets them in the aims row under **Group make-up** on the Raids or
+  Readiness page (*Set aims* / *Edit aims*, **Save aims**), with `/roster comp` (*Aims* in Discord) or in plain text ("we want 3–4 healers"). A role aim (tank, healer, melee,
   ranged) outside the owner's limits is refused; class and spec aims aren't checked against the limits.
 - **A run's week** — when a run's sheet **opens** (a few days before the run; it differs per raid), when those who
   haven't answered get a **reminder** (by default halfway between the opening and the lock), when it **locks** (a day
@@ -786,8 +786,8 @@ edits that new family and leaves the one it shared alone.
   are the owner's (*Group make-up* in `/gm config raid`, *tank min / max* on the Raids page, `tank_min` in plain text);
   **aims** — what readiness compares the guild with — are the officers': per role (tank, healer, melee, ranged), class
   or spec, *at least*, an optional *at most* and *why* (the selects also offer a value already stored past their range,
-  such as a max equal to the run size). Set them on the **Readiness** page (**Edit aims**: slot icon · at least · at most ·
-  why, one **Save aims**), in the Raids page's **Aims** table, with `/roster comp` (pick the raid, *Set an aim for…*
+  such as a max equal to the run size). Set them in the aims row under **Group make-up** on the **Readiness** or Raids page (*Set aims* / *Edit aims*:
+  slot icon · at least · at most · why, one **Save aims**), with `/roster comp` (pick the raid, *Set an aim for…*
   a role, a class or *A particular spec…*, then at least / at most / why in one form; *Remove an aim*; **Save
   aims**), in plain text ("reduce healer to 3-5", "cap hunters at 3 because Trueshot", "clear the paladin aim")
   or MCP `set_comp_target`. One write per raid whichever way; a role aim outside the limits is refused with *"at least 4
@@ -1115,7 +1115,7 @@ removes it. A paused schedule says *Paused — would next run Sat 24 Oct 8:00 PM
 changing the rosters per run says *From the next run: the sheet advertises 2 × 10 seats. The run already open keeps its 1 ×
 10.* On the site: the Raids page's **Schedules** block under each raid lists them in words with the next three runs (a
 paused one: *Paused — would next run … · nothing opens*); the owner adds, edits (weekday + 12-hour time pickers,
-lockout-day picks; a run's-week fields left empty follow the raid; the **Standard / Short notice / Same week** presets fill
+lockout-day picks; fields of a run's week left empty follow the raid; the **Standard / Short notice / Same week** presets fill
 them; under the form *With these rules* shows the next three runs the bot computes from the draft, or the refusal the
 Save would give) and removes them. **Pause / Resume** sits beside Edit with one confirm (*"Nothing new opens from Alt run;
 … is already open and keeps its sheet. Regulars stay."*). The editor saves only the fields you changed, so a pause made in

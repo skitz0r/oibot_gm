@@ -2294,7 +2294,7 @@ class Registry:
         if over == (self.config.loot or {}):
             return []
         self.config.loot = over
-        self.save_config(f"loot weights: {'; '.join(lines) or 'overrides tidied'} ({by})"[:200])
+        self.save_config(f"loot weights: {'; '.join(lines) or "the guild's changes tidied"} ({by})"[:200])
         return lines or ["loot weights: no number changed (the guild's changes tidied)"]
 
     # ---- loot history imports (design §3.1 "Data on-ramp" L07; dual interfaces phase 4, design §5.48)
@@ -3474,7 +3474,7 @@ class Registry:
                 if t.tzinfo is None:
                     t = t.replace(tzinfo=_Z(self.config.timezone))
                 over["first_open"] = t.isoformat()
-            value = self.local12(over["first_open"]) if over.get("first_open") else "no start date"  # stored ISO, shown in words
+            value = self.local12(over["first_open"]) if over.get("first_open") else "no first lockout set — weekly runs start at the next run time; a day-of-lockout schedule needs one"  # stored ISO, shown in words
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
             role, bound = field.split("_")
             try:
@@ -3822,16 +3822,16 @@ class Registry:
         if bid:
             self.config.buffs.pop(bid, None)
             self.config.families.pop(bid, None)
-            self.save_config(f"aura {bid} overrides cleared (by {by})")
+            self.save_config(f"aura {bid}: the guild's changes cleared (by {by})")
             return f"{bid}: back to the game defaults"
         self.config.buffs, self.config.families = {}, {}
-        self.save_config(f"aura overrides cleared (by {by})")
+        self.save_config(f"auras: the guild's changes cleared (by {by})")
         return "auras: back to the game defaults"
 
     @_config_verb(_raid_section)
     def clear_raid_override(self, instance: str, by: str) -> str:
         self.config.raids.pop(instance, None)
-        self.save_config(f"raid {instance} overrides cleared (by {by})")
+        self.save_config(f"raid {instance}: the guild's changes cleared (by {by})")
         return f"{instance}: back to profile defaults"
 
     def verification(self, discord_id: int) -> str:
