@@ -937,7 +937,7 @@ class TickWizard(Wizard):
         except RegistryError as e:
             await self.refuse(interaction, _err(e), self.untick)
             return
-        await self.show(interaction, "↩ Un-ticked " + (", ".join(d.item_name for d in res["removed"]) or "nothing") + ".",
+        await self.show(interaction, ("↩ Un-ticked " + ", ".join(d.item_name for d in res["removed"]) + ".") if res["removed"] else "↩ Nothing was un-ticked.",
                         self.button("Tick drops", self.start, discord.ButtonStyle.primary), self.button("Done", self.done))
 
 

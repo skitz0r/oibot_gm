@@ -13,7 +13,7 @@ interface CompanionsCard {
   tokens: { shared: boolean; shared_feeds: boolean; var: string; set: boolean; listener: boolean; bind_set: boolean } | null;
 }
 
-const YES = (on: boolean) => <Badge size="sm" variant="light" color={on ? "teal" : "gray"}>{on ? "set" : "not set"}</Badge>;
+const YES = (on: boolean) => <Badge size="sm" variant="light" color={on ? "teal" : "gray"}>{on ? "in .env" : "not in .env"}</Badge>;
 
 /** Loot › Companions (design §3.1 L22 + the tokens card, phase 3): which companions feed this guild (live · quiet ·
  *  disconnected, last seen, events) and, for the owner, which token variables the host has — names only. */

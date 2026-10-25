@@ -35,7 +35,7 @@ export function DescribedView({ d }: { d: Described }) {
             <Text key={j} size="sm">
               {p.label ? <Text span c="dimmed">{p.label}: </Text> : null}
               {p.before !== null ? <><Text span td="line-through" c="dimmed">{p.before}</Text>{" → "}</> : null}
-              <Text span fw={600}>{p.after ?? "—"}</Text>
+              <Text span fw={600}>{p.after ?? "cleared"}</Text>
             </Text>
           ))}
           {ln.notes.map((n, j) => <Text key={`n${j}`} size="xs" c="dimmed">{n}</Text>)}

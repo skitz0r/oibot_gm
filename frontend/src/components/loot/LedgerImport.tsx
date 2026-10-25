@@ -66,7 +66,7 @@ export function LedgerImport({ onClose, onDone }: { onClose: () => void; onDone:
       <Table verticalSpacing={2}>
         <Table.Thead><Table.Tr><Table.Th>Line</Table.Th><Table.Th>Character</Table.Th><Table.Th>Item</Table.Th><Table.Th>Received</Table.Th><Table.Th>{why ? "Why" : "Weight"}</Table.Th></Table.Tr></Table.Thead>
         <Table.Tbody>
-          {rows.length === 0 && <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="dimmed">None.</Text></Table.Td></Table.Tr>}
+          {rows.length === 0 && <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="dimmed">{why ? "No duplicates — none of these awards is in the history already." : "Nothing new — every award in this file is in the history already."}</Text></Table.Td></Table.Tr>}
           {rows.map((r) => (
             <Table.Tr key={`${r.line}-${r.item}`}>
               <Table.Td><Text size="xs" c="dimmed">{r.line}</Text></Table.Td>

@@ -843,7 +843,7 @@ class RaidMixin:
                 why = None
                 if ev.state != "open" or rc.solve_inputs(ev) == inputs:
                     break
-                ev.log.append(f"lock ({by}): answers or pins changed during the solve — solving again")
+                ev.log.append(f"lock ({by}): answers or pins changed while the groups were being built — building again")
             else:
                 why = "the answers or pins kept changing while the roster was being built; lock again in a moment"
             if why is not None:

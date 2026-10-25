@@ -48,10 +48,10 @@ class RecruitWizard(OwnerWizard):
 
     def summary(self) -> str:
         d = self.draft
-        roles = ", ".join(f"<@&{r}>" for r in d["roles"]) or "none"
+        roles = ", ".join(f"<@&{r}>" for r in d["roles"]) or "no role — everyone applies first"
         lines = [f"**Applications:** {'open' if d['open'] else 'closed'}",
-                 f"**Note on the Apply screen:** {d['note'] or 'none'}",
-                 f"**Invite link:** {d['invite'] or 'none'}",
+                 f"**Note on the Apply screen:** {d['note'] or 'no note'}",
+                 f"**Invite link:** {d['invite'] or 'no invite link'}",
                  f"**Member roles** (holders register without applying): {roles}"]
         n = len(self.changes())
         lines.append(f"-# {n} change(s) in the draft — nothing is saved until **Save**." if n else "-# No changes yet.")

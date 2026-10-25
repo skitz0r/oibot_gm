@@ -120,8 +120,8 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           </Box>
         ))}
       </Group>
-      <ChipRow label={`${meta.labels.sub} (${signups.filter((s) => s.status === "sub").length})`} items={signups.filter((s) => s.status === "sub")} menu={menu} />
-      <ChipRow label={`${meta.labels.out} (${signups.filter((s) => s.status === "out").length})`} items={signups.filter((s) => s.status === "out")} menu={menu} />
+      <ChipRow label={`${meta.labels.sub} (${signups.filter((s) => s.status === "sub").length})`} items={signups.filter((s) => s.status === "sub")} empty={`Nobody has pressed ${meta.labels.sub} for this run.`} menu={menu} />
+      <ChipRow label={`${meta.labels.out} (${signups.filter((s) => s.status === "out").length})`} items={signups.filter((s) => s.status === "out")} empty={`Nobody has pressed ${meta.labels.out} for this run.`} menu={menu} />
       <Group gap="xs" mt={8} justify="space-between" wrap="wrap">
         <Group gap="xs"><Eyebrow>Away that day</Eyebrow>{(e.absences || []).length === 0 ? <Text size="sm" c="dimmed">nobody</Text> : e.absences!.map((a) => <Text key={a.display_name} size="sm">{a.display_name}{a.reason ? <Text span c="dimmed"> ({a.reason})</Text> : null}</Text>)}</Group>
         <Group gap="xs">
@@ -337,11 +337,11 @@ function NotAnswered({ e, meta, onDone }: { e: NightSheet; meta: Meta; onDone: (
   );
 }
 
-function ChipRow({ label, items, menu }: { label: string; items: Signup[]; menu: (s: Signup) => React.ReactNode }) {
+function ChipRow({ label, items, empty, menu }: { label: string; items: Signup[]; empty: string; menu: (s: Signup) => React.ReactNode }) {
   return (
     <Group gap="xs" mt={8} align="center">
       <Eyebrow>{label}</Eyebrow>
-      {items.length === 0 && <Text size="sm" c="dimmed">—</Text>}
+      {items.length === 0 && <Text size="sm" c="dimmed">{empty}</Text>}
       {items.map((s) => (
         <Group key={s.uid} gap={4} wrap="nowrap" px={8} py={2} style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 7, background: "var(--mantine-color-slate-6)" }}>
           {/* a callout's note (officers only — never the public sheet) rides on the chip's tooltip */}
@@ -382,7 +382,7 @@ export function Detail({ e, onAct, busy, readOnly = false }: { e: NightSheet; on
             <Stack gap={0}>
               {rows.map((r, i) => (
                 <Group key={i} gap={8} wrap="nowrap" align="flex-start">
-                  <Text size="xs" c="dimmed" w={150} style={{ flex: "none", fontVariantNumeric: "tabular-nums" }}>{r.when || "—"}</Text>
+                  <Text size="xs" c="dimmed" w={150} style={{ flex: "none", fontVariantNumeric: "tabular-nums" }}>{r.when || ""}</Text>
                   <Text size="xs" style={{ minWidth: 0 }}>{r.text}{r.officer && <Badge ml={6} size="xs" variant="outline" color="gray">officers</Badge>}</Text>
                 </Group>
               ))}

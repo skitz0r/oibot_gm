@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 WEEKDAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
 STATUSES = ("in", "sub", "out")  # Join / Bench / No thanks (legacy "tentative" is read as "in")
 LABELS = {"in": "Join", "sub": "Bench", "out": "No thanks"}
+# a machine code, never shown: a run that sends no reminders (`reminders`), an ad hoc run that expects nobody (`expected_from`)
+OFF = "none"
 # a member's own Join / Bench after lock: the sheet's SignupButton and plain text (configops.authorize) refuse it in these words
 LOCKED_JOIN = "The roster is locked — answer your confirmation DM, or press Can't make it on the sheet."
 STATES = ("open", "locked", "done", "cancelled")
@@ -266,7 +268,7 @@ def run_settings(rd: dict) -> dict:
     lead, lock = float(rd.get("signup_lead_hours", RAID_DEFAULTS["signup_lead_hours"])), float(rd.get("lock_hours_before", RAID_DEFAULTS["lock_hours_before"]))
     nudge = float(rd["nudge_hours_before"]) if rd.get("nudge_hours_before") is not None else (lead + lock) / 2  # registry: halfway between open and lock
     return {"cutoff_soft_hours": nudge, "cutoff_hard_hours": lock, "open_days_before": lead / 24,
-            "reminders": "dm" if rd.get("nudge", RAID_DEFAULTS["nudge"]) else "none",
+            "reminders": "dm" if rd.get("nudge", RAID_DEFAULTS["nudge"]) else OFF,
             "open_dm": bool(rd.get("open_dm", RAID_DEFAULTS["open_dm"])), "autofill": bool(rd.get("autofill", RAID_DEFAULTS["autofill"]))}
 
 
@@ -520,7 +522,7 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         rd = {**rd, "nudge_hours_before": nudge_h}
     t = {"key": key, "name": f"{rd.get('name', instance)} {reg.local12(start)}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
          "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
-         "reminders": "dm" if c.get("nudge", rd["nudge"]) else "none", "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True}
+         "reminders": "dm" if c.get("nudge", rd["nudge"]) else OFF, "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True}
     # every run carries its class and series (roster redesign Phase 1): a one-off (ADHOC_SCHEDULE) and a pickup template
     # are ad hoc; anything else is a run of a recurring series whose regulars it expects
     kind = rd.get("class") or schedule_class(sched.get("kind"))
@@ -896,7 +898,7 @@ def expected_from(reg: Registry, ev: RaidEvent) -> str:
     if is_test_run(reg, ev):
         return "test"
     if run_kind(reg, ev) != "recurring":
-        return "none"
+        return OFF
     return "regulars" if run_regulars(reg, ev) else "everyone"
 
 
@@ -2159,7 +2161,7 @@ def another_run_hint(reg: Registry, ev: "RaidEvent", rosters: list[RosterResult]
     if len(any_role) < size or not _can_cover(any_role, need):
         return None
     how = "" if _can_cover(main_only, need) else " with offspecs or alts"
-    return f"Leftovers, bench and pool ({len(any_role)}) could make another run{how}."
+    return f"Leftovers, Bench and everyone else who could play ({len(any_role)}) are enough for another run{how}."
 
 
 def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], role_max: dict[str, int], fixed: set[str]) -> set[str]:
@@ -2284,8 +2286,8 @@ def solver_error_text(e: Exception) -> str:
     if "INFEASIBLE" in msg or "no roster found" in msg:
         return "no roster satisfies the rules: check the raid's tank/healer minimums against who joined, pins that overfill a group, and keep-apart pairs"
     if "UNKNOWN" in msg or "time" in msg.lower():
-        return "the solver ran out of time before finding a roster; try again or reduce pins"
-    return f"the solver failed: {msg}"
+        return "the bot couldn't find a roster in time — try again or pin fewer people"
+    return f"building the roster failed: {msg}"
 
 
 def split_preview(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str, avoid: list[list[list[str]]] | None = None) -> tuple[list[list[str]], list[RosterResult]]:
@@ -2329,7 +2331,7 @@ class BoardChanged(RegistryError):
 class SolverBusy(RegistryError):
     """RaidMixin.solving: the solver is already working on this run (a lock, an auto-fill, a split preview)."""
 
-    def __init__(self, msg: str = "the solver is already working on this run — try again in a moment"):
+    def __init__(self, msg: str = "the roster is already being built — try again in a moment"):
         super().__init__(msg)
 
 
@@ -2538,7 +2540,7 @@ def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
                 r.groups[smallest].append(p.signup_name)
             elif r.groups is not None:
                 r.groups.append([p.signup_name])
-            ev.log.append(f"seated {sg.display_name} in roster {i + 1}")
+            ev.log.append(f"rostered {sg.display_name} in roster {i + 1}")
             on_roster_change(reg.key, ev, added=[sg.discord_id])
             return i
     return None

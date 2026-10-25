@@ -175,7 +175,7 @@ export function AgentsPage() {
           <Table.ScrollContainer minWidth={420}>
             <Table highlightOnHover>
               <Table.Tbody>
-                {data.runs.length === 0 && <Table.Tr><Table.Td><Text size="sm" c="dimmed">none yet</Text></Table.Td></Table.Tr>}
+                {data.runs.length === 0 && <Table.Tr><Table.Td><Text size="sm" c="dimmed">No runs yet — each review or apply run is listed here once it has run.</Text></Table.Td></Table.Tr>}
                 {data.runs.map((r) => (
                   <Table.Tr key={r.id} onClick={() => setOpen(r.id)} style={{ cursor: "pointer", background: r.id === shown ? "var(--mantine-color-slate-6)" : undefined }}>
                     <Table.Td w={150}><Text size="xs" c="dimmed">{r.started_label}</Text></Table.Td>

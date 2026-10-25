@@ -103,6 +103,9 @@ def away_line(away: list) -> str:
 
 
 EMBED_FIELD_MAX, EMBED_TOTAL_MAX = 1024, 5600  # Discord: 1024 per field value, 6000 per embed (kept under, with headroom)
+# an embed column with nobody in it: inline fields are the sheet's columns, so this is a cell under its header (the copy
+# rule's table-cell carve-out — the column's name says what is missing), and Discord refuses an empty field value
+EMPTY_CELL = "—"
 
 
 def _column(lines: list[str]) -> str:
@@ -114,7 +117,7 @@ def _column(lines: list[str]) -> str:
             break
         out.append(ln)
         used += len(ln) + 1
-    return "\n".join(out) or "—"
+    return "\n".join(out) or EMPTY_CELL
 
 
 def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[discord.Embed, discord.ui.View | None]:
@@ -295,7 +298,7 @@ def plan_ask_md(reg: Registry, ico, a) -> str:
 def still_short_md(ico, plan) -> str:
     sa = plan.short_after
     bits = ([f"{sa['headcount']} seat{'s' if sa['headcount'] != 1 else ''}"] if sa.get("headcount") else []) + [f"{ico('role', r)} {k}" for r, k in sa.get("roles", {}).items()]
-    return ("   ".join(bits) + " → recruit") if bits else "nothing"
+    return ("   ".join(bits) + " → recruit") if bits else ""
 
 
 def suggested_block(reg: Registry, ico, plan) -> str:
@@ -324,7 +327,8 @@ def suggested_block(reg: Registry, ico, plan) -> str:
         lines.append("-# " + why + (f" · alternates: {alts}" if alts else ""))
     if len(seats) > SUGGEST_LINES:
         lines.append(f"-# +{len(seats) - SUGGEST_LINES} more — Ask sends only the {SUGGEST_LINES} above; Suggest… lists them all")
-    lines.append(f"Still short if all say yes: {still_short_md(ico, plan)}")
+    short = still_short_md(ico, plan)
+    lines.append(f"Still short if all say yes: {short}" if short else "Full if all say yes.")
     return "\n".join(lines)
 
 
@@ -345,10 +349,11 @@ def _role_counts(ico, players) -> str:
 
 
 def gaps_text(ico, nd: dict) -> str:
-    """What a run is short, from rc.needs(): seats as a number, role shortfalls as role icon + number (never "2 tank")."""
+    """What a run is short, from rc.needs(): seats as a number, role shortfalls as role icon + number (never "2 tank");
+    "no gaps" when it is short of nothing."""
     bits = [f"{nd['headcount']} seat{'s' if nd['headcount'] != 1 else ''}"] if nd["headcount"] else []
     bits += [f"{ico('role', r)} {n}" for r, n in nd["roles"].items()]
-    return "   ".join(bits) if bits else "nothing"
+    return "   ".join(bits) if bits else "no gaps"
 
 
 LEVEL_DOT = {"green": "🟢", "amber": "🟠", "red": "🔴"}
@@ -801,8 +806,8 @@ def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> 
     tally = (f"✅ {sum(1 for c in rows if c['answer'] == 'yes')} · ⏳ {sum(1 for c in rows if c['answer'] is None)} · ❌ {sum(1 for c in rows if c['answer'] in ('no', 'expired'))}"
              if rows else "first come — no confirmations")
     lines = [f"**{len(ev.seated())}** rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + "   " + _role_counts(ico, ev.seated()), tally]
-    short = gaps_text(ico, nd)
-    lines.append(f"**Short** {short}" if short != "nothing" else "**Full**")
+    short = bool(nd["headcount"] or nd["roles"])
+    lines.append(f"**Short** {gaps_text(ico, nd)}" if short else "**Full**")
     if officer:
         waiting = [c["display_name"] + (" (site)" if c["channel"] == "web" else "") for c in rows if c["answer"] is None]
         if waiting:
@@ -812,7 +817,7 @@ def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> 
     if officer:
         parts += [run_actions_row(reg, ev, locked=True), night_actions_row(reg, ev)]
     view = ui.LayoutView(timeout=None)
-    view.add_item(ui.Container(*parts, accent_colour=0xC0392B if short != "nothing" else TEAL))
+    view.add_item(ui.Container(*parts, accent_colour=0xC0392B if short else TEAL))
     return view
 
 

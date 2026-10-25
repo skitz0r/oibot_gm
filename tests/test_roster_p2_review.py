@@ -73,10 +73,10 @@ def test_member_snapshot_shows_only_the_askers_own_ask(reg, rs):
 def test_member_snapshot_log_leaves_out_the_officers_workflow(reg, rs):
     ev, p = _asked_prelock(reg, rs)
     ev.log += ["fill (Officer): asked Kael", "fill: a role swap would cover it — waiting for an officer's Ask", "suggestion: Ana declined (flex)",
-               "lock (Officer): answers or pins changed during the solve — solving again", "Officer approved the swap"]
+               "lock (Officer): answers or pins changed while the groups were being built — building again", "Officer approved the swap"]
     member = "\n".join(help_mod.run_lines(reg, rs, ev, is_officer=False, detail=True, viewer_id=p["Kael"].discord_id))
     log = next(ln for ln in member.splitlines() if ln.strip().startswith("recent log:"))
-    for hidden in ("suggestions sent by", "fill (Officer)", "role swap would cover", "suggestion: Ana", "solving again", "approved"):
+    for hidden in ("suggestions sent by", "fill (Officer)", "role swap would cover", "suggestion: Ana", "building again", "approved"):
         assert hidden not in log, hidden
     assert "opened (" in log, "the run's own story stays"
     officer_view = "\n".join(help_mod.run_lines(reg, rs, ev, is_officer=True, detail=True, viewer_id=p["Kael"].discord_id))

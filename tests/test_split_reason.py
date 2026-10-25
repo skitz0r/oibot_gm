@@ -57,7 +57,7 @@ def test_another_run_hint_from_pool(reg, rs):
     board = rc.board_rosters(reg, ev, [[p.signup_name for p in players[:5]], [p.signup_name for p in players[5:10]]], 10)
     # the other tanks and healers never answered: the pool could make another run as they are
     hint = rc.another_run_hint(reg, ev, board, rc.run_split_reason(reg, ev))
-    assert hint and hint.startswith("Leftovers, bench and pool") and "offspec" not in hint
+    assert hint and hint.startswith("Leftovers, Bench and everyone else who could play") and "offspec" not in hint
     # everyone else says No thanks: nothing left to make one from
     join(reg, rs, ev, [m for m in reg.test_members() if str(m.discord_id) not in ev.signups], "out")
     assert rc.another_run_hint(reg, ev, board, rc.run_split_reason(reg, ev)) is None
@@ -129,7 +129,7 @@ def test_run_payload_carries_reason_and_leftovers(reg, rs, monkeypatch):
     rs.save(ev, "board")
     d = client.get(f"/api/run/{ev.key}", headers=bearer()).json()
     assert len(d["board"]["leftovers"]) == 11 and set(d["board"]["leftovers"]) <= {s["display_name"] for s in d["board"]["bank"]}
-    assert d["board"]["another"].startswith("Leftovers, bench and pool")
+    assert d["board"]["another"].startswith("Leftovers, Bench and everyone else who could play")
 
 
 def test_health_and_lock_cards_say_why(reg, rs):

@@ -255,7 +255,7 @@ class Wizard(discord.ui.View):
     def select(self, placeholder: str, opts: Sequence[Opt], on_pick: Callable[[discord.Interaction, list[str]], Awaitable[None]],
                *, min_values: int = 1, max_values: int = 1) -> discord.ui.Select:
         opts = list(opts)[:MAX_OPTIONS]
-        s = discord.ui.Select(placeholder=placeholder[:150], options=[o.option() for o in opts] or [discord.SelectOption(label="—", value="-")],
+        s = discord.ui.Select(placeholder=placeholder[:150], options=[o.option() for o in opts] or [discord.SelectOption(label="Nothing to pick", value="-")],
                               min_values=min(min_values, len(opts) or 1), max_values=min(max_values, len(opts) or 1), disabled=not opts)
 
         async def cb(interaction: discord.Interaction) -> None:

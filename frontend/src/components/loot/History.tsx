@@ -93,7 +93,7 @@ export function Precedents() {
           <Table>
             <Table.Thead><Table.Tr><Table.Th>Date</Table.Th><Table.Th>Item</Table.Th><Table.Th>Bot picked</Table.Th><Table.Th>Council awarded</Table.Th><Table.Th>Reason</Table.Th><Table.Th /></Table.Tr></Table.Thead>
             <Table.Tbody>
-              {data.rows.length === 0 && <Table.Tr><Table.Td colSpan={6}><Text size="sm" c="dimmed">None.</Text></Table.Td></Table.Tr>}
+              {data.rows.length === 0 && <Table.Tr><Table.Td colSpan={6}><Text size="sm" c="dimmed">{status ? `No ${status} precedents — clear the filter to see them all.` : "No precedents yet — an award the council makes against the bot's pick, with its reason, becomes one."}</Text></Table.Td></Table.Tr>}
               {data.rows.map((p) => (
                 <Table.Tr key={p.ref} style={{ opacity: p.status === "active" ? 1 : 0.6 }}>
                   <Table.Td><Text size="xs" c="dimmed">{p.date_label}</Text></Table.Td><Table.Td>{p.item}</Table.Td><Table.Td>{p.bot}</Table.Td><Table.Td>{p.human}</Table.Td>

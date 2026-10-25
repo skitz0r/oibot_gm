@@ -68,7 +68,7 @@ export function ChannelsCard() {
                   ) : (
                     <Group gap="xs" wrap="wrap">
                       {c.id ? (data.links.channels?.[c.kind] ? <Anchor size="sm" href={data.links.channels[c.kind]} target="_blank" rel="noreferrer">{c.name ? `#${c.name}` : "a channel"}</Anchor> : <Text size="sm">{c.name ? `#${c.name}` : "a channel"}</Text>)
-                        : <Text size="sm" c="dimmed">not set</Text>}
+                        : <Text size="sm" c="dimmed">{data.owner ? "No channel yet — pick one with Edit." : "No channel yet — the owner picks one."}</Text>}
                       {c.problem && <Tooltip label={c.problem} multiline w={300}><Badge color="red" variant="light">{c.missing.length ? `missing: ${c.missing.join(", ")}` : "deleted"}</Badge></Tooltip>}
                       {c.kind === "news" && c.id && data.owner && <Button size="compact-xs" variant="subtle" onClick={webhook}>Webhook URL</Button>}
                     </Group>
