@@ -69,9 +69,8 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
 
         <Box>
           <Group justify="space-between" mb={4}><Eyebrow>Against the aims</Eyebrow><Anchor component={Link} to={`/raids#raid-${r.raid}`} size="xs">Limits on the Raids page</Anchor></Group>
-          <Table.ScrollContainer minWidth={460}>
-            <Table verticalSpacing={4}>
-              <Table.Thead><Table.Tr><Table.Th w={50} /><Table.Th w={80}>Have</Table.Th><Table.Th w={90}>Aim</Table.Th><Table.Th>Why</Table.Th></Table.Tr></Table.Thead>
+          <Table verticalSpacing={4}>
+              <Table.Thead><Table.Tr><Table.Th w={40} /><Table.Th w={56}>Have</Table.Th><Table.Th w={70}>Aim</Table.Th><Table.Th>Why</Table.Th></Table.Tr></Table.Thead>
               <Table.Tbody>
                 {r.comp.map((c) => (
                   <Table.Tr key={c.key}>
@@ -83,7 +82,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
                 ))}
               </Table.Tbody>
             </Table>
-          </Table.ScrollContainer>
+          
           {r.notes.map((n, i) => <Text key={i} size="xs" c="dimmed">{n}</Text>)}
         </Box>
 

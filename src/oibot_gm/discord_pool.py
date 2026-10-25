@@ -843,7 +843,9 @@ class SetupMixin:
             cid = getattr(cfg, attr, None)
             label = CHANNEL_LABELS[kind][0]
             if not cid:
-                rows.append({"key": f"channel:{kind}", "label": label, "state": "bad" if kind in REQUIRED_KINDS else "warn", "text": "not set",
+                how = f"/gm config {kind}-channel or the site's Config › Channels"
+                text = f"not set — the bot can't post without it: {how}" if kind in REQUIRED_KINDS else f"not set — pick one with {how}"
+                rows.append({"key": f"channel:{kind}", "label": label, "state": "bad" if kind in REQUIRED_KINDS else "warn", "text": text,
                              "test": f"config.{attr}"})
             elif kind in problems:
                 rows.append({"key": f"channel:{kind}", "label": label, "state": "bad", "text": problems[kind], "test": f"perms.missing_for(<#{cid}>, {kind!r})"})
