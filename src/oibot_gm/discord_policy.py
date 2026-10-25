@@ -406,8 +406,12 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if req is None:
         from .llm.provider import for_guild
 
-        with for_guild(reg.key):  # D45: the parse is this guild's spend
-            req = await asyncio.to_thread(configops.parse, provider, reg, text, name, officer=officer and not public)
+        try:
+            with for_guild(reg.key):  # D45: the parse is this guild's spend
+                req = await asyncio.to_thread(configops.parse, provider, reg, text, name, officer=officer and not public)
+        except Exception as e:  # noqa: BLE001 — §2.7: the model being down is a sentence to the asker + an ops error, never silence
+            await send(await configops.report_error(ops, reg.config, e, "plain-text parse"), ephemeral=True)
+            return
     if req.kind == "ignore":
         return
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line

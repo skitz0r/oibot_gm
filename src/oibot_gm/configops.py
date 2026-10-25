@@ -21,14 +21,24 @@ log = logging.getLogger(__name__)
 
 # ---- refusal wording (dual interfaces §2.7): one helper every surface answers an exception with
 GENERIC_ERROR = "Something went wrong and nothing was changed. The owner has the details."
+MODEL_ERROR = "The model isn't reachable right now, so I couldn't read that. Nothing was changed; the owner has the details."
+
+
+def is_model_error(e: BaseException) -> bool:
+    """A failure of the LLM call itself (the SDK's own exceptions: bad key, no network, 5xx, rate limit) — the person
+    can't act on it, but the sentence says what kind of thing is wrong instead of a bare 'something went wrong'."""
+    return (type(e).__module__ or "").split(".")[0] == "anthropic"
 
 
 def user_error(e: BaseException) -> str:
     """What a person reads when a verb raised: a RegistryError or ValueError is a refusal written for them (its text);
-    anything else is a bug they can't act on — GENERIC_ERROR, and the caller gives the owner the details with
-    `report_error` (an ops error line, which also DMs the owner). Never a type name or a traceback in a reply."""
+    anything else is a bug they can't act on — GENERIC_ERROR (MODEL_ERROR when the LLM call itself failed), and the
+    caller gives the owner the details with `report_error` (an ops error line, which also DMs the owner). Never a type
+    name or a traceback in a reply."""
     if isinstance(e, (RegistryError, ValueError)):
         return str(e) or GENERIC_ERROR
+    if is_model_error(e):
+        return MODEL_ERROR
     return GENERIC_ERROR
 
 
@@ -36,7 +46,7 @@ async def report_error(ops, cfg, e: BaseException, where: str) -> str:
     """`user_error`, plus the ops error line (with the traceback) when the error is not a refusal. Returns the text to
     show the person. `ops` None (offline, tests) → logged only."""
     text = user_error(e)
-    if text == GENERIC_ERROR:
+    if text in (GENERIC_ERROR, MODEL_ERROR):
         log.exception("%s failed", where, exc_info=e)
         if ops is not None and cfg is not None:
             try:

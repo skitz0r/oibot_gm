@@ -835,7 +835,9 @@ edits that new family and leaves the one it shared alone.
   *Expired — say it again.*; a press on a diff (or a policy reading) from before a bot restart answers *Expired after a
   restart — nothing was changed* instead of Discord's "interaction failed". When something breaks inside a change,
   every surface says the same thing — *Something went wrong and nothing was changed. The owner has the details.* — and
-  the owner gets the details in the ops channel and a DM; a refusal ("that run is locked") always reads as written. A board change (a move, the groups, auto-fill, using a
+  the owner gets the details in the ops channel and a DM; when the model itself can't be reached (a bad API key, no
+  network, the provider down) the sentence is *The model isn't reachable right now, so I couldn't read that. Nothing was
+  changed; the owner has the details.*; a refusal ("that run is locked") always reads as written. A board change (a move, the groups, auto-fill, using a
   proposal) is refused with *"the board changed since you looked"* when someone else changed that board between the
   diff and your Apply — nothing is overwritten, even when an unrelated step of the request (a DM setting) comes first;
   the request's own earlier steps (a pin, a move) never count as a change, and once one board step is refused the request's later board steps on that run are refused too. Absences

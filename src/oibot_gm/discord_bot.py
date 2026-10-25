@@ -713,7 +713,11 @@ class OibotGM(FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, R
 
         async with message.channel.typing():
             if may_act and not reg.may_ask(uid, officer):
-                req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name, officer=officer and not public)
+                try:
+                    req = await asyncio.to_thread(configops.parse, provider, reg, text, reg.members[uid].display_name if uid in reg.members else message.author.display_name, officer=officer and not public)
+                except Exception as e:  # noqa: BLE001 — the model being down is a reply + an ops error, never silence
+                    await message.reply(await configops.report_error(self.ops, reg.config, e, "plain-text parse"), allowed_mentions=quiet)
+                    return
                 if req.kind == "change" and req.ops:
                     await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req)
                 else:
