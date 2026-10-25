@@ -302,7 +302,7 @@ def config_show_embed(reg: Registry, sections) -> discord.Embed:
                 shown.append(f"-# +{len(s.lines) - i} more on the site")
                 break
             shown.append(line[:cap])
-        value = "\n".join(shown)[:FIELD_MAX] or "—"
+        value = "\n".join(shown)[:FIELD_MAX] or "Nothing set in this section yet — the Config page sets it."
         left -= len(value) + len(s.title)
         e.add_field(name=s.title, value=value, inline=False)
     e.set_footer(text="Everything here is on the site's Config page (Overview); /gm config … changes it.")
@@ -492,7 +492,7 @@ CHANNEL_SHORTCUTS = (
     ("applications", "applications-channel", "Owner: where application review cards are posted (defaults to the ops channel)"),
     ("roster", "roster-channel", "Owner: private channel for roster overviews, proposals, officer cards and the loot council"),
     ("registration", "registration-channel", "Owner: public read-only channel with the registration card (buttons open to everyone)"),
-    ("analytics", "analytics-channel", "Owner: officer channel with live pool-readiness cards per raid and a change log"),
+    ("analytics", "analytics-channel", "Owner: officer channel with a live readiness card per raid (who could play) and a change log"),
     ("absences", "absences-channel", "Owner: public channel with the 'I'll be away' card; one line per absence"),
     ("signup", "signup-channel", "Owner: where raid sheets are posted"),
     ("news", "news-channel", "Owner: where the news webhook posts; the bot keeps the items about our game"),
@@ -529,7 +529,7 @@ def application_embed(reg: Registry, a, ico=None) -> discord.Embed:
         fixed.append(("Can raid", _clip("\n".join(schedule_names(reg, a.schedules)), FIELD_VALUE_MAX)))
     if a.availability:  # older applications: free-text raid times
         fixed.append(("When they can raid", _clip(a.availability, 300)))
-    answers = [(_clip(x.get("label") or "?", 256), str(x.get("answer") or "").strip() or "—") for x in (a.answers or [])]
+    answers = [(_clip(x.get("label") or "?", 256), str(x.get("answer") or "").strip() or "(left blank)") for x in (a.answers or [])]
     if a.about:
         answers.append(("Anything else", a.about))
     room = FIELDS_MAX - len(fixed) - 1  # one field kept for the overflow / full-answers note
@@ -1124,7 +1124,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         view = overview_post_view(reg, ico) if officer_view and reg.config.roster_channel_id else None
         await interaction.response.send_message(embed=e, ephemeral=True, **({"view": view} if view else {}))
 
-    @roster.command(name="comp", description="Desired comp: what readiness aims for per role, class or spec (bounds stay the owner's)")
+    @roster.command(name="comp", description="Aims: what readiness compares the guild with, per role, class or spec (limits stay the owner's)")
     async def roster_comp(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:  # flows_config.CompTargetsWizard: only the targets block of the Group make-up screen → configops (authorize_ops + apply_ops)
@@ -1305,7 +1305,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         except (RegistryError, ValueError) as e:
             await interaction.response.send_message(f"❌ {e}", ephemeral=True)
             return
-        names = ", ".join(f"<@&{r}>" for r in reg.config.officer_role_ids) or "none"
+        names = ", ".join(f"<@&{r}>" for r in reg.config.officer_role_ids) or "no officer role — only the server owner and Manage Server count"
         await interaction.response.send_message(f"✅ Officer roles: {names}" + "".join(f"\n⚠ {c}" for c in cons), ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
 
@@ -1333,7 +1333,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         else:
             have = reg.error_dm_targets()
             want = [u for u in have if u != member.id] if remove else list(dict.fromkeys(have + [member.id]))
-            value = ", ".join(f"<@{u}>" for u in want) or "none"
+            value = ", ".join(f"<@{u}>" for u in want) or "nobody"  # the op's word for [] (errors stay in the ops channel)
         try:
             line = await configops.apply_async(reg, configops.ConfigOp(op="set", path="error_dms", value=value), interaction.user.display_name, True,
                                                bot=interaction.client, by_id=interaction.user.id, via="discord")
@@ -1372,7 +1372,7 @@ def register_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: ops_m
         reg.save_config(f"ask audience → {audience.value}")
         await interaction.response.send_message(f"✅ Free-form questions: **{audience.value}**. Everyone else gets the static guide (about, schedule, how to register, signups, apply, contact).", ephemeral=True)
 
-    @config.command(name="raid", description="Owner: a raid's rules — run times, signup cadence, make-up, weights, lockout, notes")
+    @config.command(name="raid", description="Owner: a raid's rules — run times, a run's week, make-up, weights, lockout, notes")
     async def cfg_raid(interaction: discord.Interaction):
         reg, interaction = await need(interaction)
         if reg:

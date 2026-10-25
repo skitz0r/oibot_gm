@@ -210,9 +210,9 @@ class Ask:
 
 # ---------------------------------------------------------------- small helpers
 
-def _names(items, limit: int = MAX_LIST) -> str:
+def _names(items, limit: int = MAX_LIST, empty: str = "nobody") -> str:
     items = list(items)
-    return ", ".join(items[:limit]) + (f" … +{len(items) - limit}" if len(items) > limit else "") if items else "none"
+    return ", ".join(items[:limit]) + (f" … +{len(items) - limit}" if len(items) > limit else "") if items else empty
 
 
 def _safe(text) -> str:
@@ -298,7 +298,7 @@ def member_lines(reg: Registry, rs, m, head: str, officer_view: bool) -> list[st
     chars = "; ".join(f"{c.label} ({c.cls} {c.spec}{'/' + c.offspec if c.offspec else ''}, {'main' if c.is_main else 'alt'}, {c.status}, rank {c.rank}{', rostered on ' + '; '.join(runs_of[c.label]) if runs_of[c.label] else ''}{'' if c.confirmed_by else ', unconfirmed'})" for c in m.active())
     today = reg.now_local().date().isoformat()
     ups = m.upcoming_absences(today)
-    absences = "; ".join(reg.span_label(a.start, a.end) + (f" (reason “{_safe(a.reason)[:120]}”)" if a.reason and officer_view else "") for a in ups[:4]) or "none"
+    absences = "; ".join(reg.span_label(a.start, a.end) + (f" (reason “{_safe(a.reason)[:120]}”)" if a.reason and officer_view else "") for a in ups[:4]) or "no absences ahead"
     asks = [f"{a['roster']} ({a['character']}, via {a.get('channel', 'dm')})" for a in reg.open_placement_asks(m.discord_id)]
     regular = "; ".join(f"{reg.series_label(k)} ({c.label})" for k, c in reg.regular_series_of(m))
     out = [f"{head}: {m.display_name}{' (test puppet)' if m.test else ''} · roles {primary or '?'}{' +' + ','.join(flex) if flex else ''} · characters: {chars or 'none'} · DMs {'off' if m.dm_opt_out else 'on'} · upcoming absences {absences}"
@@ -442,7 +442,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     runs_now = rc.how_many_rosters(reg, players, size, rb, want=n_rosters) if live else len(ev.all_rosters)
     kind = rc.run_kind(reg, ev)
     series = rc.run_series(reg, ev)
-    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" (series {reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
+    head += (f" · schedule {team.get('schedule_id') or ev.schedule or 'default'} · {kind}" + (f" (schedule {reg.series_label(series)})" if series else " (first come, no regulars, no reminder)")
              + ("" if rc.run_confirms(reg, ev) else " · no confirmations (Join is the commitment)")
              + f" · expects {n_rosters} roster(s) = {n_rosters * size} seats · {runs_now} run(s) this slot" + (" on the answers so far" if ev.state == "open" else ""))
     out = [head]
@@ -531,7 +531,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
             out.append("  your open ask (a DM from the bot, answer there): " + " · ".join(_own_ask_words(reg, a, fmt) for a in mine))
     elif open_asks or done_asks:
         asks = [f"{a.display_name} ({a.kind}: {a.character} {a.spec} for {a.role}, {a.reason}, " + ("said yes, waiting for the tied ask" if a.held else f"deadline {reg.local12(a.expires_at, fmt) if a.expires_at else '?'}") + ")" for a in open_asks]
-        out.append("  fill asks outstanding: " + (_names(asks) if asks else "none")
+        out.append("  fill asks outstanding: " + (_names(asks) if asks else "no fill asks waiting")
                    + (f" · recent answers: {', '.join(f'{a.display_name} {a.answer}' for a in done_asks)}" if done_asks else ""))
     away = [(m, m.absent_on(day)) for m in reg.members.values() if m.absent_on(day)]
     if away:
@@ -783,7 +783,7 @@ def _auras(ask: Ask) -> list[str]:
     r = prof.comp_rules
     roles = r.get("roles", {})
     grp = r.get("grouping", {})
-    out = ["### Auras (effective: game profile + guild overrides; * = fields the guild overrode)",
+    out = ["### Auras (the game's defaults + the guild's changes; * = a field the guild changed)",
            f"comp rules: raid size {r.get('raid_size')}, groups of {r.get('group_size')}, " + ", ".join(f"{k} {v.get('min')}–{v.get('max')}" for k, v in roles.items()) + (f", per group at most {grp.get('healer_max_per_group')} healers / {grp.get('tank_max_per_group')} tanks" if grp else "")]
     # what the question names first, so a cut never loses it
     out += [l for hit, l in b_lines + f_lines if hit] + [l for hit, l in b_lines if not hit] + [l for hit, l in f_lines if not hit]
@@ -794,7 +794,7 @@ def _readiness(ask: Ask) -> list[str]:
     from . import comp as comp_mod
 
     reg = ask.reg
-    out = ["### Pool readiness per raid (officers; the analytics cards' data)"]
+    out = ["### Who could play, per raid (officers; the analytics cards' data)"]
     plan = None
     for rid in reg.profile.raids:
         try:
@@ -811,21 +811,21 @@ def _readiness(ask: Ask) -> list[str]:
                        + (" · ".join(f"{r} {n}" + (f"/{cv['need'][r]}" if cv["need"].get(r) else "") for r, n in cv["counts"].items())
                           + (f" · short {', '.join(f'{n} {r}' for r, n in cv['short'].items())}" if cv["short"] else "")
                           + (f" · coverage {cv.get('level')}" + (f" (could cover: {', '.join(cv.get('cover') or [])})" if cv.get("cover") else "") + (f" (recruit: {', '.join(cv.get('recruit') or [])})" if cv.get("recruit") else "") if cv.get("level") else "")
-                          if cv["regulars"] else "none yet (every main is expected)"))
+                          if cv["regulars"] else "no regulars yet, so every main is expected — officers add them on the Rosters page"))
             for f in cv.get("forecast") or []:  # the 4-week forecast: regulars minus recorded absences (code-computed)
                 if f["short"]:
                     out.append(f"    forecast {f['day']}: short {', '.join(f'{k} {r}' for r, k in f['short'].items())}" + (f" ({', '.join(f['away'])} away)" if f["away"] else ""))
         if d["missing_buffs"]:
-            out.append(f"  nobody in the pool brings: {_names((b['name'] for b in d['missing_buffs']), 12)}")
+            out.append(f"  nobody who could play brings: {_names((b['name'] for b in d['missing_buffs']), 12)}")
         if d["short"]:
-            out.append("  desired comp short: " + " · ".join(f"{c['key']} {c['have']}/{c['want']} ({c['why'][:90]})" for c in d["short"][:8]))
+            out.append("  aims short: " + " · ".join(f"{c['key']} {c['have']}/{c['want']} ({c['why'][:90]})" for c in d["short"][:8]))
         if d["over"]:
             out.append("  over cap: " + " · ".join(f"{c['key']} {c['have']}/{c['max']} ({c['why'][:90]})" for c in d["over"][:8]))
         if d["comp"]:  # the whole desired comp, met targets too, each with its justification ("what is X's desired comp and why")
-            out.append("  desired comp: " + " · ".join(f"{c['key']} {c['have']} of {c['want']}" + (f"–{c['max']}" if c["max"] is not None else "+") + f" {c['level']}"
+            out.append("  aims: " + " · ".join(f"{c['key']} {c['have']} of {c['want']}" + (f"–{c['max']}" if c["max"] is not None else "+") + f" {c['level']}"
                                                        + (" (officer)" if c["source"] == "officer" else "") + f" ({(c['note'] or c['why'])[:90]})" for c in d["comp"][:14]))
     if plan:
-        out.append("pool: mains by role " + " · ".join(f"{r} {n}" for r, n in plan["by_role"].items())
+        out.append("who could play: mains by role " + " · ".join(f"{r} {n}" for r, n in plan["by_role"].items())
                    + (" · flex " + "; ".join(f"{r}: {_names(v, 6)}" for r, v in plan["flex"].items()) if plan["flex"] else "")
                    + (" · single provider: " + ", ".join(f"{s['buff']} ({s['who']})" for s in plan["single_provider"][:10]) if plan["single_provider"] else ""))
     return out
@@ -923,8 +923,8 @@ def _test_bench(ask: Ask) -> list[str]:
         if t.get("test"):
             runs.append(e.key + (f" (tester <@{t['test_by']}>)" if t.get("test_by") else ""))
     return ["### Test bench (officers)",
-            f"{len(puppets)} of {reg.TEST_MAX} puppets · roles " + " · ".join(f"{r} {n}" for r, n in roles.items()) + f" · test runs {', '.join(runs) or 'none'}",
-            "specs: " + (", ".join(f"{k} ×{v}" for k, v in sorted(specs.items())) or "none")]
+            f"{len(puppets)} of {reg.TEST_MAX} puppets · roles " + " · ".join(f"{r} {n}" for r, n in roles.items()) + f" · test runs {', '.join(runs) or 'no test run open'}",
+            "specs: " + (", ".join(f"{k} ×{v}" for k, v in sorted(specs.items())) or "no puppets yet (/gm test seed makes some)")]
 
 
 def _config(ask: Ask) -> list[str]:
@@ -1013,7 +1013,7 @@ def core_lines(ask: Ask) -> list[str]:
 
     def ch(i):
         if not i:
-            return "not set"
+            return "no channel set (/gm config channels)"
         return f"<#{i}>" + (" (not found: deleted, or the bot can't see it)" if known is not None and int(i) not in known else "")
 
     lines = [f"## Guild: {cfg.name} · game profile {cfg.game_profile} · timezone {cfg.timezone} · now {reg.local12(reg.now_local(), '%a %d %b %Y %I:%M %p')} (all times below are guild time)",
@@ -1047,8 +1047,8 @@ def core_lines(ask: Ask) -> list[str]:
         lines.append(f"raid {rid} ({rd.get('name', rid)}): size {rd.get('size')}, slots {', '.join(reg.slot_label(x) for x in rd.get('slots') or []) or 'none (nothing opens)'}, sheet opens {rd['signup_lead_hours']}h before, "
                      f"nudge {'at ' + str(rd['nudge_hours_before']) + 'h before' if rd.get('nudge', True) else 'off'}, locks {rd['lock_hours_before']}h before, confirmations expire {rd['confirm_hours_before']}h before, "
                      f"fill asks time out after {rd['fill_ask_hours']}h, autofill {rd.get('autofill', True)}, open_dm {rd.get('open_dm', False)}, split {rd.get('split_policy')}, weights {rd.get('weights')}, lockout {rd['lockout_days']}d{window}, duration {rd.get('duration_hours')}h, comp {comp}"
-                     + (f", first open {reg.local12(fo)}" if fo else "") + (f", comp targets {over['comp_targets']}" if over.get("comp_targets") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
-                     + (f", overridden: {', '.join(k for k in over if k not in ('comp_targets', 'comp_groups'))}" if any(k not in ("comp_targets", "comp_groups") for k in over) else "")
+                     + (f", first open {reg.local12(fo)}" if fo else "") + (f", aims {over['comp_targets']}" if over.get("comp_targets") else "") + (f", groups {over['comp_groups']}" if over.get("comp_groups") else "")
+                     + (f", changed from the game's default: {', '.join(k for k in over if k not in ('comp_targets', 'comp_groups'))}" if any(k not in ("comp_targets", "comp_groups") for k in over) else "")
                      + (f", notes “{_safe(notes)[:120]}{'…' if len(notes) > 120 else ''}”" if notes else ""))
         for s in reg.schedules(rid):  # when it runs: each schedule in words, its own cadence overrides, its next runs
             own = reg.schedule_def(rid, s["id"])["schedule"]["own"]
@@ -1059,15 +1059,15 @@ def core_lines(ask: Ask) -> list[str]:
 
             cls = schedule_class(s["kind"])
             regs = reg.regulars(series_key(rid, s["id"])) if cls == "recurring" else []
-            lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}, {cls}): {reg.schedule_label(rid, s)}" + (f"; own settings {own}" if own else ("; the raid's cadence" if cls == "recurring" else "; the ad hoc defaults (no reminder, no confirmations, lock 2h before, first come)"))
+            lines.append(f"  schedule {s['id']} “{s['name']}” ({s['kind']}, {cls}): {reg.schedule_label(rid, s)}" + (f"; own settings {own}" if own else ("; the raid's week" if cls == "recurring" else "; the ad hoc defaults (no reminder, no confirmations, lock 2h before, first come)"))
                          + (f"; regulars {len(regs)}" + (f" ({_names((f'{m.display_name} ({c.label})' for m, c in regs), 12)})" if regs and ask.officer else "") if cls == "recurring" else "")
                          + (f"; next runs {', '.join(nxt)}" if nxt else ""))
     if cfg.buffs or cfg.families:
         auras = "; ".join(f"{bid} {ov}" for bid, ov in (cfg.buffs or {}).items())
         fams = "; ".join(f"{fid} {ov}" for fid, ov in (cfg.families or {}).items())
-        lines.append(("aura overrides (guild-learned buff facts): " + (auras or "none") + " · family overrides: " + (fams or "none"))[:800] + (" (ask about auras for all of them)" if len(auras) + len(fams) > 700 else ""))
+        lines.append(("the guild's changes to buffs (guild-learned buff facts): " + (auras or "no buff changed") + " · to stacking families: " + (fams or "no family changed"))[:800] + (" (ask about auras for all of them)" if len(auras) + len(fams) > 700 else ""))
     else:
-        lines.append("aura overrides: none (game defaults)")
+        lines.append("the guild's changes to buffs: no buff or family changed — every aura reads the game's defaults")
     puppets = reg.test_members()
     rs = ask.rs
     test_runs = [e.key for e in rs.live() if (cfg.roster(e.team) or {}).get("test")] if rs is not None else []

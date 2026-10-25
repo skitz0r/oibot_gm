@@ -173,11 +173,11 @@ def test_channel_clear(reg, rs):
 def test_cadence_preset(reg):
     op = ConfigOp(op="raid_set", target="barrow_deeps", field="cadence", value="short")
     d = configops.describe(reg, op)
-    assert d.startswith("raid barrow_deeps cadence: opens 48h") and d.endswith("→ short (opens 48h, nudge 36h, lock 24h, confirm by 12h before)")
+    assert d.startswith("raid barrow_deeps — a run's week: opens 48h") and d.endswith("→ short (opens 48h, nudge 36h, lock 24h, confirm by 12h before)")
     configops.apply(reg, op, "Owner", True)
     rd = reg.raid_def("barrow_deeps")
     assert {f: float(rd[f]) for f in presets.CADENCE_FIELDS} == {f: float(v) for f, v in presets.preset_fields("short").items()}
-    assert "cadence is one of" in configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="cadence", value="lazy"))
+    assert "a run's week is one of the presets: " in configops.describe(reg, ConfigOp(op="raid_set", target="barrow_deeps", field="cadence", value="lazy"))
 
 
 def test_coalesce_saves_settings_that_only_work_together(reg):

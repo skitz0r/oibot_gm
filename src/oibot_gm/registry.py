@@ -784,7 +784,7 @@ def parse_series(key: str) -> tuple[str, str]:
     """'<raid id>:<schedule id>' → (raid id, schedule id)."""
     rid, sep, sid = str(key or "").partition(":")
     if not sep or not rid or not sid:
-        raise RegistryError(f"{key or '?'} isn't a series (raid:schedule)")
+        raise RegistryError(f"{key or '?'} isn't a schedule (raid:schedule)")
     return rid, sid
 INHERIT_WORDS = ("", "inherit", "raid", "default", "same", "clear", "none")  # a cadence override set to one of these goes back to the raid's
 _SCHED_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,15}$")
@@ -998,17 +998,11 @@ def _clabel(c: dict) -> str:
     return f"{c['cls']} ({c['spec']})"
 
 
-def _roles_text(rp: dict) -> str:
-    if not rp or not rp.get("primary"):
-        return "—"
-    return rp["primary"] + (f" (+{', '.join(rp['flex'])})" if rp.get("flex") else "")
-
-
 def diff_member(old: dict | None, new: dict) -> list[str]:
     """Human lines describing what changed between two saved states of a member (for the change log)."""
     who = new["display_name"]
     if old is None:
-        lines = [f"➕ **{who}** joined the pool"]
+        lines = [f"➕ **{who}** registered — one more who could play"]
         for c in new["characters"]:
             lines.append(f"➕ {who}: {'main' if c['is_main'] else 'alt'} {_clabel(c)} · {c['cls']} {c['spec']}" + (f"/{c['offspec']}" if c.get("offspec") else "") + f" · {c['status']}")
         return lines
@@ -1043,7 +1037,7 @@ def diff_member(old: dict | None, new: dict) -> list[str]:
         if not o.get("confirmed_by") and c.get("confirmed_by"):
             ch.append(f"confirmed by {c['confirmed_by']}")
         if sorted(o.get("flex", [])) != sorted(c.get("flex", [])):
-            ch.append("flex " + (", ".join(c.get("flex", [])) or "none"))
+            ch.append(("extra roles " + ", ".join(c["flex"])) if c.get("flex") else "no extra roles")
         if ch:
             lines.append(f"{who} · {_clabel(o)}: " + " · ".join(ch))
     for k, o in oc.items():
@@ -2301,7 +2295,7 @@ class Registry:
             return []
         self.config.loot = over
         self.save_config(f"loot weights: {'; '.join(lines) or 'overrides tidied'} ({by})"[:200])
-        return lines or ["loot weights: overrides tidied (no number changed)"]
+        return lines or ["loot weights: no number changed (the guild's changes tidied)"]
 
     # ---- loot history imports (design §3.1 "Data on-ramp" L07; dual interfaces phase 4, design §5.48)
     def _award_pairs(self, names, item_id, item_name) -> set[tuple[str, str]]:
@@ -3315,10 +3309,10 @@ class Registry:
             if t is None:
                 if slot in cur:
                     cur.pop(slot)
-                    lines.append(f"{words}: back to the derived target")
+                    lines.append(f"{words}: back to the default aim")
                 continue
             if not isinstance(t, dict):
-                raise RegistryError(f"{words}: a target is {{min, max, note}}")
+                raise RegistryError(f"{words}: an aim is {{min, max, note}}")
             try:
                 lo = int(t.get("min") or 0)
                 hi = None if t.get("max") in (None, "") else int(t["max"])
@@ -3326,7 +3320,7 @@ class Registry:
                 raise RegistryError(f"{words}: at least / at most are whole numbers") from None
             note = str(t.get("note") or "").strip() or None
             if lo < 0 or (hi is not None and hi < 0):
-                raise RegistryError(f"{words}: a target can't be negative")
+                raise RegistryError(f"{words}: an aim can't be negative")
             if hi is not None and hi < lo:
                 raise RegistryError(f"{words}: at most {hi} is below at least {lo}")
             if lo > size:
@@ -3335,9 +3329,9 @@ class Registry:
             if role and role in bounds:
                 b = bounds[role]
                 if lo > int(b["max"]):
-                    raise RegistryError(f"at least {_comp_words(slot, lo)} but the raid allows at most {int(b['max'])} — change the bounds first (owner)")
+                    raise RegistryError(f"at least {_comp_words(slot, lo)} but the raid allows at most {int(b['max'])} — change the limits first (owner)")
                 if hi is not None and slot == role and hi < int(b["min"]):
-                    raise RegistryError(f"at most {_comp_words(slot, hi)} but the raid seats at least {int(b['min'])} — change the bounds first (owner)")
+                    raise RegistryError(f"at most {_comp_words(slot, hi)} but the raid takes at least {int(b['min'])} — change the limits first (owner)")
             if note and len(note) > COMP_NOTE_MAX:
                 raise RegistryError(f"{words}: the reason holds {COMP_NOTE_MAX} characters ({len(note)} given)")
             entry = {"min": lo, **({"max": hi} if hi is not None else {}), **({"note": note} if note else {})}
@@ -3356,7 +3350,7 @@ class Registry:
             if run is None and not holder:
                 self.config.raids.pop(key, None)
         name = (run or {}).get("name") or self.raid_def(instance).get("name", instance)
-        self.save_config(f"{key} comp targets: {'; '.join(lines)} (by {by})"[:400])
+        self.save_config(f"{key} aims: {'; '.join(lines)} (by {by})"[:400])
         return [f"{name} · {ln}" for ln in lines]
 
     def _check_raid(self, instance: str) -> None:
@@ -3413,7 +3407,7 @@ class Registry:
         over = self.config.raids.setdefault(instance, {})
         if field == "slots":
             over["slots"] = parse_slots(value)
-            value = ", ".join(self.slot_label(x) for x in over["slots"]) or "none"  # the reply and change log read 12-hour
+            value = ", ".join(self.slot_label(x) for x in over["slots"]) or "no run times"  # the reply and change log read 12-hour
         elif field == "schedules":  # the whole stored list (the wizard's and set_schedule's one write); `default`'s slots go to the raid
             if not isinstance(value, list):
                 raise RegistryError("schedules must be a list of schedules")
@@ -3430,7 +3424,7 @@ class Registry:
                 over["schedules"] = rows
             else:
                 over.pop("schedules", None)
-            value = ", ".join(e["id"] for e in rows) or "none"
+            value = ", ".join(e["id"] for e in rows) or "no schedules of its own"
         elif field in RAID_HOURS_FIELDS:
             try:
                 num = float(value)
@@ -3480,7 +3474,7 @@ class Registry:
                 if t.tzinfo is None:
                     t = t.replace(tzinfo=_Z(self.config.timezone))
                 over["first_open"] = t.isoformat()
-            value = self.local12(over["first_open"]) if over.get("first_open") else "none"  # stored ISO, shown in words
+            value = self.local12(over["first_open"]) if over.get("first_open") else "no start date"  # stored ISO, shown in words
         elif field in ("tank_min", "tank_max", "healer_min", "healer_max", "dps_min", "dps_max"):
             role, bound = field.split("_")
             try:
@@ -3820,8 +3814,8 @@ class Registry:
             return "Nothing to reset: every aura already reads the game defaults."
         parts = [f"{c['buffs']} buff{'' if c['buffs'] == 1 else 's'} ({', '.join(c['buff_names'])})" if c["buffs"] else "",
                  f"{c['families']} famil{'y' if c['families'] == 1 else 'ies'} ({', '.join(c['family_names'])})" if c["families"] else ""]
-        return (f"Overrides on {' and '.join(p for p in parts if p)} go, guild-declared families included. The solver, the cards and the "
-                "board read the defaults from the next run on; nothing already locked is re-solved.")
+        return (f"The guild's changes to {' and '.join(p for p in parts if p)} go, guild-declared families included. From the next run on, the "
+                "groups, the cards and the board use the game's defaults; a roster already locked stays as it is.")
 
     @_config_verb("buffs")
     def clear_aura_overrides(self, by: str, bid: str | None = None) -> str:

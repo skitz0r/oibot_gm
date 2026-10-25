@@ -93,7 +93,7 @@ def test_readiness_gives_the_desired_comp_and_the_over_cap_reason(reg, rs):
     s = state(reg, rs, OWNER, True, "what is the desired comp and are we over cap?")
     over = next(l for l in s.splitlines() if l.startswith("  over cap: ") and "healer" in l)
     assert "cap because Trueshot" in over
-    assert any(l.startswith("  desired comp: ") and "healer" in l and "(officer)" in l for l in s.splitlines())
+    assert any(l.startswith("  aims: ") and "healer" in l and "(officer)" in l for l in s.splitlines())
 
 
 def test_unconfirmed_list_survives_a_long_member_list(reg, rs):

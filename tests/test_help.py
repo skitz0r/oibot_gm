@@ -226,7 +226,7 @@ def test_sections_are_gated_by_keyword(reg, rs):
     assert "### " not in state(reg, rs, reg.test_members()[0].discord_id, False, "what's going on?", extras_full())
     auras = state(reg, rs, OWNER, True, "does windfury totem stack with anything?")
     assert "### Auras" in auras and auras.split("### Auras")[1].split("\n")[2].startswith("windfury_totem"), "what the question names comes first"
-    assert "### Pool readiness" in state(reg, rs, OWNER, True, "are we ready, what comp are we short?")
+    assert "### Who could play, per raid" in state(reg, rs, OWNER, True, "are we ready, what comp are we short?")
     assert "### Test bench" in state(reg, rs, OWNER, True, "how many puppets on the test bench?") and f"of {reg.TEST_MAX} puppets" in state(reg, rs, OWNER, True, "puppets?")
 
 
