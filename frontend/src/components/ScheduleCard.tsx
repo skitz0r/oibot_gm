@@ -74,7 +74,7 @@ export function Schedules({ r, meta, owner, policies, maxRosters, onSaved, onEdi
               {s.kind !== "pickup" && (s.active
                 ? <Text size="xs" c="dimmed">{s.next.length ? `next: ${s.next.join(" · ")}` : "no run coming up"}</Text>
                 : <Text size="xs" c="yellow">{(s.next_if_active || []).length ? `Paused — would next run ${s.next_if_active![0]} · nothing opens` : "Paused · nothing opens"}</Text>)}
-              <Text size="xs" c={Object.keys(s.own).length ? "yellow" : "dimmed"}>{Object.keys(s.own).length ? `own cadence: ${ownWords(s)}` : s.class === "adhoc" ? "the ad hoc defaults: first come, no reminder, no confirmations, locks 2 h before" : "the raid's cadence"}</Text>
+              <Text size="xs" c={Object.keys(s.own).length ? "yellow" : "dimmed"}>{Object.keys(s.own).length ? `its own timing: ${ownWords(s)}` : s.class === "adhoc" ? "the ad hoc defaults: first come, no reminder, no confirmations, locks 2 h before" : "follows the raid's timing"}</Text>
             </Box>
             {owner && (
               <Group gap={4} wrap="nowrap">
@@ -220,7 +220,7 @@ function ScheduleEditor({ r, meta, s, policies, maxRosters, onClose, onSaved, on
           </Group>
         )}
         {d.kind === "pickup" && <Text size="sm" c="dimmed">A template never opens by itself: the Rosters page and /raid open offer it, and the run starts at the day and time picked there.</Text>}
-        <Text size="sm" fw={500} mt="xs">{adhoc ? "Ad hoc" : "Recurring"} cadence <Text span size="xs" c="dimmed">— empty follows {adhoc ? "the ad hoc defaults (it takes only the raid's size, comp and lockout)" : "the raid's rules"}</Text></Text>
+        <Text size="sm" fw={500} mt="xs">{adhoc ? "An ad hoc run's timing" : "A run's week"} <Text span size="xs" c="dimmed">— empty follows {adhoc ? "the ad hoc defaults (it takes only the raid's size, comp and lockout)" : "the raid's rules"}</Text></Text>
         {!adhoc && (meta?.cadence_presets || []).length > 0 && (
           <Group gap={6} wrap="wrap">
             <Text size="xs" c="dimmed">Presets:</Text>

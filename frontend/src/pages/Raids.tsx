@@ -6,17 +6,18 @@ import { DateTimePicker } from "@mantine/dates";
 import { IconPencil } from "@tabler/icons-react";
 import { api, type CompSlot, type Meta, type RaidRule, type Raids, type Readiness } from "../api";
 import { RaidHeader } from "../components/RaidHeader";
-import { Eyebrow, PageTitle, fail } from "../components/Page";
+import { PageTitle, fail } from "../components/Page";
 import { useConfirm } from "../components/ConfirmModal";
 import { Schedules, raidRevs } from "../components/ScheduleCard";
 import { useOpsSave } from "../components/ReviewModal";
 import { useDirty } from "../hooks/useDirty";
 import { CompTargets } from "../components/CompTargets";
+import { Pair, Panel, RunWeek, SeatWeights, Section, WEIGHT_HINT, WEIGHT_WORDS } from "../components/RaidCard";
 
 export function RaidsPage({ meta }: { meta: Meta }) {
   const [data, setData] = useState<Raids | null>(null);
   const [slots, setSlots] = useState<CompSlot[] | null>(null);
-  const editing = useRef(0);  // edit modes open on this page (rules, targets, a schedule editor): live reloads wait for them
+  const editing = useRef(0);  // edit modes open on this page (rules, aims, a schedule editor): live reloads wait for them
   const onEditing = (on: boolean) => { editing.current = Math.max(0, editing.current + (on ? 1 : -1)); };
   const load = () => api.get<Raids>("/api/raids").then(setData).catch(fail);
   useEffect(() => { load(); api.get<Readiness>("/api/readiness").then((r) => setSlots(r.slots)).catch(() => setSlots([])); }, []);
@@ -25,13 +26,29 @@ export function RaidsPage({ meta }: { meta: Meta }) {
   if (!data) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">
-      <PageTitle title="Raids" intro={`Each raid's rules: cadence (signup opens, lock, confirmation deadline), first opening, lockout, desired comp, and how the solver weighs seats — then its schedules, which say when it runs. Amber marks an override of the game defaults. Times are ${data.tz}.`} />
+      <PageTitle title="Raids" intro={`Each raid's rules: a run's week (when its sheet opens, locks and must be confirmed by), the group make-up and who gets a seat when more people join than there are seats — then its schedules, which say when it runs. Amber marks a value changed from the game's default. Times are ${data.tz}.`} />
       {data.raids.map((r) => <RuleCard key={r.id} r={r} meta={meta} slots={slots} owner={data.owner} weightKeys={data.weight_keys} policies={data.split_policies} maxRosters={data.max_rosters} onSaved={load} onEditing={onEditing} />)}
     </Stack>
   );
 }
 
 type Draft = { split_policy: string; nudge: boolean; autofill: boolean; open_dm: boolean; confirm: boolean; nudge_hours_before: number | string; signup_lead_hours: number | string; lock_hours_before: number | string; confirm_hours_before: number | string; fill_ask_hours: number | string; weights: Record<string, number | string>; first_open: string; lockout_days: number | string; duration_hours: number | string; notes: string; comp: Record<string, { min: number | string; max: number | string }> };
+
+/** A raid setting as the reset confirm names it (the reader's words, never the stored key). */
+const SETTING_WORDS: Record<string, string> = {
+  signup_lead_hours: "when the sheet opens", nudge: "the nudge", nudge_hours_before: "when the nudge goes", lock_hours_before: "when it locks",
+  confirm: "confirmations", confirm_hours_before: "the confirm-by time", fill_ask_hours: "how long a fill ask waits", autofill: "filling seats automatically",
+  open_dm: "the DM when the sheet opens", split_policy: "how one night's two groups are made", first_open: "the first run", lockout_days: "the lockout",
+  duration_hours: "how long a run lasts", notes: "the notes", size: "the size", slots: "the run times", schedules: "the schedules", comp_targets: "the officers' aims",
+  comp_groups: "the group layout", name: "the name",
+};
+function settingWords(k: string): string {
+  const w = /^weight_(.+)$/.exec(k);
+  if (w) return `the ${WEIGHT_WORDS[w[1]] || w[1].replace(/_/g, " ")} weight`;
+  const c = /^(tank|healer|dps)_(min|max)$/.exec(k);
+  if (c) return `the ${c[1]} ${c[2] === "min" ? "minimum" : "maximum"}`;
+  return SETTING_WORDS[k] || k.replace(/_/g, " ");
+}
 
 function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onSaved, onEditing }: { r: RaidRule; meta: Meta; slots: CompSlot[] | null; owner: boolean; weightKeys: string[]; policies: string[]; maxRosters: number; onSaved: () => void; onEditing: (on: boolean) => void }) {
   const [editing, setEditingState] = useState(false);
@@ -43,7 +60,6 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
   useDirty(`raid-rules:${r.id}`, editing);
   useEffect(() => setD(toDraft(r)), [r]);
   const over = (k: string) => r.overridden.includes(k);
-  const oc = (k: string) => (over(k) ? "yellow" : undefined);
 
   async function save() {
     setBusy(true);
@@ -54,44 +70,62 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
   async function reset() {
-    const what = r.overridden.map((k) => k.replace(/^weight_/, "weight ").replace(/_/g, " ")).join(", ");
-    if (!(await ask({ title: `Reset ${r.name} to the game defaults?`, message: `${r.overridden.length} override${r.overridden.length === 1 ? "" : "s"} go: ${what}.${r.overridden.includes("slots") || r.overridden.includes("schedules") ? " Its schedules go too: no sheet opens for this raid until you add one again." : ""}${r.live ? ` The ${r.live} live sheet${r.live === 1 ? "" : "s"} keep their times.` : ""}`, confirmLabel: "Reset", color: "red" }))) return;
+    const what = r.overridden.map(settingWords).join(", ");
+    const n = r.overridden.length;
+    if (!(await ask({ title: `Reset ${r.name} to the game's defaults?`, message: `The guild's ${n} change${n === 1 ? "" : "s"} to this raid go back to the game's default${n === 1 ? "" : "s"}: ${what}.${r.overridden.includes("slots") || r.overridden.includes("schedules") ? " Its schedules go too: no sheet opens for this raid until you add one again." : ""}${r.live ? ` The ${r.live} live sheet${r.live === 1 ? "" : "s"} keep their times.` : ""}`, confirmLabel: "Reset", color: "red" }))) return;
     setBusy(true);
     try {
       const x = await saveOps([{ kind: "raid_reset", target: r.id }], { ...raidRevs(r), title: `Reset ${r.name}` });
       if (x?.applied?.length) { setEditing(false); onSaved(); }
     } catch (e) { fail(e); } finally { setBusy(false); }
   }
-  const metaLine = [`${r.size}-player`, r.schedules.length ? `${r.schedules.length} schedule${r.schedules.length === 1 ? "" : "s"}` : "no schedules", r.live ? `${r.live} live` : null, r.opened ? `window ${r.window[0]} → ${r.window[1]}` : r.first_open_local ? `opens ${r.window[0]}` : "no opening date set"].filter(Boolean).join(" · ");
+  const chip = (on: boolean) => (on ? <Badge component="span" size="xs" color="yellow" variant="light" style={{ textTransform: "none" }}>changed</Badge> : null);
+  const metaParts: [string, boolean][] = [
+    [`${r.size}-player`, over("size")],
+    [`${r.lockout_days}-day lockout`, over("lockout_days")],
+    [`${r.duration_hours} h`, over("duration_hours")],
+    [r.first_open_words ? `first run ${r.first_open_words}` : "no first-run date yet — the owner sets it under Edit rules", over("first_open")],
+  ];
+  const metaLine = (
+    <Group component="span" gap={6} wrap="wrap" style={{ rowGap: 2 }}>
+      {metaParts.map(([text, changed], i) => (
+        <Group component="span" key={i} gap={6} wrap="nowrap">{i > 0 && <Text span size="xs" c="dimmed" opacity={0.6}>·</Text>}<Text span size="xs" c="dimmed">{text}</Text>{chip(changed)}</Group>
+      ))}
+    </Group>
+  );
+  const limits = Object.fromEntries(["tank", "healer", "dps"].filter((role) => r.comp[role]).map((role) => [role, { min: r.comp[role].min ?? 0, max: r.comp[role].max ?? null }]));
+  const limitsChanged = ["tank", "healer", "dps"].filter((role) => over(`${role}_min`) || over(`${role}_max`));
+  const split = (SPLIT_LABEL[r.split_policy] || r.split_policy).toLowerCase();
 
   return (
     <Card id={`raid-${r.id}`} style={{ scrollMarginTop: 16 }}>
       <RaidHeader id={r.id} name={r.name} meta={metaLine} right={owner && !editing ? <Button variant="default" size="sm" leftSection={<IconPencil size={15} />} onClick={() => setEditing(true)}>Edit rules</Button> : null} />
       <Box p="md">
         {!editing ? (
-          <Stack gap="md">
-            <Group gap="xl" wrap="wrap">
-              <Fact label="signup opens" value={`${r.signup_lead_hours} h before`} c={oc("signup_lead_hours")} />
-              <Fact label="nudge" value={r.nudge ? `${r.nudge_hours_before} h before` : "off"} c={over("nudge") || over("nudge_hours_before") ? "yellow" : undefined} />
-              <Fact label="fill after lock" value={r.autofill ? "automatic" : "by hand"} c={oc("autofill")} />
-              <Fact label="DM on open" value={r.open_dm ? "on" : "off"} c={oc("open_dm")} />
-              <Fact label="locks" value={`${r.lock_hours_before} h before`} c={oc("lock_hours_before")} />
-              <Fact label="confirm by" value={r.confirm === false ? "no confirmations" : `${r.confirm_hours_before} h before`} c={oc("confirm_hours_before") || oc("confirm")} />
-              <Fact label="fill asks" value={`${r.fill_ask_hours} h to answer`} c={oc("fill_ask_hours")} />
-              <Fact label="split policy" value={SPLIT_LABEL[r.split_policy] || r.split_policy} c={oc("split_policy")} />
-            </Group>
-            <Group gap="xl" wrap="wrap">
-              <Fact label="first opens" value={r.first_open_local ? local12(r.first_open_local) : "—"} c={oc("first_open")} />
-              <Fact label="lockout" value={`${r.lockout_days} days`} c={oc("lockout_days")} />
-              <Fact label="duration" value={`${r.duration_hours} h`} c={oc("duration_hours")} />
-              {(["tank", "healer", "dps"] as const).map((role) => <Fact key={role} label={role} value={`${r.comp[role]?.min ?? "?"}–${r.comp[role]?.max ?? "?"}`} c={over(`${role}_min`) || over(`${role}_max`) ? "yellow" : undefined} />)}
-              <Fact label="seat weights" value={weightKeys.map((k) => `${k.replace("_", " ")} ${r.weights[k] ?? 0}`).join(" · ")} c={weightKeys.some((k) => over(`weight_${k}`)) ? "yellow" : undefined} />
-              {r.notes && <Fact label="notes" value={r.notes} c={oc("notes")} />}
-            </Group>
+          <Stack gap="lg">
+            <Section title="A run's week" hint="when each step happens, counted back from the raid · amber = changed from the game's default">
+              <RunWeek r={r} />
+            </Section>
+            <Pair>
+              <Section title="Group make-up" hint="how many of each role a run takes">
+                <Panel>
+                  <CompTargets meta={meta} rid={r.id} size={r.size} targets={r.comp_targets} bounds={limits} boundsChanged={limitsChanged} slots={slots} rev={r.rev} editable onSaved={onSaved} onEditing={onEditing} />
+                </Panel>
+                {r.comp_groups.length > 0 && <Text size="xs" c="dimmed">Group layout: {r.comp_groups.join(", ")} (set in plain text in the analytics channel)</Text>}
+              </Section>
+              <Section title="Who gets a seat" hint="when more people join than there are seats, these count — a higher number counts more">
+                <Panel>
+                  <SeatWeights r={r} keys={weightKeys} />
+                  <Text size="xs" c={over("split_policy") ? "yellow" : "dimmed"} mt={4}>When one night fills two groups: {split} — {SPLIT_BLURB[r.split_policy] || split}.</Text>
+                </Panel>
+              </Section>
+            </Pair>
+            {r.notes && <Text size="sm" c="dimmed"><Text span inherit fw={600} c={over("notes") ? "yellow" : undefined}>Notes</Text>{"  "}{r.notes}</Text>}
+            {!owner && <Text size="xs" c="dimmed">The owner edits the raid's rules; officers set the aims.</Text>}
           </Stack>
         ) : (
           <Stack gap="sm">
-            <Text size="xs" c="dimmed">The raid's cadence: every schedule below follows it unless the schedule sets its own. Run times are set per schedule.</Text>
+            <Text size="xs" c="dimmed">The raid's timing: every schedule below follows it unless the schedule sets its own. Run times are set per schedule.</Text>
             <Group gap="md" wrap="wrap" align="flex-end">
               <NumberInput label="signup opens (h before)" min={1} value={d.signup_lead_hours} onChange={(v) => setD({ ...d, signup_lead_hours: v })} w={190} />
               <NumberInput label="nudge (h before)" description="one DM to mains who haven't answered" min={0} value={d.nudge_hours_before} onChange={(v) => setD({ ...d, nudge_hours_before: v })} w={170} disabled={!d.nudge} />
@@ -129,17 +163,6 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
             </Group>
           </Stack>
         )}
-        {/* the Group make-up's second tier (design RD-12): officers' TARGETS — what readiness aims for. The bounds above
-            (tank/healer/dps min–max) stay the owner's; any officer edits this table. */}
-        <Box mt="md">
-          <Eyebrow>Desired comp</Eyebrow>
-          <Box mt={4}>
-            <CompTargets meta={meta} rid={r.id} size={r.size} targets={r.comp_targets} slots={slots} rev={r.rev} editable onSaved={onSaved} onEditing={onEditing}
-              bounds={Object.fromEntries(["tank", "healer", "dps"].filter((role) => r.comp[role]).map((role) => [role, { min: r.comp[role].min ?? 0, max: r.comp[role].max ?? r.size }]))} />
-          </Box>
-          {r.comp_groups.length > 0 && <Text size="xs" c="dimmed" mt={4}>Group layout: {r.comp_groups.join(", ")} (set in plain text in the analytics channel)</Text>}
-        </Box>
-        {!owner && <Text size="xs" c="dimmed" mt="sm">The owner edits raid rules; officers edit the desired comp.</Text>}
       </Box>
       <Schedules r={r} meta={meta} owner={owner} policies={policies} maxRosters={maxRosters} onSaved={onSaved} onEditing={onEditing} />
       {confirmDialog}
@@ -149,8 +172,7 @@ function RuleCard({ r, meta, slots, owner, weightKeys, policies, maxRosters, onS
 }
 
 export const SPLIT_LABEL: Record<string, string> = { balanced: "Balanced", first: "Raid one first", rotation: "Rotation" };
-export const SPLIT_BLURB: Record<string, string> = { balanced: "both runs equal: synergy, tanks, healers and seat quality spread evenly", first: "roster 1 gets the best synergy and seat weights; roster 2 is the rest", rotation: "whoever sat out or was in the weaker run last window moves up" };
-const WEIGHT_HINT: Record<string, string> = { rank: "core > raider > trial", main: "main over alt", sat_out: "benched last window", signup_order: "earlier signup", regular: "a regular of the schedule" };
+export const SPLIT_BLURB: Record<string, string> = { balanced: "both made equally strong", first: "the first group is made as strong as it can be; the second takes the rest", rotation: "whoever sat out or was in the weaker group last time moves up" };
 
 function toDraft(r: RaidRule): Draft {
   return { split_policy: r.split_policy, nudge: r.nudge, autofill: r.autofill, open_dm: r.open_dm, confirm: r.confirm !== false, nudge_hours_before: r.nudge_hours_before, signup_lead_hours: r.signup_lead_hours, lock_hours_before: r.lock_hours_before, confirm_hours_before: r.confirm_hours_before, fill_ask_hours: r.fill_ask_hours, weights: { ...r.weights },
@@ -164,24 +186,4 @@ function pickerValue(iso: string): string | null {
 }
 function fromPicker(v: string | null, keep: string): string {
   return v ? v.slice(0, 16).replace(" ", "T") : keep;
-}
-
-/** '2026-12-09T15:00' (guild wall time, no zone) → 'Wed 9 Dec 2026 3:00 PM'. Read field by field: a Date would shift it
- *  into the viewer's zone, and this is guild time. */
-function local12(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
-  if (!m) return iso;
-  const [y, mo, d, h, mi] = m.slice(1).map(Number);
-  const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][new Date(Date.UTC(y, mo - 1, d)).getUTCDay()];
-  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][mo - 1];
-  return `${wd} ${d} ${mon} ${y} ${h % 12 || 12}:${String(mi).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
-}
-
-function Fact({ label, value, c }: { label: string; value: string; c?: string }) {
-  return (
-    <Box style={{ minWidth: 0, maxWidth: "100%" }}>
-      <Text size="xs" c="dimmed" tt="uppercase" style={{ letterSpacing: ".08em" }}>{label}{c && <Badge size="xs" color={c} variant="light" ml={6}>override</Badge>}</Text>
-      <Text size="sm" fw={600} c={c} style={{ wordBreak: "break-word" }}>{value}</Text>
-    </Box>
-  );
 }

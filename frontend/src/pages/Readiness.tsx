@@ -27,7 +27,7 @@ export function ReadinessPage({ meta }: { meta: Meta }) {
   if (!data) return <Text c="dimmed">Loading…</Text>;
   return (
     <Stack gap="lg">
-      <PageTitle title="Readiness" intro="What the guild could field for each raid, and how it stands against the desired comp. Officers set the targets here (or with /roster comp); the bounds the solver seats are the owner's, under the raid's rules on the Raids page." />
+      <PageTitle title="Readiness" intro="What the guild could field for each raid, and how it stands against the aims. Officers set the aims here (or with /roster comp); the limits — the fewest and most of each role a run takes — are the owner's, in the raid's rules on the Raids page." />
       {data.raids.map((r) => <RaidReadiness key={r.raid} r={r} meta={meta} slots={data.slots} onSaved={load}
         onEditing={(on) => { editing.current += on ? 1 : -1; if (!on && editing.current < 0) editing.current = 0; }} />)}
     </Stack>
@@ -43,7 +43,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
    *  worked on early — the same POST /api/raid/<id>/open (rc.open_run with the schedule) as the Raids page and /raid open. */
   async function openEarly(s: Series, f: ForecastRow) {
     const short = Object.entries(f.short).map(([role, k]) => `${k} ${role}${k === 1 ? "" : "s"}`).join(", ");
-    if (!(await ask({ title: `Open ${s.name} · ${f.when} now?`, message: `Its regulars leave it short (${short}). The sheet posts in the signup channel now instead of on its cadence, so everyone can answer from today; nobody is DMed unless the schedule DMs on open.`, confirmLabel: "Open it now" }))) return;
+    if (!(await ask({ title: `Open ${s.name} · ${f.when} now?`, message: `Its regulars leave it short (${short}). The sheet posts in the signup channel now instead of when its schedule would open it, so everyone can answer from today; nobody is DMed unless the schedule DMs on open.`, confirmLabel: "Open it now" }))) return;
     setOpening(f.start);
     try { const x = await api.post<{ message: string }>(`/api/raid/${r.raid}/open`, { start: f.start, schedule: s.id }); ok(x.message); onSaved(); } catch (e) { fail(e); } finally { setOpening(null); }
   }
@@ -68,7 +68,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
         </Group>
 
         <Box>
-          <Group justify="space-between" mb={4}><Eyebrow>Against the desired comp</Eyebrow><Anchor component={Link} to={`/raids#raid-${r.raid}`} size="xs">Group make-up (bounds) on the Raids page</Anchor></Group>
+          <Group justify="space-between" mb={4}><Eyebrow>Against the aims</Eyebrow><Anchor component={Link} to={`/raids#raid-${r.raid}`} size="xs">Limits on the Raids page</Anchor></Group>
           <Table.ScrollContainer minWidth={460}>
             <Table verticalSpacing={4}>
               <Table.Thead><Table.Tr><Table.Th w={50} /><Table.Th w={80}>Have</Table.Th><Table.Th w={90}>Aim</Table.Th><Table.Th>Why</Table.Th></Table.Tr></Table.Thead>
@@ -78,7 +78,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
                     <Table.Td><SlotIcon meta={meta} slot={c.key} label={words(c.key)} /></Table.Td>
                     <Table.Td><Text size="sm" fw={600} c={c.have < c.want ? "red" : c.max !== null && c.have > c.max ? "yellow" : "teal"} style={{ fontVariantNumeric: "tabular-nums" }}>{c.have}</Text></Table.Td>
                     <Table.Td style={{ fontVariantNumeric: "tabular-nums" }}>{c.max !== null && c.max !== c.want ? `${c.want}–${c.max}` : c.want}</Table.Td>
-                    <Table.Td><Group gap={6} wrap="nowrap">{c.source === "officer" && <Badge size="xs" variant="light" color="teal">target</Badge>}<Text size="xs" c="dimmed">{c.note || c.why}</Text></Group></Table.Td>
+                    <Table.Td><Group gap={6} wrap="nowrap">{c.source === "officer" && <Badge size="xs" variant="light" color="teal">officers' aim</Badge>}<Text size="xs" c="dimmed">{c.note || c.why}</Text></Group></Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -88,8 +88,8 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
         </Box>
 
         <Box>
-          <Eyebrow>Desired comp — the officers' targets</Eyebrow>
-          <Box mt={4}><CompTargets meta={meta} rid={r.raid} size={r.size} targets={r.targets} bounds={r.bounds} slots={slots} rev={r.rev} editable onSaved={onSaved} onEditing={onEditing} /></Box>
+          <Group gap="sm" align="baseline" wrap="wrap"><Eyebrow>Group make-up</Eyebrow><Text size="xs" c="dimmed">how many of each role a run takes</Text></Group>
+          <Box mt={4}><CompTargets meta={meta} rid={r.raid} size={r.size} targets={r.targets} bounds={r.bounds} slots={slots} rev={r.rev} editable onReadiness onSaved={onSaved} onEditing={onEditing} /></Box>
           {r.comp_groups.length > 0 && <Text size="xs" c="dimmed" mt={4}>Group layout: {r.comp_groups.join(", ")} (set in plain text)</Text>}
         </Box>
 

@@ -1,0 +1,61 @@
+/* The Raids page's raid card (out/mockups/raidcard): a run's week as a timeline — left to right on a desktop, top to
+   bottom on a phone — and the who-gets-a-seat bars. */
+
+.section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.heading { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px; }
+.panel {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 8px; min-width: 0;
+  background: var(--mantine-color-slate-8); border: 1px solid var(--mantine-color-slate-5);
+}
+.pair { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--mantine-spacing-lg); }
+@media (min-width: 62em) {
+  .pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---- the timeline */
+.week { position: relative; list-style: none; margin: 0; padding: 0; }
+.tick { display: flex; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: var(--mantine-color-teal-4); flex: none; box-shadow: 0 0 0 3px var(--mantine-color-body); }
+.changed .dot { background: var(--mantine-color-yellow-5); }
+.changed .label { color: var(--mantine-color-yellow-5); }
+.end { width: 14px; height: 14px; border-radius: 3px; background: var(--mantine-color-slate-0); flex: none; box-shadow: 0 0 0 3px var(--mantine-color-body); }
+.label { font-size: 13.5px; font-weight: 600; }
+.last .label { font-weight: 700; }
+.when { font-size: 12px; color: var(--mantine-color-dimmed); }
+
+/* phone: top to bottom, the line down the left */
+.week::before {
+  content: ""; position: absolute; left: 6px; top: 7px; bottom: 7px; width: 2px; background: var(--mantine-color-teal-4);
+}
+.tick { position: relative; display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 14px; align-items: center; padding-bottom: 14px; }
+.tick.last { padding-bottom: 0; }
+.text { display: flex; justify-content: space-between; gap: 8px; min-width: 0; }
+
+/* desktop: left to right, counted back from the raid */
+@media (min-width: 48em) {
+  /* evenly spaced: tick i of n sits at i / n of the width (RunWeek sets --i and --n); the raid at the right end */
+  .week { height: 58px; margin: 0 8px; }
+  .week::before { left: 0; right: 0; top: 6px; bottom: auto; width: auto; height: 2px; }
+  .tick { position: absolute; top: 0; left: calc(var(--i) / var(--n) * 100%); transform: translateX(-50%); width: 120px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding-bottom: 0; text-align: center; }
+  .tick.first { transform: none; align-items: flex-start; text-align: left; }
+  .tick.last { left: auto; right: 0; transform: none; align-items: flex-end; text-align: right; }
+  .text { flex-direction: column; justify-content: flex-start; gap: 0; align-items: inherit; }
+}
+
+/* ---- who gets a seat */
+.bar { display: grid; grid-template-columns: 96px minmax(0, 1fr) 20px; align-items: center; gap: 10px; font-size: 13.5px; }
+.track { height: 8px; border-radius: 4px; background: var(--mantine-color-slate-5); overflow: hidden; }
+.fill { display: block; height: 100%; background: var(--mantine-color-teal-4); }
+.fill.changedFill { background: var(--mantine-color-yellow-5); }
+.num { text-align: right; color: var(--mantine-color-dimmed); font-variant-numeric: tabular-nums; }
+.num.changedNum { color: var(--mantine-color-yellow-5); }
+
+/* ---- group make-up rows */
+.mrow { display: flex; flex-wrap: wrap; align-items: center; column-gap: 22px; row-gap: 6px; min-width: 0; }
+.mlabel { width: 110px; flex: none; font-size: 12px; color: var(--mantine-color-dimmed); }
+@media (max-width: 48em) {
+  .mlabel { flex-basis: 100%; width: auto; }  /* a phone: the row's label above its icons, never squeezing them onto two lines */
+}
+.count { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.count.changedCount { color: var(--mantine-color-yellow-5); }
