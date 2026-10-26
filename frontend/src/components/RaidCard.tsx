@@ -128,7 +128,7 @@ export function WhenItRuns({ r, owner }: { r: RaidRule; owner: boolean }) {
         <li className={css.run}>
           <span className={[css.runDot, css.runNext].join(" ")} />
           <span className={css.runWhen}>{r.first_open_words}</span>
-          <span className={css.runWhat}>the first sheet opens — nothing before it</span>
+          <span className={css.runWhat}>the first scheduled sheet opens — its schedules open nothing before it</span>
         </li>
       )}
       {nothing && <li className={css.run}><Text size="sm" c="dimmed">No run coming up: {how}.</Text></li>}

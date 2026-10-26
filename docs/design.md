@@ -3294,8 +3294,8 @@ level chip read AMBER.
 **What.**
 - **When it runs** is the card's first block, from the runs themselves: `GET /api/raids` carries `live_runs` (the raid's
   open or locked runs, never a test run: `{key, when, state, schedule}`, each a link to the Rosters page) and `next_run`
-  (the earliest start across the ACTIVE recurring schedules; a pickup template opens nothing on its own). *The first sheet
-  opens …* shows only until it has; afterwards the anchor lives in Edit rules alone. A raid with none of the three says
+  (the earliest start across the ACTIVE recurring schedules; a pickup template opens nothing on its own). *The first scheduled
+  sheet opens …* (an ad hoc run may be open before it) shows only until it has; afterwards the anchor lives in Edit rules alone. A raid with none of the three says
   *No run coming up* and how to change it. The page also reloads on the `run` topic, so a lock shows without a refresh.
 - **One edit mode per card** (`RuleCard.mode`: rules | aims | schedule): the other two's buttons wait, *Set aims* is a
   button, and the schedule editor opens **in place of its row** (a new one under the list) instead of a modal. The
