@@ -266,7 +266,7 @@ def test_news_policy_loot_sections(reg, rs):
     reg.store.append_jsonl(f"{reg.key}/precedents.jsonl", {"date": "2026-09-15", "item_id": 1, "bot": "A", "human": m.main.name, "reason": "r", "by": "Boss"})
     loot = state(reg, rs, OWNER, True, f"what loot did {m.main.name} get?")
     block = loot.split("### Loot")[1].split("\n### ")[0]
-    assert "Wed 02 Sep" in block and "Tue 15 Sep" in block
+    assert "Wed 2 Sep" in block and "Tue 15 Sep" in block
     assert not re.search(r"\d{4}-\d{2}-\d{2}", block), "the clock rule: no ISO dates in the loot section"
 
 
@@ -285,7 +285,7 @@ def test_a_members_loot_question_shows_their_own_awards_only(reg, rs):
                                                           "reason": "secret council reason", "by": "Mira", "import_id": "r1-d1"})
     s = state(reg, rs, a.discord_id, False, "what loot did I get?")
     block = s.split("### Your loot")[1].split("\n### ")[0].split("\n## ")[0]
-    assert f"Wed 02 Sep · {a.main.label} · Robe of Tests · Gatekeeper · MS" in block
+    assert f"Wed 2 Sep · {a.main.label} · Robe of Tests · Gatekeeper · MS" in block
     for secret in ("Shard of Doom", b.main.label, "secret council reason", "tier", "override", "Voided Helm", "### Loot"):
         assert secret not in block, secret
     o = state(reg, rs, OWNER, True, "any loot precedents?")

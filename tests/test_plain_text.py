@@ -179,11 +179,11 @@ def test_describe_member_and_test_ops(reg, rs):
     assert d(op="dm", member=m.display_name, value="off").startswith(f"{m.display_name}: DMs on → off")
     assert "dm is on | off" in d(op="dm", member=m.display_name, value="maybe")
     reg.add_absence(m.discord_id, "2030-03-01", "2030-03-03", None, "t")
-    assert d(op="absence_clear", member=m.display_name) == f"{m.display_name}: clear absence Fri 01 Mar → Sun 03 Mar — open sheets it had pre-filled re-open for them (a seat freed on a locked run is not handed back)"
-    assert "no absence starting Mon 01 Apr" in d(op="absence_clear", member=m.display_name, start="2030-04-01")
+    assert d(op="absence_clear", member=m.display_name) == f"{m.display_name}: clear absence Fri 1 Mar → Sun 3 Mar — open sheets it had pre-filled re-open for them (a seat freed on a locked run is not handed back)"
+    assert "no absence starting Mon 1 Apr" in d(op="absence_clear", member=m.display_name, start="2030-04-01")
     reg.add_absence(m.discord_id, "2030-06-10", "2030-06-10", None, "t")
     two = d(op="absence_clear", member=m.display_name)  # two upcoming: the refusal names them the way a person reads dates
-    assert "2 upcoming absences (Fri 01 Mar → Sun 03 Mar, Mon 10 Jun) — say which" in two and "2030-" not in two
+    assert "2 upcoming absences (Fri 1 Mar → Sun 3 Mar, Mon 10 Jun) — say which" in two and "2030-" not in two
     reg.clear_absence(m.discord_id, "2030-06-10", "t")
     assert d(op="test", value="seed 5").startswith("test bench: seed 5 puppet member(s) (now 16 of 80")
     assert "compressed Barrow Deeps run" in d(op="test", value="run barrow_deeps")
@@ -333,17 +333,17 @@ def test_absence_clear(reg, rs):
     m = reg.test_members()[0]
     reg.add_absence(m.discord_id, "2030-03-01", "2030-03-03", "holiday", "t")
     bot = FakeBot(rs)
-    with pytest.raises(RegistryError, match="(?i)no absence starting Mon 01 Apr"):
+    with pytest.raises(RegistryError, match="(?i)no absence starting Mon 1 Apr"):
         run(configops.apply_async(reg, ConfigOp(op="absence_clear", member=m.display_name, start="2030-04-01"), "Officer", False, bot=bot))
     out = run(configops.apply_async(reg, ConfigOp(op="absence_clear", member=m.display_name), "Officer", False, bot=bot))
-    assert out == f"{m.display_name}: cleared absence Fri 01 Mar → Sun 03 Mar — sheet re-opened"
+    assert out == f"{m.display_name}: cleared absence Fri 1 Mar → Sun 3 Mar — sheet re-opened"
     assert bot.calls == [("absence_cleared", m.display_name, "2030-03-01", "Officer")]
     assert not reg.members[m.discord_id].absences
     reg.add_absence(m.discord_id, "2030-05-01", None, None, "t")
     reg.add_absence(m.discord_id, "2030-06-01", None, None, "t")
     with pytest.raises(RegistryError, match="2 upcoming absences"):
         configops.apply(reg, ConfigOp(op="absence_clear", member=m.display_name), "Officer", is_owner=False)
-    assert configops.apply(reg, ConfigOp(op="absence_clear", member=m.display_name, start="2030-05-01"), "Officer", is_owner=False) == f"{m.display_name}: cleared absence Wed 01 May"
+    assert configops.apply(reg, ConfigOp(op="absence_clear", member=m.display_name, start="2030-05-01"), "Officer", is_owner=False) == f"{m.display_name}: cleared absence Wed 1 May"
     assert [a.start for a in reg.members[m.discord_id].absences] == ["2030-06-01"]
 
 

@@ -325,7 +325,7 @@ function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: Raid
   // test runs (the test bench's rehearsals and comp sandboxes) live on their own Test tab, never among the real sheets (B9)
   const open = r.open.filter((e) => !e.test), locked = r.locked.filter((e) => !e.test);
   const tests = [...r.open, ...r.locked].filter((e) => e.test);
-  const metaLine = [scheds.length ? scheds.map((s) => (scheds.length > 1 ? `${s.name}: ${s.label}` : s.label)).join(" · ") : "no schedule set", r.opened ? null : r.first_open ? `opens ${r.first_open}` : "no opening date", `${open.length} open · ${locked.length} locked`].filter(Boolean).join(" · ");
+  const metaLine = [scheds.length ? scheds.map((s) => (scheds.length > 1 ? `${s.name}: ${s.label}` : s.label)).join(" · ") : "no schedule yet — add one on the Raids page", r.opened ? null : r.first_open ? `the first sheet opens ${r.first_open}` : "no first opening yet — the owner sets it on the Raids page", `${open.length} open · ${locked.length} locked`].filter(Boolean).join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
   const first = tests.some((e) => e.key === target) ? "test" : locked.some((e) => e.key === target) ? "locked" : r.past.some((e) => e.key === target) ? "history" : open.length ? "open" : locked.length ? "locked" : "upcoming";
   const testBadge = <Tooltip label="a test run: puppets and its tester only — its cards post where it was opened"><Badge variant="light" color="grape" leftSection={<IconFlask size={12} />}>test</Badge></Tooltip>;

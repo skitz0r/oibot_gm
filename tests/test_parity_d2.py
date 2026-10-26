@@ -303,7 +303,7 @@ def test_confirm_all_pending_with_the_list_in_the_officer_context(reg):
 def test_raid_reset_preview_is_in_words(reg):
     reg.set_raid_overrides("barrow_deeps", {"slots": "Tue 19:30, Thu 20:00", "first_open": "2026-12-09T15:00:00-08:00", "lock_hours_before": 12}, "t")
     d = configops.describe(reg, ConfigOp(op="raid_reset", target="barrow_deeps"))
-    assert "Tue 7:30 PM, Thu 8:00 PM" in d and "Wed 09 Dec 2026 3:00 PM" in d and "locks 12 hours before" in d
+    assert "Tue 7:30 PM, Thu 8:00 PM" in d and "Wed 9 Dec 2026 3:00 PM" in d and "locks 12 hours before" in d
     assert "19:30" not in d and "2026-12-09" not in d and "{" not in d
 
 
@@ -703,7 +703,7 @@ def test_the_config_dump_labels_raid_overrides_and_schedule_settings(reg):
     dump = text.split("```yaml\n", 1)[1].split("```", 1)[0]
     assert "first_open" not in dump and "19:30" not in dump, "raid overrides leave the bare dump"
     line = next(l for l in text.splitlines() if l.startswith("- barrow_deeps: ") and "first_open=" in l)
-    assert "first_open=2026-12-09T15:00:00-08:00 (= first open Wed 09 Dec 2026 3:00 PM)" in line
+    assert "first_open=2026-12-09T15:00:00-08:00 (= first open Wed 9 Dec 2026 3:00 PM)" in line
     assert "(= run times Tue 7:30 PM)" in line and "(= locks 12 hours before)" in line
     own = next(l for l in text.splitlines() if "schedule late" in l)
     assert "own settings {" in own and "(= lock hours before: 30 hours before)" in own

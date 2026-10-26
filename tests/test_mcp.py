@@ -179,7 +179,7 @@ def test_members_set_rank_confirm_main(client, reg):
 
 # ---- the tool layer over a mocked bot
 
-RUN = {"key": "bd-1209-1930-2026-12-09", "run": "bd-1209-1930", "raid": "Barrow Deeps", "when": "Wed 09 Dec 7:30 PM", "rel": "in 2 days", "state": "open", "fill_state": None,
+RUN = {"key": "bd-1209-1930-2026-12-09", "run": "bd-1209-1930", "raid": "Barrow Deeps", "when": "Wed 9 Dec 7:30 PM", "rel": "in 2 days", "state": "open", "fill_state": None,
        "size": 20, "counts": {"in": 12, "sub": 2, "out": 1}, "rostered": 0, "n_rosters": 0, "signups": [], "board": {"bank": [], "rosters": []}}
 
 

@@ -3279,6 +3279,47 @@ from a Raid-Helper export (display name = the part before "(Character)" or "/Alt
 script still writes the test bench's `test_roster.yaml`. Real names and ids never enter this repo: the export and the
 rows stay outside it. Tests: `tests/test_member_import.py`, the import test in `tests/test_people_web.py`.
 
+### 5.54 The Raids page reads by its shape (built 2026-10-26)
+
+**Why.** A review of the Raids page against the roster page's standard (2026-10-25) found the behaviour sound and the
+layout drifting: the card said *next: Tue 15 Dec* last, under the schedules, while the Rosters page showed a sheet
+already open for that raid; the rules editor was one flat form of fourteen inputs with the card's amber lost; three edit
+styles (inline rules, a text-link *Set aims*, a schedule modal) could be open at once with three Saves; the same step had
+three names (opens / signup opens / sheet opens; *Who gets a seat* vs *Seat order at lock*; *reminder on* vs *remind the
+unanswered*; the weights named one way on the card and another in each editor); *first opens* showed on a raid that had
+been running for weeks (it is the lockout's anchor); the day carried a leading zero (*Wed 09 Dec*); every card repeated
+the page's hints; the aims editor scrolled sideways on a phone; the dps limit's icon was broken on Readiness and its
+level chip read AMBER.
+
+**What.**
+- **When it runs** is the card's first block, from the runs themselves: `GET /api/raids` carries `live_runs` (the raid's
+  open or locked runs, never a test run: `{key, when, state, schedule}`, each a link to the Rosters page) and `next_run`
+  (the earliest start across the ACTIVE recurring schedules; a pickup template opens nothing on its own). *The first sheet
+  opens …* shows only until it has; afterwards the anchor lives in Edit rules alone. A raid with none of the three says
+  *No run coming up* and how to change it. The page also reloads on the `run` topic, so a lock shows without a refresh.
+- **One edit mode per card** (`RuleCard.mode`: rules | aims | schedule): the other two's buttons wait, *Set aims* is a
+  button, and the schedule editor opens **in place of its row** (a new one under the list) instead of a modal. The
+  editor's drafts feed `RunWeek` (`WeekRule`), so the timeline moves as a value is typed, in Edit rules and in the
+  schedule editor (a step left empty shows what it inherits); a cadence preset lights up while the hours match it.
+- **One name per step**, defined once in `components/RaidCard.tsx` (`HOUR_WORDS` / `HOUR_HINT`, `SWITCH_WORDS` /
+  `SWITCH_HINT`, `WEIGHT_WORDS` / `WEIGHT_HINT`) and read by the card, the rules editor and the schedule editor: *sheet
+  opens · reminder · locks · confirm by · a fill ask waits*; *reminder · fill seats automatically after the lock · DM the
+  regulars when the sheet opens · ask the rostered to confirm*; the editors' sections are the card's (*A run's week ·
+  Group make-up · Who gets a seat · The raid*), with an amber label on a field stored as changed.
+- **The day's leading zero goes** everywhere a person reads (`constants.fmt12`, so Registry.local12, day_label, the
+  Discord cards and the manual all say *Wed 9 Dec*; the hour already had none). The header's facts are amber when
+  changed (the card's one convention, with the tooltip) instead of a *changed* chip; the notes sit under the raid's name;
+  an officer reads *The owner edits the rules; officers set the aims* in the header's corner.
+- **Less said twice**: the page intro is one line with the zone in words (*Times in Los Angeles*); the schedule row is
+  two lines (name · class · regulars — *no regulars yet — name them on the Rosters page* when none; the label with the
+  next runs, each date unbreakable) and a paused one is bordered amber with *Paused — nothing opens* as its line; the
+  aims editor is a grid that stacks on a phone; a limit of *dps* draws the melee + ranged pair everywhere (`SlotIcon`);
+  the Readiness level chip reads *ready / thin / short* with why in the tooltip. The Rosters header's *no schedule set* is
+  *no schedule yet — add one on the Raids page* and its *opens …* is *the first sheet opens …*, the same words as Raids.
+
+Out of scope, named for later: a timeline inside the Discord `/gm config raid` wizard (Discord has no drawing surface;
+its review lines already carry the hours).
+
 ## 6. Architecture
 
 ```mermaid

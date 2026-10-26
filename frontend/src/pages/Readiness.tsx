@@ -12,6 +12,12 @@ import { useRefresh } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
 
 const LEVEL: Record<string, string> = { green: "teal", amber: "yellow", red: "red" };
+/** the level as a word about the guild, not a colour: what it could field from who could play */
+const LEVEL_WORDS: Record<string, string> = { green: "ready", amber: "thin", red: "short" };
+const LEVEL_WHY: Record<string, string> = { green: "who could play covers the raid", amber: "it could field the raid with little to spare", red: "it can't field the raid from who could play" };
+function LevelChip({ level }: { level: string }) {
+  return <Tooltip label={LEVEL_WHY[level] || level}><Badge variant="light" color={LEVEL[level] || "gray"} style={{ textTransform: "none" }}>{LEVEL_WORDS[level] || level}</Badge></Tooltip>;
+}
 
 /** Readiness (officers; design §3.3 Cluster C, RD-12): per raid, the pool against its size, roles with who could cover,
  *  the buffs nobody brings, and the DESIRED COMP — the officers' targets (Edit targets) against what the pool has; then the
@@ -50,7 +56,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
   return (
     <Card>
       <RaidHeader id={r.raid} name={r.name} meta={`${hc.mains} of ${r.size} mains${hc.alts ? ` · ${hc.alts} alts` : ""}${hc.unnamed ? ` · ${hc.unnamed} unnamed` : ""}`}
-        right={<Badge variant="light" color={LEVEL[r.level] || "gray"}>{r.level}</Badge>} />
+        right={<LevelChip level={r.level} />} />
       <Stack gap="md" p="md">
         <Group gap="lg" wrap="wrap" align="center">
           {r.roles.map((x) => {
@@ -100,7 +106,7 @@ function RaidReadiness({ r, meta, slots, onSaved, onEditing }: { r: ReadinessRai
                 <Box key={s.key}>
                   <Group gap="sm" wrap="wrap">
                     <Text size="sm" fw={600}>{s.name}</Text>
-                    {s.level && <Badge size="xs" variant="light" color={LEVEL[s.level] || "gray"}>{s.level}</Badge>}
+                    {s.level && <Tooltip label={LEVEL_WHY[s.level] || s.level}><Badge size="xs" variant="light" color={LEVEL[s.level] || "gray"} style={{ textTransform: "none" }}>{LEVEL_WORDS[s.level] || s.level}</Badge></Tooltip>}
                     {!s.active && <Badge size="xs" variant="light" color="gray">paused</Badge>}
                     <Group gap={8}>{Object.entries(s.need).map(([role, need]) => (
                       <Group key={role} gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={14} title={role} /><Text size="xs" style={{ fontVariantNumeric: "tabular-nums" }}>{s.counts[role] || 0}/{need}</Text></Group>

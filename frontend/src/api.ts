@@ -182,7 +182,10 @@ export interface Rosters { raids: RaidRuns[]; orphans: Sheet[]; people?: Person[
 export interface RaidRule {
   id: string; name: string; size: number; lockout_days: number; duration_hours: number; notes: string; comp: Record<string, { min?: number; max?: number }>;
   slots: string[]; slot_labels?: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number; autofill: boolean; open_dm: boolean; confirm?: boolean;
-  overridden: string[]; comp_targets: Record<string, CompTarget>; comp_groups: string[]; first_open_local: string; /** Registry.local12 words for a person ("Wed 9 Dec 3:00 PM"); first_open_local is the input's machine form */ first_open_words?: string; opened: boolean; window: [string, string]; live: number;
+  overridden: string[]; comp_targets: Record<string, CompTarget>; comp_groups: string[];
+  /** the raid's sheets open or locked now (never a test run) and the next run an active schedule opens — the card's "When it runs" */
+  live_runs?: { key: string; when: string; state: string; schedule: string }[]; next_run?: { when: string; schedule: string } | null;
+  first_open_local: string; /** Registry.local12 words for a person ("Wed 9 Dec 3:00 PM"); first_open_local is the input's machine form */ first_open_words?: string; opened: boolean; window: [string, string]; live: number;
   schedules: Schedule[];
   /** the raid section rev an edit-mode Save sends back as revs["config:raids:<id>"] */
   rev?: string;

@@ -216,7 +216,7 @@ def test_a_utc_export_of_a_late_evening_award_is_the_councils_own_row(reg):
     plain = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-10 05:15:00\n").rows  # TMB style: a time, no zone
     rep = reg.import_awards(plain, "Officer", preview=True)
     assert (rep["new"], rep["duplicates"]) == (0, 1), "no zone: a day either side matches"
-    assert "Wed 09 Dec 2026" in rep["groups"]["duplicates"][0]["why"], "the row it matched, by the day a person reads"
+    assert "Wed 9 Dec 2026" in rep["groups"]["duplicates"][0]["why"], "the row it matched, by the day a person reads"
     far = ledger_csv.parse(f"character,item,received\n{a},Robe of Tests,2026-12-11T20:00:00-08:00\n").rows
     assert reg.import_awards(far, "Officer", preview=True)["new"] == 1, "a zoned moment is exact: two days later is another award"
 
@@ -362,7 +362,7 @@ def test_preview_rows_show_the_day_a_person_reads_never_iso(reg):
     a = reg.test_members()[0].main.label
     rep = reg.import_awards(ledger_csv.parse(f"character,item,received\n{a},Shard of Doom,2026-12-09\n").rows, "Officer", preview=True)
     row = rep["groups"]["new"][0]
-    assert row["received"] == "2026-12-09" and row["received_label"] == reg.day_label("2026-12-09", with_year=True) == "Wed 09 Dec 2026"
+    assert row["received"] == "2026-12-09" and row["received_label"] == reg.day_label("2026-12-09", with_year=True) == "Wed 9 Dec 2026"
     assert "2026-12-09" not in row["received_label"]
 
 

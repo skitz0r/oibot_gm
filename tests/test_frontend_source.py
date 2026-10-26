@@ -152,7 +152,7 @@ def test_character_status_is_one_badge_in_full_words():
 
 
 def test_absence_row_wraps_instead_of_overflowing_the_card():
-    """UI audit: on the Me page's side column the row 'Wed 04 Nov → Fri 06 Nov · vacati… · I'm back' ran past the card's
+    """UI audit: on the Me page's side column the row 'Wed 4 Nov → Fri 6 Nov · vacati… · I'm back' ran past the card's
     edge. The row wraps (the actions drop under the days), the reason chip shrinks with its full text on hover, I'm back
     never shrinks."""
     card = (SRC / "components" / "AbsencesCard.tsx").read_text()

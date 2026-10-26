@@ -1538,7 +1538,9 @@ class Registry:
             d = _d.fromisoformat(str(iso_day))
         except ValueError:
             return str(iso_day)
-        return d.strftime("%a %d %b %Y" if with_year else "%a %d %b")  # same day form as CLOCK12 ('Wed 09 Dec')
+        from .constants import fmt12
+
+        return fmt12(d, "%a %d %b %Y" if with_year else "%a %d %b")  # same day form as CLOCK12 ('Wed 9 Dec')
 
     def span_label(self, start: str, end: str | None) -> str:
         return self.day_label(start) + (f" → {self.day_label(end)}" if end and end != start else "")

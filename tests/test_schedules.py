@@ -5,6 +5,7 @@ health against N rosters), the /gm config Schedules section, plain-text ops, the
 from __future__ import annotations
 
 import asyncio
+import re
 import copy
 import subprocess
 from datetime import date, datetime, timedelta
@@ -481,3 +482,28 @@ def test_raid_open_lists_schedules_by_name_and_opens_a_pickup_template_at_a_pick
     asyncio.run(go2())
     opens = [c for c in bot.calls if c[0] == "open_run_and_post"]
     assert opens[-1][3] == "pug" and opens[-1][2].hour == 21
+
+
+def test_the_raids_route_says_when_a_raid_runs_from_the_runs_themselves(api, reg, rs):
+    """Design §5.54: `live_runs` = the raid's open or locked runs (never a test run), `next_run` = the earliest start of an
+    ACTIVE recurring schedule (a paused one and a pickup template open nothing), `first_open_words` shown by the page only
+    until the first sheet has opened — and every day reads without a leading zero."""
+    c, bot = api
+    opened(reg)
+    raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
+    assert raid["live_runs"] == [] and raid["next_run"] is None and all(not s["slots"] for s in raid["schedules"]), "no run times yet: nothing coming"
+    c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "alt", "fields": {"slots": ["Sat 20:00"], "name": "Alt run"}}, headers=bearer())
+    c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "pug", "fields": {"kind": "pickup", "name": "Pickup"}}, headers=bearer())
+    ok = c.post(f"/api/raid/{RID}/open", json={"schedule": "alt"}, headers=bearer())
+    assert ok.status_code == 200
+    raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
+    live = raid["live_runs"]
+    assert len(live) == 1 and live[0]["state"] == "open" and live[0]["schedule"] == "Alt run" and "-alt-" in live[0]["key"] and bot.opened[-1][2] == "alt"
+    assert not re.search(r"\b0\d [A-Z][a-z]{2}\b", live[0]["when"] + raid["next_run"]["when"]), "no leading zero on a day a person reads"
+    assert raid["next_run"]["schedule"] == "Alt run"
+    c.post("/api/admin/raid/schedule", json={"instance": RID, "id": "wed", "fields": {"slots": ["Wed 20:00"], "name": "Wednesday"}}, headers=bearer())
+    paused = post_confirmed(c, "/api/admin/raid/schedule", {"instance": RID, "id": "alt", "fields": {"active": False}}, headers=bearer())
+    assert paused.status_code == 200, paused.json()
+    raid = next(x for x in c.get("/api/raids", headers=bearer()).json()["raids"] if x["id"] == RID)
+    assert raid["next_run"]["schedule"] == "Wednesday", "a paused schedule opens nothing: the next run is the other schedule's"
+    assert len(raid["live_runs"]) == 1, "the run already open from the paused schedule keeps its sheet"

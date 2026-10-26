@@ -738,7 +738,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     # ---- runs: the officer panel (sheets per raid, the board, lock, confirmations)
     def t12(reg, value) -> str:
-        """'Wed 09 Dec 4:00 PM' in guild time (12-hour clock everywhere the site shows a run time)."""
+        """'Wed 9 Dec 4:00 PM' in guild time (12-hour clock everywhere the site shows a run time)."""
         return reg.local12(value)  # THE formatter (Registry.local12); nothing here composes a clock of its own
 
     def clock12(reg, value) -> str:
@@ -1007,7 +1007,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "series": series,
                         "orphan_regulars": [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec}
                                             for k, m, c in reg.orphan_regulars() if k.partition(":")[0] == rid],
-                        "opened": bool(fo and fo <= now), "first_open": reg.local12(fo, "%a %d %b %Y %I:%M %p") if fo else None,
+                        "opened": bool(fo and fo <= now), "first_open": reg.local12(fo) if fo else None,
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "past_total": len(closed),
                         "upcoming": upcoming, "signup_channel": bool(reg.config.signup_channel_id)})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
@@ -1848,6 +1848,29 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": "action must be seed, run, answer, clear, compose or comp"}, status_code=400)
         return await fn(v, d)
 
+    def live_runs_of(reg, rs, rid: str) -> list[dict]:
+        """The raid's runs open or locked right now, soonest first, in words for the Raids card's "When it runs" block
+        (a test run never: it has its own tab on Rosters): {key, when, state, schedule} — `schedule` = the schedule's name,
+        "ad hoc" for a one-off or a pickup."""
+        out = []
+        for ev in sorted((e for e in rs.live() if e.instance == rid and not e.test), key=lambda e: e.starts_at):
+            sched = next((s for s in reg.schedules(rid) if s["id"] == (ev.schedule or "default")), None)
+            name = "ad hoc" if rc.run_kind(reg, ev) == "adhoc" else (sched.get("name") or sched["id"]) if sched else "its schedule"
+            out.append({"key": ev.key, "when": t12(reg, ev.starts_at), "state": ev.state, "schedule": name})
+        return out
+
+    def next_run_of(reg, rid: str) -> dict | None:
+        """The raid's next scheduled run across its ACTIVE recurring schedules (a pickup template opens nothing on its
+        own): {when, schedule}; None when no active schedule has a run coming."""
+        best = None
+        for s in reg.schedules(rid):
+            if s.get("kind") == "pickup" or not s.get("active", True):
+                continue
+            for t in rc.next_runs_of(reg, rid, s, 1):
+                if best is None or t < best[0]:
+                    best = (t, s.get("name") or s["id"])
+        return {"when": t12(reg, best[0]), "schedule": best[1]} if best else None
+
     # ---- raids: rules per raid (officers read, owner edits)
     @app.get("/api/raids")
     async def raids(request: Request):
@@ -1867,6 +1890,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "first_open_words": reg.local12(fo) if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid),
+                        "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rid),
                         "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)], "rev": reg.config_rev(f"raids:{rid}")})
         return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES),
                 "schedule_kinds": list(SCHEDULE_KINDS), "schedule_cadence": list(SCHEDULE_CADENCE), "max_rosters": MAX_SCHEDULE_ROSTERS}

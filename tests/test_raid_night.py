@@ -605,7 +605,7 @@ def test_open_preview_resolves_dst_nights_and_matches_a_scheduled_run(reg, rs):
 
 
 def test_local12_is_the_one_formatter(reg):
-    assert reg.local12("2026-12-02T04:05:00+00:00") == "Tue 01 Dec 8:05 PM"
+    assert reg.local12("2026-12-02T04:05:00+00:00") == "Tue 1 Dec 8:05 PM"
 
 
 # ---------------------------------------------------------------- the scheduler's missing signup channel

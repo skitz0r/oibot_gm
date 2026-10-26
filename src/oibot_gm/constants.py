@@ -21,8 +21,9 @@ CLOCK12 = "%a %d %b %I:%M %p"
 
 
 def fmt12(dt, fmt: str = CLOCK12) -> str:
-    """'Tue 22 Sep 7:30 PM' for a datetime in its own zone (leading zero stripped). The single implementation behind
-    wizard.fmt12, raid_views.clock12, flows_config.fmt12 and agents.clock12; never `%H:%M` where a person reads."""
+    """'Tue 22 Sep 7:30 PM' / 'Wed 9 Dec 3:00 PM' for a datetime in its own zone: the hour's AND the day's leading zero
+    stripped (a person says "the 9th", never "oh-nine"). The single implementation behind wizard.fmt12,
+    raid_views.clock12, flows_config.fmt12, agents.clock12 and Registry.day_label; never `%H:%M` where a person reads."""
     import re
 
-    return re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", dt.strftime(fmt))
+    return re.sub(r"\b0(\d) ([A-Z][a-z]{2})\b", r"\1 \2", re.sub(r"\b0(\d:\d\d [AP]M)", r"\1", dt.strftime(fmt)))

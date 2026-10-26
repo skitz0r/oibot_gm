@@ -178,7 +178,7 @@ def check_outcome(outcome) -> str:
 
 
 def award_words(reg: Registry, ap: Appeal | None = None, *, character=None, item=None, received=None, boss=None, offspec=None) -> str:
-    """'Kestrel · Robe of Tests · Tue 06 Oct · Gatekeeper · MS' — exactly what the public loot log shows, nothing more."""
+    """'Kestrel · Robe of Tests · Tue 6 Oct · Gatekeeper · MS' — exactly what the public loot log shows, nothing more."""
     if ap is not None:
         character, item, received, boss, offspec = ap.character, ap.item, ap.received, ap.boss, ap.offspec
     parts = [str(character), str(item), reg.day_label(str(received)[:10])] + ([str(boss)] if boss else []) + ["OS" if offspec else "MS"]
@@ -203,7 +203,7 @@ def notice_text(ap: Appeal) -> str:
 
 
 def state_words(reg: Registry, ap: Appeal) -> str:
-    """For the member: 'asked Tue 06 Oct 7:30 PM — the officers have it' / 'answered: The award stands.'"""
+    """For the member: 'asked Tue 6 Oct 7:30 PM — the officers have it' / 'answered: The award stands.'"""
     if ap.state == "resolved":
         return f"answered {reg.local12(ap.resolved_at)}: {OUTCOMES.get(ap.outcome or '', '')}" if ap.resolved_at else f"answered: {OUTCOMES.get(ap.outcome or '', '')}"
     return f"asked {reg.local12(ap.created_at)} — the officers have it"

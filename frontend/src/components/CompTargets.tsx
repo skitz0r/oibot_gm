@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useDirty } from "../hooks/useDirty";
-import { ActionIcon, Anchor, Box, Button, Group, NumberInput, Select, Stack, Table, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Anchor, Box, Button, Group, NumberInput, Select, Stack, Text, TextInput, Tooltip } from "@mantine/core";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import type { CompSlot, CompTarget, Meta } from "../api";
@@ -8,8 +8,10 @@ import { GameIcon } from "./Icons";
 import { useOpsSave } from "./ReviewModal";
 import css from "./raidcard.module.css";
 
-/** A comp slot's icon alone — role, class or spec — with its words in the tooltip (the iconography rule). */
+/** A comp slot's icon alone — role, class or spec — with its words in the tooltip (the iconography rule). "dps" (a limit's
+ *  role, not a game role) is the melee + ranged pair. */
 export function SlotIcon({ meta, slot, label, size = 22 }: { meta: Meta; slot: string; label?: string; size?: number }) {
+  if (slot === "dps") return <RoleIcon meta={meta} role="dps" size={size} />;
   const kind = meta.roles.includes(slot) ? "role" : slot.includes(":") ? "spec" : "class";
   return (
     <Tooltip label={label || slot}>
@@ -85,8 +87,8 @@ export function CompTargets({ meta, rid, size, targets, bounds, boundsChanged, s
   const b = bounds || {};
   const roles = ["tank", "healer", "dps"].filter((role) => b[role]);
   const aims = Object.entries(targets);
-  const setAims = editable && slots ? <Anchor component="button" type="button" size="xs" fw={600} onClick={start}>{aims.length ? "Edit aims" : "Set aims"}</Anchor> : null;
-  const readiness = onReadiness ? <>this page</> : <>the <Anchor component={Link} to="/readiness" inherit>Readiness</Anchor> page</>;
+  const setAims = editable && slots ? <Button size="xs" variant="default" onClick={start}>{aims.length ? "Edit aims" : "Set aims"}</Button> : null;
+  const readiness = onReadiness ? <>this page</> : <Anchor component={Link} to="/readiness" inherit>Readiness</Anchor>;
   const taken = new Set((rows || []).map((r) => r.slot));
   return (
     <Stack gap="xs">
@@ -104,7 +106,7 @@ export function CompTargets({ meta, rid, size, targets, bounds, boundsChanged, s
         <div className={css.mrow}>
           <span className={css.mlabel}>aims <Text span inherit c="dimmed" opacity={0.75}>(officers)</Text></span>
           {aims.length === 0
-            ? <Text size="sm" c="dimmed" style={{ flex: "1 1 220px", minWidth: 0 }}>No aims set yet — {readiness} compares who could play with the limits above and the default aims the raid buffs give.</Text>
+            ? <Text size="xs" c="dimmed" style={{ flex: "1 1 160px", minWidth: 0 }}>No aims yet: {readiness} measures against the limits and the raid buffs' defaults.</Text>
             : aims.map(([slot, t]) => (
               <span key={slot} className={css.count}>
                 <SlotIcon meta={meta} slot={slot} label={`${words(slot)} — ${t.note || "no reason given"}`} />{range(t.min ?? 0, t.max)}
@@ -114,22 +116,20 @@ export function CompTargets({ meta, rid, size, targets, bounds, boundsChanged, s
         </div>
       ) : (
         <Stack gap="xs">
-          {rows.length > 0 && <Table.ScrollContainer minWidth={520}>
-            <Table verticalSpacing={4}>
-              <Table.Thead><Table.Tr><Table.Th w={50} /><Table.Th w={110}>At least</Table.Th><Table.Th w={110}>At most</Table.Th><Table.Th>Why</Table.Th><Table.Th w={40} /></Table.Tr></Table.Thead>
-              <Table.Tbody>
-                {rows.map((r, i) => (
-                  <Table.Tr key={r.slot}>
-                    <Table.Td><SlotIcon meta={meta} slot={r.slot} label={words(r.slot)} /></Table.Td>
-                    <Table.Td><NumberInput size="xs" min={0} max={size} value={r.min} aria-label={`${words(r.slot)}: at least`} onChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, min: v } : x)))} /></Table.Td>
-                    <Table.Td><NumberInput size="xs" min={0} max={size} value={r.max} placeholder="no limit" aria-label={`${words(r.slot)}: at most`} onChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, max: v } : x)))} /></Table.Td>
-                    <Table.Td><TextInput size="xs" value={r.note} maxLength={200} placeholder="why — shown on the Readiness page" aria-label={`${words(r.slot)}: why`} onChange={(e) => { const v = e.currentTarget.value; setRows(rows.map((x, j) => (j === i ? { ...x, note: v } : x))); }} /></Table.Td>
-                    <Table.Td><ActionIcon variant="subtle" color="red" aria-label={`remove the ${words(r.slot)} aim`} onClick={() => setRows(rows.filter((_, j) => j !== i))}><IconTrash size={14} /></ActionIcon></Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>}
+          {rows.length > 0 && (
+            <div className={css.aimgrid}>
+              <span /><span className={css.aimhead}>At least</span><span className={css.aimhead}>At most</span><span className={[css.aimhead, css.aimWhy].join(" ")}>Why</span><span />
+              {rows.map((r, i) => (
+                <Fragment key={r.slot}>
+                  <SlotIcon meta={meta} slot={r.slot} label={words(r.slot)} />
+                  <NumberInput size="xs" min={0} max={size} value={r.min} aria-label={`${words(r.slot)}: at least`} onChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, min: v } : x)))} />
+                  <NumberInput size="xs" min={0} max={size} value={r.max} placeholder="no limit" aria-label={`${words(r.slot)}: at most`} onChange={(v) => setRows(rows.map((x, j) => (j === i ? { ...x, max: v } : x)))} />
+                  <TextInput size="xs" className={css.aimWhy} value={r.note} maxLength={200} placeholder="why — shown on the Readiness page" aria-label={`${words(r.slot)}: why`} onChange={(e) => { const v = e.currentTarget.value; setRows(rows.map((x, j) => (j === i ? { ...x, note: v } : x))); }} />
+                  <Tooltip label={`Remove the ${words(r.slot)} aim`}><ActionIcon variant="subtle" color="red" aria-label={`remove the ${words(r.slot)} aim`} onClick={() => setRows(rows.filter((_, j) => j !== i))}><IconTrash size={14} /></ActionIcon></Tooltip>
+                </Fragment>
+              ))}
+            </div>
+          )}
           {rows.length === 0 && <Text size="sm" c="dimmed">No aims in this draft — add one for a role, class or spec below, or Save to clear them all.</Text>}
           <Group gap="xs" wrap="wrap">
             <Select size="xs" w={240} searchable placeholder="Add an aim for…" value={adding} onChange={setAdding} nothingFoundMessage="No role, class or spec by that name"
