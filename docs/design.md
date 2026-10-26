@@ -3250,6 +3250,35 @@ ids, dict keys, log lines, commit messages or docstrings) and fails on the code'
 `xfail(strict=True)` until the copy sweep lands; `out/copy_findings.md` (`uv run python tests/test_copy.py`) is the sweep
 list. A sweep that renames a label the glossary names (e.g. the *Desired comp* table) changes §1a in the same commit.
 
+### 5.53 A roster from a signup list (built 2026-10-25)
+
+**Why.** A guild that organised on Raid-Helper before the bot arrived has its roster in an event export: who signed up,
+as which spec, with each person's Discord id (`userId`). Waiting for thirty people to `/register` one by one leaves the
+readiness and roster pages empty for weeks; seeding them as puppets (§5.42) gives the officers the shape but not the
+people — a puppet is never the person who later logs in. The user asked (2026-10-25) for the signups to be registered
+as the actual roster.
+
+**What.** `Registry.import_members(rows, by, by_id=, preview=)` registers each row `{discord_id, name, character, cls,
+spec, offspec?, rank?}` as the member with that Discord id — the record `/register` writes, so the person finds it on
+the Me page and in `/me view` — with the character as their main. A record already on file (a sighting, an absence, a
+left-and-returned member) keeps its display name and gains the character only when it has no active one; someone who
+already registered is never changed. Rows that can't be applied are **skipped and named** with the reason — a signup
+list always holds someone already registered, so a refusal of the whole list would make it useless: no or test Discord
+id, a second row for the same person, a class or spec not in the game version, a character name already registered
+(to anyone, case apart) or twice in the list, an alt rank. Everything is checked before anything is written; one
+store batch for the lot. No rank → trial (D25); a `rank` on a row is a decision about a person, so from MCP it needs
+the actor (D8, `people_actor`). Imported characters are unconfirmed: the officer's confirm stays what it means (someone
+checked the character exists). `preview` answers the same `added` / `skipped` lists and writes nothing. Capped at
+`IMPORT_MAX` = 200 rows.
+
+**Surfaces.** `POST /api/members/import` (officers; `message`, `added`, `skipped`, `preview`; one `ops.audited` line
+"imported N member(s) from a signup list") and MCP `import_members(rows, preview)` — a single-surface feature in
+`configops.BY_DESIGN_ONLY` (`member_import`): a signup list is a file, Discord has no file editor, and a person's own
+registration remains `/register` on every surface. `scripts/raidhelper_roster.py --members event.json` writes the rows
+from a Raid-Helper export (display name = the part before "(Character)" or "/Alt"; no rank unless `--rank`); the same
+script still writes the test bench's `test_roster.yaml`. Real names and ids never enter this repo: the export and the
+rows stay outside it. Tests: `tests/test_member_import.py`, the import test in `tests/test_people_web.py`.
+
 ## 6. Architecture
 
 ```mermaid

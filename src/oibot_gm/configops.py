@@ -521,6 +521,9 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "ledger_import": {"surface": "web", "path": "POST /api/loot/import", "reason": "a loot history CSV is a file with a preview of new rows, duplicates and unknown items (MCP import_ledger reads the same route); Discord has no file editor"},
     "ledger_import_undo": {"surface": "web", "path": "POST /api/loot/import/undo", "reason": "undoing an import is picked from the list of earlier imports beside the import itself (MCP undo_import reads the same route); Discord has no file editor"},
     "policy_distil": {"surface": "web", "path": "POST /api/loot/distil", "reason": "Claude's drafted policy sentences are picked from a list beside the precedents each rests on (MCP distil); the pick appends through policy_append, which every surface has"},
+    # §5.53: a signup list is a file — rows with Discord ids — imported with a preview and a skipped list; a person's own
+    # registration stays /register and the Me page on every surface
+    "member_import": {"surface": "web", "path": "POST /api/members/import", "reason": "a signup list (a Raid-Helper export turned into rows by scripts/raidhelper_roster.py) is a file imported with a preview and the skipped rows named (MCP import_members reads the same route); Discord has no file editor, and a person's own registration is /register everywhere"},
 }
 
 

@@ -822,6 +822,13 @@ edits that new family and leaves the one it shared alone.
   number is typed; a long list ends "and N more — the Members page lists them all". `/roster back member:` is their
   *I'm back*: pick the absence, see which sheets re-open, confirm. Test puppets stay out of these lists, the absences
   card and the absences channel. Officers only, checked on every press: lose the officer role mid-screen and the next press is refused.
+- A roster from a signup list: before everyone has registered, an officer can register the people who signed up on
+  Raid-Helper in one go. `scripts/raidhelper_roster.py --members event.json` turns the event's export into rows (each
+  person's Discord id, display name, character, class and spec) and MCP `import_members` (§8b) writes them through the
+  Members page's route: each person gets the record `/register` would have written, keyed by their real Discord id, with
+  that character as their main at rank trial and unconfirmed (confirm and rank them on the Members page as usual).
+  Someone already registered is skipped and named, never changed; so is a character name someone else holds. Preview
+  first: the same lists, nothing written.
 - Regulars: `/roster add` (pick the recurring schedule, then the member — or name them in the command — then the
   character), `/roster remove`, `/roster members` (a schedule's regulars by role, one per line). Same list as the
   Rosters page's *Regulars* tab, plain text and MCP `set_regular` (§4 *Regulars*).
@@ -1376,7 +1383,7 @@ The test bench is on both surfaces: everything below works in Discord (`/gm test
 bench** card on the Members page), and plain text and MCP reach the same steps.
 
 **Puppets.** `/gm test seed` asks how many puppet members to create (5, 10, 20 or the whole bench; fake Discord ids, a
-realistic class mix and ranks, mains confirmed — or, when the host put a `test_roster.yaml` in the guild's data folder, the guild's own signup shape by name; `scripts/raidhelper_roster.py` writes that file from a Raid-Helper event export). `/gm test compose` builds the bench by composition instead: pick a
+realistic class mix and ranks, mains confirmed — or, when the host put a `test_roster.yaml` in the guild's data folder, the guild's own signup shape by name; `scripts/raidhelper_roster.py` writes that file from a Raid-Helper event export, and its `--members` mode writes the rows that register the same people for real, §7). `/gm test compose` builds the bench by composition instead: pick a
 class, then a spec, then how many; repeat for as many specs as you like; the screen keeps the review line ("3 to add ·
 2 to remove") and nothing is written before **Save** (removals take the newest puppets of that spec; one rostered on a
 locked run is refused — cancel that run or clear the bench). On the site the card shows the bench as spec icons with a
@@ -1506,6 +1513,7 @@ news post says can make the review read or write another server.
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |
 | `save_characters` · `set_member` · `set_dm` | character table rows (a row's `flex` list sets its extra roles) · rank / confirm / main · DMs on or off — **a rank or a confirm needs `OIBOT_MCP_ACTOR`** (D8); a main change, a respec, retire and delete don't |
+| `import_members` | a roster from a signup list (§7): rows `{discord_id, name, character, cls, spec, offspec?, rank?}` — `scripts/raidhelper_roster.py --members event.json` writes them from a Raid-Helper export — register each person with the character as their main; `preview=true` lists what would be added and skipped, nothing written; a row's `rank` needs the actor (D8), without one they start as trial |
 | `set_channel` · `set_config` | a bot channel by name, or `clear=true` to stop using one (one of the two; `loot` = the public loot log; refused when the bot can't post there; `preview=true` says what is posted, pinned or forgotten) · timezone (with runs open or locked, preview it, then add `timezone_runs`: `keep` or `move`), ask audience, about, officer roles (the whole list of ids or role NAMES, resolved by the bot; @everyone and bots' own roles refused; `[]` for none), news keywords, `loot_log` on/off, `public` (listed on the homepage and the public schedule, or not), `error_dm_ids` (who gets the error alerts; null = the owner, `[]` = nobody) — one or several as `fields` |
 | `recruitment` · `set_recruitment` · `create_invite` | applications open or closed, the note, the invite, member roles (by name or id) and the questions · change any of them in one write (questions = the whole ordered list; the registration card follows) · a permanent invite to a channel you name, created and saved as the invite link in one step (`preview=true` shows it first) |
 | `list_applications` · `decide_application` | open applications and the last 20 decided (character, schedules, answers, when) · accept or decline one by the applicant's name, character or id, with a note to them |

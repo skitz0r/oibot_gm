@@ -767,6 +767,19 @@ def save_characters(member: str, rows: list[dict], guild: Guild = None) -> str:
 
 
 @mcp.tool()
+def import_members(rows: list[dict], preview: bool = False, guild: Guild = None) -> str:
+    """Seed the roster from a signup list (a Raid-Helper event export: `scripts/raidhelper_roster.py --members event.json`
+    writes the rows). Each row {discord_id, name, character, cls, spec, offspec?, rank?} registers that person with the
+    character as their main — the same record /register writes, keyed by their real Discord id, so they find it on the Me
+    page. Someone already registered is skipped and named (never changed); so is a character name someone else holds, a
+    test id, or a second row for one person. `preview=true` lists what would be added and skipped and writes nothing —
+    show the person that first. A `rank` on a row is a decision about a person (D8): sent as OIBOT_MCP_ACTOR and refused
+    without it; rows without one start as trial. Same route as the Members page's import."""
+    decides = bool(not preview and any(isinstance(r, dict) and r.get("rank") for r in rows))
+    return msg(api(guild).post("/api/members/import", {"rows": rows, "preview": bool(preview)}, actor=decides))
+
+
+@mcp.tool()
 def set_member(member: str, character: str | None = None, rank: str | None = None, confirm: bool | None = None, main: str | None = None, guild: Guild = None) -> str:
     """Officer edits of one member's record: `rank` (trial|raider|core|alt|social — the MEMBER's rank, stored on their main;
     naming an alt as `character` is refused), `confirm=true` (verify `character`, default the main), `main` (character

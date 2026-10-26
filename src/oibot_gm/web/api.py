@@ -1948,6 +1948,30 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return {"message": head + "".join(f"\n{r}" for r in ripple) + "".join(f"\n⛔ {r['display_name']}: {r['error']}" for r in refused_rows),
                 "lines": done, "ripple": ripple, "refused": refused_rows, "preview": preview}
 
+    @app.post("/api/members/import")
+    async def members_import(request: Request):
+        """A roster from a signup list (design §5.53): rows {discord_id, name, character, cls, spec, offspec?, rank?} → the
+        member with that Discord id gets the character as their main (Registry.import_members — the record /register
+        writes). Someone already registered is skipped and named, never changed; so is a character name someone else holds,
+        a test id or a second row for one person: `skipped` carries each with its reason and the rest go in. `preview`
+        answers the same lists and writes nothing. A `rank` on a row from MCP needs the actor (D8). Officers."""
+        v, d = await body(request, officer=True)
+        rows = d.get("rows")
+        if not isinstance(rows, list):
+            return JSONResponse({"error": "rows must be a list"}, status_code=400)
+        preview = bool(d.get("preview"))
+        people_actor(v, [r for r in rows if isinstance(r, dict)], preview)
+        try:
+            res = await asyncio.to_thread(v.reg.import_members, rows, v.name, by_id=v.uid, preview=preview)
+        except Exception as e:  # noqa: BLE001
+            return await refused(v, request, e)
+        n, k = len(res["added"]), len(res["skipped"])
+        skipped = f", {k} skipped" if k else ""
+        head = f"preview — nothing saved: {n} to add{skipped}" if preview else f"{n} member(s) imported from a signup list{skipped}"
+        if not preview and n:
+            await ops_mod.audited(bot.ops, v.reg, v.name, f"imported {n} member(s) from a signup list{skipped}", via=v.via, by_id=v.uid)
+        return {"message": head + "".join(f"\n{line}" for line in res["added"]) + "".join(f"\n⛔ {s['name']}: {s['why']}" for s in res["skipped"]), **res}
+
     @app.get("/api/member")
     async def member_get(request: Request, name: str = ""):
         """One member by display name, character name or id (`?name=`): characters, every absence on file, open asks, DM setting."""

@@ -412,3 +412,28 @@ def test_mcp_application_decisions_need_the_actor_header(w):
     assert r.status_code == 200, r.text
     assert decided and decided[0][3] == "mcp"
     assert "actor=True" in inspect.getsource(ms.decide_application)
+
+
+# ---------------------------------------------------------------- a roster from a signup list (design §5.53)
+
+def test_members_import_is_the_officers_previews_and_needs_the_actor_for_a_rank(w):
+    imp = 310_000_000_000_000_001
+    rows = [{"discord_id": str(imp), "name": "Ash", "character": "Ashgrove", "cls": "Priest", "spec": "Holy"}]
+    assert w.c.post("/api/members/import", json={"rows": rows}, headers=as_user(w, member(w, 0).discord_id)).status_code == 403, "officers only"
+    h = as_user(w, OFFICER)
+    r = w.c.post("/api/members/import", json={"rows": rows, "preview": True}, headers=h)
+    assert r.status_code == 200 and r.json()["preview"] and imp not in w.reg.members and r.json()["message"].startswith("preview")
+    r = w.c.post("/api/members/import", json={"rows": rows}, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["added"] == ["Ash: Ashgrove (Priest Holy, trial)"] and w.reg.members[imp].main.name == "Ashgrove" and w.reg.members[imp].rank == "trial"
+    assert r.json()["message"].startswith("1 member(s) imported from a signup list")
+    r = w.c.post("/api/members/import", json={"rows": rows}, headers=h)
+    assert r.status_code == 200 and r.json()["added"] == [] and r.json()["skipped"][0]["why"] == "already registered as Ashgrove"
+    assert w.c.post("/api/members/import", json={"rows": []}, headers=h).status_code == 400
+    assert w.c.post("/api/members/import", json={"rows": "x"}, headers=h).status_code == 400
+    ranked = [{"discord_id": str(imp + 1), "name": "Bram", "character": "Bramblewick", "cls": "Warrior", "spec": "Protection", "rank": "raider"}]
+    r = w.c.post("/api/members/import", json={"rows": ranked}, headers=H)  # MCP's bearer alone: a rank is a person's decision (D8)
+    assert r.status_code == 403 and imp + 1 not in w.reg.members
+    assert w.c.post("/api/members/import", json={"rows": ranked, "preview": True}, headers=H).status_code == 200, "a preview needs no actor"
+    r = w.c.post("/api/members/import", json={"rows": ranked}, headers=H | {"X-Oibot-Actor": str(OFFICER)})
+    assert r.status_code == 200 and w.reg.members[imp + 1].rank == "raider"

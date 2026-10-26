@@ -4066,6 +4066,79 @@ class Registry:
         self.save(m, f"{display_name} registered {c.label} ({cls} {spec}{', main' if c.is_main else ', alt'})")
         return m, c
 
+    # ---- a roster from a signup list (design §5.53): officers register the people who signed up, by their Discord ids
+    IMPORT_MAX = 200  # a 40-player guild's whole signup list several times over; a guard against a pasted log
+
+    @_member_write
+    def import_members(self, rows: list[dict], by: str, *, by_id: int | None = None, preview: bool = False) -> dict:
+        """Register the people of a signup list: each row {discord_id, name, character, cls, spec, offspec?, rank?} becomes
+        the member with that Discord id (a record already on file keeps its display name) with the character as their
+        main — the record /register writes, so the person finds it on the Me page. Someone who already has an active
+        character is never changed. A row that can't be applied is SKIPPED with its reason, never a refusal of the whole
+        list (a signup list always holds someone already registered): a missing or test id, a second row for one person,
+        a bad class or spec, a character name already registered, an alt rank. Rows without a rank start as trial (D25).
+        `preview` writes nothing. Returns {added: [lines], skipped: [{name, why}], preview}."""
+        if not isinstance(rows, list) or not rows:
+            raise RegistryError("Nothing to import: the list is empty.")
+        if len(rows) > self.IMPORT_MAX:
+            raise RegistryError(f"That list has {len(rows)} rows; one import takes at most {self.IMPORT_MAX}.")
+        adds, skipped, seen_ids, seen_names = [], [], set(), set()
+        for r in rows:
+            if not isinstance(r, dict):
+                raise RegistryError("rows must be objects")
+            label = str(r.get("name") or r.get("character") or r.get("discord_id") or "?").strip()
+            try:
+                raw = str(r.get("discord_id") or "").strip()
+                if not raw.isdigit():
+                    raise RegistryError("no Discord id")
+                uid = int(raw)
+                if uid >= self.TEST_BASE:
+                    raise RegistryError("a test id")
+                if uid in seen_ids:
+                    raise RegistryError("a second row for the same person")
+                name = str(r.get("name") or "").strip()
+                if not name:
+                    raise RegistryError("no display name")
+                character = self.normalise_name(str(r.get("character") or ""))
+                cls = str(r.get("cls") or "")
+                if cls not in self.profile.classes:
+                    raise RegistryError(f"{cls or '?'} isn't a class in this game version")
+                spec = self.validate_spec(cls, str(r.get("spec") or ""))
+                offspec = self.validate_spec(cls, str(r["offspec"])) if r.get("offspec") else None
+                if offspec == spec:
+                    offspec = None
+                rank = str(r.get("rank") or "").strip().lower() or None
+                if rank and rank not in RANKS:
+                    raise RegistryError(f"{rank} isn't a rank ({', '.join(RANKS)})")
+                if rank == "alt":
+                    raise RegistryError("a first character is a main, never an alt")
+                m = self.members.get(uid)
+                if m is not None and m.test:
+                    raise RegistryError("a test puppet")
+                if m is not None and m.active():
+                    raise RegistryError(f"already registered as {', '.join(c.label for c in m.active())}")
+                hit = self.find(character)
+                if hit:
+                    raise RegistryError(f"{character} is already registered to {hit[0].display_name}")
+                if character.lower() in seen_names:
+                    raise RegistryError(f"{character} is already in this list")
+            except RegistryError as e:
+                skipped.append({"name": label, "why": str(e)})
+                continue
+            seen_ids.add(uid)
+            seen_names.add(character.lower())
+            adds.append((uid, name, character, cls, spec, offspec, rank, m.display_name if m else name))
+        lines = [f"{shown}: {character} ({cls} {spec}{'/' + offspec if offspec else ''}, {rank or 'trial'})" for uid, name, character, cls, spec, offspec, rank, shown in adds]
+        if preview or not adds:
+            return {"added": lines, "skipped": skipped, "preview": preview}
+        with self.store.batch(f"{self.key}: {len(adds)} members imported from a signup list by {by}"):
+            for uid, name, character, cls, spec, offspec, rank, _shown in adds:
+                m, c = self.add_character(uid, name, character, cls, spec, offspec, True)
+                if rank:
+                    c.rank = rank
+                self.save(m, f"{m.display_name}: {c.label} imported from a signup list (by {by})")
+        return {"added": lines, "skipped": skipped, "preview": False}
+
     @_member_write
     def set_main(self, discord_id: int, name: str) -> tuple[Member, RegisteredCharacter, RegisteredCharacter | None]:
         m = self.member(discord_id)
