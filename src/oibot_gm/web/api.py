@@ -878,6 +878,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "timeline": {"nudge": t12(reg, soft) if rc.team_setting(t, "reminders") != "none" else None, "lock": t12(reg, hard),
                              "confirm": (clock12(reg, confirm) if confirm.date() == ev.start.astimezone(reg.tz).date() else t12(reg, confirm)) if rc.run_confirms(reg, ev) else None,
                              "locked_at": clock12(reg, ev.locked_at) if ev.locked_at else None},
+                "week": week_json(reg, ev, t, soft, hard, confirm),
                 "signups": [signup_json(s, ev.pins) for s in sorted(ev.signups.values(), key=lambda s: (rc.STATUSES.index(s.status) if s.status in rc.STATUSES else 9, s.updated_at))],
                 # officer-facing: who the bot expects an answer from and hasn't heard from — a recurring run's regulars
                 # (every main while its series has none: `expected_from` says which); an ad hoc run expects nobody
@@ -905,6 +906,24 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "links": links_json(reg, ev), "loot": loot_json(reg, ev),
                 **night_json(reg, rs, ev, t, plan)}
 
+    def week_json(reg, ev, t, soft, hard, confirm) -> list[dict]:
+        """The run's week as the Rosters card's strip (design §5.56): the steps it takes, in time order — sheet opens
+        (when it did), reminder (when the run takes one), locks (when it did, once locked), confirm by (when the rostered
+        are asked) and the raid — each {step (RaidCard.tsx's HOUR_WORDS key, or "raid"), when (words), at (ISO, for the
+        strip's spacing and its now mark), done}. Nothing here is a sentence; the page names the steps."""
+        now = reg.now_local()
+        opened = datetime.fromisoformat(ev.created_at) if ev.created_at else ev.start - timedelta(hours=float(reg.raid_def(ev.instance)["signup_lead_hours"]))
+        locked = datetime.fromisoformat(ev.locked_at) if ev.locked_at else hard
+        steps = [("signup_lead_hours", opened)]
+        if rc.team_setting(t, "reminders") != "none" and soft > opened:
+            steps.append(("nudge_hours_before", soft))
+        steps.append(("lock_hours_before", locked))
+        if rc.run_confirms(reg, ev):
+            steps.append(("confirm_hours_before", confirm))
+        rows = [{"step": k, "when": t12(reg, at), "at": at.isoformat(), "done": k == "signup_lead_hours" or at <= now or (k == "lock_hours_before" and ev.state != "open")}
+                for k, at in sorted(steps, key=lambda x: x[1])]
+        return rows + [{"step": "raid", "when": t12(reg, ev.start), "at": ev.start.isoformat(), "done": ev.start <= now}]
+
     def night_json(reg, rs, ev, t, plan=None) -> dict:
         """The raid-night state the SheetCard renders (dual interfaces phase 2, design §2.5 / B4–B8): every one computed
         from the run, words already written (no clock or sentence composed in the browser)."""
@@ -918,6 +937,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         reopen_no = rc.reopen_refusal(reg, ev) if ev.state in ("done", "cancelled") else None
         return {"lock_error": failed,
                 "fill_state_text": rc.fill_state_text(reg, ev),
+                "short_why": rc.short_why(reg, ev),  # the clause after the short line's role icons (asks out / who hasn't answered)
                 "early_warning": rc.early_warning(reg, rs, ev, plan) if ev.state == "open" else False,
                 "spec_switches": rc.spec_switches(reg, ev) if locked else [],
                 "regulars_not_rostered": rc.regulars_not_rostered(reg, ev) if locked else [],
@@ -992,24 +1012,19 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             past = [ev_json(reg, rs, e, full=False) for e in closed[:HISTORY_PAGE]]  # the rest: GET /api/runs (paged)
             fo = reg.first_open(rid)
             scheds = reg.schedules(rid)
-            many = len([s for s in scheds if s["kind"] != "pickup"]) > 1
-            no_channel = not reg.config.signup_channel_id
-
-            def opens_at(s, start):
-                return start - timedelta(hours=float(reg.schedule_def(rid, s["id"])["signup_lead_hours"]))
-            # each upcoming run: its exact instant (`start_iso`, what the row's Open carries back to the open route) and,
-            # with no signup channel set, `needs_channel` once its sheet is due — the scheduler opens nothing then
-            upcoming = [{"slot": (s["name"] if many else reg.slot_label(start.astimezone(reg.tz).strftime("%a %H:%M"))), "schedule": s["id"], "schedule_name": s["name"], "start": t12(reg, start),
-                         "start_iso": start.isoformat(), "key": rc.event_key(rid, start, s["id"]), "opens": t12(reg, opens_at(s, start)),
-                         "needs_channel": no_channel and opens_at(s, start) <= now}
-                        for s, start in rc.upcoming(reg, rid, now, 24 * rc.OPEN_HORIZON_DAYS) if rc.event_key(rid, start, s["id"]) not in rs.events][:6]
+            # each active schedule's next three runs whatever the horizon (rc.upcoming_rows): the exact instant
+            # (`start_iso`, what the row's Open carries back), `can_open` + `why` (the server's sentence when it can't),
+            # `needs_channel` once its sheet is due and no signup channel can take it — the scheduler opens nothing then
+            upcoming = rc.upcoming_rows(reg, rs, rid, now)
             series = rc.series_outlook(reg, rid)  # one card per recurring series: its regulars (one member per line on the page) against the minimums, level, forecast
             out.append({"id": rid, "name": rd.get("name", rid), "size": int(rd.get("size") or 20), "slots": list(rd["slots"]), "slot_labels": [reg.slot_label(x) for x in rd["slots"]], "lockout_days": int(rd["lockout_days"]),
                         "schedules": [{"id": s["id"], "name": s["name"], "kind": s["kind"], "class": schedule_class(s["kind"]), "label": reg.schedule_label(rid, s), "active": bool(s.get("active", True))} for s in scheds],
                         "series": series,
                         "orphan_regulars": [{"key": k, "label": reg.series_label(k), "uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec}
                                             for k, m, c in reg.orphan_regulars() if k.partition(":")[0] == rid],
-                        "opened": bool(fo and fo <= now), "first_open": reg.local12(fo) if fo else None,
+                        "opened": bool(fo and fo <= now), "first_open": reg.local12(fo) if fo else None, "first_open_words": reg.local12(fo) if fo else "",
+                        # the Raids card's "When it runs" block, from the same fields (design §5.54 / §5.56)
+                        "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "past_total": len(closed),
                         "upcoming": upcoming, "signup_channel": bool(reg.config.signup_channel_id)})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
@@ -1861,17 +1876,12 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             out.append({"key": ev.key, "when": t12(reg, ev.starts_at), "state": ev.state, "schedule": name})
         return out
 
-    def next_run_of(reg, rid: str) -> dict | None:
+    def next_run_of(reg, rs, rid: str) -> dict | None:
         """The raid's next scheduled run across its ACTIVE recurring schedules (a pickup template opens nothing on its
-        own): {when, schedule}; None when no active schedule has a run coming."""
-        best = None
-        for s in reg.schedules(rid):
-            if s.get("kind") == "pickup" or not s.get("active", True):
-                continue
-            for t in rc.next_runs_of(reg, rid, s, 1):
-                if best is None or t < best[0]:
-                    best = (t, s.get("name") or s["id"])
-        return {"when": t12(reg, best[0]), "schedule": best[1]} if best else None
+        own) that has no sheet yet — a run already open or locked is listed above it, a closed one is past: {when,
+        schedule, opens} (`opens` = when its sheet opens on its own); None when no active schedule has a run coming."""
+        rows = [u for u in rc.upcoming_rows(reg, rs, rid) if u["key"] not in rs.events]
+        return {"when": rows[0]["start"], "schedule": rows[0]["schedule_name"], "opens": rows[0]["opens"]} if rows else None
 
     # ---- raids: rules per raid (officers read, owner edits)
     @app.get("/api/raids")
@@ -1892,7 +1902,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         "comp_targets": over.get("comp_targets") or {}, "comp_groups": over.get("comp_groups") or [],
                         "first_open_local": fo.astimezone(z).strftime("%Y-%m-%dT%H:%M") if fo else "", "first_open_words": reg.local12(fo) if fo else "", "opened": bool(fo and fo <= now),
                         "window": [reg.local12(ws), reg.local12(we)], "live": sum(1 for e in rs.live() if e.instance == rid),
-                        "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rid),
+                        "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),
                         "schedules": [schedule_json(reg, rid, s) for s in reg.schedules(rid)], "rev": reg.config_rev(f"raids:{rid}")})
         return {"raids": out, "tz": reg.config.timezone, "owner": v.owner, "weight_keys": list(RAID_WEIGHT_DEFAULTS), "split_policies": list(SPLIT_POLICIES),
                 "schedule_kinds": list(SCHEDULE_KINDS), "schedule_cadence": list(SCHEDULE_CADENCE), "max_rosters": MAX_SCHEDULE_ROSTERS}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Box, Button, Group, SegmentedControl, Stack, Text } from "@mantine/core";
-import { IconRefresh, IconScale, IconSparkles } from "@tabler/icons-react";
+import { ActionIcon, Box, Button, Group, Popover, SegmentedControl, Stack, Text, Tooltip } from "@mantine/core";
+import { IconInfoCircle, IconRefresh, IconScale, IconUsers } from "@tabler/icons-react";
 import { api, type Board, type GroupSummary, type Meta, type Seat, type Sheet } from "../../api";
 import { SPLIT_LABEL } from "../../pages/Raids";
 import { RaidWide } from "../GroupsBlock";
@@ -12,8 +12,11 @@ import css from "../../pages/rosters.module.css";
 
 type Drag = { name: string; from: { r: number; g: number } | null };
 
-/** The board: bank + groups, drag and drop. Before lock it is the layout the lock will use; after lock it is the roster. */
-export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard }) {
+/** The board: bank + groups, drag and drop. Before lock it is the layout the lock will use; after lock it is the roster.
+ *  One ⓘ legend says what the marks mean and how dragging works (never repeated under every card); an open seat is a
+ *  dashed slot with no word. After the lock only the groups with someone in them show, plus one empty group to drop
+ *  into. `onHide`: before the lock the card collapses it back to one line. */
+export function BoardView({ e, meta, busy, onAct, onBoard, onHide }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onHide?: () => void }) {
   const board = e.board!;
   const locked = e.state !== "open";
   const conf = Object.fromEntries((e.confirmations || []).map((c) => [c.display_name, c.answer]));
@@ -104,23 +107,30 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
   return (
     <Box mt="lg">
       <Group justify="space-between" wrap="wrap" mb="xs">
-        <Group gap="sm"><Eyebrow>Roster builder</Eyebrow>{canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}{canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}{saving && <Text size="xs" c="dimmed">saving…</Text>}{locked && <Text size="xs" c="dimmed">the board is the roster: group moves are free, dragging in from the bench asks that person to confirm, dragging out frees the seat</Text>}</Group>
+        <Group gap="sm" wrap="wrap">
+          <Text fw={700}>Board</Text>
+          <Legend locked={locked} />
+          {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} runs this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}</Text>}
+          {canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}
+          {saving && <Text size="xs" c="dimmed">saving…</Text>}
+        </Group>
         {!locked && (
-          <Group gap="xs">
-            <Button size="xs" variant="light" leftSection={<IconSparkles size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
+          <Group gap="xs" wrap="wrap">
+            <Button size="xs" variant="default" leftSection={<IconUsers size={13} />} loading={busy === `auto${e.key}`} onClick={() => onAct(`auto${e.key}`, `/api/run/${e.key}/autofill`)}>Auto-fill empty seats</Button>
             {canSplit && <Button size="xs" variant="default" leftSection={<IconScale size={13} />} onClick={() => setSplitOpen(true)}>{multi ? "Propose splits" : "Propose roster"}</Button>}
-            <Button size="xs" variant="subtle" color="red" ml="md" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={clear}>Clear</Button>
+            <Button size="xs" variant="subtle" color="red" leftSection={<IconRefresh size={13} />} disabled={saving} onClick={clear}>Clear</Button>
+            {onHide && <Button size="xs" variant="subtle" color="gray" onClick={onHide}>Hide the board</Button>}
           </Group>
         )}
       </Group>
       <Box className={css.board}>
         <Box>
           <Group justify="space-between" gap="xs" wrap="wrap">
-            <Eyebrow>Bank · {board.bank.length} unplaced</Eyebrow>
+            <Eyebrow plain>Bank · {board.bank.length} unplaced</Eyebrow>
             <SegmentedControl size="xs" value={bankSort} onChange={pickSort} data={[{ value: "signup", label: "signup" }, { value: "spec", label: "spec" }, { value: "role", label: "role" }]} />
           </Group>
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
-            {board.bank.length === 0 && <Text size="xs" c="dimmed">everyone who joined is placed</Text>}
+            {board.bank.length === 0 && <Text size="xs" c="dimmed">{placed ? "Everyone who joined is placed." : "Nobody joined this run."}</Text>}
             {left.length > 0 && <Text size="xs" fw={700}>Leftovers ({left.length})</Text>}
             {left.map((s) => chip(s, null))}
             {left.length > 0 && locked && reason && <SplitReasonLine meta={meta} r={reason} />}
@@ -128,7 +138,6 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
             {left.length > 0 && rest.length > 0 && <Text size="xs" fw={700} mt={6}>Bench</Text>}
             {rest.map((s) => chip(s, null))}
           </Stack>
-          <Text size="xs" c="dimmed" mt={6}>Drag into a group. Drag a placed name back here to bench them. Dropping on someone swaps.</Text>
         </Box>
         <Stack gap="md" style={{ minWidth: 0 }}>
           {board.rosters.map((r, ri) => (
@@ -136,6 +145,8 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
               {board.rosters.length > 1 && <RosterHeader meta={meta} r={r} />}
               <Box className={css.groups}>
                 {r.groups.map((g, gi) => {
+                  // after the lock: the groups with someone in them, plus the first empty one to drop into
+                  if (locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return null;
                   const sm = groupSummary(r.summary, gi);
                   const overCap = Object.entries(caps).filter(([role, cap]) => g.filter((s) => s.role === role).length > cap).map(([role]) => role);
                   return (
@@ -146,7 +157,7 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
                         const s = g[i];
                         return (
                           <Box key={i} {...zone(id, () => drop({ r: ri, g: gi, i }))} style={{ minHeight: 30, margin: "2px 0", borderRadius: 6, border: `1px dashed ${over === id ? "var(--mantine-color-teal-4)" : s ? "transparent" : "var(--mantine-color-slate-5)"}`, display: "flex", alignItems: "center", paddingLeft: s ? 0 : 8 }}>
-                            {s ? chip(s, { r: ri, g: gi }, conf[s.display_name]) : <Text size="xs" c="dimmed">· open</Text>}
+                            {s ? chip(s, { r: ri, g: gi }, conf[s.display_name]) : <Tooltip label="open seat"><Box style={{ alignSelf: "stretch", flex: 1 }} aria-label="open seat" /></Tooltip>}
                           </Box>
                         );
                       })}
@@ -171,7 +182,33 @@ export function BoardView({ e, meta, busy, onAct, onBoard }: { e: Sheet; meta: M
       </Box>
       {canSplit && <SplitModal e={e} meta={meta} multi={multi} opened={splitOpen} onClose={() => setSplitOpen(false)} onUse={async (layout, strategy) => { await commit(layout.map(() => []).length ? chunk(layout, board.n_groups) : [], strategy); }} />}
       {confirmDialog}
-      <Text size="xs" c="dimmed" mt={6}>Coloured = present in that group · greyed with a red edge = wanted here and the provider sits in another group · plain grey = nobody in the run brings it · teal edge = covered by a raid-wide buff of the same family · totems one per element.</Text>
     </Box>
+  );
+}
+
+/** The board's one legend (ⓘ): what its marks mean and how a drag works — said once, not under every card. */
+function Legend({ locked }: { locked: boolean }) {
+  const row = (mark: React.ReactNode, words: string) => <Group gap={8} wrap="nowrap" align="center"><Box style={{ width: 34, flex: "none", display: "flex", justifyContent: "center" }}>{mark}</Box><Text size="xs">{words}</Text></Group>;
+  const sq = (style: React.CSSProperties) => <Box style={{ width: 20, height: 20, borderRadius: 5, ...style }} />;
+  return (
+    <Popover width={340} position="bottom-start" shadow="md" withinPortal>
+      <Popover.Target>
+        <ActionIcon variant="subtle" color="gray" size="md" aria-label="What the board shows"><IconInfoCircle size={16} /></ActionIcon>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Stack gap={8}>
+          <Text size="sm" fw={700}>What the board shows</Text>
+          {row(<Box style={{ width: 30, height: 16, border: "1px dashed var(--mantine-color-slate-4)", borderRadius: 5 }} />, "an open seat — the lock fills it, or a fill ask after the lock")}
+          {row(sq({ background: "var(--mantine-color-teal-7)" }), "a raid buff someone in the group brings")}
+          {row(sq({ border: "2px solid var(--mantine-color-red-5)", opacity: 0.6 }), "greyed with a red edge: wanted in this group, and the one who brings it is in another")}
+          {row(sq({ border: "2px solid var(--mantine-color-slate-5)", opacity: 0.6 }), "plain grey: nobody in the run brings it (hover for its name)")}
+          {row(sq({ border: "2px solid var(--mantine-color-teal-4)", opacity: 0.8 }), "teal edge: covered by a raid-wide buff of the same family")}
+          <Text size="xs" c="dimmed">Totems count one per element.</Text>
+          <Text size="xs" c="dimmed">{locked
+            ? "The board is the roster: moving someone between groups is free, dragging someone in from the bank asks them to confirm, dragging someone out frees their seat."
+            : "Drag a name into a group, or back to the bank to take it out again; dropping on someone swaps the two."}</Text>
+        </Stack>
+      </Popover.Dropdown>
+    </Popover>
   );
 }

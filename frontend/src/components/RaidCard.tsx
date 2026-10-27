@@ -1,6 +1,7 @@
 import { Text, Tooltip } from "@mantine/core";
 import { Link } from "react-router-dom";
-import type { RaidRule } from "../api";
+import type { LiveRun, NextRun, RaidRule } from "../api";
+import type { WeekStep } from "./board/types";
 import css from "./raidcard.module.css";
 
 /** The raid card's pieces (the Raids page; mockup out/mockups/raidcard): a section heading with its one-line hint, when
@@ -101,29 +102,36 @@ function weekSentence(r: WeekRule): { text: string; changed: boolean }[] {
   ];
 }
 
+/** What WhenItRuns reads: the Raids card's raid, or the Rosters page's (both carry the same server fields). */
+export type RunsOf = { live_runs?: LiveRun[]; next_run?: NextRun | null; first_open_words?: string; opened: boolean; schedules?: unknown[] };
+
+/** A live run's state in the block's words (design §5.54) — the Rosters card's chip says the same. */
+export const RUN_STATE_WORDS: Record<string, string> = { open: "sheet open for signup", locked: "locked — the roster stands" };
+
 /** When the raid runs, from the runs themselves (design §5.54): the sheets open or locked right now, then the next run
  *  its schedules will open, then — before the first sheet ever opens — when that is. A raid with none of these says so
- *  and how to change it. */
-export function WhenItRuns({ r, owner }: { r: RaidRule; owner: boolean }) {
+ *  and how to change it. The Rosters page (design §5.56) passes `here` (a live run's time jumps to its card on this
+ *  page), `upcoming` (its rows with Open, in place of the next-run line) and `nothing` (its own way out). */
+export function WhenItRuns({ r, owner, here = false, upcoming, nothing: nothingText }: { r: RunsOf; owner: boolean; here?: boolean; upcoming?: React.ReactNode; nothing?: React.ReactNode }) {
   const live = r.live_runs || [];
-  const nothing = !live.length && !r.next_run && !(r.first_open_words && !r.opened);
-  const how = r.schedules.length ? "its schedules are paused or have no run coming" : owner ? "add a schedule below, or open a run from the Rosters page" : "the owner adds a schedule below; an officer can open a run from the Rosters page";
+  const nothing = !live.length && !(upcoming ?? r.next_run) && !(r.first_open_words && !r.opened);
+  const how = (r.schedules || []).length ? "its schedules are paused or have no run coming" : owner ? "add a schedule below, or open a run from the Rosters page" : "the owner adds a schedule below; an officer can open a run from the Rosters page";
   return (
     <ul className={css.runs}>
       {live.map((e) => (
         <li key={e.key} className={css.run}>
           <span className={[css.runDot, e.state === "locked" ? css.runLocked : css.runOpen].join(" ")} />
-          <Link to={`/rosters#run-${e.key}`} className={css.runWhen}>{e.when}</Link>
-          <span className={css.runWhat}>{e.state === "locked" ? "locked — the roster stands" : "sheet open for signup"} · {e.schedule}</span>
+          {here ? <a href={`#run-${e.key}`} className={css.runWhen}>{e.when}</a> : <Link to={`/rosters#run-${e.key}`} className={css.runWhen}>{e.when}</Link>}
+          <span className={css.runWhat}>{RUN_STATE_WORDS[e.state] || RUN_STATE_WORDS.locked} · {e.schedule}</span>
         </li>
       ))}
-      {r.next_run && (
+      {upcoming ?? (r.next_run && (
         <li className={css.run}>
           <span className={[css.runDot, css.runNext].join(" ")} />
           <span className={css.runWhen}>{r.next_run.when}</span>
-          <span className={css.runWhat}>next run · {r.next_run.schedule}</span>
+          <span className={css.runWhat}>next run · {r.next_run.schedule}{r.next_run.opens ? ` — its sheet opens ${r.next_run.opens}` : ""}</span>
         </li>
-      )}
+      ))}
       {r.first_open_words && !r.opened && (
         <li className={css.run}>
           <span className={[css.runDot, css.runNext].join(" ")} />
@@ -131,8 +139,46 @@ export function WhenItRuns({ r, owner }: { r: RaidRule; owner: boolean }) {
           <span className={css.runWhat}>the first scheduled sheet opens — its schedules open nothing before it</span>
         </li>
       )}
-      {nothing && <li className={css.run}><Text size="sm" c="dimmed">No run coming up: {how}.</Text></li>}
+      {nothing && <li className={css.run}><Text size="sm" c="dimmed">{nothingText ?? <>No run coming up: {how}.</>}</Text></li>}
     </ul>
+  );
+}
+
+/** A step of a run's week once it has happened (the run card's strip); the rest read HOUR_WORDS. */
+export const DONE_WORDS: Record<string, string> = { signup_lead_hours: "sheet opened", nudge_hours_before: "reminder", lock_hours_before: "locked", confirm_hours_before: "confirm by" };
+
+/** One run's week as a strip (the Rosters card, design §5.56): the steps it takes in time order, evenly spaced, done in
+ *  teal and the rest grey, the raid a square at the end, and a "now" mark between the steps it falls between. Every
+ *  date comes in words from the server (ev_json `week`); the browser only places the mark. */
+export function RunStrip({ steps }: { steps: WeekStep[] }) {
+  if (steps.length < 2) return null;
+  const n = steps.length;
+  const at = steps.map((s) => Date.parse(s.at));
+  const t = Date.now();
+  let now: number | null = null;
+  if (t < at[0]) now = 0;
+  else for (let i = 0; i < n - 1; i++) {
+    if (at[i] <= t && t < at[i + 1]) { now = (i + (t - at[i]) / Math.max(1, at[i + 1] - at[i])) / (n - 1); break; }
+  }
+  return (
+    <div className={css.strip} aria-label="the run's week">
+      <span className={css.stripLine} />
+      <span className={css.stripDone} style={{ width: `${(now ?? (t >= at[n - 1] ? 1 : 0)) * 100}%` }} />
+      {steps.map((s, i) => {
+        const raid = s.step === "raid";
+        const label = raid ? "raid" : (s.done ? DONE_WORDS[s.step] : HOUR_WORDS[s.step]) || s.step;
+        return (
+          <Tooltip key={s.step} label={raid || !HOUR_HINT[s.step] ? s.when : `${s.when} · ${HOUR_HINT[s.step]}`}>
+            <span className={[css.step, i === 0 ? css.stepFirst : "", i === n - 1 ? css.stepLast : "", s.done ? "" : css.todo].join(" ")} style={{ left: `${(i / (n - 1)) * 100}%` }}>
+              <span className={raid ? css.stepEnd : css.stepDot} />
+              <span className={css.stepLabel}>{label}</span>
+              <span className={css.stepWhen}>{s.when}</span>
+            </span>
+          </Tooltip>
+        );
+      })}
+      {now !== null && <span className={css.now} style={{ left: `${now * 100}%` }}><span className={css.nowWord}>now</span><span className={css.nowBar} /></span>}
+    </div>
   );
 }
 

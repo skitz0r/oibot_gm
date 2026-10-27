@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Switch, Text, Textarea, Tooltip } from "@mantine/core";
+import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { IconBell, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { api, type Meta, type Person, type Sheet, type Signup } from "../../api";
@@ -12,13 +12,17 @@ import { BoardPreview } from "./BoardPreview";
 import { BoardView } from "./BoardView";
 import { FillModal } from "./FillModal";
 import { TellTheBot } from "../TellTheBot";
-import { Aura, RoleCounts, SeatLine, runName, type Act, type OnBoard } from "./shared";
+import { ANSWER, RoleCounts, SeatLine, runName, type Act, type OnBoard } from "./shared";
+import { RUN_STATE_WORDS, RunStrip } from "../RaidCard";
 import type { LockPreview, NightSheet } from "./types";
 
-/** One sheet: header + timeline, who joined by class, bench / no-thanks rows, the board, the detail accordion. Raid-night
- *  state (dual interfaces phase 2) comes as words from the server: the lock failure, the fill state, asks waiting on the
- *  site, the D3 banner, the spec switches and regulars left out — nothing here composes a sentence the bot didn't. */
-/** `badge`: an extra badge beside the state (the Rosters page's Test tab passes the test badge). */
+/** One live run's card (design §5.56), in the order a raid leader reads it: the time, its state and kind; the run's week
+ *  as a strip with a now mark; one headcount with its owner (joined before the lock, rostered after) and the role counts;
+ *  one short line (role icon + number + why, from the server); before the lock who joined by class, the other answers in
+ *  one line and the board collapsed to one line until it's opened; after the lock the board alone — it is the roster.
+ *  Raid-night state (dual interfaces phase 2) comes as words from the server: the lock failure, the fill state, asks
+ *  waiting on the site, the D3 banner, the spec switches and regulars left out — nothing here composes a sentence the
+ *  bot didn't. `badge`: an extra badge beside the state (the Rosters page's Test tab passes the test badge). */
 export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badge, people }: { e: Sheet; meta: Meta; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void>; badge?: ReactNode; people?: Person[] }) {
   const e = sheet as unknown as NightSheet;
   const locked = e.state !== "open";
@@ -31,15 +35,23 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const conf = e.confirmations || [];
   const counts = { yes: conf.filter((c) => c.answer === "yes").length, pending: conf.filter((c) => c.answer === null).length, no: conf.filter((c) => c.answer === "no" || c.answer === "expired").length };
   const shortRoles = n ? Object.entries(n.roles).filter(([, k]) => k > 0) : [];
-  const isShort = !!n && (n.headcount > 0 || shortRoles.length > 0);
+  // after the lock a freed seat the roles don't account for is a bare number (seats); before it the headcount is the "N / size joined" itself
+  const extraSeats = locked && n ? Math.max(0, n.headcount - shortRoles.reduce((x, [, k]) => x + k, 0)) : 0;
+  const isShort = shortRoles.length > 0 || extraSeats > 0;
+  const anyone = locked || joined.length > 0;
   const [ask, confirmDialog] = useConfirm();
   const [fillOpen, setFillOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [boardOpen, setBoardOpenState] = useState<boolean>(() => { try { return localStorage.getItem(`oibot.board.${e.key}`) === "1"; } catch { return false; } });
+  const setBoardOpen = (v: boolean) => { setBoardOpenState(v); try { localStorage.setItem(`oibot.board.${e.key}`, v ? "1" : "0"); } catch { /* per-viewer convenience only */ } };
   const seatsN = (e.plan?.seats || []).length;  // seats the planner works on (before lock: the tank/healer minimums)
   const asksN = (e.plan?.seats || []).filter((st) => st.options.length).length;
   const name = runName(e as unknown as Sheet);
   const hints = (e.health?.roles || []).filter((r) => r.need && r.have < r.need && r.hint);
+  const placed = (e.board?.rosters || []).reduce((k, r) => k + r.groups.reduce((m, g) => m + g.length, 0), 0);
+  const missing = e.health?.no_provider_buffs || [];
+  const bench = signups.filter((s) => s.status === "sub"), outs = signups.filter((s) => s.status === "out"), away = e.absences || [];
 
   // the row ⋮ menu (design B5): the member's filtered on-behalf list from the server — the same one /raid set offers
   const menu = (s: Signup) => <MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload} />;
@@ -60,49 +72,67 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   // one Fill button in every state (design B7): before lock the planner's suggestions, after lock the seats to fill
   const fillTip = !locked
     ? (seatsN ? `${seatsN} seat${seatsN === 1 ? "" : "s"} short of the tank/healer minimums — ${asksN} suggestion${asksN === 1 ? "" : "s"}; nothing is sent until you press Send` : "the tank/healer minimums are covered by who joined and the regulars yet to answer")
-    : (isShort ? `${n!.headcount + shortRoles.reduce((x, [, k]) => x + k, 0)} short — ${asksN} suggestion${asksN === 1 ? "" : "s"}` : "every seat is taken");
+    : (isShort ? `${(n?.headcount || 0)} short — ${asksN} suggestion${asksN === 1 ? "" : "s"}` : "every seat is taken");
+  const facts = [e.kind === "adhoc" ? "first come, first rostered" : e.series_name, locked ? e.rel : e.timeline ? `locks ${e.timeline.lock}` : null].filter(Boolean).join(" · ");
 
   return (
-    <Box id={`run-${e.key}`} p="md" style={{ border: `1px solid ${locked ? "var(--mantine-color-yellow-5)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, scrollMarginTop: 16 }}>
-      <Group justify="space-between" wrap="wrap" align="flex-start">
-        <Box>
-          <Group gap="sm">
-            <Text size="lg" fw={700}>{e.when}</Text>
-            {badge}
-            {locked && <Badge variant="light" color="yellow">locked</Badge>}
-            {e.kind === "adhoc" && <Tooltip label="first come, first rostered · no regulars · no reminder"><Badge variant="light" color="blue">ad hoc</Badge></Tooltip>}
-            {e.kind === "recurring" && e.series_name && <Text size="xs" c="dimmed">{e.series_name}</Text>}
-            {e.early_warning && <Tooltip label="the regulars can't cover a tank or healer minimum — see the suggestions"><Badge variant="light" color="red">early warning</Badge></Tooltip>}
-            {e.autofill_paused && <Tooltip label={`autofill paused${e.autofill_paused_by ? ` by ${e.autofill_paused_by}` : ""} — your Fill still sends`}><Badge variant="light" color="gray">autofill paused</Badge></Tooltip>}
-          </Group>
-          {e.timeline && (
-            <Text size="xs" c="dimmed" mt={2}>
-              🕒 {e.rel}{!locked && e.timeline.nudge && <> · ❗ nudges {e.timeline.nudge}</>} · 🔒 {locked ? "locked" : `locks ${e.timeline.lock}`}{e.timeline.confirm ? ` · ✓ confirm by ${e.timeline.confirm}` : " · no confirmations: Join is the commitment"}
-            </Text>
-          )}
+    <Box id={`run-${e.key}`} p="md" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 10, scrollMarginTop: 16, background: "var(--mantine-color-slate-8)" }}>
+      <Group justify="space-between" wrap="wrap" align="center" gap="xs">
+        <Group gap="sm" wrap="wrap" align="center" style={{ minWidth: 0 }}>
+          <Text size="lg" fw={800}>{e.when}</Text>
+          {badge}
+          {locked
+            ? <Badge variant="light" color="gray" tt="none" leftSection={<IconLock size={12} />}>{RUN_STATE_WORDS.locked}</Badge>
+            : <Badge variant="light" color="teal" tt="none">open for signup</Badge>}
+          {e.kind === "adhoc" && <Badge variant="light" color="gray" tt="none">ad hoc</Badge>}
+          {e.early_warning && <Tooltip label="the regulars can't cover a tank or healer minimum — see the suggestions"><Badge variant="light" color="red" tt="none">early warning</Badge></Tooltip>}
+          {e.autofill_paused && <Tooltip label={`autofill paused${e.autofill_paused_by ? ` by ${e.autofill_paused_by}` : ""} — your Fill still sends`}><Badge variant="light" color="gray" tt="none">autofill paused</Badge></Tooltip>}
+          {facts && <Text size="sm" c="dimmed">{facts}</Text>}
+        </Group>
+        <Group gap={8} wrap="wrap">
           <RunLinks e={e} />
-          {e.live && <Button size="compact-xs" variant="subtle" mt={2} leftSection={<IconMessageCircle size={12} />} onClick={() => setTellOpen((x) => !x)}>Tell the bot about this run</Button>}
-        </Box>
-        <Group gap={4}>
-          {e.live && people && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
+          {e.live && <Button size="compact-xs" variant="subtle" color="gray" leftSection={<IconMessageCircle size={12} />} onClick={() => setTellOpen((x) => !x)}>Tell the bot about this run</Button>}
           <RunMenu e={e} busy={busy} onRemind={remind} onPause={pause} onEnd={endNow} onRepost={() => setRepostOpen(true)} />
         </Group>
       </Group>
 
       {tellOpen && <Box mt="sm"><TellTheBot scope={`run:${e.key}`} guild={meta.guild_key} prefill={`${name}: `} placeholder={`Ask or tell the bot about ${name}…`} autoFocus /></Box>}
       {e.lock_error && <Alert color="red" variant="light" mt="sm" p="xs"><Text size="sm">{e.lock_error}</Text></Alert>}
+      {e.live && e.week && <Box mt="md"><RunStrip steps={e.week} /></Box>}
 
-      <Group gap="xs" mt="sm" align="baseline">
-        <Text fw={700} style={{ fontSize: 22, fontVariantNumeric: "tabular-nums" }}>{locked ? e.rostered : joined.length}<Text span c="dimmed" fw={500} size="sm"> / {e.size}{e.n_rosters > 1 ? ` × ${e.n_rosters}` : ""}</Text></Text>
-        {locked && e.confirms !== false && <Group gap={6} ml="sm"><Badge variant="light" color="teal">✓ {counts.yes}</Badge><Badge variant="light" color="gray">⏳ {counts.pending}</Badge><Badge variant="light" color="red">✗ {counts.no}</Badge></Group>}
-      </Group>
-      <Group gap="md" mt={4}>
-        <RoleCounts meta={meta} counts={roles} size={18} />
-        {(e.double_booked || []).length > 0 && <Tooltip label={e.double_booked!.join(", ")}><Badge variant="light" color="yellow">double-booked {e.double_booked!.length}</Badge></Tooltip>}
-        {(e.health?.no_provider_buffs || []).length > 0 && (
-          <Group gap={4} aria-label="party buffs nobody brings">{e.health!.no_provider_buffs!.map((b) => <Aura key={b.id} a={b} missing />)}</Group>
+      {/* one headcount with its owner, the role counts, one short line, Answer for someone… beside the joiners */}
+      <Group gap="md" mt="sm" align="center" wrap="wrap">
+        <Text fw={800} style={{ fontSize: 26, fontVariantNumeric: "tabular-nums", lineHeight: 1.2 }}>{locked ? e.rostered : joined.length}<Text span c="dimmed" fw={500} size="md"> / {e.size}{e.n_rosters > 1 ? ` × ${e.n_rosters}` : ""} {locked ? "rostered" : "joined"}</Text></Text>
+        {anyone && <RoleCounts meta={meta} counts={roles} size={18} />}
+        {anyone && isShort && (
+          <Group gap={6} wrap="wrap" align="center">
+            <Text size="sm" fw={700} c="red.5">short</Text>
+            {extraSeats > 0 && <Tooltip label={`${extraSeats} open seat${extraSeats === 1 ? "" : "s"}`}><Text size="sm" fw={700} c="red.5" style={{ fontVariantNumeric: "tabular-nums" }}>{extraSeats}</Text></Tooltip>}
+            {shortRoles.map(([role, k]) => (
+              <Group key={role} gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={16} title={role} /><Text size="sm" fw={700} c="red.5" style={{ fontVariantNumeric: "tabular-nums" }}>{k}</Text></Group>
+            ))}
+            {e.short_why && <Text size="sm" c="dimmed">— {e.short_why}</Text>}
+          </Group>
         )}
+        {!anyone && <Text size="sm" c="dimmed">Nobody has joined yet — the sheet is in Discord, or answer for someone here.</Text>}
+        {(e.double_booked || []).length > 0 && <Tooltip label={e.double_booked!.join(", ")}><Badge variant="light" color="gray" tt="none">double-booked {e.double_booked!.length}</Badge></Tooltip>}
+        {!locked && joined.length > 0 && missing.length > 0 && (
+          <Tooltip label={`Nobody in the run brings: ${missing.map((b) => b.name).join(", ")}`} multiline maw={320}>
+            <Group gap={4} p={3} wrap="nowrap" aria-label="party buffs nobody in the run brings" style={{ border: "1px dashed var(--mantine-color-slate-4)", borderRadius: 7 }}>
+              {missing.map((b) => <BuffMark key={b.id} b={b} />)}
+            </Group>
+          </Tooltip>
+        )}
+        <Box style={{ flex: "1 1 auto" }} />
+        {e.live && people && <SomeoneElse run={e.key} people={people} onDone={onReload} />}
       </Group>
+      {locked && e.confirms !== false && conf.length > 0 && (
+        <Group gap="md" mt={6}>
+          <Text size="sm" c="teal.4">{ANSWER.yes.mark} {counts.yes} confirmed</Text>
+          <Text size="sm" c="dimmed">⏳ {counts.pending} waiting</Text>
+          <Text size="sm" c="red.5">{ANSWER.no.mark} {counts.no} can't make it</Text>
+        </Group>
+      )}
       {/* who could cover a short role (officers): the server's words, one line per short role, under the counts */}
       {!locked && hints.length > 0 && (
         <Stack gap={0} mt={4}>{hints.map((r) => <Group key={r.role} gap={6} wrap="nowrap"><GameIcon meta={meta} kind="role" id={r.role} size={14} title={r.role} /><Text size="xs" c="dimmed">{r.hint}</Text></Group>)}</Stack>
@@ -111,41 +141,35 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       {locked && <NightBlock e={e} meta={meta} onFill={() => setFillOpen(true)} />}
       {!locked && <NotAnswered e={e} meta={meta} onDone={onReload} />}
 
-      <Group gap="xl" mt="md" align="flex-start" wrap="wrap">
-        {byClass.length === 0 && <Text size="sm" c="dimmed">Nobody has joined yet.</Text>}
-        {byClass.map(([cls, ss]) => (
-          <Box key={cls} style={{ minWidth: 0 }}>
-            <Group gap={6} mb={2}><GameIcon meta={meta} kind="class" id={cls} size={20} title={cls} /><Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>{ss.length}</Text></Group>
-            {ss.map((s) => <SeatLine key={s.uid} meta={meta} s={s} right={<>{s.pin && <Badge size="xs" variant="light" color={s.pin === "in" ? "teal" : "red"}>{s.pin === "in" ? "pinned" : "bench"}</Badge>}{menu(s)}</>} />)}
-          </Box>
-        ))}
-      </Group>
-      <ChipRow label={`${meta.labels.sub} (${signups.filter((s) => s.status === "sub").length})`} items={signups.filter((s) => s.status === "sub")} empty={`Nobody is on ${meta.labels.sub} for this run.`} menu={menu} />
-      <ChipRow label={`${meta.labels.out} (${signups.filter((s) => s.status === "out").length})`} items={signups.filter((s) => s.status === "out")} empty={`Nobody has said ${meta.labels.out} for this run.`} menu={menu} />
-      <Group gap="xs" mt={8} justify="space-between" wrap="wrap">
-        <Group gap="xs"><Eyebrow>Away that day</Eyebrow>{(e.absences || []).length === 0 ? <Text size="sm" c="dimmed">nobody</Text> : e.absences!.map((a) => <Text key={a.display_name} size="sm">{a.display_name}{a.reason ? <Text span c="dimmed"> ({a.reason})</Text> : null}</Text>)}</Group>
-        <Group gap="xs">
-          {/* the iconography rule: a shortfall is the word, then icon + number per role (never "2 tank"); a bare number = seats */}
-          {isShort ? (
-            <Group gap={6} wrap="nowrap">
-              <Badge variant="filled" color="red">short</Badge>
-              {n!.headcount > 0 && <Tooltip label={`${n!.headcount} seat${n!.headcount === 1 ? "" : "s"}`}><Text size="xs" fw={700} c="red" style={{ fontVariantNumeric: "tabular-nums" }}>{n!.headcount}</Text></Tooltip>}
-              {shortRoles.map(([role, k]) => (
-                <Group key={role} gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={16} title={role} /><Text size="xs" fw={700} c="red" style={{ fontVariantNumeric: "tabular-nums" }}>{k}</Text></Group>
-              ))}
-            </Group>
-          ) : <Badge variant="light" color="teal">full</Badge>}
+      {/* before the lock: who joined by class (spec icon + name only); after it the board alone is the roster */}
+      {!locked && byClass.length > 0 && (
+        <Group gap="xl" mt="md" align="flex-start" wrap="wrap">
+          {byClass.map(([cls, ss]) => (
+            <Box key={cls} style={{ minWidth: 0 }}>
+              <Group gap={6} mb={2}><GameIcon meta={meta} kind="class" id={cls} size={20} title={cls} /><Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>{ss.length}</Text></Group>
+              {ss.map((s) => <SeatLine key={s.uid} meta={meta} s={s} right={<>{s.pin && <Badge size="xs" variant="light" tt="none" color={s.pin === "in" ? "teal" : "red"}>{s.pin === "in" ? "pinned" : "bench"}</Badge>}{menu(s)}</>} />)}
+            </Box>
+          ))}
         </Group>
-      </Group>
+      )}
+      {/* the other answers in one line, a part only when someone is in it (after the lock the Bench answers sit in the board's bank) */}
+      <OthersLine label={meta.labels.sub} items={locked ? [] : bench} menu={menu} outs={outs} outLabel={meta.labels.out} away={away} />
 
-      {e.board && <BoardView e={e as unknown as Sheet} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} />}
+      {e.board && locked && <BoardView e={e as unknown as Sheet} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} />}
+      {e.board && !locked && joined.length > 0 && !boardOpen && (
+        <Group mt="md" gap="sm" wrap="wrap" justify="space-between" p="sm" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 10 }}>
+          <Text size="sm"><b>Board</b> <Text span c="dimmed">— {joined.length} joined, {placed} placed: shape it before the lock, or let the lock place everyone</Text></Text>
+          <Button size="xs" variant="default" onClick={() => setBoardOpen(true)}>Open the board</Button>
+        </Group>
+      )}
+      {e.board && !locked && joined.length > 0 && boardOpen && <BoardView e={e as unknown as Sheet} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onHide={() => setBoardOpen(false)} />}
       {/* Run actions live here in every state, under the board they act on: destructive far left, the step that
-          commits the work last on the right. What does not apply yet is disabled with the reason, never removed. */}
+          commits the work last on the right. What does not apply yet is disabled with the reason in its label. */}
       <Group justify="space-between" wrap="wrap" gap="sm" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
         <Button size="xs" variant="subtle" color="red" loading={busy === `cancel${e.key}`} onClick={() => setCancelOpen(true)}>Cancel run</Button>
-        <Group gap="xs">
+        <Group gap="xs" wrap="wrap">
           <Tooltip label={fillTip}>
-            <Button size="xs" variant={asksN ? "light" : "default"} color={asksN ? "yellow" : undefined} leftSection={<IconUsersPlus size={13} />} onClick={() => setFillOpen(true)}>Fill</Button>
+            <Button size="xs" variant={asksN ? "light" : "default"} color={asksN ? "teal" : undefined} leftSection={<IconUsersPlus size={13} />} onClick={() => setFillOpen(true)}>Fill</Button>
           </Tooltip>
           <Button size="xs" leftSection={<IconLock size={13} />} disabled={locked} loading={busy === `lock${e.key}`} onClick={() => setLockOpen(true)}>{locked ? `Locked${e.timeline?.locked_at ? ` ${e.timeline.locked_at}` : ""}` : "Lock now"}</Button>
           {/* after lock, the next step is the loot council (design §3.1): open it here (the same route as Loot › Tonight), or go to it */}
@@ -166,6 +190,13 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       {confirmDialog}
     </Box>
   );
+}
+
+/** A buff nobody in the run brings: its icon alone (the cluster's one tooltip names them all). */
+function BuffMark({ b }: { b: { abbr: string; colour: string; art: string | null; name: string } }) {
+  return b.art
+    ? <Box component="img" src={`/img/icon/${b.art}.jpg`} alt={b.name} style={{ width: 22, height: 22, borderRadius: 5, opacity: 0.45, filter: "grayscale(1)" }} />
+    : <Box style={{ minWidth: 26, textAlign: "center", padding: "1px 4px", borderRadius: 5, fontSize: 11, fontWeight: 700, color: "var(--mantine-color-slate-2)" }}>{b.abbr}</Box>;
 }
 
 /** Where the run lives in Discord: the sheet, the officer card (the raid-night hub), the updates thread, the loot thread. */
@@ -214,20 +245,20 @@ function NightBlock({ e, meta, onFill }: { e: NightSheet; meta: Meta; onFill: ()
   return (
     <Stack gap={6} mt="sm">
       {e.fill_state === "suggested" && (
-        <Alert color="yellow" variant="light" p="xs">
+        <Alert color="teal" variant="light" p="xs">
           <Group justify="space-between" wrap="wrap" gap="xs">
             <Text size="sm">Waiting on you: {e.plan?.lines?.[0] || "a role swap would cover a short seat"}</Text>
-            <Button size="compact-sm" variant="light" color="yellow" onClick={onFill}>Fill</Button>
+            <Button size="compact-sm" variant="light" color="teal" onClick={onFill}>Fill</Button>
           </Group>
         </Alert>
       )}
       <Text size="xs" c="dimmed">fill: {e.fill_state_text || e.fill_state}{e.asks_on_site ? ` · ${e.asks_on_site} ask${e.asks_on_site === 1 ? "" : "s"} wait on the site` : ""}{e.reminded_at ? ` · reminded ${e.reminded_at}${e.reminded_by ? ` by ${e.reminded_by}` : ""}` : ""}</Text>
-      {e.confirmations_pending && <Text size="xs" c="yellow">Confirmations not yet sent — the bot resumes them within a minute.</Text>}
+      {e.confirmations_pending && <Text size="xs" c="dimmed">Confirmations not yet sent — the bot resumes them within a minute.</Text>}
       {(switches.length > 0 || left.length > 0) && (
         <Group gap="xl" align="flex-start" wrap="wrap">
           {switches.length > 0 && (
             <Box>
-              <Eyebrow>Playing an offspec</Eyebrow>
+              <Eyebrow plain>Playing an offspec</Eyebrow>
               {switches.map((s) => (
                 <Group key={`${s.roster}${s.display_name}`} gap={6} wrap="nowrap" style={{ lineHeight: 1.8 }}>
                   <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={18} title={`${s.spec}${s.signed_spec ? ` (signed up as ${s.signed_spec})` : ""}`} />
@@ -238,7 +269,7 @@ function NightBlock({ e, meta, onFill }: { e: NightSheet; meta: Meta; onFill: ()
           )}
           {left.length > 0 && (
             <Box>
-              <Eyebrow>Regulars not rostered</Eyebrow>
+              <Eyebrow plain>Regulars not rostered</Eyebrow>
               {left.map((s) => (
                 <Group key={s.uid} gap={6} wrap="nowrap" style={{ lineHeight: 1.8 }}>
                   <GameIcon meta={meta} kind="spec" id={`${s.cls}:${s.spec}`} size={18} title={s.spec} />
@@ -305,24 +336,24 @@ function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: 
  *  answered as icon + number. Ad hoc runs expect nobody, so nothing shows. */
 function NotAnswered({ e, meta, onDone }: { e: NightSheet; meta: Meta; onDone: () => Promise<void> }) {
   const waiting = e.not_answered || [];
-  if (!e.expected_from || e.expected_from === "none") return null;
+  if (!e.expected_from || e.expected_from === "none" || waiting.length === 0) return null;  // nobody to wait on: no box
   const regs = e.regulars || [];
   const tally = (st: string) => regs.filter((r) => r.status === st).length;
   const title = e.expected_from === "regulars" ? `Regulars who haven't answered (${waiting.length} of ${regs.length})`
     : e.expected_from === "test" ? `Test bench, not answered (${waiting.length})` : `Not answered (${waiting.length}) — no regulars set, everyone counts`;
   return (
-    <Box mt="sm" p="sm" style={{ border: `1px solid ${waiting.length ? "var(--mantine-color-yellow-6)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8 }}>
+    <Box mt="sm" p="sm" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8 }}>
       <Group justify="space-between" wrap="wrap" gap="xs">
-        <Eyebrow>{title}</Eyebrow>
+        <Eyebrow plain>{title}</Eyebrow>
         {e.expected_from === "regulars" && (
           <Group gap="sm">
-            <Tooltip label={meta.labels.in}><Badge variant="light" color="teal">✓ {tally("in")}</Badge></Tooltip>
-            <Tooltip label={meta.labels.sub}><Badge variant="light" color="yellow">{meta.labels.sub} {tally("sub")}</Badge></Tooltip>
-            <Tooltip label={meta.labels.out}><Badge variant="light" color="red">✗ {tally("out")}</Badge></Tooltip>
+            <Tooltip label={meta.labels.in}><Badge variant="light" color="teal" tt="none">✓ {tally("in")}</Badge></Tooltip>
+            <Tooltip label={meta.labels.sub}><Badge variant="light" color="gray" tt="none">{meta.labels.sub} {tally("sub")}</Badge></Tooltip>
+            <Tooltip label={meta.labels.out}><Badge variant="light" color="red" tt="none">✗ {tally("out")}</Badge></Tooltip>
           </Group>
         )}
       </Group>
-      {waiting.length === 0 ? <Text size="sm" c="dimmed" mt={4}>Everyone has answered.</Text> : (
+      {(
         <Stack gap={0} mt={4}>
           {waiting.map((s) => (
             <Group key={s.uid || s.display_name} gap={6} wrap="nowrap" style={{ lineHeight: 1.8 }}>
@@ -337,36 +368,42 @@ function NotAnswered({ e, meta, onDone }: { e: NightSheet; meta: Meta; onDone: (
   );
 }
 
-function ChipRow({ label, items, empty, menu }: { label: string; items: Signup[]; empty: string; menu: (s: Signup) => React.ReactNode }) {
+/** The answers that aren't Join, in one line: Bench (before the lock), No thanks and Away that day — a part only when
+ *  someone is in it, nothing at all when all three are empty. A callout's note (officers only — never the public sheet)
+ *  rides on the name's tooltip; each name keeps its ⋮ menu. */
+function OthersLine({ label, items, outLabel, outs, away, menu }: { label: string; items: Signup[]; outLabel: string; outs: Signup[]; away: { display_name: string; reason?: string | null }[]; menu: (s: Signup) => React.ReactNode }) {
+  if (!items.length && !outs.length && !away.length) return null;
+  const chip = (s: Signup) => (
+    <Group key={s.uid} gap={2} wrap="nowrap">
+      <Tooltip label={s.note || ""} disabled={!s.note} multiline maw={280}><Text size="sm" fw={600} td={s.note ? "underline dotted" : undefined}>{s.display_name}</Text></Tooltip>{menu(s)}
+    </Group>
+  );
   return (
-    <Group gap="xs" mt={8} align="center">
-      <Eyebrow>{label}</Eyebrow>
-      {items.length === 0 && <Text size="sm" c="dimmed">{empty}</Text>}
-      {items.map((s) => (
-        <Group key={s.uid} gap={4} wrap="nowrap" px={8} py={2} style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 7, background: "var(--mantine-color-slate-6)" }}>
-          {/* a callout's note (officers only — never the public sheet) rides on the chip's tooltip */}
-          <Tooltip label={s.note || ""} disabled={!s.note} multiline maw={280}><Text size="sm" td={s.note ? "underline dotted" : undefined}>{s.display_name}</Text></Tooltip>{menu(s)}
-        </Group>
-      ))}
+    <Group gap="xs" mt="sm" align="center" wrap="wrap">
+      {items.length > 0 && <><Text size="sm" c="dimmed">{label} ·</Text>{items.map(chip)}</>}
+      {outs.length > 0 && <><Text size="sm" c="dimmed">{items.length ? "· " : ""}{outLabel} ·</Text>{outs.map(chip)}</>}
+      {away.length > 0 && <><Text size="sm" c="dimmed">{items.length || outs.length ? "· " : ""}Away that day ·</Text>{away.map((a) => <Text key={a.display_name} size="sm" fw={600}>{a.display_name}{a.reason ? <Text span c="dimmed" fw={400}> ({a.reason})</Text> : null}</Text>)}</>}
     </Group>
   );
 }
 
-/** The detail accordion: fill asks (an ask still out can be withdrawn), callouts with their notes, and the log — each line
- *  with its stamp in words, officer-only lines marked; the raw lines behind "machine form". `readOnly`: the history drawer. */
+/** The detail accordion, "What happened · N lines": fill asks (an ask still out can be withdrawn), callouts with their
+ *  notes, and the log — each line with its stamp in words, officer-only lines marked. Nothing to show = no accordion.
+ *  `readOnly`: the history drawer. */
 export function Detail({ e, onAct, busy, readOnly = false }: { e: NightSheet; onAct?: Act; busy?: string | null; readOnly?: boolean }) {
   const fa = e.fill_asks || [], co = e.callouts || [], rows = e.log_rows || (e.log || []).map((t) => ({ at: "", when: "", text: t, officer: false }));
-  const [raw, setRaw] = useState(false);
+  const lines = fa.length + co.length + rows.length;
+  if (!lines) return null;
   return (
     <Accordion variant="contained" mt="md" chevronPosition="left">
       <Accordion.Item value="detail">
-        <Accordion.Control><Text size="xs" c="dimmed">fill asks ({fa.length}) · callouts ({co.length}) · log ({rows.length})</Text></Accordion.Control>
+        <Accordion.Control><Text size="sm" c="dimmed">What happened · {lines} line{lines === 1 ? "" : "s"}</Text></Accordion.Control>
         <Accordion.Panel>
           {fa.length > 0 && (
             <Stack gap={2} mb="sm">
               {fa.map((a, i) => (
                 <Group key={i} gap={6} wrap="wrap">
-                  <Text size="xs">{a.display_name} · {a.kind}{a.phase === "prelock" ? " (before lock)" : ""} · {a.character} ({a.spec}, {a.role}) · {a.reason}{a.approved_by ? ` · by ${a.approved_by}` : ""}{a.channel === "web" ? " · on the site" : ""}{a.deadline && a.answer === null ? ` · by ${a.deadline}` : ""} · <Text span c={a.answer === "yes" ? "teal" : a.answer === "no" ? "red" : "yellow"}>{a.answer || "waiting"}{a.answered_by ? ` (${a.answered_by})` : ""}</Text></Text>
+                  <Text size="xs">{a.display_name} · {a.kind}{a.phase === "prelock" ? " (before lock)" : ""} · {a.character} ({a.spec}, {a.role}) · {a.reason}{a.approved_by ? ` · by ${a.approved_by}` : ""}{a.channel === "web" ? " · on the site" : ""}{a.deadline && a.answer === null ? ` · by ${a.deadline}` : ""} · <Text span c={a.answer === "yes" ? "teal" : a.answer === "no" ? "red" : "dimmed"}>{a.answer || "waiting"}{a.answered_by ? ` (${a.answered_by})` : ""}</Text></Text>
                   {!readOnly && onAct && a.pending && a.uid && (
                     <Button size="compact-xs" variant="subtle" color="gray" loading={busy === `withdraw${e.key}${a.uid}`} onClick={() => onAct(`withdraw${e.key}${a.uid}`, `/api/run/${e.key}/withdraw`, { uid: a.uid })}>Withdraw</Button>
                   )}
@@ -375,22 +412,17 @@ export function Detail({ e, onAct, busy, readOnly = false }: { e: NightSheet; on
             </Stack>
           )}
           {co.length > 0 && <Stack gap={0} mb="sm">{co.map((c, i) => <Text key={i} size="xs" c="dimmed">{c.display_name} {c.hours_before}h before{c.late ? " (after lock)" : ""}{c.note ? ` — ${c.note}` : ""}</Text>)}</Stack>}
-          <Group justify="space-between" mb={4}><Eyebrow>Log</Eyebrow><Switch size="xs" label="machine form" checked={raw} onChange={(ev) => setRaw(ev.currentTarget.checked)} /></Group>
-          {raw ? (
-            <Box component="pre" style={{ fontSize: 12, whiteSpace: "pre-wrap", margin: 0, fontFamily: "var(--mantine-font-family-monospace)", color: "var(--mantine-color-slate-2)" }}>{(e.log || []).join("\n")}</Box>
-          ) : (
-            <Stack gap={0}>
-              {rows.map((r, i) => (
-                <Group key={i} gap={8} wrap="nowrap" align="flex-start">
-                  <Text size="xs" c="dimmed" w={150} style={{ flex: "none", fontVariantNumeric: "tabular-nums" }}>{r.when || ""}</Text>
-                  <Text size="xs" style={{ minWidth: 0 }}>{r.text}{r.officer && <Badge ml={6} size="xs" variant="outline" color="gray">officers</Badge>}</Text>
-                </Group>
-              ))}
-            </Stack>
-          )}
+          {rows.length > 0 && <Box mb={4}><Eyebrow plain>Log</Eyebrow></Box>}
+          <Stack gap={0}>
+            {rows.map((r, i) => (
+              <Group key={i} gap={8} wrap="nowrap" align="flex-start">
+                <Text size="xs" c="dimmed" w={150} style={{ flex: "none", fontVariantNumeric: "tabular-nums" }}>{r.when || ""}</Text>
+                <Text size="xs" style={{ minWidth: 0 }}>{r.text}{r.officer && <Badge ml={6} size="xs" variant="outline" color="gray" tt="none">officers</Badge>}</Text>
+              </Group>
+            ))}
+          </Stack>
         </Accordion.Panel>
       </Accordion.Item>
     </Accordion>
   );
 }
-

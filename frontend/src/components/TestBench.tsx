@@ -140,6 +140,7 @@ export function TestBench({ meta, rows, onChanged }: { meta: Meta; rows: MemberR
           </Group>
         </Group>
         {state && !dirty && <OpenTestRun meta={meta} state={state} puppets={puppets.length} busy={busy} onPost={post} />}
+        <Text size="xs" c="dimmed">A test run's card lives on the Rosters page, on its raid's Test tab — the tab appears once a test run is open.</Text>
         {state && !dirty && state.runs.length > 0 && <AnswerAsPuppets state={state} puppets={puppets} busy={busy} onPost={post} />}
         <Box pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}><TestFeed /></Box>
       </Stack>

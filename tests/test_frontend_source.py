@@ -164,3 +164,24 @@ def test_settings_card_names_the_owner():
     """UI audit: Config › Settings read "Owner: Discord id 137691328623542272". A person reads a name, never a snowflake."""
     page = (SRC / "pages" / "Config.tsx").read_text()
     assert "Discord id ${" not in page and "st.owner_name" in page
+
+
+def test_rosters_page_reads_by_its_shape():
+    """Design §5.56: every live run is a card in time order — no state tabs (the "Open for signup" tab hid the locked run
+    on raid night); the tabs are Regulars · History · Test. The run card's dates come from the server (Clock rule: no
+    two-digit day anywhere a person reads, a picker's format is the house one) and amber is gone from the page."""
+    page = (SRC / "pages" / "Rosters.tsx").read_text()
+    card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
+    board = (SRC / "components" / "board" / "BoardView.tsx").read_text()
+    tabs = re.findall(r'<Tabs\.Tab value="(\w+)"', page)
+    assert tabs == ["regulars", "history", "test"], tabs
+    assert "<WhenItRuns" in page and "upcoming=" in page and "can_open" in page
+    assert "<RunStrip" in card and "short_why" in card and '"rostered" : "joined"' in card
+    assert "Sparkles" not in page + board, "a plain icon, not one that reads as AI"
+    for f in SRC.rglob("*.tsx"):
+        text = f.read_text()
+        assert 'day: "2-digit"' not in text, f"{f.name}: a two-digit day breaks the Clock rule"
+        for fmt in re.findall(r'valueFormat="([^"]+)"', text):
+            assert "DD" not in fmt and "HH" not in fmt, f"{f.name}: {fmt}"
+    for f in (page, card, board, (SRC / "components" / "board" / "FillModal.tsx").read_text(), (SRC / "components" / "board" / "shared.tsx").read_text()):
+        assert not re.search(r'(?:color|c)=\{?"yellow', f), "amber marks a value changed from the default; Rosters has none"

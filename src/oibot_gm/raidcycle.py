@@ -2852,6 +2852,75 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
             "closed": ev.state if refusal else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 
+UPCOMING_PER_SCHEDULE = 3  # the Rosters page lists each active schedule's next three runs, whatever the horizon
+
+
+def open_row_refusal(reg: Registry, rs: "RaidStore", instance: str, start: datetime, key: str, opens: datetime, now: datetime | None = None) -> str | None:
+    """Why an upcoming run's row can't be opened by hand yet, in words (the Rosters page prints it under the row), or None.
+    A closed run at that time is never opened again (closed_run_refusal); a run more than OPEN_HORIZON_DAYS out isn't
+    "the next run" the open paths reach (open_when), so the row says when Open works and when the sheet opens on its own."""
+    why = closed_run_refusal(rs, key)
+    if why:
+        return why
+    now = now or reg.now_local()
+    if start > now + timedelta(days=OPEN_HORIZON_DAYS):
+        early = start - timedelta(days=OPEN_HORIZON_DAYS)
+        return (f"Too far ahead to open now: Open works from {reg.local12(early)}, three weeks before the run"
+                + (f"; its sheet opens on its own {reg.local12(opens)}." if opens > early else "."))
+    return None
+
+
+def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime | None = None, n: int = UPCOMING_PER_SCHEDULE) -> list[dict]:
+    """Each ACTIVE recurring schedule's next `n` runs that aren't live yet, soonest first, whatever the horizon (the
+    Rosters page's "When it runs" block and its Open buttons; a pickup template opens nothing on its own): {schedule,
+    schedule_name, start (words), start_iso (the exact instant Open carries back), key, opens (words), opens_iso,
+    needs_channel (the sheet is due and no signup channel can take it), can_open, why (open_row_refusal's sentence)}."""
+    now = now or reg.now_local()
+    no_channel = not reg.config.signup_channel_id
+    out = []
+    for s in reg.schedules(instance):
+        if s.get("kind") == "pickup" or not s.get("active", True):
+            continue
+        lead = float(reg.schedule_def(instance, s["id"])["signup_lead_hours"])
+        rows = []
+        for t in next_runs_of(reg, instance, s, n + 6, now):
+            key = event_key(instance, t, s["id"])
+            ev = rs.events.get(key)
+            if ev is not None and ev.state not in ("done", "cancelled"):
+                continue  # live: it has its own card
+            opens = t - timedelta(hours=lead)
+            why = open_row_refusal(reg, rs, instance, t, key, opens, now)
+            rows.append({"schedule": s["id"], "schedule_name": s.get("name") or s["id"], "start": reg.local12(t), "start_iso": t.isoformat(), "key": key,
+                         "opens": reg.local12(opens), "opens_iso": opens.isoformat(), "needs_channel": no_channel and opens <= now,
+                         "can_open": why is None, "why": why})
+            if len(rows) >= n:
+                break
+        out += rows
+    return sorted(out, key=lambda r: (r["start_iso"], r["schedule"] != DEFAULT_SCHEDULE))
+
+
+def short_why(reg: Registry, ev: RaidEvent) -> str | None:
+    """Why a short run is short, as the clause after the role icons on the Rosters card ("short ⛨1 — 2 asks out, 1 on
+    the bench could step in"): after the lock the fill asks out and who could take a seat; before it the expected people
+    who haven't answered. None when there is nothing to add (or the run is over)."""
+    if ev.state in ("done", "cancelled"):
+        return None
+    if ev.state != "open" and ev.all_rosters:
+        asks = [a for a in ev.fill_asks if a.pending]
+        asked = {a.discord_id for a in asks}
+        seated = {player_uid(ev, p) for p in ev.seated()}
+        bench = [s for s in ev.signups.values() if s.status in ("in", "sub") and s.discord_id not in seated and s.discord_id not in asked]
+        parts = ([f"{len(asks)} ask{'' if len(asks) == 1 else 's'} out"] if asks else []) + ([f"{len(bench)} on the bench could step in"] if bench else [])
+        return ", ".join(parts) or None
+    waiting = not_answered(reg, ev)
+    if not waiting:
+        return None
+    names = [c.label for _m, c in waiting[:5]] + ([f"+{len(waiting) - 5} more"] if len(waiting) > 5 else [])
+    k = len(waiting)
+    noun = (f"{k} regular{'' if k == 1 else 's'}" if expected_from(reg, ev) == "regulars" else str(k))
+    return f"{noun} {'hasn' if k == 1 else 'haven'}'t answered: {', '.join(names)}"
+
+
 # ---------------------------------------------------------------- what the lock decided, as data (the site's locked SheetCard)
 
 def spec_switches(reg: Registry, ev: RaidEvent) -> list[dict]:

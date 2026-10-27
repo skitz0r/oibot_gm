@@ -28,7 +28,13 @@ export interface NightFields {
   fill_asks?: { uid?: string; display_name: string; kind: string; character: string; spec: string; role: string; reason: string; why?: string | null; answer: string | null;
     phase?: "prelock" | "fill"; approved_by?: string | null; answered_by?: string | null; channel?: "dm" | "web"; pending?: boolean; deadline?: string | null }[];
   callouts?: { display_name: string; hours_before: number; late: boolean; note?: string | null }[];
+  /** the run's week for the card's strip: steps in time order (`step` = a RaidCard.tsx HOUR_WORDS key, or "raid"), words + ISO instant + done */
+  week?: WeekStep[];
+  /** the clause after the short line's role icons, from the server ("2 asks out, 1 on the bench could step in") */
+  short_why?: string | null;
 }
+
+export interface WeekStep { step: string; when: string; at: string; done: boolean }
 
 export type NightSheet = Omit<Sheet, "fill_asks" | "callouts"> & NightFields;
 
@@ -42,8 +48,6 @@ export interface OpenPreview {
   closed?: "done" | "cancelled" | null; refusal?: string | null;  // that time's run is closed: Open is refused (rc.closed_run_refusal)
 }
 
-/** One upcoming run on the Rosters page (web/api.py rosters_data). */
-export interface UpcomingRow { slot: string; start: string; start_iso?: string; key?: string; opens: string; schedule?: string; schedule_name?: string; needs_channel?: boolean }
 
 /** GET /api/runs — past runs, paged. */
 export interface RunsPage { runs: Sheet[]; total: number; offset: number; limit: number; more: boolean }

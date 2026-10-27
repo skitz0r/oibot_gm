@@ -23,6 +23,8 @@ export function CardHeader({ title, hint, action }: { title: string; hint?: stri
   );
 }
 
-export function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <Text size="xs" fw={700} tt="uppercase" c="dimmed" style={{ letterSpacing: ".08em" }}>{children}</Text>;
+/** A section's small heading. `plain`: lower case, the way the Rosters and Raids pages read (no shouting eyebrows). */
+export function Eyebrow({ children, plain = false }: { children: React.ReactNode; plain?: boolean }) {
+  return plain ? <Text size="xs" fw={700} c="dimmed" style={{ letterSpacing: ".02em" }}>{children}</Text>
+    : <Text size="xs" fw={700} tt="uppercase" c="dimmed" style={{ letterSpacing: ".08em" }}>{children}</Text>;
 }

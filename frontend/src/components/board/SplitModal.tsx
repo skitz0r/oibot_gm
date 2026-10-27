@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Box, Button, Group, Modal, Stack, Text, Tooltip } from "@mantine/core";
+import { Box, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { IconRefresh } from "@tabler/icons-react";
 import { api, type Meta, type Sheet, type SplitPreview } from "../../api";
 import { SPLIT_BLURB, SPLIT_LABEL } from "../../pages/Raids";
@@ -29,7 +29,6 @@ export function SplitModal({ e, meta, multi, opened, onClose, onUse }: { e: Shee
               <Text size="sm" fw={700}>{SPLIT_LABEL[st] || st}</Text><Text size="xs" c="dimmed">{SPLIT_BLURB[st] || ""}</Text>
             </Box>
           ))}
-          <Tooltip label="needs wishlists and loot tables — not yet"><Box p="sm" style={{ flex: "1 1 180px", border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8, opacity: 0.4 }}><Text size="sm" fw={700}>Loot quality</Text><Text size="xs" c="dimmed">seat people where the drops they need go uncontested</Text></Box></Tooltip>
         </Group>}
         <Group justify="space-between" wrap="wrap">
           <Text size="xs" c="dimmed">{busy ? "building…" : preview ? (multi ? <>Preview of <b>{SPLIT_LABEL[preview.strategy] || preview.strategy}</b> · total synergy {preview.total} · gap {preview.gap} · your own placements on the board are kept</> : <>The bot's pick · synergy {preview.total} · your own placements on the board are kept</>) : ""}</Text>

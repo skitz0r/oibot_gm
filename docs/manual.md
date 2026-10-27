@@ -163,7 +163,7 @@ your sheets and confirmations, **My loot** and your **Wishlist** (§9), and the 
 inbox** (§4 *Your inbox*): every ask waiting for you — Confirm / Can't make it, a seat or swap question, a pre-lock
 "could you come?" — as a card with its two buttons and its deadline, then your **Notices** (what happened that you
 should know: not rostered, a seat released, an officer answered for you, a run cancelled…), and **My sheets** with
-Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid: sheets open for signup with every answer, pins, the board and *Lock now*; locked runs with confirmations, freed seats and **Fill seats**; upcoming slots; history), **Raids** (per raid: **when it runs** — the sheets open or locked right now (each a link to Rosters), the next run its schedules open and, before any sheet has opened, when the first one does; **a run's week** as a timeline counted back from the raid — when the sheet opens, the reminder, the lock and the confirm-by time — with what happens after the lock; the **group make-up**: the owner's limits and the officers' aims, which every officer sets with **Set aims** / **Edit aims**; **who gets a seat**: the weights as bars, highest first, and how one night's two groups are made; amber marks a value changed from the game's default; the owner presses **Edit rules** (the same four groups, with the timeline moving as a value is typed); one thing is edited at a time per raid — the rules, the aims or a schedule, whose editor opens in place of its row — and the other buttons wait; each schedule has **Pause / Resume** beside Edit), **Readiness** (per raid: a *ready* / *thin* / *short* chip, who could play against its size, roles with who could cover, buffs nobody brings, what the guild has against the aims, the group make-up with **Set aims** / **Edit aims**, and the regulars' coverage with the next four weeks — §6), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings**, **Channels**, **Recruitment and more** (with the **Loot scoring** weights, §9) and, for the owner, **Companions** — the loot companion tokens, §8; owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire and Distil;
+Join · Bench · No thanks (and *Can't make it…* once a run is locked) — the same answers as the sheet's buttons; officers get, in the left rail, **Rosters** (per raid, soonest first: **when it runs** — the same block as on Raids, with each active schedule's next three runs and **Open now** on the ones that can open (the others say why not yet); then every live run as a card in time order — its week as a strip with a *now* mark, one headcount (*7 / 10 joined* before the lock, *8 / 10 rostered* after), the role counts and one *short* line with why; before the lock every answer by class and the board collapsed to one line until you open it, after the lock the board alone (it is the roster) with confirmations, freed seats and **Fill seats**; **Answer for someone…** beside the headcount; then the **Regulars**, **History** and **Test** tabs), **Raids** (per raid: **when it runs** — the sheets open or locked right now (each a link to Rosters), the next run its schedules open and, before any sheet has opened, when the first one does; **a run's week** as a timeline counted back from the raid — when the sheet opens, the reminder, the lock and the confirm-by time — with what happens after the lock; the **group make-up**: the owner's limits and the officers' aims, which every officer sets with **Set aims** / **Edit aims**; **who gets a seat**: the weights as bars, highest first, and how one night's two groups are made; amber marks a value changed from the game's default; the owner presses **Edit rules** (the same four groups, with the timeline moving as a value is typed); one thing is edited at a time per raid — the rules, the aims or a schedule, whose editor opens in place of its row — and the other buttons wait; each schedule has **Pause / Resume** beside Edit), **Readiness** (per raid: a *ready* / *thin* / *short* chip, who could play against its size, roles with who could cover, buffs nobody brings, what the guild has against the aims, the group make-up with **Set aims** / **Edit aims**, and the regulars' coverage with the next four weeks — §6), **Auras** (what the guild knows about each buff; the owner edits), **Members** (every member's main and alts in one table, with an owner/officer/member badge taken from Discord roles; the member column stays in view while the table scrolls sideways; the **rank** select on each main (rank is the member's, §3); a DM switch per member; each character's **⋮** menu — *Make main*, *Confirm*, *Retire*, *Delete*; extra roles (*Flex*); upcoming absences with **I'm back**, and *+ away*; members with no character under **No characters**; the **Absences** table — everyone away, with the reason and who recorded it; **Edit members** lets an officer change any member's characters exactly as on Me, with one save — a member someone else changed meanwhile is refused alone and stays drafted; the **Test bench** card seeds or composes puppet members, opens and answers test runs, follows them in a live feed and opens a comp sandbox, see §8a), **Config** (an **Overview**: the **Setup** checklist, then the whole configuration in words — the owner also sees the host's facts — then **Settings**, **Channels**, **Recruitment and more** (with the **Loot scoring** weights, §9) and, for the owner, **Companions** — the loot companion tokens, §8; owner edits; officers read; it shows who owns the guild — handing it over is `/gm config owner` in the server, §8), **Loot** (Tonight — the live council; History; Precedents with Retire and Distil;
 Items — the untiered list, the tier grid and the loot history import; Wishlists — who wants what, and the ThatsMyBIS import; §9), **Ops** (the
 bot's recent actions and the plain-text permissions; a badge counts errors folded into an earlier alert), **Applications**
 (the open applications oldest first with every answer in full, the earlier verdicts, Accept / Decline with the same
@@ -364,7 +364,7 @@ wait, autofill, DM on open, split policy) — anything it doesn't set follows th
   from the raid's first opening every `lockout_days`, so a 3- or 5-day reset is followed exactly (and daylight saving
   never moves the wall-clock time; a time the clocks skip that night moves past the gap).
 - **Pickup template** — never opens by itself. `/raid open` → *Ad hoc run…* offers it (*Pickup — pick a time*), the
-  Rosters page has it in *Start ad hoc run*'s template picker beside the date and time; the run gets the template's
+  Rosters page has it in *Start an ad hoc run…*'s template picker above the date and time; the run gets the template's
   settings.
 Each schedule also says how many **rosters** a run expects (1–4). With 2, the sheet advertises 2 × the raid's size
 (20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock aims
@@ -376,7 +376,7 @@ its id in their key (`bd-1212-2000-alt`), so two schedules starting at the same 
 - **Recurring** — weekly nights and days of each lockout (the raid's own run times included). Opens by itself on its
   week, has **regulars**, and its lock weighs being a regular (below). Confirmations on by default.
 - **Ad hoc** — a pickup template, or a **one-off** run at a time an officer picks (*Ad hoc run…* in `/raid open`,
-  *Start ad hoc run* on the Rosters page, or plain text / MCP with a time that is none of the raid's upcoming runs).
+  *Start an ad hoc run…* on the Rosters page, or plain text / MCP with a time that is none of the raid's upcoming runs).
   It takes the raid's size, comp, lockout and length but none of its recurring timing — its own lighter defaults: no
   reminder, no DM on open, **no confirmations** (Join is the commitment; *Can't make it* frees your seat), locks
   **2 h** before, fill asks wait **1 h**, and seats go **first come, first rostered** (the joiners in the order they
@@ -502,8 +502,8 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    health card with its *Suggested* block right away (an early warning; see *Suggestions* above). With `open_dm` on [off] everyone
    the sheet is for (the schedule's regulars, or every main while it has none) is also DMed when it opens. Officers can
    open a sheet early from the Rosters page: **Open next run** takes the raid's next scheduled run (with several
-   recurring schedules, a picker beside it chooses which), and **Start ad hoc run** opens a one-off (or a pickup
-   template, picked beside it) at the date and time you pick. `/raid open` does the same in Discord: pick the raid,
+   recurring schedules, a picker beside it chooses which; when no run can open yet, why is written under it), and
+   **Start an ad hoc run…** opens one screen for a one-off (or a pickup template, picked there) at the date and time you pick. `/raid open` does the same in Discord: pick the raid,
    then **Next run — <time>**, **Another upcoming run…** (each labelled with its schedule's name when there are several)
    or **Ad hoc run…** (a pickup template, or *One-off — pick a day and time*: day, hour and minutes from lists; nothing
    typed; ad hoc defaults; more than three pickup templates come as one *Pick a template* select). **Another upcoming
@@ -512,13 +512,15 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    regulars and confirmations, and the confirm screen says so. The confirm screen shows
    the time in guild time and in your own, and on a daylight-saving night says which time it used (2:30 AM on the
    spring-forward night becomes 3:30 AM; on the fall-back night the first 1:30 AM is taken). On the site the
-   **Upcoming** tab has an **Open** on every row (one press, then the same confirm), and *Start ad hoc run* asks the bot
-   what the picked time would open as you pick: when it is a scheduled run the button reads *Open the … run —
-   scheduled, with confirmations*; its confirm shows both clocks, the run's rules, the daylight-saving note and the
-   channel the sheet posts in, and opens exactly the run it showed (if the time now means another run, nothing opens
+   raid's **When it runs** block lists each active schedule's next three runs however far ahead; a run that can open
+   has **Open now** (one press, then the same confirm) and one that can't yet says why in the bot's words (more than
+   three weeks out: when Open works and when its sheet opens on its own; a time whose run was cancelled or ended).
+   *Start an ad hoc run…* asks the bot what the picked time would open as you pick: when it is a scheduled run the button reads *Open the … run —
+   scheduled, with confirmations*; the same screen shows both clocks, the run's rules, the daylight-saving note and the
+   channel the sheet posts in, and why Start waits when it does, and opens exactly the run it showed (if the time now means another run, nothing opens
    and the preview is shown again). With **no signup channel set** the scheduler opens nothing: each run that was due
    gets one warning on the ops feed ("Barrow Deeps Tue 7:30 PM did not open: no signup channel is set") and its
-   Upcoming row says *needs a signup channel* in red. A raid with no run times offers *Set this raid's run times →*. A run opened closer
+   row in *When it runs* says *needs a signup channel* in red. A raid with no run times offers *Set this raid's run times →*. A run opened closer
    than its week assumes keeps a usable window: a pickup two hours out nudges, locks and confirms inside those two
    hours instead of inheriting a lock time that has already passed. A start more than five minutes in the past is
    refused however the run is opened (the site, `/raid open`, plain text, MCP), with the time named in words.
@@ -531,9 +533,12 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
    rosters the run expects (1, or its schedule's *rosters per run*) — the same numbers Fill works from; when the
    joiners could make more runs than that, the "Enough people for 2 runs …" line says what another run is short. `nudge` [on] switches the DM off per raid; the health card
    still comes.
-3. **Officers shape the roster** (Rosters page, before lock): the sheet shows every answer by class, Bench
-   and No thanks rows, absences that day, and the **board** — a bank of everyone who joined and the groups
-   of the run. Drag names from the bank into groups, between groups, or back to the bank; dropping on
+3. **Officers shape the roster** (Rosters page, before lock): the run's card shows its week as a strip (the steps
+   done in teal, a *now* mark), the headcount (*7 / 10 joined*) with the role counts and one *short* line (role icon +
+   number, and why — *2 regulars haven't answered: …*), every Join by class, the other answers in one line (Bench, No
+   thanks, Away that day — each only when someone is in it), and the **board**, one line (*Board — 7 joined, 2 placed:
+   shape it before the lock, or let the lock place everyone*) until you press **Open the board** — a bank of everyone
+   who joined and the groups of the run; its ⓘ says what the marks mean. Drag names from the bank into groups, between groups, or back to the bank; dropping on
    someone swaps them. Every group shows its auras as you go (coloured = present, greyed with a red edge =
    someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs
    update too. The board is **shared**: every officer sees the same one, a change anywhere (another officer, a
@@ -663,11 +668,10 @@ Timeline for each run (per-raid settings; defaults in brackets, Barrow Deeps ope
 **Reading a run.** `/raid health` works at any time: on an open sheet the health card, on a locked run a brief with
 rostered against the seats, what is short (role icon + number), the confirmations tally and the fill state in words —
 officers also see who is waiting and the lock card's buttons; members see the counts only. On the site a sheet shows,
-under its role counts, who could cover a short role (officers) and the party buffs nobody brings (icons only, names in
-the tooltips); links to the sheet, the officer card and the updates thread in Discord; and, once locked, *Playing an
-offspec* and *Regulars not rostered* (one member per line, the spec icon alone). The run's **detail** lists its fill
+under its role counts, who could cover a short role (officers) and the party buffs nobody in the run brings (icons only in one dashed frame, the names in its tooltip; shown once someone has joined); links to the sheet, the officer card and the updates thread in Discord; and, once locked, *Playing an
+offspec* and *Regulars not rostered* (one member per line, the spec icon alone). The run's **What happened · N lines** lists its fill
 asks (who answered for whom, which wait on the site), callouts with their notes, and the **log** — every line with its
-time in words, lines only officers would read marked *officers*, the raw lines behind *machine form*. **History**
+time in words, lines only officers would read marked *officers*. **History**
 lists the newest eight past runs per raid and *Show older runs* pages the rest; a row opens the run read-only in a
 side panel (a `#run-<key>` link opens it too).
 
@@ -700,7 +704,7 @@ Deeps Tue 7:30 PM; no callout is recorded. Kestrel sees a notice on their Me pag
 pressed something meanwhile it says so first (*"Kestrel is now Bench as Kestrel (since 5:12 PM) — keep going?"*).
 On your own record it is your own answer, and the screen says so: *"Your own record: no notice is written."* On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
-list, and the sheet's header has **Someone else…** for anyone not on it. Plain text ("Kestrel can't make it tonight,
+list, and **Answer for someone…** beside the run's headcount does it for anyone not on it. Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
 `callout=false`) do the same. Whatever an officer records for someone reaches them as a **notice** on their Me page and
 in `/me view` ("Jon set you to No thanks for Barrow Deeps Tue 7:30 PM"), and an open DM card of theirs is edited to

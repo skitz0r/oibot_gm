@@ -299,8 +299,8 @@ def guild_overview(guild: Guild = None) -> dict:
 
 @mcp.tool()
 def list_runs(guild: Guild = None) -> dict:
-    """Live sheets per raid (open / locked, with counts and the roster state) plus the upcoming slots the scheduler
-    will open and the last closed runs. Use the `key` of a run with get_run and the write tools."""
+    """Live sheets per raid (open / locked, with counts and the roster state) plus each active schedule's next three
+    runs (`can_open`, and `why` when it can't yet) and the last closed runs. Use the `key` of a run with get_run and the write tools."""
     data = api(guild).get("/api/rosters")
     return {"tz": data.get("tz"), "raids": [{"id": r["id"], "name": r["name"], "size": r["size"], "opened": r["opened"], "first_open": r.get("first_open"),
                                             "open": [run_summary(e) for e in r.get("open", [])], "locked": [run_summary(e) for e in r.get("locked", [])],

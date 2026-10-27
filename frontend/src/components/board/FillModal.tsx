@@ -46,17 +46,17 @@ function Suggestions({ plan, meta, picks, setPick, short }: { plan: Plan; meta: 
     <Stack gap="sm">
       {plan.phase === "prelock" ? (
         <Group gap="md" align="center" wrap="wrap">
-          <Eyebrow>Expected</Eyebrow>
+          <Eyebrow plain>Expected</Eyebrow>
           {expected.map(([role, n]) => (
             <Group key={role} gap={4} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={18} title={role} /><Text size="sm" c={(plan.have[role] || 0) < n ? "red" : undefined} style={{ fontVariantNumeric: "tabular-nums" }}>{plan.have[role] || 0}/{n}</Text></Group>
           ))}
           {plan.expected > 0 && <Text size="xs" c="dimmed">joined + {plan.expected} regular{plan.expected === 1 ? "" : "s"} yet to answer</Text>}
-          {plan.full && <Badge variant="light" color="gray">every seat taken: swaps first</Badge>}
+          {plan.full && <Badge variant="light" color="gray" tt="none">every seat taken: swaps first</Badge>}
         </Group>
       ) : short && (
         <Group gap="md" align="center">
-          <Eyebrow>Short</Eyebrow>
-          {!short.headcount && !Object.keys(short.roles).length ? <Badge variant="light" color="teal">full</Badge> : (
+          <Eyebrow plain>Short</Eyebrow>
+          {!short.headcount && !Object.keys(short.roles).length ? <Badge variant="light" color="teal" tt="none">full</Badge> : (
             <Group gap="md">
               {short.headcount > 0 && <Text size="sm" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>{short.headcount} seat{short.headcount === 1 ? "" : "s"}</Text>}
               {Object.entries(short.roles).map(([role, k]) => <Group key={role} gap={4} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={18} title={role} /><Text size="sm" style={{ fontVariantNumeric: "tabular-nums" }}>{k}</Text></Group>)}
@@ -83,12 +83,12 @@ function Suggestions({ plan, meta, picks, setPick, short }: { plan: Plan; meta: 
       ))}
       {plan.seats.some((st) => st.options.length) && (
         <Stack gap={2}>
-          <Eyebrow>Send DMs exactly these</Eyebrow>
+          <Eyebrow plain>Send DMs exactly these</Eyebrow>
           {batch.length === 0 && <Text size="sm" c="dimmed">Nothing can go out now — at most 3 asks out at once; ask again once some are answered.</Text>}
           {batch.map((a, i) => (
             <Group key={i} gap={6} wrap="nowrap" align="flex-start">
               <AskLine a={a} meta={meta} />
-              {["flex", "offspec", "alt"].includes(a.kind) && <Badge size="xs" variant="light" color="orange" style={{ flex: "none" }}>swap</Badge>}
+              {["flex", "offspec", "alt"].includes(a.kind) && <Badge size="xs" variant="light" color="gray" tt="none" style={{ flex: "none" }}>swap</Badge>}
               {a.pair != null && <Text size="xs" c="dimmed" style={{ flex: "none" }}>{a.vacates ? `backfill: ${names.get(String(a.pair)) || "?"}` : `backfills ${names.get(String(a.pair)) || "?"}`}</Text>}
             </Group>
           ))}
@@ -130,7 +130,7 @@ export function FillModal({ e, meta, opened, onClose, onSent }: { e: Sheet; meta
     <Modal opened={opened} onClose={onClose} title={`${suggest ? "Suggestions" : "Fill seats"} · ${runName(e)}`} centered size="lg">
       <Stack gap="md">
         {busy && <Text size="sm" c="dimmed">Working out who to ask…</Text>}
-        {notice && <Text size="sm" c="yellow">{notice}</Text>}
+        {notice && <Text size="sm" c="dimmed">{notice}</Text>}
         {p && plan && <Suggestions plan={plan} meta={meta} picks={picks} short={p.short} setPick={(i, k) => setPicks((x) => ({ ...x, [i]: k }))} />}
         <Text size="xs" c="dimmed">{suggest
           ? "Each ask is a DM with Yes / No. A yes changes their signup (spec or character); the lock still builds the roster. One ask per member per run; unanswered asks close at lock."

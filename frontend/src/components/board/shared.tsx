@@ -86,7 +86,7 @@ export function SplitReasonLine({ meta, r }: { meta: Meta; r: SplitReason }) {
     : `Enough people for ${r.bodies_allow} runs — a ${NTH[r.run - 1] || `run ${r.run}`} is short`;
   return (
     <Group gap={6} wrap="wrap">
-      <Text size="xs" c={r.roles_allow === 0 ? "red.5" : "yellow.5"}>{lead}</Text>
+      <Text size="xs" c={r.roles_allow === 0 ? "red.5" : "dimmed"}>{lead}</Text>
       {Object.entries(r.short).map(([role, n]) => (
         <Group key={role} gap={3} wrap="nowrap"><GameIcon meta={meta} kind="role" id={role} size={14} title={role} /><Text size="xs" style={{ fontVariantNumeric: "tabular-nums" }}>{n}</Text></Group>
       ))}

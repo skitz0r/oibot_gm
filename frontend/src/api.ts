@@ -153,9 +153,16 @@ export interface Sheet {
     /** "Bosses 3 / 6" (design §3.5 L12): the slowest council's kills against the raid's bosses (total null while unlisted) */
     bosses?: { done: number; total: number | null; all_down: boolean; text: string } | null };
 }
+/** A raid's run open or locked now (never a test run), in words — the "When it runs" block on Raids and Rosters. */
+export interface LiveRun { key: string; when: string; state: string; schedule: string }
+/** The next run an active schedule opens that has no sheet yet; `opens` = when its sheet opens on its own. */
+export interface NextRun { when: string; schedule: string; opens?: string }
+/** One upcoming run of an active schedule (web/api.py rosters_data → rc.upcoming_rows): `can_open` false comes with `why`, the server's sentence. */
+export interface UpcomingRun { schedule: string; schedule_name: string; start: string; start_iso: string; key: string; opens: string; opens_iso: string; needs_channel: boolean; can_open: boolean; why: string | null }
 export interface RaidRuns {
-  id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null;
-  open: Sheet[]; locked: Sheet[]; past: Sheet[]; upcoming: { slot: string; start: string; opens: string; schedule?: string; schedule_name?: string }[];
+  id: string; name: string; size: number; slots: string[]; slot_labels?: string[]; lockout_days: number; opened: boolean; first_open: string | null; first_open_words?: string;
+  live_runs?: LiveRun[]; next_run?: NextRun | null;
+  open: Sheet[]; locked: Sheet[]; past: Sheet[]; past_total?: number; upcoming: UpcomingRun[];
   /** every schedule of the raid, in words (`label`), for the open-a-run control; pickup templates (ad hoc) open only on demand */
   schedules?: { id: string; name: string; kind: string; class?: "recurring" | "adhoc"; label: string; active: boolean }[];
   /** one entry per recurring schedule: its regulars (one member per line on the page) against the role minimums */
@@ -194,7 +201,7 @@ export interface RaidRule {
   slots: string[]; slot_labels?: string[]; signup_lead_hours: number; lock_hours_before: number; confirm_hours_before: number; fill_ask_hours: number; weights: Record<string, number>; split_policy: string; nudge: boolean; nudge_hours_before: number; autofill: boolean; open_dm: boolean; confirm?: boolean;
   overridden: string[]; comp_targets: Record<string, CompTarget>; comp_groups: string[];
   /** the raid's sheets open or locked now (never a test run) and the next run an active schedule opens — the card's "When it runs" */
-  live_runs?: { key: string; when: string; state: string; schedule: string }[]; next_run?: { when: string; schedule: string } | null;
+  live_runs?: LiveRun[]; next_run?: NextRun | null;
   first_open_local: string; /** Registry.local12 words for a person ("Wed 9 Dec 3:00 PM"); first_open_local is the input's machine form */ first_open_words?: string; opened: boolean; window: [string, string]; live: number;
   schedules: Schedule[];
   /** the raid section rev an edit-mode Save sends back as revs["config:raids:<id>"] */

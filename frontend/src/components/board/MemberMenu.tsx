@@ -26,7 +26,7 @@ function items(acts: MemberAction[]): Item[] {
 const DANGER = new Set(["callout", "confirm_no", "fill_no", "no_thanks"]);
 const ICON: Record<string, React.ReactNode> = { pin_in: <IconPin size={14} />, pin_out: <IconUserOff size={14} />, unpin: <IconPinnedOff size={14} />, join: <IconUserPlus size={14} /> };
 
-/** Pick → the consequence (+ the note box for a callout) → the write. Shared by the row menu and "Someone else…". */
+/** Pick → the consequence (+ the note box for a callout) → the write. Shared by the row menu and "Answer for someone…". */
 function useRecord(run: string, onDone: () => Promise<void> | void) {
   const [ask, dialog] = useConfirm();
   async function record(uid: string, name: string, list: MemberActions, it: Item) {
@@ -67,7 +67,7 @@ export function MemberMenu({ run, uid, name, onDone }: { run: string; uid: strin
   );
 }
 
-/** The sheet header's "Someone else…": a member who isn't on the sheet (or anyone) → the same filtered list as buttons. */
+/** "Answer for someone…" beside the joiners: a member who isn't on the sheet (or anyone) → the same filtered list as buttons. */
 export function SomeoneElse({ run, people, onDone }: { run: string; people: Person[]; onDone: () => Promise<void> | void }) {
   const [open, setOpen] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
@@ -81,8 +81,8 @@ export function SomeoneElse({ run, people, onDone }: { run: string; people: Pers
   const person = people.find((p) => p.uid === uid);
   return (
     <>
-      <Button size="compact-xs" variant="subtle" color="gray" onClick={() => setOpen(true)}>Someone else…</Button>
-      <Modal opened={open} onClose={close} title="Record for someone else" centered>
+      <Button size="xs" variant="default" onClick={() => setOpen(true)}>Answer for someone…</Button>
+      <Modal opened={open} onClose={close} title="Answer for someone" centered>
         <Stack gap="sm">
           <Select label="Member" placeholder="Pick a member" searchable value={uid} onChange={setUid}
             data={people.map((p) => ({ value: p.uid, label: p.display_name }))} nothingFoundMessage="nobody by that name" />

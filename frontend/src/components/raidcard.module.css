@@ -69,7 +69,7 @@
 .run { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px; min-width: 0; }
 .runDot { width: 10px; height: 10px; border-radius: 50%; flex: none; align-self: center; }
 .runOpen { background: var(--mantine-color-teal-4); }
-.runLocked { background: var(--mantine-color-yellow-5); }
+.runLocked { background: var(--mantine-color-slate-1); }  /* never amber: amber marks a value changed from the default */
 .runNext { background: var(--mantine-color-slate-3); }
 .runWhen { font-size: 14px; font-weight: 600; white-space: nowrap; color: inherit; text-decoration: none; }
 a.runWhen:hover { text-decoration: underline; }
@@ -89,3 +89,27 @@ a.runWhen:hover { text-decoration: underline; }
 .sched.paused { border-color: var(--mantine-color-yellow-8); }
 .editor { padding: 12px 14px; border: 1px solid var(--mantine-color-teal-8); border-radius: 8px; min-width: 0; }
 .nowrap { white-space: nowrap; }
+
+/* ---- one run's week as a strip (the Rosters card): steps evenly spaced, done teal, the rest grey, a now mark */
+.strip { position: relative; height: 62px; margin: 0 8px; padding-top: 14px; }
+.stripLine, .stripDone { position: absolute; left: 0; top: 20px; height: 2px; }
+.stripLine { right: 0; background: var(--mantine-color-slate-5); }
+.stripDone { background: var(--mantine-color-teal-4); }
+.step { position: absolute; top: 14px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 3px;
+  text-align: center; white-space: nowrap; }
+.step.stepFirst { transform: none; align-items: flex-start; text-align: left; }
+.step.stepLast { transform: translateX(-100%); align-items: flex-end; text-align: right; }
+.stepDot { width: 14px; height: 14px; border-radius: 50%; background: var(--mantine-color-teal-4); flex: none; box-shadow: 0 0 0 3px var(--mantine-color-body); }
+.todo .stepDot { background: var(--mantine-color-slate-4); }
+.stepEnd { width: 14px; height: 14px; border-radius: 3px; background: var(--mantine-color-slate-0); flex: none; box-shadow: 0 0 0 3px var(--mantine-color-body); }
+.stepLabel { font-size: 12px; font-weight: 600; }
+.todo .stepLabel { color: var(--mantine-color-dimmed); }
+.stepWhen { font-size: 11px; color: var(--mantine-color-dimmed); }
+.now { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.nowWord { font-size: 10px; font-weight: 700; line-height: 12px; }
+.nowBar { width: 2px; height: 22px; background: currentColor; }
+@media (max-width: 48em) {
+  .strip { height: 48px; }
+  .stepWhen { display: none; }  /* a phone: the steps' names; the dates are in each step's tooltip and the card's line */
+  .stepLabel { font-size: 11px; }
+}

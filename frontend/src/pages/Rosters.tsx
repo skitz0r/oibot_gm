@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { DateTimePicker } from "@mantine/dates";
-import { ActionIcon, Badge, Box, Button, Card, Drawer, Group, Select, Stack, Tabs, Text, Tooltip } from "@mantine/core";
-import { IconFlask, IconSparkles, IconUserPlus, IconX } from "@tabler/icons-react";
-import { api, type Board, type Meta, type Person, type RaidRuns, type Rosters, type Series, type Sheet } from "../api";
+import { ActionIcon, Anchor, Badge, Box, Button, Card, Drawer, Group, Modal, Select, Stack, Tabs, Text, Tooltip, UnstyledButton } from "@mantine/core";
+import { IconCalendarPlus, IconFlask, IconPlus, IconUserPlus, IconX } from "@tabler/icons-react";
+import { api, type Board, type Meta, type Person, type RaidRuns, type Rosters, type Series, type Sheet, type UpcomingRun } from "../api";
 import { GameIcon } from "../components/Icons";
 import { useConfirm } from "../components/ConfirmModal";
 import { classColour } from "../theme";
@@ -11,7 +12,8 @@ import { Eyebrow, PageTitle, fail, ok } from "../components/Page";
 import { BoardPreview } from "../components/board/BoardPreview";
 import { Detail, SheetCard } from "../components/board/SheetCard";
 import { TestFeed } from "../components/TestFeed";
-import type { NightSheet, OpenPreview, RunsPage, UpcomingRow } from "../components/board/types";
+import type { NightSheet, OpenPreview, RunsPage } from "../components/board/types";
+import { WhenItRuns, raidCardCss } from "../components/RaidCard";
 import { RoleCounts, runName, type Act, type OnBoard } from "../components/board/shared";
 import { usePoll } from "../hooks/usePoll";
 import { useLive } from "../hooks/useLive";
@@ -40,46 +42,58 @@ export function RostersPage({ meta }: { meta: Meta }) {
   }
 
   if (!data) return <Text c="dimmed">Loading…</Text>;
+  const zone = meta.timezones?.flatMap((g) => g.items).find((i) => i.value === data.tz)?.label || data.tz;  // the zone in words, as on Raids
   return (
     <Stack gap="lg">
-      <PageTitle title="Rosters" intro={`Recurring schedules open a sheet per run on their own and have regulars — the people expected each week (nothing is answered for them; you see who hasn't answered). Ad hoc runs are opened here at a time you pick: first come, first rostered. Shape the roster on the board before it locks; after lock, the board is the roster. Times are ${data.tz}; the page refreshes itself while open.`} />
+      <PageTitle title="Rosters" intro={`Each raid's runs, soonest first: answer for someone, shape the board, lock, fill. Times in ${zone}.`} />
       {data.raids.map((r) => <RaidCard key={r.id} r={r} meta={meta} people={data.people || []} busy={busy} onAct={act} onBoard={patchBoard} onReload={load} />)}
       {data.orphans.length > 0 && (
-        <Card><Box p="md"><Eyebrow>Sheets not tied to a raid</Eyebrow>{data.orphans.map((e) => <Text key={e.key} size="sm">{runName(e)} · {e.state}</Text>)}</Box></Card>
+        <Card><Box p="md"><Eyebrow plain>Sheets not tied to a raid</Eyebrow>{data.orphans.map((e) => <Text key={e.key} size="sm">{runName(e)} · {e.state}</Text>)}</Box></Card>
       )}
     </Stack>
   );
 }
 
-/** Open the next run of a recurring schedule: one press (a schedule select when the raid has several). */
+/** a person's own clock for the open confirms: day without a leading zero, 12-hour (the Clock rule) */
+const yourClock = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+
+/** Open the next run of a recurring schedule: one press (a schedule select when the raid has several) — the first
+ *  upcoming run the server says can open. When none can, the reason is written under the button (a disabled button's
+ *  tooltip never shows). */
 function OpenNext({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct: Act }) {
   const [sched, setSched] = useState<string>("");  // "" = the next run of any recurring schedule
   const recurring = (r.schedules || []).filter((s) => s.active && s.class !== "adhoc" && s.kind !== "pickup");
-  const next = r.upcoming.find((u) => !sched || u.schedule === sched);
+  const rows = r.upcoming.filter((u) => !sched || u.schedule === sched);
+  const next = rows.find((u) => u.can_open);
+  const why = next ? null : rows[0]?.why || "Nothing to open: this schedule has no run coming — check it on the Raids page.";
   return (
-    <Group gap="xs" align="center" wrap="wrap">
-      {recurring.length > 1 && (
-        <Select size="sm" w={180} allowDeselect={false} aria-label="which recurring schedule" value={sched} onChange={(v) => setSched(v || "")}
-          data={[{ value: "", label: "Any schedule" }, ...recurring.map((s) => ({ value: s.id, label: s.name }))]} />
-      )}
-      <Tooltip label={next ? `The next run: ${next.start}` : "No run coming up — add run times on the Raids page"} withinPortal>
-        <Button size="sm" leftSection={<IconSparkles size={15} />} loading={busy === `open${r.id}`} disabled={!next}
-          onClick={() => onAct(`open${r.id}`, `/api/raid/${r.id}/open`, { schedule: sched })}>Open next run</Button>
-      </Tooltip>
-    </Group>
+    <Stack gap={4} align="flex-end" style={{ maxWidth: 340 }}>
+      <Group gap="xs" align="center" wrap="wrap" justify="flex-end">
+        {recurring.length > 1 && (
+          <Select size="sm" w={180} allowDeselect={false} aria-label="which recurring schedule" value={sched} onChange={(v) => setSched(v || "")}
+            data={[{ value: "", label: "Any schedule" }, ...recurring.map((s) => ({ value: s.id, label: s.name }))]} />
+        )}
+        <Tooltip label={next ? `Opens the sheet for ${next.start} now` : ""} disabled={!next} withinPortal>
+          <Button size="sm" variant="default" leftSection={<IconPlus size={15} />} loading={busy === `open${r.id}`} disabled={!next}
+            onClick={() => next && onAct(`open${r.id}`, `/api/raid/${r.id}/open`, { start: next.start_iso, schedule: next.schedule })}>Open next run</Button>
+        </Tooltip>
+      </Group>
+      {why && <Text size="xs" c="dimmed" ta="right">{why}</Text>}
+    </Stack>
   );
 }
 
-/** Start an ad hoc run: a pickup template (its own settings) or a one-off, at a date and time picked — nobody types a
- *  timestamp. Every change asks the server what Open would do (POST /api/raid/{rid}/open/preview, rc.open_preview): a
- *  time that IS an upcoming recurring run relabels the button "Open the … run — scheduled, with confirmations", and
- *  the confirm shows both clocks (guild time and yours), the run's rules, the DST note and where the sheet posts. Open
- *  carries the preview's exact instant and key back, so a stale match is refused rather than opening another run. */
+/** Start an ad hoc run: a button opening one screen — a pickup template (its own settings) or a one-off, at a date and
+ *  time picked (nobody types a timestamp). Every change asks the server what Open would do (POST
+ *  /api/raid/{rid}/open/preview, rc.open_preview): a time that IS an upcoming recurring run relabels the button "Open the
+ *  … run — scheduled, with confirmations"; the screen shows both clocks (guild time and yours), the run's rules, the DST
+ *  note and where the sheet posts, and why Start waits when it does. Start carries the preview's exact instant and key
+ *  back, so a stale match is refused rather than opening another run. */
 function StartAdhoc({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct: Act }) {
+  const [opened, setOpened] = useState(false);
   const [tpl, setTpl] = useState<string>("adhoc");  // "adhoc" = a one-off
   const [when, setWhen] = useState<string | null>(null);
   const [p, setP] = useState<OpenPreview | null>(null);
-  const [ask, dialog] = useConfirm();
   const templates = (r.schedules || []).filter((s) => s.active && (s.class === "adhoc" || s.kind === "pickup"));
   const picked = (when || "").trim();
   useEffect(() => {
@@ -90,64 +104,90 @@ function StartAdhoc({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAc
       .then((x) => { if (live) setP(x); }).catch(() => { if (live) setP(null); });
     return () => { live = false; };
   }, [picked, tpl, r.id]);
-  const label = p && p.kind === "scheduled" ? `Open the ${p.schedule_name} run — scheduled, with confirmations` : "Start ad hoc run";
+  const scheduled = p?.kind === "scheduled";
+  const label = scheduled ? `Open the ${p!.schedule_name} run — scheduled, with confirmations` : "Start the ad hoc run";
+  const waits = !picked ? "Pick the day and time it starts." : !p ? "Checking that time…" : p.refusal ? p.refusal : p.past ? "That time has passed — pick a later one." : null;
+  const close = () => { setOpened(false); setWhen(null); setP(null); };
   async function start() {
-    if (!p) return;
-    const yours = new Date(p.start).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
-    const message = [`${p.label} guild time · ${yours} your time`, p.rules, p.when_note, p.exists ? `A run for that time already exists (${p.exists}); Open points you at it instead of making a second.` : "", p.refusal || "",
-      p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].filter(Boolean).join("\n");
-    if (!(await ask({ title: p.kind === "scheduled" ? `Open the ${p.schedule_name} run?` : `Start an ad hoc ${r.name}?`, message, confirmLabel: p.kind === "scheduled" ? "Open" : "Start" }))) return;
+    if (!p || waits) return;
+    close();
     await onAct(`adhoc${r.id}`, `/api/raid/${r.id}/open`, { start: p.start, key: p.key,
       // a time that IS a scheduled run opens as that schedule's run (null = the raid's own run times → "default");
       // sending "adhoc" there would resolve to a one-off key and the server would refuse the stale preview (409)
       schedule: p.kind === "scheduled" ? (p.schedule || "default") : (p.schedule || (tpl === "adhoc" ? "adhoc" : tpl)) });
-    setWhen(null);
   }
   return (
-    <Group gap="xs" align="center" wrap="wrap">
-      {templates.length > 0 && (
-        <Select size="sm" w={180} allowDeselect={false} aria-label="template" value={tpl} onChange={(v) => setTpl(v || "adhoc")}
-          data={[{ value: "adhoc", label: "One-off" }, ...templates.map((s) => ({ value: s.id, label: s.name }))]} />
-      )}
-      <DateTimePicker
-        size="sm" w={230} clearable value={when} onChange={setWhen} placeholder="pick a date and time"
-        minDate={new Date().toISOString().slice(0, 10)}
-        valueFormat="ddd DD MMM h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }}
-        popoverProps={{ withinPortal: true }} aria-label="when the ad hoc run starts"
-      />
-      <Tooltip label={p ? (p.refusal || `${p.label} — ${p.rules}`) : picked ? "Checking that time…" : "Pick when it starts"} withinPortal multiline w={320}>
-        <Button size="sm" variant="default" loading={busy === `adhoc${r.id}`} disabled={!p || p.past || !!p.closed} onClick={start}>{label}</Button>
-      </Tooltip>
-      {dialog}
-    </Group>
+    <>
+      <Button size="sm" variant="default" leftSection={<IconCalendarPlus size={15} />} loading={busy === `adhoc${r.id}`} onClick={() => setOpened(true)}>Start an ad hoc run…</Button>
+      <Modal opened={opened} onClose={close} title={`Start an ad hoc ${r.name} run`} centered>
+        <Stack gap="sm">
+          {templates.length > 0 && (
+            <Select label="Settings" allowDeselect={false} value={tpl} onChange={(v) => setTpl(v || "adhoc")}
+              data={[{ value: "adhoc", label: "One-off" }, ...templates.map((s) => ({ value: s.id, label: s.name }))]} />
+          )}
+          <DateTimePicker
+            label="When it starts" clearable value={when} onChange={setWhen} placeholder="pick a date and time"
+            minDate={new Date().toISOString().slice(0, 10)}
+            valueFormat="ddd D MMM YYYY h:mm A" timePickerProps={{ format: "12h", withDropdown: true, popoverProps: { withinPortal: false } }}
+            popoverProps={{ withinPortal: true }} aria-label="when the ad hoc run starts"
+          />
+          {p && (
+            <Stack gap={2}>
+              <Text size="sm"><b>{p.label}</b> guild time · {yourClock(p.start)} your time</Text>
+              <Text size="sm" c="dimmed">{p.rules}</Text>
+              {p.when_note && <Text size="sm" c="dimmed">{p.when_note}</Text>}
+              {p.exists && <Text size="sm" c="dimmed">A run for that time already exists ({p.exists}); Open points you at it instead of making a second.</Text>}
+              <Text size="sm" c="dimmed">{p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."}</Text>
+            </Stack>
+          )}
+          <Group justify="flex-end" gap="sm">
+            <Button variant="default" onClick={close}>Back</Button>
+            <Button disabled={!!waits} onClick={start}>{label}</Button>
+          </Group>
+          {waits && <Text size="xs" c={p?.refusal ? "red" : "dimmed"} ta="right">{waits}</Text>}
+        </Stack>
+      </Modal>
+    </>
   );
 }
 
-/** The Upcoming tab: each run of a recurring schedule with its own Open (design B4) — one press, then the confirm with the
- *  server's preview; a row the scheduler can't open (no signup channel set) says so in red. */
+/** The raid's upcoming runs inside "When it runs" (design §5.56): each active schedule's next three runs, whatever the
+ *  horizon — the soonest as "next run", the rest behind one toggle. A row the server says can open has Open now (one
+ *  press, then the confirm with the server's preview); one that can't says why, in the server's words. */
 function UpcomingRows({ r, busy, onAct }: { r: RaidRuns; busy: string | null; onAct: Act }) {
   const [ask, dialog] = useConfirm();
-  const rows = r.upcoming as UpcomingRow[];
-  async function open(u: UpcomingRow) {
+  const [all, setAll] = useState(false);
+  const rows = all ? r.upcoming : r.upcoming.slice(0, 1);
+  async function open(u: UpcomingRun) {
     let p: OpenPreview;
     try { p = await api.post<OpenPreview>(`/api/raid/${r.id}/open/preview`, { start: u.start_iso, schedule: u.schedule }); } catch (err) { fail(err); return; }
-    const yours = new Date(p.start).toLocaleString(undefined, { weekday: "short", day: "2-digit", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
     if (p.refusal) { fail(new Error(p.refusal)); return; }
-    const message = [`${p.label} guild time · ${yours} your time`, p.rules, p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].join("\n");
-    if (!(await ask({ title: `Open ${r.name} · ${u.slot}?`, message, confirmLabel: "Open" }))) return;
-    await onAct(`up${u.key || u.start}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, key: p.key });
+    const message = [`${p.label} guild time · ${yourClock(p.start)} your time`, p.rules, p.channel ? `The sheet posts in #${p.channel_name || "the signup channel"}.` : "No signup channel is set: the sheet isn't posted until one is (/raid sheet)."].join("\n");
+    if (!(await ask({ title: `Open ${r.name} · ${u.start} now?`, message, confirmLabel: "Open now" }))) return;
+    await onAct(`up${u.key}`, `/api/raid/${r.id}/open`, { start: p.start, schedule: u.schedule, key: p.key });
   }
+  const css = raidCardCss;
   return (
-    <Stack gap={4}>
-      {rows.map((u) => (
-        <Group key={u.key || u.start} gap="sm" wrap="wrap">
-          <Text size="sm"><b>{u.start}</b> <Text span c="dimmed">· {u.slot} · sheet opens {u.opens}</Text></Text>
+    <>
+      {rows.map((u, i) => (
+        <li key={u.key} className={css.run}>
+          <span className={[css.runDot, css.runNext].join(" ")} />
+          <span className={css.runWhen}>{u.start}</span>
+          <span className={css.runWhat}>{i === 0 ? "next run · " : ""}{u.schedule_name} — its sheet opens {u.opens}</span>
+          {u.can_open && <Button size="compact-xs" variant="light" loading={busy === `up${u.key}`} onClick={() => open(u)}>Open now</Button>}
           {u.needs_channel && <Text size="xs" c="red">needs a signup channel</Text>}
-          {u.start_iso && <Button size="compact-xs" variant="light" loading={busy === `up${u.key || u.start}`} onClick={() => open(u)}>Open</Button>}
-        </Group>
+          {!u.can_open && u.why && <Text size="xs" c="dimmed" style={{ flexBasis: "100%", paddingLeft: 20 }}>{u.why}</Text>}
+        </li>
       ))}
+      {r.upcoming.length > 1 && (
+        <li className={css.run}>
+          <Anchor component="button" type="button" size="xs" onClick={() => setAll((x) => !x)} style={{ paddingLeft: 20 }}>
+            {all ? "Show only the next run" : `Show the next ${r.upcoming.length} runs`}
+          </Anchor>
+        </li>
+      )}
       {dialog}
-    </Stack>
+    </>
   );
 }
 
@@ -155,7 +195,7 @@ function UpcomingRows({ r, busy, onAct }: { r: RaidRuns; busy: string | null; on
  *  the run in full (GET /api/run/{key}); `#run-<key>` deep links open it. */
 function History({ r, meta }: { r: RaidRuns; meta: Meta }) {
   const [more, setMore] = useState<Sheet[]>([]);
-  const [total, setTotal] = useState<number>((r as RaidRuns & { past_total?: number }).past_total ?? r.past.length);
+  const [total, setTotal] = useState<number>(r.past_total ?? r.past.length);
   const [busy, setBusy] = useState(false);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const rows = [...r.past, ...more.filter((m) => !r.past.some((p) => p.key === m.key))];
@@ -169,11 +209,12 @@ function History({ r, meta }: { r: RaidRuns; meta: Meta }) {
   }
   return (
     <Stack gap={4}>
-      {rows.length === 0 && <Text size="sm" c="dimmed">No past runs.</Text>}
+      {rows.length === 0 && <Text size="sm" c="dimmed">No past runs yet — a run lands here once it ends or is cancelled.</Text>}
       {rows.map((e) => (
-        <Text key={e.key} size="sm" style={{ cursor: "pointer" }} onClick={() => { setOpenKey(e.key); window.history.replaceState(null, "", `#run-${e.key}`); }}>
-          <Badge size="xs" variant="outline" color={e.state === "done" ? "teal" : "gray"} mr={6}>{e.state}</Badge>{e.when} · {e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}
-        </Text>
+        <UnstyledButton key={e.key} aria-label={`open the run of ${e.when}`} onClick={() => { setOpenKey(e.key); window.history.replaceState(null, "", `#run-${e.key}`); }}
+          style={{ borderRadius: 6, padding: "2px 4px", width: "fit-content", maxWidth: "100%" }}>
+          <Text size="sm" component="span"><Badge size="xs" variant="outline" color={e.state === "done" ? "teal" : "gray"} tt="none" mr={6}>{e.state}</Badge>{e.when} · {e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}</Text>
+        </UnstyledButton>
       ))}
       {rows.length < total && <Button size="compact-xs" variant="subtle" loading={busy} onClick={loadMore} w="fit-content">Show older runs ({total - rows.length} more)</Button>}
       <RunDrawer runKey={openKey} meta={meta} onClose={() => { setOpenKey(null); if (window.location.hash.startsWith("#run-")) window.history.replaceState(null, "", window.location.pathname + window.location.search); }} />
@@ -199,7 +240,7 @@ function RunDrawer({ runKey, meta, onClose }: { runKey: string | null; meta: Met
     <Drawer opened={!!runKey} onClose={onClose} position="right" size="xl" title={e ? `${e.raid} · ${e.when}` : "Loading…"}>
       {e && (
         <Stack gap="sm">
-          <Group gap="sm"><Badge variant="outline" color={e.state === "done" ? "teal" : "gray"}>{e.state}</Badge>{e.closed_at && <Text size="xs" c="dimmed">closed {e.closed_at}</Text>}</Group>
+          <Group gap="sm"><Badge variant="outline" color={e.state === "done" ? "teal" : "gray"} tt="none">{e.state}</Badge>{e.closed_at && <Text size="xs" c="dimmed">closed {e.closed_at}</Text>}</Group>
           <Text size="sm">{e.counts.in} joined · {e.rostered} rostered{e.n_rosters > 1 ? ` in ${e.n_rosters} rosters` : ""}</Text>
           {e.board && e.rostered > 0 && <BoardPreview meta={meta} board={e.board} />}
           {e.may_reopen && <Button size="xs" variant="light" loading={busy} onClick={reopen} w="fit-content">Reopen — ended by mistake</Button>}
@@ -221,7 +262,7 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
   const person = people.find((p) => p.uid === who);
   const on = new Set(s.regulars.map((x) => x.uid));
   const level = s.level || (Object.entries(s.need).some(([role, n]) => (s.counts[role] || 0) < n) ? "red" : "green");
-  const levelColour = { green: "teal", amber: "yellow", red: "red" }[level];
+  const levelColour = { green: "teal", amber: "slate", red: "red" }[level];  // never amber on this page: amber marks a value changed from the default
   const spare = s.no_spare || [];
   const levelWords = { green: "regular mains cover the tank and healer minimums, with a spare", amber: spare.length ? `no spare ${spare.join(" or ")} among regular mains — one absence leaves it short` : "covered only with offspecs, flex roles or alts", red: "regulars can't field the minimum" }[level];
   async function remove(uid: string, name: string, character: string) {
@@ -237,7 +278,7 @@ function RegularsCard({ r, s, meta, people, onAct, busy }: { r: RaidRuns; s: Ser
     <Box p="sm" style={{ border: "1px solid var(--mantine-color-slate-5)", borderRadius: 8, minWidth: 260, flex: "1 1 300px" }}>
       <Group justify="space-between" wrap="wrap" gap="xs">
         <Box style={{ minWidth: 0 }}>
-          <Text fw={700} size="sm">{s.name}{!s.active && <Badge ml={6} size="xs" color="gray" variant="light">paused</Badge>}</Text>
+          <Text fw={700} size="sm">{s.name}{!s.active && <Badge ml={6} size="xs" color="gray" variant="light" tt="none">paused</Badge>}</Text>
           <Text size="xs" c="dimmed">{s.label} · {s.regulars.length} regular{s.regulars.length === 1 ? "" : "s"} for {s.seats} seats</Text>
         </Box>
         <Tooltip label={levelWords}>
@@ -278,7 +319,7 @@ function Forecast({ s, meta }: { s: Series; meta: Meta }) {
   if (!rows.length) return null;
   return (
     <Box mt={6}>
-      <Eyebrow>Next 4 weeks</Eyebrow>
+      <Eyebrow plain>Next 4 weeks</Eyebrow>
       <Stack gap={0}>
         {rows.map((f) => (
           <Tooltip key={f.start} label={f.away.length ? `away: ${f.away.join(", ")}` : `${f.expected} regulars expected`} withinPortal>
@@ -320,54 +361,57 @@ function Regulars({ r, meta, people, onAct, busy }: { r: RaidRuns; meta: Meta; p
   );
 }
 
+/** One raid: its header (the schedules in words, Open next run, Start an ad hoc run…), "When it runs" (the Raids card's
+ *  block from the same server fields, with the upcoming runs and their Open), then every live run as a card in time
+ *  order — open or locked, soonest first, never a test run — and the tabs for what isn't live: Regulars · History ·
+ *  Test (only once a test run exists). Design §5.56. */
 function RaidCard({ r, meta, people, busy, onAct, onBoard, onReload }: { r: RaidRuns; meta: Meta; people: Person[]; busy: string | null; onAct: Act; onBoard: OnBoard; onReload: () => Promise<void> }) {
   const scheds = (r.schedules || []).filter((s) => s.active && s.kind !== "pickup");
+  const recurring = scheds.filter((s) => s.class !== "adhoc");
   // test runs (the test bench's rehearsals and comp sandboxes) live on their own Test tab, never among the real sheets (B9)
-  const open = r.open.filter((e) => !e.test), locked = r.locked.filter((e) => !e.test);
+  const runs = [...r.open, ...r.locked].filter((e) => !e.test).sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
   const tests = [...r.open, ...r.locked].filter((e) => e.test);
-  const metaLine = [scheds.length ? scheds.map((s) => (scheds.length > 1 ? `${s.name}: ${s.label}` : s.label)).join(" · ") : "no schedule yet — add one on the Raids page", r.opened ? null : r.first_open ? `the first sheet opens ${r.first_open}` : "no first opening yet — the owner sets it on the Raids page", `${open.length} open · ${locked.length} locked`].filter(Boolean).join(" · ");
+  const metaLine = [`${r.size}-player`, scheds.length ? scheds.map((s) => `${s.name}, ${s.label}`).join(" · ") : "no schedule yet — add one on the Raids page"].join(" · ");
   const target = window.location.hash.startsWith("#run-") ? window.location.hash.slice(5) : "";
-  const first = tests.some((e) => e.key === target) ? "test" : locked.some((e) => e.key === target) ? "locked" : r.past.some((e) => e.key === target) ? "history" : open.length ? "open" : locked.length ? "locked" : "upcoming";
-  const testBadge = <Tooltip label="a test run: puppets and its tester only — its cards post where it was opened"><Badge variant="light" color="grape" leftSection={<IconFlask size={12} />}>test</Badge></Tooltip>;
+  const first = tests.some((e) => e.key === target) ? "test" : r.past.some((e) => e.key === target) ? "history" : "regulars";
+  const regulars = (r.series || []).reduce((n, s) => n + s.regulars.length, 0);
+  const testBadge = <Tooltip label="a test run: puppets and its tester only — its cards post where it was opened"><Badge variant="light" color="grape" tt="none" leftSection={<IconFlask size={12} />}>test</Badge></Tooltip>;
   return (
     <Card>
-      <RaidHeader id={r.id} name={r.name} meta={metaLine} right={<Stack gap={6} align="flex-end"><OpenNext r={r} busy={busy} onAct={onAct} /><StartAdhoc r={r} busy={busy} onAct={onAct} /></Stack>} />
-      <Tabs defaultValue={first} px="md" pb="md">
-        <Tabs.List>
-          <Tabs.Tab value="open" rightSection={open.length ? <Badge size="xs" color="teal" variant="light">{open.length}</Badge> : null}>Open for signup</Tabs.Tab>
-          <Tabs.Tab value="locked" rightSection={locked.length ? <Badge size="xs" color="yellow" variant="light">{locked.length}</Badge> : null}>Locked</Tabs.Tab>
-          <Tabs.Tab value="upcoming">Upcoming</Tabs.Tab>
-          <Tabs.Tab value="regulars" rightSection={(r.series || []).length ? <Badge size="xs" color="gray" variant="light">{(r.series || []).reduce((n, s) => n + s.regulars.length, 0)}</Badge> : null}>Regulars</Tabs.Tab>
-          <Tabs.Tab value="history">History</Tabs.Tab>
-          {tests.length > 0 && <Tabs.Tab value="test" rightSection={<Badge size="xs" color="grape" variant="light">{tests.length}</Badge>}>Test</Tabs.Tab>}
-        </Tabs.List>
-        <Tabs.Panel value="open" pt="md">
-          {open.length === 0 && <Text size="sm" c="dimmed">No sheet open. The next slot opens on its own {r.upcoming[0] ? `${r.upcoming[0].opens}` : "once a schedule is set on Raids"}, or open one now.</Text>}
-          <Stack gap="md">{open.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}</Stack>
-        </Tabs.Panel>
-        <Tabs.Panel value="locked" pt="md">
-          {locked.length === 0 && <Text size="sm" c="dimmed">Nothing locked.</Text>}
-          <Stack gap="md">{locked.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}</Stack>
-        </Tabs.Panel>
-        {tests.length > 0 && (
-          <Tabs.Panel value="test" pt="md">
-            <Stack gap="md">
-              {tests.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} badge={testBadge} people={people} />)}
-              {meta.viewer.officer && <Card withBorder p="sm"><TestFeed run={tests.length === 1 ? tests[0].key : undefined} height={260} /></Card>}
-            </Stack>
+      <RaidHeader id={r.id} name={r.name} meta={metaLine} right={
+        <Group gap="xs" align="flex-start" wrap="wrap" justify="flex-end">
+          <StartAdhoc r={r} busy={busy} onAct={onAct} />
+          {recurring.length > 0 && <OpenNext r={r} busy={busy} onAct={onAct} />}
+        </Group>} />
+      <Stack gap="md" p="md">
+        <Box>
+          <Box mb={6}><Eyebrow plain>When it runs</Eyebrow></Box>
+          <WhenItRuns r={r} owner={false} here upcoming={r.upcoming.length ? <UpcomingRows r={r} busy={busy} onAct={onAct} /> : undefined}
+            nothing={<>No run coming up: no schedule opens a sheet for this raid. Add one on the <Anchor component={Link} to="/raids" size="sm">Raids page</Anchor>, or start an ad hoc run here.</>} />
+        </Box>
+        {runs.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} people={people} />)}
+        <Tabs defaultValue={first}>
+          <Tabs.List>
+            <Tabs.Tab value="regulars">Regulars · {regulars}</Tabs.Tab>
+            <Tabs.Tab value="history">History</Tabs.Tab>
+            {tests.length > 0 && <Tabs.Tab value="test">Test · {tests.length}</Tabs.Tab>}
+          </Tabs.List>
+          {tests.length > 0 && (
+            <Tabs.Panel value="test" pt="md">
+              <Stack gap="md">
+                {tests.map((e) => <SheetCard key={e.key} e={e} meta={meta} busy={busy} onAct={onAct} onBoard={onBoard} onReload={onReload} badge={testBadge} people={people} />)}
+                {meta.viewer.officer && <Card withBorder p="sm"><TestFeed run={tests.length === 1 ? tests[0].key : undefined} height={260} /></Card>}
+              </Stack>
+            </Tabs.Panel>
+          )}
+          <Tabs.Panel value="regulars" pt="md">
+            <Regulars r={r} meta={meta} people={people} onAct={onAct} busy={busy} />
           </Tabs.Panel>
-        )}
-        <Tabs.Panel value="upcoming" pt="md">
-          {r.upcoming.length === 0 && <Text size="sm" c="dimmed">No upcoming runs{scheds.length ? " before the raid opens" : " — add a schedule on Raids"}.</Text>}
-          <UpcomingRows r={r} busy={busy} onAct={onAct} />
-        </Tabs.Panel>
-        <Tabs.Panel value="regulars" pt="md">
-          <Regulars r={r} meta={meta} people={people} onAct={onAct} busy={busy} />
-        </Tabs.Panel>
-        <Tabs.Panel value="history" pt="md">
-          <History r={r} meta={meta} />
-        </Tabs.Panel>
-      </Tabs>
+          <Tabs.Panel value="history" pt="md">
+            <History r={r} meta={meta} />
+          </Tabs.Panel>
+        </Tabs>
+      </Stack>
     </Card>
   );
 }

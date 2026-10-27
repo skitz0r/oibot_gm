@@ -3368,6 +3368,67 @@ outputs back, with the idea of status sharing later ("I'm at step 412 of 1–60 
 position: the addon's saved variables or the companion); map art (the explorer draws zone boxes from the waypoints, the
 member can overlay their own continent images); a tbc `guides.yaml`.
 
+### 5.56 The Rosters page reads by its shape (built 2026-10-26)
+
+**Why.** A review of the Rosters page against the standard §5.54 set for Raids (2026-10-26, 50 findings; the user
+approved desktop, board and phone mockups) found the actions sound and the page hard to read on the night it matters:
+the *Open for signup* tab opened whenever a sheet was open, so on raid night the locked run — confirmations, Fill — hid
+behind *Locked*; the raid header was a prose string whose counts repeated the tab badges, in words other than the Raids
+card's; the Upcoming tab listed only runs inside the 21-day horizon, so a raid opening in December said *No upcoming runs
+before the raid opens* and greyed Open next run while Raids showed its next run; an empty sheet's board took the page
+(eight groups of five "· open" slots and fourteen greyed buffs); the run's week was emoji prose; *short* appeared three
+ways; the headcount had no owner; a locked card listed people twice; empty Bench / No thanks / Away rows always
+rendered; the board's legend and drag hint repeated under every card; disabled buttons hid their reason; the ad hoc
+picker and both confirms showed *Wed 04 Nov*; chips and eyebrows shouted in capitals; amber meant five things.
+
+**What (phase 1 — the page's shape).**
+- **Every live run is a card in time order** — open or locked, soonest first, never a test run; the tabs are only
+  **Regulars · History · Test** (Test once a test run exists, which the Test bench card now says). The raid header
+  reads *10-player · Raid nights, Tuesdays 4:00 AM* (or *no schedule yet — add one on the Raids page*) with **Start an
+  ad hoc run…** and, on a raid with a recurring schedule, **Open next run**; the page intro is one line with the zone in
+  words.
+- **When it runs** is the Raids card's block (`RaidCard.WhenItRuns`, now taking either page's raid: `RunsOf`), from the
+  same server fields on `GET /api/rosters` — `live_runs`, `next_run` (now `{when, schedule, opens}` and skipping a run
+  that already has a sheet, on both pages), `first_open_words`. On Rosters a live run's time jumps to its card, and the
+  next-run line is replaced by **each active schedule's next three runs whatever the horizon** (`rc.upcoming_rows`,
+  `UPCOMING_PER_SCHEDULE`): the soonest shown, the rest behind *Show the next N runs*; a row that can open has **Open
+  now** (the preview confirm as before), one that can't says why in the server's words (`rc.open_row_refusal`: a
+  closed run at that time — `closed_run_refusal` — or more than `OPEN_HORIZON_DAYS` out: *Too far ahead to open now:
+  Open works from …, three weeks before the run; its sheet opens on its own …*, the same limit the no-time open paths
+  keep). Open next run opens the first row that can open and writes the first row's reason under itself when none can.
+  The locked dot is light grey on both pages (amber marks a changed value only).
+- **The run's week** is a strip (`RaidCard.RunStrip`) from `ev_json.week` — `[{step, when, at, done}]`: sheet opened
+  (its `created_at`), reminder (when the run takes one), locks (its `locked_at` once locked), confirm by (when the
+  rostered are asked), the raid — in time order, evenly spaced, done teal, the rest grey, a *now* mark the browser
+  places between the two steps it falls between; the names are `HOUR_WORDS` / `DONE_WORDS` (*sheet opened*, *locked*),
+  the dates the server's words (hidden under 48em, in each step's tooltip).
+- **One headcount with its owner** — *7 / 10 joined* before the lock, *8 / 10 rostered* after — the role counts, and
+  **one short line**: *short* + role icon + number (after the lock a freed seat no role accounts for is a bare number)
+  + the server's clause `ev_json.short_why` (`rc.short_why`: *2 asks out, 1 on the bench could step in* after the lock;
+  *2 regulars haven't answered: A, B* before it). **Answer for someone…** (was *Someone else…*) sits at the end of that
+  row. The party buffs nobody brings show only once someone has joined, as one dashed cluster with one tooltip.
+- **Before the lock** who joined by class, the other answers in **one line** (Bench · No thanks · Away that day — a part
+  only when someone is in it, nothing when all three are empty) and the **board collapsed to one line** (*Board — 7
+  joined, 2 placed: shape it before the lock, or let the lock place everyone* · *Open the board*; remembered per run
+  in the browser; *Hide the board* folds it again); with nobody joined just *Nobody has joined yet — the sheet is in
+  Discord, or answer for someone here.* **After the lock** the class columns go — the board is the roster — and only
+  its groups with someone in them show, plus one empty group to drop into. The *not answered* box shows only while
+  someone hasn't.
+- **The board** is titled *Board*, has one **ⓘ legend** (what the marks mean and how a drag works, before or after the
+  lock) instead of two lines under every card, and an open seat is a dashed slot with no word (tooltip *open seat*).
+  Plain icons (users, plus, calendar) replace the sparkles; the split modal's dead *Loot quality* tile is gone.
+- **Smaller things**: the detail accordion reads *What happened · N lines* (absent when there are none; the *machine
+  form* switch is gone — MCP and the log keep the raw lines); history rows are buttons (keyboard-reachable); empty
+  states say how to fill them (*No past runs yet — a run lands here once it ends or is cancelled*); the ad hoc screen
+  writes why Start waits under it; badges and eyebrows are lower case (`Eyebrow plain`, `tt="none"`); no amber on the
+  page (the fill banner and suggestion button are teal, the regulars' thin level slate); the Clock rule's day:
+  `valueFormat="ddd D MMM YYYY h:mm A"`, `day: "numeric"` (pinned in tests/test_frontend_source.py).
+
+Left for phase 2 (one vocabulary across web, Discord, Me and the manual) and phase 3 (consequence verbs, *Move to…*,
+44 px targets): the card's action labels (*Fill*, *Lock now*, *Open loot council*, the ⋮ menu), the bank's name, the
+state words and confirmation marks from one map, a locked card's role counts from the roster — on purpose, so each
+phase changes one thing at a time.
+
 ## 6. Architecture
 
 ```mermaid
