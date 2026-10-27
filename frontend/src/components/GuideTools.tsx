@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Anchor, Badge, Button, Card, Group, Stack, Table, Text, TextInput, Textarea } from "@mantine/core";
+import { Anchor, Badge, Box, Button, Card, Group, Stack, Table, Text, TextInput, Textarea } from "@mantine/core";
 import { api, guildQuery, type GuideStatus, type Meta } from "../api";
 import { CardHeader, fail, ok } from "./Page";
 import { useConfirm } from "./ConfirmModal";
@@ -79,7 +79,18 @@ export function GuideTools({ meta }: { meta: Meta }) {
               <Stack gap={2}>
                 {st.files.map((f) => <Text key={f.name} size="xs" c="dimmed"><b>{f.name}</b> — {f.words}</Text>)}
               </Stack>
-              <Table withTableBorder={false} verticalSpacing={4} fz="sm" layout="auto" style={{ tableLayout: "auto" }}>
+              {/* the group rows: a table from tablet width up, a stacked list on a phone (no sideways scroll) */}
+              <Stack gap="xs" hiddenFrom="sm">
+                {(st.groups || []).map((g) => (
+                  <Box key={g.group} style={{ borderTop: "1px solid var(--mantine-color-slate-6)", paddingTop: 6 }}>
+                    <Group gap={6} wrap="nowrap"><Text size="sm" fw={600}>{g.group}</Text>{g.starter && <Badge size="xs" variant="light" color="gray" tt="none">free starter</Badge>}</Group>
+                    <Text size="xs" c="dimmed">levels {g.lo}–{g.hi} · {g.guides} guide{g.guides === 1 ? "" : "s"} · {g.steps} steps · {g.km} km walking</Text>
+                    <Text size="xs">{g.zones.join(" → ")}</Text>
+                    <Text size="xs" c="dimmed">{g.dungeons.length ? g.dungeons.join(", ") : "no dungeon on this route"}</Text>
+                  </Box>
+                ))}
+              </Stack>
+              <Table visibleFrom="sm" withTableBorder={false} verticalSpacing={4} fz="sm" layout="auto" style={{ tableLayout: "auto" }}>
                 <Table.Thead>
                   <Table.Tr><Table.Th>Guide group</Table.Th><Table.Th>Levels</Table.Th><Table.Th>Guides</Table.Th><Table.Th>Steps</Table.Th><Table.Th>Zones in order</Table.Th><Table.Th>Dungeons</Table.Th><Table.Th>Walking</Table.Th></Table.Tr>
                 </Table.Thead>
@@ -102,7 +113,9 @@ export function GuideTools({ meta }: { meta: Meta }) {
           <Card>
             <CardHeader title="Route explorer" hint="pick your character on the left; the map and the steps follow"
               action={<Anchor href={`/api/me/guide/explorer${q}`} target="_blank" rel="noopener" size="sm">Open in its own tab</Anchor>} />
-            <iframe title="Route explorer" src={`/api/me/guide/explorer${q}`} sandbox="allow-scripts allow-downloads" style={{ display: "block", width: "100%", height: EXPLORER_HEIGHT, border: 0, background: "#12171f" }} />
+            {/* the explorer has its own phone layout (Character · Map · Route tabs) that needs the whole screen: on a phone it opens in its own tab */}
+            <Box visibleFrom="sm"><iframe title="Route explorer" src={`/api/me/guide/explorer${q}`} sandbox="allow-scripts allow-downloads" style={{ display: "block", width: "100%", height: EXPLORER_HEIGHT, border: 0, background: "#12171f" }} /></Box>
+            <Text hiddenFrom="sm" p="md" size="sm" c="dimmed">On a phone the explorer needs the whole screen: open it in its own tab with the link above.</Text>
           </Card>
         </>
       )}
