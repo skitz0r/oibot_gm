@@ -158,7 +158,9 @@ PY_FILES = ["raid_views.py", "wizard.py", "inbox.py", "consequences.py", "discor
             "discord_registry.py", "configops.py", "help.py", "presets.py",
             # refusals and run-log lines a person reads come from these too
             "registry.py", "raidcycle.py", "discord_loot_surface.py", "discord_people.py", "appeals.py", "discord_policy.py",
-            "discord_help.py"]
+            "discord_help.py",
+            # the leveling-guide tool's refusals (§5.55) and its routes' sentences
+            "guides/build.py", "guides/rxp_decode.py", "web/api_guides.py"]
 LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
 # calls whose string arguments are machine-facing (patterns, keys, ids), not words a person reads
 MACHINE_CALLS = {"compile", "match", "search", "fullmatch", "sub", "findall", "finditer", "split", "startswith", "endswith",

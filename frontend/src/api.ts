@@ -76,6 +76,16 @@ export interface Meta {
   /** §2.9: Discord reachable for this guild (channel / role editing waits while not); `stale` = this viewer's membership is the
    *  last-known "yes" (reads go on, officer writes refuse) */
   discord?: { ready: boolean; stale: boolean };
+  /** §5.55: the game version has the leveling-guide tool's tables (profiles/<version>/guides.yaml) — the Me page shows its Leveling guide tab */
+  guides?: boolean;
+}
+/** The Me page's Leveling guide tab (GET /api/me/guide, design §5.55): what the member has built from their own RestedXP
+ *  import string. `files` = the downloads in order with their words; `groups` = one row per guide group; `built_when` is
+ *  words (the clock rule); `starter_pack` = the host holds the addon zip, so the explorer covers the free 1–20 too. */
+export interface GuideStatus {
+  available: boolean; built: boolean; files: { name: string; words: string }[]; starter_pack: boolean;
+  built_when?: string; guides?: number; steps?: number; starter?: number; range?: string; sizes?: Record<string, number>;
+  groups?: { group: string; guides: number; steps: number; lo: number; hi: number; zones: string[]; dungeons: string[]; km: number; starter: boolean }[];
 }
 /** `rosters` = the locked runs it holds a seat on (words); `regular_on` = the recurring schedules it is a regular of (words). */
 export interface Character { label: string; name: string | null; surname: string | null; cls: string; spec: string; offspec: string | null; is_main: boolean; status: string; rank: string; rosters: string[]; regular_on?: string[]; confirmed: boolean; role: string; off_role: string | null; flex?: string[] }

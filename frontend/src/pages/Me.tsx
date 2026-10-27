@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Box, Button, Card, Group, Select, Stack, Switch, Text, Title } from "@mantine/core";
+import { Badge, Box, Button, Card, Group, Select, Stack, Switch, Tabs, Text, Title } from "@mantine/core";
+import { useSearchParams } from "react-router-dom";
 import css from "./me.module.css";
 import { api, type Me, type Meta, type MyRegular, type MySheet } from "../api";
 import { AskCard, NoticesCard } from "../components/AskCard";
@@ -15,9 +16,15 @@ import { CharacterTable } from "../components/CharacterTable";
 import { AbsencesCard } from "../components/AbsencesCard";
 import { AttendanceCard } from "../components/AttendanceCard";
 import { MyApplication } from "../components/MyApplication";
+import { GuideTools } from "../components/GuideTools";
 
 
+/** Me: the member's own record and inbox, and — when the game version has the tool (meta.guides, §5.55) — a second tab,
+ *  Leveling guide, where they unlock their own RestedXP guide. The tab is the URL's ?tab= so a link can open it. */
 export function MePage({ meta }: { meta: Meta }) {
+  const [params, setParams] = useSearchParams();
+  const tab = meta.guides && params.get("tab") === "guide" ? "guide" : "me";
+  const go = (t: string) => setParams((p) => { const n = new URLSearchParams(p); if (t === "me") n.delete("tab"); else n.set("tab", t); return n; }, { replace: true });
   const [me, setMe] = useState<Me | null>(null);
   const [editing, setEditing] = useState(false);
   const [ask, confirmDialog] = useConfirm();
@@ -39,11 +46,32 @@ export function MePage({ meta }: { meta: Meta }) {
   }, [me]);
 
   if (!me) return <Text c="dimmed">Loading…</Text>;
-  return (
+  const header = (
+    <Group justify="space-between" align="flex-start">
+      <Box><Title order={1} size="h2">{me.display_name}</Title><Text c="dimmed" size="sm" mt={4}>{summary}</Text></Box>
+    </Group>
+  );
+  if (meta.guides) {
+    return (
+      <Stack gap="lg">
+        {header}
+        <Tabs value={tab} onChange={(v) => v && go(v)} keepMounted={false}>
+          <Tabs.List mb="md">
+            <Tabs.Tab value="me">My record</Tabs.Tab>
+            <Tabs.Tab value="guide">Leveling guide</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="me">{record(me)}</Tabs.Panel>
+          <Tabs.Panel value="guide"><GuideTools meta={meta} /></Tabs.Panel>
+        </Tabs>
+        {confirmDialog}
+      </Stack>
+    );
+  }
+  return <Stack gap="lg">{header}{record(me)}{confirmDialog}</Stack>;
+
+  function record(me: Me) {
+    return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-start">
-        <Box><Title order={1} size="h2">{me.display_name}</Title><Text c="dimmed" size="sm" mt={4}>{summary}</Text></Box>
-      </Group>
       <MyApplication application={me.application} registered={me.characters.length > 0} />
       {me.must_apply && !(me.application && me.application.state === "open") && (
         <Card withBorder>
@@ -97,11 +125,9 @@ export function MePage({ meta }: { meta: Meta }) {
           </Card>
         </Stack>
       </div>
-
-      {confirmDialog}
     </Stack>
-  );
-
+    );
+  }
 }
 
 /** One live sheet, answerable here (design B1): Join · Bench · No thanks while the sheet is open (the current answer filled), a

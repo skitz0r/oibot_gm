@@ -495,6 +495,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             # §2.9: Discord reachable for this guild (Config disables channel / role editing while not); `stale` = this
             # viewer's membership is the last-known "yes" (reads go on, officer writes refuse)
             "discord": {"ready": discord_ready(bot, reg), "stale": bool(getattr(v, "stale", False))},
+            # §5.55: the Me page shows its Leveling guide tab when the game version has guides.yaml (zone tables for the explorer)
+            "guides": bool((getattr(reg.profile, "guides", None) or {}).get("zones")),
         }
 
     @app.get("/api/meta")
@@ -2270,6 +2272,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     from .api_me import install_me_api  # the member inbox (asks, notices, own answers) and the officers' on-behalf routes (design §5.40)
 
     install_me_api(app, bot, who=who, body=body, find_live=find_live, resolve_member=resolve_member)
+
+    from .api_guides import install_guides_api  # the leveling-guide tool on the Me page (design §5.55)
+
+    install_guides_api(app, bot, who=who, body=body)
 
     from .api_loot import install_loot_api  # the loot council, history, precedents, the award log, items, wishlists (design §3.1)
 

@@ -523,6 +523,9 @@ BY_DESIGN_ONLY: dict[str, dict[str, str]] = {
     "policy_distil": {"surface": "web", "path": "POST /api/loot/distil", "reason": "Claude's drafted policy sentences are picked from a list beside the precedents each rests on (MCP distil); the pick appends through policy_append, which every surface has"},
     # §5.53: a signup list is a file — rows with Discord ids — imported with a preview and a skipped list; a person's own
     # registration stays /register and the Me page on every surface
+    # §5.55: a member's own RestedXP guide — an import string of ~1 MB pasted with the BattleTag it was issued to — becomes their
+    # addon, explorer and text on the Me page alone; MCP's token is the owner's (the string must not land in a transcript)
+    "leveling_guide": {"surface": "web", "path": "POST /api/me/guide", "reason": "a RestedXP import string is a ~1 MB paste with the member's own BattleTag as its key: the Me page's Leveling guide tab is the only place it is typed; Discord has no paste of that size and MCP's token is the owner's, so it reads the status but never builds"},
     "member_import": {"surface": "web", "path": "POST /api/members/import", "reason": "a signup list (a Raid-Helper export turned into rows by scripts/raidhelper_roster.py) is a file imported with a preview and the skipped rows named (MCP import_members reads the same route); Discord has no file editor, and a person's own registration is /register everywhere"},
 }
 

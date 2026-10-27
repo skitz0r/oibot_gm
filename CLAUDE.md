@@ -40,7 +40,8 @@ Claude-assisted Guild Master bot for WoW raiding guilds. Prototype. Read `docs/d
 ## Layout
 ```
 profiles/tbc/          GameProfile YAML (buffs.yaml drives both the solver and WCL party inference)
-profiles/forever/      Classic-era buff matrix: `slot` = one totem per element per shaman, `scope: raid` = cast buffs, `status` = evidence level,
+profiles/forever/      guides.yaml = the leveling-guide tool's tables (zone ids, continent rects, dungeon tags, the addon folder / Interface line — §5.55);
+                       Classic-era buff matrix: `slot` = one totem per element per shaman, `scope: raid` = cast buffs, `status` = evidence level,
                        `families:` = stacking families with the beneficiary map (buffs point at one; guild overrides in guild.yaml buffs/families → Registry.profile)
 fixtures/demo/         anonymized shadow-guild data (real copy in fixtures/25bg, gitignored): REAL (BisCouncil ledger, WCL attendance/roster) + MOCK (tiers, wishlists, policy, ranks)
 src/oibot_gm/
@@ -401,6 +402,15 @@ companion/             Windows-side client: tails WoWChatLog.txt, parses loot/dr
                        is created AT the recruitment Save (invite_create). A stale membership (§2.9): web/app.viewer drops v.officer for any write
                        (v.stale_write → api.who 503 STALE_OFFICER). Companion tokens (§5.50, owner): GET /api/companions (rows, never a value),
                        POST /api/companions/issue (the value in that body ONCE, no-store; refused for MCP), POST /api/companions/revoke
+  guides/              the leveling-guide tool (design §5.55): rxp_decode (decode / encode an RXPGuides import string: RC4 keyed from the BattleTag +
+                       zlib + Adler-32; GuideError = the refusal in words), rxp_md (Markdown per guide group), rxp_json (GuideGame from
+                       GameProfile.guides; dataset / summaries), explorer.html (the vendored one-file route explorer, data inlined in #guides-data),
+                       build.py (build → out/guides/<guild>/<uid>/: explorer.html · RXPGuides_LocalGuides.zip · guide-text.zip · guides.json ·
+                       status.json, swapped in whole; FILES = the downloads; OIBOT_RXP_ADDON = the host's addon zip for the free starter guides;
+                       the inputs are never written or logged; lock_for = one build per member at a time)
+  web/api_guides.py    install_guides_api (called from api.py): GET/POST /api/me/guide (status / build in a thread; MCP never builds), /clear,
+                       GET /api/me/guide/explorer (inline, its own CSP sandbox, no-store), /file/{name} (the three downloads) — the folder is
+                       always the session's own uid; /api/meta.guides = the version has the tool
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409); sheet_row_extras
@@ -426,7 +436,8 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        components/ConfirmModal.tsx (useConfirm), components/ReviewModal.tsx (THE edit-mode review: ReviewModal + useOpsSave = the tiered Save over
                        /api/ops/change, the result sheet, stale-token / restart handling; api.ts opsApi + OpsChange / Described / OpsReply), components/PlainPermissions.tsx (Ops page: who may do what, where), components/RaidCard.tsx (the Raids card's pieces — §5.54: Section / Panel / Pair, WhenItRuns (live_runs + next_run), RunWeek fed by a rule OR an editor's draft (WeekRule), SeatWeights; HOUR_WORDS / SWITCH_WORDS / WEIGHT_WORDS = THE words of a run's week, read by the card and both editors), components/ScheduleCard.tsx (Raids page schedules + the editor IN PLACE of the row: Pause/Resume, diff-only Save, presets that light up when matched, the draft's timeline, the server's preview), components/TellTheBot.tsx (the officers' box: /api/ask → or the plain-text preview + Apply; officer pages' rail + each SheetCard; NEVER on Me — D40), components/CompTargets.tsx (the limits + aims rows, Set aims / Edit aims → a `comp` change; a phone-safe grid editor; SlotIcon draws dps as melee + ranged; Readiness + Raids), hooks/useLive.ts (reload on /api/events server-sent events; board drags are single `/move` ops, whole-board writes carry `rev`) + hooks/usePoll.ts (45 s fallback); game constants come from /api/meta (roles, statuses, group caps, class colours); the server selector (rail, when `meta.guilds` > 1) and `api.ts setGuild` → every call sends `X-Oibot-Guild`, images/EventSource add `guildQuery()`. `npm run build` writes src/oibot_gm/web/static/app (committed, so the bot runs without Node);
                        components/ChannelsCard.tsx + SetupCard.tsx (Config: channels edit mode via useOpsSave; Setup / Host cards), LeftServer.tsx (Members: Remove record),
-                       MyApplication.tsx (Me: own application), CompanionsCard.tsx (Config › Companions, owner: issue → the token once in a modal with
+                       MyApplication.tsx (Me: own application), GuideTools.tsx (Me › Leveling guide, §5.55: paste + build, What you got, the
+                       explorer in a sandboxed iframe; the Me page is tabbed — My record · Leveling guide — when meta.guides is on), CompanionsCard.tsx (Config › Companions, owner: issue → the token once in a modal with
                        Copy / "I've saved it", revoke via useConfirm, presence per token), setupApi.ts (their shapes), hooks/useDirty.ts (EVERY edit mode registers — linted — so the server selector asks
                        "Save or discard your edits first");
                        `npm run dev` proxies /api,/img,/auth to the bot on :8788. Pages: Me (+ My loot, Wishlist, AttendanceCard.tsx) · Loot log (members) · Help (members: the manual by section, commands by tier) · Rosters · Raids · Readiness (pages/Readiness.tsx: GET /api/readiness, officers' targets) · Applications (officers, D32) · Members (bank + admin merged; officers edit anyone's characters/grid; components/TestBench.tsx = seed/compose, open and answer test runs, the comp sandbox, TestFeed.tsx = the live test feed; Rosters' per-raid Test tab) · Loot (components/loot/*: Tonight · History · Precedents (+ Distil.tsx) · Items (+ Claude draft, CSV import/export, LedgerImport.tsx = the loot history import) · Wishlists (TMB import previewed per character) · Appeals (L32) · Companions); Me › My loot's Ask the council (MyLoot.tsx) · Policy (Written vs Applied, drafts, Add a rule) · Agents (the news review's monitor; proposal cards on phones, Apply now, the owner's "Restart owed" banner = /api/agents.restart_pending) · Ops · Config (Overview = SetupCard + config_summary · Settings edit mode · Channels (ChannelsCard) + News · Recruitment and more (+ LootWeightsCard.tsx = Loot scoring, §5.48) · Companions (owner); Mantine, left rail,

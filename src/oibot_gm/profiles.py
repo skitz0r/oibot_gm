@@ -160,6 +160,7 @@ class GameProfile:
     icons: dict[str, dict[str, str]] = field(default_factory=dict)  # {classes, roles, specs('Class:Spec')} -> CDN icon names
     families: dict[str, Family] = field(default_factory=dict)  # stacking families; buffs without one get a family of their own
     label: str = ""  # display name for people ("WoW: Forever"): profiles/<version>/profile.yaml `label`, else the name titled
+    guides: dict[str, Any] = field(default_factory=dict)  # guides.yaml: the leveling-guide tool's zone / continent / dungeon tables (§5.55); empty = no tool for this version
     _spec_cache: dict[str, SpecInfo] = field(default_factory=dict)
 
     @classmethod
@@ -199,6 +200,7 @@ class GameProfile:
             items=items,
             known_items=known,
             loot=y("loot_defaults.yaml"),
+            guides=(y("guides.yaml") or {}) if (root / "guides.yaml").exists() else {},
         )
 
     def __post_init__(self):

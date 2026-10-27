@@ -1,0 +1,452 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<!-- The route explorer (design §5.55): the RXP guide toolkit's single-file web app, served per member by web/api_guides.py and
+     downloadable as one offline file. Its data is the base64 gzip JSON in #guides-data (build.py fills GUIDES_DATA); nothing is fetched. -->
+<script type="text/plain" id="guides-data">GUIDES_DATA</script>
+<title>Forever Route Explorer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: cartographer's table. Dark-first ink-and-brass; light theme is parchment. Three panes: character, map, route. */
+:root{
+  --bg:#12171f; --panel:#1a212c; --panel2:#212a37; --line:#2e3948; --fg:#e8e2d2; --muted:#9aa3ae;
+  --accent:#d9a84e; --accent-fg:#1a1200; --friendly:#7fd38a; --enemy:#ef7b6d; --loot:#8ec6ff; --buy:#f0c674; --warn:#ffb86b; --pick:#c7a5ff;
+  --ok:#6fcf97; --off:#5c6675; --sea:#0f1620; --land:#1f2938; --zone:#2b3747; --zone-line:#3d4b5e;
+  --font-display:"Cinzel",Georgia,serif; --font-body:"Source Sans 3","Segoe UI",system-ui,sans-serif; --font-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){ :root:not([data-theme="dark"]){
+  --bg:#efe6d2; --panel:#f7f1e3; --panel2:#ece3cf; --line:#d6c9ad; --fg:#2b2418; --muted:#6f6552;
+  --accent:#8a5a16; --accent-fg:#fff7e6; --friendly:#2a7d3a; --enemy:#b23a2c; --loot:#1f5fa8; --buy:#8a6410; --warn:#a85a00; --pick:#6a3fb5;
+  --ok:#2e8b57; --off:#a69c86; --sea:#d8cfb8; --land:#efe6d2; --zone:#e6dcc4; --zone-line:#c4b28f; color-scheme:light; } }
+:root[data-theme="light"]{
+  --bg:#efe6d2; --panel:#f7f1e3; --panel2:#ece3cf; --line:#d6c9ad; --fg:#2b2418; --muted:#6f6552;
+  --accent:#8a5a16; --accent-fg:#fff7e6; --friendly:#2a7d3a; --enemy:#b23a2c; --loot:#1f5fa8; --buy:#8a6410; --warn:#a85a00; --pick:#6a3fb5;
+  --ok:#2e8b57; --off:#a69c86; --sea:#d8cfb8; --land:#efe6d2; --zone:#e6dcc4; --zone-line:#c4b28f; color-scheme:light; }
+
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.4}
+*{box-sizing:border-box}
+button,select,input{font:inherit;color:inherit}
+.app{display:grid;grid-template-rows:auto 1fr;height:100%;min-height:0}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+header h1{font-family:var(--font-display);font-weight:700;font-size:18px;margin:0;letter-spacing:.04em}
+header .sub{color:var(--muted);font-size:13px}
+.spacer{flex:1}
+.tabs{display:none;gap:4px}
+.tabs button{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+main{display:grid;grid-template-columns:280px minmax(0,1fr) 380px;min-height:0;height:100%}
+.pane{min-width:0;min-height:0;overflow:auto;border-right:1px solid var(--line);background:var(--panel)}
+.pane:last-child{border-right:0}
+#mapPane{background:var(--sea);display:flex;flex-direction:column;overflow:hidden}
+section.block{padding:12px 14px;border-bottom:1px solid var(--line)}
+h2{font-family:var(--font-display);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 8px;font-weight:700}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.field label{font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+select,input[type=number]{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{flex:1;background:var(--panel2);border:0;padding:6px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);font-weight:600}
+.check{display:flex;gap:8px;align-items:center;padding:3px 0;cursor:pointer}
+.check input{accent-color:var(--accent);margin:0}
+.check small{color:var(--muted)}
+.dlist{display:grid;grid-template-columns:1fr 1fr;gap:2px 10px}
+.dlist .check{font-size:13px}
+.dlist .n{color:var(--muted);font-family:var(--font-mono);font-size:11px;margin-left:auto}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+.btn:focus-visible,select:focus-visible,input:focus-visible,.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.stat{background:var(--panel2);border-radius:6px;padding:6px 8px}
+.stat b{display:block;font-family:var(--font-mono);font-size:15px;font-variant-numeric:tabular-nums}
+.stat span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+
+/* map */
+.maptools{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+.maptools input[type=range]{accent-color:var(--accent);width:160px}
+.maptools .lvl{font-family:var(--font-mono);font-variant-numeric:tabular-nums;min-width:4.5em}
+#mapWrap{flex:1;min-height:320px;position:relative;overflow:hidden;cursor:grab}
+#mapWrap.drag{cursor:grabbing}
+#map{width:100%;height:100%;display:block;touch-action:none}
+.zone{fill:var(--zone);stroke:var(--zone-line);stroke-width:1.2}
+.zonelbl{fill:var(--muted);font-family:var(--font-display);font-size:7px;letter-spacing:.05em;pointer-events:none;text-anchor:middle}
+.contlbl{fill:var(--muted);font-family:var(--font-display);font-size:18px;letter-spacing:.2em;opacity:.5;pointer-events:none}
+.route{fill:none;stroke-width:1.1;stroke-linejoin:round;stroke-linecap:round;opacity:.85}
+.route.dim{opacity:.22}
+.route.active{stroke-width:2;opacity:1}
+.hop{fill:none;stroke-dasharray:3 3;stroke-width:.8;opacity:.5}
+.pt{stroke:var(--bg);stroke-width:.6;cursor:pointer}
+.pt.sel{stroke:var(--fg);stroke-width:1.5}
+#tip{position:absolute;pointer-events:none;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12px;max-width:260px;box-shadow:0 4px 14px rgba(0,0,0,.35);display:none;z-index:3}
+#tip b{display:block;font-family:var(--font-mono);font-size:11px;color:var(--accent)}
+.legend{display:flex;gap:10px;flex-wrap:wrap;padding:6px 12px;border-top:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+#imgNote{font-size:12px;color:var(--muted)}
+
+/* route pane */
+.chain{display:flex;flex-direction:column;gap:2px}
+.gnode{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+.gnode:hover{background:var(--panel2)}
+.gnode.active{border-color:var(--accent);background:var(--panel2)}
+.gnode .sw{width:10px;height:10px;border-radius:3px;flex:none}
+.gnode .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gnode .ct{font-family:var(--font-mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.gnode .br{font-size:11px;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:0 6px}
+.branch{margin:4px 0 6px 20px;padding:6px 8px;border-left:2px solid var(--accent);background:var(--panel2);border-radius:0 6px 6px 0}
+.branch .t{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.branch label{display:flex;gap:6px;align-items:center;padding:2px 0;cursor:pointer;font-size:13px}
+.branch label small{color:var(--muted)}
+.steps{display:flex;flex-direction:column}
+.step{padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer;display:grid;grid-template-columns:34px 1fr;gap:6px}
+.step:hover{background:var(--panel2)}
+.step.sel{background:var(--panel2);box-shadow:inset 3px 0 0 var(--accent)}
+.step .n{font-family:var(--font-mono);font-size:11px;color:var(--muted);padding-top:2px;font-variant-numeric:tabular-nums}
+.step .ln{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:2px}
+.step .ln li{min-width:0}
+.step.hidden-step{opacity:.45}
+.step.hidden-step .ln{text-decoration:line-through}
+.chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.chip{font-size:10px;padding:1px 6px;border-radius:10px;border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.04em;text-decoration:none!important}
+.chip.d{border-color:var(--accent);color:var(--accent)}
+.chip.why{border-color:var(--enemy);color:var(--enemy)}
+.chip.opt{border-color:var(--loot);color:var(--loot)}
+.t-friendly{color:var(--friendly);font-weight:600}.t-enemy{color:var(--enemy);font-weight:600}.t-loot{color:var(--loot);font-weight:600}.t-buy{color:var(--buy);font-weight:600}.t-warn{color:var(--warn)}.t-pick{color:var(--pick);font-weight:600}
+.cmd{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.routehead{position:sticky;top:0;background:var(--panel);z-index:2;border-bottom:1px solid var(--line);padding:10px 14px}
+.routehead .gname{font-family:var(--font-display);font-size:14px;font-weight:700;text-wrap:balance}
+.routehead .meta{font-size:12px;color:var(--muted);margin-top:2px}
+#loading{padding:40px;text-align:center;color:var(--muted);grid-column:1/-1}
+.note{font-size:12px;color:var(--muted);margin:6px 0 0}
+@media (max-width:980px){
+  main{grid-template-columns:1fr}
+  .pane{display:none;border-right:0}
+  .pane.show{display:flex;flex-direction:column}
+  .tabs{display:flex}
+  header{padding-inline:16px}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important} }
+</style>
+
+<div class="app">
+<header>
+  <h1>Forever Route Explorer</h1>
+  <span class="sub" id="charSummary">RestedXP leveling routes, 1–60, projected on Azeroth</span>
+  <span class="spacer"></span>
+  <nav class="tabs" aria-label="Panes">
+    <button data-pane="setPane" aria-selected="true">Character</button>
+    <button data-pane="mapPane" aria-selected="false">Map</button>
+    <button data-pane="routePane" aria-selected="false">Route</button>
+  </nav>
+</header>
+<main>
+  <div id="loading">Unpacking 123 guides…</div>
+  <aside class="pane show" id="setPane" hidden>
+    <section class="block">
+      <h2>Character</h2>
+      <div class="field"><label>Faction</label>
+        <div class="seg" id="factionSeg"><button data-v="Alliance" aria-pressed="true">Alliance</button><button data-v="Horde" aria-pressed="false">Horde</button></div></div>
+      <div class="field"><label for="race">Race</label><select id="race"></select></div>
+      <div class="field"><label for="cls">Class</label><select id="cls"></select></div>
+      <div class="field"><label for="startGuide">Starting guide</label><select id="startGuide"></select>
+        <p class="note" id="startNote"></p></div>
+    </section>
+    <section class="block">
+      <h2>Ruleset</h2>
+      <label class="check"><input type="checkbox" id="hardcore"> Hardcore mode <small>(addon setting)</small></label>
+      <label class="check"><input type="checkbox" id="hcserver"> Hardcore realm</label>
+      <label class="check"><input type="checkbox" id="ssf"> Solo Self-Found</label>
+      <label class="check"><input type="checkbox" id="groupq" checked> Include group quests</label>
+      <label class="check"><input type="checkbox" id="showOpt" checked> Show optional steps</label>
+      <label class="check"><input type="checkbox" id="showHidden"> Show skipped steps (struck through)</label>
+      <div class="field" style="margin-top:6px"><label for="xprate">XP rate</label>
+        <select id="xprate"><option value="1">1× (standard)</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+    </section>
+    <section class="block">
+      <h2>Dungeons</h2>
+      <div class="row" style="margin-bottom:6px"><button class="btn" id="dAll">All</button><button class="btn" id="dNone">None</button><button class="btn" id="dReset">Guide default</button></div>
+      <div class="dlist" id="dlist"></div>
+      <p class="note">Numbers show how many steps on your current route each dungeon adds. Turning one off removes its run and shows the "if you skipped it" steps instead.</p>
+    </section>
+    <section class="block">
+      <h2>Route totals</h2>
+      <div class="stats" id="stats"></div>
+      <p class="note">Walking distance is summed between consecutive waypoints under 3,000 yd apart; longer jumps count as travel hops (flights, boats, hearths).</p>
+    </section>
+  </aside>
+
+  <div class="pane" id="mapPane" hidden>
+    <div class="maptools">
+      <button class="btn" id="play" title="Animate the route by level">▶ Play</button>
+      <input type="range" id="lvlRange" min="1" max="60" value="60" step="0.5" aria-label="Show route up to level">
+      <span class="lvl">to lvl <span id="lvlOut">60</span></span>
+      <span class="spacer"></span>
+      <label class="check"><input type="checkbox" id="onlyActive"> Only selected guide</label>
+      <button class="btn" id="fit">Fit</button>
+      <label class="btn" for="imgK" title="Overlay your own Kalimdor map image">Kalimdor img</label><input type="file" id="imgK" accept="image/*" hidden>
+      <label class="btn" for="imgE" title="Overlay your own Eastern Kingdoms map image">E. Kingdoms img</label><input type="file" id="imgE" accept="image/*" hidden>
+      <input type="range" id="imgOp" min="0" max="1" step="0.05" value="0.6" aria-label="Map image opacity" style="width:80px" hidden>
+    </div>
+    <div id="mapWrap">
+      <svg id="map" viewBox="0 0 2060 700" role="img" aria-label="Route map"></svg>
+      <div id="tip"></div>
+    </div>
+    <div class="legend"><span>Colors match the guide chain on the right.</span><span><i style="background:none;height:0;border-top:2px dashed var(--muted)"></i>flight / boat / hearth</span><span>Drag to pan, scroll to zoom, click a dot to jump to its step.</span></div>
+  </div>
+
+  <aside class="pane" id="routePane" hidden>
+    <section class="block">
+      <h2>Guide chain</h2>
+      <div class="chain" id="chain"></div>
+    </section>
+    <div class="routehead"><div class="gname" id="gname">—</div><div class="meta" id="gmeta"></div></div>
+    <div class="steps" id="steps"></div>
+  </aside>
+</main>
+</div>
+
+<script>
+(async function(){
+const $=s=>document.querySelector(s);
+const RACES={Alliance:['Human','Dwarf','NightElf','Gnome','Skyborne'],Horde:['Orc','Undead','Tauren','Troll','Skyborne']};
+const CLASSES=['Warrior','Paladin','Hunter','Rogue','Priest','Shaman','Mage','Warlock','Druid'];
+const PALETTE=['#d9a84e','#6fb3e0','#e07a6f','#7fd38a','#c7a5ff','#f0c674','#64c9c2','#ef9ad0','#a3c76f','#ffb86b','#8ec6ff','#d08fff'];
+const CONT=[{w:40741.18,h:27149.69,name:'Eastern Kingdoms',ox:1060,sw:1000},{w:36799.81,h:24533.2,name:'Kalimdor',ox:0,sw:1000}];
+CONT.forEach(c=>{c.sh=c.sw*c.h/c.w;});
+const MAXGAP=3000;
+
+let S={faction:'Alliance',race:'Human',cls:'Warrior',start:'',hardcore:false,hcserver:false,ssf:false,groupq:true,showOpt:true,showHidden:false,xprate:1,dungeons:{},choices:{},lvl:60,onlyActive:false};
+try{const s=JSON.parse(localStorage.getItem('fre.settings')||'null'); if(s) S=Object.assign(S,s);}catch(e){}
+const save=()=>{try{localStorage.setItem('fre.settings',JSON.stringify(S));}catch(e){}};
+
+// ---- load data
+const inlineData=document.getElementById('guides-data');
+const b64=inlineData?inlineData.textContent.trim():await (await fetch('guides.txt')).text();
+const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+const ds=new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+const D=JSON.parse(await new Response(ds).text());
+const byName={}; D.guides.forEach(g=>byName[g.name]=g);
+const DTAGS=Object.keys(D.dungeons);
+if(!Object.keys(S.dungeons).length) DTAGS.forEach(t=>S.dungeons[t]=true);
+$('#loading').remove(); document.querySelectorAll('.pane').forEach(p=>p.hidden=false);
+
+// ---- condition evaluator (port of the addon's applies())
+function ctx(level){return {classU:S.cls.toUpperCase(),race:S.race==='Undead'?'Scourge':S.race,faction:S.faction,level:level||1};}
+function parseCond(text,c){
+  let guard=0;
+  while(/\(/.test(text)&&guard++<10){
+    text=text.replace(/(!?)\(\s*([^()]*?)\s*\)/g,(m,op,inner)=> (parseCond(inner,c)!==(op==='!'))?c.classU:'NULL');
+  }
+  for(const grp of text.split('/')){
+    let v=true; const entries=grp.match(/!?[\w\d]+/g)||[];
+    for(let e of entries){
+      let neg=false; if(e[0]==='!'){neg=true;e=e.slice(1);}
+      const lvl=/^\d+$/.test(e)?+e:4095; let up=e.toUpperCase();
+      if(e==='Undead') e='Scourge';
+      let match;
+      if(up==='MALE'||up==='FEMALE') match=true;
+      else if(up==='SOD') match=false;
+      else match=(up===c.classU||e===c.race||e===c.faction||c.level>=lvl||up==='FOREVER'||e==='enUS');
+      v=neg?!match:match; if(!v)break;
+    }
+    if(v&&entries.length) return true;
+    if(v&&!entries.length) return true;
+  }
+  return false;
+}
+const applies=(t,level)=>!t||!t.trim()?true:parseCond(t.trim(),ctx(level));
+
+// ---- step visibility
+function stepInfo(st){
+  const f=st.flags||{}; const why=[]; const lvl=st.lvl||1;
+  if(st.cond&&!applies(st.cond,lvl)) why.push(st.cond.replace(/\s+/g,' '));
+  if(f.hardcore&&!S.hardcore) why.push('hardcore only'); if(f.softcore&&S.hardcore) why.push('softcore only');
+  if(f.hardcoreserver&&!S.hcserver) why.push('HC realm only'); if(f.softcoreserver&&S.hcserver) why.push('non-HC realm');
+  if(f.ssf&&!S.ssf) why.push('SSF only'); if(f.ah&&S.ssf) why.push('needs AH');
+  if(f.som) why.push('SoM only');
+  if(f.season&&!String(f.season).split(/[,;\s]+/).includes('0')) why.push('season '+f.season);
+  if(f.phase){const m=String(f.phase).match(/(\d+)-?(\d*)/); if(m){const a=+m[1],b=m[2]?+m[2]:65535; if(!(6>=a&&6<=b)) why.push('phase '+f.phase);}}
+  if(f.xprate){const m=String(f.xprate).match(/^([<>]?)\s*(\d+\.?\d*)-?(\d*\.?\d*)/); if(m){let lo=1,hi=4095; if(m[1]==='<'){lo=0;hi=+m[2]-1e-4;}else if(m[1]==='>'){lo=+m[2]+1e-4;}else{lo=+m[2]||1;hi=m[3]?+m[3]:4095;} if(S.xprate<lo||S.xprate>hi) why.push('xp rate '+f.xprate);}}
+  if(st.group&&!S.groupq) why.push('group quest'); if(st.solo&&S.groupq) why.push('solo only');
+  if(f.optional&&!S.showOpt) why.push('optional');
+  let dtag=null,dskip=null;
+  (st.dungeon||[]).forEach(d=>{if(!dtag&&applies(d.cond,lvl))dtag=d.t;});
+  (st.dskip||[]).forEach(d=>{if(!dskip&&applies(d.cond,lvl))dskip=d.t;});
+  if(dskip&&S.dungeons[dskip]) why.push('skipped unless '+dskip+' off');
+  else if(dtag&&dtag!==dskip&&!S.dungeons[dtag]) why.push(dtag+' off');
+  return {shown:why.length===0,why,dtag,dskip,optional:!!f.optional};
+}
+
+// ---- chain
+function guideApplies(g){ if(!applies(g.cond,g.lo)) return false; const fac=S.faction; if(/\((A|H)\)|Alliance|Horde/.test(g.group)){ if(fac==='Alliance'&&/\(H\)|Horde/.test(g.group)) return false; if(fac==='Horde'&&/\(A\)|Alliance/.test(g.group)) return false;} return true; }
+function startCandidates(){ return D.guides.filter(g=>g.lo<=1&&guideApplies(g)).sort((a,b)=>a.name.localeCompare(b.name)); }
+function scoreStart(g){ let s=0; const c=ctx(1); if(g.defaultfor&&g.defaultfor!=='none'&&parseCond(g.defaultfor,c)) s+=2; if(g.cond.toUpperCase().includes(c.classU)) s+=1; if(g.cond.includes(c.race)) s+=1; if(/Mage AoE|ADV/.test(g.name)) s-=0.5; return s; }
+function nextOptions(g){
+  const seen=new Set(); const opts=[];
+  g.next.forEach(n=>{const t=byName[n.name]; if(t&&!seen.has(t.name)&&applies(n.cond,g.hi)&&guideApplies(t)){seen.add(t.name);opts.push({g:t,off:false});}});
+  D.guides.forEach(t=>{ if(seen.has(t.name)||t===g||!guideApplies(t)) return; if(t.lo>=g.hi-1&&t.lo<=g.hi+1&&t.lo>1){seen.add(t.name);opts.push({g:t,off:true});} });
+  return opts;
+}
+function buildChain(){
+  const cands=startCandidates(); if(!cands.length) return [];
+  let start=byName[S.start]; if(!start||!cands.includes(start)){ start=cands.slice().sort((a,b)=>scoreStart(b)-scoreStart(a))[0]; S.start=start.name; }
+  const chain=[]; const visited=new Set(); let cur=start;
+  while(cur&&!visited.has(cur.name)&&chain.length<80){
+    visited.add(cur.name); const opts=nextOptions(cur); let pick=null;
+    const ch=S.choices[cur.name]; if(ch){ const o=opts.find(o=>o.g.name===ch); if(o) pick=o.g; }
+    if(!pick){ const o=opts.find(o=>!o.off); pick=o?o.g:null; }
+    chain.push({g:cur,opts,pick}); cur=pick;
+  }
+  return chain;
+}
+
+// ---- rendering helpers
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function fmtText(t){ return esc(t).replace(/\{(friendly|enemy|loot|buy|warn|pick)\}/g,'<span class="t-$1">').replace(/\{\/\}/g,'</span>'); }
+const DEF={accept:a=>`Accept quest #${a}`,turnin:a=>`Turn in quest #${a}`,complete:a=>`Complete quest #${a.split(',')[0]}`,xp:a=>`Grind until level ${a}`,train:()=>'Train new spells and abilities',fly:a=>`Fly to ${a}`,fp:a=>`Get the ${a} flight path`,hs:a=>a?`Hearthstone to ${a}`:'Use your Hearthstone',home:a=>a?`Set your hearth at ${a}`:'Set your hearth',collect:a=>{const p=a.split(',');return `Collect ${p[1]||1}× item #${p[0]}`},use:a=>`Use item #${a}`,vendor:()=>'Visit a vendor',trainer:()=>'Visit the trainer',abandon:a=>`Abandon quest #${a}`,deathskip:()=>'Die and resurrect at the spirit healer to skip travel',dungeon:a=>`Dungeon: ${a}`,group:()=>'Group quest',destroy:a=>`Destroy item #${a}`,bankdeposit:a=>`Bank: deposit ${a}`,bankwithdraw:a=>`Bank: withdraw ${a}`,equip:a=>`Equip item #${a}`,stable:()=>'Stable / retrieve pet'};
+function lineHtml(l){
+  if(l.text) return fmtText(l.text);
+  const d=DEF[l.cmd]; if(d) return `<span class="cmd">${esc(d(l.args||''))}</span>`;
+  return '';
+}
+
+// ---- state derived
+let chain=[],active=0,selStep=-1,routeStats={};
+function recompute(){
+  chain=buildChain(); if(active>=chain.length) active=Math.max(0,chain.length-1);
+  // per-step info cache for this ruleset
+  chain.forEach(n=>{ n.info=n.g.steps.map(stepInfo); });
+  // dungeon counts and stats
+  const dc={}; DTAGS.forEach(t=>dc[t]=0); let shown=0,total=0,walk=0,hops=0,last=null;
+  chain.forEach(n=>n.g.steps.forEach((st,i)=>{ total++; const inf=n.info[i]; if(inf.dtag) dc[inf.dtag]++; if(!inf.shown) return; shown++;
+    st.pts.forEach(p=>{ if(p.cond&&!applies(p.cond,st.lvl)) return; if(last&&last.c===p.c){const c=CONT[p.c]; const d=Math.hypot((p.x-last.x)*c.w,(p.y-last.y)*c.h); if(d<MAXGAP) walk+=d; else hops++;} else if(last) hops++; last=p; }); }));
+  routeStats={dc,shown,total,walk,hops};
+  renderAll();
+}
+function renderAll(){ renderSettings(); renderChain(); renderSteps(); renderMap(); renderStats(); save(); }
+
+// ---- settings UI
+function renderSettings(){
+  document.querySelectorAll('#factionSeg button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===S.faction)));
+  const r=$('#race'); r.innerHTML=RACES[S.faction].map(x=>`<option value="${x}"${x===S.race?' selected':''}>${x==='NightElf'?'Night Elf':x}</option>`).join('');
+  const c=$('#cls'); c.innerHTML=CLASSES.map(x=>`<option${x===S.cls?' selected':''}>${x}</option>`).join('');
+  const sg=$('#startGuide'); const cands=startCandidates(); sg.innerHTML=cands.map(g=>`<option value="${esc(g.name)}"${g.name===S.start?' selected':''}>${esc(g.disp)}${g.src==='starter'?'':' ★'}</option>`).join('');
+  $('#startNote').textContent=cands.length?`${cands.length} starting guide${cands.length>1?'s':''} fit this character. ★ = from the purchased guide; others ship free with the addon.`:'No guide fits this character.';
+  ['hardcore','hcserver','ssf','groupq','showOpt','showHidden'].forEach(k=>$('#'+k).checked=!!S[k]);
+  $('#xprate').value=String(S.xprate); $('#onlyActive').checked=S.onlyActive;
+  $('#lvlRange').value=S.lvl; $('#lvlOut').textContent=S.lvl;
+  const dl=$('#dlist'); dl.innerHTML=DTAGS.map(t=>`<label class="check" title="${esc(D.dungeons[t])}"><input type="checkbox" data-d="${t}"${S.dungeons[t]?' checked':''}> ${esc(D.dungeons[t])}<span class="n">${routeStats.dc?routeStats.dc[t]||'':''}</span></label>`).join('');
+  $('#charSummary').textContent=`${S.faction} ${S.race==='NightElf'?'Night Elf':S.race} ${S.cls}${S.hardcore?' · Hardcore':''}${S.ssf?' · SSF':''}`;
+}
+function renderStats(){
+  const r=routeStats; const km=(r.walk*0.9144/1000);
+  const lastG=chain[chain.length-1]; const reach=lastG?lastG.g.hi:0;
+  $('#stats').innerHTML=[[chain.length,'guides in chain'],[r.shown.toLocaleString(),'steps on route'],[(r.total-r.shown).toLocaleString(),'steps skipped'],[`1→${reach}`,'levels covered'],[km.toFixed(0)+' km','walking ('+Math.round(r.walk/1000)+'k yd)'],[r.hops,'travel hops']].map(([b,s])=>`<div class="stat"><b>${b}</b><span>${s}</span></div>`).join('');
+}
+
+// ---- chain UI
+function renderChain(){
+  const el=$('#chain'); el.innerHTML='';
+  chain.forEach((n,i)=>{
+    const shown=n.info.filter(x=>x.shown).length;
+    const div=document.createElement('div'); div.className='gnode'+(i===active?' active':''); div.innerHTML=`<span class="sw" style="background:${PALETTE[i%PALETTE.length]}"></span><span class="nm" title="${esc(n.g.disp)}">${esc(n.g.disp)}</span>${n.opts.filter(o=>!o.off).length>1?'<span class="br">branch</span>':''}<span class="ct">${shown}</span>`;
+    div.onclick=()=>{active=i;selStep=-1;renderChain();renderSteps();renderMap();};
+    el.appendChild(div);
+    if(i===active&&n.opts.length){
+      const b=document.createElement('div'); b.className='branch'; b.innerHTML=`<div class="t">After this guide</div>`+n.opts.map(o=>`<label><input type="radio" name="nx" value="${esc(o.g.name)}"${n.pick&&n.pick.name===o.g.name?' checked':''}> ${esc(o.g.disp)}${o.off?' <small>(off-route alternative)</small>':''}</label>`).join('');
+      b.querySelectorAll('input').forEach(inp=>inp.onchange=()=>{S.choices[n.g.name]=inp.value;recompute();});
+      el.appendChild(b);
+    }
+  });
+}
+
+// ---- steps UI
+function renderSteps(){
+  const n=chain[active]; const el=$('#steps'); el.innerHTML='';
+  if(!n){$('#gname').textContent='—';$('#gmeta').textContent='';return;}
+  $('#gname').textContent=n.g.disp; const shown=n.info.filter(x=>x.shown).length;
+  $('#gmeta').textContent=`${n.g.group}${n.g.sub?' · '+n.g.sub:''} · ${shown} of ${n.g.steps.length} steps apply${n.g.cond?' · for '+n.g.cond:''}`;
+  const frag=document.createDocumentFragment(); let k=0;
+  n.g.steps.forEach((st,i)=>{
+    const inf=n.info[i]; if(!inf.shown&&!S.showHidden) return; if(inf.shown) k++;
+    const lines=st.lines.filter(l=>!l.cond||applies(l.cond,st.lvl)).map(lineHtml).filter(Boolean);
+    if(!lines.length&&!st.pts.length) return;
+    const d=document.createElement('div'); d.className='step'+(inf.shown?'':' hidden-step')+(i===selStep?' sel':''); d.dataset.i=i;
+    const chips=[]; if(inf.dtag) chips.push(`<span class="chip d">${inf.dtag}</span>`); if(inf.dskip) chips.push(`<span class="chip">if no ${inf.dskip}</span>`); if(inf.optional) chips.push('<span class="chip opt">optional</span>'); if(st.flags&&st.flags.hardcore) chips.push('<span class="chip">hardcore</span>'); if(st.group) chips.push('<span class="chip">group</span>'); inf.why.forEach(w=>chips.push(`<span class="chip why">${esc(w)}</span>`));
+    d.innerHTML=`<div class="n">${inf.shown?k:'·'}<br><span style="opacity:.7">L${Math.round(st.lvl)}</span></div><div><ul class="ln">${lines.map(l=>`<li>${l}</li>`).join('')}</ul>${chips.length?`<div class="chips">${chips.join('')}</div>`:''}</div>`;
+    d.onclick=()=>{selStep=i;renderSteps();renderMap(true);};
+    frag.appendChild(d);
+  });
+  el.appendChild(frag);
+  const sel=el.querySelector('.step.sel'); if(sel) sel.scrollIntoView({block:'nearest'});
+}
+
+// ---- map
+const svg=$('#map'); let view={x:0,y:0,w:2060,h:700}; const imgs={0:null,1:null};
+function P(p){const c=CONT[p.c];return [c.ox+p.x*c.sw,20+p.y*c.sh];}
+function renderMap(focus){
+  const parts=[];
+  CONT.forEach((c,ci)=>{
+    parts.push(`<rect x="${c.ox}" y="20" width="${c.sw}" height="${c.sh.toFixed(1)}" fill="var(--land)" stroke="var(--line)" rx="6"/>`);
+    if(imgs[ci]) parts.push(`<image href="${imgs[ci]}" x="${c.ox}" y="20" width="${c.sw}" height="${c.sh.toFixed(1)}" preserveAspectRatio="none" opacity="${$('#imgOp').value}"/>`);
+    parts.push(`<text class="contlbl" x="${c.ox+16}" y="${(20+c.sh-14).toFixed(1)}">${c.name.toUpperCase()}</text>`);
+  });
+  if(!imgs[0]||!imgs[1]) for(const id in D.zones){const z=D.zones[id]; if(imgs[z.c]) continue; const c=CONT[z.c]; const x=c.ox+z.x0*c.sw,y=20+z.y0*c.sh,w=(z.x1-z.x0)*c.sw,h=(z.y1-z.y0)*c.sh; parts.push(`<rect class="zone" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4"/><text class="zonelbl" x="${(x+w/2).toFixed(1)}" y="${(y+h/2+4).toFixed(1)}">${esc(z.name)}</text>`);}
+  // routes
+  const pts=[]; let selPt=null;
+  chain.forEach((n,gi)=>{
+    if(S.onlyActive&&gi!==active) return;
+    const col=PALETTE[gi%PALETTE.length]; let seg=[],last=null; const segs=[],hops=[];
+    n.g.steps.forEach((st,si)=>{ if(!n.info[si].shown||st.lvl>S.lvl) return;
+      st.pts.forEach(p=>{ if(p.cond&&!applies(p.cond,st.lvl)) return; const q=P(p); const far=last&&(last.p.c!==p.c||Math.hypot((p.x-last.p.x)*CONT[p.c].w,(p.y-last.p.y)*CONT[p.c].h)>=MAXGAP);
+        if(far){ if(seg.length>1) segs.push(seg); hops.push([last.q,q]); seg=[q]; } else seg.push(q);
+        pts.push({q,gi,si,st,col,n}); if(gi===active&&si===selStep) selPt={q,st}; last={p,q}; });
+    });
+    if(seg.length>1) segs.push(seg);
+    const cls='route'+(gi===active?' active':(S.onlyActive?'':' dim'));
+    hops.forEach(h=>parts.push(`<line class="hop" x1="${h[0][0].toFixed(1)}" y1="${h[0][1].toFixed(1)}" x2="${h[1][0].toFixed(1)}" y2="${h[1][1].toFixed(1)}" stroke="${col}"/>`));
+    segs.forEach(s=>parts.push(`<polyline class="${cls}" stroke="${col}" points="${s.map(q=>q[0].toFixed(1)+','+q[1].toFixed(1)).join(' ')}"/>`));
+  });
+  // points: only active guide's, to keep it light
+  pts.filter(p=>p.gi===active).forEach(p=>parts.push(`<circle class="pt${p.si===selStep?' sel':''}" cx="${p.q[0].toFixed(1)}" cy="${p.q[1].toFixed(1)}" r="${p.si===selStep?3:1.2}" fill="${p.col}" data-si="${p.si}"/>`));
+  svg.innerHTML=parts.join('');
+  if(focus&&selPt){ const [x,y]=selPt.q; if(x<view.x||x>view.x+view.w||y<view.y||y>view.y+view.h){ view.x=x-view.w/2; view.y=y-view.h/2; applyView(); } }
+}
+function fitView(){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; for(const id in D.zones){const z=D.zones[id],c=CONT[z.c]; x0=Math.min(x0,c.ox+z.x0*c.sw);x1=Math.max(x1,c.ox+z.x1*c.sw);y0=Math.min(y0,20+z.y0*c.sh);y1=Math.max(y1,20+z.y1*c.sh);} const m=30; x0-=m;y0-=m;x1+=m;y1+=m; const r=svg.getBoundingClientRect(); const ar=r.width&&r.height?r.width/r.height:2.9; let w=x1-x0,hh=y1-y0; if(w/hh<ar){const nw=hh*ar;x0-=(nw-w)/2;w=nw;} else {const nh=w/ar;y0-=(nh-hh)/2;hh=nh;} view={x:x0,y:y0,w:w,h:hh}; applyView(); }
+function applyView(){ svg.setAttribute('viewBox',`${view.x} ${view.y} ${view.w} ${view.h}`); }
+// pan/zoom
+const wrap=$('#mapWrap'); let drag=null;
+wrap.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y};wrap.classList.add('drag');wrap.setPointerCapture(e.pointerId);});
+wrap.addEventListener('pointermove',e=>{ if(drag){const r=svg.getBoundingClientRect();const k=view.w/r.width;view.x=drag.vx-(e.clientX-drag.x)*k;view.y=drag.vy-(e.clientY-drag.y)*k;applyView();} else showTip(e); });
+wrap.addEventListener('pointerup',()=>{drag=null;wrap.classList.remove('drag');});
+wrap.addEventListener('wheel',e=>{e.preventDefault();const r=svg.getBoundingClientRect();const mx=view.x+(e.clientX-r.left)/r.width*view.w,my=view.y+(e.clientY-r.top)/r.height*view.h;userZoomed=true;const f=e.deltaY>0?1.15:1/1.15;view.w*=f;view.h*=f;view.x=mx-(mx-view.x)*f;view.y=my-(my-view.y)*f;applyView();},{passive:false});
+$('#fit').onclick=fitView; window.addEventListener('resize',()=>{if(!userZoomed)fitView();}); let userZoomed=false;
+const tip=$('#tip');
+function showTip(e){ const t=e.target; if(t.classList&&t.classList.contains('pt')){ const si=+t.dataset.si; const n=chain[active]; const st=n.g.steps[si]; const txt=st.lines.map(l=>l.text).filter(Boolean)[0]||DEF[(st.lines[0]||{}).cmd]?.((st.lines[0]||{}).args||'')||''; tip.innerHTML=`<b>${esc(n.g.disp)} · step ${si+1} · L${Math.round(st.lvl)}</b>${fmtText(txt).slice(0,300)}`; const r=wrap.getBoundingClientRect(); tip.style.left=Math.min(e.clientX-r.left+12,r.width-270)+'px'; tip.style.top=(e.clientY-r.top+12)+'px'; tip.style.display='block'; } else tip.style.display='none'; }
+svg.addEventListener('click',e=>{const t=e.target; if(t.classList&&t.classList.contains('pt')){selStep=+t.dataset.si;renderSteps();renderMap();}});
+// map images
+function loadImg(inp,ci){ inp.onchange=()=>{const f=inp.files[0]; if(!f) return; const rd=new FileReader(); rd.onload=()=>{imgs[ci]=rd.result;$('#imgOp').hidden=false;renderMap();}; rd.readAsDataURL(f);}; }
+loadImg($('#imgK'),1); loadImg($('#imgE'),0); $('#imgOp').oninput=()=>renderMap();
+// level playback
+let timer=null;
+$('#lvlRange').oninput=e=>{S.lvl=+e.target.value;$('#lvlOut').textContent=S.lvl;renderMap();save();};
+$('#play').onclick=()=>{ if(timer){clearInterval(timer);timer=null;$('#play').textContent='▶ Play';return;} if(S.lvl>=60) S.lvl=1; $('#play').textContent='⏸ Pause'; timer=setInterval(()=>{S.lvl=Math.min(60,+(S.lvl+0.5).toFixed(1)); $('#lvlRange').value=S.lvl; $('#lvlOut').textContent=S.lvl; renderMap(); if(S.lvl>=60){clearInterval(timer);timer=null;$('#play').textContent='▶ Play';save();}},120); };
+
+// ---- settings events
+document.querySelectorAll('#factionSeg button').forEach(b=>b.onclick=()=>{S.faction=b.dataset.v; if(!RACES[S.faction].includes(S.race)) S.race=RACES[S.faction][0]; S.start=''; S.choices={}; active=0; recompute();});
+$('#race').onchange=e=>{S.race=e.target.value;S.start='';active=0;recompute();};
+$('#cls').onchange=e=>{S.cls=e.target.value;S.start='';active=0;recompute();};
+$('#startGuide').onchange=e=>{S.start=e.target.value;active=0;recompute();};
+['hardcore','hcserver','ssf','groupq','showOpt','showHidden'].forEach(k=>$('#'+k).onchange=e=>{S[k]=e.target.checked;recompute();});
+$('#xprate').onchange=e=>{S.xprate=+e.target.value;recompute();};
+$('#onlyActive').onchange=e=>{S.onlyActive=e.target.checked;renderMap();save();};
+$('#dlist').addEventListener('change',e=>{const t=e.target.dataset.d; if(t){S.dungeons[t]=e.target.checked;recompute();}});
+$('#dAll').onclick=()=>{DTAGS.forEach(t=>S.dungeons[t]=true);recompute();};
+$('#dNone').onclick=()=>{DTAGS.forEach(t=>S.dungeons[t]=false);recompute();};
+$('#dReset').onclick=()=>{DTAGS.forEach(t=>S.dungeons[t]=true);recompute();};
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-selected',String(x===b)));document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('show',p.id===b.dataset.pane)); if(b.dataset.pane==='mapPane') requestAnimationFrame(fitView);});
+
+recompute(); fitView();
+})();
+</script>
+
+</body></html>

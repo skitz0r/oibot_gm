@@ -3320,6 +3320,54 @@ level chip read AMBER.
 Out of scope, named for later: a timeline inside the Discord `/gm config raid` wizard (Discord has no drawing surface;
 its review lines already carry the hours).
 
+### 5.55 The leveling guide on the Me page (built 2026-10-26)
+
+**Why.** Members level with RestedXP (RXP) guides bought per account; the addon locks a bought guide to the Battle.net
+account it was issued to, so a raider can't read their own purchase outside the game, browse the route, or run it on a
+second account of theirs. The user had a small toolkit (`rxp_build.py`: the addon's own decrypt — RC4 keyed from the
+BattleTag, zlib, Adler-32 — ported, a step-syntax → Markdown / JSON parser and a single-file route explorer) and asked
+for it on the site: a tab on the member's own page where they paste the import string and their BattleTag and get the
+outputs back, with the idea of status sharing later ("I'm at step 412 of 1–60 Horde").
+
+**What.**
+- **`src/oibot_gm/guides/`** — the toolkit as functions: `rxp_decode.decode(text, battletag)` (GuideError in words for a
+  paste that isn't a string and for the wrong key — a checksum mismatch is the same wrong key — and `encode`, the
+  inverse the tests build fixtures with), `rxp_md.render(texts)` (Markdown per guide group), `rxp_json.dataset(…) /
+  summaries(…)` (the explorer's data: steps with a level estimate between the guide's xp markers, world → map points,
+  zone boxes; per-group rows: guides, steps, zones in order, dungeons, walking km), `explorer.html` (the vendored web
+  app with its data **inlined** as base64 gzip in `#guides-data`, so the one file works from `file://` — the toolkit
+  fetched `guides.txt` and needed a server) and `build.build(text, tag, folder, game, addon_zip)`.
+- **Game version is data:** the zone-id table, the continent rects the world coordinates project onto, the dungeon
+  tags and aliases, the addon's folder and `.toc` Interface line live in `profiles/<version>/guides.yaml`
+  (`GameProfile.guides` → `GuideGame`); a version without the file has no tool (the tab is absent, the route answers
+  *There is no leveling-guide tool for this game version yet*). The toolkit read `mapids.txt` beside the script.
+- **Where the outputs live:** `out/guides/<guild>/<uid>/` — generated output (gitignored), never the data repo: a paid
+  guide is the member's purchase, not guild state. The folder holds the three downloads (`explorer.html`,
+  `RXPGuides_LocalGuides.zip`, `guide-text.zip`), `guides.json` (the parsed dataset, kept for the status idea) and
+  `status.json`; a build writes a `.tmp` sibling and swaps it in, so a failed build keeps the previous one. **The inputs
+  are never written or logged**: the string is read once, the BattleTag is the key. One lock per (guild, uid): a second
+  build while one runs is refused (409), not queued. A paste over 4 MB is refused before decoding.
+- **Routes** (`web/api_guides.py`, every one resolving the folder from the session's uid, never a parameter): `GET
+  /api/me/guide` (status: available, built, the files with their words, `built_when` in Registry.local12 words, the
+  group rows), `POST /api/me/guide` {text, battletag} (the build in a worker thread; MCP's token is the owner's and is
+  refused — the string must not land in a transcript), `POST /api/me/guide/clear`, `GET /api/me/guide/explorer` (the page
+  inline, under its own CSP `sandbox allow-scripts …` and `no-store`: the guide's text runs with no reach into the site)
+  and `GET /api/me/guide/file/{name}` (the three downloads only). `/api/meta.guides` says whether the version has the tool.
+  Web-only by design (`configops.BY_DESIGN_ONLY["leveling_guide"]`).
+- **The Me page** gains tabs when `meta.guides` is on — *My record* (everything it had) and *Leveling guide* (`?tab=guide`,
+  `components/GuideTools.tsx`): one card to paste and build (the string and the BattleTag are cleared from the form after
+  the build), *What you got* (the three downloads with their sizes and one line each on what they are; the group table:
+  levels, guides, steps, zones in order, dungeons, walking; *Remove my files* with a confirm) and the explorer in a
+  sandboxed iframe with *Open in its own tab*. Every state renders from the status; nothing here touches guild data, so it
+  is a form, not an edit mode.
+- **The host's addon zip** (`OIBOT_RXP_ADDON=<path>` in `.env`, optional): the free 1–20 starter guides are read from
+  `Guides/<addon_folder>/*.lua` inside it and added to the explorer's dataset (tagged `starter`, counted apart) so a bought
+  20–60 reads as one 1–60 route; the companion addon ships the paid guides only (RXPGuides has the free ones).
+
+**Not done, named:** status sharing (a member's current step / level on a card or in Discord — needs a source of the
+position: the addon's saved variables or the companion); map art (the explorer draws zone boxes from the waypoints, the
+member can overlay their own continent images); a tbc `guides.yaml`.
+
 ## 6. Architecture
 
 ```mermaid

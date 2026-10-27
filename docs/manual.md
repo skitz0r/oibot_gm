@@ -63,6 +63,10 @@ The bot, the site and this manual use one word for each thing. When you ask the 
 - **The companion** — a small program the raid leader runs next to the game; it reads the game's chat log and tells the
   bot what dropped, who looted it and which bosses died. It needs a token from the owner (Config › Companions or
   `/gm config companion`).
+- **Leveling guide** — your own RestedXP guide, unlocked on **Me › Leveling guide**: you paste the **import string**
+  the addon's Export button gives you and the **BattleTag** of the account it was issued to (its key), and you get back a
+  **companion addon** that loads the guide on any of your characters, a one-file **route explorer** to browse offline, and
+  the guides as readable text. For you alone: nobody else can open your files, and the string and the BattleTag are not kept.
 
 ## 2. Channels
 
@@ -175,6 +179,19 @@ officer, a change in Discord); a 45-second refresh is only the fallback when the
 reloaded under you: the Config page's Settings say *Someone changed the settings since you opened them* with **Reload (keeps your
 edits)** — a field you didn't touch takes the new value; a field you edited that someone else changed too is listed
 (*yours … · saved now …*) with **Keep mine** / **Take theirs**, and Save waits until you've picked for each.
+
+**Leveling guide** (every member, **Me › Leveling guide** — WoW: Forever only): RestedXP locks a bought guide to the Battle.net
+account it was issued to. Paste the **import string** the addon's Export button gives you (it starts with a number and a bar, `78|…`)
+and that account's **BattleTag**, press **Build my guide**, and the site unlocks it for you: **RXPGuides_LocalGuides.zip** (a companion
+addon — unzip it into *Interface/AddOns* next to RXPGuides and the guide loads on any character of yours), **explorer.html** (the
+route explorer: pick faction, race and class, and the map draws the route zone by zone with every step's text; one file, it works
+offline from your own computer) and **guide-text.zip** (the guides as readable text, one file per group, with a summary of the zones
+visited, dungeons and walking distance). The explorer also runs on the page itself. *What you got* lists the guide groups with their
+levels, steps, zones in order and dungeons. Your files are yours alone — nobody else, officers included, can open them — and the
+import string and the BattleTag are read once to unlock the guide and not kept; **Remove my files** deletes the outputs, and pasting
+the string again rebuilds them. When the host has a copy of the RXPGuides addon (`OIBOT_RXP_ADDON` in `.env`), the explorer adds the
+free 1–20 starter guides, so a bought 20–60 guide reads as one 1–60 route. A wrong BattleTag answers *That BattleTag doesn't unlock
+this guide*; a paste that isn't an import string says so.
 
 **Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail, and every live sheet on the Rosters page has
 **Tell the bot about this run** (it starts with the run's name). Type a question ("who hasn't answered tonight?") and the answer comes
